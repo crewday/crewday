@@ -20,7 +20,7 @@ Covers the three transitions the spec contract pins:
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import Engine, create_engine, select
@@ -32,7 +32,6 @@ from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.base import Base
 from app.adapters.db.ops.models import WorkerHeartbeat
 from app.tenancy import tenant_agnostic
-from app.tenancy.orm_filter import install_tenant_filter
 from app.util.clock import FrozenClock
 from app.worker import job_state
 from app.worker.job_state import (
@@ -78,8 +77,11 @@ def patched_default_uow(engine: Engine) -> Iterator[Session]:
     The yielded session is a sibling factory bound to the same engine
     so the test can ``select`` rows the writers committed.
     """
-    factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
-    install_tenant_filter(factory)
+    factory = sessionmaker(
+        bind=engine,
+        expire_on_commit=False,
+        class_=_session_mod.FilteredSession,
+    )
     original_engine = _session_mod._default_engine
     original_factory = _session_mod._default_sessionmaker_
     _session_mod._default_engine = engine
@@ -164,6 +166,36 @@ class TestRecordSuccess:
         assert row.consecutive_failures == 0
         assert row.dead_at is None
 
+    def test_back_to_back_success_upserts_in_one_tx_are_idempotent(
+        self, patched_default_uow: Session
+    ) -> None:
+        """Two uncommitted success writes for one job update one row."""
+        first = datetime(2026, 5, 2, 12, 0, tzinfo=UTC)
+        second = first + timedelta(seconds=1)
+
+        job_state._record_success_in_session(
+            patched_default_uow,
+            job_id=_JOB_ID,
+            now=first,
+        )
+        patched_default_uow.flush()
+        job_state._record_success_in_session(
+            patched_default_uow,
+            job_id=_JOB_ID,
+            now=second,
+        )
+        patched_default_uow.commit()
+
+        rows = patched_default_uow.scalars(select(WorkerHeartbeat)).all()
+        assert len(rows) == 1
+        row = rows[0]
+        row_at = row.heartbeat_at
+        if row_at.tzinfo is None:
+            row_at = row_at.replace(tzinfo=UTC)
+        assert row_at == second
+        assert row.consecutive_failures == 0
+        assert row.dead_at is None
+
 
 # ---------------------------------------------------------------------------
 # record_failure
@@ -186,6 +218,40 @@ class TestRecordFailure:
         assert row is not None
         assert row.consecutive_failures == 1
         assert row.dead_at is None
+        assert _read_audit_actions(patched_default_uow) == []
+
+    def test_back_to_back_failure_upserts_in_one_tx_increment_atomically(
+        self, patched_default_uow: Session
+    ) -> None:
+        """Two uncommitted failure writes for one job do not collide."""
+        now = datetime(2026, 5, 2, 12, 0, tzinfo=UTC)
+        clock = FrozenClock(now)
+
+        first = job_state._record_failure_in_session(
+            patched_default_uow,
+            job_id=_JOB_ID,
+            clock=clock,
+            now=now,
+        )
+        patched_default_uow.flush()
+        second = job_state._record_failure_in_session(
+            patched_default_uow,
+            job_id=_JOB_ID,
+            clock=clock,
+            now=now + timedelta(seconds=1),
+        )
+        patched_default_uow.commit()
+
+        assert [first.consecutive_failures, second.consecutive_failures] == [1, 2]
+        assert first.repeated_failure_audit_emitted is False
+        assert second.repeated_failure_audit_emitted is False
+        assert first.killed is False
+        assert second.killed is False
+
+        rows = patched_default_uow.scalars(select(WorkerHeartbeat)).all()
+        assert len(rows) == 1
+        assert rows[0].consecutive_failures == 2
+        assert rows[0].dead_at is None
         assert _read_audit_actions(patched_default_uow) == []
 
     def test_third_failure_emits_repeated_failure_audit(
