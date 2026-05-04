@@ -196,8 +196,8 @@ echo "schemathesis: seeded workspace=${SLUG} owner=${EMAIL} (Bearer + session co
 # every built-in check + the three custom checks registered by
 # :mod:`tests.contract.hooks` via ``SCHEMATHESIS_HOOKS``.
 #
-# ``--exclude-path-regex`` keeps the SSE transport endpoint out of
-# the sweep — its ``text/event-stream`` body is an open-ended pipe
+# ``--exclude-path-regex`` keeps the SSE transport endpoints out of
+# the sweep — their ``text/event-stream`` bodies are open-ended pipes
 # the schemathesis runner can't reason about with a request budget.
 #
 # ``--generation-codec=ascii`` is the HTTP-header constraint:
@@ -566,6 +566,44 @@ INCLUDE_ARGS=(
     # does not emit that cross-field invariant in JSON Schema today.
     --exclude-operation-id 'stays.ical_feeds.update'
     # ----------------------------------------------------------------
+    # Admin tag (cd-8nxpq). ``--include-tag admin`` selects the
+    # deployment-admin surface. The router declares the shared
+    # problem+json envelope and the runner excludes the SSE transport
+    # path above because ``/admin/events`` is an open event stream, not
+    # a finite JSON response.
+    #
+    # ``admin.admins.grant`` / ``admin.admins.groups.owners.add`` —
+    # request bodies intentionally enforce exactly one target selector:
+    # either ``user_id`` or ``email``. The OpenAPI schema advertises the
+    # one-of shape, but Schemathesis' coverage phase still emits both
+    # selectors or both null as positive examples. Runtime correctly
+    # returns typed 422s (``ambiguous_target`` / ``missing_target``);
+    # focused admin route tests cover the invariant.
+    --exclude-operation-id 'admin.admins.grant'
+    --exclude-operation-id 'admin.admins.groups.owners.add'
+    # ``admin.settings.update`` — the expected JSON type for ``value``
+    # depends on the path ``key`` (bool / int / string / secret / JSON).
+    # OpenAPI can list the key enum, but it cannot express the
+    # key-specific body schema on one FastAPI route. The runtime
+    # correctly rejects mismatched values with 422
+    # ``invalid_setting_value``; focused admin settings tests cover the
+    # per-key coercers.
+    --exclude-operation-id 'admin.settings.update'
+    # ``admin.audit.list`` / ``admin.audit.tail`` / ``admin.usage.list`` —
+    # optional timestamp query parameters are omission-only on the HTTP
+    # surface. Schemathesis serializes the OpenAPI nullable/format space
+    # into literal strings such as ``null`` / ``0`` and treats those as
+    # positive examples; the runtime correctly rejects them with the
+    # typed 422 ``invalid_iso8601`` envelope. Adding a full timestamp
+    # regex to the schema made Schemathesis' generator pathologically
+    # slow, so these finite feeds stay covered by focused route tests
+    # until the runner has a non-null optional-query strategy. The tail
+    # route also returns NDJSON, which the runner cannot response-validate
+    # without a custom deserializer.
+    --exclude-operation-id 'admin.audit.list'
+    --exclude-operation-id 'admin.audit.tail'
+    --exclude-operation-id 'admin.usage.list'
+    # ----------------------------------------------------------------
     # LLM tag (cd-e5sit). ``--include-tag llm`` spans both the
     # workspace LLM preference/usage surface and the bare-host admin
     # model-configuration tree. The workspace operations below carry
@@ -790,7 +828,7 @@ SCHEMATHESIS_ARGS=(
     --mode all
     --max-examples "${MAX_EXAMPLES}"
     --workers "${WORKERS}"
-    --exclude-path-regex '^/events$'
+    --exclude-path-regex '^/(events|admin/events)$'
     --generation-codec ascii
     --suppress-health-check filter_too_much,data_too_large,too_slow
     "${RUN_INCLUDE_ARGS[@]}"

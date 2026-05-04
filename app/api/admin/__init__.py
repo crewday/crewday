@@ -60,11 +60,12 @@ from app.api.admin.signup import build_admin_signup_router
 from app.api.admin.signups import build_admin_signups_router
 from app.api.admin.usage import build_admin_usage_router
 from app.api.admin.workspaces import build_admin_workspaces_router
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 
 __all__ = ["admin_router"]
 
 
-admin_router = APIRouter(tags=["admin"])
+admin_router = APIRouter(tags=["admin"], responses=IDENTITY_PROBLEM_RESPONSES)
 admin_router.include_router(build_admin_me_router())
 admin_router.include_router(build_admin_workspaces_router())
 admin_router.include_router(build_admin_signup_router())

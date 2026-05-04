@@ -201,6 +201,24 @@ class TestUpdateSignupSettings:
         assert resp.status_code == 200
         assert resp.json()["signup_throttle_overrides"] == {"per_ip_hour": 9}
 
+    def test_rejects_coerced_scalar_types(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        client.cookies.set(
+            SESSION_COOKIE_NAME, _admin_cookie(session_factory, settings)
+        )
+        resp = client.put(
+            "/admin/api/v1/signup/settings",
+            json={
+                "signup_enabled": 0,
+                "signup_throttle_overrides": {"per_ip_hour": False},
+            },
+        )
+        assert resp.status_code == 422
+
     def test_404_for_non_admin(
         self,
         client: TestClient,

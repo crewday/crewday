@@ -92,6 +92,7 @@ _MAX_LIMIT: Final[int] = 200
 # (transport, refusal, timeout).
 _STATUS_SUCCESS: Final[str] = "success"
 _STATUS_ERROR: Final[str] = "error"
+_STATUS_PATTERN: Final[str] = f"^(|{_STATUS_SUCCESS}|{_STATUS_ERROR})$"
 
 
 class UsageSummaryEntry(BaseModel):
@@ -454,17 +455,20 @@ def build_admin_usage_router() -> APIRouter:
         capability: Annotated[str | None, Query(max_length=128)] = None,
         actor_user_id: Annotated[str | None, Query(max_length=64)] = None,
         status_filter: Annotated[
-            str | None,
+            str,
             Query(
                 alias="status",
                 # ``status`` is a binary success / error projection on
                 # top of the four-value :class:`LlmUsage.status` enum;
                 # the SPA's filter UX surfaces only the two values
                 # so the spec-aligned wire shape stays narrow.
-                pattern=f"^({_STATUS_SUCCESS}|{_STATUS_ERROR})$",
+                pattern=_STATUS_PATTERN,
             ),
-        ] = None,
-        since: Annotated[str | None, Query(max_length=64)] = None,
+        ] = "",
+        since: Annotated[
+            str,
+            Query(max_length=64, json_schema_extra={"format": "date-time"}),
+        ] = "",
         cursor: Annotated[str | None, Query(max_length=64)] = None,
         limit: Annotated[int, Query(ge=1, le=_MAX_LIMIT)] = _DEFAULT_LIMIT,
     ) -> UsageListResponse:

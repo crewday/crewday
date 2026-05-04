@@ -297,12 +297,9 @@ class TestAdminSignupsOpenApi:
         assert op["x-cli"].get("verb") == "signups-list"
         assert op["x-cli"].get("mutates") is False
         assert op["parameters"][0]["name"] == "kind"
-        assert op["parameters"][0]["schema"]["anyOf"][0]["enum"] == [
-            "burst_rate",
-            "distinct_emails_one_ip",
-            "repeat_email",
-            "quota_near_breach",
-        ]
+        assert op["parameters"][0]["schema"]["pattern"] == (
+            "^(|burst_rate|distinct_emails_one_ip|repeat_email|quota_near_breach)$"
+        )
 
 
 def _seed_suspicious(

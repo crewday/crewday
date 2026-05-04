@@ -33,7 +33,7 @@ from dataclasses import dataclass, fields
 from datetime import UTC, datetime
 from typing import Annotated, Any, Final
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -387,6 +387,7 @@ _REGISTRY: Final[tuple[_SettingDef, ...]] = (
 _REGISTRY_INDEX: Final[dict[str, _SettingDef]] = {
     entry.key: entry for entry in _REGISTRY
 }
+_SETTING_KEY_ENUM: Final[list[str]] = [entry.key for entry in _REGISTRY]
 
 
 class DeploymentSettingResponse(BaseModel):
@@ -620,7 +621,10 @@ def build_admin_settings_router() -> APIRouter:
         },
     )
     def update_setting(
-        key: str,
+        key: Annotated[
+            str,
+            Path(json_schema_extra={"enum": _SETTING_KEY_ENUM}),
+        ],
         payload: DeploymentSettingPayload,
         ctx: Annotated[DeploymentContext, Depends(current_deployment_admin_principal)],
         session: _Db,

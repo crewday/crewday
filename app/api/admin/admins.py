@@ -29,7 +29,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -90,14 +90,44 @@ class AdminGrantRequest(BaseModel):
     422 ``missing_target``; both set is a 422 ``ambiguous_target``.
     """
 
-    user_id: str | None = Field(default=None, max_length=64)
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "oneOf": [
+                {
+                    "required": ["user_id"],
+                    "properties": {
+                        "user_id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                        },
+                        "email": {"type": "null"},
+                    },
+                },
+                {
+                    "required": ["email"],
+                    "properties": {
+                        "user_id": {"type": "null"},
+                        "email": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 320,
+                        },
+                    },
+                },
+            ]
+        },
+    )
+
+    user_id: str | None = Field(default=None, min_length=1, max_length=64)
     # Plain ``str`` rather than :class:`pydantic.EmailStr` for the
     # same reason the magic-link / recovery routers use it: the
     # domain layer already canonicalises with
     # :func:`canonicalise_email` before any DB lookup, so pulling
     # in ``email-validator`` just to re-validate here would
     # duplicate the contract for no DB-shape gain.
-    email: str | None = Field(default=None, max_length=320)
+    email: str | None = Field(default=None, min_length=1, max_length=320)
 
 
 class AdminGrantResponse(BaseModel):
@@ -130,9 +160,11 @@ class GroupMemberRequest(BaseModel):
     Owner-only.
     """
 
-    user_id: str | None = Field(default=None, max_length=64)
+    model_config = AdminGrantRequest.model_config
+
+    user_id: str | None = Field(default=None, min_length=1, max_length=64)
     # Same plain-``str`` rationale as :class:`AdminGrantRequest.email`.
-    email: str | None = Field(default=None, max_length=320)
+    email: str | None = Field(default=None, min_length=1, max_length=320)
 
 
 class GroupMemberInfo(BaseModel):

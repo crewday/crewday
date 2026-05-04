@@ -316,8 +316,14 @@ def build_admin_audit_router() -> APIRouter:
         action: Annotated[str | None, Query(max_length=128)] = None,
         entity_kind: Annotated[str | None, Query(max_length=64)] = None,
         entity_id: Annotated[str | None, Query(max_length=64)] = None,
-        since: Annotated[str | None, Query(max_length=64)] = None,
-        until: Annotated[str | None, Query(max_length=64)] = None,
+        since: Annotated[
+            str,
+            Query(max_length=64, json_schema_extra={"format": "date-time"}),
+        ] = "",
+        until: Annotated[
+            str,
+            Query(max_length=64, json_schema_extra={"format": "date-time"}),
+        ] = "",
         cursor: Annotated[str | None, Query(max_length=64)] = None,
         limit: Annotated[int, Query(ge=1, le=_MAX_LIMIT)] = _DEFAULT_LIMIT,
     ) -> AuditListResponse:
@@ -382,8 +388,14 @@ def build_admin_audit_router() -> APIRouter:
         action: Annotated[str | None, Query(max_length=128)] = None,
         entity_kind: Annotated[str | None, Query(max_length=64)] = None,
         entity_id: Annotated[str | None, Query(max_length=64)] = None,
-        since: Annotated[str | None, Query(max_length=64)] = None,
-        until: Annotated[str | None, Query(max_length=64)] = None,
+        since: Annotated[
+            str,
+            Query(max_length=64, json_schema_extra={"format": "date-time"}),
+        ] = "",
+        until: Annotated[
+            str,
+            Query(max_length=64, json_schema_extra={"format": "date-time"}),
+        ] = "",
         limit: Annotated[int, Query(ge=1, le=_MAX_LIMIT)] = _DEFAULT_LIMIT,
     ) -> StreamingResponse:
         """Stream the deployment audit feed as NDJSON.

@@ -26,7 +26,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Final
 
 from fastapi import APIRouter, Depends, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool, StrictInt
 from sqlalchemy.orm import Session
 
 from app.adapters.db.capabilities.models import DeploymentSetting
@@ -92,8 +92,8 @@ class SignupSettingsPayload(BaseModel):
     untouched.
     """
 
-    signup_enabled: bool | None = Field(default=None)
-    signup_throttle_overrides: dict[str, int] | None = Field(default=None)
+    signup_enabled: StrictBool | None = Field(default=None)
+    signup_throttle_overrides: dict[str, StrictInt] | None = Field(default=None)
     signup_disposable_domains_path: str | None = Field(default=None, max_length=512)
 
 

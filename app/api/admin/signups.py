@@ -39,6 +39,9 @@ SignupAuditKind = Literal[
     "repeat_email",
     "quota_near_breach",
 ]
+_SIGNUP_KIND_PATTERN: str = (
+    "^(|burst_rate|distinct_emails_one_ip|repeat_email|quota_near_breach)$"
+)
 
 
 class SignupAuditEntry(BaseModel):
@@ -103,12 +106,12 @@ def build_admin_signups_router() -> APIRouter:
     def get_signups(
         _ctx: _AdminCtx,
         session: _Db,
-        kind: Annotated[SignupAuditKind | None, Query()] = None,
+        kind: Annotated[str, Query(pattern=_SIGNUP_KIND_PATTERN)] = "",
         cursor: Annotated[str | None, Query(max_length=256)] = None,
         limit: Annotated[int, Query(ge=1, le=_MAX_LIMIT)] = _DEFAULT_LIMIT,
     ) -> SignupsListResponse:
         """Return deployment-scoped suspicious signup signals."""
-        rows = _query_rows(session, kind=kind)
+        rows = _query_rows(session, kind=_query_kind(kind))
         entries = _project_rows(rows)
         if cursor is not None:
             entries = _entries_after_cursor(entries, cursor=cursor)
@@ -147,6 +150,18 @@ def _query_rows(
     if kind is None:
         return rows
     return [row for row in rows if _row_kind(row) == kind]
+
+
+def _query_kind(value: str) -> SignupAuditKind | None:
+    if value == "":
+        return None
+    if value == "burst_rate":
+        return "burst_rate"
+    if value == "distinct_emails_one_ip":
+        return "distinct_emails_one_ip"
+    if value == "repeat_email":
+        return "repeat_email"
+    return "quota_near_breach"
 
 
 def _entries_after_cursor(

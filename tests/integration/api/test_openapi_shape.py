@@ -170,6 +170,63 @@ class TestOpenapiIntegration:
             f"Identity-adjacent operations missing 'identity' tag: {offenders}"
         )
 
+    def test_admin_problem_responses_match_runtime_envelope(
+        self, pinned_settings: Settings, real_make_uow: None
+    ) -> None:
+        """Admin 4xx responses document the problem+json error seam."""
+        resp = _client(pinned_settings).get("/api/openapi.json")
+        op = resp.json()["paths"]["/admin/api/v1/admins"]["post"]
+
+        response = op["responses"]["422"]
+        assert "application/problem+json" in response["content"]
+        assert "application/json" not in response["content"]
+
+    def test_admin_contract_generation_hints_are_tight(
+        self, pinned_settings: Settings, real_make_uow: None
+    ) -> None:
+        """OpenAPI advertises admin invariants Schemathesis can generate."""
+        resp = _client(pinned_settings).get("/api/openapi.json")
+        schema = resp.json()
+
+        grant_schema = schema["components"]["schemas"]["AdminGrantRequest"]
+        assert grant_schema["oneOf"] == [
+            {
+                "properties": {
+                    "user_id": {
+                        "maxLength": 64,
+                        "minLength": 1,
+                        "type": "string",
+                    },
+                    "email": {"type": "null"},
+                },
+                "required": ["user_id"],
+            },
+            {
+                "properties": {
+                    "user_id": {"type": "null"},
+                    "email": {
+                        "maxLength": 320,
+                        "minLength": 1,
+                        "type": "string",
+                    },
+                },
+                "required": ["email"],
+            },
+        ]
+
+        settings_op = schema["paths"]["/admin/api/v1/settings/{key}"]["put"]
+        key_param = next(
+            param for param in settings_op["parameters"] if param["name"] == "key"
+        )
+        assert "signup_enabled" in key_param["schema"]["enum"]
+        assert "trusted_interfaces" in key_param["schema"]["enum"]
+
+        audit_op = schema["paths"]["/admin/api/v1/audit"]["get"]
+        since_param = next(
+            param for param in audit_op["parameters"] if param["name"] == "since"
+        )
+        assert since_param["schema"]["format"] == "date-time"
+
 
 # ---------------------------------------------------------------------------
 # Bare-host auth surface survives the factory refactor
