@@ -49,6 +49,7 @@ from typing import Any, Final, Literal
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.adapters.llm.ports import Tool
 from app.domain.agent.runtime import (
     DelegatedToken,
     GateDecision,
@@ -131,10 +132,201 @@ def _build_index(
     return index
 
 
+def _build_tool_catalog(
+    index: Mapping[str, _OperationEntry],
+    *,
+    workspace_slug: str,
+    components: Mapping[str, Any],
+) -> tuple[Tool, ...]:
+    """Build the deterministic function-calling catalog for ``index``."""
+    return tuple(
+        {
+            "name": op_id,
+            "description": _tool_description(op_id, entry.operation),
+            "input_schema": _tool_input_schema(
+                entry,
+                workspace_slug=workspace_slug,
+                components=components,
+            ),
+        }
+        for op_id, entry in sorted(index.items())
+    )
+
+
+def _tool_description(op_id: str, operation: Mapping[str, Any]) -> str:
+    raw = operation.get("description") or operation.get("summary")
+    return raw if isinstance(raw, str) and raw.strip() else op_id
+
+
+def _tool_input_schema(
+    entry: _OperationEntry,
+    *,
+    workspace_slug: str,
+    components: Mapping[str, Any],
+) -> dict[str, object]:
+    properties: dict[str, object] = {}
+    required: list[str] = []
+    advertised_path_params: set[str] = set()
+
+    parameters = entry.operation.get("parameters")
+    if not isinstance(parameters, list):
+        parameters = []
+
+    injected_slug = bool(workspace_slug) and "{slug}" in entry.path
+    for param in parameters:
+        if not isinstance(param, Mapping):
+            continue
+        loc = param.get("in")
+        if loc not in ("path", "query"):
+            continue
+        name = param.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        if name == "slug" and injected_slug:
+            continue
+        properties[name] = _parameter_schema(param, components=components)
+        if param.get("description") is not None:
+            description = param["description"]
+            if isinstance(description, str) and description:
+                property_schema = properties[name]
+                if isinstance(property_schema, dict):
+                    property_schema.setdefault("description", description)
+        if param.get("required") is True:
+            required.append(name)
+        if loc == "path":
+            advertised_path_params.add(name)
+
+    for name in sorted(_path_template_vars(entry.path) - advertised_path_params):
+        if name == "slug" and injected_slug:
+            continue
+        properties[name] = {"type": "string"}
+        required.append(name)
+
+    body_schema = _request_body_schema(entry.operation, components=components)
+    if body_schema is not None:
+        if body_schema.get("type") == "object":
+            body_properties = body_schema.get("properties")
+            if isinstance(body_properties, Mapping):
+                for name, body_property_schema in body_properties.items():
+                    if isinstance(name, str):
+                        properties[name] = (
+                            dict(body_property_schema)
+                            if isinstance(body_property_schema, Mapping)
+                            else {}
+                        )
+            body_required = body_schema.get("required")
+            if isinstance(body_required, list):
+                required.extend(name for name in body_required if isinstance(name, str))
+        else:
+            properties["body"] = body_schema
+            required.append("body")
+
+    tool_schema: dict[str, object] = {
+        "type": "object",
+        "properties": properties,
+    }
+    tool_schema["additionalProperties"] = False
+    if required:
+        tool_schema["required"] = sorted(set(required))
+    return tool_schema
+
+
+def _parameter_schema(
+    parameter: Mapping[str, Any],
+    *,
+    components: Mapping[str, Any],
+) -> dict[str, object]:
+    raw_schema = parameter.get("schema")
+    if not isinstance(raw_schema, Mapping):
+        return {}
+    return _resolve_local_refs(raw_schema, components=components)
+
+
+def _request_body_schema(
+    operation: Mapping[str, Any],
+    *,
+    components: Mapping[str, Any],
+) -> dict[str, object] | None:
+    request_body = operation.get("requestBody")
+    if not isinstance(request_body, Mapping):
+        return None
+    content = request_body.get("content")
+    if not isinstance(content, Mapping):
+        return None
+    media = content.get("application/json")
+    if not isinstance(media, Mapping):
+        return None
+    schema = media.get("schema")
+    return (
+        _resolve_local_refs(schema, components=components)
+        if isinstance(schema, Mapping)
+        else None
+    )
+
+
+def _resolve_local_refs(
+    schema: Mapping[str, Any],
+    *,
+    components: Mapping[str, Any],
+    seen: frozenset[str] = frozenset(),
+) -> dict[str, object]:
+    ref = schema.get("$ref")
+    if isinstance(ref, str) and ref.startswith("#/components/schemas/"):
+        if ref in seen:
+            return dict(schema)
+        name = ref.rsplit("/", 1)[-1]
+        schemas = components.get("schemas")
+        if isinstance(schemas, Mapping):
+            target = schemas.get(name)
+            if isinstance(target, Mapping):
+                return _resolve_local_refs(
+                    target,
+                    components=components,
+                    seen=seen | {ref},
+                )
+
+    resolved: dict[str, object] = {}
+    for key, value in schema.items():
+        if isinstance(value, Mapping):
+            resolved[key] = _resolve_local_refs(
+                value,
+                components=components,
+                seen=seen,
+            )
+        elif isinstance(value, list):
+            resolved[key] = [
+                _resolve_local_refs(item, components=components, seen=seen)
+                if isinstance(item, Mapping)
+                else item
+                for item in value
+            ]
+        else:
+            resolved[key] = value
+    return resolved
+
+
+def _path_template_vars(path: str) -> set[str]:
+    """Return ``{name}`` variables from an OpenAPI path template."""
+    template_vars: set[str] = set()
+    cursor = path
+    while True:
+        start = cursor.find("{")
+        if start == -1:
+            break
+        end = cursor.find("}", start)
+        if end == -1:
+            break
+        template_vars.add(cursor[start + 1 : end])
+        cursor = cursor[end + 1 :]
+    return template_vars
+
+
 def _split_inputs(
     entry: _OperationEntry,
     inputs: Mapping[str, object],
-) -> tuple[dict[str, str], dict[str, object], dict[str, object] | None]:
+    *,
+    components: Mapping[str, Any],
+) -> tuple[dict[str, str], dict[str, object], object | None]:
     """Split ``inputs`` into ``(path_vars, query_params, body)``.
 
     Path templates use the ``{name}`` syntax FastAPI emits; every
@@ -146,8 +338,10 @@ def _split_inputs(
     the body (for body-bearing methods) or query parameters
     (for ``GET``/``DELETE`` where body is not supported).
 
-    Body and query are returned as plain dicts (not ``Mapping``)
-    so the caller can mutate-merge without aliasing risk.
+    Query is returned as a plain dict (not ``Mapping``) so the caller
+    can mutate-merge without aliasing risk. Object request bodies use
+    the leftover-input dict; non-object bodies are passed as the raw
+    ``body`` argument advertised in the tool schema.
     """
     parameters = entry.operation.get("parameters")
     if not isinstance(parameters, list):
@@ -173,17 +367,7 @@ def _split_inputs(
     # still honoured (e.g. inherited query params), but a path
     # variable that's missing from ``parameters`` (older codegen)
     # still gets resolved.
-    template_vars: set[str] = set()
-    cursor = entry.path
-    while True:
-        start = cursor.find("{")
-        if start == -1:
-            break
-        end = cursor.find("}", start)
-        if end == -1:
-            break
-        template_vars.add(cursor[start + 1 : end])
-        cursor = cursor[end + 1 :]
+    template_vars = _path_template_vars(entry.path)
 
     # Path-binding takes priority: any input key that matches a
     # path template var is bound there, even if the OpenAPI
@@ -214,6 +398,13 @@ def _split_inputs(
                 query[key] = value
             else:
                 body[key] = value
+        body_schema = _request_body_schema(entry.operation, components=components)
+        if (
+            body_schema is not None
+            and body_schema.get("type") != "object"
+            and set(body) == {"body"}
+        ):
+            return path_vars, query, body["body"]
         return path_vars, query, (body if body else None)
 
     # Read methods: the request has no body, so any input that
@@ -342,6 +533,15 @@ class OpenAPIToolDispatcher:
         if not isinstance(paths, Mapping):
             paths = {}
         self._index = _build_index(paths)
+        components = schema.get("components") if isinstance(schema, Mapping) else None
+        if not isinstance(components, Mapping):
+            components = {}
+        self._components = components
+        self._tools = _build_tool_catalog(
+            self._index,
+            workspace_slug=self._workspace_slug,
+            components=components,
+        )
         # The TestClient is heavy (it spins a context manager around
         # the ASGI app); building it once and stashing the instance
         # keeps the dispatch hot-path flat. Tests can swap the field
@@ -354,6 +554,11 @@ class OpenAPIToolDispatcher:
     def operation_ids(self) -> frozenset[str]:
         """Return every tool name the dispatcher knows about."""
         return frozenset(self._index)
+
+    @property
+    def tools(self) -> tuple[Tool, ...]:
+        """Return every OpenAPI operation as a provider-ready tool schema."""
+        return self._tools
 
     # -- ToolDispatcher Protocol --------------------------------------
 
@@ -417,7 +622,11 @@ class OpenAPIToolDispatcher:
             merged_inputs["slug"] = self._workspace_slug
 
         try:
-            path_vars, query, body = _split_inputs(entry, merged_inputs)
+            path_vars, query, body = _split_inputs(
+                entry,
+                merged_inputs,
+                components=self._components,
+            )
         except ValueError as exc:
             # Bad input — return 422 so the LLM treats it the same way
             # FastAPI would surface a validation failure. The body

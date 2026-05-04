@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.audit.models import AuditLog
+from app.adapters.llm.ports import Tool
 from app.domain.agent.runtime import GateDecision, ToolResult
 from app.domain.agent.staff_chat import (
     STAFF_CHAT_AGENT_LABEL,
@@ -167,6 +168,43 @@ def test_staff_chat_turn_uses_employee_capability_and_worker_channel(
     assert started.scope == STAFF_CHAT_SCOPE
     assert finished.scope == STAFF_CHAT_SCOPE
     assert finished.outcome == "replied"
+
+
+def test_staff_chat_turn_only_advertises_worker_tools(
+    db_session: Session,
+    bus: EventBus,
+    clock: FrozenClock,
+) -> None:
+    ctx, channel_id = _bind_and_seed(db_session)
+    tools: tuple[Tool, ...] = (
+        {
+            "name": "get_tasks_today",
+            "description": "List today's tasks.",
+            "input_schema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "payroll.issue",
+            "description": "Issue payroll.",
+            "input_schema": {"type": "object", "properties": {}},
+        },
+    )
+    llm = ScriptedLLMClient(replies=[make_text_response("No tasks.")])
+
+    run_staff_chat_turn(
+        ctx,
+        session=db_session,
+        thread_id=channel_id,
+        user_message="What's on my plate today?",
+        trigger="event",
+        llm_client=llm,
+        tool_dispatcher=FakeToolDispatcher(tools=tools),
+        token_factory=FakeTokenFactory(),
+        event_bus=bus,
+        clock=clock,
+    )
+
+    assert llm.last_tools is not None
+    assert [tool["name"] for tool in llm.last_tools] == ["get_tasks_today"]
 
 
 def test_mark_task_done_keeps_existing_policy_gating(

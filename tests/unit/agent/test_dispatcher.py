@@ -9,10 +9,10 @@ factory makes each branch a one-liner.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 import pytest
-from fastapi import APIRouter, FastAPI, Header, HTTPException, Query
+from fastapi import APIRouter, Body, FastAPI, Header, HTTPException, Query
 
 from app.agent.dispatcher import OpenAPIToolDispatcher
 from app.domain.agent.runtime import DelegatedToken, ToolCall
@@ -30,6 +30,10 @@ def _build_app() -> FastAPI:
     @router.post("/w/{slug}/api/v1/things")
     def create_thing(slug: str, body: dict[str, Any]) -> dict[str, Any]:
         return {"slug": slug, "received": body, "id": "thing_001"}
+
+    @router.post("/w/{slug}/api/v1/batches")
+    def create_batch(slug: str, body: Annotated[list[str], Body()]) -> dict[str, Any]:
+        return {"slug": slug, "received": body}
 
     @router.delete("/w/{slug}/api/v1/things/{thing_id}")
     def delete_thing(slug: str, thing_id: str) -> dict[str, Any]:
@@ -78,6 +82,9 @@ def _schema_with(*entries: dict[str, Any]) -> dict[str, Any]:
     paths: dict[str, dict[str, Any]] = {}
     for entry in entries:
         op: dict[str, Any] = {"operationId": entry["operationId"]}
+        for key in ("summary", "description", "requestBody"):
+            if entry.get(key) is not None:
+                op[key] = entry[key]
         if entry.get("annotation") is not None:
             op["x-agent-confirm"] = entry["annotation"]
         if entry.get("parameters") is not None:
@@ -121,6 +128,167 @@ def test_index_skips_non_operation_keys() -> None:
     }
     disp = OpenAPIToolDispatcher(app=FastAPI(), openapi=schema, workspace_slug="ws")
     assert disp.operation_ids == frozenset({"x.read"})
+
+
+def test_tools_catalog_is_deterministic_and_omits_injected_slug() -> None:
+    schema = _schema_with(
+        {
+            "path": "/w/{slug}/api/v1/items/{item_id}",
+            "method": "patch",
+            "operationId": "items.update",
+            "description": "Update an item.",
+            "summary": "Patch item",
+            "parameters": [
+                {
+                    "name": "slug",
+                    "in": "path",
+                    "required": True,
+                    "schema": {"type": "string"},
+                },
+                {
+                    "name": "item_id",
+                    "in": "path",
+                    "required": True,
+                    "description": "Item id.",
+                    "schema": {"type": "string"},
+                },
+                {
+                    "name": "dry_run",
+                    "in": "query",
+                    "schema": {"type": "boolean"},
+                },
+            ],
+            "requestBody": {
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "type": "object",
+                            "properties": {"name": {"type": "string"}},
+                            "required": ["name"],
+                        }
+                    }
+                }
+            },
+        },
+        {
+            "path": "/w/{slug}/api/v1/items",
+            "method": "get",
+            "operationId": "items.list",
+            "summary": "List items.",
+        },
+    )
+    disp = OpenAPIToolDispatcher(app=FastAPI(), openapi=schema, workspace_slug="ws")
+
+    assert [tool["name"] for tool in disp.tools] == ["items.list", "items.update"]
+    update_tool = disp.tools[1]
+    assert update_tool["description"] == "Update an item."
+    assert update_tool["input_schema"] == {
+        "type": "object",
+        "properties": {
+            "item_id": {"type": "string", "description": "Item id."},
+            "dry_run": {"type": "boolean"},
+            "name": {"type": "string"},
+        },
+        "additionalProperties": False,
+        "required": ["item_id", "name"],
+    }
+
+
+def test_tools_catalog_uses_summary_then_operation_id_fallback() -> None:
+    schema = _schema_with(
+        {
+            "path": "/a",
+            "method": "get",
+            "operationId": "a.read",
+            "summary": "Read A.",
+        },
+        {
+            "path": "/b",
+            "method": "get",
+            "operationId": "b.read",
+        },
+    )
+    disp = OpenAPIToolDispatcher(app=FastAPI(), openapi=schema, workspace_slug="ws")
+
+    assert [tool["description"] for tool in disp.tools] == ["Read A.", "b.read"]
+
+
+def test_tools_catalog_advertises_template_vars_and_resolves_body_refs() -> None:
+    schema = {
+        "openapi": "3.1.0",
+        "components": {
+            "schemas": {
+                "ThingWrite": {
+                    "type": "object",
+                    "properties": {
+                        "label": {"type": "string"},
+                        "metadata": {"$ref": "#/components/schemas/Metadata"},
+                    },
+                    "required": ["label"],
+                },
+                "Metadata": {
+                    "type": "object",
+                    "properties": {"source": {"type": "string"}},
+                },
+            }
+        },
+        "paths": {
+            "/w/{slug}/api/v1/things/{thing_id}": {
+                "patch": {
+                    "operationId": "things.update",
+                    "requestBody": {
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/ThingWrite"}
+                            }
+                        }
+                    },
+                }
+            }
+        },
+    }
+    disp = OpenAPIToolDispatcher(app=FastAPI(), openapi=schema, workspace_slug="ws")
+
+    assert disp.tools[0]["input_schema"] == {
+        "type": "object",
+        "properties": {
+            "thing_id": {"type": "string"},
+            "label": {"type": "string"},
+            "metadata": {
+                "type": "object",
+                "properties": {"source": {"type": "string"}},
+            },
+        },
+        "additionalProperties": False,
+        "required": ["label", "thing_id"],
+    }
+
+
+def test_tools_catalog_wraps_non_object_request_body() -> None:
+    schema = _schema_with(
+        {
+            "path": "/w/{slug}/api/v1/batches",
+            "method": "post",
+            "operationId": "batches.create",
+            "requestBody": {
+                "content": {
+                    "application/json": {
+                        "schema": {"type": "array", "items": {"type": "string"}}
+                    }
+                }
+            },
+        }
+    )
+    disp = OpenAPIToolDispatcher(app=FastAPI(), openapi=schema, workspace_slug="ws")
+
+    assert disp.tools[0]["input_schema"] == {
+        "type": "object",
+        "properties": {
+            "body": {"type": "array", "items": {"type": "string"}},
+        },
+        "additionalProperties": False,
+        "required": ["body"],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +436,26 @@ def test_dispatch_post_serialises_body_and_marks_mutated() -> None:
         "received": {"name": "widget"},
         "id": "thing_001",
     }
+
+
+def test_dispatch_unwraps_non_object_request_body() -> None:
+    app = _build_app()
+    schema = app.openapi()
+    batch_op = next(
+        op["operationId"]
+        for path, methods in schema["paths"].items()
+        for method, op in methods.items()
+        if method == "post" and "batches" in path
+    )
+    disp = OpenAPIToolDispatcher(app=app, openapi=schema, workspace_slug="ws-test")
+    result = disp.dispatch(
+        ToolCall(id="c1", name=batch_op, input={"body": ["one", "two"]}),
+        token=_token(),
+        headers={},
+    )
+
+    assert result.status_code == 200
+    assert result.body == {"slug": "ws-test", "received": ["one", "two"]}
 
 
 def test_dispatch_failed_write_is_not_mutated() -> None:

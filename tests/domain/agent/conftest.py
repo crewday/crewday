@@ -289,6 +289,7 @@ class FakeToolDispatcher:
 
     responses: dict[str, list[ToolResult]] = field(default_factory=dict)
     gates: dict[str, GateDecision] = field(default_factory=dict)
+    tools: tuple[Tool, ...] = ()
     captured: list[CapturedDispatch] = field(default_factory=list)
     is_gated_calls: list[ToolCall] = field(default_factory=list)
 
@@ -332,6 +333,7 @@ class ScriptedLLMClient:
     replies: list[LLMResponse] = field(default_factory=list)
     chat_calls: int = 0
     last_messages: list[ChatMessage] | None = None
+    last_tools: Sequence[Tool] | None = None
 
     def complete(
         self,
@@ -356,6 +358,7 @@ class ScriptedLLMClient:
     ) -> LLMResponse:
         self.chat_calls += 1
         self.last_messages = list(messages)
+        self.last_tools = tools
         if not self.replies:
             return LLMResponse(
                 text="(no scripted reply)",

@@ -39,6 +39,7 @@ from app.adapters.db.base import Base
 from app.adapters.db.identity.models import ApiToken
 from app.adapters.db.llm.models import ApprovalRequest
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
+from app.adapters.llm.ports import Tool
 from app.api.deps import current_workspace_context, db_session
 from app.api.errors import add_exception_handlers
 from app.api.v1.approvals import (
@@ -173,6 +174,7 @@ class FakeToolDispatcher:
 
     responses: dict[str, list[ToolResult]] = field(default_factory=dict)
     captured: list[_CapturedReplay] = field(default_factory=list)
+    tools: tuple[Tool, ...] = ()
     raise_on_dispatch: BaseException | None = None
 
     def is_gated(self, call: ToolCall) -> Any:  # pragma: no cover - guard

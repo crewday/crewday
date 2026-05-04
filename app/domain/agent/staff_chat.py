@@ -6,13 +6,13 @@ Spec: ``docs/specs/11-llm-and-agents.md`` "Worker-side agent",
 
 from __future__ import annotations
 
-from collections.abc import Container, Mapping
+from collections.abc import Container, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
 
 from sqlalchemy.orm import Session
 
-from app.adapters.llm.ports import LLMClient
+from app.adapters.llm.ports import LLMClient, Tool
 from app.domain.agent.runtime import (
     DEFAULT_HISTORY_CAP,
     DelegatedToken,
@@ -237,6 +237,12 @@ class _StaffChatDispatcher:
     """Catalog guard that fail-closes before an out-of-scope tool executes."""
 
     inner: ToolDispatcher
+
+    @property
+    def tools(self) -> Sequence[Tool]:
+        return tuple(
+            tool for tool in self.inner.tools if is_staff_chat_tool(tool["name"])
+        )
 
     def is_gated(self, call: ToolCall) -> GateDecision:
         if not is_staff_chat_tool(call.name):

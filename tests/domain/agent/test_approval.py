@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.llm.models import ApprovalRequest
+from app.adapters.llm.ports import Tool
 from app.domain.agent.approval import (
     EXPIRED_DECISION_NOTE,
     MAX_PAGE_LIMIT,
@@ -95,6 +96,7 @@ class _RecordingDispatcher:
 
     responses: dict[str, list[ToolResult]] = field(default_factory=dict)
     captured: list[_CapturedReplay] = field(default_factory=list)
+    tools: tuple[Tool, ...] = ()
     raise_on_dispatch: BaseException | None = None
 
     def is_gated(self, call: ToolCall):  # type: ignore[no-untyped-def]

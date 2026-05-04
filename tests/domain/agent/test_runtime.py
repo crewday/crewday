@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.llm.models import ApprovalRequest, LlmPromptTemplate, LlmUsage
 from app.adapters.db.messaging.models import ChatMessage
-from app.adapters.llm.ports import LLMResponse
+from app.adapters.llm.ports import LLMResponse, Tool
 from app.domain.agent.preferences import PreferenceUpdate, save_preference
 from app.domain.agent.runtime import (
     APPROVAL_REQUEST_TTL,
@@ -152,6 +152,43 @@ def test_no_tool_turn_emits_started_finished_and_one_chat_message(
 
     audit_count = db_session.scalar(select(func.count()).select_from(AuditLog))
     assert audit_count == 0
+
+
+def test_runtime_forwards_dispatcher_tools_to_llm(
+    db_session: Session,
+    bus: EventBus,
+    clock: FrozenClock,
+) -> None:
+    _ws, ctx, channel_id = _bind_and_seed(db_session)
+
+    tools: tuple[Tool, ...] = (
+        {
+            "name": "tasks.list",
+            "description": "List tasks",
+            "input_schema": {
+                "type": "object",
+                "properties": {"property_id": {"type": "string"}},
+            },
+        },
+    )
+    llm = ScriptedLLMClient(replies=[make_text_response("No open tasks.")])
+    run_turn(
+        ctx,
+        session=db_session,
+        scope="manager",
+        thread_id=channel_id,
+        user_message="Anything open?",
+        trigger="event",
+        llm_client=llm,
+        tool_dispatcher=FakeToolDispatcher(tools=tools),
+        token_factory=FakeTokenFactory(),
+        agent_label=_AGENT_LABEL,
+        capability=_CAPABILITY,
+        event_bus=bus,
+        clock=clock,
+    )
+
+    assert llm.last_tools == tools
 
 
 def test_task_scope_reply_event_carries_task_key(
@@ -1189,9 +1226,18 @@ def test_runtime_prefers_native_tool_calls_over_text_parse(
     """Native ``response.tool_calls`` short-circuits the free-text parser."""
     _ws, ctx, channel_id = _bind_and_seed(db_session)
 
+    native_response = _native_tool_response("tasks.list", {"property_id": "p1"})
     llm = ScriptedLLMClient(
         replies=[
-            _native_tool_response("tasks.list", {"property_id": "p1"}),
+            LLMResponse(
+                text=(
+                    '<tool_call name="wrong.text_tool" input=\'{"property_id":"p9"}\'/>'
+                ),
+                usage=native_response.usage,
+                model_id="fake/model",
+                finish_reason="tool_calls",
+                tool_calls=native_response.tool_calls,
+            ),
             make_text_response("There are 2 open tasks."),
         ]
     )

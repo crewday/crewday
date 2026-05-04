@@ -41,7 +41,7 @@ from app.adapters.db.llm.models import (
 )
 from app.adapters.db.messaging.models import ChatChannel
 from app.adapters.db.workspace.models import Workspace
-from app.adapters.llm.ports import LLMResponse, LLMUsage
+from app.adapters.llm.ports import LLMResponse, LLMUsage, Tool
 from app.auth import tokens as tokens_module
 from app.domain.agent.runtime import (
     DelegatedToken,
@@ -178,6 +178,7 @@ class _CountingDispatcher:
     a successful 201."""
 
     captured: list[ToolCall] = field(default_factory=list)
+    tools: tuple[Tool, ...] = ()
 
     def is_gated(self, call: ToolCall) -> GateDecision:
         return GateDecision(gated=False)

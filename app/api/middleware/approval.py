@@ -17,6 +17,7 @@ from starlette.responses import JSONResponse, Response
 from app.adapters.db.identity.models import User
 from app.adapters.db.llm.models import ApprovalRequest
 from app.adapters.db.session import make_uow
+from app.adapters.llm.ports import Tool
 from app.domain.agent.runtime import (
     DelegatedToken,
     GateDecision,
@@ -227,6 +228,10 @@ def _invalid_approval_input_response() -> Response:
 
 class InProcessApprovalDispatcher(ToolDispatcher):
     """Replay approval rows through domain services for supported tools."""
+
+    @property
+    def tools(self) -> tuple[Tool, ...]:
+        return ()
 
     def is_gated(self, call: ToolCall) -> GateDecision:
         del call

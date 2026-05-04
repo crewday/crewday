@@ -119,7 +119,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Final, Literal, Protocol
@@ -130,7 +130,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.llm.models import ApprovalRequest
 from app.adapters.db.messaging.models import ChatChannel, ChatMessage
 from app.adapters.llm.ports import ChatMessage as LlmChatMessage
-from app.adapters.llm.ports import LLMClient, LLMResponse
+from app.adapters.llm.ports import LLMClient, LLMResponse, Tool
 from app.audit import write_audit
 from app.domain.agent.compaction import search_chat_archive
 from app.domain.agent.preferences import (
@@ -440,6 +440,11 @@ class ToolDispatcher(Protocol):
       :attr:`ToolResult.mutated` to decide whether to audit.
     """
 
+    @property
+    def tools(self) -> Sequence[Tool]:
+        """Return the function-calling tool catalog exposed to the model."""
+        ...
+
     def is_gated(self, call: ToolCall) -> GateDecision:
         """Return the gate decision for ``call``."""
         ...
@@ -725,6 +730,7 @@ def run_turn(
                 ctx=ctx,
                 model_pick=model_pick,
                 history=history,
+                tools=tool_dispatcher.tools,
                 capability=capability,
                 correlation_id=correlation_id,
                 attempt=iteration,
@@ -1244,6 +1250,7 @@ def _call_llm(
     ctx: WorkspaceContext,
     model_pick: ModelPick,
     history: list[LlmChatMessage],
+    tools: Sequence[Tool],
     capability: str,
     correlation_id: str,
     attempt: int,
@@ -1274,6 +1281,7 @@ def _call_llm(
         temperature=model_pick.temperature
         if model_pick.temperature is not None
         else 0.0,
+        tools=tools,
         consents=load_consent_set(session, ctx.workspace_id),
     )
     elapsed_ms = int((clock.now() - started).total_seconds() * 1000)
