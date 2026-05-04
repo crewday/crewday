@@ -56,6 +56,7 @@ STYLEGUIDE_DIFF_FRACTION: Final[float] = 0.001
 
 _BASELINES_DIR: Final[Path] = Path(__file__).parent.parent / "_baselines"
 _DIFF_DIR: Final[Path] = Path(__file__).parent.parent / "_diff"
+_MAX_TRAILING_BLANK_HEIGHT_DRIFT: Final[int] = 64
 
 
 def compare_screenshot(
@@ -102,14 +103,21 @@ def compare_screenshot(
 
     baseline_img = Image.open(baseline_path).convert("RGBA")
     if baseline_img.size != capture_img.size:
-        diff_dir.mkdir(parents=True, exist_ok=True)
-        oversized_path = diff_dir / f"{name}.png"
-        capture_img.save(oversized_path)
-        pytest.fail(
-            f"baseline {name!r} size mismatch: baseline={baseline_img.size}, "
-            f"capture={capture_img.size}; saved capture at {oversized_path} — "
-            "viewport drifted or theme changed?"
+        normalized = (
+            _crop_trailing_blank_mismatch(baseline_img, capture_img)
+            if full_page
+            else None
         )
+        if normalized is None:
+            diff_dir.mkdir(parents=True, exist_ok=True)
+            oversized_path = diff_dir / f"{name}.png"
+            capture_img.save(oversized_path)
+            pytest.fail(
+                f"baseline {name!r} size mismatch: baseline={baseline_img.size}, "
+                f"capture={capture_img.size}; saved capture at {oversized_path} — "
+                "viewport drifted or theme changed?"
+            )
+        baseline_img, capture_img = normalized
 
     width, height = baseline_img.size
     diff_img = Image.new("RGBA", (width, height))
@@ -134,3 +142,47 @@ def compare_screenshot(
             f"pixels differ ({pct:.3f}%, budget {budget_pct:.3f}%). "
             f"Diff at {diff_path}."
         )
+
+
+def _crop_trailing_blank_mismatch(
+    baseline_img: Image.Image,
+    capture_img: Image.Image,
+) -> tuple[Image.Image, Image.Image] | None:
+    """Normalize browser-only full-page height drift at a blank page tail."""
+    baseline_width, baseline_height = baseline_img.size
+    capture_width, capture_height = capture_img.size
+    if baseline_width != capture_width:
+        return None
+
+    shorter_height = min(baseline_height, capture_height)
+    height_delta = abs(baseline_height - capture_height)
+    if height_delta > _MAX_TRAILING_BLANK_HEIGHT_DRIFT:
+        return None
+
+    taller_img = baseline_img if baseline_height > capture_height else capture_img
+    shorter_img = capture_img if baseline_height > capture_height else baseline_img
+
+    extra = taller_img.crop((0, shorter_height, baseline_width, taller_img.height))
+    extra_color = _solid_color(extra)
+    if extra_color is None:
+        return None
+
+    bottom_row = shorter_img.crop(
+        (0, shorter_height - 1, baseline_width, shorter_height)
+    )
+    if _solid_color(bottom_row) != extra_color:
+        return None
+
+    crop_box = (0, 0, baseline_width, shorter_height)
+    return baseline_img.crop(crop_box), capture_img.crop(crop_box)
+
+
+def _solid_color(image: Image.Image) -> tuple[int, int, int, int] | None:
+    colors = image.getcolors(maxcolors=2)
+    if colors is None or len(colors) != 1:
+        return None
+
+    color = colors[0][1]
+    if not isinstance(color, tuple) or len(color) != 4:
+        return None
+    return color

@@ -139,3 +139,98 @@ def test_visual_harness_fires_on_deliberate_pixel_change(
     # Sanity: the diff PNG is a valid image, not empty bytes.
     diff_img = Image.open(BytesIO(diff_path.read_bytes()))
     assert diff_img.size == baseline_img.size
+
+
+def test_visual_harness_tolerates_trailing_blank_height_drift(
+    page: Page, tmp_path: Path
+) -> None:
+    """Full-page browser captures may grow by blank background rows only."""
+    page.set_viewport_size({"width": 200, "height": 200})
+    html = (
+        "<!doctype html><html><body style='margin:0;background:rgb(171,205,239)'>"
+        "<div style='width:200px;height:200px;background:rgb(171,205,239)'>"
+        "</div></body></html>"
+    )
+    page.goto(f"data:text/html,{html}")
+    page.wait_for_load_state("load")
+
+    baselines_dir = tmp_path / "_baselines"
+    diff_dir = tmp_path / "_diff"
+    baselines_dir.mkdir()
+    Image.new("RGBA", (200, 190), (171, 205, 239, 255)).save(
+        baselines_dir / "blank_tail.png"
+    )
+
+    compare_screenshot(
+        page,
+        name="blank_tail",
+        threshold=STYLEGUIDE_DIFF_FRACTION,
+        baselines_dir=baselines_dir,
+        diff_dir=diff_dir,
+    )
+
+    assert not (diff_dir / "blank_tail.png").exists()
+
+
+def test_visual_harness_rejects_nonblank_trailing_height_drift(
+    page: Page, tmp_path: Path
+) -> None:
+    page.set_viewport_size({"width": 200, "height": 200})
+    html = (
+        "<!doctype html><html><body style='margin:0;background:rgb(171,205,239)'>"
+        "<div style='width:200px;height:190px;background:rgb(171,205,239)'></div>"
+        "<div style='width:200px;height:10px;background:rgb(255,0,0)'></div>"
+        "</body></html>"
+    )
+    page.goto(f"data:text/html,{html}")
+    page.wait_for_load_state("load")
+
+    baselines_dir = tmp_path / "_baselines"
+    diff_dir = tmp_path / "_diff"
+    baselines_dir.mkdir()
+    Image.new("RGBA", (200, 190), (171, 205, 239, 255)).save(
+        baselines_dir / "nonblank_tail.png"
+    )
+
+    with pytest.raises(pytest.fail.Exception, match="size mismatch"):
+        compare_screenshot(
+            page,
+            name="nonblank_tail",
+            threshold=STYLEGUIDE_DIFF_FRACTION,
+            baselines_dir=baselines_dir,
+            diff_dir=diff_dir,
+        )
+
+    assert (diff_dir / "nonblank_tail.png").exists()
+
+
+def test_visual_harness_rejects_blank_height_drift_for_viewport_capture(
+    page: Page, tmp_path: Path
+) -> None:
+    page.set_viewport_size({"width": 200, "height": 200})
+    html = (
+        "<!doctype html><html><body style='margin:0;background:rgb(171,205,239)'>"
+        "<div style='width:200px;height:200px;background:rgb(171,205,239)'>"
+        "</div></body></html>"
+    )
+    page.goto(f"data:text/html,{html}")
+    page.wait_for_load_state("load")
+
+    baselines_dir = tmp_path / "_baselines"
+    diff_dir = tmp_path / "_diff"
+    baselines_dir.mkdir()
+    Image.new("RGBA", (200, 190), (171, 205, 239, 255)).save(
+        baselines_dir / "viewport_tail.png"
+    )
+
+    with pytest.raises(pytest.fail.Exception, match="size mismatch"):
+        compare_screenshot(
+            page,
+            name="viewport_tail",
+            threshold=STYLEGUIDE_DIFF_FRACTION,
+            full_page=False,
+            baselines_dir=baselines_dir,
+            diff_dir=diff_dir,
+        )
+
+    assert (diff_dir / "viewport_tail.png").exists()
