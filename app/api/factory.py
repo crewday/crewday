@@ -1577,6 +1577,9 @@ def _build_worker_lifespan(
         # (tests, static analysis) that imports ``create_app`` just
         # for its signature without ever building the app.
         from app.adapters.db.session import make_engine
+        from app.domain.llm.invalidation_bridge import (
+            build_llm_assignment_invalidation_bridge,
+        )
         from app.events.bus import bus as default_event_bus
         from app.events.relay import build_relay
         from app.worker import create_scheduler, register_jobs
@@ -1609,6 +1612,21 @@ def _build_worker_lifespan(
         app.state.events_relay_engine = relay_engine
         default_event_bus.set_relay(relay)
         await relay.start()
+
+        # LLM router cache invalidation is intentionally narrower
+        # than the all-event SSE relay: assignment edits publish on a
+        # dedicated Postgres channel and each worker re-emits the
+        # typed event onto its local bus, reusing the router's
+        # existing subscriber. SQLite returns a no-op bridge and
+        # keeps the single-process dev path.
+        llm_bridge_engine = make_engine()
+        llm_bridge = build_llm_assignment_invalidation_bridge(
+            engine=llm_bridge_engine,
+            bus=default_event_bus,
+        )
+        app.state.llm_assignment_invalidation_bridge = llm_bridge
+        app.state.llm_assignment_invalidation_bridge_engine = llm_bridge_engine
+        await llm_bridge.start()
 
         if cfg.worker == "internal":
             scheduler = create_scheduler()
@@ -1653,6 +1671,18 @@ def _build_worker_lifespan(
             if engine_to_dispose is not None:
                 engine_to_dispose.dispose()
                 app.state.events_relay_engine = None
+            llm_bridge_to_stop = getattr(
+                app.state, "llm_assignment_invalidation_bridge", None
+            )
+            if llm_bridge_to_stop is not None:
+                await llm_bridge_to_stop.stop()
+                app.state.llm_assignment_invalidation_bridge = None
+            llm_bridge_engine_to_dispose = getattr(
+                app.state, "llm_assignment_invalidation_bridge_engine", None
+            )
+            if llm_bridge_engine_to_dispose is not None:
+                llm_bridge_engine_to_dispose.dispose()
+                app.state.llm_assignment_invalidation_bridge_engine = None
 
     return _lifespan
 

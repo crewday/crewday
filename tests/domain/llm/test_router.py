@@ -9,7 +9,7 @@ Covers every branch of the Beads acceptance criteria:
 * Unknown capability → :class:`CapabilityUnassignedError`.
 * Fully-disabled chain (no parent) → :class:`CapabilityUnassignedError`.
 * Cache TTL expiry.
-* SSE-triggered cache invalidation via the
+* Event-triggered cache invalidation via the
   :class:`~app.events.types.LlmAssignmentChanged` event on the
   production bus.
 * Property-style test: random chains length 1..5 always come back in
@@ -23,14 +23,18 @@ See ``docs/specs/11-llm-and-agents.md`` §"Model assignment",
 
 from __future__ import annotations
 
+import asyncio
 import random
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from app.domain.llm import router as router_module
+from app.domain.llm.invalidation_bridge import PostgresLlmAssignmentInvalidationBridge
 from app.domain.llm.router import (
     CACHE_TTL_SECONDS,
     CapabilityUnassignedError,
@@ -54,6 +58,16 @@ from tests.domain.llm.conftest import (
 )
 
 _SEED_MODEL = "01HWA00000000000000000MDL0"
+
+
+async def _wait_for(predicate: Callable[[], bool], *, timeout: float = 5.0) -> None:
+    """Poll ``predicate`` until it becomes true."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not predicate():
+        if loop.time() > deadline:
+            raise AssertionError("predicate never became true")
+        await asyncio.sleep(0.05)
 
 
 def _publish_assignment_changed(bus: EventBus, workspace_id: str) -> None:
@@ -901,7 +915,7 @@ class TestCache:
             # Attempt (1): direct assignment through the proxy must
             # fail at the type level.
             with pytest.raises(TypeError):
-                first.extra_api_params["top_p"] = 0.1  # type: ignore[index]
+                first.extra_api_params["top_p"] = 0.1
 
             # Attempt (2): if a caller somehow mutated a mutable view
             # they obtained elsewhere, the *next* resolve must still
@@ -1142,6 +1156,70 @@ class TestBusSubscription:
             assert second.provider_model_id == "01HWA00000000000000000LBU2"
         finally:
             reset_current(token)
+
+
+class TestPostgresInvalidationBridge:
+    """Two-worker LLM assignment invalidation through Postgres NOTIFY."""
+
+    @pytest.mark.pg_only
+    async def test_assignment_edit_on_one_bus_invalidates_sibling_router_cache(
+        self,
+        engine: Engine,
+        db_session: Session,
+        clock: FrozenClock,
+    ) -> None:
+        """A sibling worker sees a model-assignment edit within one NOTIFY trip.
+
+        ``bus_a`` intentionally is not subscribed to the router; it
+        only hosts the bridge publisher. The cache can therefore move
+        from ``PG01`` to ``PG02`` only after ``bridge_b`` receives the
+        Postgres notification and republishes
+        :class:`LlmAssignmentChanged` on ``bus_b``.
+        """
+        bus_a = EventBus()
+        bus_b = EventBus()
+        router_module._subscribe_to_bus(bus_b)
+        bridge_a = PostgresLlmAssignmentInvalidationBridge(engine=engine, bus=bus_a)
+        bridge_b = PostgresLlmAssignmentInvalidationBridge(engine=engine, bus=bus_b)
+        await bridge_a.start()
+        await bridge_b.start()
+        await asyncio.sleep(0.5)
+
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            row = seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="chat.manager",
+                priority=0,
+                model_id="01HWA00000000000000000PG01",
+            )
+
+            first = resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+            assert first.provider_model_id == "01HWA00000000000000000PG01"
+
+            seed_provider_model(
+                db_session, provider_model_id="01HWA00000000000000000PG02"
+            )
+            row.model_id = "01HWA00000000000000000PG02"
+            db_session.flush()
+
+            _publish_assignment_changed(bus_a, ws.id)
+
+            await _wait_for(
+                lambda: (
+                    resolve_primary(
+                        db_session, ctx, "chat.manager", clock=clock
+                    ).provider_model_id
+                    == "01HWA00000000000000000PG02"
+                )
+            )
+        finally:
+            reset_current(token)
+            await bridge_a.stop()
+            await bridge_b.stop()
 
 
 # ---------------------------------------------------------------------------

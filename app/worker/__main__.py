@@ -63,6 +63,19 @@ async def _run() -> None:
     settings = get_settings()
     setup_logging(level=settings.log_level)
 
+    from app.adapters.db.session import make_engine
+    from app.domain.llm.invalidation_bridge import (
+        build_llm_assignment_invalidation_bridge,
+    )
+    from app.events.bus import bus as default_event_bus
+
+    llm_bridge_engine = make_engine()
+    llm_bridge = build_llm_assignment_invalidation_bridge(
+        engine=llm_bridge_engine,
+        bus=default_event_bus,
+    )
+    await llm_bridge.start()
+
     scheduler = create_scheduler()
     register_jobs(scheduler, settings=settings)
     start(scheduler)
@@ -100,18 +113,22 @@ async def _run() -> None:
                 },
             )
 
-    signum = await stop_signal
-    _log.info(
-        "worker process stopping",
-        extra={"event": "worker.process.stopping", "signal": signum},
-    )
-    # ``wait=True`` — the standalone worker has no HTTP deadline, so
-    # let pending jobs finish (bounded by their own timeouts).
-    stop(scheduler, wait=True)
-    _log.info(
-        "worker process stopped",
-        extra={"event": "worker.process.stopped"},
-    )
+    try:
+        signum = await stop_signal
+        _log.info(
+            "worker process stopping",
+            extra={"event": "worker.process.stopping", "signal": signum},
+        )
+    finally:
+        # ``wait=True`` — the standalone worker has no HTTP deadline, so
+        # let pending jobs finish (bounded by their own timeouts).
+        stop(scheduler, wait=True)
+        await llm_bridge.stop()
+        llm_bridge_engine.dispose()
+        _log.info(
+            "worker process stopped",
+            extra={"event": "worker.process.stopped"},
+        )
 
 
 def main() -> int:

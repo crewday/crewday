@@ -48,7 +48,7 @@ Implementation notes:
   hop budget; a detected cycle is treated as "no parent" — the
   caller sees :class:`CapabilityUnassignedError` rather than a
   hang.
-* **30 s in-process cache, SSE-invalidated.** A workspace-wide
+* **30 s in-process cache, event-invalidated.** A workspace-wide
   dict keyed by ``(workspace_id, capability)`` avoids a DB round
   trip on every chat turn. The admin / API layer that mutates
   assignments publishes :class:`~app.events.types.LlmAssignmentChanged`
@@ -60,20 +60,17 @@ Implementation notes:
   single capability's chain — an edit to an inheritance edge can
   silently change the chain of a capability two hops downstream.
 
-* **Single-process deployment assumption.** The cache lives in
-  process memory and the event bus fans out only within the
-  publishing process (:mod:`app.events.bus` is sync + in-process).
-  v1 deployments run a single uvicorn worker (§16
-  "Deployment / operations" — no multi-worker recipe yet), so an
-  assignment edit from any process reaches every reader via the
-  same bus. If a future deployment introduces multiple API workers
-  or a dedicated agent-runtime process, a worker that doesn't host
-  the publisher will serve stale picks until the 30 s TTL expires
-  — a bounded but real staleness window. The cheapest right answer
-  at that point is a Postgres ``LISTEN/NOTIFY`` (or Redis pub/sub)
-  cross-process bridge that re-publishes
-  :class:`LlmAssignmentChanged` on every subscriber's in-process
-  bus; see the paired Beads follow-up.
+* **Cross-process invalidation on Postgres.** The cache still lives
+  in process memory, but Postgres deployments run
+  :mod:`app.domain.llm.invalidation_bridge` at lifespan startup.
+  Each worker subscribes to the local
+  :class:`LlmAssignmentChanged` event, sends it through
+  ``pg_notify`` on the ``llm_assignment`` channel, and
+  republishes sibling notifications onto that worker's local
+  :class:`~app.events.bus.EventBus`. The router subscriber above is
+  therefore the only invalidation path in every process. SQLite
+  remains the single-process / development path and uses the
+  existing in-process bus behavior plus the 30 s TTL safety net.
 
 * **Bus subscription at import time.** The production bus is
   wired up at the bottom of this module rather than via a lazy

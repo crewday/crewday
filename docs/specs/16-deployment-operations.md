@@ -529,6 +529,15 @@ layer by RLS (§15). Payments are **not** in scope for v1
   connection per worker, plus a small short-lived send pool for
   `pg_notify` (separate from the request engine pool); size
   Postgres `max_connections` for `--workers N` accordingly.
+- LLM model-assignment edits use a narrower sibling bridge:
+  `app/domain/llm/invalidation_bridge.py`. On Postgres, each
+  worker opens a long-lived `LISTEN llm_assignment`
+  connection and republishes received `LlmAssignmentChanged`
+  payloads onto its local in-process `EventBus`, so the router cache
+  invalidation subscriber in `app/domain/llm/router.py` is reused in
+  every worker. SQLite keeps the single-process/dev behavior and the
+  router's 30 s TTL remains the fallback if a direct DB edit bypasses
+  the bus.
 - **Postgres 15+ recommended** for the threat profile (untrusted
   tenants) because it activates `features.rls` (§01) as defence-
   in-depth. The app runs equally on SQLite; the choice is about
