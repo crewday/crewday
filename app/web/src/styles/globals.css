@@ -35,3 +35,20 @@
 @import "./scheduler-drawer.css";
 @import "./inventory.css";
 @import "./auth-gate.css";
+
+.panel--inset {
+  background: var(--paper-2);
+  border-color: var(--line-strong);
+  padding: 16px 18px;
+  box-shadow:
+    inset 0 1px 0 var(--card-raised),
+    inset 0 0 0 1px color-mix(in oklab, var(--line) 45%, transparent);
+}
+
+.panel--inset .settings-list li {
+  align-items: baseline;
+  column-gap: 8px;
+  row-gap: 2px;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
