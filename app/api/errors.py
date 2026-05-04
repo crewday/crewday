@@ -58,6 +58,7 @@ from app.domain.errors import (
     Forbidden,
     Gone,
     IdempotencyConflict,
+    Internal,
     InvalidCursor,
     NotFound,
     RateLimited,
@@ -110,6 +111,7 @@ _DOMAIN_STATUS_MAP: Final[dict[type[DomainError], int]] = {
     RateLimited: 429,
     ServiceUnavailable: 503,
     UpstreamUnavailable: 502,
+    Internal: 500,
     ApprovalRequired: 409,
 }
 

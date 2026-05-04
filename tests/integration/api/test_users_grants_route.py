@@ -209,6 +209,7 @@ def test_delete_grants_refuses_to_orphan_owners_group(
     assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
     body = response.json()
     assert body["status"] == 422
+    assert body["error"] == "would_orphan_owners_group"
     # Spec 12 defines canonical RFC 7807 types under /errors/. The Beads
     # task's older /problems/ wording is intentionally not copied here.
     assert body["type"] == f"{CANONICAL_TYPE_BASE}would_orphan_owners_group"

@@ -243,8 +243,8 @@ class TestAuthZ:
         r = client.post(f"/users/{worker_id}/reset_passkey")
         assert r.status_code == 403, r.text
         body = r.json()
-        assert body["detail"]["error"] == "permission_denied"
-        assert body["detail"]["action_key"] == "users.reset_passkey"
+        assert body["error"] == "permission_denied"
+        assert body["action_key"] == "users.reset_passkey"
 
     def test_worker_rejected_403(
         self,
@@ -259,7 +259,7 @@ class TestAuthZ:
         )
         r = client.post(f"/users/{worker_id}/reset_passkey")
         assert r.status_code == 403, r.text
-        assert r.json()["detail"]["error"] == "permission_denied"
+        assert r.json()["error"] == "permission_denied"
 
 
 # ---------------------------------------------------------------------------
@@ -392,4 +392,4 @@ class TestTenancy:
         )
         r = client.post(f"/users/{sibling_id}/reset_passkey")
         assert r.status_code == 404, r.text
-        assert r.json()["detail"]["error"] == "employee_not_found"
+        assert r.json()["error"] == "employee_not_found"

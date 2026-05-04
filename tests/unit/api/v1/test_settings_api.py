@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
@@ -12,6 +13,15 @@ from tests.factories.identity import bootstrap_user, bootstrap_workspace
 from tests.unit.api.v1.identity.conftest import build_client, ctx_for
 
 pytest_plugins = ("tests.unit.api.v1.identity.conftest",)
+
+
+def _assert_problem_json(response: Response) -> dict[str, object]:
+    assert response.headers["content-type"].startswith("application/problem+json")
+    body = response.json()
+    assert body["type"] == "https://crewday.dev/errors/validation"
+    assert body["title"] == "Validation error"
+    assert body["status"] == 422
+    return body
 
 
 def _seed(factory: sessionmaker[Session]) -> tuple[WorkspaceContext, str]:
@@ -112,4 +122,21 @@ def test_settings_patch_rejects_unknown_keys(factory: sessionmaker[Session]) -> 
     response = client.patch("/settings", json={"unknown.key": True})
 
     assert response.status_code == 422
-    assert response.json()["detail"]["error"] == "unknown_setting"
+    body = _assert_problem_json(response)
+    assert body["error"] == "unknown_setting"
+    assert body["key"] == "unknown.key"
+
+
+def test_settings_patch_rejects_wrong_value_type(
+    factory: sessionmaker[Session],
+) -> None:
+    ctx, _workspace_id = _seed(factory)
+    client = _client(ctx, factory)
+
+    response = client.patch("/settings", json={"tasks.checklist_required": "yes"})
+
+    assert response.status_code == 422
+    body = _assert_problem_json(response)
+    assert body["error"] == "setting_type_invalid"
+    assert body["key"] == "tasks.checklist_required"
+    assert body["expected"] == "bool"

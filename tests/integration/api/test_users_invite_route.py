@@ -29,9 +29,11 @@ from app.adapters.db.identity.models import User
 from app.adapters.db.workspace.models import Workspace
 from app.api.deps import current_workspace_context
 from app.api.deps import db_session as _db_session_dep
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.users import build_users_router
 from app.auth._throttle import Throttle
 from app.config import Settings
+from app.domain.errors import DomainError, Internal
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.ulid import new_ulid
 from tests._fakes.mailer import InMemoryMailer
@@ -211,6 +213,7 @@ TestInviteCommitFailureNoEmailLeak`.
         ),
         prefix="/api/v1",
     )
+    add_exception_handlers(app)
 
     def _session() -> Iterator[Session]:
         s = session_factory()
@@ -292,41 +295,41 @@ class TestRateLimit:
         # :class:`RateLimited`. The router maps it to 429.
         second = client.post("/api/v1/users/invite", json=body)
         assert second.status_code == 429, second.text
-        detail = second.json().get("detail")
-        assert detail == {"error": "rate_limited"}, second.text
+        assert second.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+        assert second.json()["error"] == "rate_limited", second.text
 
 
 class TestErrorMapping:
-    """Direct unit coverage for :func:`_http_for_invite`'s branches."""
+    """Direct unit coverage for :func:`_error_for_invite`'s branches."""
 
     def test_invite_body_invalid_maps_to_422(self) -> None:
         """``InviteBodyInvalid`` keeps its 422 ``invalid_body`` envelope."""
-        from app.api.v1.users import _http_for_invite
+        from app.api.v1.users import _error_for_invite
         from app.domain.identity import membership
 
-        http = _http_for_invite(membership.InviteBodyInvalid("missing email"))
-        assert http.status_code == 422
-        assert isinstance(http.detail, dict)
-        assert http.detail["error"] == "invalid_body"
+        err = _error_for_invite(membership.InviteBodyInvalid("missing email"))
+        assert isinstance(err, DomainError)
+        assert err.extra["error"] == "invalid_body"
+        assert err.detail == "missing email"
 
     def test_rate_limited_maps_to_429(self) -> None:
         """``RateLimited`` from the magic-link throttle maps to 429."""
-        from app.api.v1.users import _http_for_invite
+        from app.api.v1.users import _error_for_invite
         from app.auth._throttle import RateLimited
 
-        http = _http_for_invite(RateLimited("per-IP request budget exceeded"))
-        assert http.status_code == 429
-        assert http.detail == {"error": "rate_limited"}
+        err = _error_for_invite(RateLimited("per-IP request budget exceeded"))
+        assert isinstance(err, DomainError)
+        assert err.extra == {"error": "rate_limited"}
         # ``RateLimited`` carries no retry-after hint today, so the
         # router does not fabricate one. The OpenAPI schema's global
         # ``Retry-After`` documentation still applies for the day a
         # future variant lands a real hint.
-        assert http.headers in (None, {})
+        assert "retry_after_seconds" not in err.extra
 
     def test_unknown_exception_falls_back_to_500(self) -> None:
         """An unmapped exception still routes through the 500 fallback."""
-        from app.api.v1.users import _http_for_invite
+        from app.api.v1.users import _error_for_invite
 
-        http = _http_for_invite(RuntimeError("something exploded"))
-        assert http.status_code == 500
-        assert http.detail == {"error": "internal"}
+        err = _error_for_invite(RuntimeError("something exploded"))
+        assert isinstance(err, Internal)
+        assert err.extra == {"error": "internal"}

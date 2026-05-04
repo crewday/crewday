@@ -361,7 +361,7 @@ class TestTenancy:
         # avoid leaking the sibling's existence.
         r = client.post(f"/users/{sibling_id}/magic_link", json={})
         assert r.status_code == 404, r.text
-        assert r.json()["detail"]["error"] == "employee_not_found"
+        assert r.json()["error"] == "employee_not_found"
 
 
 class TestPostMagicLinkOutboxOrdering:

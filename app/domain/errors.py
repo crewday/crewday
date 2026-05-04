@@ -16,6 +16,7 @@ listed in ``docs/specs/12-rest-api.md`` §"Errors":
 * :class:`RateLimited` → ``rate_limited``
 * :class:`ServiceUnavailable` → ``service_unavailable``
 * :class:`UpstreamUnavailable` → ``upstream_unavailable``
+* :class:`Internal` → ``internal``
 * :class:`ApprovalRequired` → ``approval_required``
 
 Subclasses deliberately do **not** know their HTTP status code — the
@@ -60,6 +61,7 @@ __all__ = [
     "Forbidden",
     "Gone",
     "IdempotencyConflict",
+    "Internal",
     "InvalidCursor",
     "NotFound",
     "RateLimited",
@@ -279,6 +281,13 @@ class UpstreamUnavailable(DomainError):
 
     title: ClassVar[str] = "Upstream unavailable"
     type_name: ClassVar[str] = "upstream_unavailable"
+
+
+class Internal(DomainError):
+    """Unexpected server-side failure that should still render as problem+json."""
+
+    title: ClassVar[str] = "Internal server error"
+    type_name: ClassVar[str] = "internal"
 
 
 class ApprovalRequired(DomainError):

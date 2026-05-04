@@ -21,7 +21,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, ConfigDict, RootModel
 from sqlalchemy.orm import Session
 
@@ -36,11 +36,24 @@ from app.auth.magic_link import (
     ConsumeLockout,
     InvalidToken,
     PurposeMismatch,
-    RateLimited,
     TokenExpired,
+)
+from app.auth.magic_link import (
+    RateLimited as MagicLinkRateLimited,
 )
 from app.authz.dep import Permission
 from app.config import Settings
+from app.domain.errors import (
+    BadRequest,
+    Conflict,
+    DomainError,
+    Forbidden,
+    Gone,
+    Internal,
+    NotFound,
+    RateLimited,
+    Validation,
+)
 from app.events.bus import bus as default_event_bus
 from app.events.types import WorkspaceChanged
 from app.services.workspace.ownership_verification import (
@@ -586,10 +599,10 @@ def post_verify_ownership_request(
     except (
         OwnersOnlyError,
         WorkspaceVerificationNotFound,
-        RateLimited,
+        MagicLinkRateLimited,
         InvalidToken,
     ) as exc:
-        raise _http_for_verify_ownership(exc) from exc
+        raise _domain_error_for_verify_ownership(exc) from exc
     if dispatch is not None:
         dispatch.deliver()
     return VerifyOwnershipRequestResponse()
@@ -621,7 +634,7 @@ def post_verify_ownership_consume(
             settings=settings,
         )
     except ConsumeLockout as exc:
-        raise _http_for_verify_ownership(exc) from exc
+        raise _domain_error_for_verify_ownership(exc) from exc
     except (
         OwnersOnlyError,
         WorkspaceVerificationNotFound,
@@ -630,10 +643,10 @@ def post_verify_ownership_consume(
         PurposeMismatch,
         TokenExpired,
         AlreadyConsumed,
-        RateLimited,
+        MagicLinkRateLimited,
     ) as exc:
         throttle.record_consume_failure(ip=ip, now=SystemClock().now())
-        raise _http_for_verify_ownership(exc) from exc
+        raise _domain_error_for_verify_ownership(exc) from exc
     throttle.record_consume_success(ip=ip)
     return VerifyOwnershipConsumeResponse(verification_state=verification_state)
 
@@ -658,10 +671,7 @@ def patch_workspace_settings(
     for key, raw_value in payload.root.items():
         definition = _CATALOG_BY_KEY.get(key)
         if definition is None:
-            raise HTTPException(
-                status_code=422,
-                detail={"error": "unknown_setting", "key": key},
-            )
+            raise Validation(extra={"error": "unknown_setting", "key": key})
         if raw_value is None:
             if key in current:
                 current.pop(key)
@@ -701,7 +711,7 @@ def _get_workspace(session: Session, ctx: WorkspaceContext) -> Workspace:
     with tenant_agnostic():
         ws = session.get(Workspace, ctx.workspace_id)
     if ws is None:
-        raise HTTPException(status_code=404, detail={"error": "workspace_not_found"})
+        raise NotFound(extra={"error": "workspace_not_found"})
     return ws
 
 
@@ -732,41 +742,20 @@ def _settings(request: Request) -> Settings:
     return settings
 
 
-def _http_for_verify_ownership(exc: Exception) -> HTTPException:
+def _domain_error_for_verify_ownership(exc: Exception) -> DomainError:
     if isinstance(exc, OwnersOnlyError):
-        return HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "owners_only"},
-        )
+        return Forbidden(extra={"error": "owners_only"})
     if isinstance(exc, WorkspaceVerificationNotFound):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "workspace_verification_not_found"},
-        )
+        return NotFound(extra={"error": "workspace_verification_not_found"})
     if isinstance(exc, WorkspaceVerificationMismatch | PurposeMismatch | InvalidToken):
-        return HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "workspace_verification_invalid"},
-        )
+        return BadRequest(extra={"error": "workspace_verification_invalid"})
     if isinstance(exc, TokenExpired):
-        return HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail={"error": "workspace_verification_expired"},
-        )
+        return Gone(extra={"error": "workspace_verification_expired"})
     if isinstance(exc, AlreadyConsumed):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "workspace_verification_already_consumed"},
-        )
-    if isinstance(exc, RateLimited | ConsumeLockout):
-        return HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={"error": "rate_limited"},
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+        return Conflict(extra={"error": "workspace_verification_already_consumed"})
+    if isinstance(exc, MagicLinkRateLimited | ConsumeLockout):
+        return RateLimited(extra={"error": "rate_limited"})
+    return Internal(extra={"error": "internal"})
 
 
 def _workspace_settings_response(ws: Workspace) -> WorkspaceSettingsResponse:
@@ -878,9 +867,8 @@ def _validate_value(definition: SettingDefinitionResponse, raw_value: Any) -> An
     if definition.type == "bool":
         if isinstance(raw_value, bool):
             return raw_value
-        raise HTTPException(
-            status_code=422,
-            detail={
+        raise Validation(
+            extra={
                 "error": "setting_type_invalid",
                 "key": definition.key,
                 "expected": "bool",
@@ -888,9 +876,8 @@ def _validate_value(definition: SettingDefinitionResponse, raw_value: Any) -> An
         )
     if definition.type == "int":
         if isinstance(raw_value, bool) or not isinstance(raw_value, int):
-            raise HTTPException(
-                status_code=422,
-                detail={
+            raise Validation(
+                extra={
                     "error": "setting_type_invalid",
                     "key": definition.key,
                     "expected": "int",
@@ -899,9 +886,8 @@ def _validate_value(definition: SettingDefinitionResponse, raw_value: Any) -> An
         return raw_value
     if definition.enum_values is not None and raw_value in definition.enum_values:
         return raw_value
-    raise HTTPException(
-        status_code=422,
-        detail={
+    raise Validation(
+        extra={
             "error": "setting_type_invalid",
             "key": definition.key,
             "expected": "enum",

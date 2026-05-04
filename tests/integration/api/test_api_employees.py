@@ -54,6 +54,7 @@ from app.adapters.db.workspace.models import (
 from app.adapters.mail.ports import Mailer
 from app.api.deps import current_workspace_context
 from app.api.deps import db_session as _db_session_dep
+from app.api.errors import add_exception_handlers
 from app.api.v1.users import build_users_router
 from app.auth._throttle import Throttle
 from app.tenancy import WorkspaceContext, tenant_agnostic
@@ -233,6 +234,7 @@ def client(
         build_users_router(mailer=mailer, throttle=throttle),
         prefix="/api/v1",
     )
+    add_exception_handlers(app)
 
     def _session() -> Iterator[Session]:
         s = session_factory()
@@ -293,7 +295,7 @@ class TestPatchUser:
             json={"display_name": "X"},
         )
         assert r.status_code == 404, r.text
-        assert r.json()["detail"]["error"] == "employee_not_found"
+        assert r.json()["error"] == "employee_not_found"
 
     def test_unknown_field_is_422(
         self,
@@ -365,7 +367,7 @@ class TestArchiveReinstate:
     def test_archive_missing_user_is_404(self, client: TestClient) -> None:
         r = client.post("/api/v1/users/01HZNONEXISTENTUSERID00000/archive")
         assert r.status_code == 404, r.text
-        assert r.json()["detail"]["error"] == "employee_not_found"
+        assert r.json()["error"] == "employee_not_found"
 
     def test_deployment_scope_clears_users_archived_at(
         self,
@@ -427,7 +429,7 @@ class TestArchiveReinstate:
         _, target_id = seeded
         r = client.post(f"/api/v1/users/{target_id}/reinstate?scope=deployment")
         assert r.status_code == 403, r.text
-        assert r.json()["detail"]["error"] == "forbidden"
+        assert r.json()["error"] == "forbidden"
 
 
 class TestGetUser:

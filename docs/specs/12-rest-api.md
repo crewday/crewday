@@ -269,9 +269,10 @@ Canonical error `type` URIs — full URI is
   `upstream_unavailable` (502), `payload_too_large` (413),
   `idempotency_conflict` (409), `would_orphan_owners_group` (422),
   `last_owner_grant_protected` (409), `approval_required` (409).
-- `internal` (500) — fallback when an unregistered `DomainError`
-  subclass reaches the handler. Unknown `HTTPException` statuses fall
-  back to `http_<status>` (e.g. `http_418`).
+- `internal` (500) — unexpected server-side failure; also the fallback
+  when an unregistered `DomainError` subclass reaches the handler.
+  Unknown `HTTPException` statuses fall back to `http_<status>` (e.g.
+  `http_418`).
 
 ### Idempotency
 

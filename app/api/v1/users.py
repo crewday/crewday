@@ -64,7 +64,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -83,6 +83,16 @@ from app.auth.magic_link_port import MagicLinkAdapter
 from app.authz import PermissionDenied, require
 from app.authz.dep import Permission
 from app.config import Settings, get_settings
+from app.domain.errors import (
+    DomainError,
+    Forbidden,
+    Internal,
+    NotFound,
+    Validation,
+)
+from app.domain.errors import (
+    RateLimited as DomainRateLimited,
+)
 from app.domain.identity import membership
 from app.domain.identity.permission_groups import (
     WouldOrphanOwnersGroup,
@@ -381,13 +391,10 @@ def _view_to_response(view: EmployeeView) -> EmployeeProfileResponse:
 # ---------------------------------------------------------------------------
 
 
-def _http_for_invite(exc: Exception) -> HTTPException:
-    """Map a :func:`membership.invite` domain error to an HTTP response."""
+def _error_for_invite(exc: Exception) -> DomainError:
+    """Map a :func:`membership.invite` error to the transport error."""
     if isinstance(exc, membership.InviteBodyInvalid):
-        return HTTPException(
-            status_code=422,
-            detail={"error": "invalid_body", "message": str(exc)},
-        )
+        return Validation(str(exc), extra={"error": "invalid_body"})
     # ``link_port.request_link`` runs the per-IP / per-email magic-link
     # throttle (5/min, ``app/auth/_throttle.py``). A burst from the same
     # source IP within the window — common in e2e flakes that hammer
@@ -397,18 +404,12 @@ def _http_for_invite(exc: Exception) -> HTTPException:
     # bucket only tracks the window edge, not the remainder), so we
     # omit ``Retry-After`` rather than fabricating a value.
     if isinstance(exc, RateLimited):
-        return HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={"error": "rate_limited"},
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+        return DomainRateLimited(extra={"error": "rate_limited"})
+    return Internal(extra={"error": "internal"})
 
 
-def _http_for_remove(exc: Exception) -> HTTPException:
-    """Map a :func:`membership.remove_member` error to an HTTP response.
+def _error_for_remove(exc: Exception) -> DomainError:
+    """Map a :func:`membership.remove_member` error to the transport error.
 
     :class:`WouldOrphanOwnersGroup` is **not** handled here: it is a
     :class:`~app.domain.errors.Validation` subclass, so the RFC 7807
@@ -418,21 +419,12 @@ def _http_for_remove(exc: Exception) -> HTTPException:
     audit row on a fresh UoW, then re-raises the typed exception.
     """
     if isinstance(exc, membership.NotAMember):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_a_member"},
-        )
+        return NotFound(extra={"error": "not_a_member"})
     if isinstance(exc, membership.InviteStateInvalid):
         # ``InviteStateInvalid`` is re-raised when the workspace has
         # no owners group — a server-side invariant break.
-        return HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": "workspace_invariant_broken"},
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+        return Internal(extra={"error": "workspace_invariant_broken"})
+    return Internal(extra={"error": "internal"})
 
 
 def _client_ip(request: Request) -> str:
@@ -472,10 +464,7 @@ def _assert_workspace_membership(
     """
     row = session.get(UserWorkspace, (user_id, ctx.workspace_id))
     if row is None or row.workspace_id != ctx.workspace_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "employee_not_found"},
-        )
+        raise NotFound(extra={"error": "employee_not_found"})
     return row
 
 
@@ -489,10 +478,7 @@ def _load_user(session: Session, *, user_id: str) -> User:
     with tenant_agnostic():
         row = session.get(User, user_id)
     if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "employee_not_found"},
-        )
+        raise NotFound(extra={"error": "employee_not_found"})
     return row
 
 
@@ -792,7 +778,7 @@ def build_users_router(
                     dispatch=dispatch,
                 )
         except (membership.InviteBodyInvalid, RateLimited) as exc:
-            raise _http_for_invite(exc) from exc
+            raise _error_for_invite(exc) from exc
 
         # ``with`` exited cleanly → UoW committed → invite + nonce +
         # audit are durable on disk. Now fire the queued invite-
@@ -846,15 +832,9 @@ def build_users_router(
                 body=service_body,
             )
         except EmployeeNotFound as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "employee_not_found"},
-            ) from exc
+            raise NotFound(extra={"error": "employee_not_found"}) from exc
         except ProfileFieldForbidden as exc:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={"error": "forbidden"},
-            ) from exc
+            raise Forbidden(extra={"error": "forbidden"}) from exc
         return _view_to_response(view)
 
     @router.post(
@@ -873,15 +853,9 @@ def build_users_router(
                 SqlAlchemyMembershipRepository(session), ctx, user_id=user_id
             )
         except EmployeeNotFound as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "employee_not_found"},
-            ) from exc
+            raise NotFound(extra={"error": "employee_not_found"}) from exc
         except PermissionDenied as exc:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={"error": "forbidden"},
-            ) from exc
+            raise Forbidden(extra={"error": "forbidden"}) from exc
         return _view_to_response(view)
 
     @router.post(
@@ -924,15 +898,9 @@ def build_users_router(
             else:
                 view = reinstate_employee(repo, ctx, user_id=user_id)
         except EmployeeNotFound as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "employee_not_found"},
-            ) from exc
+            raise NotFound(extra={"error": "employee_not_found"}) from exc
         except PermissionDenied as exc:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={"error": "forbidden"},
-            ) from exc
+            raise Forbidden(extra={"error": "forbidden"}) from exc
         return _view_to_response(view)
 
     @router.get(
@@ -951,10 +919,7 @@ def build_users_router(
                 SqlAlchemyMembershipRepository(session), ctx, user_id=user_id
             )
         except EmployeeNotFound as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "employee_not_found"},
-            ) from exc
+            raise NotFound(extra={"error": "employee_not_found"}) from exc
         return _view_to_response(view)
 
     @router.delete(
@@ -970,7 +935,7 @@ def build_users_router(
         """Strip every grant + group-member + session tied to ``user_id``."""
         try:
             membership.remove_member(session, ctx, user_id=user_id)
-        except WouldOrphanOwnersGroup:
+        except WouldOrphanOwnersGroup as exc:
             # Typed refusal — forensic row lands on a fresh UoW so
             # the primary UoW's rollback does not sweep it. Re-raise
             # the typed exception so the RFC 7807 seam translates it
@@ -988,9 +953,11 @@ def build_users_router(
                     )
             except Exception:
                 _log.exception("remove_member refusal audit failed on fresh UoW")
-            raise
+            raise WouldOrphanOwnersGroup(
+                str(exc), extra={"error": "would_orphan_owners_group"}
+            ) from exc
         except (membership.NotAMember, membership.InviteStateInvalid) as exc:
-            raise _http_for_remove(exc) from exc
+            raise _error_for_remove(exc) from exc
 
         return RemoveMemberResponse()
 
@@ -1177,12 +1144,11 @@ def build_users_router(
                     scope_id=ctx.workspace_id,
                 )
             except PermissionDenied as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail={
+                raise Forbidden(
+                    extra={
                         "error": "permission_denied",
                         "action_key": "users.reset_passkey",
-                    },
+                    }
                 ) from exc
 
             _assert_workspace_membership(session, ctx=ctx, user_id=user_id)

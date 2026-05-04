@@ -305,7 +305,7 @@ class TestReinstateScopeDeployment:
         )
         resp = client.post(f"/users/{user_id}/reinstate?scope=deployment")
         assert resp.status_code == 403
-        assert resp.json()["detail"]["error"] == "forbidden"
+        assert resp.json()["error"] == "forbidden"
 
     def test_unknown_user_is_404(
         self,
@@ -325,7 +325,7 @@ class TestReinstateScopeDeployment:
         )
         resp = client.post("/users/01H_DOES_NOT_EXIST_____/reinstate?scope=deployment")
         assert resp.status_code == 404
-        assert resp.json()["detail"]["error"] == "employee_not_found"
+        assert resp.json()["error"] == "employee_not_found"
 
 
 # Silence unused-import warnings for symbols imported only to register
