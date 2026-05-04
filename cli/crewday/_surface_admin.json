@@ -304,32 +304,22 @@
         "name": "since",
         "required": false,
         "schema": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Since"
+          "default": "",
+          "format": "date-time",
+          "maxLength": 64,
+          "title": "Since",
+          "type": "string"
         }
       },
       {
         "name": "until",
         "required": false,
         "schema": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Until"
+          "default": "",
+          "format": "date-time",
+          "maxLength": 64,
+          "title": "Until",
+          "type": "string"
         }
       },
       {
@@ -461,32 +451,22 @@
         "name": "since",
         "required": false,
         "schema": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Since"
+          "default": "",
+          "format": "date-time",
+          "maxLength": 64,
+          "title": "Since",
+          "type": "string"
         }
       },
       {
         "name": "until",
         "required": false,
         "schema": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Until"
+          "default": "",
+          "format": "date-time",
+          "maxLength": 64,
+          "title": "Until",
+          "type": "string"
         }
       },
       {
@@ -658,6 +638,26 @@
         "name": "key",
         "required": true,
         "schema": {
+          "enum": [
+            "captcha_required",
+            "llm_default_budget_cents_30d",
+            "marketplace_enabled",
+            "openrouter.api_key_envelope_id",
+            "platform_fee_currency_policy",
+            "platform_fee_default_bps",
+            "require_passkey_attestation",
+            "signup_enabled",
+            "signup_throttle_overrides",
+            "smtp.bounce_domain",
+            "smtp.from",
+            "smtp.host",
+            "smtp.password_envelope_id",
+            "smtp.port",
+            "smtp.timeout",
+            "smtp.use_tls",
+            "smtp.user",
+            "trusted_interfaces"
+          ],
           "title": "Key",
           "type": "string"
         }
@@ -734,21 +734,10 @@
         "name": "kind",
         "required": false,
         "schema": {
-          "anyOf": [
-            {
-              "enum": [
-                "burst_rate",
-                "distinct_emails_one_ip",
-                "quota_near_breach",
-                "repeat_email"
-              ],
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Kind"
+          "default": "",
+          "pattern": "^(|burst_rate|distinct_emails_one_ip|repeat_email|quota_near_breach)$",
+          "title": "Kind",
+          "type": "string"
         }
       },
       {
@@ -818,6 +807,125 @@
       "mutates": true,
       "summary": "Raise or lower a workspace's LLM budget cap",
       "verb": "usage-cap"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/usage"
+    },
+    "idempotent": true,
+    "name": "usage-list",
+    "operation_id": "admin.usage.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "workspace_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Workspace Id"
+        }
+      },
+      {
+        "name": "capability",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Capability"
+        }
+      },
+      {
+        "name": "actor_user_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Actor User Id"
+        }
+      },
+      {
+        "name": "status",
+        "required": false,
+        "schema": {
+          "default": "",
+          "pattern": "^(|success|error)$",
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      {
+        "name": "since",
+        "required": false,
+        "schema": {
+          "default": "",
+          "format": "date-time",
+          "maxLength": 64,
+          "title": "Since",
+          "type": "string"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "maximum": 200,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/UsageListResponse",
+    "summary": "Page through raw LLM usage rows with cd-wjpl telemetry",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "Page through raw LLM usage rows",
+      "verb": "usage-list"
     }
   },
   {

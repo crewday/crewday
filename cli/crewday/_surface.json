@@ -1,6 +1,62 @@
 [
   {
     "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/events"
+    },
+    "idempotent": true,
+    "name": "events-list",
+    "operation_id": "transport.admin_events",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Deployment-admin Server-Sent Events stream",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/admin/users/{user_id}/passkeys/{credential_id}"
+    },
+    "idempotent": true,
+    "name": "user-passkey-revoke",
+    "operation_id": "admin.users.passkeys.revoke",
+    "path_params": [
+      {
+        "name": "user_id",
+        "required": true,
+        "schema": {
+          "title": "User Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "credential_id",
+        "required": true,
+        "schema": {
+          "title": "Credential Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Revoke one passkey for a workspace member",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": true,
+      "summary": "Revoke one passkey for a workspace member",
+      "verb": "user-passkey-revoke"
+    }
+  },
+  {
+    "body_schema_ref": null,
     "group": "agent",
     "http": {
       "method": "GET",
@@ -1562,6 +1618,179 @@
     }
   },
   {
+    "body_schema_ref": null,
+    "group": "audit",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/audit/tail"
+    },
+    "idempotent": true,
+    "name": "tail",
+    "operation_id": "audit.tail",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "follow",
+        "required": false,
+        "schema": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Follow",
+          "type": "integer"
+        }
+      },
+      {
+        "name": "actor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Actor"
+        }
+      },
+      {
+        "name": "actor_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Actor Id"
+        }
+      },
+      {
+        "name": "action",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Action"
+        }
+      },
+      {
+        "name": "entity",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Entity"
+        }
+      },
+      {
+        "name": "entity_kind",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Entity Kind"
+        }
+      },
+      {
+        "name": "entity_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Entity Id"
+        }
+      },
+      {
+        "name": "since",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Since"
+        }
+      },
+      {
+        "name": "until",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Until"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": null,
+    "summary": "NDJSON projection of workspace-scoped audit rows",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "audit",
+      "mutates": false,
+      "summary": "NDJSON projection of workspace-scoped audit rows",
+      "verb": "tail"
+    }
+  },
+  {
     "body_schema_ref": "#/components/schemas/MagicConsumeBody",
     "group": "auth",
     "http": {
@@ -1923,6 +2152,121 @@
     "summary": "List client quotes",
     "x_agent_confirm": null,
     "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "bookings",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/bookings"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "bookings.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "user_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "User Id"
+        }
+      },
+      {
+        "name": "property_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property Id"
+        }
+      },
+      {
+        "name": "from",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "From"
+        }
+      },
+      {
+        "name": "to",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "To"
+        }
+      },
+      {
+        "name": "status",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Status"
+        }
+      },
+      {
+        "name": "pending_amend",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pending Amend"
+        }
+      }
+    ],
+    "response_schema_ref": null,
+    "summary": "List bookings in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "bookings",
+      "mutates": false,
+      "summary": "List bookings in a workspace",
+      "verb": "list"
+    }
   },
   {
     "body_schema_ref": "#/components/schemas/ChatChannelCreateRequest",
@@ -4382,6 +4726,56 @@
           "title": "Limit",
           "type": "integer"
         }
+      },
+      {
+        "name": "from",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Inclusive lower bound on ``date`` (ISO date). Combine with ``to`` to slice a date window.",
+          "title": "From"
+        }
+      },
+      {
+        "name": "to",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Inclusive upper bound on ``date`` (ISO date). Combine with ``from`` to slice a date window.",
+          "title": "To"
+        }
+      },
+      {
+        "name": "approved",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "``true`` returns only approved overrides; ``false`` returns only pending overrides. Omit for both states.",
+          "title": "Approved"
+        }
       }
     ],
     "response_schema_ref": "#/components/schemas/UserAvailabilityOverrideListResponse",
@@ -4480,6 +4874,43 @@
       "group": "me",
       "summary": "Poll my privacy export",
       "verb": "export-status"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "me",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/history"
+    },
+    "idempotent": true,
+    "name": "history",
+    "operation_id": "me.history.get",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "tab",
+        "required": false,
+        "schema": {
+          "default": "tasks",
+          "description": "Active tab the SPA is rendering. The response carries every tab's array regardless of this value (so the page can switch tabs client-side without a refetch); ``tab`` echoes back so the caller can assert which view it asked for. Unknown values surface as 422 via FastAPI's default Pydantic Literal validation.",
+          "enum": [
+            "chats",
+            "expenses",
+            "leaves",
+            "tasks"
+          ],
+          "title": "Tab",
+          "type": "string"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/HistoryPayload",
+    "summary": "Worker history feed \u2014 completed tasks, decided expenses, past leaves, archived chats",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "me",
+      "verb": "history"
     }
   },
   {
@@ -4661,6 +5092,37 @@
     }
   },
   {
+    "body_schema_ref": null,
+    "group": "me-tokens",
+    "http": {
+      "method": "GET",
+      "path": "/api/v1/me/tokens/{token_id}/audit"
+    },
+    "idempotent": true,
+    "name": "audit",
+    "operation_id": "auth.me.tokens.audit",
+    "path_params": [
+      {
+        "name": "token_id",
+        "required": true,
+        "schema": {
+          "title": "Token Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Per-personal-token audit timeline \u2014 newest first",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "me-tokens",
+      "mutates": false,
+      "summary": "Show one of your personal access token audit timelines",
+      "verb": "audit"
+    }
+  },
+  {
     "body_schema_ref": "#/components/schemas/MintPersonalTokenBody",
     "group": "me-tokens",
     "http": {
@@ -4733,6 +5195,68 @@
       "mutates": true,
       "summary": "Revoke one of your personal access tokens",
       "verb": "revoke"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "me-tokens",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/me/tokens/{token_id}/revoke"
+    },
+    "idempotent": false,
+    "name": "revoke-post",
+    "operation_id": "auth.me.tokens.revoke_post",
+    "path_params": [
+      {
+        "name": "token_id",
+        "required": true,
+        "schema": {
+          "title": "Token Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Revoke a personal access token via POST \u2014 alias of DELETE",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "me-tokens",
+      "mutates": true,
+      "summary": "Revoke one of your personal access tokens (POST alias)",
+      "verb": "revoke-post"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "me-tokens",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/me/tokens/{token_id}/rotate"
+    },
+    "idempotent": false,
+    "name": "rotate",
+    "operation_id": "auth.me.tokens.rotate",
+    "path_params": [
+      {
+        "name": "token_id",
+        "required": true,
+        "schema": {
+          "title": "Token Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/MintPersonalTokenResponse",
+    "summary": "Rotate a personal access token's secret in place",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "me-tokens",
+      "mutates": true,
+      "summary": "Rotate one of your personal access tokens",
+      "verb": "rotate"
     }
   },
   {
@@ -8988,7 +9512,7 @@
     "group": "tasks",
     "http": {
       "method": "POST",
-      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/assign"
+      "path": "/w/{slug}/api/v1/tasks/{task_id}/assign"
     },
     "idempotent": false,
     "name": "assign",
@@ -9014,7 +9538,7 @@
     "group": "tasks",
     "http": {
       "method": "POST",
-      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/cancel"
+      "path": "/w/{slug}/api/v1/tasks/{task_id}/cancel"
     },
     "idempotent": false,
     "name": "cancel",
@@ -9040,7 +9564,7 @@
     "group": "tasks",
     "http": {
       "method": "PATCH",
-      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/checklist/{item_id}"
+      "path": "/w/{slug}/api/v1/tasks/{task_id}/checklist/{item_id}"
     },
     "idempotent": false,
     "name": "checklist",
@@ -9076,8 +9600,45 @@
     "body_schema_ref": null,
     "group": "tasks",
     "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/tasks/{task_id}/checklist/{item_id}/evidence"
+    },
+    "idempotent": false,
+    "name": "checklist-evidence",
+    "operation_id": "attach_task_checklist_evidence",
+    "path_params": [
+      {
+        "name": "task_id",
+        "required": true,
+        "schema": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "item_id",
+        "required": true,
+        "schema": {
+          "title": "Item Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/TaskChecklistItemPayload",
+    "summary": "Attach a photo blob to a checklist item",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "checklist-evidence"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tasks",
+    "http": {
       "method": "DELETE",
-      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/comments/{comment_id}"
+      "path": "/w/{slug}/api/v1/tasks/{task_id}/comments/{comment_id}"
     },
     "idempotent": true,
     "name": "comment-delete",
@@ -9114,7 +9675,7 @@
     "group": "tasks",
     "http": {
       "method": "PATCH",
-      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/comments/{comment_id}"
+      "path": "/w/{slug}/api/v1/tasks/{task_id}/comments/{comment_id}"
     },
     "idempotent": false,
     "name": "comment-update",
@@ -9151,7 +9712,7 @@
     "group": "tasks",
     "http": {
       "method": "POST",
-      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/comments"
+      "path": "/w/{slug}/api/v1/tasks/{task_id}/comments"
     },
     "idempotent": false,
     "name": "comments",
@@ -9177,7 +9738,7 @@
     "group": "tasks",
     "http": {
       "method": "GET",
-      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/comments"
+      "path": "/w/{slug}/api/v1/tasks/{task_id}/comments"
     },
     "idempotent": true,
     "name": "comments-list",
@@ -9236,7 +9797,7 @@
     "group": "tasks",
     "http": {
       "method": "POST",
-      "path": "/w/{slug}/api/v1/tasks/tasks/from_nl/commit"
+      "path": "/w/{slug}/api/v1/tasks/from_nl/commit"
     },
     "idempotent": false,
     "name": "commit",
@@ -9253,7 +9814,7 @@
     "group": "tasks",
     "http": {
       "method": "POST",
-      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/complete"
+      "path": "/w/{slug}/api/v1/tasks/{task_id}/complete"
     },
     "idempotent": false,
     "name": "complete",
@@ -9279,7 +9840,7 @@
     "group": "tasks",
     "http": {
       "method": "POST",
-      "path": "/w/{slug}/api/v1/tasks/tasks"
+      "path": "/w/{slug}/api/v1/tasks"
     },
     "idempotent": false,
     "name": "create",
@@ -9296,7 +9857,7 @@
     "group": "tasks",
     "http": {
       "method": "GET",
-      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/detail"
+      "path": "/w/{slug}/api/v1/tasks/{task_id}/detail"
     },
     "idempotent": true,
     "name": "detail",
@@ -9325,7 +9886,7 @@
     "group": "tasks",
     "http": {
       "method": "POST",
-      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/evidence"
+      "path": "/w/{slug}/api/v1/tasks/{task_id}/evidence"
     },
     "idempotent": false,
     "name": "evidence",
@@ -9351,7 +9912,7 @@
     "group": "tasks",
     "http": {
       "method": "GET",
-      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/evidence"
+      "path": "/w/{slug}/api/v1/tasks/{task_id}/evidence"
     },
     "idempotent": true,
     "name": "evidence-list",
@@ -9366,7 +9927,37 @@
         }
       }
     ],
-    "query_params": [],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
     "response_schema_ref": "#/components/schemas/EvidenceListResponse",
     "summary": "List evidence rows on a task",
     "x_agent_confirm": null,
@@ -9380,7 +9971,7 @@
     "group": "tasks",
     "http": {
       "method": "POST",
-      "path": "/w/{slug}/api/v1/tasks/tasks/from_nl"
+      "path": "/w/{slug}/api/v1/tasks/from_nl"
     },
     "idempotent": false,
     "name": "from_nl",
@@ -9397,7 +9988,7 @@
     "group": "tasks",
     "http": {
       "method": "GET",
-      "path": "/w/{slug}/api/v1/tasks/tasks"
+      "path": "/w/{slug}/api/v1/tasks"
     },
     "idempotent": true,
     "name": "list",
@@ -9642,10 +10233,27 @@
           "title": "N",
           "type": "integer"
         }
+      },
+      {
+        "name": "for",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 16,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Half-open day window to preview, e.g. ``30d`` or ISO-8601 ``P30D``. When present, the legacy ``n`` count is ignored.",
+          "title": "For"
+        }
       }
     ],
     "response_schema_ref": "#/components/schemas/SchedulePreviewResponse",
-    "summary": "Return the next N occurrences of a schedule",
+    "summary": "Return upcoming occurrences of a schedule",
     "x_agent_confirm": null,
     "x_cli": {
       "group": "tasks",
@@ -9839,7 +10447,7 @@
     "group": "tasks",
     "http": {
       "method": "GET",
-      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}"
+      "path": "/w/{slug}/api/v1/tasks/{task_id}"
     },
     "idempotent": true,
     "name": "show",
@@ -9868,7 +10476,7 @@
     "group": "tasks",
     "http": {
       "method": "POST",
-      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/skip"
+      "path": "/w/{slug}/api/v1/tasks/{task_id}/skip"
     },
     "idempotent": false,
     "name": "skip",
@@ -9894,7 +10502,7 @@
     "group": "tasks",
     "http": {
       "method": "POST",
-      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/start"
+      "path": "/w/{slug}/api/v1/tasks/{task_id}/start"
     },
     "idempotent": false,
     "name": "start",
@@ -10106,7 +10714,7 @@
     "group": "tasks",
     "http": {
       "method": "PATCH",
-      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}"
+      "path": "/w/{slug}/api/v1/tasks/{task_id}"
     },
     "idempotent": false,
     "name": "update",
@@ -10427,6 +11035,35 @@
           ],
           "title": "Status"
         }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
       }
     ],
     "response_schema_ref": "#/components/schemas/LeaveListResponse",
@@ -10526,6 +11163,35 @@
             }
           ],
           "title": "Status"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
         }
       }
     ],
@@ -10680,6 +11346,35 @@
           "title": "Open Only",
           "type": "boolean"
         }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
       }
     ],
     "response_schema_ref": "#/components/schemas/ShiftListResponse",
@@ -10691,6 +11386,37 @@
     }
   },
   {
+    "body_schema_ref": null,
+    "group": "tokens",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/auth/tokens/{token_id}/audit"
+    },
+    "idempotent": true,
+    "name": "audit",
+    "operation_id": "auth.tokens.audit",
+    "path_params": [
+      {
+        "name": "token_id",
+        "required": true,
+        "schema": {
+          "title": "Token Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Per-token audit timeline \u2014 newest first",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tokens",
+      "mutates": false,
+      "summary": "Show a workspace API token's audit timeline",
+      "verb": "audit"
+    }
+  },
+  {
     "body_schema_ref": "#/components/schemas/MintTokenBody",
     "group": "tokens",
     "http": {
@@ -10699,7 +11425,7 @@
     },
     "idempotent": false,
     "name": "create",
-    "operation_id": "auth.tokens.mint",
+    "operation_id": "tokens.mint",
     "path_params": [],
     "query_params": [],
     "response_schema_ref": "#/components/schemas/MintTokenResponse",
@@ -10721,7 +11447,7 @@
     },
     "idempotent": true,
     "name": "list",
-    "operation_id": "auth.tokens.list",
+    "operation_id": "tokens.list",
     "path_params": [],
     "query_params": [
       {
@@ -10773,7 +11499,7 @@
     },
     "idempotent": true,
     "name": "revoke",
-    "operation_id": "auth.tokens.revoke",
+    "operation_id": "tokens.revoke",
     "path_params": [
       {
         "name": "token_id",
@@ -10793,6 +11519,68 @@
       "mutates": true,
       "summary": "Revoke a workspace API token",
       "verb": "revoke"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tokens",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/auth/tokens/{token_id}/revoke"
+    },
+    "idempotent": false,
+    "name": "revoke-post",
+    "operation_id": "auth.tokens.revoke_post",
+    "path_params": [
+      {
+        "name": "token_id",
+        "required": true,
+        "schema": {
+          "title": "Token Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Revoke a token via POST \u2014 alias of DELETE",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tokens",
+      "mutates": true,
+      "summary": "Revoke a workspace API token (POST alias)",
+      "verb": "revoke-post"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tokens",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/auth/tokens/{token_id}/rotate"
+    },
+    "idempotent": false,
+    "name": "rotate",
+    "operation_id": "auth.tokens.rotate",
+    "path_params": [
+      {
+        "name": "token_id",
+        "required": true,
+        "schema": {
+          "title": "Token Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/MintTokenResponse",
+    "summary": "Rotate a token's secret in place \u2014 plaintext returned once",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tokens",
+      "mutates": true,
+      "summary": "Rotate a workspace API token's secret",
+      "verb": "rotate"
     }
   },
   {
@@ -11463,6 +12251,58 @@
     "body_schema_ref": null,
     "group": "users",
     "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/users"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "users.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/UserListResponse",
+    "summary": "List users in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "users",
+      "mutates": false,
+      "summary": "List workspace users",
+      "verb": "list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "users",
+    "http": {
       "method": "POST",
       "path": "/w/{slug}/api/v1/users/{user_id}/magic_link"
     },
@@ -11505,9 +12345,23 @@
         }
       }
     ],
-    "query_params": [],
+    "query_params": [
+      {
+        "name": "scope",
+        "required": false,
+        "schema": {
+          "default": "workspace",
+          "enum": [
+            "deployment",
+            "workspace"
+          ],
+          "title": "Scope",
+          "type": "string"
+        }
+      }
+    ],
     "response_schema_ref": "#/components/schemas/app__api__v1__users__EmployeeProfileResponse",
-    "summary": "Reinstate a user's engagement + work roles in this workspace",
+    "summary": "Reinstate a user's engagement + work roles",
     "x_agent_confirm": null,
     "x_cli": null
   },
@@ -11906,6 +12760,37 @@
     "body_schema_ref": null,
     "group": "webhooks",
     "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/webhooks/{webhook_id}/enable"
+    },
+    "idempotent": false,
+    "name": "enable",
+    "operation_id": "webhooks.enable",
+    "path_params": [
+      {
+        "name": "webhook_id",
+        "required": true,
+        "schema": {
+          "title": "Webhook Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WebhookResponse",
+    "summary": "Enable an outbound webhook subscription",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "webhooks",
+      "mutates": true,
+      "summary": "Enable an outbound webhook subscription",
+      "verb": "enable"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "webhooks",
+    "http": {
       "method": "GET",
       "path": "/w/{slug}/api/v1/webhooks"
     },
@@ -11922,6 +12807,37 @@
       "mutates": false,
       "summary": "List outbound webhook subscriptions",
       "verb": "list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "webhooks",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/webhooks/{webhook_id}"
+    },
+    "idempotent": true,
+    "name": "read",
+    "operation_id": "webhooks.read",
+    "path_params": [
+      {
+        "name": "webhook_id",
+        "required": true,
+        "schema": {
+          "title": "Webhook Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WebhookResponse",
+    "summary": "Read an outbound webhook subscription",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "webhooks",
+      "mutates": false,
+      "summary": "Read an outbound webhook subscription",
+      "verb": "read"
     }
   },
   {

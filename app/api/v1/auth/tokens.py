@@ -595,14 +595,12 @@ def build_tokens_router() -> APIRouter:
         summary="Revoke a token via POST — alias of DELETE",
         dependencies=[permission_gate],
         openapi_extra={
-            # Same x-cli verb as the DELETE form — the SPA prefers
-            # POST because some browsers / proxies strip request
-            # bodies on DELETE. Both paths share the same idempotency
-            # contract; CLI consumers should still prefer the DELETE
-            # form for consistency with REST conventions.
+            # Keep DELETE as the canonical ``tokens revoke`` CLI verb;
+            # this SPA-friendly POST alias gets a distinct command so
+            # the generated surface has one operation per group/verb.
             "x-cli": {
                 "group": "tokens",
-                "verb": "revoke",
+                "verb": "revoke-post",
                 "summary": "Revoke a workspace API token (POST alias)",
                 "mutates": True,
             },

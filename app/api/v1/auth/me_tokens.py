@@ -550,7 +550,7 @@ def build_me_tokens_router() -> APIRouter:
         openapi_extra={
             "x-cli": {
                 "group": "me-tokens",
-                "verb": "revoke",
+                "verb": "revoke-post",
                 "summary": "Revoke one of your personal access tokens (POST alias)",
                 "mutates": True,
             },
