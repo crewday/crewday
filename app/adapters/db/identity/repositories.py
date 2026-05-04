@@ -39,7 +39,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from datetime import date as _date_cls
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.adapters.db.availability.models import (
@@ -633,6 +633,27 @@ class SqlAlchemyUserPushTokenRepository(UserPushTokenRepository):
                 )
             row.token = token
             row.last_seen_at = last_seen_at
+            self._session.flush()
+        return _to_user_push_token_row(row)
+
+    def disable(
+        self,
+        *,
+        token_id: str,
+        disabled_at: datetime,
+    ) -> UserPushTokenRow | None:
+        with tenant_agnostic():
+            row = self._session.scalars(
+                update(UserPushToken)
+                .where(
+                    UserPushToken.id == token_id,
+                    UserPushToken.disabled_at.is_(None),
+                )
+                .values(disabled_at=disabled_at)
+                .returning(UserPushToken)
+            ).first()
+            if row is None:
+                return None
             self._session.flush()
         return _to_user_push_token_row(row)
 

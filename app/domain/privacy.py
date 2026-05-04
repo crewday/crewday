@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.expenses.models import ExpenseClaim
 from app.adapters.db.identity.models import Session as SessionRow
-from app.adapters.db.identity.models import User
+from app.adapters.db.identity.models import User, UserPushToken
 from app.adapters.db.integrations.models import WebhookDelivery
 from app.adapters.db.llm.models import LlmUsage
 from app.adapters.db.messaging.models import EmailDelivery
@@ -53,6 +53,7 @@ RETENTION_DEFAULT_DAYS: dict[str, int] = {
     "email_delivery": 90,
     "webhook_delivery": 90,
 }
+USER_PUSH_TOKEN_DISABLED_RETENTION_DAYS = 90
 
 
 @dataclass(frozen=True, slots=True)
@@ -421,6 +422,7 @@ def rotate_operational_logs(
                         data_dir=data_dir,
                     )
                 )
+        results.append(_purge_disabled_user_push_tokens(session, now=now))
     return tuple(result for result in results if result.archived_rows > 0)
 
 
@@ -698,6 +700,23 @@ def _archive_and_delete(
         table=table.name,
         workspace_id=workspace_id,
         archived_rows=len(rows),
+    )
+
+
+def _purge_disabled_user_push_tokens(
+    session: Session, *, now: datetime
+) -> RetentionResult:
+    cutoff = now - timedelta(days=USER_PUSH_TOKEN_DISABLED_RETENTION_DAYS)
+    result = session.execute(
+        delete(UserPushToken).where(
+            UserPushToken.disabled_at.is_not(None),
+            UserPushToken.disabled_at < cutoff,
+        )
+    )
+    return RetentionResult(
+        table=UserPushToken.__tablename__,
+        workspace_id=None,
+        archived_rows=_rowcount(result),
     )
 
 

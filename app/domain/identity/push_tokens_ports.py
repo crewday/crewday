@@ -203,6 +203,20 @@ class UserPushTokenRepository(Protocol):
         """
         ...
 
+    def disable(
+        self,
+        *,
+        token_id: str,
+        disabled_at: datetime,
+    ) -> UserPushTokenRow | None:
+        """Set ``disabled_at`` on an active row and return the projection.
+
+        Returns ``None`` when the row does not exist or was already
+        disabled. The caller uses the ``None`` result to keep vendor
+        duplicate acknowledgements from emitting duplicate audit rows.
+        """
+        ...
+
     def delete(self, *, user_id: str, token_id: str) -> bool:
         """Hard-delete the row owned by ``user_id`` with id ``token_id``.
 

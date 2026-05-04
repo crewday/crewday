@@ -23,9 +23,10 @@ Public surface:
   the router returns. Deliberately drops the raw ``token`` column —
   PII-adjacent, never echoed back over the wire.
 * **Service functions** — :func:`register`, :func:`list_for_user`,
-  :func:`refresh`, :func:`unregister`. Each takes ``repo`` plus
-  the authenticated ``user_id`` (NOT a workspace context — this
-  surface is identity-scoped).
+  :func:`refresh`, :func:`unregister`, and
+  :func:`disable_after_vendor_ack`. Each takes ``repo`` plus the
+  authenticated ``user_id`` or worker-resolved token id (NOT a
+  workspace context — this surface is identity-scoped).
 
 **Authz.** Every operation is self-only: the caller registers their
 own device, refreshes their own row, deletes their own row, lists
@@ -34,13 +35,14 @@ surface (§02 "user_push_token" §"Visibility" — "neither owners /
 managers nor deployment admins see another user's push tokens").
 
 **Audit (§02 "user_push_token").** Audit rows fire on register,
-unregister, and (future) vendor-ack disable. Not on idempotent
+unregister, and vendor-ack disable. Not on idempotent
 re-register (same ``(user_id, platform, token)`` triple) and not on
 no-op delete — those are routine client housekeeping, not
 audit-worthy state changes. The audit ``diff`` carries
-``user_id`` / ``platform`` / ``device_label`` / ``app_version`` —
-NEVER the raw ``token`` (PII). The audit writer's redaction seam
-re-applies the rule at persistence time as defence-in-depth.
+``user_id`` / ``platform`` / ``device_label`` plus the mutation's
+non-sensitive context — NEVER the raw ``token`` (PII). The audit
+writer's redaction seam re-applies the rule at persistence time as
+defence-in-depth.
 
 **Architecture.** This module talks to a
 :class:`~app.domain.identity.push_tokens_ports.UserPushTokenRepository`
@@ -91,6 +93,7 @@ __all__ = [
     "PushTokenNotFound",
     "TokenClaimed",
     "UserPushTokenView",
+    "disable_after_vendor_ack",
     "list_for_user",
     "refresh",
     "register",
@@ -457,3 +460,43 @@ def unregister(
         },
         clock=clock,
     )
+
+
+def disable_after_vendor_ack(
+    repo: UserPushTokenRepository,
+    *,
+    token_id: str,
+    vendor_reason: str,
+    clock: Clock | None = None,
+) -> bool:
+    """Disable one push-token row after a terminal FCM/APNS vendor ack.
+
+    Worker-only lifecycle transition for §10 native push delivery.
+    The worker addresses rows by ``user_push_token.id`` so the raw
+    FCM/APNS token is not threaded into audit or logs after the send.
+
+    Returns ``True`` only when this call changed the row from active
+    to disabled and emitted ``user_push_token.disabled``. Missing rows
+    and already-disabled rows return ``False`` and write no audit row,
+    keeping duplicate vendor acknowledgements idempotent.
+    """
+    now = (clock if clock is not None else SystemClock()).now()
+    disabled = repo.disable(token_id=token_id, disabled_at=now)
+    if disabled is None:
+        return False
+
+    write_audit(
+        repo.session,
+        _agnostic_audit_ctx(disabled.user_id),
+        entity_kind="user_push_token",
+        entity_id=disabled.id,
+        action="user_push_token.disabled",
+        diff={
+            "user_id": disabled.user_id,
+            "platform": disabled.platform,
+            "device_label": disabled.device_label,
+            "vendor_reason": vendor_reason,
+        },
+        clock=clock,
+    )
+    return True
