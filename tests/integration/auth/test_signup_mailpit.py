@@ -33,6 +33,7 @@ from app.adapters.db.identity.models import (
 from app.adapters.db.workspace.models import Workspace
 from app.adapters.mail.smtp import SMTPMailer
 from app.api.deps import db_session as _db_session_dep
+from app.api.errors import add_exception_handlers
 from app.api.v1.auth.signup import build_signup_router
 from app.auth import passkey
 from app.auth._throttle import Throttle
@@ -51,12 +52,24 @@ from tests.integration.mail import (
 pytestmark = pytest.mark.integration
 
 _DEFAULT_MAILPIT_URL = "http://127.0.0.1:8026"
+_DEFAULT_MAILPIT_SMTP_HOST = "127.0.0.1"
+_DEFAULT_MAILPIT_SMTP_PORT = 1026
 _SIGNUP_SUBJECT = "crew.day — verify your email and finish signing up"
 _SIGNUP_PURPOSE = "signup_verify"
 
 
 def _mailpit_url() -> str:
     return os.environ.get("CREWDAY_TEST_MAILPIT_URL", _DEFAULT_MAILPIT_URL)
+
+
+def _mailpit_smtp_host() -> str:
+    return os.environ.get("CREWDAY_TEST_MAILPIT_SMTP_HOST", _DEFAULT_MAILPIT_SMTP_HOST)
+
+
+def _mailpit_smtp_port() -> int:
+    return int(
+        os.environ.get("CREWDAY_TEST_MAILPIT_SMTP_PORT", _DEFAULT_MAILPIT_SMTP_PORT)
+    )
 
 
 @pytest.fixture
@@ -107,8 +120,8 @@ def throttle() -> Throttle:
 @pytest.fixture
 def mailer() -> SMTPMailer:
     return SMTPMailer(
-        host="127.0.0.1",
-        port=1025,
+        host=_mailpit_smtp_host(),
+        port=_mailpit_smtp_port(),
         from_addr="crew.day dev <no-reply@dev.crew.day>",
         use_tls=False,
         timeout=5,
@@ -126,6 +139,7 @@ def client(
     import app.adapters.db.session as _session_mod
 
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(
         build_signup_router(
             mailer=mailer,
@@ -340,4 +354,4 @@ def test_expired_signup_nonce_returns_410(
 
     response = client.post("/api/v1/signup/verify", json={"token": token})
     assert response.status_code == 410, response.text
-    assert response.json()["detail"]["error"] == "expired"
+    assert response.json()["error"] == "expired"
