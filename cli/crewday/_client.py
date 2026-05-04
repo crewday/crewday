@@ -306,6 +306,7 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
             # silently send requests to the wrong host.
             raise ConfigError("base_url is required for CrewdayClient")
         self._base_url = base_url
+        self._base_path = httpx.URL(base_url).path.rstrip("/")
         self._token = token
         self._workspace = workspace
         self._user_agent = _resolve_user_agent(user_agent)
@@ -406,6 +407,7 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
                 "URL-encoded form bodies are not on the v1 API surface."
             )
         method_upper = method.upper()
+        request_path = self._path_for_request(path)
 
         # Build the per-call header set. ``Idempotency-Key`` is
         # forwarded verbatim (§12 "Idempotency": opaque ASCII, server
@@ -430,7 +432,7 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
                     # closing it.
                     request_obj = self._client.build_request(
                         method_upper,
-                        path,
+                        request_path,
                         json=json,
                         params=params,
                         headers=headers or None,
@@ -444,7 +446,7 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
                     # uploads (e.g. ``kind`` on task evidence).
                     response = self._client.request(
                         method_upper,
-                        path,
+                        request_path,
                         data=data,
                         files=files,
                         params=params,
@@ -453,7 +455,7 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
                 else:
                     response = self._client.request(
                         method_upper,
-                        path,
+                        request_path,
                         json=json,
                         params=params,
                         headers=headers or None,
@@ -461,7 +463,7 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
             except _TRANSIENT_TRANSPORT_EXCEPTIONS as exc:
                 self._log_attempt(
                     method=method_upper,
-                    path=path,
+                    path=request_path,
                     attempt=attempt,
                     status=None,
                     correlation_id=None,
@@ -496,7 +498,7 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
             )
             self._log_attempt(
                 method=method_upper,
-                path=path,
+                path=request_path,
                 attempt=attempt,
                 status=response.status_code,
                 correlation_id=correlation_id,
@@ -541,6 +543,16 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
         raise ServerError(  # pragma: no cover — defensive guard.
             "request loop exited without producing a response (logic bug)"
         )
+
+    def _path_for_request(self, path: str) -> str:
+        if not self._base_path or not path.startswith("/"):
+            return path
+        if path == self._base_path:
+            return "/"
+        base_prefix = f"{self._base_path}/"
+        if path.startswith(base_prefix):
+            return "/" + path[len(base_prefix) :]
+        return path
 
     # -- verb shortcuts ----------------------------------------------
 

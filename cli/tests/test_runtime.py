@@ -50,6 +50,8 @@ def _no_sleep(_seconds: float) -> None:
 
 def _client_factory(
     handler: Callable[[httpx.Request], httpx.Response],
+    *,
+    base_url: str = "https://api.test.local",
 ) -> Callable[[CrewdayContext], CrewdayClient]:
     """Return a ``ClientFactory`` that builds a mocked :class:`CrewdayClient`.
 
@@ -60,7 +62,7 @@ def _client_factory(
 
     def factory(ctx: CrewdayContext) -> CrewdayClient:
         return CrewdayClient(
-            base_url="https://api.test.local",
+            base_url=base_url,
             token="test-token",
             workspace=ctx.workspace,
             transport=httpx.MockTransport(handler),
@@ -76,6 +78,7 @@ def _build_root(
     *,
     workspace_path: pathlib.Path = DEFAULT_SURFACE_PATH,
     admin_path: pathlib.Path = DEFAULT_SURFACE_ADMIN_PATH,
+    base_url: str = "https://api.test.local",
 ) -> click.Group:
     """Build a fresh root + register generated commands wired to ``handler``.
 
@@ -115,7 +118,7 @@ def _build_root(
 
     register_generated_commands(
         test_root,
-        client_factory=_client_factory(handler),
+        client_factory=_client_factory(handler, base_url=base_url),
         workspace_path=workspace_path,
         admin_path=admin_path,
     )
@@ -612,6 +615,66 @@ def test_body_file_loads_json(tmp_path: pathlib.Path) -> None:
     )
     assert result.exit_code == 0, result.output
     assert captured["body"] == body_payload
+
+
+def test_tasks_create_body_file_targets_workspace_task_root(
+    tmp_path: pathlib.Path,
+) -> None:
+    """``tasks create --body-file`` posts to the workspace task root."""
+    workspace_path, admin_path = _write_surface(
+        tmp_path,
+        workspace=[
+            _entry(
+                name="create",
+                group="tasks",
+                method="POST",
+                path="/w/{slug}/api/v1/tasks",
+                operation_id="create_task",
+                idempotent=False,
+                body_schema_ref="#/components/schemas/TaskCreate",
+            )
+        ],
+    )
+
+    body_path = tmp_path / "task-create.json"
+    body_payload = {
+        "title": "CLI task",
+        "property_id": "prop_123",
+        "expected_role_id": "role_123",
+        "scheduled_for_local": "2026-05-04T12:00:00",
+        "duration_minutes": 30,
+        "photo_evidence": "disabled",
+        "is_personal": False,
+    }
+    body_path.write_text(json.dumps(body_payload), encoding="utf-8")
+
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["method"] = request.method
+        captured["path"] = request.url.path
+        captured["body"] = json.loads(request.content)
+        captured["authorization"] = request.headers.get("Authorization")
+        return httpx.Response(201, json={"id": "task_123"})
+
+    test_root = _build_root(
+        handler,
+        workspace_path=workspace_path,
+        admin_path=admin_path,
+        base_url="https://api.test.local/w/smoke/api/v1",
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(
+        test_root,
+        ["--workspace", "smoke", "tasks", "create", "--body-file", str(body_path)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/w/smoke/api/v1/tasks"
+    assert captured["body"] == body_payload
+    assert captured["authorization"] == "Bearer test-token"
 
 
 # ---------------------------------------------------------------------------

@@ -176,6 +176,7 @@ class _SessionApi:
     def get(self, path: str) -> dict[str, Any]:
         resp = self._client.get(path)
         _raise_api_error(resp, method="GET", path=path)
+        self._refresh_csrf(resp)
         body = resp.json()
         if not isinstance(body, dict):
             raise AssertionError(f"GET {path} returned non-object JSON: {body!r}")
@@ -184,6 +185,7 @@ class _SessionApi:
     def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         resp = self._client.post(path, json=payload)
         _raise_api_error(resp, method="POST", path=path)
+        self._refresh_csrf(resp)
         body = resp.json()
         if not isinstance(body, dict):
             raise AssertionError(f"POST {path} returned non-object JSON: {body!r}")
@@ -192,10 +194,16 @@ class _SessionApi:
     def put(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         resp = self._client.put(path, json=payload)
         _raise_api_error(resp, method="PUT", path=path)
+        self._refresh_csrf(resp)
         body = resp.json()
         if not isinstance(body, dict):
             raise AssertionError(f"PUT {path} returned non-object JSON: {body!r}")
         return body
+
+    def _refresh_csrf(self, resp: httpx.Response) -> None:
+        csrf = resp.cookies.get(CSRF_COOKIE_NAME)
+        if csrf:
+            self._client.headers[CSRF_HEADER_NAME] = csrf
 
 
 class _CrewdayCli:
