@@ -29,13 +29,12 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import Engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 import app.adapters.db.session as _session_mod
 from app.api.v1 import CONTEXT_ROUTERS
 from app.config import Settings
 from app.main import create_app
-from app.tenancy.orm_filter import install_tenant_filter
 
 pytestmark = pytest.mark.integration
 
@@ -65,8 +64,9 @@ def real_make_uow(engine: Engine) -> Iterator[None]:
     """Point the process-wide UoW at the integration engine."""
     original_engine = _session_mod._default_engine
     original_factory = _session_mod._default_sessionmaker_
-    factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
-    install_tenant_filter(factory)
+    factory = sessionmaker(
+        bind=engine, expire_on_commit=False, class_=_session_mod.FilteredSession
+    )
     _session_mod._default_engine = engine
     _session_mod._default_sessionmaker_ = factory
     try:
@@ -169,6 +169,43 @@ class TestOpenapiIntegration:
         assert offenders == [], (
             f"Identity-adjacent operations missing 'identity' tag: {offenders}"
         )
+
+    def test_workspace_auth_tokens_metadata_is_stable(
+        self, pinned_settings: Settings, real_make_uow: None
+    ) -> None:
+        """Workspace token management publishes stable CLI metadata."""
+        resp = _client(pinned_settings).get("/api/openapi.json")
+        paths = resp.json()["paths"]
+
+        cases = [
+            (
+                paths["/w/{slug}/api/v1/auth/tokens"]["post"],
+                "tokens.mint",
+                "create",
+                True,
+            ),
+            (
+                paths["/w/{slug}/api/v1/auth/tokens"]["get"],
+                "tokens.list",
+                "list",
+                False,
+            ),
+            (
+                paths["/w/{slug}/api/v1/auth/tokens/{token_id}"]["delete"],
+                "tokens.revoke",
+                "revoke",
+                True,
+            ),
+        ]
+
+        for operation, operation_id, verb, mutates in cases:
+            assert operation["operationId"] == operation_id
+            assert "x-interactive-only" not in operation
+            x_cli = operation["x-cli"]
+            assert x_cli["group"] == "tokens"
+            assert x_cli["verb"] == verb
+            assert x_cli["mutates"] is mutates
+            assert x_cli["summary"]
 
     def test_admin_problem_responses_match_runtime_envelope(
         self, pinned_settings: Settings, real_make_uow: None

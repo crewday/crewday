@@ -328,7 +328,7 @@ def build_tokens_router() -> APIRouter:
         "",
         status_code=status.HTTP_201_CREATED,
         response_model=MintTokenResponse,
-        operation_id="auth.tokens.mint",
+        operation_id="tokens.mint",
         summary="Mint a new API token — plaintext returned once",
         dependencies=[permission_gate],
         openapi_extra={
@@ -441,7 +441,7 @@ def build_tokens_router() -> APIRouter:
     @api.get(
         "",
         response_model=TokenListResponse,
-        operation_id="auth.tokens.list",
+        operation_id="tokens.list",
         summary="List every token on this workspace (active + revoked)",
         dependencies=[permission_gate],
         openapi_extra={
@@ -495,7 +495,7 @@ def build_tokens_router() -> APIRouter:
     @api.delete(
         "/{token_id}",
         status_code=status.HTTP_204_NO_CONTENT,
-        operation_id="auth.tokens.revoke",
+        operation_id="tokens.revoke",
         summary="Revoke a token — idempotent",
         dependencies=[permission_gate],
         openapi_extra={
