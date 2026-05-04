@@ -266,6 +266,41 @@ class FakeEmailDeliveryRepo:
                 return row
         return None
 
+    def apply_provider_delivery_state(
+        self,
+        *,
+        workspace_id: str,
+        delivery_id: str,
+        provider_message_id: str,
+        delivery_state: str,
+        error_text: str | None,
+    ) -> EmailDeliveryRow | None:
+        prior = self.rows.get(delivery_id)
+        if (
+            prior is None
+            or prior.workspace_id != workspace_id
+            or prior.provider_message_id != provider_message_id
+        ):
+            return None
+        first_error = prior.first_error if prior.first_error is not None else error_text
+        updated = EmailDeliveryRow(
+            id=prior.id,
+            workspace_id=prior.workspace_id,
+            to_person_id=prior.to_person_id,
+            to_email_at_send=prior.to_email_at_send,
+            template_key=prior.template_key,
+            context_snapshot_json=prior.context_snapshot_json,
+            sent_at=prior.sent_at,
+            provider_message_id=prior.provider_message_id,
+            delivery_state=delivery_state,
+            first_error=first_error,
+            retry_count=prior.retry_count,
+            inbound_linkage=prior.inbound_linkage,
+            created_at=prior.created_at,
+        )
+        self.rows[delivery_id] = updated
+        return updated
+
 
 class _RaisingMailer:
     def __init__(self, *, message: str) -> None:

@@ -60,6 +60,15 @@ from app.domain.messaging.ports import (
 )
 from app.tenancy import tenant_agnostic
 
+_EMAIL_DELIVERY_PROVIDER_STATE_RANK: dict[str, int] = {
+    "queued": 0,
+    "sent": 1,
+    "delivered": 2,
+    "failed": 2,
+    "bounced": 3,
+    "complaint": 4,
+}
+
 __all__ = [
     "SqlAlchemyChatChannelBindingRepository",
     "SqlAlchemyChatChannelRepository",
@@ -1361,6 +1370,46 @@ class SqlAlchemyEmailDeliveryRepository(EmailDeliveryRepository):
                 )
             ).one_or_none()
         return _to_email_delivery_row(row) if row is not None else None
+
+    def apply_provider_delivery_state(
+        self,
+        *,
+        workspace_id: str,
+        delivery_id: str,
+        provider_message_id: str,
+        delivery_state: str,
+        error_text: str | None,
+    ) -> EmailDeliveryRow | None:
+        target_rank = _EMAIL_DELIVERY_PROVIDER_STATE_RANK[delivery_state]
+        eligible_states = tuple(
+            state
+            for state, rank in _EMAIL_DELIVERY_PROVIDER_STATE_RANK.items()
+            if rank < target_rank or state == delivery_state
+        )
+        values: dict[str, object] = {"delivery_state": delivery_state}
+        if error_text is not None:
+            values["first_error"] = func.coalesce(EmailDelivery.first_error, error_text)
+
+        # justification: deployment-scope webhook update re-pins workspace + ESP id.
+        with tenant_agnostic():
+            result = self._session.execute(
+                update(EmailDelivery)
+                .where(EmailDelivery.id == delivery_id)
+                .where(EmailDelivery.workspace_id == workspace_id)
+                .where(EmailDelivery.provider_message_id == provider_message_id)
+                .where(EmailDelivery.delivery_state.in_(eligible_states))
+                .values(**values)
+            )
+            self._session.flush()
+        if _rowcount(result) == 1:
+            return _to_email_delivery_row(self._load(delivery_id))
+        row = self.find_by_provider_message_id(
+            workspace_id=workspace_id,
+            provider_message_id=provider_message_id,
+        )
+        if row is not None and row.id == delivery_id:
+            return row
+        return None
 
     def _load(self, delivery_id: str) -> EmailDelivery:
         # justification: transition methods load rows already selected by id.

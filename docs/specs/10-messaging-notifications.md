@@ -214,7 +214,7 @@ email_delivery
 ├── context_snapshot_json
 ├── sent_at
 ├── provider_message_id
-├── delivery_state             # queued | sent | delivered | bounced | failed
+├── delivery_state             # queued | sent | delivered | bounced | complaint | failed
 ├── first_error
 ├── retry_count
 └── inbound_linkage            # reply-tracking, if any

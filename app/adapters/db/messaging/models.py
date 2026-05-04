@@ -166,8 +166,9 @@ _EMAIL_OPT_OUT_SOURCE_VALUES: tuple[str, ...] = (
 # ``queued`` is the initial state at row-insert time (worker picks
 # it up for dispatch); ``sent`` is post-SMTP ``250 OK``; ``delivered``
 # lands when the provider posts back a positive event; ``bounced``
-# when the mailbox rejects; ``failed`` when the adapter exhausts the
-# retry budget. A new state lands via an additive migration — enum
+# when the mailbox rejects; ``complaint`` when the recipient reports
+# spam; ``failed`` when the adapter exhausts the retry budget. A new
+# state lands via an additive migration — enum
 # widening is portable (CHECK body rewrite via
 # ``batch_alter_table`` on SQLite, direct ALTER on PG).
 _EMAIL_DELIVERY_STATE_VALUES: tuple[str, ...] = (
@@ -175,6 +176,7 @@ _EMAIL_DELIVERY_STATE_VALUES: tuple[str, ...] = (
     "sent",
     "delivered",
     "bounced",
+    "complaint",
     "failed",
 )
 
@@ -915,9 +917,10 @@ class EmailDelivery(Base):
 
     One row per email the worker queues; ``delivery_state`` walks
     ``queued → sent → delivered`` on the happy path and
-    ``queued → sent → bounced`` / ``queued → failed`` on the error
-    paths. ``first_error`` snapshots the adapter's first failure
-    message so a support query can answer "why did this bounce?"
+    ``queued → sent → bounced`` / ``queued → sent → complaint`` /
+    ``queued → failed`` on the error paths. ``first_error`` snapshots
+    the first adapter or provider failure message so a support query
+    can answer "why did this bounce?"
     without replaying the SMTP log; ``retry_count`` drives the §10
     worker's exponential back-off. ``provider_message_id`` is the
     SMTP / ESP-issued id the bounce-reply correlator keys on when
@@ -982,7 +985,8 @@ class EmailDelivery(Base):
     # message id (conventionally the RFC 5322 Message-ID header).
     provider_message_id: Mapped[str | None] = mapped_column(String, nullable=True)
     # Walks ``queued → sent → delivered`` on success,
-    # ``queued → sent → bounced`` / ``queued → failed`` on error.
+    # ``queued → sent → bounced`` / ``queued → sent → complaint`` /
+    # ``queued → failed`` on error.
     # See ``_EMAIL_DELIVERY_STATE_VALUES``.
     delivery_state: Mapped[str] = mapped_column(String, nullable=False)
     # First adapter-level error string, if any. Stored on first

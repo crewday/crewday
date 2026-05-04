@@ -821,8 +821,9 @@ class EmailDeliveryRepository(Protocol):
       can re-attempt deliveries the SMTP I/O dropped on the floor.
     * :meth:`mark_sent` — on a successful ``mailer.send`` return the
       provider-issued message id is stamped and the row flips to
-      ``delivery_state='sent'``. Bounce / delivered webhooks join on
-      ``provider_message_id`` to advance to ``bounced`` / ``delivered``.
+      ``delivery_state='sent'``. Provider webhooks join on
+      ``provider_message_id`` to advance to ``delivered`` / ``bounced``
+      / ``complaint`` / ``failed``.
     * :meth:`mark_failed` — on
       :class:`~app.adapters.mail.ports.MailDeliveryError` the row
       captures the first error, bumps ``retry_count``, and flips to
@@ -934,5 +935,26 @@ class EmailDeliveryRepository(Protocol):
         event". The composite
         ``ix_email_delivery_workspace_provider_msgid`` index keeps
         the lookup cheap even at v1's modest volume.
+        """
+        ...
+
+    def apply_provider_delivery_state(
+        self,
+        *,
+        workspace_id: str,
+        delivery_id: str,
+        provider_message_id: str,
+        delivery_state: str,
+        error_text: str | None,
+    ) -> EmailDeliveryRow | None:
+        """Apply a provider webhook state update to a previously sent row.
+
+        The update remains workspace-scoped and re-checks the provider
+        message id selected by :meth:`find_by_provider_message_id` so a
+        stale webhook handler cannot update a row outside the matched
+        ledger entry. State movement is monotonic and idempotent:
+        duplicate redeliveries return the current row, while older
+        states never overwrite a newer terminal state. ``first_error``
+        is captured only when it is currently NULL.
         """
         ...
