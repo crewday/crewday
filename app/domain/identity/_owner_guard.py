@@ -80,6 +80,8 @@ See:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from sqlalchemy import and_, func, select, update
 from sqlalchemy.orm import Session
 
@@ -90,9 +92,20 @@ from app.adapters.db.authz.models import (
 )
 
 __all__ = [
+    "OwnerMemberManagerGrantStatus",
     "count_owner_members_locked",
     "count_owner_members_with_manager_grant_locked",
+    "owner_member_manager_grant_status_locked",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class OwnerMemberManagerGrantStatus:
+    """Locked snapshot used by the role-grant revoke guard."""
+
+    owners_group_exists: bool
+    is_owner_member: bool
+    manager_holding_owner_count: int
 
 
 def _lock_owners_group(session: Session, *, workspace_id: str) -> str | None:
@@ -287,3 +300,64 @@ def count_owner_members_with_manager_grant_locked(
     )
     count = session.scalar(count_stmt)
     return count or 0
+
+
+def owner_member_manager_grant_status_locked(
+    session: Session,
+    *,
+    workspace_id: str,
+    user_id: str,
+    exclude_grant_id: str | None = None,
+) -> OwnerMemberManagerGrantStatus:
+    """Return target owners-membership and admin-reach count under one lock.
+
+    ``role_grants.revoke`` needs two facts from the same owners-group
+    snapshot: whether the grant holder is still an owners-group member,
+    and how many owners-group members would still hold a live manager
+    grant after the pending revoke. Reading membership before acquiring
+    the lock can falsely protect a grant after a concurrent
+    ``remove_member`` has already moved that user out of ``owners``.
+    """
+    owners_group_id = _lock_owners_group(session, workspace_id=workspace_id)
+    if owners_group_id is None:
+        return OwnerMemberManagerGrantStatus(
+            owners_group_exists=False,
+            is_owner_member=False,
+            manager_holding_owner_count=0,
+        )
+
+    is_member_stmt = (
+        select(PermissionGroupMember.user_id)
+        .where(
+            PermissionGroupMember.group_id == owners_group_id,
+            PermissionGroupMember.workspace_id == workspace_id,
+            PermissionGroupMember.user_id == user_id,
+        )
+        .limit(1)
+    )
+    is_member = session.scalars(is_member_stmt).first() is not None
+
+    grant_predicates = [
+        RoleGrant.workspace_id == workspace_id,
+        RoleGrant.user_id == PermissionGroupMember.user_id,
+        RoleGrant.grant_role == "manager",
+        RoleGrant.revoked_at.is_(None),
+    ]
+    if exclude_grant_id is not None:
+        grant_predicates.append(RoleGrant.id != exclude_grant_id)
+
+    count_stmt = (
+        select(func.count(func.distinct(PermissionGroupMember.user_id)))
+        .select_from(PermissionGroupMember)
+        .where(
+            PermissionGroupMember.group_id == owners_group_id,
+            PermissionGroupMember.workspace_id == workspace_id,
+        )
+        .where(select(RoleGrant.id).where(and_(*grant_predicates)).exists())
+    )
+    count = session.scalar(count_stmt)
+    return OwnerMemberManagerGrantStatus(
+        owners_group_exists=True,
+        is_owner_member=is_member,
+        manager_holding_owner_count=count or 0,
+    )

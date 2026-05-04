@@ -76,7 +76,7 @@ adapters can import each other; only ``app.domain → app.adapters``
 is forbidden). The repo also threads its open
 :class:`~sqlalchemy.orm.Session` through ``repo.session`` so the
 audit writer (``app.audit.write_audit``), the locking primitive
-(:func:`app.domain.identity._owner_guard.count_owner_members_with_manager_grant_locked`),
+(:func:`app.domain.identity._owner_guard.owner_member_manager_grant_status_locked`),
 and the owners-membership lookup
 (:func:`app.authz.owners.is_owner_member`) keep using the same UoW.
 
@@ -96,7 +96,7 @@ from datetime import datetime
 from app.audit import write_audit
 from app.authz.owners import is_owner_member
 from app.domain.identity._owner_guard import (
-    count_owner_members_with_manager_grant_locked,
+    owner_member_manager_grant_status_locked,
 )
 from app.domain.identity.ports import (
     RoleGrantRepository,
@@ -475,21 +475,25 @@ def revoke(
     # manager grant" — worker / client / guest revokes never affect the
     # governance anchor and always pass.
     if row.grant_role == "manager":
-        # :func:`count_owner_members_with_manager_grant_locked` takes
-        # the same lock on the owners-group row as
-        # :func:`count_owner_members_locked` does, then counts the
+        # :func:`owner_member_manager_grant_status_locked` takes the
+        # same lock on the owners-group row as
+        # :func:`count_owner_members_locked` does, then checks whether
+        # this grant holder is still in ``owners@<ws>`` and counts the
         # users who are BOTH in ``owners@<ws>`` AND hold at least one
         # ``manager`` grant — excluding the row we're about to revoke.
         # The shared lock serialises the membership-removal and
         # grant-revoke guards so a concurrent ``remove_member`` /
         # ``revoke`` on the same workspace cannot race us to a state
         # where the count silently tips to zero (cd-mb5n + cd-nj8m).
-        remaining = count_owner_members_with_manager_grant_locked(
+        owner_status = owner_member_manager_grant_status_locked(
             repo.session,
             workspace_id=ctx.workspace_id,
+            user_id=row.user_id,
             exclude_grant_id=grant_id,
         )
-        if remaining == 0:
+        if owner_status.manager_holding_owner_count == 0 and (
+            owner_status.is_owner_member or not owner_status.owners_group_exists
+        ):
             raise LastOwnerGrantProtected(
                 "cannot remove last manager grant on owners group; "
                 "mint a replacement manager grant on another owners "

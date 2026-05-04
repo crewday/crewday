@@ -54,6 +54,8 @@ from app.adapters.db.authz.repositories import (
 )
 from app.adapters.db.identity.models import User
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
+from app.domain.identity import role_grants as role_grants_module
+from app.domain.identity._owner_guard import OwnerMemberManagerGrantStatus
 from app.domain.identity.permission_groups import (
     WouldOrphanOwnersGroup,
     add_member,
@@ -362,7 +364,8 @@ def _owners_with_manager_grant_count(
                 RoleGrant,
                 (RoleGrant.user_id == PermissionGroupMember.user_id)
                 & (RoleGrant.workspace_id == workspace_id)
-                & (RoleGrant.grant_role == "manager"),
+                & (RoleGrant.grant_role == "manager")
+                & (RoleGrant.revoked_at.is_(None)),
             )
             .where(
                 PermissionGroup.workspace_id == workspace_id,
@@ -883,3 +886,187 @@ class TestCrossPathRace:
                 )
             finally:
                 _scrub_workspace(factory, ws.workspace_id)
+
+
+class TestRevokeRemovedOwnerRace:
+    """Race ``revoke(A-grant)`` with ``remove_member(A from owners)``.
+
+    Pre-state: ``owners@<ws>`` has members A and B; both hold a live
+    ``manager`` grant. Two threads run concurrently:
+
+    * Thread 1: ``revoke(A-manager-grant)``.
+    * Thread 2: ``remove_member(A from owners)``.
+
+    If the revoke path decides A is an owner before taking the shared
+    owners-group lock, then the membership-removal path can commit
+    first and leave only B in ``owners``. A stale revoke guard then
+    sees the post-removal count as one and can raise a spurious
+    :class:`LastOwnerGrantProtected`, even though B remains as a
+    manager-holding owner and the revoke is safe. The revoke path must
+    read A's owners-membership under the same lock as the count.
+    """
+
+    def test_no_spurious_last_owner_refusal_when_target_left_owners(
+        self, isolated_engine: Engine
+    ) -> None:
+        factory = _session_factory(isolated_engine)
+
+        for i in range(_ITERATIONS):
+            ws = _bootstrap_two_owner_workspace(factory, slug_suffix=f"same-{i:02d}")
+
+            start = threading.Barrier(2)
+            result = _new_race_result()
+
+            t1 = threading.Thread(
+                target=_revoke_worker,
+                kwargs={
+                    "factory": factory,
+                    "workspace_id": ws.workspace_id,
+                    "workspace_slug": ws.workspace_slug,
+                    "actor_id": ws.owner_b_id,
+                    "grant_id": ws.owner_a_grant_id,
+                    "start": start,
+                    "result": result,
+                },
+            )
+            t2 = threading.Thread(
+                target=_remove_member_worker,
+                kwargs={
+                    "factory": factory,
+                    "ws": ws,
+                    "actor_id": ws.owner_b_id,
+                    "target_user_id": ws.owner_a_id,
+                    "start": start,
+                    "result": result,
+                },
+            )
+            t1.start()
+            t2.start()
+            t1.join(timeout=15)
+            t2.join(timeout=15)
+
+            try:
+                assert not any(
+                    isinstance(e, LastOwnerGrantProtected) for e in result.errors
+                ), (
+                    f"iteration {i}: revoke/remove same-owner race raised a "
+                    f"spurious LastOwnerGrantProtected "
+                    f"(successes={result.successes}, errors={result.errors})"
+                )
+                assert result.errors == [], (
+                    f"iteration {i}: expected both operations to succeed, "
+                    f"got successes={result.successes}, errors={result.errors}"
+                )
+                assert len(result.successes) == 2, (
+                    f"iteration {i}: expected revoke and remove to succeed, "
+                    f"got successes={result.successes}, errors={result.errors}"
+                )
+                assert _owners_member_count(factory, ws.workspace_id) == 1, (
+                    f"iteration {i}: expected B to remain as the sole owner, "
+                    f"got count={_owners_member_count(factory, ws.workspace_id)}"
+                )
+                assert (
+                    _owners_with_manager_grant_count(factory, ws.workspace_id) == 1
+                ), (
+                    f"iteration {i}: expected B to remain as manager-holding owner, "
+                    f"successes={result.successes}, errors={result.errors}"
+                )
+            finally:
+                _scrub_workspace(factory, ws.workspace_id)
+
+    def test_revoke_snapshot_sees_target_removed_before_lock(
+        self, isolated_engine: Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        factory = _session_factory(isolated_engine)
+        ws = _bootstrap_two_owner_workspace(factory, slug_suffix="same-forced")
+        result = _new_race_result()
+        revoke_reached_snapshot = threading.Event()
+        removal_done = threading.Event()
+
+        original_status = role_grants_module.owner_member_manager_grant_status_locked
+
+        def delayed_status(
+            session: Session,
+            *,
+            workspace_id: str,
+            user_id: str,
+            exclude_grant_id: str | None = None,
+        ) -> OwnerMemberManagerGrantStatus:
+            revoke_reached_snapshot.set()
+            if not removal_done.wait(timeout=15):
+                raise AssertionError("timed out waiting for target owner removal")
+            return original_status(
+                session,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                exclude_grant_id=exclude_grant_id,
+            )
+
+        monkeypatch.setattr(
+            role_grants_module,
+            "owner_member_manager_grant_status_locked",
+            delayed_status,
+        )
+
+        def remove_target_after_revoke_reaches_snapshot() -> None:
+            try:
+                if not revoke_reached_snapshot.wait(timeout=15):
+                    raise AssertionError("timed out waiting for revoke snapshot hook")
+                with factory() as session:
+                    ctx = _ctx_for(ws.workspace_id, ws.workspace_slug, ws.owner_b_id)
+                    token = set_current(ctx)
+                    try:
+                        remove_member(
+                            _pg_repo(session),
+                            ctx,
+                            group_id=ws.owners_group_id,
+                            user_id=ws.owner_a_id,
+                            clock=FrozenClock(_PINNED),
+                        )
+                        session.commit()
+                        with result.lock:
+                            result.successes.append(f"remove:{ws.owner_a_id}")
+                    finally:
+                        reset_current(token)
+            except Exception as exc:  # pragma: no cover - harness
+                with result.lock:
+                    result.errors.append(exc)
+            finally:
+                removal_done.set()
+
+        t1 = threading.Thread(
+            target=_revoke_worker,
+            kwargs={
+                "factory": factory,
+                "workspace_id": ws.workspace_id,
+                "workspace_slug": ws.workspace_slug,
+                "actor_id": ws.owner_b_id,
+                "grant_id": ws.owner_a_grant_id,
+                "start": threading.Barrier(1),
+                "result": result,
+            },
+        )
+        t2 = threading.Thread(target=remove_target_after_revoke_reaches_snapshot)
+        t1.start()
+        t2.start()
+        t1.join(timeout=15)
+        t2.join(timeout=15)
+
+        try:
+            assert not t1.is_alive(), "revoke worker deadlocked"
+            assert not t2.is_alive(), "remove-member worker deadlocked"
+            assert not any(
+                isinstance(e, LastOwnerGrantProtected) for e in result.errors
+            ), (
+                "revoke used a stale pre-lock owners-membership decision "
+                f"(successes={result.successes}, errors={result.errors})"
+            )
+            assert result.errors == [], (
+                f"expected forced removal-before-lock sequence to succeed, "
+                f"got successes={result.successes}, errors={result.errors}"
+            )
+            assert len(result.successes) == 2
+            assert _owners_member_count(factory, ws.workspace_id) == 1
+            assert _owners_with_manager_grant_count(factory, ws.workspace_id) == 1
+        finally:
+            _scrub_workspace(factory, ws.workspace_id)
