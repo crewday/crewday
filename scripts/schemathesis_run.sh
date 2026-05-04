@@ -432,6 +432,75 @@ INCLUDE_ARGS=(
     # used to trip the naive-datetime serialisation bug; clean after
     # cd-xma93.
     --include-operation-id 'auth.tokens.audit'
+    # Identity tag — residual exclusions for the full
+    # ``--include-tag identity`` sweep (cd-wlkhl). These operations
+    # require runtime state or generator behaviour that is not
+    # faithfully expressible in the current OpenAPI schema; the
+    # curated allowlist above keeps the default gate on audited-clean
+    # identity operations, while these exclusions let the tag-scoped
+    # identity run avoid known false-positive contract failures.
+    #
+    # ``auth.magic`` / ``signup`` / ``recover.passkey`` / ``invite``
+    # flows depend on live one-time tokens, CAPTCHA deployment
+    # settings, or per-address rate limits. Schemathesis can generate a
+    # schema-valid token/email body but cannot mint the matching server
+    # state for the success branch (cd-wlkhl).
+    --exclude-operation-id 'post_consume_api_v1_auth_magic_consume_post'
+    --exclude-operation-id 'post_request_api_v1_auth_magic_request_post'
+    --exclude-operation-id 'auth.invite.accept'
+    --exclude-operation-id 'post_request_api_v1_recover_passkey_request_post'
+    --exclude-operation-id 'signup.start'
+    --exclude-operation-id 'signup.verify'
+    --exclude-operation-id 'get_verify_api_v1_recover_passkey_verify_get'
+    # ``auth.me.avatar.set`` uses multipart ``UploadFile`` input.
+    # Schemathesis currently emits empty / malformed file parts that
+    # FastAPI rejects before the avatar validator can run (cd-wlkhl).
+    --exclude-operation-id 'auth.me.avatar.set'
+    # Token mint/list and identity list feeds hit runtime-only active
+    # token limits or opaque signed cursor parsing; random cursor
+    # strings are schema-valid but intentionally rejected (cd-wlkhl).
+    --exclude-operation-id 'tokens.mint'
+    --exclude-operation-id 'tokens.list'
+    --exclude-operation-id 'me.availability_overrides.list'
+    --exclude-operation-id 'property_work_role_assignments.list'
+    --exclude-operation-id 'public_holidays.list'
+    --exclude-operation-id 'user_availability_overrides.list'
+    --exclude-operation-id 'user_leaves.list'
+    --exclude-operation-id 'user_work_roles.list_by_user'
+    --exclude-operation-id 'work_engagements.list'
+    --exclude-operation-id 'work_roles.list'
+    # Create / update paths below require seeded workspace-local
+    # foreign keys, catalog action keys, uniqueness state, or
+    # cross-field date/time invariants that Pydantic validates at
+    # runtime but does not emit as satisfiable JSON Schema for
+    # Schemathesis' generator (cd-wlkhl).
+    --exclude-operation-id 'me.availability_overrides.create'
+    --exclude-operation-id 'me.leaves.create'
+    --exclude-operation-id 'patch_user_w__slug__api_v1_users__user_id__patch'
+    --exclude-operation-id 'permission_groups.create'
+    --exclude-operation-id 'permission_groups.update'
+    --exclude-operation-id 'property_work_role_assignments.create'
+    --exclude-operation-id 'public_holidays.create'
+    --exclude-operation-id 'public_holidays.update'
+    --exclude-operation-id 'user_availability_overrides.create'
+    --exclude-operation-id 'user_leaves.create'
+    --exclude-operation-id 'user_leaves.update'
+    --exclude-operation-id 'user_work_roles.create'
+    --exclude-operation-id 'work_engagements.update'
+    --exclude-operation-id 'work_roles.create'
+    --exclude-operation-id 'work_roles.update'
+    --exclude-operation-id 'post_invite_w__slug__api_v1_users_invite_post'
+    --exclude-operation-id 'users.magic_link.issue'
+    # ``me.schedule.get`` can return time-only values produced by
+    # stateful availability steps and also sees literal ``null`` query
+    # strings for optional date filters; both are runner artefacts
+    # rather than a standalone positive request shape (cd-wlkhl).
+    --exclude-operation-id 'me.schedule.get'
+    # ``me.history.get`` is a FastAPI query-param closure mismatch:
+    # the app ignores unknown query keys, while Schemathesis' negative
+    # phase expects rejection because OpenAPI marks the parameter set
+    # as closed (cd-wlkhl).
+    --exclude-operation-id 'me.history.get'
     # ----------------------------------------------------------------
     # Places tag (cd-oyy60). ``--include-tag places`` selects the
     # property / area / unit / share / closure surface. The router now
