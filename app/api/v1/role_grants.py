@@ -319,7 +319,7 @@ def build_role_grants_router() -> APIRouter:
     """
     api = APIRouter(
         prefix="/role_grants",
-        tags=["identity", "role_grants"],
+        tags=["identity", "authz", "role_grants"],
         responses=IDENTITY_PROBLEM_RESPONSES,
     )
 
@@ -595,7 +595,7 @@ def build_users_role_grants_router() -> APIRouter:
     """
     api = APIRouter(
         prefix="/users",
-        tags=["identity", "role_grants"],
+        tags=["identity", "authz", "role_grants"],
         responses=IDENTITY_PROBLEM_RESPONSES,
     )
 

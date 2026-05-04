@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.identity.models import User
 from app.adapters.db.llm.models import AgentPreference, BudgetLedger
 from app.api.deps import current_workspace_context, db_session
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.audit import write_audit
 from app.authz.dep import Permission
 from app.domain.agent.preferences import (
@@ -35,7 +36,7 @@ from app.events.types import UserAgentSettingsChanged, WorkspaceChanged
 from app.tenancy import WorkspaceContext
 from app.util.clock import SystemClock
 
-router = APIRouter(tags=["llm"])
+router = APIRouter(tags=["llm"], responses=IDENTITY_PROBLEM_RESPONSES)
 
 __all__ = ["build_workspace_llm_router", "router"]
 
@@ -574,7 +575,7 @@ def get_workspace_usage(ctx: _Ctx, session: _Db) -> WorkspaceUsageRead:
 def build_workspace_llm_router() -> APIRouter:
     """Flat workspace LLM routes consumed by the SPA."""
 
-    flat = APIRouter(tags=["llm"])
+    flat = APIRouter(tags=["llm"], responses=IDENTITY_PROBLEM_RESPONSES)
     flat.add_api_route(
         "/agent_preferences/workspace",
         get_workspace_agent_prefs,

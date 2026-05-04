@@ -178,10 +178,16 @@ class _UnitBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=_MAX_NAME_LEN)
     ordinal: int = Field(default=0, ge=0)
     default_checkin_time: str | None = Field(
-        default=None, min_length=_MAX_TIME_LEN, max_length=_MAX_TIME_LEN
+        default=None,
+        min_length=_MAX_TIME_LEN,
+        max_length=_MAX_TIME_LEN,
+        json_schema_extra={"pattern": r"^\\d{2}:\\d{2}$"},
     )
     default_checkout_time: str | None = Field(
-        default=None, min_length=_MAX_TIME_LEN, max_length=_MAX_TIME_LEN
+        default=None,
+        min_length=_MAX_TIME_LEN,
+        max_length=_MAX_TIME_LEN,
+        json_schema_extra={"pattern": r"^\\d{2}:\\d{2}$"},
     )
     max_guests: int | None = Field(default=None, ge=1)
     welcome_overrides_json: dict[str, Any] = Field(default_factory=dict)

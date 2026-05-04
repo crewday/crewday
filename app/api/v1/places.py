@@ -94,6 +94,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace
 from app.adapters.db.workspace.models import Workspace
 from app.api.deps import current_workspace_context, db_session
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.authz import PermissionDenied, require
 from app.authz.dep import Permission
 from app.authz.places_visibility import visible_property_ids_for_user
@@ -116,7 +117,7 @@ __all__ = [
 ]
 
 
-router = APIRouter(tags=["places"])
+router = APIRouter(tags=["places"], responses=IDENTITY_PROBLEM_RESPONSES)
 
 _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]
 _Db = Annotated[Session, Depends(db_session)]
@@ -233,7 +234,60 @@ class PropertyWriteRequest(BaseModel):
     address shape and derives a rendered address when callers omit it.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "anyOf": [
+                {
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200,
+                        },
+                        "timezone": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": (
+                                r"^(?:[A-Za-z_][A-Za-z0-9_+-]*|"
+                                r"[A-Za-z_][A-Za-z0-9_+-]*(?:/[A-Za-z_][A-Za-z0-9_+-]*)+)$"
+                            ),
+                        },
+                        "address": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500,
+                        }
+                    },
+                    "required": ["name", "timezone", "address"],
+                },
+                {
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200,
+                        },
+                        "timezone": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": (
+                                r"^(?:[A-Za-z_][A-Za-z0-9_+-]*|"
+                                r"[A-Za-z_][A-Za-z0-9_+-]*(?:/[A-Za-z_][A-Za-z0-9_+-]*)+)$"
+                            ),
+                        },
+                        "address_json": {
+                            "type": "object",
+                            "minProperties": 1,
+                        }
+                    },
+                    "required": ["name", "timezone", "address_json"],
+                },
+            ]
+        },
+    )
 
     name: str = Field(..., min_length=1, max_length=200)
     kind: property_service.PropertyKind = "residence"
@@ -244,7 +298,17 @@ class PropertyWriteRequest(BaseModel):
     country: str | None = Field(default=None, min_length=2, max_length=2)
     locale: str | None = Field(default=None, max_length=35)
     default_currency: str | None = Field(default=None, max_length=3)
-    timezone: str = Field(..., min_length=1, max_length=64)
+    timezone: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        json_schema_extra={
+            "pattern": (
+                r"^(?:[A-Za-z_][A-Za-z0-9_+-]*|"
+                r"[A-Za-z_][A-Za-z0-9_+-]*(?:/[A-Za-z_][A-Za-z0-9_+-]*)+)$"
+            )
+        },
+    )
     lat: float | None = None
     lon: float | None = None
     client_org_id: str | None = Field(default=None, max_length=64)
@@ -466,10 +530,38 @@ class MembershipListResponse(BaseModel):
 
 
 class ShareCreateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "oneOf": [
+                {
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                        }
+                    },
+                    "required": ["workspace_id"],
+                    "not": {"required": ["workspace_slug"]},
+                },
+                {
+                    "properties": {
+                        "workspace_slug": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 80,
+                        }
+                    },
+                    "required": ["workspace_slug"],
+                    "not": {"required": ["workspace_id"]},
+                },
+            ]
+        },
+    )
 
-    workspace_id: str | None = Field(default=None, max_length=64)
-    workspace_slug: str | None = Field(default=None, max_length=80)
+    workspace_id: str = Field(default=None, max_length=64)
+    workspace_slug: str = Field(default=None, max_length=80)
     membership_role: membership_service.MembershipRole = "managed_workspace"
     share_guest_identity: bool = False
 
@@ -887,7 +979,10 @@ def build_properties_router() -> APIRouter:
     :func:`tests.unit.api.v1.identity.conftest.build_client` to keep
     the dependency-override cache per-case.
     """
-    api = APIRouter(tags=["places", "properties"])
+    api = APIRouter(
+        tags=["places", "properties"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     read_gate = Depends(Permission("scope.view", scope_kind="workspace"))
     create_gate = Depends(Permission("properties.create", scope_kind="workspace"))

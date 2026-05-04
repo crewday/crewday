@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.places.models import Property
 from app.api.deps import current_workspace_context, db_session
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.api.v1._scheduler_resolver import (
     ScheduleAssignmentResponse,
     SchedulerPropertyResponse,
@@ -286,7 +287,11 @@ def _build_payload(
 
 
 def build_scheduler_router() -> APIRouter:
-    api = APIRouter(prefix="/scheduler", tags=["tasks", "scheduler"])
+    api = APIRouter(
+        prefix="/scheduler",
+        tags=["tasks", "scheduler"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     @api.get(
         "/calendar",

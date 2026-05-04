@@ -52,6 +52,7 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.authz.dep import Permission
 from app.config import Settings, get_settings
 from app.domain.stays.bundle_service import (
@@ -489,7 +490,7 @@ class SqlAlchemyGuestSettingsResolver:
 
 
 def build_stays_router() -> APIRouter:
-    api = APIRouter(tags=["stays"])
+    api = APIRouter(tags=["stays"], responses=IDENTITY_PROBLEM_RESPONSES)
 
     read_gate = Depends(Permission("stays.read", scope_kind="workspace"))
     manage_gate = Depends(Permission("stays.manage", scope_kind="workspace"))
@@ -968,7 +969,7 @@ def build_stays_public_router() -> APIRouter:
     middleware does not require a workspace session before the guest
     token resolver can run.
     """
-    api = APIRouter(tags=["stays"])
+    api = APIRouter(tags=["stays"], responses=IDENTITY_PROBLEM_RESPONSES)
 
     @api.get(
         "/welcome",

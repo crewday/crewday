@@ -56,6 +56,7 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.domain.time.geofence_settings import (
     GeofenceMode,
     GeofenceSettingNotFound,
@@ -110,7 +111,7 @@ from app.tenancy import WorkspaceContext
 __all__ = ["router"]
 
 
-router = APIRouter(tags=["time"])
+router = APIRouter(tags=["time"], responses=IDENTITY_PROBLEM_RESPONSES)
 
 
 _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]

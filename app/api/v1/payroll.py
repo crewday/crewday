@@ -69,6 +69,7 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.audit import write_audit
 from app.authz import require
 from app.authz.dep import Permission
@@ -128,6 +129,7 @@ from app.domain.privacy import payout_manifest_available
 from app.events import bus as default_event_bus
 from app.events.types import ExpenseReimbursed, PayrollExportReady
 from app.tenancy import WorkspaceContext
+from app.util.currency import ISO_4217_ALLOWLIST
 from app.util.clock import SystemClock
 from app.util.ulid import new_ulid
 
@@ -148,6 +150,7 @@ _Storage = Annotated[Storage, Depends(get_storage)]
 
 
 _MAX_ID_LEN = 64
+_CURRENCY_SCHEMA_EXTRA = {"enum": sorted(ISO_4217_ALLOWLIST)}
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +163,12 @@ class _PayRuleBodyRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    currency: str = Field(..., min_length=3, max_length=3)
+    currency: str = Field(
+        ...,
+        min_length=3,
+        max_length=3,
+        json_schema_extra=_CURRENCY_SCHEMA_EXTRA,
+    )
     base_cents_per_hour: int = Field(..., ge=0, le=BASE_CENTS_MAX)
     overtime_multiplier: Decimal = Field(default=Decimal("1.5"))
     night_multiplier: Decimal = Field(default=Decimal("1.25"))
@@ -646,7 +654,7 @@ _PayslipIdPath = Annotated[
 
 def build_payroll_router() -> APIRouter:
     """Return a fresh :class:`APIRouter` wired for the payroll surface."""
-    api = APIRouter(tags=["payroll"])
+    api = APIRouter(tags=["payroll"], responses=IDENTITY_PROBLEM_RESPONSES)
 
     edit_gate = Depends(Permission("pay_rules.edit", scope_kind="workspace"))
     payout_gate = Depends(Permission("payroll.issue_payslip", scope_kind="workspace"))

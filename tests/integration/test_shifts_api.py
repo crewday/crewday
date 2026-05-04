@@ -278,6 +278,14 @@ class TestOpenShift:
         assert detail["error"] == "already_open"
         assert detail["existing_shift_id"] == first.json()["id"]
 
+    def test_open_rejects_boolean_gps_accuracy(
+        self,
+        worker_client: tuple[TestClient, WorkspaceContext, str],
+    ) -> None:
+        client, _ctx, _uid = worker_client
+        resp = client.post("/shifts/open", json={"gps_accuracy_m": False})
+        assert resp.status_code == 422, resp.text
+
     def test_cross_user_open_without_manager_returns_403(
         self,
         worker_client: tuple[TestClient, WorkspaceContext, str],

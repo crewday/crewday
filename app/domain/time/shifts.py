@@ -50,7 +50,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictFloat
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -189,9 +189,9 @@ class ShiftOpen(BaseModel):
     property_id: str | None = Field(default=None, max_length=_MAX_ID_LEN)
     source: ShiftOpenSource = "manual"
     notes_md: str | None = Field(default=None, max_length=_MAX_NOTES_LEN)
-    client_lat: float | None = Field(default=None, ge=-90, le=90)
-    client_lon: float | None = Field(default=None, ge=-180, le=180)
-    gps_accuracy_m: float | None = Field(default=None, ge=0)
+    client_lat: StrictFloat | None = Field(default=None, ge=-90, le=90)
+    client_lon: StrictFloat | None = Field(default=None, ge=-180, le=180)
+    gps_accuracy_m: StrictFloat | None = Field(default=None, ge=0)
 
 
 class ShiftClose(BaseModel):

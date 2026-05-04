@@ -36,6 +36,7 @@ import click
 from sqlalchemy import select
 from sqlalchemy.orm import Session as SqlaSession
 
+from app.adapters.db.authz.models import DeploymentOwner, RoleGrant
 from app.adapters.db.identity.models import User, canonicalise_email
 from app.adapters.db.session import make_uow
 from app.adapters.db.workspace.models import Workspace
@@ -51,6 +52,45 @@ _SESSION_COOKIE_NAME: Final[str] = "__Host-crewday_session"
 
 
 _DEV_AUTH_ENV_VAR: Final[str] = "CREWDAY_DEV_AUTH"
+
+
+def _ensure_deployment_admin(
+    session: SqlaSession,
+    *,
+    user_id: str,
+) -> None:
+    """Give the schemathesis actor access to the bare-host admin tree."""
+    now = SystemClock().now()
+    with tenant_agnostic():
+        existing_grant = session.scalar(
+            select(RoleGrant.id)
+            .where(RoleGrant.scope_kind == "deployment")
+            .where(RoleGrant.user_id == user_id)
+            .where(RoleGrant.grant_role == "manager")
+            .where(RoleGrant.revoked_at.is_(None))
+            .limit(1)
+        )
+        if existing_grant is None:
+            session.add(
+                RoleGrant(
+                    id=new_ulid(),
+                    workspace_id=None,
+                    user_id=user_id,
+                    grant_role="manager",
+                    scope_kind="deployment",
+                    created_at=now,
+                    created_by_user_id=None,
+                )
+            )
+        if session.get(DeploymentOwner, user_id) is None:
+            session.add(
+                DeploymentOwner(
+                    user_id=user_id,
+                    added_at=now,
+                    added_by_user_id=None,
+                )
+            )
+        session.flush()
 
 
 def _check_gates() -> None:
@@ -133,6 +173,7 @@ def main(email: str, workspace_slug: str, label: str, output: OutputFormat) -> N
             workspace = uow.scalars(
                 select(Workspace).where(Workspace.slug == workspace_slug)
             ).one()
+            _ensure_deployment_admin(uow, user_id=user.id)
 
         # 3. Mint a workspace-scoped token. ``scopes`` is left empty
         #    on purpose — empty-scope workspace tokens are the v1

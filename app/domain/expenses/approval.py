@@ -110,6 +110,7 @@ from app.events import (
 )
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.currency import ISO_4217_ALLOWLIST
 
 __all__ = [
     "ApprovalEdits",
@@ -126,6 +127,8 @@ __all__ = [
     "mark_reimbursed",
     "reject_claim",
 ]
+
+_CURRENCY_SCHEMA_EXTRA = {"enum": sorted(ISO_4217_ALLOWLIST)}
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +248,12 @@ class ApprovalEdits(BaseModel):
 
     vendor: str | None = Field(default=None, min_length=1, max_length=_MAX_VENDOR_LEN)
     purchased_at: datetime | None = None
-    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    currency: str | None = Field(
+        default=None,
+        min_length=3,
+        max_length=3,
+        json_schema_extra=_CURRENCY_SCHEMA_EXTRA,
+    )
     total_amount_cents: int | None = Field(default=None, gt=0)
     category: ExpenseCategory | None = None
     property_id: str | None = Field(default=None, max_length=_MAX_ID_LEN)

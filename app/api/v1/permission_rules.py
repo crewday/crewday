@@ -201,7 +201,7 @@ def build_permission_rules_router() -> APIRouter:
     """Return a fresh :class:`APIRouter` wired for permission-rule ops."""
     api = APIRouter(
         prefix="/permission_rules",
-        tags=["identity", "permission_rules"],
+        tags=["identity", "authz", "permission_rules"],
         responses=IDENTITY_PROBLEM_RESPONSES,
     )
 

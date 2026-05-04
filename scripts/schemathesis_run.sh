@@ -42,6 +42,9 @@ WORKERS="${SCHEMATHESIS_WORKERS:-1}"
 HOOKS_MODULE="${SCHEMATHESIS_HOOKS:-tests/contract/hooks.py}"
 PYTHON_BIN="${PYTHON:-uv run python}"
 SCHEMATHESIS_BIN="${SCHEMATHESIS_BIN:-uv run schemathesis}"
+if [[ "${1:-}" == "--" ]]; then
+    shift
+fi
 
 # Per-run scratch dir so concurrent invocations on the dev box don't
 # clobber each other's SQLite file. ``mktemp -d`` lands under TMPDIR
@@ -428,6 +431,291 @@ INCLUDE_ARGS=(
     # used to trip the naive-datetime serialisation bug; clean after
     # cd-xma93.
     --include-operation-id 'auth.tokens.audit'
+    # ----------------------------------------------------------------
+    # Places tag (cd-oyy60). ``--include-tag places`` selects the
+    # property / area / unit / share / closure surface. The router now
+    # declares the shared problem+json 4xx envelope, so the runtime 404
+    # and 422 responses line up with the OpenAPI contract and the tag
+    # can run without curated carve-outs.
+    # ----------------------------------------------------------------
+    --include-tag places
+    # ``properties.create`` / ``properties.update`` — the runtime
+    # validates ``timezone`` against ``zoneinfo.ZoneInfo`` and there is
+    # no stable JSON Schema way to express the full IANA allowlist.
+    # Keep the CRUD endpoints covered by focused unit / integration
+    # tests and exclude the contract sweep's free-form zone fuzzing.
+    --exclude-operation-id 'properties.create'
+    --exclude-operation-id 'properties.update'
+    # ``property_closures.list`` — optional ``from`` / ``to`` query
+    # params are omission-only in FastAPI but schemathesis will still
+    # generate literal ``null`` values for them. The runtime rejects
+    # those strings before handler code runs, so keep the list op out of
+    # the sweep until the contract runner learns a non-null strategy.
+    --exclude-operation-id 'property_closures.list'
+    # ``property_closures.create`` / ``property_closures.update`` —
+    # the ``ends_at > starts_at`` invariant is enforced by the domain
+    # DTO and cannot be expressed as a JSON Schema constraint. Random
+    # equal / inverted windows correctly 422 before the business logic
+    # can accept them.
+    --exclude-operation-id 'property_closures.create'
+    --exclude-operation-id 'property_closures.update'
+    # ``property_workspace.share`` — the request accepts either
+    # ``workspace_id`` or ``workspace_slug``; schemathesis still
+    # explores a null-ish selector branch that the runtime rejects
+    # before handler code can normalize it.
+    --exclude-operation-id 'property_workspace.share'
+    # ----------------------------------------------------------------
+    # Time tag (cd-k4l96). ``--include-tag time`` selects shifts,
+    # leaves, and per-property geofence settings. The router now
+    # declares the shared problem+json 4xx envelope, so missing shift,
+    # leave, and property ids satisfy status / content-type
+    # conformance. The exclusions below are residual data-generation
+    # constraints that require either signed cursor hints, seeded target
+    # ids, or OpenAPI cross-field invariants before the full tag can run
+    # without curated carve-outs.
+    # ----------------------------------------------------------------
+    --include-tag time
+    # ``time.list_*`` — same opaque cursor issue as ``assets.list``.
+    # Cursor is a signed base64url payload; random schema-valid strings
+    # correctly 422 as ``invalid_cursor``.
+    --exclude-operation-id 'time.list_shifts'
+    --exclude-operation-id 'time.list_leaves'
+    --exclude-operation-id 'time.list_my_leaves'
+    # ``time.create_my_leave`` / ``time.update_my_leave_dates`` /
+    # ``time.edit_shift`` — the runtime requires ``ends_at`` to be
+    # strictly greater than ``starts_at``. Pydantic validates that
+    # cross-field invariant, but JSON Schema cannot express it for
+    # arbitrary RFC 3339 datetimes, so schemathesis treats equal or
+    # inverted windows as positive examples.
+    --exclude-operation-id 'time.create_my_leave'
+    --exclude-operation-id 'time.update_my_leave_dates'
+    --exclude-operation-id 'time.edit_shift'
+    # ``time.open_shift`` — opening for another user requires a real
+    # seeded user id and only one live open shift per user. Random
+    # schema-valid ids and repeated positive examples correctly hit
+    # FK / already-open runtime invariants before the success branch.
+    --exclude-operation-id 'time.open_shift'
+    # ----------------------------------------------------------------
+    # Authz tag (cd-eaz40). ``--include-tag authz`` selects the
+    # permission / permission-group / permission-rule / role-grant
+    # governance surface. The routes inherit the identity problem+json
+    # envelope; the exclusions below are runtime invariants that still
+    # need either test-data seeding or tighter OpenAPI constraints before
+    # the full tag can be promoted without external excludes.
+    # ----------------------------------------------------------------
+    # ``permission_groups.list`` / ``permission_rules.list`` /
+    # ``role_grants.list_by_user`` — same opaque cursor issue as
+    # ``assets.list``. The cursor is a signed base64url payload; random
+    # schema-valid strings correctly 422 as ``invalid_cursor``.
+    --exclude-operation-id 'permission_groups.list'
+    --exclude-operation-id 'permission_rules.list'
+    --exclude-operation-id 'role_grants.list_by_user'
+    # ``permissions.resolved`` / ``permissions.resolved_self`` —
+    # ``action_key`` is a compile-time catalog key (§05). OpenAPI can
+    # express it as a bounded string but not as "one of the live catalog
+    # keys" without generating a giant enum that drifts every time the
+    # catalog changes; random strings correctly 422 ``unknown_action_key``.
+    --exclude-operation-id 'permissions.resolved'
+    --exclude-operation-id 'permissions.resolved_self'
+    # ``role_grants.create`` — ``scope_property_id`` must be a real
+    # property linked to the seeded workspace. Random ids correctly 422
+    # ``cross_workspace_property`` before the success branch; re-enable
+    # once the schemathesis seed exposes a reusable property id.
+    --exclude-operation-id 'role_grants.create'
+    # ``permission_rules.create`` / ``permission_rules.revoke`` — v1
+    # intentionally returns 503 ``permission_rule_table_unavailable``
+    # until the permission_rule table lands (cd-dzp). Re-enable with the
+    # table migration.
+    --exclude-operation-id 'permission_rules.create'
+    --exclude-operation-id 'permission_rules.revoke'
+    # ----------------------------------------------------------------
+    # Stays tag (cd-zqbnp). ``--include-tag stays`` selects the manager
+    # stays surface. The router declares the shared problem+json 4xx
+    # envelope, so missing resources satisfy status / content-type
+    # conformance. The exclusions below are residual runtime invariants
+    # that need seeded IDs, a per-op guest-token auth hook, or tighter
+    # OpenAPI constraints before the full tag can run without curated
+    # carve-outs.
+    # ----------------------------------------------------------------
+    # ``stays.welcome.*`` — public guest-link reads authenticate with
+    # the Bearer value as the signed guest token. The runner's global
+    # Bearer is an owner API token, so these ops correctly return 410
+    # ``welcome_link_expired`` instead of a guest payload. Re-enable
+    # once hooks can provide a minted guest-link token per operation.
+    --exclude-operation-id 'stays.welcome.read_bearer'
+    --exclude-operation-id 'stays.welcome.read_path_token'
+    # ``stays.ical_feeds.create`` — requires a real property in the
+    # seeded workspace and a fetchable absolute iCal URL. Random strings
+    # correctly fail URL validation or parent lookup before the success
+    # branch. Re-enable once the seed exposes a reusable property id and
+    # local iCal fixture URL.
+    --exclude-operation-id 'stays.ical_feeds.create'
+    # ``stays.reservations.list`` / ``stays.stay_bundles.list`` — same
+    # opaque cursor issue as ``assets.list``. Cursor is a signed payload;
+    # random schema-valid strings correctly 422 ``invalid_cursor``.
+    --exclude-operation-id 'stays.reservations.list'
+    --exclude-operation-id 'stays.stay_bundles.list'
+    # ``stays.ical_feeds.list`` — FastAPI ignores unknown query params,
+    # while schemathesis' negative-data check expects rejection because
+    # OpenAPI marks query parameters as closed. Keep focused route tests
+    # as coverage until the contract runner has a policy for extra query
+    # keys across FastAPI routers.
+    --exclude-operation-id 'stays.ical_feeds.list'
+    # ``stays.ical_feeds.update`` — PATCH rejects the all-null no-op
+    # body at the domain boundary (``ical_feed_update_empty``). Pydantic
+    # does not emit that cross-field invariant in JSON Schema today.
+    --exclude-operation-id 'stays.ical_feeds.update'
+    # ----------------------------------------------------------------
+    # LLM tag (cd-e5sit). ``--include-tag llm`` spans both the
+    # workspace LLM preference/usage surface and the bare-host admin
+    # model-configuration tree. The workspace operations below carry
+    # the shared problem+json response envelope and were confirmed
+    # clean by isolating them against the runner with
+    # ``--include-operation-id``. The admin operations stay under the
+    # admin-tag contract task (cd-k8m2b) because their bare-host staff
+    # auth + seeded provider/model graph needs one coordinated audit
+    # instead of being duplicated in the LLM workspace sweep.
+    # ----------------------------------------------------------------
+    --include-operation-id 'workspace.llm.agent_preferences.workspace.get'
+    --include-operation-id 'workspace.llm.agent_preferences.workspace.put'
+    --include-operation-id 'workspace.llm.agent_preferences.me.get'
+    --include-operation-id 'workspace.llm.agent_preferences.me.put'
+    --include-operation-id 'workspace.llm.agent_approval_mode.me.get'
+    --include-operation-id 'workspace.llm.agent_approval_mode.me.put'
+    --include-operation-id 'workspace.llm.usage.get'
+    --exclude-operation-id 'admin.llm.graph'
+    --exclude-operation-id 'admin.llm.providers.list'
+    --exclude-operation-id 'admin.llm.providers.create'
+    --exclude-operation-id 'admin.llm.providers.get'
+    --exclude-operation-id 'admin.llm.providers.update'
+    --exclude-operation-id 'admin.llm.providers.delete'
+    --exclude-operation-id 'admin.llm.models.list'
+    --exclude-operation-id 'admin.llm.models.create'
+    --exclude-operation-id 'admin.llm.models.get'
+    --exclude-operation-id 'admin.llm.models.update'
+    --exclude-operation-id 'admin.llm.models.delete'
+    --exclude-operation-id 'admin.llm.provider_models.list'
+    --exclude-operation-id 'admin.llm.provider_models.create'
+    --exclude-operation-id 'admin.llm.provider_models.get'
+    --exclude-operation-id 'admin.llm.provider_models.update'
+    --exclude-operation-id 'admin.llm.provider_models.delete'
+    --exclude-operation-id 'admin.llm.assignments.list'
+    --exclude-operation-id 'admin.llm.assignments.create'
+    --exclude-operation-id 'admin.llm.assignments.reorder'
+    --exclude-operation-id 'admin.llm.assignments.get'
+    --exclude-operation-id 'admin.llm.assignments.update'
+    --exclude-operation-id 'admin.llm.assignments.delete'
+    --exclude-operation-id 'admin.llm.prompts.list'
+    --exclude-operation-id 'admin.llm.prompts.get'
+    --exclude-operation-id 'admin.llm.prompts.update'
+    --exclude-operation-id 'admin.llm.prompts.revisions'
+    --exclude-operation-id 'admin.llm.prompts.reset'
+    --exclude-operation-id 'admin.llm.calls.list'
+    --exclude-operation-id 'admin.llm.sync_pricing'
+    # ----------------------------------------------------------------
+    # Payroll tag (cd-198mc). ``--include-tag payroll`` selects the
+    # manager pay-rule, pay-period, payslip, CSV export, and payout
+    # manifest surface. The router now declares the shared problem+json
+    # 4xx envelope, and the pay-rule body schema advertises the
+    # deployment currency allow-list. The exclusions below are residual
+    # runtime invariants that need
+    # seeded target IDs or OpenAPI cross-field/conditional constraints
+    # before the full tag can run without curated carve-outs.
+    # ----------------------------------------------------------------
+    --include-tag payroll
+    # ``payroll.pay_rules.list`` — same opaque cursor issue as
+    # ``assets.list``. Cursor is a signed payload; random schema-valid
+    # strings correctly 422 as ``invalid_cursor``.
+    --exclude-operation-id 'payroll.pay_rules.list'
+    # ``payroll.pay_rules.create`` / ``payroll.pay_rules.update`` —
+    # ``effective_to`` must be strictly greater than ``effective_from``.
+    # JSON Schema cannot express that cross-field datetime invariant,
+    # so schemathesis treats equal or inverted windows as positive
+    # examples.
+    --exclude-operation-id 'payroll.pay_rules.create'
+    --exclude-operation-id 'payroll.pay_rules.update'
+    # ``payroll.pay_periods.create`` / ``payroll.pay_periods.update`` —
+    # ``ends_at`` must be strictly greater than ``starts_at``; this is
+    # the same cross-field datetime invariant as the pay-rule window.
+    --exclude-operation-id 'payroll.pay_periods.create'
+    --exclude-operation-id 'payroll.pay_periods.update'
+    # ``payroll.exports.csv`` — the required query set depends on the
+    # path ``kind``: timesheets / expense-ledger require ``since`` and
+    # ``until``, while payslips may use ``period_id``. FastAPI exposes
+    # this as one route, and OpenAPI cannot attach kind-specific query
+    # requirements to individual path enum values.
+    --exclude-operation-id 'payroll.exports.csv'
+    # ``payroll.payslips.payout_manifest`` — manifests are generated
+    # just-in-time from retained payout snapshots and may return 410
+    # once retention has purged the secret material. Random payslip IDs
+    # cannot reach the success branch without a seeded issued payslip.
+    --exclude-operation-id 'payroll.payslips.payout_manifest'
+    # ----------------------------------------------------------------
+    # Expenses tag (cd-63lcq). ``--include-tag expenses`` selects the
+    # worker claim CRUD, manager approval / reimbursement, attachment,
+    # pending totals, and receipt-scan preview surface. The router
+    # declares the shared problem+json 4xx envelope, and claim/edit
+    # currency schemas advertise the same ISO-4217 allow-list the domain
+    # validates at runtime. The exclusions below are residual generation
+    # constraints that need signed cursors or realistic multipart / OCR
+    # fixtures before the full tag can run without curated carve-outs.
+    # ----------------------------------------------------------------
+    --include-tag expenses
+    # ``list_expense_claims`` / ``list_pending_expense_claims`` — same
+    # opaque cursor issue as ``assets.list``. Cursor is a signed payload;
+    # random schema-valid strings correctly 422 as ``invalid_cursor``.
+    --exclude-operation-id 'list_expense_claims'
+    --exclude-operation-id 'list_pending_expense_claims'
+    # ``create_expense_claim`` — ``purchased_at`` must not be in the
+    # future relative to the server clock (plus a small skew allowance),
+    # and ``work_engagement_id`` must be a real caller-owned engagement.
+    # JSON Schema cannot express the moving datetime bound, and random
+    # ids correctly miss the seeded engagement graph.
+    --exclude-operation-id 'create_expense_claim'
+    # ``scan_expense_receipt`` — the success branch requires a non-empty
+    # receipt file part plus a configured OCR model / LLM seam. Random
+    # multipart bodies frequently omit or stringify the UploadFile field
+    # and correctly fail request validation before the preview branch.
+    --exclude-operation-id 'scan_expense_receipt'
+    # ----------------------------------------------------------------
+    # Tasks tag (cd-mb0dh). ``--include-tag tasks`` selects the manager
+    # task, template, schedule, scheduler-calendar, comments, evidence,
+    # and NL-intake surface. The tasks and scheduler routers now
+    # declare the shared problem+json response envelope, so validation
+    # and missing-resource responses match the runtime content type.
+    # The exclusions below are residual data-generation constraints:
+    # opaque cursors, seeded task/template/schedule ids, multipart file
+    # bodies, LLM capability assignment, and cross-field / per-route
+    # invariants OpenAPI cannot express for arbitrary generated data.
+    # ----------------------------------------------------------------
+    --include-tag tasks
+    # List cursors are signed opaque payloads; random schema-valid
+    # strings correctly 422 as ``invalid_cursor``.
+    --exclude-operation-id 'list_tasks'
+    --exclude-operation-id 'list_schedules'
+    --exclude-operation-id 'list_task_templates'
+    --exclude-operation-id 'list_task_comments'
+    # Creation paths below require real workspace-local parent ids
+    # (templates / roles / areas) or body invariants that are validated
+    # by the domain layer but not fully representable in JSON Schema.
+    --exclude-operation-id 'create_task'
+    --exclude-operation-id 'create_schedule'
+    --exclude-operation-id 'update_schedule'
+    --exclude-operation-id 'create_task_template'
+    --exclude-operation-id 'update_task_template'
+    # Multipart evidence generation currently produces empty/malformed
+    # file parts that FastAPI rejects before the task success branch.
+    --exclude-operation-id 'upload_task_evidence'
+    --exclude-operation-id 'attach_task_checklist_evidence'
+    # NL task intake requires an assigned local LLM capability and a
+    # seeded preview id. Those are covered by focused domain tests until
+    # the contract seed can provision a fake capability graph.
+    --exclude-operation-id 'draft_task_from_nl'
+    --exclude-operation-id 'commit_task_from_nl'
+    # FastAPI accepts repeated scalar query params with normal scalar
+    # coercion, while Schemathesis' negative-data phase models them as
+    # arrays and expects rejection.
+    --exclude-operation-id 'scheduler.calendar.get'
 )
 
 # Checks excluded for the asset gate — kept here (rather than at
@@ -455,24 +743,66 @@ EXCLUDE_CHECKS_ARGS=(
     --exclude-checks unsupported_method
 )
 
+USER_ARGS=("$@")
+USER_HAS_INCLUDE_FILTER=0
+USER_INCLUDE_TAGS=()
+for ((i = 0; i < ${#USER_ARGS[@]}; i++)); do
+    if [[ "${USER_ARGS[$i]}" == --include-* ]]; then
+        USER_HAS_INCLUDE_FILTER=1
+    fi
+    if [[ "${USER_ARGS[$i]}" == "--include-tag" && -n "${USER_ARGS[$((i + 1))]:-}" ]]; then
+        USER_INCLUDE_TAGS+=("${USER_ARGS[$((i + 1))]}")
+    elif [[ "${USER_ARGS[$i]}" == --include-tag=* ]]; then
+        USER_INCLUDE_TAGS+=("${USER_ARGS[$i]#--include-tag=}")
+    fi
+done
+
+RUN_INCLUDE_ARGS=()
+for ((i = 0; i < ${#INCLUDE_ARGS[@]}; i++)); do
+    if ((USER_HAS_INCLUDE_FILTER)) && [[ "${INCLUDE_ARGS[$i]}" == --include-* ]]; then
+        if [[ -n "${INCLUDE_ARGS[$((i + 1))]:-}" && "${INCLUDE_ARGS[$((i + 1))]}" != --* ]]; then
+            i=$((i + 1))
+        fi
+        continue
+    fi
+    if [[ "${INCLUDE_ARGS[$i]}" == "--include-tag" && -n "${INCLUDE_ARGS[$((i + 1))]:-}" ]]; then
+        duplicate=0
+        for tag in "${USER_INCLUDE_TAGS[@]}"; do
+            if [[ "${tag}" == "${INCLUDE_ARGS[$((i + 1))]}" ]]; then
+                duplicate=1
+                break
+            fi
+        done
+        if ((duplicate)); then
+            i=$((i + 1))
+            continue
+        fi
+    fi
+    RUN_INCLUDE_ARGS+=("${INCLUDE_ARGS[$i]}")
+done
+
+SCHEMATHESIS_ARGS=(
+    run
+    --header "Authorization: Bearer ${TOKEN}"
+    --header "Cookie: __Host-crewday_session=${SESSION}; crewday_csrf=schemathesis"
+    --header "X-CSRF: schemathesis"
+    --checks all
+    --mode all
+    --max-examples "${MAX_EXAMPLES}"
+    --workers "${WORKERS}"
+    --exclude-path-regex '^/events$'
+    --generation-codec ascii
+    --suppress-health-check filter_too_much,data_too_large,too_slow
+    "${RUN_INCLUDE_ARGS[@]}"
+    "${EXCLUDE_CHECKS_ARGS[@]}"
+    --report junit
+    --report-dir "${REPORT_DIR}"
+    "${USER_ARGS[@]}"
+    "http://${HOST}:${PORT}/api/openapi.json"
+)
+
 set +e
-${SCHEMATHESIS_BIN} run \
-    "http://${HOST}:${PORT}/api/openapi.json" \
-    --header "Authorization: Bearer ${TOKEN}" \
-    --header "Cookie: __Host-crewday_session=${SESSION}; crewday_csrf=schemathesis" \
-    --header "X-CSRF: schemathesis" \
-    --checks all \
-    --mode all \
-    --max-examples "${MAX_EXAMPLES}" \
-    --workers "${WORKERS}" \
-    --exclude-path-regex '^/events$' \
-    --generation-codec ascii \
-    --suppress-health-check filter_too_much,data_too_large,too_slow \
-    "${INCLUDE_ARGS[@]}" \
-    "${EXCLUDE_CHECKS_ARGS[@]}" \
-    --report junit \
-    --report-dir "${REPORT_DIR}" \
-    "$@"
+${SCHEMATHESIS_BIN} "${SCHEMATHESIS_ARGS[@]}"
 RC=$?
 set -e
 

@@ -407,7 +407,7 @@ def build_permission_groups_router() -> APIRouter:
     """Return a fresh :class:`APIRouter` wired for permission-group ops."""
     api = APIRouter(
         prefix="/permission_groups",
-        tags=["identity", "permission_groups"],
+        tags=["identity", "authz", "permission_groups"],
         responses=IDENTITY_PROBLEM_RESPONSES,
     )
 

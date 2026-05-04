@@ -53,6 +53,7 @@ from app.adapters.db.messaging.repositories import SqlAlchemyPushTokenRepository
 from app.api.deps import current_workspace_context, db_session
 from app.api.messaging.channels import build_channels_router
 from app.api.messaging.messages import build_messages_router
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.audit import write_audit
 from app.domain.messaging.push_tokens import (
     MAX_ENDPOINT_LEN,
@@ -419,7 +420,7 @@ def build_messaging_router(
     """
     _monotonic = monotonic if monotonic is not None else time.monotonic
 
-    r = APIRouter(tags=["messaging"])
+    r = APIRouter(tags=["messaging"], responses=IDENTITY_PROBLEM_RESPONSES)
     r.include_router(build_channels_router())
     r.include_router(build_messages_router(event_bus=event_bus))
 

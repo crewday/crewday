@@ -31,6 +31,31 @@ def test_messaging_router_declares_notifications_and_push_management_routes() ->
     }.issubset(operations)
 
 
+def test_messaging_router_documents_problem_json_validation_errors() -> None:
+    app = FastAPI()
+    app.include_router(build_messaging_router())
+
+    responses = app.openapi()["paths"]["/notifications"]["get"]["responses"]
+
+    assert responses["422"]["content"] == {
+        "application/problem+json": {
+            "schema": {
+                "additionalProperties": True,
+                "properties": {
+                    "type": {"type": "string"},
+                    "title": {"type": "string"},
+                    "status": {"type": "integer"},
+                    "detail": {"type": "string"},
+                    "instance": {"type": "string"},
+                    "errors": {"items": {"type": "object"}, "type": "array"},
+                },
+                "required": ["type", "title", "status", "instance"],
+                "type": "object",
+            }
+        }
+    }
+
+
 def test_native_push_registration_requires_workspace_context() -> None:
     app = FastAPI()
 

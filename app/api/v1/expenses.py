@@ -121,6 +121,7 @@ from app.api.pagination import (
     decode_cursor,
     encode_cursor,
 )
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.config import Settings, get_settings
 from app.domain.expenses import (
     ApprovalEdits,
@@ -182,7 +183,7 @@ from app.util.ulid import new_ulid
 __all__ = ["ExpenseClaimPayload", "make_seam_pair", "router"]
 
 
-router = APIRouter(tags=["expenses"])
+router = APIRouter(tags=["expenses"], responses=IDENTITY_PROBLEM_RESPONSES)
 
 
 def _optional_llm(request: Request) -> LLMClient | None:

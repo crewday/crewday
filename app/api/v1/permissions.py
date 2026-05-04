@@ -329,7 +329,7 @@ def build_permissions_router() -> APIRouter:
     """Return a fresh :class:`APIRouter` wired for permission introspection."""
     api = APIRouter(
         prefix="/permissions",
-        tags=["identity", "permissions"],
+        tags=["identity", "authz", "permissions"],
         responses=IDENTITY_PROBLEM_RESPONSES,
     )
 

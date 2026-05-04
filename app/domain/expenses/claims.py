@@ -182,6 +182,8 @@ ExpenseCategory = Literal[
 ]
 ReceiptKind = Literal["receipt", "invoice", "other"]
 
+_CURRENCY_SCHEMA_EXTRA = {"enum": sorted(ISO_4217_ALLOWLIST)}
+
 
 # Local mirrors of the adapter-side ``_STATE_VALUES`` /
 # ``_CATEGORY_VALUES`` / ``_ATTACHMENT_KIND_VALUES`` tuples. The seam
@@ -401,7 +403,11 @@ class ExpenseClaimCreate(BaseModel):
     work_engagement_id: str = Field(min_length=1, max_length=_MAX_ID_LEN)
     vendor: str = Field(min_length=1, max_length=_MAX_VENDOR_LEN)
     purchased_at: datetime
-    currency: str = Field(min_length=3, max_length=3)
+    currency: str = Field(
+        min_length=3,
+        max_length=3,
+        json_schema_extra=_CURRENCY_SCHEMA_EXTRA,
+    )
     # Strictly positive — a zero-cents claim is nonsensical (the
     # worker is asking for nothing) and a negative one is impossible.
     # The DB CHECK is ``>= 0`` (it has to admit zero rows produced by
@@ -448,7 +454,12 @@ class ExpenseClaimUpdate(BaseModel):
     work_engagement_id: str | None = Field(default=None, max_length=_MAX_ID_LEN)
     vendor: str | None = Field(default=None, max_length=_MAX_VENDOR_LEN)
     purchased_at: datetime | None = None
-    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    currency: str | None = Field(
+        default=None,
+        min_length=3,
+        max_length=3,
+        json_schema_extra=_CURRENCY_SCHEMA_EXTRA,
+    )
     # Strictly positive on edits too — same rationale as
     # :class:`ExpenseClaimCreate`. A worker who tries to PATCH the
     # amount to zero is presumably trying to cancel; the cancel path

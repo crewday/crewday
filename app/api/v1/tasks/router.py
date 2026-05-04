@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, status
 
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+
 from .comments import router as comments_router
 from .evidence import router as evidence_router
 from .nl import router as nl_router
@@ -31,7 +33,19 @@ from .payloads import TaskListResponse, TaskPayload
 from .schedules import router as schedules_router
 from .templates import router as templates_router
 
-router = APIRouter(tags=["tasks"])
+TASK_PROBLEM_RESPONSES = {
+    **IDENTITY_PROBLEM_RESPONSES,
+    402: {
+        "description": "LLM budget exhausted",
+        "content": IDENTITY_PROBLEM_RESPONSES[422]["content"],
+    },
+    503: {
+        "description": "Service unavailable",
+        "content": IDENTITY_PROBLEM_RESPONSES[422]["content"],
+    },
+}
+
+router = APIRouter(tags=["tasks"], responses=TASK_PROBLEM_RESPONSES)
 
 # List / create at the bare ``/w/<slug>/api/v1/tasks`` path. Using
 # ``path=""`` only works when the route is attached directly to the
