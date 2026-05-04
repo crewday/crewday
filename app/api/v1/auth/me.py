@@ -17,13 +17,9 @@ map their grant as ``manager`` in the response (the governance
 anchor is already encoded by the ``manager`` surface, per §03 —
 ``owner`` is no longer a grant-role value in v1).
 
-**Defaults on absent columns.** The v1 :class:`Workspace` row does
-not yet carry ``timezone`` / ``default_currency`` / ``default_country``
-/ ``default_locale`` (cd-n6p adds them). Until then we emit sensible
-defaults so the SPA's typed ``Workspace`` contract is honoured
-without a brittle ``null`` field. This is documented as a known
-drift on cd-h2t0; the defaults match the deployment's locale bias
-and can be overridden once the columns land.
+Workspace timezone, currency, and locale are persisted on the
+:class:`Workspace` row. The workspace country is still a structured
+setting (``workspace.default_country``) in ``settings_json``.
 
 See ``docs/specs/03-auth-and-tokens.md`` §"Sessions",
 ``docs/specs/14-web-frontend.md`` §"Workspace selector", and
@@ -74,15 +70,6 @@ __all__ = [
 _log = logging.getLogger(__name__)
 
 _Db = Annotated[Session, Depends(db_session)]
-
-
-# Defaults used until the v1 workspace row carries the real columns
-# (cd-n6p). Kept here rather than in settings because they are
-# serialisation defaults, not deploy-tunable policy.
-_DEFAULT_TIMEZONE: str = "UTC"
-_DEFAULT_CURRENCY: str = "EUR"
-_DEFAULT_COUNTRY: str = "FR"
-_DEFAULT_LOCALE: str = "en"
 
 
 class WorkspaceSummary(BaseModel):
@@ -358,10 +345,10 @@ def _load_available_workspaces(
                 workspace=WorkspaceSummary(
                     id=workspace.slug,
                     name=workspace.name,
-                    timezone=_DEFAULT_TIMEZONE,
-                    default_currency=_DEFAULT_CURRENCY,
-                    default_country=_DEFAULT_COUNTRY,
-                    default_locale=_DEFAULT_LOCALE,
+                    timezone=workspace.default_timezone,
+                    default_currency=workspace.default_currency,
+                    default_country=_workspace_default_country(workspace),
+                    default_locale=workspace.default_locale,
                 ),
                 grant_role=role,
                 binding_org_id=grant.binding_org_id,
@@ -369,6 +356,13 @@ def _load_available_workspaces(
             )
         )
     return out
+
+
+def _workspace_default_country(workspace: Workspace) -> str:
+    value = workspace.settings_json.get("workspace.default_country")
+    if isinstance(value, str) and value:
+        return value
+    return "XX"
 
 
 def _client_binding_org_ids(

@@ -15,10 +15,10 @@ Coverage:
   ``available_workspaces`` / ``current_workspace_id`` /
   ``is_deployment_admin`` matching the seeded user, and the keys
   + JSON types match the TS contract.
-* **Workspace defaults.** Until cd-n6p adds the columns, the
-  ``WorkspaceSummary`` ``timezone`` / ``default_currency`` /
-  ``default_country`` / ``default_locale`` carry the spec-pinned
-  defaults (``UTC`` / ``EUR`` / ``FR`` / ``en``).
+* **Workspace summary defaults.** The ``WorkspaceSummary`` ``timezone``
+  / ``default_currency`` / ``default_country`` / ``default_locale``
+  fields round-trip the persisted workspace defaults consumed by the
+  SPA bootstrap.
 * **Deployment-admin flag.** A user with a deployment-scope role
   grant flips ``is_deployment_admin`` to ``True``.
 * **401 absent cookie.** ``error == 'session_required'``.
@@ -75,6 +75,7 @@ _TEST_ACCEPT_LANGUAGE: str = "en"
 _SEED_EMAILS: tuple[str, ...] = (
     "happy@example.com",
     "defaults@example.com",
+    "country-missing@example.com",
     "admin@example.com",
     "expired@example.com",
     "revoked@example.com",
@@ -82,6 +83,7 @@ _SEED_EMAILS: tuple[str, ...] = (
 _SEED_SLUGS: tuple[str, ...] = (
     "ws-happy",
     "ws-defaults",
+    "ws-country-missing",
     "ws-admin",
     "ws-expired",
     "ws-revoked",
@@ -272,6 +274,10 @@ def _seed_owner_workspace(
     display_name: str,
     slug: str,
     name: str,
+    default_timezone: str = "UTC",
+    default_currency: str = "USD",
+    default_country: str = "XX",
+    default_locale: str = "en",
 ) -> tuple[str, str]:
     """Seed a workspace + owner user; return ``(user_id, workspace_slug)``."""
     with session_factory() as s:
@@ -282,6 +288,10 @@ def _seed_owner_workspace(
             name=name,
             owner_user_id=user.id,
         )
+        ws.default_timezone = default_timezone
+        ws.default_currency = default_currency
+        ws.default_locale = default_locale
+        ws.settings_json = {"workspace.default_country": default_country}
         s.commit()
         return user.id, ws.slug
 
@@ -419,16 +429,17 @@ class TestAuthMeHappyPath:
         session_factory: sessionmaker[Session],
         settings: Settings,
     ) -> None:
-        """Until cd-n6p adds the columns, the timezone / currency /
-        country / locale fields carry the module-level defaults so the
-        SPA's typed contract is honoured without a brittle ``null``.
-        """
+        """Workspace locale defaults round-trip from persisted workspace values."""
         user_id, _slug = _seed_owner_workspace(
             session_factory,
             email="defaults@example.com",
             display_name="Defaults",
             slug="ws-defaults",
             name="Defaults",
+            default_timezone="Asia/Tokyo",
+            default_currency="JPY",
+            default_country="JP",
+            default_locale="ja-JP",
         )
         cookie = _issue_cookie(session_factory, user_id=user_id, settings=settings)
         client.cookies.set(SESSION_COOKIE_NAME, cookie)
@@ -436,11 +447,45 @@ class TestAuthMeHappyPath:
         r = client.get("/api/v1/auth/me")
         assert r.status_code == 200, r.text
         ws = r.json()["available_workspaces"][0]["workspace"]
-        # Pinned to the constants at the top of ``app/api/v1/auth/me.py``.
-        assert ws["timezone"] == "UTC"
+        assert ws["timezone"] == "Asia/Tokyo"
+        assert ws["default_currency"] == "JPY"
+        assert ws["default_country"] == "JP"
+        assert ws["default_locale"] == "ja-JP"
+
+    def test_workspace_summary_country_falls_back_when_setting_absent(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        """Workspace country follows the settings-json fallback used by settings."""
+        user_id, slug = _seed_owner_workspace(
+            session_factory,
+            email="country-missing@example.com",
+            display_name="Country Missing",
+            slug="ws-country-missing",
+            name="Country Missing",
+            default_timezone="Europe/Paris",
+            default_currency="EUR",
+            default_country="FR",
+            default_locale="fr",
+        )
+        with session_factory() as s:
+            ws = s.scalar(select(Workspace).where(Workspace.slug == slug))
+            assert ws is not None
+            ws.settings_json = {}
+            s.commit()
+
+        cookie = _issue_cookie(session_factory, user_id=user_id, settings=settings)
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+        r = client.get("/api/v1/auth/me")
+        assert r.status_code == 200, r.text
+        ws = r.json()["available_workspaces"][0]["workspace"]
+        assert ws["timezone"] == "Europe/Paris"
         assert ws["default_currency"] == "EUR"
-        assert ws["default_country"] == "FR"
-        assert ws["default_locale"] == "en"
+        assert ws["default_country"] == "XX"
+        assert ws["default_locale"] == "fr"
 
 
 class TestAuthMeDeploymentAdmin:
