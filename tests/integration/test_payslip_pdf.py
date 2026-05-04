@@ -20,6 +20,7 @@ from app.adapters.db.payroll.models import PayPeriod, PayRule, Payslip
 from app.adapters.db.payroll.repositories import SqlAlchemyPayslipPdfRepository
 from app.adapters.storage.ports import Blob
 from app.api.deps import current_workspace_context, db_session, get_storage
+from app.api.errors import add_exception_handlers
 from app.api.v1.payroll import build_payroll_router
 from app.domain.payroll import pdf as payslip_pdf
 from app.domain.payroll.pdf import render_payslip
@@ -263,6 +264,7 @@ def _client_for(
     storage: InMemoryStorage,
 ) -> TestClient:
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(build_payroll_router(), prefix="/api/v1/payroll")
 
     def _session() -> Iterator[Session]:

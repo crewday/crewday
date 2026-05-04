@@ -50,6 +50,7 @@ from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.time.models import Shift
 from app.adapters.db.workspace.models import Workspace
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.time import router as time_router
 from app.events import ShiftChanged, bus
 from app.tenancy.context import ActorGrantRole, WorkspaceContext
@@ -181,6 +182,7 @@ def _build_app(
 ) -> FastAPI:
     """Mount :data:`time_router` behind pinned ctx + db overrides."""
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(time_router)
 
     def _override_ctx() -> WorkspaceContext:
@@ -195,6 +197,23 @@ def _build_app(
     app.dependency_overrides[current_workspace_context] = _override_ctx
     app.dependency_overrides[db_session] = _override_db
     return app
+
+
+def _assert_problem(
+    resp: Any,
+    *,
+    status_code: int,
+    type_name: str,
+    error: str,
+) -> dict[str, Any]:
+    assert resp.status_code == status_code, resp.text
+    assert resp.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    body = resp.json()
+    assert body["type"] == f"https://crewday.dev/errors/{type_name}"
+    assert body["status"] == status_code
+    assert body["instance"] == resp.request.url.path
+    assert body["error"] == error
+    return body
 
 
 @pytest.fixture
@@ -273,10 +292,10 @@ class TestOpenShift:
         first = client.post("/shifts/open", json={})
         assert first.status_code == 201
         second = client.post("/shifts/open", json={})
-        assert second.status_code == 409, second.text
-        detail = second.json()["detail"]
-        assert detail["error"] == "already_open"
-        assert detail["existing_shift_id"] == first.json()["id"]
+        body = _assert_problem(
+            second, status_code=409, type_name="conflict", error="already_open"
+        )
+        assert body["existing_shift_id"] == first.json()["id"]
 
     def test_open_rejects_boolean_gps_accuracy(
         self,
@@ -302,8 +321,7 @@ class TestOpenShift:
             )
             s.commit()
         resp = client.post("/shifts/open", json={"user_id": other_id})
-        assert resp.status_code == 403, resp.text
-        assert resp.json()["detail"]["error"] == "forbidden"
+        _assert_problem(resp, status_code=403, type_name="forbidden", error="forbidden")
 
     def test_manager_opens_shift_for_worker(
         self,
@@ -383,8 +401,7 @@ class TestCloseShift:
     ) -> None:
         client, *_ = worker_client
         resp = client.post("/shifts/nope/close", json={})
-        assert resp.status_code == 404, resp.text
-        assert resp.json()["detail"]["error"] == "not_found"
+        _assert_problem(resp, status_code=404, type_name="not_found", error="not_found")
 
     def test_close_with_invalid_window_422(
         self,
@@ -402,8 +419,10 @@ class TestCloseShift:
             f"/shifts/{opened['id']}/close",
             json={"ends_at": way_earlier},
         )
-        assert resp.status_code == 422, resp.text
-        assert resp.json()["detail"]["error"] == "invalid_window"
+        body = _assert_problem(
+            resp, status_code=422, type_name="validation", error="invalid_window"
+        )
+        assert body["detail"]
 
     def test_worker_cannot_close_another_users_shift(
         self,
@@ -424,8 +443,7 @@ class TestCloseShift:
         client_b = TestClient(_build_app(factory, ctx_b), raise_server_exceptions=False)
         opened = client_a.post("/shifts/open", json={}).json()
         resp = client_b.post(f"/shifts/{opened['id']}/close", json={})
-        assert resp.status_code == 403, resp.text
-        assert resp.json()["detail"]["error"] == "forbidden"
+        _assert_problem(resp, status_code=403, type_name="forbidden", error="forbidden")
 
     def test_manager_can_close_workers_shift(
         self,
@@ -481,8 +499,7 @@ class TestEditShift:
         client, *_ = worker_client
         opened = client.post("/shifts/open", json={}).json()
         resp = client.patch(f"/shifts/{opened['id']}", json={"notes_md": "bump"})
-        assert resp.status_code == 403, resp.text
-        assert resp.json()["detail"]["error"] == "forbidden"
+        _assert_problem(resp, status_code=403, type_name="forbidden", error="forbidden")
 
     def test_manager_edit_200(
         self,
@@ -508,8 +525,10 @@ class TestEditShift:
             f"/shifts/{opened['id']}",
             json={"ends_at": opened["starts_at"]},
         )
-        assert resp.status_code == 422, resp.text
-        assert resp.json()["detail"]["error"] == "invalid_window"
+        body = _assert_problem(
+            resp, status_code=422, type_name="validation", error="invalid_window"
+        )
+        assert body["detail"]
 
     def test_edit_missing_404(
         self,
@@ -644,8 +663,7 @@ class TestListShifts:
     ) -> None:
         client, *_ = worker_client
         resp = client.get("/shifts/no-such")
-        assert resp.status_code == 404
-        assert resp.json()["detail"]["error"] == "not_found"
+        _assert_problem(resp, status_code=404, type_name="not_found", error="not_found")
 
 
 # ---------------------------------------------------------------------------

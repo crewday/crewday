@@ -47,7 +47,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
+from fastapi import APIRouter, Depends, Path, Query, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
@@ -74,6 +74,14 @@ from app.audit import write_audit
 from app.authz import require
 from app.authz.dep import Permission
 from app.authz.enforce import PermissionDenied
+from app.domain.errors import (
+    Conflict,
+    Forbidden,
+    Gone,
+    InvalidCursor,
+    NotFound,
+    Validation,
+)
 from app.domain.payroll.compute import (
     PayslipComputeConflict,
     PayslipInvariantViolated,
@@ -129,8 +137,8 @@ from app.domain.privacy import payout_manifest_available
 from app.events import bus as default_event_bus
 from app.events.types import ExpenseReimbursed, PayrollExportReady
 from app.tenancy import WorkspaceContext
-from app.util.currency import ISO_4217_ALLOWLIST
 from app.util.clock import SystemClock
+from app.util.currency import ISO_4217_ALLOWLIST
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -451,66 +459,60 @@ def _request_to_update(body: PayRuleUpdateRequest) -> PayRuleUpdate:
     return PayRuleUpdate.model_validate(body.model_dump())
 
 
-def _http_for_invariant(exc: PayRuleInvariantViolated) -> HTTPException:
-    return HTTPException(
-        status_code=422,
-        detail={"error": "pay_rule_invariant", "message": str(exc)},
+def _validation_error(symbol: str, message: str) -> Validation:
+    return Validation(
+        message,
+        extra={"error": symbol, "message": message},
     )
 
 
-def _http_for_locked(exc: PayRuleLocked) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail={"error": "pay_rule_locked", "message": str(exc)},
+def _conflict_error(symbol: str, message: str) -> Conflict:
+    return Conflict(
+        message,
+        extra={"error": symbol, "message": message},
     )
 
 
-def _http_for_not_found() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"error": "pay_rule_not_found"},
-    )
+def _not_found_error(symbol: str, message: str | None = None) -> NotFound:
+    return NotFound(message, extra={"error": symbol})
 
 
-def _http_for_period_not_found() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"error": "pay_period_not_found"},
-    )
+def _error_for_invariant(exc: PayRuleInvariantViolated) -> Validation:
+    return _validation_error("pay_rule_invariant", str(exc))
 
 
-def _http_for_period_invariant(exc: Exception) -> HTTPException:
+def _error_for_locked(exc: PayRuleLocked) -> Conflict:
+    return _conflict_error("pay_rule_locked", str(exc))
+
+
+def _error_for_not_found() -> NotFound:
+    return _not_found_error("pay_rule_not_found")
+
+
+def _error_for_period_not_found() -> NotFound:
+    return _not_found_error("pay_period_not_found")
+
+
+def _error_for_period_invariant(exc: Exception) -> Validation:
     message = str(exc)
     error = (
         "bookings_unsettled"
         if message.startswith("bookings_unsettled")
         else "pay_period_invariant"
     )
-    return HTTPException(
-        status_code=422,
-        detail={"error": error, "message": message},
-    )
+    return _validation_error(error, message)
 
 
-def _http_for_period_conflict(exc: Exception) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail={"error": "pay_period_transition_conflict", "message": str(exc)},
-    )
+def _error_for_period_conflict(exc: Exception) -> Conflict:
+    return _conflict_error("pay_period_transition_conflict", str(exc))
 
 
-def _http_for_payslip_not_found() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"error": "payslip_not_found"},
-    )
+def _error_for_payslip_not_found() -> NotFound:
+    return _not_found_error("payslip_not_found")
 
 
-def _http_for_payslip_conflict(message: str) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail={"error": "payslip_transition_conflict", "message": message},
-    )
+def _error_for_payslip_conflict(message: str) -> Conflict:
+    return _conflict_error("payslip_transition_conflict", message)
 
 
 def _payout_snapshot_for(row: PayslipReadRow) -> dict[str, object]:
@@ -584,9 +586,9 @@ def _require_workspace_permission(
             scope_id=ctx.workspace_id,
         )
     except PermissionDenied as exc:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "permission_denied", "action_key": action_key},
+        raise Forbidden(
+            "permission denied",
+            extra={"error": "permission_denied", "action_key": action_key},
         ) from exc
 
 
@@ -691,9 +693,10 @@ def build_payroll_router() -> APIRouter:
             # doesn't carry the ``"<isoformat>|<id>"`` shape. Map
             # to 422 so the surface mirrors :func:`decode_cursor`'s
             # ``invalid_cursor`` error envelope.
-            raise HTTPException(
-                status_code=422,
-                detail={"error": "invalid_cursor", "message": str(exc)},
+            message = str(exc)
+            raise InvalidCursor(
+                message,
+                extra={"error": "invalid_cursor", "message": message},
             ) from exc
         page = paginate(
             views,
@@ -734,7 +737,7 @@ def build_payroll_router() -> APIRouter:
                 body=_request_to_create(body),
             )
         except PayRuleInvariantViolated as exc:
-            raise _http_for_invariant(exc) from exc
+            raise _error_for_invariant(exc) from exc
         return _view_to_response(view)
 
     @api.get(
@@ -756,7 +759,7 @@ def build_payroll_router() -> APIRouter:
                 rule_id=rule_id,
             )
         except PayRuleNotFound as exc:
-            raise _http_for_not_found() from exc
+            raise _error_for_not_found() from exc
         return _view_to_response(view)
 
     @api.patch(
@@ -787,11 +790,11 @@ def build_payroll_router() -> APIRouter:
                 body=_request_to_update(body),
             )
         except PayRuleNotFound as exc:
-            raise _http_for_not_found() from exc
+            raise _error_for_not_found() from exc
         except PayRuleLocked as exc:
-            raise _http_for_locked(exc) from exc
+            raise _error_for_locked(exc) from exc
         except PayRuleInvariantViolated as exc:
-            raise _http_for_invariant(exc) from exc
+            raise _error_for_invariant(exc) from exc
         return _view_to_response(view)
 
     @api.delete(
@@ -820,9 +823,9 @@ def build_payroll_router() -> APIRouter:
                 rule_id=rule_id,
             )
         except PayRuleNotFound as exc:
-            raise _http_for_not_found() from exc
+            raise _error_for_not_found() from exc
         except PayRuleLocked as exc:
-            raise _http_for_locked(exc) from exc
+            raise _error_for_locked(exc) from exc
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @api.get(
@@ -860,7 +863,7 @@ def build_payroll_router() -> APIRouter:
                 ends_at=body.ends_at,
             )
         except PayPeriodInvariantViolated as exc:
-            raise _http_for_period_invariant(exc) from exc
+            raise _error_for_period_invariant(exc) from exc
         return _period_to_response(view)
 
     @api.get(
@@ -882,7 +885,7 @@ def build_payroll_router() -> APIRouter:
                 period_id=period_id,
             )
         except DomainPayPeriodNotFound as exc:
-            raise _http_for_period_not_found() from exc
+            raise _error_for_period_not_found() from exc
         return _period_to_response(view)
 
     @api.patch(
@@ -907,11 +910,11 @@ def build_payroll_router() -> APIRouter:
                 ends_at=body.ends_at,
             )
         except DomainPayPeriodNotFound as exc:
-            raise _http_for_period_not_found() from exc
+            raise _error_for_period_not_found() from exc
         except PayPeriodInvariantViolated as exc:
-            raise _http_for_period_invariant(exc) from exc
+            raise _error_for_period_invariant(exc) from exc
         except PayPeriodTransitionConflict as exc:
-            raise _http_for_period_conflict(exc) from exc
+            raise _error_for_period_conflict(exc) from exc
         return _period_to_response(view)
 
     @api.delete(
@@ -933,9 +936,9 @@ def build_payroll_router() -> APIRouter:
                 period_id=period_id,
             )
         except DomainPayPeriodNotFound as exc:
-            raise _http_for_period_not_found() from exc
+            raise _error_for_period_not_found() from exc
         except PayPeriodTransitionConflict as exc:
-            raise _http_for_period_conflict(exc) from exc
+            raise _error_for_period_conflict(exc) from exc
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @api.post(
@@ -953,7 +956,7 @@ def build_payroll_router() -> APIRouter:
         repo = SqlAlchemyPayPeriodRepository(session)
         row = repo.get(workspace_id=ctx.workspace_id, period_id=period_id)
         if row is None:
-            raise _http_for_period_not_found()
+            raise _error_for_period_not_found()
         if row.state == "locked":
             return _period_to_response(get_period(repo, ctx, period_id=period_id))
         try:
@@ -967,16 +970,13 @@ def build_payroll_router() -> APIRouter:
                 ),
             )
         except DomainPayPeriodNotFound as exc:
-            raise _http_for_period_not_found() from exc
+            raise _error_for_period_not_found() from exc
         except PayPeriodInvariantViolated as exc:
-            raise _http_for_period_invariant(exc) from exc
+            raise _error_for_period_invariant(exc) from exc
         except PayPeriodTransitionConflict as exc:
-            raise _http_for_period_conflict(exc) from exc
+            raise _error_for_period_conflict(exc) from exc
         except (PayslipInvariantViolated, PayslipComputeConflict) as exc:
-            raise HTTPException(
-                status_code=422,
-                detail={"error": "payslip_compute_failed", "message": str(exc)},
-            ) from exc
+            raise _validation_error("payslip_compute_failed", str(exc)) from exc
         return _period_to_response(view)
 
     @api.post(
@@ -998,9 +998,9 @@ def build_payroll_router() -> APIRouter:
                 period_id=period_id,
             )
         except DomainPayPeriodNotFound as exc:
-            raise _http_for_period_not_found() from exc
+            raise _error_for_period_not_found() from exc
         except PayPeriodTransitionConflict as exc:
-            raise _http_for_period_conflict(exc) from exc
+            raise _error_for_period_conflict(exc) from exc
         return _period_to_response(view)
 
     @api.post(
@@ -1018,7 +1018,7 @@ def build_payroll_router() -> APIRouter:
     ) -> PayrollExportJobResponse:
         repo = SqlAlchemyPayPeriodRepository(session)
         if repo.get(workspace_id=ctx.workspace_id, period_id=period_id) is None:
-            raise _http_for_period_not_found()
+            raise _error_for_period_not_found()
         clock = SystemClock()
         now = clock.now()
         job_id = new_ulid(clock=clock)
@@ -1104,7 +1104,7 @@ def build_payroll_router() -> APIRouter:
             payslip_id=payslip_id,
         )
         if row is None:
-            raise _http_for_payslip_not_found()
+            raise _error_for_payslip_not_found()
         if row.user_id != ctx.actor_id:
             _require_workspace_permission(
                 session,
@@ -1130,7 +1130,7 @@ def build_payroll_router() -> APIRouter:
             payslip_id=payslip_id,
         )
         if row is None:
-            raise _http_for_payslip_not_found()
+            raise _error_for_payslip_not_found()
         if row.user_id != ctx.actor_id:
             _require_workspace_permission(
                 session,
@@ -1146,12 +1146,9 @@ def build_payroll_router() -> APIRouter:
             )
             blob = storage.get(rendered.content_hash)
         except PayslipPdfNotFound as exc:
-            raise _http_for_payslip_not_found() from exc
+            raise _error_for_payslip_not_found() from exc
         except BlobNotFound as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "payslip_pdf_blob_not_found"},
-            ) from exc
+            raise _not_found_error("payslip_pdf_blob_not_found") from exc
         return StreamingResponse(
             blob,
             media_type="application/pdf",
@@ -1181,7 +1178,7 @@ def build_payroll_router() -> APIRouter:
             payslip_id=payslip_id,
         )
         if row is None:
-            raise _http_for_payslip_not_found()
+            raise _error_for_payslip_not_found()
         if row.user_id != ctx.actor_id:
             _require_workspace_permission(
                 session,
@@ -1203,7 +1200,7 @@ def build_payroll_router() -> APIRouter:
                 force=force,
             )
         except PayslipPdfNotFound as exc:
-            raise _http_for_payslip_not_found() from exc
+            raise _error_for_payslip_not_found() from exc
         return _payslip_pdf_to_response(rendered)
 
     @api.post(
@@ -1221,9 +1218,9 @@ def build_payroll_router() -> APIRouter:
         repo = SqlAlchemyPayslipReadRepository(session)
         row = repo.get_payslip(workspace_id=ctx.workspace_id, payslip_id=payslip_id)
         if row is None:
-            raise _http_for_payslip_not_found()
+            raise _error_for_payslip_not_found()
         if row.status == "voided":
-            raise _http_for_payslip_conflict("voided payslips cannot be issued")
+            raise _error_for_payslip_conflict("voided payslips cannot be issued")
         if row.status in {"issued", "paid"}:
             return _payslip_to_response(row)
 
@@ -1266,13 +1263,13 @@ def build_payroll_router() -> APIRouter:
             payslip_id=payslip_id,
         )
         if row is None:
-            raise _http_for_payslip_not_found()
+            raise _error_for_payslip_not_found()
         if row.status == "paid":
             return _payslip_to_response(row)
         if row.status == "voided":
-            raise _http_for_payslip_conflict("voided payslips cannot be paid")
+            raise _error_for_payslip_conflict("voided payslips cannot be paid")
         if row.status != "issued":
-            raise _http_for_payslip_conflict("only issued payslips can be paid")
+            raise _error_for_payslip_conflict("only issued payslips can be paid")
 
         period_repo = SqlAlchemyPayPeriodRepository(session)
         period = period_repo.get(
@@ -1280,7 +1277,7 @@ def build_payroll_router() -> APIRouter:
             period_id=row.pay_period_id,
         )
         if period is None:
-            raise _http_for_payslip_conflict(
+            raise _error_for_payslip_conflict(
                 "payslip pay period not found for reimbursement settlement"
             )
 
@@ -1379,9 +1376,9 @@ def build_payroll_router() -> APIRouter:
         repo = SqlAlchemyPayslipReadRepository(session)
         row = repo.get_payslip(workspace_id=ctx.workspace_id, payslip_id=payslip_id)
         if row is None:
-            raise _http_for_payslip_not_found()
+            raise _error_for_payslip_not_found()
         if row.status == "paid":
-            raise _http_for_payslip_conflict("paid payslips cannot be voided")
+            raise _error_for_payslip_conflict("paid payslips cannot be voided")
         if row.status == "voided":
             return _payslip_to_response(row)
 
@@ -1464,20 +1461,13 @@ def build_payroll_router() -> APIRouter:
                     status_filter=status_filter,
                 )
         except ExportWindowInvalid as exc:
-            raise HTTPException(
-                status_code=422,
-                detail={"error": "invalid_export_window", "message": str(exc)},
-            ) from exc
+            raise _validation_error("invalid_export_window", str(exc)) from exc
         except PayPeriodNotFound as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "pay_period_not_found", "period_id": str(exc)},
+            raise NotFound(
+                extra={"error": "pay_period_not_found", "period_id": str(exc)}
             ) from exc
         except ExpenseStatusInvalid as exc:
-            raise HTTPException(
-                status_code=422,
-                detail={"error": "invalid_expense_status", "message": str(exc)},
-            ) from exc
+            raise _validation_error("invalid_expense_status", str(exc)) from exc
 
         return StreamingResponse(
             stream_csv_with_audit(export, repo, ctx, include_bom=bom),
@@ -1511,10 +1501,7 @@ def build_payroll_router() -> APIRouter:
             payslip_id=payslip_id,
             workspace_id=ctx.workspace_id,
         ):
-            raise HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail={"error": "payout_manifest_purged"},
-            )
+            raise Gone(extra={"error": "payout_manifest_purged"})
         return PayoutManifestResponse(payslip_id=payslip_id, status="available")
 
     return api

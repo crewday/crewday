@@ -52,6 +52,7 @@ from app.adapters.db.tasks.models import Occurrence
 from app.adapters.db.time.models import Leave, Shift
 from app.adapters.db.workspace.models import Workspace
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.time import router as time_router
 from app.events.bus import bus as default_event_bus
 from app.events.types import LeaveDecided
@@ -187,6 +188,7 @@ def _build_app(
 ) -> FastAPI:
     """Mount :data:`time_router` behind pinned ctx + db overrides."""
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(time_router)
 
     def _override_ctx() -> WorkspaceContext:
@@ -201,6 +203,23 @@ def _build_app(
     app.dependency_overrides[current_workspace_context] = _override_ctx
     app.dependency_overrides[db_session] = _override_db
     return app
+
+
+def _assert_problem(
+    resp: Any,
+    *,
+    status_code: int,
+    type_name: str,
+    error: str,
+) -> dict[str, Any]:
+    assert resp.status_code == status_code, resp.text
+    assert resp.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    body = resp.json()
+    assert body["type"] == f"https://crewday.dev/errors/{type_name}"
+    assert body["status"] == status_code
+    assert body["instance"] == resp.request.url.path
+    assert body["error"] == error
+    return body
 
 
 @pytest.fixture
@@ -556,8 +575,7 @@ class TestUpdateMyLeave:
                 "ends_at": _FUTURE_END.isoformat(),
             },
         )
-        assert resp.status_code == 404, resp.text
-        assert resp.json()["detail"]["error"] == "not_found"
+        _assert_problem(resp, status_code=404, type_name="not_found", error="not_found")
 
     def test_update_non_pending_409(
         self,
@@ -576,8 +594,10 @@ class TestUpdateMyLeave:
                 "ends_at": (_FUTURE_END + timedelta(days=2)).isoformat(),
             },
         )
-        assert resp.status_code == 409, resp.text
-        assert resp.json()["detail"]["error"] == "invalid_transition"
+        body = _assert_problem(
+            resp, status_code=409, type_name="conflict", error="invalid_transition"
+        )
+        assert body["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -612,8 +632,10 @@ class TestCancelMyLeave:
         created = client.post("/me/leaves", json=_leave_body()).json()
         client.delete(f"/me/leaves/{created['id']}")
         resp = client.delete(f"/me/leaves/{created['id']}")
-        assert resp.status_code == 409, resp.text
-        assert resp.json()["detail"]["error"] == "invalid_transition"
+        body = _assert_problem(
+            resp, status_code=409, type_name="conflict", error="invalid_transition"
+        )
+        assert body["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -657,8 +679,7 @@ class TestListWorkspaceLeaves:
         workspace-wide queue and must be rejected."""
         client, *_ = worker_client
         resp = client.get("/leaves")
-        assert resp.status_code == 403, resp.text
-        assert resp.json()["detail"]["error"] == "forbidden"
+        _assert_problem(resp, status_code=403, type_name="forbidden", error="forbidden")
 
     def test_worker_gets_403_on_cross_user_filter(
         self,
@@ -676,8 +697,7 @@ class TestListWorkspaceLeaves:
         client_a = TestClient(_build_app(factory, ctx_a), raise_server_exceptions=False)
 
         resp = client_a.get("/leaves", params={"user_id": b_id})
-        assert resp.status_code == 403, resp.text
-        assert resp.json()["detail"]["error"] == "forbidden"
+        _assert_problem(resp, status_code=403, type_name="forbidden", error="forbidden")
 
     def test_worker_can_read_own_via_list_leaves(
         self,
@@ -930,8 +950,7 @@ class TestMeScope:
                 "ends_at": (_FUTURE_END + timedelta(days=3)).isoformat(),
             },
         )
-        assert resp.status_code == 404, resp.text
-        assert resp.json()["detail"]["error"] == "not_found"
+        _assert_problem(resp, status_code=404, type_name="not_found", error="not_found")
 
     def test_manager_me_delete_on_worker_leave_is_404(
         self,
@@ -955,8 +974,7 @@ class TestMeScope:
         created = client_worker.post("/me/leaves", json=_leave_body()).json()
 
         resp = client_mgr.delete(f"/me/leaves/{created['id']}")
-        assert resp.status_code == 404, resp.text
-        assert resp.json()["detail"]["error"] == "not_found"
+        _assert_problem(resp, status_code=404, type_name="not_found", error="not_found")
 
         # But the manager can use the cross-user URL and succeed.
         ok = client_mgr.delete(f"/leaves/{created['id']}")

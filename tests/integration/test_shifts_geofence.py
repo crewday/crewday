@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
@@ -20,6 +21,7 @@ from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.time.models import GeofenceSetting, Shift
 from app.adapters.db.workspace.models import Workspace
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.time import router as time_router
 from app.events import ShiftGeofenceWarning, bus
 from app.tenancy.context import ActorGrantRole, WorkspaceContext
@@ -164,6 +166,7 @@ def _build_app(
     ctx: WorkspaceContext,
 ) -> FastAPI:
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(time_router)
 
     def _override_ctx() -> WorkspaceContext:
@@ -178,6 +181,23 @@ def _build_app(
     app.dependency_overrides[current_workspace_context] = _override_ctx
     app.dependency_overrides[db_session] = _override_db
     return app
+
+
+def _assert_problem(
+    resp: Any,
+    *,
+    status_code: int,
+    type_name: str,
+    error: str,
+) -> dict[str, object]:
+    assert resp.status_code == status_code, resp.text
+    assert resp.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    body = resp.json()
+    assert body["type"] == f"https://crewday.dev/errors/{type_name}"
+    assert body["status"] == status_code
+    assert body["instance"] == resp.request.url.path
+    assert body["error"] == error
+    return body
 
 
 @pytest.fixture
@@ -319,8 +339,7 @@ def test_manager_can_create_update_read_and_delete_geofence_setting(
     assert _geofence_count(factory, ctx.workspace_id) == 0
 
     missing = client.get(f"/properties/{_PROPERTY_ID}/geofence")
-    assert missing.status_code == 404
-    assert missing.json()["detail"]["error"] == "not_found"
+    _assert_problem(missing, status_code=404, type_name="not_found", error="not_found")
     assert _audit_actions(factory, ctx.workspace_id) == [
         "geofence_setting.created",
         "geofence_setting.updated",
@@ -343,8 +362,7 @@ def test_worker_cannot_manage_geofence_setting(
         },
     )
 
-    assert resp.status_code == 403, resp.text
-    assert resp.json()["detail"]["error"] == "forbidden"
+    _assert_problem(resp, status_code=403, type_name="forbidden", error="forbidden")
     assert _geofence_count(factory, ctx.workspace_id) == 0
 
 
@@ -363,8 +381,7 @@ def test_manager_cannot_create_setting_for_unlinked_property(
         },
     )
 
-    assert resp.status_code == 404, resp.text
-    assert resp.json()["detail"]["error"] == "not_found"
+    _assert_problem(resp, status_code=404, type_name="not_found", error="not_found")
     assert _geofence_count(factory, ctx.workspace_id) == 0
 
 
@@ -404,8 +421,12 @@ def test_upserted_geofence_setting_enforces_clock_in(
 
     clock_in = client.post("/shifts/open", json={"property_id": _PROPERTY_ID})
 
-    assert clock_in.status_code == 422, clock_in.text
-    assert clock_in.json()["detail"]["error"] == "geofence_fix_required"
+    _assert_problem(
+        clock_in,
+        status_code=422,
+        type_name="validation",
+        error="geofence_fix_required",
+    )
     assert _shift_count(factory, ctx.workspace_id) == 0
 
 
@@ -445,10 +466,10 @@ def test_out_of_fence_enforce_returns_422_and_audits(
         },
     )
 
-    assert resp.status_code == 422, resp.text
-    detail = resp.json()["detail"]
-    assert detail["error"] == "geofence_outside"
-    assert detail["distance_m"] > detail["radius_m"]
+    body = _assert_problem(
+        resp, status_code=422, type_name="validation", error="geofence_outside"
+    )
+    assert body["distance_m"] > body["radius_m"]
     assert _shift_count(factory, ctx.workspace_id) == 0
     assert _audit_actions(factory, ctx.workspace_id) == ["shift.geofence_rejected"]
 
@@ -506,8 +527,9 @@ def test_missing_fix_enforce_returns_422_and_audits(
 
     resp = client.post("/shifts/open", json={"property_id": _PROPERTY_ID})
 
-    assert resp.status_code == 422, resp.text
-    assert resp.json()["detail"]["error"] == "geofence_fix_required"
+    _assert_problem(
+        resp, status_code=422, type_name="validation", error="geofence_fix_required"
+    )
     assert _shift_count(factory, ctx.workspace_id) == 0
     assert _audit_actions(factory, ctx.workspace_id) == ["shift.geofence_rejected"]
 

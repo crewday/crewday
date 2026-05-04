@@ -43,12 +43,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, Path, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import problem_response
 from app.api.pagination import (
     DEFAULT_LIMIT,
     LimitQuery,
@@ -57,6 +58,14 @@ from app.api.pagination import (
     paginate,
 )
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.domain.errors import (
+    Conflict,
+    DomainError,
+    Forbidden,
+    NotFound,
+    ServiceUnavailable,
+    Validation,
+)
 from app.domain.time.geofence_settings import (
     GeofenceMode,
     GeofenceSettingNotFound,
@@ -284,58 +293,34 @@ _PropertyId = Annotated[str, Path(max_length=40)]
 # ---------------------------------------------------------------------------
 
 
-def _http_for_shift_error(exc: Exception) -> HTTPException:
-    """Map a domain shift error to the router's HTTP response shape.
+def _domain_for_shift_error(exc: Exception) -> DomainError:
+    """Map a domain shift error to the router's problem+json shape.
 
     Keeps the mapping centralised so every route returns the same
-    ``{"error": "<code>"}`` envelope for the same domain type —
-    the SPA / CLI can switch on ``body.detail.error`` without
-    parsing the status code.
+    ``error`` symbol for the same domain type.
     """
     if isinstance(exc, ShiftNotFound):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found"},
-        )
+        return NotFound(extra={"error": "not_found"})
     if isinstance(exc, ShiftAlreadyOpen):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
+        return Conflict(
+            extra={
                 "error": "already_open",
                 "existing_shift_id": exc.existing_shift_id,
-            },
+            }
         )
     if isinstance(exc, ShiftBoundaryInvalid):
-        # Use the literal 422 rather than the starlette constant —
-        # starlette renamed ``HTTP_422_UNPROCESSABLE_ENTITY`` →
-        # ``HTTP_422_UNPROCESSABLE_CONTENT`` in 2024 and emits a
-        # deprecation warning on the old name. The integer is stable
-        # across versions. (Same trick used in
-        # :mod:`app.authz.dep._misuse_to_http`.)
-        return HTTPException(
-            status_code=422,
-            detail={"error": "invalid_window", "message": str(exc)},
-        )
+        return Validation(str(exc), extra={"error": "invalid_window"})
     if isinstance(exc, ShiftGeofenceRejected):
-        return HTTPException(
-            status_code=422,
-            detail=exc.verdict.to_http_detail(),
-        )
+        return Validation(extra=exc.verdict.to_http_detail())
     if isinstance(exc, ShiftEditForbidden):
-        return HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "forbidden"},
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+        return Forbidden(extra={"error": "forbidden"})
+    return ServiceUnavailable("Internal server error", extra={"error": "internal"})
 
 
-def _http_for_leave_error(exc: Exception) -> HTTPException:
-    """Map a domain leave error to the router's HTTP response shape.
+def _domain_for_leave_error(exc: Exception) -> DomainError:
+    """Map a domain leave error to the router's problem+json shape.
 
-    Mirrors :func:`_http_for_shift_error`. The split between 409 and
+    Mirrors :func:`_domain_for_shift_error`. The split between 409 and
     422 follows the shifts convention:
 
     * :class:`LeaveBoundaryInvalid` -> 422 ``invalid_window`` (bad
@@ -349,54 +334,25 @@ def _http_for_leave_error(exc: Exception) -> HTTPException:
     * :class:`LeavePermissionDenied` -> 403.
     """
     if isinstance(exc, LeaveNotFound):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found"},
-        )
+        return NotFound(extra={"error": "not_found"})
     if isinstance(exc, LeaveBoundaryInvalid):
-        # Literal 422 — see :func:`_http_for_shift_error` for the
-        # starlette-constant rename rationale.
-        return HTTPException(
-            status_code=422,
-            detail={"error": "invalid_window", "message": str(exc)},
-        )
+        return Validation(str(exc), extra={"error": "invalid_window"})
     if isinstance(exc, LeaveKindInvalid):
-        return HTTPException(
-            status_code=422,
-            detail={"error": "invalid_kind", "message": str(exc)},
-        )
+        return Validation(str(exc), extra={"error": "invalid_kind"})
     if isinstance(exc, LeaveTransitionForbidden):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "invalid_transition", "message": str(exc)},
-        )
+        return Conflict(str(exc), extra={"error": "invalid_transition"})
     if isinstance(exc, LeavePermissionDenied):
-        return HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "forbidden"},
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+        return Forbidden(extra={"error": "forbidden"})
+    return ServiceUnavailable("Internal server error", extra={"error": "internal"})
 
 
-def _http_for_geofence_setting_error(exc: Exception) -> HTTPException:
+def _domain_for_geofence_setting_error(exc: Exception) -> DomainError:
     """Map geofence-setting service errors to HTTP envelopes."""
     if isinstance(exc, GeofenceSettingNotFound):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found"},
-        )
+        return NotFound(extra={"error": "not_found"})
     if isinstance(exc, GeofenceSettingPermissionDenied):
-        return HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "forbidden"},
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+        return Forbidden(extra={"error": "forbidden"})
+    return ServiceUnavailable("Internal server error", extra={"error": "internal"})
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +369,7 @@ def _http_for_geofence_setting_error(exc: Exception) -> HTTPException:
 )
 def post_open_shift(
     body: ShiftOpen,
+    request: Request,
     ctx: _Ctx,
     session: _Db,
 ) -> ShiftPayload | JSONResponse:
@@ -430,13 +387,19 @@ def post_open_shift(
             gps_accuracy_m=body.gps_accuracy_m,
         )
     except ShiftGeofenceRejected as exc:
-        http_exc = _http_for_shift_error(exc)
-        return JSONResponse(
-            status_code=http_exc.status_code,
-            content={"detail": http_exc.detail},
+        err = _domain_for_shift_error(exc)
+        # The service wrote a rejection audit row before raising; return the
+        # problem response directly so the request UoW can commit it.
+        return problem_response(
+            request,
+            status=422,
+            type_name=err.type_name,
+            title=err.title,
+            detail=err.detail,
+            extra=err.extra,
         )
     except (ShiftAlreadyOpen, ShiftEditForbidden) as exc:
-        raise _http_for_shift_error(exc) from exc
+        raise _domain_for_shift_error(exc) from exc
 
     return ShiftPayload.from_view(view)
 
@@ -462,7 +425,7 @@ def post_close_shift(
             ends_at=body.ends_at,
         )
     except (ShiftNotFound, ShiftBoundaryInvalid, ShiftEditForbidden) as exc:
-        raise _http_for_shift_error(exc) from exc
+        raise _domain_for_shift_error(exc) from exc
 
     return ShiftPayload.from_view(view)
 
@@ -492,7 +455,7 @@ def patch_edit_shift(
     try:
         view = edit_shift(session, ctx, shift_id=shift_id, **kwargs)
     except (ShiftNotFound, ShiftBoundaryInvalid, ShiftEditForbidden) as exc:
-        raise _http_for_shift_error(exc) from exc
+        raise _domain_for_shift_error(exc) from exc
 
     return ShiftPayload.from_view(view)
 
@@ -560,7 +523,7 @@ def get_one_shift(
     try:
         view = get_shift(session, ctx, shift_id=shift_id)
     except ShiftNotFound as exc:
-        raise _http_for_shift_error(exc) from exc
+        raise _domain_for_shift_error(exc) from exc
     return ShiftPayload.from_view(view)
 
 
@@ -585,7 +548,7 @@ def get_one_geofence_setting(
     try:
         view = get_geofence_setting(session, ctx, property_id=property_id)
     except (GeofenceSettingNotFound, GeofenceSettingPermissionDenied) as exc:
-        raise _http_for_geofence_setting_error(exc) from exc
+        raise _domain_for_geofence_setting_error(exc) from exc
     return GeofenceSettingPayload.from_view(view)
 
 
@@ -611,7 +574,7 @@ def put_geofence_setting(
             body=body,
         )
     except (GeofenceSettingNotFound, GeofenceSettingPermissionDenied) as exc:
-        raise _http_for_geofence_setting_error(exc) from exc
+        raise _domain_for_geofence_setting_error(exc) from exc
     return GeofenceSettingPayload.from_view(view)
 
 
@@ -631,7 +594,7 @@ def delete_one_geofence_setting(
     try:
         view = delete_geofence_setting(session, ctx, property_id=property_id)
     except (GeofenceSettingNotFound, GeofenceSettingPermissionDenied) as exc:
-        raise _http_for_geofence_setting_error(exc) from exc
+        raise _domain_for_geofence_setting_error(exc) from exc
     return GeofenceSettingPayload.from_view(view)
 
 
@@ -690,12 +653,7 @@ def post_create_my_leave(
             reason_md=body.reason_md,
         )
     except ValueError as exc:
-        # Pydantic validation errors are ``ValueError`` subclasses;
-        # map boundary / kind issues to the 422 envelope.
-        raise HTTPException(
-            status_code=422,
-            detail={"error": "invalid_payload", "message": str(exc)},
-        ) from exc
+        raise Validation(str(exc), extra={"error": "invalid_payload"}) from exc
 
     try:
         view = create_leave(session, ctx, body=service_body)
@@ -704,7 +662,7 @@ def post_create_my_leave(
         LeaveKindInvalid,
         LeavePermissionDenied,
     ) as exc:
-        raise _http_for_leave_error(exc) from exc
+        raise _domain_for_leave_error(exc) from exc
     return LeavePayload.from_view(view)
 
 
@@ -774,19 +732,13 @@ def _load_owned_leave_or_404(
     try:
         view = get_leave(session, ctx, leave_id=leave_id)
     except LeaveNotFound as exc:
-        raise _http_for_leave_error(exc) from exc
+        raise _domain_for_leave_error(exc) from exc
     except LeavePermissionDenied as exc:
         # Caller is a non-owner with cross-user privileges — still
         # not the caller's own leave, so ``/me/`` rejects.
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found"},
-        ) from exc
+        raise NotFound(extra={"error": "not_found"}) from exc
     if view.user_id != ctx.actor_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found"},
-        )
+        raise NotFound(extra={"error": "not_found"})
     return view
 
 
@@ -818,7 +770,7 @@ def patch_update_my_leave(
         LeaveTransitionForbidden,
         LeavePermissionDenied,
     ) as exc:
-        raise _http_for_leave_error(exc) from exc
+        raise _domain_for_leave_error(exc) from exc
     return LeavePayload.from_view(view)
 
 
@@ -847,7 +799,7 @@ def delete_cancel_my_leave(
         LeaveTransitionForbidden,
         LeavePermissionDenied,
     ) as exc:
-        raise _http_for_leave_error(exc) from exc
+        raise _domain_for_leave_error(exc) from exc
     return LeavePayload.from_view(view)
 
 
@@ -908,7 +860,7 @@ def get_list_leaves(
                 after_id=after_id,
             )
     except LeavePermissionDenied as exc:
-        raise _http_for_leave_error(exc) from exc
+        raise _domain_for_leave_error(exc) from exc
     page = paginate(views, limit=limit, key_getter=lambda v: v.id)
     return LeaveListResponse(
         data=[LeavePayload.from_view(v) for v in page.items],
@@ -933,7 +885,7 @@ def get_one_leave(
     try:
         view = get_leave(session, ctx, leave_id=leave_id)
     except (LeaveNotFound, LeavePermissionDenied) as exc:
-        raise _http_for_leave_error(exc) from exc
+        raise _domain_for_leave_error(exc) from exc
     return LeavePayload.from_view(view)
 
 
@@ -953,7 +905,7 @@ def get_leave_conflicts(
     try:
         conflicts = get_conflicts(session, ctx, leave_id=leave_id)
     except (LeaveNotFound, LeavePermissionDenied) as exc:
-        raise _http_for_leave_error(exc) from exc
+        raise _domain_for_leave_error(exc) from exc
     return LeaveConflictsPayload(
         leave_id=conflicts.leave_id,
         shift_ids=list(conflicts.shift_ids),
@@ -978,10 +930,7 @@ def post_decide_leave(
     try:
         service_body = LeaveDecisionRequest.model_validate(body.model_dump())
     except ValueError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"error": "invalid_payload", "message": str(exc)},
-        ) from exc
+        raise Validation(str(exc), extra={"error": "invalid_payload"}) from exc
 
     try:
         view = decide_leave(session, ctx, leave_id=leave_id, body=service_body)
@@ -990,7 +939,7 @@ def post_decide_leave(
         LeaveTransitionForbidden,
         LeavePermissionDenied,
     ) as exc:
-        raise _http_for_leave_error(exc) from exc
+        raise _domain_for_leave_error(exc) from exc
     return LeavePayload.from_view(view)
 
 
@@ -1021,5 +970,5 @@ def delete_cancel_leave(
         LeaveTransitionForbidden,
         LeavePermissionDenied,
     ) as exc:
-        raise _http_for_leave_error(exc) from exc
+        raise _domain_for_leave_error(exc) from exc
     return LeavePayload.from_view(view)

@@ -21,6 +21,11 @@ from app.adapters.db.payroll.models import Booking, PayPeriod, PayRule, Payslip
 from app.adapters.db.workspace.models import WorkEngagement
 from app.api.deps import current_workspace_context
 from app.api.deps import db_session as _db_session_dep
+from app.api.errors import (
+    CANONICAL_TYPE_BASE,
+    CONTENT_TYPE_PROBLEM_JSON,
+    add_exception_handlers,
+)
 from app.api.v1.payroll import build_payroll_router
 from app.events import bus
 from app.events.types import PayrollExportReady
@@ -250,6 +255,7 @@ def _client_for(
     ctx: WorkspaceContext,
 ) -> TestClient:
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(build_payroll_router(), prefix="/api/v1/payroll")
 
     def _session() -> Iterator[Session]:
@@ -266,6 +272,24 @@ def _client_for(
     app.dependency_overrides[_db_session_dep] = _session
     app.dependency_overrides[current_workspace_context] = lambda: ctx
     return TestClient(app)
+
+
+def _assert_problem(
+    response: Any,
+    *,
+    status_code: int,
+    type_name: str,
+    error: str,
+    instance: str,
+) -> dict[str, Any]:
+    assert response.status_code == status_code, response.text
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    body = response.json()
+    assert body["type"] == f"{CANONICAL_TYPE_BASE}{type_name}"
+    assert body["status"] == status_code
+    assert body["error"] == error
+    assert body["instance"] == instance
+    return cast("dict[str, Any]", body)
 
 
 def _audit_count(
@@ -326,7 +350,14 @@ def test_pay_period_create_list_get_delete(
         deleted = client.delete(f"/api/v1/payroll/pay-periods/{period_id}")
         assert deleted.status_code == 204
         missing = client.get(f"/api/v1/payroll/pay-periods/{period_id}")
-        assert missing.status_code == 404
+        body = _assert_problem(
+            missing,
+            status_code=404,
+            type_name="not_found",
+            error="pay_period_not_found",
+            instance=f"/api/v1/payroll/pay-periods/{period_id}",
+        )
+        assert body["title"] == "Not found"
 
 
 def test_lock_pay_period_computes_payslip_and_second_lock_is_noop(
@@ -405,7 +436,15 @@ def test_payslip_reads_are_worker_scoped(
     assert own.status_code == 200
     assert own.json()["gross"] == {"cents": 4000, "currency": "USD"}
     assert own.json()["net"] == {"cents": 4000, "currency": "USD"}
-    assert peer.status_code == 403
+    body = _assert_problem(
+        peer,
+        status_code=403,
+        type_name="forbidden",
+        error="permission_denied",
+        instance=f"/api/v1/payroll/payslips/{peer_slip_id}",
+    )
+    assert body["detail"] == "permission denied"
+    assert body["action_key"] == "payroll.view_other"
     assert [item["id"] for item in own_list.json()["data"]] == [worker_slip_id]
 
 
@@ -447,7 +486,15 @@ def test_payslip_state_routes_issue_pay_and_void(
     assert paid.status_code == 200, paid.text
     assert paid.json()["status"] == "paid"
     assert paid.json()["paid_at"] is not None
-    assert paid_void.status_code == 409
+    body = _assert_problem(
+        paid_void,
+        status_code=409,
+        type_name="conflict",
+        error="payslip_transition_conflict",
+        instance=f"/api/v1/payroll/payslips/{paid_slip_id}/void",
+    )
+    assert body["detail"] == "paid payslips cannot be voided"
+    assert body["message"] == "paid payslips cannot be voided"
     assert voided.status_code == 200, voided.text
     assert voided.json()["status"] == "voided"
 
@@ -743,6 +790,25 @@ def test_period_export_returns_ready_job_and_event(
         )
         == 1
     )
+
+
+def test_csv_export_invalid_window_returns_problem_json(
+    session_factory: sessionmaker[Session],
+    seeded: SeededPayroll,
+) -> None:
+    with _client_for(session_factory, seeded.manager_ctx) as client:
+        response = client.get("/api/v1/payroll/exports/timesheets.csv")
+
+    body = _assert_problem(
+        response,
+        status_code=422,
+        type_name="validation",
+        error="invalid_export_window",
+        instance="/api/v1/payroll/exports/timesheets.csv",
+    )
+    assert body["title"] == "Validation error"
+    assert body["detail"] == "timesheets exports require since/until"
+    assert body["message"] == "timesheets exports require since/until"
 
 
 def test_payroll_routes_are_present_in_openapi(
