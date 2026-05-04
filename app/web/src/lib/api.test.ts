@@ -70,7 +70,7 @@ afterEach(() => {
 describe("resolveApiPath", () => {
   it("rewrites /api/v1/... to /w/<slug>/api/v1/... when a slug is active", () => {
     expect(resolveApiPath("/api/v1/tasks", "acme")).toBe("/w/acme/api/v1/tasks");
-    expect(resolveApiPath("/api/v1/me/avatar", "team-42")).toBe("/w/team-42/api/v1/me/avatar");
+    expect(resolveApiPath("/api/v1/me/schedule", "team-42")).toBe("/w/team-42/api/v1/me/schedule");
   });
 
   it("leaves the path unchanged when no slug is active", () => {
@@ -98,20 +98,36 @@ describe("resolveApiPath", () => {
   });
 
   it("passes auth bootstrap paths through untouched", () => {
+    expect(resolveApiPath("/api/v1/auth/email/revert", "acme")).toBe("/api/v1/auth/email/revert");
+    expect(resolveApiPath("/api/v1/auth/email/verify", "acme")).toBe("/api/v1/auth/email/verify");
     expect(resolveApiPath("/api/v1/auth/me", "acme")).toBe("/api/v1/auth/me");
     expect(resolveApiPath("/api/v1/auth/logout", "acme")).toBe("/api/v1/auth/logout");
     expect(resolveApiPath("/api/v1/auth/passkey/login/start", "acme")).toBe("/api/v1/auth/passkey/login/start");
     expect(resolveApiPath("/api/v1/me/workspaces", "acme")).toBe("/api/v1/me/workspaces");
   });
 
-  it("passes /api/v1/me/tokens through untouched — PATs are bare-host", () => {
-    // §03 PATs live outside any workspace; the server only mounts
-    // ``/api/v1/me/tokens`` at the bare host. A workspace rewrite
-    // would 404 every PAT call from the `/me` page.
-    expect(resolveApiPath("/api/v1/me/tokens", "acme")).toBe("/api/v1/me/tokens");
-    expect(resolveApiPath("/api/v1/me/tokens/tok_01", "acme")).toBe(
+  it("passes identity-scoped /api/v1/me surfaces through untouched", () => {
+    const bareHostPaths = [
+      "/api/v1/me/avatar",
+      "/api/v1/me/avatar?cache=refresh",
+      "/api/v1/me/avatar/source",
+      "/api/v1/me/email/change_request",
+      "/api/v1/me/export",
+      "/api/v1/me/export/exp_01",
+      "/api/v1/me/passkeys",
+      "/api/v1/me/passkeys/cred_01",
+      "/api/v1/me/push-tokens",
+      "/api/v1/me/push-tokens/device_01",
+      "/api/v1/me/push-tokens?limit=100",
+      "/api/v1/me/sessions",
+      "/api/v1/me/sessions/sess_01",
+      "/api/v1/me/tokens",
       "/api/v1/me/tokens/tok_01",
-    );
+    ];
+
+    for (const path of bareHostPaths) {
+      expect(resolveApiPath(path, "acme")).toBe(path);
+    }
   });
 
   it("keeps workspace-scoped auth routes under the active workspace", () => {

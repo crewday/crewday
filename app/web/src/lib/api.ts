@@ -25,6 +25,39 @@ let workspaceSlugGetter: Getter<string | null> = () => null;
 let authTokenGetter: Getter<string | null> = () => null;
 let onUnauthorizedHandler: UnauthorizedHandler | null = null;
 
+const BARE_HOST_API_PATHS = new Set([
+  "/api/v1/auth/email/revert",
+  "/api/v1/auth/email/verify",
+  "/api/v1/auth/me",
+  "/api/v1/auth/logout",
+  "/api/v1/me/workspaces",
+  "/api/v1/me/email/change_request",
+]);
+
+const BARE_HOST_API_PREFIXES = [
+  "/api/v1/auth/passkey/login/",
+  "/api/v1/me/avatar/",
+  "/api/v1/me/export/",
+  "/api/v1/me/passkeys/",
+  "/api/v1/me/push-tokens/",
+  "/api/v1/me/sessions/",
+  "/api/v1/me/tokens/",
+] as const;
+
+function isBareHostApiPath(path: string): boolean {
+  const pathname = new URL(path, "http://crewday.local").pathname;
+  return (
+    BARE_HOST_API_PATHS.has(pathname) ||
+    pathname === "/api/v1/me/avatar" ||
+    pathname === "/api/v1/me/export" ||
+    pathname === "/api/v1/me/passkeys" ||
+    pathname === "/api/v1/me/push-tokens" ||
+    pathname === "/api/v1/me/sessions" ||
+    pathname === "/api/v1/me/tokens" ||
+    BARE_HOST_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+  );
+}
+
 /**
  * Wire the active workspace-slug source. `WorkspaceProvider` calls this
  * exactly once on mount so URL building reads the current slug lazily —
@@ -90,21 +123,10 @@ export function resolveApiPath(path: string, slug: string | null = workspaceSlug
   if (/^https?:\/\//i.test(path)) return path;
   // Admin surface has no slug; workspace-prefixed paths are already final.
   if (path.startsWith("/w/") || path.startsWith("/admin/")) return path;
-  // Identity bootstrap and workspace switcher endpoints are bare-host
-  // APIs. Auth token and passkey registration routes remain workspace-
-  // scoped, so keep this list exact.
-  // `/api/v1/me/tokens` is also bare-host: PATs are tenant-agnostic
-  // (mounted with `bare_prefix` in `app/api/factory.py`, see §03
-  // "Personal access tokens"). Without this exemption the workspace
-  // rewrite would 404 every PAT call from `/me`.
-  if (
-    path === "/api/v1/auth/me" ||
-    path === "/api/v1/auth/logout" ||
-    path.startsWith("/api/v1/auth/passkey/login/") ||
-    path === "/api/v1/me/workspaces" ||
-    path === "/api/v1/me/tokens" ||
-    path.startsWith("/api/v1/me/tokens/")
-  ) return path;
+  // Identity bootstrap and identity-scoped /me endpoints are bare-host
+  // APIs. Workspace profile shortcuts such as `/api/v1/me/schedule`
+  // remain workspace-scoped, so keep this list explicit.
+  if (isBareHostApiPath(path)) return path;
   // Deployment-runtime info is bare-host shell metadata, not tenant data.
   if (path.startsWith("/api/v1/runtime/")) return path;
   // Public guest welcome tokens are self-contained credentials; the
