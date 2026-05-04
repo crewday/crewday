@@ -907,10 +907,6 @@ INCLUDE_ARGS=(
     # pre-seeded blob hashes + storage, so contract coverage waits on a
     # messaging path-resource seed instead of accepting random ids.
     --exclude-operation-id 'messaging.chat_messages.send'
-    # ``messaging.register_push_subscription`` requires an HTTPS endpoint
-    # under an allowed push-service host. Random strings correctly 422
-    # before the success branch.
-    --exclude-operation-id 'messaging.register_push_subscription'
     # Native FCM/APNS registration is a reserved v1 surface and always
     # returns 501 ``push_unavailable`` after request validation.
     --exclude-operation-id 'messaging.push_tokens.register_native_unavailable'

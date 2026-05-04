@@ -177,6 +177,14 @@ SETTINGS_KEY_VAPID_SUBJECT = "messaging.push.vapid_subject"
 MAX_ENDPOINT_LEN = 4_096
 _MAX_KEY_LEN = 256
 _MAX_UA_LEN = 512
+_WEB_PUSH_ENDPOINT_SCHEMA_PATTERN = (
+    r"^https://"
+    r"(?:fcm\.googleapis\.com|updates\.push\.services\.mozilla\.com|web\.push\.apple\.com)"
+    r"(?::443)?"
+    r"(?:/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*)?"
+    r"(?:\?[A-Za-z0-9._~!$&'()*+,;=:@%/-]*)?"
+    r"$"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +266,11 @@ class PushSubscribe(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    endpoint: str = Field(min_length=1, max_length=MAX_ENDPOINT_LEN)
+    endpoint: str = Field(
+        min_length=1,
+        max_length=MAX_ENDPOINT_LEN,
+        json_schema_extra={"pattern": _WEB_PUSH_ENDPOINT_SCHEMA_PATTERN},
+    )
     keys: PushSubscribeKeys
     # Browser ``User-Agent`` snapshot. Optional — a curl test caller
     # may omit it; the SPA sends ``navigator.userAgent`` verbatim.

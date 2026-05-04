@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from starlette.responses import JSONResponse
@@ -10,6 +12,7 @@ from app.api.deps import current_workspace_context, db_session
 from app.api.errors import _handle_domain_error, add_exception_handlers
 from app.api.v1.messaging import build_messaging_router
 from app.domain.errors import DomainError
+from app.domain.messaging.push_tokens import validate_endpoint
 from app.tenancy import WorkspaceContext
 
 
@@ -183,6 +186,44 @@ def test_notifications_list_rejects_duplicate_cursor_query_params() -> None:
     body = resp.json()
     assert body["type"].endswith("/validation")
     assert body["detail"] == "cursor may be provided at most once"
+
+
+def test_push_subscribe_openapi_bounds_endpoint_to_browser_push_origins() -> None:
+    app = FastAPI()
+    app.include_router(build_messaging_router())
+    openapi = app.openapi()
+
+    schema_ref = openapi["paths"]["/notifications/push/subscribe"]["post"][
+        "requestBody"
+    ]["content"]["application/json"]["schema"]["$ref"]
+    schema_name = schema_ref.removeprefix("#/components/schemas/")
+    endpoint_schema = openapi["components"]["schemas"][schema_name]["properties"][
+        "endpoint"
+    ]
+
+    assert endpoint_schema["pattern"].startswith("^https://")
+    assert "fcm\\.googleapis\\.com" in endpoint_schema["pattern"]
+    assert "updates\\.push\\.services\\.mozilla\\.com" in endpoint_schema["pattern"]
+    assert "web\\.push\\.apple\\.com" in endpoint_schema["pattern"]
+
+    endpoint_pattern = re.compile(endpoint_schema["pattern"])
+    valid_examples = [
+        "https://fcm.googleapis.com/fcm/send/abc",
+        "https://updates.push.services.mozilla.com/abc",
+        "https://web.push.apple.com:443/opaque-token?auth=x",
+    ]
+    invalid_examples = [
+        "http://fcm.googleapis.com/fcm/send/abc",
+        "https://attacker.example/push/sink",
+        "https://user:pass@fcm.googleapis.com/fcm/send/abc",
+        "https://fcm.googleapis.com:8443/fcm/send/abc",
+        "https://fcm.googleapis.com/fcm/send/abc#frag",
+    ]
+    for endpoint in valid_examples:
+        assert endpoint_pattern.fullmatch(endpoint) is not None
+        validate_endpoint(endpoint)
+    for endpoint in invalid_examples:
+        assert endpoint_pattern.fullmatch(endpoint) is None
 
 
 def test_native_push_registration_requires_workspace_context() -> None:
