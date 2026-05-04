@@ -702,12 +702,17 @@ fix the offender.
   (§02, §15). Payments and paid plans are out of scope for v1
   (§00 N1, §19 Beyond v1).
 - **Workspace usage budget.** Per-workspace rolling-30-day dollar
-  envelope over every LLM call charged to the workspace. Stored on
-  `workspace_budget.cap_usd_30d`; prod default $5, demo default $0.10.
+  envelope over every LLM call charged to the workspace. Stored as a
+  `BudgetLedger` / `budget_ledger` row whose `cap_cents` is the cap
+  and whose `spent_cents` is the materialized meter; prod default $5,
+  demo default $0.10.
   At cap, all LLM calls refuse with the structured `budget_exceeded`
   error until older calls age out of the window. Adjusted only by the
-  operator via `crewday admin budget set-cap` — no HTTP surface; see
-  §11 "Workspace usage budget".
+  deployment admin via `crewday admin budget set-cap` or `/admin`;
+  see §11 "Workspace usage budget".
+- **LlmUsage.** Per-call LLM usage row (`llm_usage`) carrying tokens,
+  cost, latency, outcome, capability, and correlation id. It is the
+  source data used to refresh `BudgetLedger.spent_cents`.
 - **Pricing source.** DB-authoritative per-million-token prices on
   `llm_provider_model.input_cost_per_million` / `.output_cost_per_million`.
   Kept current by the weekly `sync_llm_pricing` worker job that pulls
@@ -772,7 +777,7 @@ fix the offender.
   Default for every live capability on the demo deployment (§24).
 - **At-cap refusal.** Pre-flight client-side refusal of an LLM call
   when the workspace's rolling 30-day spend plus the projected call
-  cost would exceed `cap_usd_30d`. Returns the structured
+  cost would exceed `BudgetLedger.cap_cents`. Returns the structured
   `budget_exceeded` shape. Not an `audit_log` event; it is
   operational telemetry. See §11 "At-cap behaviour".
 - **Demo deployment.** A crewday container running with

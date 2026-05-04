@@ -417,7 +417,8 @@ inside the image (§24).
 The regular, non-demo job set (shared by recipes A / B / D) is:
 
 - `usage_rollup` — every 60 s; refreshes
-  `workspace_usage.cost_30d_usd` (§11 "Workspace usage budget").
+  `budget_ledger.spent_cents` from `llm_usage` (§11 "Workspace usage
+  budget").
 - `llm_raw_response_sweep` — every 60 minutes; nulls
   `llm_call.raw_response_json` and `raw_response_expires_at` for rows
   past their TTL (§11 "Cost tracking").

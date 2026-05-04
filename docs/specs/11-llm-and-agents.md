@@ -1593,17 +1593,6 @@ v1 members:
   (§03).
 - `crewday admin purge` — hard-delete per-person payload (§02,
   §15).
-- `crewday admin budget set-cap` — adjust a workspace's rolling
-  30-day agent usage cap (§ "Workspace usage budget"). Usage:
-  `crewday admin budget set-cap --workspace <id> --cap-usd <value>
-  [--note "<reason>"]`. Writes the new `cap_usd_30d` value and a
-  `workspace_budget.updated` `audit_log` row with `actor_kind =
-  'system'` and `via = 'cli'`. No HTTP surface by design — the
-  operator is the only principal that can commit the workspace to a
-  larger spend.
-- `crewday admin budget show` — prints the current cap, the rolling
-  30-day cost, and the percent used for one workspace or all of
-  them.
 - `crewday admin llm sync-pricing` — triggers the OpenRouter pricing
   sync on demand (same plumbing as the weekly worker job in § "Price
   sync"). Prints per-row deltas and exits non-zero on network error.
@@ -2029,21 +2018,21 @@ For users whose workspace / work-engagement settings enable chat.
 
 ## Cost tracking
 
-Every LLM call writes to `llm_call` with the provider's reported
-`usage.total_tokens` and an estimated USD cost computed from the
-serving `llm_provider_model` row's per-million prices (§ "Price sync"
-keeps them current). The background worker aggregates these rows into
-the rolling meter used by the **workspace usage budget** (§ "Workspace
-usage budget" below) and into the per-capability daily breakdowns on
-the `/admin/llm` page. Per-call `max_tokens` caps live on the
-assignment / provider-model / model cascade; the workspace envelope is
-enforced before the client picks a chain rung, as an envelope over
-every capability.
+Every shipping LLM call writes a `LlmUsage` / `llm_usage` row with
+the provider's reported token counts and an estimated cent cost
+computed from the serving `llm_provider_model` row's per-million
+prices (§ "Price sync" keeps them current). The background worker
+aggregates these rows into the rolling meter used by the **workspace
+usage budget** (§ "Workspace usage budget" below) and into the
+per-capability daily breakdowns on the `/admin/llm` page. Per-call
+`max_tokens` caps live on the assignment / provider-model / model
+cascade; the workspace envelope is enforced before the client picks a
+chain rung, as an envelope over every capability.
 
 ## Workspace usage budget
 
 One layer above the per-capability daily dollar caps (enforced on the
-aggregated `llm_call` totals): a **workspace-wide rolling dollar
+aggregated `llm_usage` totals): a **workspace-wide rolling dollar
 budget** that envelopes every LLM capability charged to the workspace.
 The per-capability caps stay — they remain useful to throttle a single
 noisy capability — but the product-level question "how much is this
@@ -2051,7 +2040,7 @@ workspace spending on agents?" is answered by this envelope, and so is
 the "stop me before I overspend" guard.
 
 A further layer above this one — for open self-serve deployments —
-aggregates `llm_call.cost_usd` across every workspace sharing a
+aggregates `llm_usage.cost_cents` across every workspace sharing a
 `signup_ip` (or IPv6 `/64` prefix). That **per-IP aggregate LLM
 spend cap** is the deploy-wide guard against a single actor
 provisioning many unverified workspaces to multiply the
@@ -2063,37 +2052,46 @@ the cap formula, the promotion-on-verification rule, and the
 
 Window: **rolling 30 days**. There is no calendar alignment, no
 monthly reset, and no reset date shown to the user. The user-visible
-label is always "Rolling 30 days"; the implementation is a trailing-
-window sum over `llm_call.cost_usd` scoped by `workspace_id` and
-`at >= now() - interval '30 days'`.
+label is always "Rolling 30 days"; the shipping implementation is a
+trailing-window sum over `llm_usage.cost_cents` scoped by
+`workspace_id` and `created_at >= now() - interval '30 days'`.
 
-- `workspace_usage.cost_30d_usd` is a **materialized aggregate**
+- `budget_ledger.spent_cents` is the **materialized aggregate**
   refreshed by the worker every 60 s (cheap query) and recomputed
-  from `llm_call` on process start. A pre-flight check on every LLM
+  from `llm_usage` on process start. A pre-flight check on every LLM
   call adds the projected cost of the current call (estimated from
-  `prompt_tokens + max_output_tokens`) to the cached aggregate
-  before comparing to the cap; the post-call update uses the
-  provider's actual `usage.total_tokens`.
+  `prompt_tokens + max_output_tokens`) to the cached aggregate on the
+  current `BudgetLedger` row before comparing to the cap; the
+  post-call update uses the provider's actual `usage.total_tokens`.
 - Rows older than 30 days are ignored by the meter regardless of
-  retention settings (§15 keeps `llm_call` for 90 days for audit
+  retention settings (§15 keeps LLM call telemetry for audit
   reasons; only the first 30 contribute to the meter).
 
 ### Cap
 
-Stored on the workspace:
+Stored on the same per-period ledger row as the materialized meter:
 
 ```
-workspace_budget
-├── workspace_id          ULID PK/FK
-├── cap_usd_30d           numeric(8,4)  -- e.g. 5.0000
-├── set_by                text           -- 'default' | 'operator'
-├── set_at                tstz
-└── note                  text?          -- operator-supplied justification
+budget_ledger
+├── workspace_id          ULID FK
+├── period_start          tstz
+├── period_end            tstz
+├── spent_cents           integer        -- materialized 30d aggregate
+├── cap_cents             integer        -- e.g. 500 = $5.00
+└── updated_at            tstz
 ```
+
+`BudgetLedger` is one row per `(workspace_id, period_start,
+period_end)`. It deliberately pairs the cap (`cap_cents`) and cached
+meter (`spent_cents`) so the budget check and post-call bump can lock
+one row. Older draft names such as `workspace_budget` for the cap and
+`workspace_usage` for the aggregate are historical labels only; they
+are not DB tables in the shipping schema. Per-call rows live in
+`LlmUsage` / `llm_usage`.
 
 Defaults:
 
-- **Prod:** `cap_usd_30d = 5.0000` seeded at workspace creation. This
+- **Prod:** `cap_cents = 500` seeded at workspace creation. This
   row is inserted in the same transaction as the workspace row.
   During the §03 "Tight initial caps" phase (until the workspace
   reaches `verification_state='human_verified'`) the seeded
@@ -2101,8 +2099,8 @@ Defaults:
   `app.domain.plans.tight_cap_cents`, so the ledger row and
   `workspace.quota_json['llm_budget_cents_30d']` agree on the same
   reduced number — a freshly-signed-up prod workspace runs at
-  `cap_usd_30d = 0.5000` until the lift, not the full $5.
-- **Demo:** `cap_usd_30d = 0.1000` seeded per scenario (§24); see
+  `cap_cents = 50` until the lift, not the full $5.
+- **Demo:** `cap_cents = 10` seeded per scenario (§24); see
   "Demo mode overrides" below.
 
 Raising or lowering a workspace cap has **two equivalent paths**:
@@ -2110,7 +2108,7 @@ Raising or lowering a workspace cap has **two equivalent paths**:
 1. **Host-CLI.** `crewday admin budget set-cap --workspace <id>
    --cap-usd <value>` remains supported — the operator is always
    the ultimate authority. No HTTP, no auth beyond container
-   shell access. Writes `audit.workspace_budget.updated` with
+   shell access. Writes `audit.budget_ledger.updated` with
    `via = 'cli'` and `actor_kind = 'system'`.
 2. **`/admin`.** Any user who passes `deployment.budget.edit`
    (§05) can adjust a cap from `/admin/usage` or
@@ -2126,8 +2124,8 @@ below.
 
 ### At-cap behaviour
 
-A call is **refused** when `cost_30d_usd + projected_call_cost >
-cap_usd_30d`. The refusal is first-class and structured:
+A call is **refused** when `spent_cents + projected_call_cost_cents >
+cap_cents`. The refusal is first-class and structured:
 
 ```json
 {
@@ -2141,7 +2139,7 @@ cap_usd_30d`. The refusal is first-class and structured:
 - Capability callers (chat composers, the digest job, NL intake) surface
   the message as-is; the agents render a neutral banner in the chat
   surface and do not attempt a retry.
-- The `llm_call` row is **not** written for a refused call — the
+- The `llm_usage` row is **not** written for a refused call — the
   meter counts only calls that left the client.
 - No capability is "paused" per se — the envelope is workspace-wide
   and the same envelope gates every capability. Once older calls age
@@ -2195,7 +2193,7 @@ the call for telemetry but the cost contribution is zero.
 
 On the demo deployment (§24), three knobs flip:
 
-- `cap_usd_30d` defaults to **$0.10** for every freshly-seeded
+- `cap_cents` defaults to **10** ($0.10) for every freshly-seeded
   workspace; overridable per scenario in the fixture.
 - The capability whitelist narrows to `chat.manager`, `chat.employee`,
   `chat.compact`, `chat.detect_language`, `chat.translate`, and
@@ -2217,15 +2215,15 @@ See §16 for deployment wiring and §24 for the demo-side UX.
 
 ## Cost tracking — extended
 
-Every LLM call still writes to `llm_call` with the provider's reported
-`usage.total_tokens` and the cost estimate computed from the serving
-`llm_provider_model`. The background worker aggregates daily totals
-into `llm_usage_daily` (one row per `(day, workspace_id, capability,
-provider_model_id)`), which powers the per-capability breakdowns on
-the `/admin/llm` page and the rolling 30-day meter. The per-capability
-daily dollar caps remain a useful throttle on a single noisy
-capability; they run **after** the workspace envelope check so the
-workspace-level refusal wins when both would fire.
+Every LLM call still writes to `llm_usage` with the provider's
+reported `usage.total_tokens` and the cost estimate computed from the
+serving `llm_provider_model`. The background worker aggregates daily
+totals into `llm_usage_daily` (one row per `(day, workspace_id,
+capability, provider_model_id)`), which powers the per-capability
+breakdowns on the `/admin/llm` page and the rolling 30-day meter. The
+per-capability daily dollar caps remain a useful throttle on a single
+noisy capability; they run **after** the workspace envelope check so
+the workspace-level refusal wins when both would fire.
 
 ## Failure modes
 
@@ -2237,7 +2235,7 @@ workspace-level refusal wins when both would fire.
 - Content refused / unsafe: return an empty structured output; log
   `finish_reason`; caller surfaces a neutral fallback.
 - Per-capability daily dollar cap exceeded (aggregate over
-  `llm_call.cost_usd` for that capability on the current UTC day):
+  `llm_usage.cost_cents` for that capability on the current UTC day):
   429 with explanation; that capability pauses until UTC midnight.
 - **Workspace usage budget exceeded** (see "Workspace usage budget"):
   the client refuses the call before it leaves with the structured
