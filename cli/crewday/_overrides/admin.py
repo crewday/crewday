@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import importlib
 import json
 import os
 import pathlib
@@ -13,6 +12,7 @@ from typing import Any
 import click
 from alembic import command
 from alembic.config import Config as AlembicConfig
+from sqlalchemy import JSON, bindparam, text
 from sqlalchemy.orm import Session
 
 from crewday._main import ConfigError
@@ -22,6 +22,30 @@ __all__ = ["register"]
 
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+_SYSTEM_ACTOR_ID = "00000000000000000000000000"
+_WORKER_AUDIT_ENTITY_KIND = "worker_job"
+_WORKER_RESET_ACTION = "worker.job.reset"
+_WORKER_STATE_SELECT = text(
+    "SELECT consecutive_failures, dead_at "
+    "FROM worker_heartbeat "
+    "WHERE worker_name = :job_id"
+)
+_WORKER_STATE_RESET = text(
+    "UPDATE worker_heartbeat "
+    "SET consecutive_failures = 0, dead_at = NULL "
+    "WHERE worker_name = :job_id"
+)
+_WORKER_RESET_AUDIT_INSERT = text(
+    "INSERT INTO audit_log ("
+    "id, workspace_id, actor_id, actor_kind, actor_grant_role, "
+    "actor_was_owner_member, entity_kind, entity_id, action, diff, "
+    "correlation_id, scope_kind, via, created_at"
+    ") VALUES ("
+    ":id, NULL, :actor_id, :actor_kind, :actor_grant_role, "
+    ":actor_was_owner_member, :entity_kind, :entity_id, :action, :diff, "
+    ":correlation_id, :scope_kind, :via, :created_at"
+    ")"
+).bindparams(bindparam("diff", type_=JSON))
 
 
 def _load_app_admin() -> Any:
@@ -766,18 +790,6 @@ rotate_session_secret = cli_override("admin", "rotate-session-secret", covers=[]
 )
 
 
-def _load_app_job_state() -> Any:
-    """Lazy import so non-host invocations don't pay the app-package cost."""
-    try:
-        job_state_mod = importlib.import_module("app.worker.job_state")
-    except Exception as exc:
-        raise ConfigError(
-            "admin worker commands must run on the server host with app "
-            "dependencies installed"
-        ) from exc
-    return job_state_mod
-
-
 def _system_clock() -> Any:
     try:
         from app.util.clock import SystemClock
@@ -787,6 +799,78 @@ def _system_clock() -> Any:
             "dependencies installed"
         ) from exc
     return SystemClock()
+
+
+def _new_ulid(clock: Any | None = None) -> str:
+    try:
+        from app.util.ulid import new_ulid
+    except Exception as exc:
+        raise ConfigError(
+            "admin worker commands must run on the server host with app "
+            "dependencies installed"
+        ) from exc
+    return new_ulid(clock=clock)
+
+
+def _reset_worker_job(job_id: str, *, clock: Any) -> bool:
+    make_uow = _make_uow()
+    with make_uow() as session:
+        assert isinstance(session, Session)
+        row = (
+            session.execute(_WORKER_STATE_SELECT, {"job_id": job_id})
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            return False
+
+        previous_failures = int(row["consecutive_failures"] or 0)
+        previous_dead_at = row["dead_at"]
+        if previous_failures == 0 and previous_dead_at is None:
+            return True
+
+        session.execute(_WORKER_STATE_RESET, {"job_id": job_id})
+        _write_worker_reset_audit(
+            session,
+            job_id=job_id,
+            previous_failures=previous_failures,
+            previous_dead=previous_dead_at is not None,
+            clock=clock,
+        )
+        session.flush()
+    return True
+
+
+def _write_worker_reset_audit(
+    session: Session,
+    *,
+    job_id: str,
+    previous_failures: int,
+    previous_dead: bool,
+    clock: Any,
+) -> None:
+    session.execute(
+        _WORKER_RESET_AUDIT_INSERT,
+        {
+            "id": _new_ulid(),
+            "actor_id": _SYSTEM_ACTOR_ID,
+            "actor_kind": "system",
+            "actor_grant_role": "manager",
+            "actor_was_owner_member": False,
+            "entity_kind": _WORKER_AUDIT_ENTITY_KIND,
+            "entity_id": job_id,
+            "action": _WORKER_RESET_ACTION,
+            "diff": {
+                "job_id": job_id,
+                "previous_consecutive_failures": previous_failures,
+                "previous_dead": previous_dead,
+            },
+            "correlation_id": _new_ulid(clock=clock),
+            "scope_kind": "deployment",
+            "via": "worker",
+            "created_at": clock.now(),
+        },
+    )
 
 
 @click.command(name="reset-job")
@@ -807,9 +891,8 @@ def worker_reset_job(_ctx: object, *, job_id: str) -> None:
     ``worker_heartbeat`` row does not exist yet — a job that has
     never run cannot be dead.
     """
-    job_state_mod = _load_app_job_state()
     clock = _system_clock()
-    reset = job_state_mod.reset_job(job_id=job_id, clock=clock)
+    reset = _reset_worker_job(job_id, clock=clock)
     click.echo(json.dumps({"job_id": job_id, "reset": reset}, sort_keys=True))
 
 

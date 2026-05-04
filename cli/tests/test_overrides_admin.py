@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
 from crewday._overrides import admin
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
 
 def test_admin_init_demo_refusal_happens_before_migrations(
@@ -162,28 +168,23 @@ def test_secret_rotation_help_renders(command: object, expected: str) -> None:
 def test_admin_worker_reset_job_clears_killswitch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``admin worker reset-job`` calls :func:`reset_job` and prints JSON.
+    """``admin worker reset-job`` calls the local reset helper and prints JSON.
 
     The override is the operator-facing seam for the cd-8euz killswitch:
     after a ``worker.job.killed`` audit row appears, the operator clears
     ``worker_heartbeat.dead_at`` + ``consecutive_failures`` so the job
-    resumes ticking. The Click verb itself is glue — the durable work
-    happens inside :func:`app.worker.job_state.reset_job`. The test
-    confirms the verb threads the right ``job_id`` through and prints
-    a stable JSON payload.
+    resumes ticking. The test confirms the verb threads the right
+    ``job_id`` through and prints a stable JSON payload without reaching
+    into the worker package.
     """
     seen_calls: list[str] = []
 
-    def fake_reset(*, job_id: str, clock: object) -> bool:
+    def fake_reset(job_id: str, *, clock: object) -> bool:
         del clock
         seen_calls.append(job_id)
         return True
 
-    monkeypatch.setattr(
-        admin,
-        "_load_app_job_state",
-        lambda: SimpleNamespace(reset_job=fake_reset),
-    )
+    monkeypatch.setattr(admin, "_reset_worker_job", fake_reset)
     monkeypatch.setattr(admin, "_system_clock", lambda: SimpleNamespace())
 
     result = CliRunner().invoke(admin.worker_reset_job, ["scheduler_heartbeat"])
@@ -199,15 +200,11 @@ def test_admin_worker_reset_job_reports_no_row(
 ) -> None:
     """A reset on a never-run job returns ``"reset": false`` (and exit 0)."""
 
-    def fake_reset(*, job_id: str, clock: object) -> bool:
+    def fake_reset(job_id: str, *, clock: object) -> bool:
         del job_id, clock
         return False
 
-    monkeypatch.setattr(
-        admin,
-        "_load_app_job_state",
-        lambda: SimpleNamespace(reset_job=fake_reset),
-    )
+    monkeypatch.setattr(admin, "_reset_worker_job", fake_reset)
     monkeypatch.setattr(admin, "_system_clock", lambda: SimpleNamespace())
 
     result = CliRunner().invoke(admin.worker_reset_job, ["never_ran"])
@@ -215,3 +212,165 @@ def test_admin_worker_reset_job_reports_no_row(
     assert result.exit_code == 0, result.output
     body = json.loads(result.output)
     assert body == {"job_id": "never_ran", "reset": False}
+
+
+def _worker_reset_engine() -> Engine:
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE worker_heartbeat ("
+                "worker_name TEXT PRIMARY KEY, "
+                "consecutive_failures INTEGER NOT NULL, "
+                "dead_at TEXT NULL"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE audit_log ("
+                "id TEXT PRIMARY KEY, "
+                "workspace_id TEXT NULL, "
+                "actor_id TEXT NOT NULL, "
+                "actor_kind TEXT NOT NULL, "
+                "actor_grant_role TEXT NOT NULL, "
+                "actor_was_owner_member BOOLEAN NOT NULL, "
+                "entity_kind TEXT NOT NULL, "
+                "entity_id TEXT NOT NULL, "
+                "action TEXT NOT NULL, "
+                "diff JSON NOT NULL, "
+                "correlation_id TEXT NOT NULL, "
+                "scope_kind TEXT NOT NULL, "
+                "via TEXT NOT NULL, "
+                "created_at TEXT NOT NULL"
+                ")"
+            )
+        )
+    return engine
+
+
+def _patch_worker_reset_uow(monkeypatch: pytest.MonkeyPatch, engine: Engine) -> None:
+    session_factory = sessionmaker(engine)
+
+    @contextmanager
+    def make_uow() -> Iterator[Session]:
+        with session_factory() as session:
+            yield session
+            session.commit()
+
+    monkeypatch.setattr(admin, "_make_uow", lambda: make_uow)
+
+
+def _patch_worker_reset_clock(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    ids: Iterator[str],
+) -> None:
+    clock = SimpleNamespace(now=lambda: datetime(2026, 5, 4, 12, 5, tzinfo=UTC))
+    monkeypatch.setattr(admin, "_system_clock", lambda: clock)
+    monkeypatch.setattr(admin, "_new_ulid", lambda clock=None: next(ids))
+
+
+def _audit_count(engine: Engine) -> int:
+    with engine.connect() as conn:
+        return conn.execute(text("SELECT COUNT(*) FROM audit_log")).scalar_one()
+
+
+def test_admin_worker_reset_job_real_helper_reports_no_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _worker_reset_engine()
+    _patch_worker_reset_uow(monkeypatch, engine)
+    _patch_worker_reset_clock(monkeypatch, ids=iter(()))
+
+    result = CliRunner().invoke(admin.worker_reset_job, ["never_ran"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {"job_id": "never_ran", "reset": False}
+    assert _audit_count(engine) == 0
+
+
+def test_admin_worker_reset_job_real_helper_skips_clean_row_audit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _worker_reset_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO worker_heartbeat "
+                "(worker_name, consecutive_failures, dead_at) "
+                "VALUES ('scheduler_heartbeat', 0, NULL)"
+            )
+        )
+    _patch_worker_reset_uow(monkeypatch, engine)
+    _patch_worker_reset_clock(monkeypatch, ids=iter(()))
+
+    result = CliRunner().invoke(admin.worker_reset_job, ["scheduler_heartbeat"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {
+        "job_id": "scheduler_heartbeat",
+        "reset": True,
+    }
+    assert _audit_count(engine) == 0
+
+
+def test_admin_worker_reset_job_resets_row_and_writes_audit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _worker_reset_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO worker_heartbeat "
+                "(worker_name, consecutive_failures, dead_at) "
+                "VALUES ('scheduler_heartbeat', 5, '2026-05-04T12:00:00Z')"
+            )
+        )
+    _patch_worker_reset_uow(monkeypatch, engine)
+    _patch_worker_reset_clock(monkeypatch, ids=iter(["audit_row_1", "correlation_1"]))
+
+    result = CliRunner().invoke(admin.worker_reset_job, ["scheduler_heartbeat"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {
+        "job_id": "scheduler_heartbeat",
+        "reset": True,
+    }
+    with engine.connect() as conn:
+        heartbeat = (
+            conn.execute(
+                text(
+                    "SELECT consecutive_failures, dead_at "
+                    "FROM worker_heartbeat "
+                    "WHERE worker_name = 'scheduler_heartbeat'"
+                )
+            )
+            .mappings()
+            .one()
+        )
+        audit = (
+            conn.execute(
+                text(
+                    "SELECT actor_id, entity_kind, entity_id, action, diff, "
+                    "correlation_id, scope_kind, via "
+                    "FROM audit_log"
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+    assert heartbeat == {"consecutive_failures": 0, "dead_at": None}
+    assert audit["actor_id"] == "00000000000000000000000000"
+    assert audit["entity_kind"] == "worker_job"
+    assert audit["entity_id"] == "scheduler_heartbeat"
+    assert audit["action"] == "worker.job.reset"
+    assert json.loads(audit["diff"]) == {
+        "job_id": "scheduler_heartbeat",
+        "previous_consecutive_failures": 5,
+        "previous_dead": True,
+    }
+    assert audit["correlation_id"] == "correlation_1"
+    assert audit["scope_kind"] == "deployment"
+    assert audit["via"] == "worker"
