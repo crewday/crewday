@@ -27,8 +27,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.workspace.models import UserWorkspace
+from app.api.v1 import users as users_module
 from app.api.v1.users import build_users_router
-from app.auth._throttle import Throttle
+from app.auth._throttle import RateLimited, Throttle
 from app.config import Settings
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.ulid import new_ulid
@@ -357,6 +358,47 @@ class TestAuditAndMail:
         assert "marie.dupont@example.com" not in body
         # Masked form ``m***@example.com`` MUST appear.
         assert "m***@example.com" in body
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimit:
+    def test_reset_passkey_rate_limited_returns_429(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+        mailer: InMemoryMailer,
+        throttle: Throttle,
+        settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        ctx, factory, ws_id = owner_ctx
+        worker_id = _seed_worker_member(
+            factory,
+            workspace_id=ws_id,
+            email="rplimited@example.com",
+            display_name="RP Limited",
+        )
+
+        def _raise_rate_limited(*args: object, **kwargs: object) -> str:
+            del args, kwargs
+            raise RateLimited("limited")
+
+        monkeypatch.setattr(
+            users_module, "_issue_passkey_recovery_link", _raise_rate_limited
+        )
+        client = _client(
+            ctx, factory, mailer=mailer, throttle=throttle, settings=settings
+        )
+        r = client.post(f"/users/{worker_id}/reset_passkey")
+
+        assert r.status_code == 429, r.text
+        body = r.json()
+        assert body["error"] == "rate_limited"
+        assert body["type"].endswith("/rate_limited")
+        assert mailer.sent == []
 
 
 # ---------------------------------------------------------------------------

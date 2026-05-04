@@ -1121,15 +1121,18 @@ def build_users_router(
                 else user.email
             )
 
-            url = _issue_passkey_recovery_link(
-                session,
-                user=user,
-                target_email=target_email,
-                ip=_client_ip(request),
-                base_url=resolved_base_url,
-                throttle=throttle,
-                settings=cfg,
-            )
+            try:
+                url = _issue_passkey_recovery_link(
+                    session,
+                    user=user,
+                    target_email=target_email,
+                    ip=_client_ip(request),
+                    base_url=resolved_base_url,
+                    throttle=throttle,
+                    settings=cfg,
+                )
+            except RateLimited as exc:
+                raise DomainRateLimited(extra={"error": "rate_limited"}) from exc
 
             # Capture every input :func:`_send_recovery_link_email`
             # needs at mint time so the deferred send is a parameter-
@@ -1260,15 +1263,18 @@ def build_users_router(
             # ``/recover/notice`` so a forwarded copy lands on a "this is
             # the notice, not the link" page rather than a redeemable
             # ceremony (§03).
-            worker_url = _issue_passkey_recovery_link(
-                session,
-                user=worker,
-                target_email=worker.email,
-                ip=_client_ip(request),
-                base_url=resolved_base_url,
-                throttle=throttle,
-                settings=cfg,
-            )
+            try:
+                worker_url = _issue_passkey_recovery_link(
+                    session,
+                    user=worker,
+                    target_email=worker.email,
+                    ip=_client_ip(request),
+                    base_url=resolved_base_url,
+                    throttle=throttle,
+                    settings=cfg,
+                )
+            except RateLimited as exc:
+                raise DomainRateLimited(extra={"error": "rate_limited"}) from exc
             notice_url = f"{resolved_base_url.rstrip('/')}/recover/notice"
             now = SystemClock().now()
 
