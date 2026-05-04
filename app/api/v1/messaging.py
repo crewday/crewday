@@ -62,7 +62,7 @@ from app.adapters.db.messaging.repositories import SqlAlchemyPushTokenRepository
 from app.api.deps import current_workspace_context, db_session
 from app.api.messaging.channels import build_channels_router
 from app.api.messaging.messages import build_messages_router
-from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES, PROBLEM_JSON_CONTENT
 from app.audit import write_audit
 from app.domain.errors import (
     Internal,
@@ -621,7 +621,14 @@ def build_messaging_router(
 
     @r.post(
         "/notifications/push/tokens",
+        response_class=Response,
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        responses={
+            status.HTTP_501_NOT_IMPLEMENTED: {
+                "description": "Native push token registration is unavailable",
+                "content": PROBLEM_JSON_CONTENT,
+            }
+        },
         operation_id="messaging.push_tokens.register_native_unavailable",
         summary="Reserved native-app push token registration surface",
     )

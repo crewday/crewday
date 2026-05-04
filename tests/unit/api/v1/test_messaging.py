@@ -78,6 +78,31 @@ def test_messaging_router_documents_problem_json_validation_errors() -> None:
     }
 
 
+def test_native_push_registration_documents_and_returns_problem_json_501() -> None:
+    app = FastAPI()
+    add_exception_handlers(app)
+    app.dependency_overrides[current_workspace_context] = _ctx
+    app.include_router(build_messaging_router())
+    openapi = app.openapi()
+    responses = openapi["paths"]["/notifications/push/tokens"]["post"]["responses"]
+
+    assert responses["501"]["description"] == (
+        "Native push token registration is unavailable"
+    )
+    assert "application/problem+json" in responses["501"]["content"]
+    assert "application/json" not in responses["501"]["content"]
+
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post(
+        "/notifications/push/tokens",
+        json={"platform": "ios", "token": "native-token"},
+    )
+
+    assert resp.status_code == 501
+    assert resp.headers["content-type"].startswith("application/problem+json")
+    assert resp.json()["error"] == "push_unavailable"
+
+
 def test_chat_openapi_documents_request_body_invariants() -> None:
     app = FastAPI()
     app.include_router(build_messaging_router())
