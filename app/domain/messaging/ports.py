@@ -901,6 +901,26 @@ class EmailDeliveryRepository(Protocol):
         """
         ...
 
+    def select_due_for_retry(
+        self,
+        *,
+        workspace_id: str,
+        now: datetime,
+        backoff_schedule_seconds: Sequence[int],
+        max_attempts: int,
+        limit: int,
+    ) -> Sequence[EmailDeliveryRow]:
+        """Return queued / failed rows whose retry backoff has elapsed.
+
+        The query is workspace-scoped so the adapter can ride the
+        ``ix_email_delivery_workspace_state_sent`` hot-path index:
+        ``workspace_id`` equality, ``delivery_state`` bucket, and
+        ``sent_at IS NULL`` for the pending states. ``retry_count``
+        remains the retry-budget guard and ``created_at`` is the
+        persisted timestamp available for backoff in the v1 schema.
+        """
+        ...
+
     def find_by_provider_message_id(
         self,
         *,

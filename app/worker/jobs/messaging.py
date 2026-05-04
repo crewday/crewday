@@ -182,3 +182,64 @@ def _make_daily_digest_fanout_body(clock: Clock) -> Callable[[], None]:
         )
 
     return _body
+
+
+def _make_email_delivery_retry_body(clock: Clock) -> Callable[[], None]:
+    """Build the email-delivery retry body (cd-4dp0f)."""
+
+    from app.adapters.mail.smtp import SMTPMailer
+    from app.adapters.mail.smtp_config import (
+        DeploymentSmtpConfigSource,
+        SmtpConfig,
+        SmtpConfigError,
+    )
+
+    settings = get_settings()
+    root_key = getattr(settings, "root_key", None)
+    smtp_source = DeploymentSmtpConfigSource(
+        env=SmtpConfig(
+            host=settings.smtp_host,
+            port=settings.smtp_port,
+            from_addr=settings.smtp_from,
+            user=settings.smtp_user,
+            password=settings.smtp_password,
+            use_tls=settings.smtp_use_tls,
+            timeout=settings.smtp_timeout,
+            bounce_domain=settings.smtp_bounce_domain,
+        ),
+        root_key=root_key,
+    )
+    mailer = SMTPMailer(config_source=smtp_source)
+
+    def _body() -> None:
+        from sqlalchemy.orm import Session as _Session
+
+        from app.worker.tasks.email_delivery_retry import retry_due_email_deliveries
+
+        try:
+            smtp_config = smtp_source.config()
+        except SmtpConfigError as exc:
+            _log.warning(
+                "email delivery retry skipped: SMTP config unavailable",
+                extra={
+                    "event": "worker.email_delivery_retry.skipped_no_smtp",
+                    "reason": str(exc),
+                },
+            )
+            return
+        if smtp_config.host is None or smtp_config.from_addr is None:
+            _log.warning(
+                "email delivery retry skipped: SMTP not configured",
+                extra={"event": "worker.email_delivery_retry.skipped_no_smtp"},
+            )
+            return
+
+        with make_uow() as session:
+            assert isinstance(session, _Session)
+            retry_due_email_deliveries(
+                session=session,
+                mailer=mailer,
+                clock=clock,
+            )
+
+    return _body

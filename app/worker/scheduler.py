@@ -89,7 +89,10 @@ from app.worker.jobs.maintenance import (
     _make_signup_gc_body,
     _make_webhook_dispatch_body,
 )
-from app.worker.jobs.messaging import _make_daily_digest_fanout_body
+from app.worker.jobs.messaging import (
+    _make_daily_digest_fanout_body,
+    _make_email_delivery_retry_body,
+)
 from app.worker.jobs.messaging_web_push import _make_web_push_dispatch_body
 from app.worker.jobs.stays import _make_poll_ical_fanout_body
 from app.worker.jobs.tasks import _make_generator_fanout_body, _make_overdue_fanout_body
@@ -110,6 +113,8 @@ __all__ = [
     "DEMO_GC_JOB_ID",
     "DEMO_USAGE_ROLLUP_INTERVAL_SECONDS",
     "DEMO_USAGE_ROLLUP_JOB_ID",
+    "EMAIL_DELIVERY_RETRY_INTERVAL_SECONDS",
+    "EMAIL_DELIVERY_RETRY_JOB_ID",
     "EXTRACT_DOCUMENT_INTERVAL_SECONDS",
     "EXTRACT_DOCUMENT_JOB_ID",
     "GENERATOR_JOB_ID",
@@ -381,6 +386,13 @@ DAILY_DIGEST_MISFIRE_GRACE_SECONDS: int = 1800
 # preferable to a stacked catch-up.
 WEB_PUSH_DISPATCH_JOB_ID: str = "messaging.web_push_dispatch"
 WEB_PUSH_DISPATCH_INTERVAL_SECONDS: int = 60
+
+# Stable job id for retrying queued / failed ``email_delivery`` rows.
+# The worker walks each workspace independently so the hot-path SELECT
+# carries ``workspace_id`` and can use
+# ``ix_email_delivery_workspace_state_sent``.
+EMAIL_DELIVERY_RETRY_JOB_ID: str = "messaging.email_delivery_retry"
+EMAIL_DELIVERY_RETRY_INTERVAL_SECONDS: int = 60
 
 # Stable job id for the agent conversation compaction worker (cd-cn7v).
 # The body walks workspaces and lets :func:`compact_due_threads` decide
@@ -742,6 +754,7 @@ def register_jobs(
         EXTRACT_DOCUMENT_JOB_ID,
         INVENTORY_REORDER_JOB_ID,
         DAILY_DIGEST_JOB_ID,
+        EMAIL_DELIVERY_RETRY_JOB_ID,
         RETENTION_ROTATION_JOB_ID,
         WEB_PUSH_DISPATCH_JOB_ID,
         AGENT_COMPACTION_JOB_ID,
@@ -1225,6 +1238,22 @@ def register_jobs(
             max_instances=1,
             coalesce=True,
             misfire_grace_time=WEB_PUSH_DISPATCH_INTERVAL_SECONDS,
+        )
+
+    if not demo_mode:
+        scheduler.add_job(
+            wrap_job(
+                _make_email_delivery_retry_body(resolved_clock),
+                job_id=EMAIL_DELIVERY_RETRY_JOB_ID,
+                clock=resolved_clock,
+            ),
+            trigger=IntervalTrigger(seconds=EMAIL_DELIVERY_RETRY_INTERVAL_SECONDS),
+            id=EMAIL_DELIVERY_RETRY_JOB_ID,
+            name=EMAIL_DELIVERY_RETRY_JOB_ID,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=EMAIL_DELIVERY_RETRY_INTERVAL_SECONDS,
         )
 
     if not demo_mode:

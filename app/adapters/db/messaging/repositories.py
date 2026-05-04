@@ -23,9 +23,9 @@ owns the transaction boundary (§01 "Key runtime invariants" #3).
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.adapters.db.identity.models import User
@@ -1230,16 +1230,121 @@ class SqlAlchemyEmailDeliveryRepository(EmailDeliveryRepository):
         error_text: str,
         now: datetime,
     ) -> EmailDeliveryRow:
+        del now
+        # justification: callers identify the just-inserted ledger row by id.
+        with tenant_agnostic():
+            stmt = (
+                update(EmailDelivery)
+                .where(EmailDelivery.id == delivery_id)
+                .values(
+                    delivery_state="failed",
+                    first_error=func.coalesce(EmailDelivery.first_error, error_text),
+                    retry_count=EmailDelivery.retry_count + 1,
+                )
+            )
+            self._session.execute(stmt)
+            self._session.flush()
         row = self._load(delivery_id)
-        row.delivery_state = "failed"
-        # §10: ``first_error`` snapshots the first adapter failure and
-        # is never overwritten on subsequent retries so support can
-        # answer "what went wrong initially?".
-        if row.first_error is None:
-            row.first_error = error_text
-        row.retry_count = row.retry_count + 1
-        self._session.flush()
         return _to_email_delivery_row(row)
+
+    def mark_retry_sent(
+        self,
+        *,
+        delivery_id: str,
+        expected_retry_count: int,
+        provider_message_id: str,
+        sent_at: datetime,
+    ) -> EmailDeliveryRow | None:
+        # justification: deployment-scope retry worker CASes a selected row.
+        with tenant_agnostic():
+            stmt = (
+                update(EmailDelivery)
+                .where(EmailDelivery.id == delivery_id)
+                .where(EmailDelivery.delivery_state.in_(("queued", "failed")))
+                .where(EmailDelivery.sent_at.is_(None))
+                .where(EmailDelivery.retry_count == expected_retry_count)
+                .values(
+                    delivery_state="sent",
+                    provider_message_id=provider_message_id,
+                    sent_at=sent_at,
+                )
+            )
+            result = self._session.execute(stmt)
+            self._session.flush()
+        if _rowcount(result) != 1:
+            return None
+        return _to_email_delivery_row(self._load(delivery_id))
+
+    def mark_retry_failed(
+        self,
+        *,
+        delivery_id: str,
+        expected_retry_count: int,
+        error_text: str,
+        now: datetime,
+        max_attempts: int,
+    ) -> EmailDeliveryRow | None:
+        del now
+        # justification: deployment-scope retry worker CASes a selected row.
+        with tenant_agnostic():
+            stmt = (
+                update(EmailDelivery)
+                .where(EmailDelivery.id == delivery_id)
+                .where(EmailDelivery.delivery_state.in_(("queued", "failed")))
+                .where(EmailDelivery.sent_at.is_(None))
+                .where(EmailDelivery.retry_count == expected_retry_count)
+                .where(EmailDelivery.retry_count < max_attempts)
+                .values(
+                    delivery_state="failed",
+                    first_error=func.coalesce(EmailDelivery.first_error, error_text),
+                    retry_count=EmailDelivery.retry_count + 1,
+                )
+            )
+            result = self._session.execute(stmt)
+            self._session.flush()
+        if _rowcount(result) != 1:
+            return None
+        return _to_email_delivery_row(self._load(delivery_id))
+
+    def select_due_for_retry(
+        self,
+        *,
+        workspace_id: str,
+        now: datetime,
+        backoff_schedule_seconds: Sequence[int],
+        max_attempts: int,
+        limit: int,
+    ) -> Sequence[EmailDeliveryRow]:
+        due_windows = [EmailDelivery.retry_count <= 0]
+        for retry_count in range(1, max_attempts):
+            delay_index = retry_count - 1
+            if delay_index >= len(backoff_schedule_seconds):
+                break
+            due_windows.append(
+                and_(
+                    EmailDelivery.retry_count == retry_count,
+                    EmailDelivery.created_at
+                    <= now - timedelta(seconds=backoff_schedule_seconds[delay_index]),
+                )
+            )
+
+        # justification: deployment-scope retry worker pins SELECT by workspace.
+        with tenant_agnostic():
+            stmt = (
+                select(EmailDelivery)
+                .where(EmailDelivery.workspace_id == workspace_id)
+                .where(EmailDelivery.delivery_state.in_(("queued", "failed")))
+                .where(EmailDelivery.sent_at.is_(None))
+                .where(EmailDelivery.retry_count < max_attempts)
+                .where(or_(*due_windows))
+                .order_by(
+                    EmailDelivery.delivery_state.asc(),
+                    EmailDelivery.sent_at.asc(),
+                )
+                .limit(limit)
+            )
+            rows = self._session.scalars(stmt).all()
+        return [_to_email_delivery_row(row) for row in rows]
 
     def find_by_provider_message_id(
         self,
@@ -1247,15 +1352,23 @@ class SqlAlchemyEmailDeliveryRepository(EmailDeliveryRepository):
         workspace_id: str,
         provider_message_id: str,
     ) -> EmailDeliveryRow | None:
-        row = self._session.scalars(
-            select(EmailDelivery).where(
-                EmailDelivery.workspace_id == workspace_id,
-                EmailDelivery.provider_message_id == provider_message_id,
-            )
-        ).one_or_none()
+        # justification: deployment-scope webhook lookup pins workspace_id.
+        with tenant_agnostic():
+            row = self._session.scalars(
+                select(EmailDelivery).where(
+                    EmailDelivery.workspace_id == workspace_id,
+                    EmailDelivery.provider_message_id == provider_message_id,
+                )
+            ).one_or_none()
         return _to_email_delivery_row(row) if row is not None else None
 
     def _load(self, delivery_id: str) -> EmailDelivery:
-        return self._session.scalars(
-            select(EmailDelivery).where(EmailDelivery.id == delivery_id)
-        ).one()
+        # justification: transition methods load rows already selected by id.
+        with tenant_agnostic():
+            return self._session.scalars(
+                select(EmailDelivery).where(EmailDelivery.id == delivery_id)
+            ).one()
+
+
+def _rowcount(result: object) -> int:
+    return int(getattr(result, "rowcount", 0))
