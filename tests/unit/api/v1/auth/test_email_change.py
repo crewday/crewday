@@ -48,6 +48,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from pydantic import SecretStr
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -64,6 +65,7 @@ from app.adapters.db.identity.models import (
 )
 from app.adapters.db.session import make_engine
 from app.api.deps import db_session as db_session_dep
+from app.api.errors import add_exception_handlers
 from app.api.v1.auth import email_change as email_change_module
 from app.auth._throttle import Throttle
 from app.auth.session import SESSION_COOKIE_NAME, issue
@@ -78,6 +80,14 @@ _TEST_UA: str = "pytest-email-change"
 _TEST_ACCEPT_LANGUAGE: str = "en"
 _BASE_URL: str = "https://crew.day"
 _PINNED: datetime = datetime(2026, 4, 25, 12, 0, 0, tzinfo=UTC)
+_PROBLEM_BY_STATUS: dict[int, tuple[str, str]] = {
+    400: ("validation", "Bad request"),
+    401: ("unauthorized", "Unauthorized"),
+    403: ("forbidden", "Forbidden"),
+    409: ("conflict", "Conflict"),
+    410: ("gone", "Gone"),
+    422: ("validation", "Validation error"),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +228,7 @@ def client(
         ),
         prefix="/api/v1",
     )
+    add_exception_handlers(app)
 
     def _session() -> Iterator[Session]:
         s = session_factory()
@@ -262,6 +273,28 @@ def _issue_cookie(
         )
         s.commit()
         return result.cookie_value
+
+
+def _assert_problem(
+    response: Response,
+    *,
+    status_code: int,
+    error: str,
+    path: str,
+) -> dict[str, object]:
+    assert response.status_code == status_code, response.text
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert "retry-after" not in response.headers
+
+    type_name, title = _PROBLEM_BY_STATUS[status_code]
+    body = response.json()
+    assert body["type"] == f"https://crewday.dev/errors/{type_name}"
+    assert body["title"] == title
+    assert body["status"] == status_code
+    assert body["instance"] == path
+    assert body["error"] == error
+    assert "detail" not in body
+    return body
 
 
 def _extract_token_from_body(body: str, *, base_url: str = _BASE_URL) -> str:
@@ -406,8 +439,12 @@ class TestChangeRequestAuthPosture:
             json={"new_email": "alice.new@example.com"},
             headers={"Authorization": "Bearer bogus-pat-token"},
         )
-        assert r.status_code == 403, r.text
-        assert r.json()["detail"]["error"] == "forbidden"
+        _assert_problem(
+            r,
+            status_code=403,
+            error="forbidden",
+            path="/api/v1/me/email/change_request",
+        )
 
     def test_change_request_refuses_bearer_even_with_valid_cookie(
         self,
@@ -427,8 +464,12 @@ class TestChangeRequestAuthPosture:
             json={"new_email": "alice.new@example.com"},
             headers={"Authorization": "Bearer mit_some_personal_token"},
         )
-        assert r.status_code == 403, r.text
-        assert r.json()["detail"]["error"] == "forbidden"
+        _assert_problem(
+            r,
+            status_code=403,
+            error="forbidden",
+            path="/api/v1/me/email/change_request",
+        )
 
     def test_change_request_no_session_is_401(self, client: TestClient) -> None:
         """No session cookie + no Bearer → 401 session_required."""
@@ -436,8 +477,12 @@ class TestChangeRequestAuthPosture:
             "/api/v1/me/email/change_request",
             json={"new_email": "alice.new@example.com"},
         )
-        assert r.status_code == 401, r.text
-        assert r.json()["detail"]["error"] == "session_required"
+        _assert_problem(
+            r,
+            status_code=401,
+            error="session_required",
+            path="/api/v1/me/email/change_request",
+        )
 
     def test_change_request_invalid_session_is_401(
         self,
@@ -449,8 +494,12 @@ class TestChangeRequestAuthPosture:
             "/api/v1/me/email/change_request",
             json={"new_email": "alice.new@example.com"},
         )
-        assert r.status_code == 401, r.text
-        assert r.json()["detail"]["error"] == "session_invalid"
+        _assert_problem(
+            r,
+            status_code=401,
+            error="session_invalid",
+            path="/api/v1/me/email/change_request",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -487,8 +536,12 @@ class TestChangeRequestValidation:
             "/api/v1/me/email/change_request",
             json={"new_email": bad_email},
         )
-        assert r.status_code == 422, r.text
-        assert r.json()["detail"]["error"] == "invalid_email"
+        _assert_problem(
+            r,
+            status_code=422,
+            error="invalid_email",
+            path="/api/v1/me/email/change_request",
+        )
 
     def test_email_in_use_is_409(
         self,
@@ -520,8 +573,12 @@ class TestChangeRequestValidation:
             "/api/v1/me/email/change_request",
             json={"new_email": "TAKEN@example.com"},  # case-insensitive
         )
-        assert r.status_code == 409, r.text
-        assert r.json()["detail"]["error"] == "email_in_use"
+        _assert_problem(
+            r,
+            status_code=409,
+            error="email_in_use",
+            path="/api/v1/me/email/change_request",
+        )
 
     def test_recent_reenrollment_is_409(
         self,
@@ -569,8 +626,12 @@ class TestChangeRequestValidation:
             "/api/v1/me/email/change_request",
             json={"new_email": "alice.new@example.com"},
         )
-        assert r.status_code == 409, r.text
-        assert r.json()["detail"]["error"] == "recent_reenrollment"
+        _assert_problem(
+            r,
+            status_code=409,
+            error="recent_reenrollment",
+            path="/api/v1/me/email/change_request",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -715,8 +776,12 @@ class TestVerifyRejections:
             "/api/v1/auth/email/verify",
             json={"token": "garbage-token-not-signed"},
         )
-        assert r.status_code == 400, r.text
-        assert r.json()["detail"]["error"] == "invalid_token"
+        _assert_problem(
+            r,
+            status_code=400,
+            error="invalid_token",
+            path="/api/v1/auth/email/verify",
+        )
 
     def test_verify_already_consumed_is_409(
         self,
@@ -744,8 +809,12 @@ class TestVerifyRejections:
         assert r1.status_code == 200, r1.text
         # Second verify hits the already-consumed nonce.
         r2 = client.post("/api/v1/auth/email/verify", json={"token": token})
-        assert r2.status_code == 409, r2.text
-        assert r2.json()["detail"]["error"] == "already_consumed"
+        _assert_problem(
+            r2,
+            status_code=409,
+            error="already_consumed",
+            path="/api/v1/auth/email/verify",
+        )
 
     def test_verify_session_user_mismatch_is_403(
         self,
@@ -806,8 +875,12 @@ class TestVerifyRejections:
         )
         client.cookies.set(SESSION_COOKIE_NAME, bob_cookie)
         r = client.post("/api/v1/auth/email/verify", json={"token": token})
-        assert r.status_code == 403, r.text
-        assert r.json()["detail"]["error"] == "session_user_mismatch"
+        _assert_problem(
+            r,
+            status_code=403,
+            error="session_user_mismatch",
+            path="/api/v1/auth/email/verify",
+        )
 
         # The mismatched-session attempt MUST NOT burn the magic-link
         # nonce — otherwise an attacker holding any session can DoS
@@ -848,8 +921,12 @@ class TestVerifyRejections:
         # router enforces session presence directly.
         client.cookies.clear()
         r = client.post("/api/v1/auth/email/verify", json={"token": token})
-        assert r.status_code == 401, r.text
-        assert r.json()["detail"]["error"] == "session_required"
+        _assert_problem(
+            r,
+            status_code=401,
+            error="session_required",
+            path="/api/v1/auth/email/verify",
+        )
 
     def test_verify_refuses_bearer_token(
         self,
@@ -861,8 +938,12 @@ class TestVerifyRejections:
             json={"token": "anything"},
             headers={"Authorization": "Bearer pat-token"},
         )
-        assert r.status_code == 403, r.text
-        assert r.json()["detail"]["error"] == "forbidden"
+        _assert_problem(
+            r,
+            status_code=403,
+            error="forbidden",
+            path="/api/v1/auth/email/verify",
+        )
 
     def test_verify_expired_token_is_410(
         self,
@@ -905,8 +986,12 @@ class TestVerifyRejections:
 
         client.cookies.set(SESSION_COOKIE_NAME, cookie_value)
         r = client.post("/api/v1/auth/email/verify", json={"token": token})
-        assert r.status_code == 410, r.text
-        assert r.json()["detail"]["error"] == "expired"
+        _assert_problem(
+            r,
+            status_code=410,
+            error="expired",
+            path="/api/v1/auth/email/verify",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1041,8 +1126,12 @@ class TestRevertRejections:
             "/api/v1/auth/email/revert",
             json={"token": "garbage-not-signed"},
         )
-        assert r.status_code == 400, r.text
-        assert r.json()["detail"]["error"] == "invalid_token"
+        _assert_problem(
+            r,
+            status_code=400,
+            error="invalid_token",
+            path="/api/v1/auth/email/revert",
+        )
 
     def test_revert_already_consumed_is_409(
         self,
@@ -1065,8 +1154,12 @@ class TestRevertRejections:
         r1 = client.post("/api/v1/auth/email/revert", json={"token": revert_token})
         assert r1.status_code == 200, r1.text
         r2 = client.post("/api/v1/auth/email/revert", json={"token": revert_token})
-        assert r2.status_code == 409, r2.text
-        assert r2.json()["detail"]["error"] == "already_consumed"
+        _assert_problem(
+            r2,
+            status_code=409,
+            error="already_consumed",
+            path="/api/v1/auth/email/revert",
+        )
 
     def test_revert_expired_token_is_410(
         self,
@@ -1106,8 +1199,12 @@ class TestRevertRejections:
 
         client.cookies.clear()
         r = client.post("/api/v1/auth/email/revert", json={"token": revert_token})
-        assert r.status_code == 410, r.text
-        assert r.json()["detail"]["error"] == "expired"
+        _assert_problem(
+            r,
+            status_code=410,
+            error="expired",
+            path="/api/v1/auth/email/revert",
+        )
 
     def test_revert_refuses_bearer_token(
         self,
@@ -1118,8 +1215,12 @@ class TestRevertRejections:
             json={"token": "anything"},
             headers={"Authorization": "Bearer some-token"},
         )
-        assert r.status_code == 403, r.text
-        assert r.json()["detail"]["error"] == "forbidden"
+        _assert_problem(
+            r,
+            status_code=403,
+            error="forbidden",
+            path="/api/v1/auth/email/revert",
+        )
 
 
 # ---------------------------------------------------------------------------

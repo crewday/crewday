@@ -44,7 +44,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Cookie, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -53,12 +53,22 @@ from app.adapters.db.session import make_uow
 from app.adapters.mail.ports import Mailer
 from app.api.deps import db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1.auth.errors import (
+    auth_bad_request,
+    auth_conflict,
+    auth_forbidden,
+    auth_gone,
+    auth_rate_limited,
+    auth_unauthorized,
+)
 from app.auth import session as auth_session
 from app.auth._throttle import ConsumeLockout, RateLimited, Throttle
 from app.auth.magic_link import PendingDispatch
 from app.auth.magic_link_port import MagicLinkAdapter
 from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME
 from app.config import Settings, get_settings
+from app.domain.errors import DomainError
+from app.domain.errors import Validation as DomainValidation
 from app.domain.identity.email_change import (
     AlreadyConsumed,
     EmailChangeOutcome,
@@ -166,8 +176,8 @@ _TokenError = (
 )
 
 
-def _http_for_token(exc: Exception) -> HTTPException:
-    """Map a magic-link domain error onto an :class:`HTTPException`.
+def _http_for_token(exc: Exception) -> DomainError:
+    """Map a magic-link domain error onto an auth problem-json error.
 
     Mirrors :func:`app.api.v1.auth.magic._http_for` so the email-
     change routes share the same error vocabulary as the generic
@@ -175,34 +185,16 @@ def _http_for_token(exc: Exception) -> HTTPException:
     payload-exp and persisted-TTL lapses, matching the spec.
     """
     if isinstance(exc, RateLimited):
-        return HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={"error": "rate_limited"},
-        )
+        return auth_rate_limited("rate_limited")
     if isinstance(exc, ConsumeLockout):
-        return HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={"error": "consume_locked_out"},
-        )
+        return auth_rate_limited("consume_locked_out")
     if isinstance(exc, TokenExpired):
-        return HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail={"error": "expired"},
-        )
+        return auth_gone("expired")
     if isinstance(exc, AlreadyConsumed):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "already_consumed"},
-        )
+        return auth_conflict("already_consumed")
     if isinstance(exc, PurposeMismatch):
-        return HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "purpose_mismatch"},
-        )
-    return HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail={"error": "invalid_token"},
-    )
+        return auth_bad_request("purpose_mismatch")
+    return auth_bad_request("invalid_token")
 
 
 def _client_ip(request: Request) -> str:
@@ -234,10 +226,7 @@ def _refuse_bearer_token(request: Request) -> None:
     """
     auth_header = request.headers.get("Authorization")
     if auth_header is not None and auth_header.lower().startswith("bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "forbidden"},
-        )
+        raise auth_forbidden("forbidden")
 
 
 def _resolve_session_user(
@@ -256,10 +245,7 @@ def _resolve_session_user(
     """
     cookie_value = cookie_primary or cookie_dev
     if not cookie_value:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "session_required"},
-        )
+        raise auth_unauthorized("session_required")
     ua = request.headers.get("user-agent", "")
     accept_language = request.headers.get("accept-language", "")
     try:
@@ -276,15 +262,9 @@ def _resolve_session_user(
         # so the SPA branches uniformly with /me on
         # ``subject_user_archived`` instead of the generic
         # ``session_invalid``.
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": auth_session.USER_ARCHIVED_WIRE_CODE},
-        ) from exc
+        raise auth_unauthorized(auth_session.USER_ARCHIVED_WIRE_CODE) from exc
     except (auth_session.SessionInvalid, auth_session.SessionExpired) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "session_invalid"},
-        ) from exc
+        raise auth_unauthorized("session_invalid") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -382,10 +362,7 @@ def build_email_change_router(
                 if user is None:
                     # Session row points at a hard-deleted user — treat
                     # as unauth, mirroring :mod:`app.api.v1.auth.me`.
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail={"error": "session_invalid"},
-                    )
+                    raise auth_unauthorized("session_invalid")
 
                 outcome = request_change(
                     repo=repo,
@@ -400,23 +377,13 @@ def build_email_change_router(
                     dispatch=dispatch,
                 )
         except InvalidEmail as exc:
-            # 422 — Pydantic / Starlette rename ``UNPROCESSABLE_ENTITY``
-            # to ``UNPROCESSABLE_CONTENT`` mid-rollout; we use the
-            # numeric literal so neither alias goes stale.
-            raise HTTPException(
-                status_code=422,
-                detail={"error": "invalid_email"},
-            ) from exc
+            # 422 validation without a human detail, matching the
+            # legacy body that only carried the ``error`` extension.
+            raise DomainValidation(extra={"error": "invalid_email"}) from exc
         except EmailInUse as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"error": "email_in_use"},
-            ) from exc
+            raise auth_conflict("email_in_use") from exc
         except RecentReenrollment as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"error": "recent_reenrollment"},
-            ) from exc
+            raise auth_conflict("recent_reenrollment") from exc
         except _TokenError as exc:
             # Magic-link rate-limit / lockout — propagated from
             # :func:`request_link`. Map through the same vocabulary
@@ -507,24 +474,15 @@ def build_email_change_router(
             # for. Spec §03 step 2: "Requires an active passkey
             # session for the same ``user_id``". 403 keeps the
             # symbol distinct from the 401 (no session at all).
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={"error": "session_user_mismatch"},
-            ) from exc
+            raise auth_forbidden("session_user_mismatch") from exc
         except EmailInUse as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"error": "email_in_use"},
-            ) from exc
+            raise auth_conflict("email_in_use") from exc
         except PendingNotFound as exc:
             # The nonce was consumed but no live pending row exists —
             # collapse to ``410 expired`` so the caller cannot tell
             # "your token was tampered with" from "your row was
             # swept" apart.
-            raise HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail={"error": "expired"},
-            ) from exc
+            raise auth_gone("expired") from exc
         except _TokenError as exc:
             raise _http_for_token(exc) from exc
 
@@ -584,10 +542,7 @@ def build_email_change_router(
                 settings=cfg,
             )
         except PendingNotFound as exc:
-            raise HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail={"error": "expired"},
-            ) from exc
+            raise auth_gone("expired") from exc
         except _TokenError as exc:
             raise _http_for_token(exc) from exc
 
