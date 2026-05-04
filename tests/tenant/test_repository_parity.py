@@ -640,8 +640,14 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.agent.compaction.search_chat_archive",
         "app.domain.agent.preferences.default_approval_mode_for_workspace",
         "app.domain.agent.preferences.read_preference",
+        # Workspace upstream-PII consent reads/writes go through
+        # ``read_preference`` with ``workspace_id == ctx.workspace_id``;
+        # save stamps new rows with the same ctx workspace. Covered by
+        # the ORM-filter seam.
+        "app.domain.agent.preferences.read_workspace_upstream_pii_consent",
         "app.domain.agent.preferences.resolve_preferences",
         "app.domain.agent.preferences.save_preference",
+        "app.domain.agent.preferences.save_workspace_upstream_pii_consent",
         "app.domain.agent.staff_chat.run_staff_chat_turn",
         "app.domain.assets.actions.delete_action",
         "app.domain.assets.actions.list_actions",
