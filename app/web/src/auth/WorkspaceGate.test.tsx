@@ -12,6 +12,10 @@ import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
 import * as preferences from "@/lib/preferences";
 import type { AuthMe } from "./types";
 
+const ACME_WORKSPACE_ID = "01KQPV1H9MY2V13PVWZ6DY0B4A";
+const BETA_WORKSPACE_ID = "01KQPV1H9MY2V13PVWZ6DY0B4B";
+const SOLO_WORKSPACE_ID = "01KQPV1H9MY2V13PVWZ6DY0B4C";
+
 function makeUser(
   workspaces: AuthMe["available_workspaces"],
   current: string | null = null,
@@ -88,9 +92,11 @@ describe("<WorkspaceGate>", () => {
   });
 
   it("auto-adopts the only workspace and renders the protected tree", () => {
+    const persistWorkspace = vi.spyOn(preferences, "persistWorkspace");
     setAuthenticated(makeUser([
       {
-        workspace: { id: "ws_only", name: "Solo", timezone: "UTC", default_currency: "USD", default_country: "US", default_locale: "en" },
+        workspace_id: SOLO_WORKSPACE_ID,
+        workspace: { id: "solo", name: "Solo", timezone: "UTC", default_currency: "USD", default_country: "US", default_locale: "en" },
         grant_role: "manager",
         binding_org_id: null,
         source: "workspace_grant",
@@ -109,25 +115,29 @@ describe("<WorkspaceGate>", () => {
     // The chooser must NOT render even momentarily for single-workspace
     // users — the auto-adopt fires synchronously in the same effect.
     expect(screen.queryByText(/Pick a workspace/i)).toBeNull();
+    expect(persistWorkspace).toHaveBeenCalledWith("solo");
   });
 
-  it("adopts the server-supplied current_workspace_id without showing the chooser", () => {
+  it("adopts the slug matching the server-supplied current_workspace_id without showing the chooser", () => {
+    const persistWorkspace = vi.spyOn(preferences, "persistWorkspace");
     setAuthenticated(makeUser(
       [
         {
-          workspace: { id: "ws_a", name: "Acme", timezone: "UTC", default_currency: "USD", default_country: "US", default_locale: "en" },
+          workspace_id: ACME_WORKSPACE_ID,
+          workspace: { id: "acme", name: "Acme", timezone: "UTC", default_currency: "USD", default_country: "US", default_locale: "en" },
           grant_role: "manager",
           binding_org_id: null,
           source: "workspace_grant",
         },
         {
-          workspace: { id: "ws_b", name: "Beta Co", timezone: "UTC", default_currency: "EUR", default_country: "FR", default_locale: "fr" },
+          workspace_id: BETA_WORKSPACE_ID,
+          workspace: { id: "beta-co", name: "Beta Co", timezone: "UTC", default_currency: "EUR", default_country: "FR", default_locale: "fr" },
           grant_role: "worker",
           binding_org_id: null,
           source: "workspace_grant",
         },
       ],
-      "ws_b",
+      BETA_WORKSPACE_ID,
     ));
 
     render(
@@ -138,9 +148,10 @@ describe("<WorkspaceGate>", () => {
       </App>,
     );
 
-    // Server already picked ws_b — adopt it silently, no chooser.
+    // Server already picked the Beta Co ULID — adopt its slug silently.
     expect(screen.getByText("protected tree")).toBeInTheDocument();
     expect(screen.queryByText(/Pick a workspace/i)).toBeNull();
+    expect(persistWorkspace).toHaveBeenCalledWith("beta-co");
   });
 
   it("renders the no-workspaces empty state when the user has no grants", () => {

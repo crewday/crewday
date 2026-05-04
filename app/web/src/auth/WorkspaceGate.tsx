@@ -61,9 +61,9 @@ export function WorkspaceGate({ children }: { children?: React.ReactNode }) {
     return w ? slugFor(w.workspace.id, w.workspace.name) : null;
   }, [available]);
   const currentSlug = useMemo(() => {
-    if (!user?.current_workspace_id) return null;
-    const current = available.find((w) => w.workspace.id === user.current_workspace_id);
-    return current ? slugFor(current.workspace.id, current.workspace.name) : null;
+    return activeWorkspaceSlug(available, {
+      workspaceId: user?.current_workspace_id ?? null,
+    });
   }, [available, user?.current_workspace_id]);
 
   // Auto-adopt for single-workspace users. Runs as an effect so the
@@ -197,18 +197,29 @@ function labelForRole(role: string): string {
 }
 
 /**
- * Resolve the URL-safe slug for a workspace. The /me payload carries
- * the workspace `id` (ULID) and `name` (display) but not the slug
- * directly — the API layer derives the slug from the name on
- * persistence. For the picker we use the id (always URL-safe) so
- * the navigation contract is unambiguous; the next `/auth/me` call
- * after the workspace is adopted will hand back the canonical slug
- * via the workspace cookie.
+ * Resolve the URL-safe slug for a workspace. Current auth payloads
+ * carry the slug in `workspace.id`; the helper keeps the call sites
+ * explicit while the wire shape finishes settling.
  *
  * Exported for `WorkspaceGate.test.tsx`.
  */
 export function slugFor(id: string, _name: string): string {
   return id;
+}
+
+function activeWorkspaceSlug(
+  available: Array<{
+    workspace_id?: string | null;
+    workspace: { id: string; name: string };
+  }>,
+  current: { workspaceId: string | null },
+): string | null {
+  if (!current.workspaceId) return null;
+  const match = available.find((w) => {
+    const slug = slugFor(w.workspace.id, w.workspace.name);
+    return w.workspace_id === current.workspaceId || slug === current.workspaceId;
+  });
+  return match ? slugFor(match.workspace.id, match.workspace.name) : null;
 }
 
 export default WorkspaceGate;

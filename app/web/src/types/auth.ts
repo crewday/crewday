@@ -11,9 +11,10 @@ export type RuleEffect = "allow" | "deny";
 export type GrantRole = "manager" | "worker" | "client" | "guest" | "admin";
 
 // §02 — workspaces the current user has access to, with the
-// highest-privilege grant role they hold there. Returned by /me so
-// the workspace switcher can render without a second call.
+// highest-privilege grant role they hold there. Returned by /auth/me
+// so WorkspaceGate can render without a second call.
 export interface AvailableWorkspace {
+  workspace_id?: string | null;
   workspace: Workspace;
   grant_role: GrantRole | null;
   binding_org_id: string | null;

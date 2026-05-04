@@ -26,10 +26,9 @@ import type { AvailableWorkspace } from "@/types/auth";
  *   `/me/workspaces`. May be empty for a brand-new account whose
  *   first grant invitation is still pending — that case lands on the
  *   "no workspaces yet" empty state.
- * - `current_workspace_id`: the slug the **server** thinks is active
- *   (read from the `crewday_workspace` cookie). When present and the
- *   client hasn't picked one yet, `<WorkspaceGate>` adopts it
- *   silently.
+ * - `current_workspace_id`: the DB ULID the **server** thinks is active.
+ *   When present and the client hasn't picked one yet, `<WorkspaceGate>`
+ *   resolves it to a slug and adopts it silently.
  * - `is_deployment_admin`: mirrors the same flag on the
  *   workspace-scoped `Me` envelope (§02, §05). Surfaced here so a
  *   deployment admin who has zero workspace grants can still
