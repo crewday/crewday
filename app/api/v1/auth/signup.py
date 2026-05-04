@@ -38,7 +38,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -49,6 +49,13 @@ from app.adapters.db.session import make_uow
 from app.adapters.mail.ports import Mailer
 from app.api.deps import db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1.auth.errors import (
+    auth_bad_request,
+    auth_conflict,
+    auth_gone,
+    auth_not_found,
+    auth_rate_limited,
+)
 from app.audit import write_audit, write_deployment_audit
 from app.auth import passkey, signup, signup_abuse
 from app.auth._hashing import hash_with_pepper
@@ -67,6 +74,8 @@ from app.auth.magic_link import (
 from app.auth.signup_abuse import CaptchaFailed, DisposableEmail
 from app.capabilities import Capabilities
 from app.config import Settings, get_settings
+from app.domain.errors import DomainError
+from app.domain.errors import Validation as DomainValidation
 from app.tenancy import InvalidSlug, tenant_agnostic
 from app.util.clock import SystemClock
 from app.util.ulid import new_ulid
@@ -220,161 +229,87 @@ _CompleteDomainError = (
 )
 
 
-def _http_for_start(exc: Exception) -> HTTPException:
+def _http_for_start(exc: Exception) -> DomainError:
     """Map a :func:`start_signup` domain error to an HTTP response."""
     if isinstance(exc, signup.SignupDisabled):
         # §03 spec says disabled deployments 404 the entire surface.
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found"},
-        )
+        return auth_not_found("not_found")
     if isinstance(exc, InvalidSlug):
-        # Starlette renamed the constant from *_ENTITY to *_CONTENT in
-        # a recent release; use the literal 422 so the router works
-        # across minor versions without a conditional import.
-        return HTTPException(
-            status_code=422,
-            detail={"error": "invalid_slug", "message": str(exc)},
+        message = str(exc)
+        return DomainValidation(
+            message,
+            extra={"error": "invalid_slug", "message": message},
         )
     if isinstance(exc, signup.SlugReserved):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "slug_reserved"},
-        )
+        return auth_conflict("slug_reserved")
     if isinstance(exc, signup.SlugTaken):
         # Spec §03 step 1: ``409 slug_taken`` carries a
         # ``suggested_alternative`` the signup UI offers in one click.
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error": "slug_taken",
-                "suggested_alternative": exc.suggested_alternative,
-            },
+        return auth_conflict(
+            "slug_taken",
+            extra={"suggested_alternative": exc.suggested_alternative},
         )
     if isinstance(exc, signup.SlugHomoglyphError):
         # Spec §03 requires the colliding slug in the body so the UI
         # can surface "you typed rnicasa but micasa is taken".
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error": "slug_homoglyph_collision",
-                "colliding_slug": exc.colliding_slug,
-            },
+        return auth_conflict(
+            "slug_homoglyph_collision",
+            extra={"colliding_slug": exc.colliding_slug},
         )
     if isinstance(exc, signup.SlugInGracePeriod):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "slug_in_grace_period"},
-        )
+        return auth_conflict("slug_in_grace_period")
     # RateLimited — last branch; the mapper is exhaustive via
     # ``_StartDomainError``.
-    return HTTPException(
-        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-        detail={"error": "rate_limited"},
-    )
+    return auth_rate_limited("rate_limited")
 
 
-def _http_for_verify(exc: Exception) -> HTTPException:
+def _http_for_verify(exc: Exception) -> DomainError:
     if isinstance(exc, signup.SignupDisabled):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found"},
-        )
+        return auth_not_found("not_found")
     if isinstance(exc, signup.SignupAttemptMissing):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "signup_attempt_not_found"},
-        )
+        return auth_not_found("signup_attempt_not_found")
     if isinstance(exc, signup.SignupAttemptExpired):
         if exc.state == "expired":
-            return HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail={"error": "expired"},
-            )
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": exc.state},
-        )
+            return auth_gone("expired")
+        return auth_conflict(exc.state)
     if isinstance(exc, TokenExpired):
-        return HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail={"error": "expired"},
-        )
+        return auth_gone("expired")
     if isinstance(exc, AlreadyConsumed):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "already_consumed"},
-        )
+        return auth_conflict("already_consumed")
     if isinstance(exc, PurposeMismatch):
-        return HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "purpose_mismatch"},
-        )
+        return auth_bad_request("purpose_mismatch")
     if isinstance(exc, ConsumeLockout):
-        return HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={"error": "consume_locked_out"},
-        )
+        return auth_rate_limited("consume_locked_out")
     if isinstance(exc, RateLimited):
-        return HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={"error": "rate_limited"},
-        )
+        return auth_rate_limited("rate_limited")
     # InvalidToken — default fallback for the verify family.
-    return HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail={"error": "invalid_token"},
-    )
+    return auth_bad_request("invalid_token")
 
 
-def _http_for_complete(exc: Exception) -> HTTPException:
+def _http_for_complete(exc: Exception) -> DomainError:
     if isinstance(exc, signup.SignupDisabled):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found"},
-        )
+        return auth_not_found("not_found")
     if isinstance(exc, signup.SignupAttemptMissing):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "signup_attempt_not_found"},
-        )
+        return auth_not_found("signup_attempt_not_found")
     if isinstance(exc, signup.SignupAttemptExpired):
         if exc.state == "expired":
-            return HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail={"error": "expired"},
-            )
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": exc.state},
-        )
+            return auth_gone("expired")
+        return auth_conflict(exc.state)
     if isinstance(exc, passkey.ChallengeNotFound):
         # ChallengeNotFound covers both a never-existed id and a
         # replayed finish (the row is deleted atomically with the
         # credential insert), so the two shapes share the 409 envelope.
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "challenge_consumed_or_unknown"},
-        )
+        return auth_conflict("challenge_consumed_or_unknown")
     if isinstance(exc, passkey.ChallengeExpired):
-        return HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "challenge_expired"},
-        )
+        return auth_bad_request("challenge_expired")
     if isinstance(
         exc,
         passkey.InvalidRegistration | passkey.ChallengeSubjectMismatch,
     ):
-        return HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "invalid_registration"},
-        )
+        return auth_bad_request("invalid_registration")
     # TooManyPasskeys — only reachable via a weird concurrent enrol,
     # but map it for completeness.
-    return HTTPException(
-        status_code=422,
-        detail={"error": "too_many_passkeys"},
-    )
+    return DomainValidation(extra={"error": "too_many_passkeys"})
 
 
 # ---------------------------------------------------------------------------
@@ -415,7 +350,7 @@ def _audit_signup_refusal(
 
     Failures of the audit UoW are logged and swallowed: this helper
     runs inside an ``except _StartAbuseError`` clause about to
-    re-raise the mapped :class:`HTTPException`, and an audit failure
+    re-raise the mapped :class:`DomainError`, and an audit failure
     here would shadow the 429/422 the client expects with a 500. The
     catch is deliberately broad (``Exception``) so any transient DB
     / config hiccup (e.g. uninitialised engine in a misconfigured
@@ -587,36 +522,23 @@ def _abuse_audit_reason(exc: Exception) -> str:
     return exc.reason
 
 
-def _http_for_abuse(exc: Exception) -> HTTPException:
+def _http_for_abuse(exc: Exception) -> DomainError:
     """Map a :mod:`app.auth.signup_abuse` refusal to an HTTP response."""
     if isinstance(exc, SignupRateLimited):
-        return HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={
-                "error": "rate_limited",
-                "retry_after_seconds": exc.retry_after_seconds,
-            },
-            headers={"Retry-After": str(exc.retry_after_seconds)},
+        return auth_rate_limited(
+            "rate_limited",
+            retry_after_seconds=exc.retry_after_seconds,
         )
     if isinstance(exc, DisposableEmail):
-        return HTTPException(
-            status_code=422,
-            detail={"error": "disposable_email"},
-        )
+        return DomainValidation(extra={"error": "disposable_email"})
     # CaptchaFailed — last branch; ``_StartAbuseError`` is exhaustive.
     assert isinstance(exc, CaptchaFailed)
     # The ``captcha_required`` reason is a distinct symbol so the SPA
     # can tell "you need to solve the CAPTCHA" apart from "you solved
     # it wrong".
     if exc.reason == "captcha_required":
-        return HTTPException(
-            status_code=422,
-            detail={"error": "captcha_required"},
-        )
-    return HTTPException(
-        status_code=422,
-        detail={"error": "captcha_failed"},
-    )
+        return DomainValidation(extra={"error": "captcha_required"})
+    return DomainValidation(extra={"error": "captcha_failed"})
 
 
 def build_signup_router(
@@ -699,10 +621,7 @@ def build_signup_router(
         # Fail fast on the 404-for-disabled-deployment path before
         # we bother hashing anything.
         if not capabilities.settings.signup_enabled:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "not_found"},
-            )
+            raise auth_not_found("not_found")
 
         ip = _client_ip(request)
         pepper = derive_subkey(cfg.root_key, purpose=_ABUSE_HKDF_PURPOSE)
@@ -799,10 +718,7 @@ def build_signup_router(
     ) -> VerifyResponse:
         """Flip the signup_attempt to *verified* + return the session id."""
         if not capabilities.settings.signup_enabled:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "not_found"},
-            )
+            raise auth_not_found("not_found")
         try:
             ssn = signup.consume_verify(
                 session,
@@ -831,10 +747,7 @@ def build_signup_router(
     ) -> PasskeyStartResponse:
         """Delegate to :func:`app.auth.passkey.register_start_signup`."""
         if not capabilities.settings.signup_enabled:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "not_found"},
-            )
+            raise auth_not_found("not_found")
         # Load the signup_attempt for the email — the passkey service
         # needs the canonical email for the WebAuthn user entity's
         # ``name`` field. We keep the domain service's single source
@@ -845,10 +758,7 @@ def build_signup_router(
         with tenant_agnostic():
             attempt = session.get(SignupAttempt, body.signup_session_id)
         if attempt is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "signup_attempt_not_found"},
-            )
+            raise auth_not_found("signup_attempt_not_found")
         try:
             opts = passkey.register_start_signup(
                 session,
@@ -882,10 +792,7 @@ def build_signup_router(
     ) -> PasskeyFinishResponse:
         """Delegate to :func:`app.auth.signup.complete_signup`."""
         if not capabilities.settings.signup_enabled:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "not_found"},
-            )
+            raise auth_not_found("not_found")
         try:
             result = signup.complete_signup(
                 session,

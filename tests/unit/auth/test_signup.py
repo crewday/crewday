@@ -50,12 +50,24 @@ from app.adapters.db.llm.models import BudgetLedger
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.deps import db_session
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
+from app.api.v1.auth import signup as signup_api
 from app.api.v1.auth.signup import build_signup_router
 from app.auth import magic_link, passkey, signup
-from app.auth._throttle import Throttle
+from app.auth._throttle import ConsumeLockout, SignupRateLimited, Throttle
+from app.auth.magic_link import (
+    AlreadyConsumed,
+    InvalidToken,
+    PurposeMismatch,
+    RateLimited,
+    TokenExpired,
+)
+from app.auth.signup_abuse import CaptchaFailed, DisposableEmail
 from app.auth.webauthn import VerifiedRegistration
 from app.capabilities import Capabilities, DeploymentSettings, Features
 from app.config import Settings
+from app.domain.errors import CANONICAL_TYPE_BASE, DomainError
+from app.tenancy import InvalidSlug
 
 _PINNED = datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)
 
@@ -121,6 +133,53 @@ def _redirect_default_engine_to(engine: Engine) -> Iterator[None]:
     finally:
         _session_mod._default_engine = original_engine
         _session_mod._default_sessionmaker_ = original_factory
+
+
+def _type_uri(short_name: str) -> str:
+    return f"{CANONICAL_TYPE_BASE}{short_name}"
+
+
+def _render_domain_error(exc: DomainError) -> Any:
+    app = FastAPI()
+
+    @app.get("/boom")
+    def boom() -> None:
+        raise exc
+
+    add_exception_handlers(app)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        return client.get("/boom")
+
+
+def _assert_problem(
+    response: Any,
+    *,
+    status_code: int,
+    type_name: str,
+    error: str,
+    detail: str | None = None,
+    extra: Mapping[str, object] | None = None,
+    retry_after_seconds: int | None = None,
+) -> dict[str, object]:
+    assert response.status_code == status_code, response.text
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    if retry_after_seconds is None:
+        assert "Retry-After" not in response.headers
+    else:
+        assert response.headers["Retry-After"] == str(retry_after_seconds)
+
+    body = response.json()
+    assert body["type"] == _type_uri(type_name)
+    assert body["status"] == status_code
+    assert body["instance"] == "/boom"
+    assert body["error"] == error
+    if detail is None:
+        assert "detail" not in body
+    else:
+        assert body["detail"] == detail
+    for key, value in (extra or {}).items():
+        assert body[key] == value
+    return body
 
 
 # ---------------------------------------------------------------------------
@@ -694,6 +753,7 @@ class TestRouterSlugTakenBody:
         engine: Engine,
     ) -> Iterator[TestClient]:
         app = FastAPI()
+        add_exception_handlers(app)
         router = build_signup_router(
             mailer=mailer,
             throttle=throttle,
@@ -738,7 +798,7 @@ class TestRouterSlugTakenBody:
             json={"email": "taken@example.com", "desired_slug": "villa-sud"},
         )
         assert r.status_code == 409
-        body = r.json()["detail"]
+        body = r.json()
         assert body["error"] == "slug_taken"
         assert body["suggested_alternative"] == "villa-sud-2"
 
@@ -1860,6 +1920,290 @@ class TestProvisionSeedsBudgetLedger:
 
 
 # ---------------------------------------------------------------------------
+# HTTP router — error mapping
+# ---------------------------------------------------------------------------
+
+
+class TestRouterDomainErrorMapping:
+    def test_start_mapper_preserves_problem_json_shapes(self) -> None:
+        invalid_slug_message = "slug must match ^[a-z0-9][a-z0-9-]*[a-z0-9]$"
+        cases = [
+            (
+                signup_api._http_for_start(signup.SignupDisabled()),
+                404,
+                "not_found",
+                "not_found",
+                None,
+                None,
+                None,
+            ),
+            (
+                signup_api._http_for_start(InvalidSlug(invalid_slug_message)),
+                422,
+                "validation",
+                "invalid_slug",
+                invalid_slug_message,
+                {"message": invalid_slug_message},
+                None,
+            ),
+            (
+                signup_api._http_for_start(signup.SlugReserved("admin")),
+                409,
+                "conflict",
+                "slug_reserved",
+                None,
+                None,
+                None,
+            ),
+            (
+                signup_api._http_for_start(
+                    signup.SlugTaken("villa-sud", "villa-sud-2")
+                ),
+                409,
+                "conflict",
+                "slug_taken",
+                None,
+                {"suggested_alternative": "villa-sud-2"},
+                None,
+            ),
+            (
+                signup_api._http_for_start(
+                    signup.SlugHomoglyphError("rnicasa", "micasa")
+                ),
+                409,
+                "conflict",
+                "slug_homoglyph_collision",
+                None,
+                {"colliding_slug": "micasa"},
+                None,
+            ),
+            (
+                signup_api._http_for_start(signup.SlugInGracePeriod("held")),
+                409,
+                "conflict",
+                "slug_in_grace_period",
+                None,
+                None,
+                None,
+            ),
+            (
+                signup_api._http_for_start(RateLimited("per-purpose throttle")),
+                429,
+                "rate_limited",
+                "rate_limited",
+                None,
+                None,
+                None,
+            ),
+        ]
+
+        for domain_error, status_code, type_name, error, detail, extra, retry in cases:
+            _assert_problem(
+                _render_domain_error(domain_error),
+                status_code=status_code,
+                type_name=type_name,
+                error=error,
+                detail=detail,
+                extra=extra,
+                retry_after_seconds=retry,
+            )
+
+    def test_verify_mapper_preserves_problem_json_shapes(self) -> None:
+        cases = [
+            (
+                signup_api._http_for_verify(signup.SignupDisabled()),
+                404,
+                "not_found",
+                "not_found",
+            ),
+            (
+                signup_api._http_for_verify(signup.SignupAttemptMissing("missing")),
+                404,
+                "not_found",
+                "signup_attempt_not_found",
+            ),
+            (
+                signup_api._http_for_verify(
+                    signup.SignupAttemptExpired("ttl", state="expired")
+                ),
+                410,
+                "gone",
+                "expired",
+            ),
+            (
+                signup_api._http_for_verify(
+                    signup.SignupAttemptExpired("done", state="already_completed")
+                ),
+                409,
+                "conflict",
+                "already_completed",
+            ),
+            (
+                signup_api._http_for_verify(TokenExpired("ttl")),
+                410,
+                "gone",
+                "expired",
+            ),
+            (
+                signup_api._http_for_verify(AlreadyConsumed("replay")),
+                409,
+                "conflict",
+                "already_consumed",
+            ),
+            (
+                signup_api._http_for_verify(PurposeMismatch("wrong purpose")),
+                400,
+                "validation",
+                "purpose_mismatch",
+            ),
+            (
+                signup_api._http_for_verify(ConsumeLockout("locked")),
+                429,
+                "rate_limited",
+                "consume_locked_out",
+            ),
+            (
+                signup_api._http_for_verify(RateLimited("per-purpose throttle")),
+                429,
+                "rate_limited",
+                "rate_limited",
+            ),
+            (
+                signup_api._http_for_verify(InvalidToken("bad token")),
+                400,
+                "validation",
+                "invalid_token",
+            ),
+        ]
+
+        for domain_error, status_code, type_name, error in cases:
+            _assert_problem(
+                _render_domain_error(domain_error),
+                status_code=status_code,
+                type_name=type_name,
+                error=error,
+            )
+
+    def test_complete_mapper_preserves_problem_json_shapes(self) -> None:
+        cases = [
+            (
+                signup_api._http_for_complete(signup.SignupDisabled()),
+                404,
+                "not_found",
+                "not_found",
+            ),
+            (
+                signup_api._http_for_complete(signup.SignupAttemptMissing("missing")),
+                404,
+                "not_found",
+                "signup_attempt_not_found",
+            ),
+            (
+                signup_api._http_for_complete(
+                    signup.SignupAttemptExpired("ttl", state="expired")
+                ),
+                410,
+                "gone",
+                "expired",
+            ),
+            (
+                signup_api._http_for_complete(
+                    signup.SignupAttemptExpired("verify first", state="not_verified")
+                ),
+                409,
+                "conflict",
+                "not_verified",
+            ),
+            (
+                signup_api._http_for_complete(passkey.ChallengeNotFound("gone")),
+                409,
+                "conflict",
+                "challenge_consumed_or_unknown",
+            ),
+            (
+                signup_api._http_for_complete(passkey.ChallengeExpired("ttl")),
+                400,
+                "validation",
+                "challenge_expired",
+            ),
+            (
+                signup_api._http_for_complete(passkey.InvalidRegistration("bad")),
+                400,
+                "validation",
+                "invalid_registration",
+            ),
+            (
+                signup_api._http_for_complete(
+                    passkey.ChallengeSubjectMismatch("wrong session")
+                ),
+                400,
+                "validation",
+                "invalid_registration",
+            ),
+            (
+                signup_api._http_for_complete(passkey.TooManyPasskeys("cap")),
+                422,
+                "validation",
+                "too_many_passkeys",
+            ),
+        ]
+
+        for domain_error, status_code, type_name, error in cases:
+            _assert_problem(
+                _render_domain_error(domain_error),
+                status_code=status_code,
+                type_name=type_name,
+                error=error,
+            )
+
+    def test_abuse_mapper_preserves_problem_json_shapes(self) -> None:
+        cases = [
+            (
+                signup_api._http_for_abuse(SignupRateLimited("ip", 45)),
+                429,
+                "rate_limited",
+                "rate_limited",
+                {"retry_after_seconds": 45},
+                45,
+            ),
+            (
+                signup_api._http_for_abuse(DisposableEmail("mailinator.com")),
+                422,
+                "validation",
+                "disposable_email",
+                None,
+                None,
+            ),
+            (
+                signup_api._http_for_abuse(CaptchaFailed("captcha_required")),
+                422,
+                "validation",
+                "captcha_required",
+                None,
+                None,
+            ),
+            (
+                signup_api._http_for_abuse(CaptchaFailed("bad_token")),
+                422,
+                "validation",
+                "captcha_failed",
+                None,
+                None,
+            ),
+        ]
+
+        for domain_error, status_code, type_name, error, extra, retry in cases:
+            _assert_problem(
+                _render_domain_error(domain_error),
+                status_code=status_code,
+                type_name=type_name,
+                error=error,
+                extra=extra,
+                retry_after_seconds=retry,
+            )
+
+
+# ---------------------------------------------------------------------------
 # HTTP router — signup_enabled gate
 # ---------------------------------------------------------------------------
 
@@ -1877,6 +2221,7 @@ class TestRouterSignupDisabled:
         engine: Engine,
     ) -> Iterator[TestClient]:
         app = FastAPI()
+        add_exception_handlers(app)
         router = build_signup_router(
             mailer=mailer,
             throttle=throttle,
@@ -1902,7 +2247,7 @@ class TestRouterSignupDisabled:
             json={"email": "x@example.com", "desired_slug": "casa-mia"},
         )
         assert r.status_code == 404
-        assert r.json()["detail"]["error"] == "not_found"
+        assert r.json()["error"] == "not_found"
 
     def test_verify_returns_404(self, client: TestClient) -> None:
         r = client.post("/api/v1/signup/verify", json={"token": "anything"})
@@ -1948,6 +2293,7 @@ class TestRouterStartErrors:
         engine: Engine,
     ) -> Iterator[TestClient]:
         app = FastAPI()
+        add_exception_handlers(app)
         router = build_signup_router(
             mailer=mailer,
             throttle=throttle,
@@ -1974,7 +2320,7 @@ class TestRouterStartErrors:
             json={"email": "a@example.com", "desired_slug": "admin"},
         )
         assert r.status_code == 409
-        assert r.json()["detail"]["error"] == "slug_reserved"
+        assert r.json()["error"] == "slug_reserved"
 
     def test_invalid_slug_returns_422(self, client: TestClient) -> None:
         r = client.post(
@@ -1982,7 +2328,7 @@ class TestRouterStartErrors:
             json={"email": "a@example.com", "desired_slug": "_Bad"},
         )
         assert r.status_code == 422
-        assert r.json()["detail"]["error"] == "invalid_slug"
+        assert r.json()["error"] == "invalid_slug"
 
     def test_homoglyph_collision_surfaces_colliding_slug(
         self,
@@ -2007,7 +2353,7 @@ class TestRouterStartErrors:
             json={"email": "a@example.com", "desired_slug": "rnicasa"},
         )
         assert r.status_code == 409
-        body = r.json()["detail"]
+        body = r.json()
         assert body["error"] == "slug_homoglyph_collision"
         assert body["colliding_slug"] == "micasa"
 
@@ -2131,6 +2477,7 @@ class TestRouterPasskeyFinishChallengeSingleUse:
         :func:`passkey.burn_challenge_on_failure` listens for.
         """
         app = FastAPI()
+        add_exception_handlers(app)
         router = build_signup_router(
             mailer=mailer,
             throttle=throttle,
@@ -2238,7 +2585,7 @@ class TestRouterPasskeyFinishChallengeSingleUse:
             },
         )
         assert resp.status_code == 400, resp.text
-        assert resp.json()["detail"]["error"] == "invalid_registration"
+        assert resp.json()["error"] == "invalid_registration"
 
         with factory() as s:
             assert s.get(WebAuthnChallenge, challenge_id) is None
@@ -2284,7 +2631,7 @@ class TestRouterPasskeyFinishChallengeSingleUse:
             },
         )
         assert resp.status_code == 400, resp.text
-        assert resp.json()["detail"]["error"] == "challenge_expired"
+        assert resp.json()["error"] == "challenge_expired"
 
         with factory() as s:
             assert s.get(WebAuthnChallenge, challenge_id) is None
@@ -2331,7 +2678,7 @@ class TestRouterPasskeyFinishChallengeSingleUse:
             },
         )
         assert resp.status_code == 400, resp.text
-        assert resp.json()["detail"]["error"] == "invalid_registration"
+        assert resp.json()["error"] == "invalid_registration"
 
         with factory() as s:
             assert s.get(WebAuthnChallenge, challenge_id) is None
