@@ -18,7 +18,6 @@ from fastapi import (
     APIRouter,
     Depends,
     Header,
-    HTTPException,
     Path,
     Query,
     Request,
@@ -55,6 +54,13 @@ from app.api.pagination import (
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES, PROBLEM_JSON_CONTENT
 from app.authz.dep import Permission
 from app.config import Settings, get_settings
+from app.domain.errors import (
+    Gone,
+    NotFound,
+    ServiceUnavailable,
+    Unauthorized,
+    Validation,
+)
 from app.domain.stays.bundle_service import (
     BundleGenerationResult,
     generate_bundles_for_stay,
@@ -173,10 +179,7 @@ def get_envelope(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> EnvelopeEncryptor:
     if settings.root_key is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "envelope_unavailable"},
-        )
+        raise ServiceUnavailable(extra={"error": "envelope_unavailable"})
     return Aes256GcmEnvelope(
         settings.root_key,
         repository=SqlAlchemySecretEnvelopeRepository(session),
@@ -602,9 +605,10 @@ def build_stays_router() -> APIRouter:
         except IcalUrlInvalid as exc:
             raise _http_for_ical_url(exc) from exc
         except ValueError as exc:
-            raise HTTPException(
-                status_code=422,
-                detail={"error": "ical_feed_update_empty", "message": str(exc)},
+            message = str(exc)
+            raise Validation(
+                message,
+                extra={"error": "ical_feed_update_empty", "message": message},
             ) from exc
         return _ical_feed_response(view)
 
@@ -1292,16 +1296,10 @@ def _welcome_url(request: Request, ctx: WorkspaceContext, *, token: str) -> str:
 
 def _bearer_token(authorization: str | None) -> str:
     if authorization is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "missing_bearer_token"},
-        )
+        raise Unauthorized(extra={"error": "missing_bearer_token"})
     scheme, sep, token = authorization.partition(" ")
     if sep != " " or scheme.lower() != "bearer" or token == "":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "invalid_bearer_token"},
-        )
+        raise Unauthorized(extra={"error": "invalid_bearer_token"})
     return token
 
 
@@ -1404,27 +1402,25 @@ def _asset_response(asset: GuestAsset) -> GuestAssetResponse:
     )
 
 
-def _welcome_gone(reason: GuestLinkGoneReason) -> HTTPException:
+def _welcome_gone(reason: GuestLinkGoneReason) -> Gone:
     error: Literal["welcome_link_expired", "welcome_link_revoked"]
     if reason == GuestLinkGoneReason.REVOKED:
         error = "welcome_link_revoked"
     else:
         error = "welcome_link_expired"
-    return HTTPException(
-        status_code=status.HTTP_410_GONE,
-        detail={"error": error, "reason": reason.value},
+    return Gone(extra={"error": error, "reason": reason.value})
+
+
+def _http_for_ical_url(exc: IcalUrlInvalid) -> Validation:
+    message = str(exc)
+    return Validation(
+        message,
+        extra={"error": exc.code, "message": message},
     )
 
 
-def _http_for_ical_url(exc: IcalUrlInvalid) -> HTTPException:
-    return HTTPException(
-        status_code=422,
-        detail={"error": exc.code, "message": str(exc)},
-    )
-
-
-def _not_found(error: str) -> HTTPException:
-    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"error": error})
+def _not_found(error: str) -> NotFound:
+    return NotFound(extra={"error": error})
 
 
 def _object_dict(value: dict[str, Any]) -> dict[str, object]:

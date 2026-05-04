@@ -44,6 +44,7 @@ from app.domain.errors import (
     Gone,
     IdempotencyConflict,
     NotFound,
+    NotImplementedFeature,
     PayloadTooLarge,
     RateLimited,
     Unauthorized,
@@ -121,6 +122,12 @@ class TestDomainErrorMapping:
                 502,
                 "upstream_unavailable",
                 "Upstream unavailable",
+            ),
+            (
+                NotImplementedFeature,
+                501,
+                "not_implemented",
+                "Not implemented",
             ),
         ],
     )

@@ -6,13 +6,14 @@ from datetime import datetime
 from hashlib import sha256
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.adapters.db.llm.models import AgentDoc
 from app.api.admin.deps import current_deployment_admin_principal
 from app.api.deps import db_session
+from app.domain.errors import NotFound
 from app.services.agent.system_docs import get_agent_doc, list_agent_docs
 from app.tenancy import DeploymentContext
 
@@ -88,10 +89,7 @@ def build_admin_agent_docs_router() -> APIRouter:
     ) -> AdminAgentDoc:
         row = get_agent_doc(session, slug)
         if row is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "not_found"},
-            )
+            raise NotFound(extra={"error": "not_found"})
         summary = _summary(row)
         return AdminAgentDoc(
             **summary.model_dump(),

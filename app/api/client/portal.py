@@ -7,7 +7,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -31,6 +31,7 @@ from app.domain.billing.client_portal import (
     ClientPortalQuoteRow,
     ClientPortalService,
 )
+from app.domain.errors import Forbidden, InvalidCursor
 from app.tenancy import WorkspaceContext
 
 __all__ = ["build_client_portal_router"]
@@ -176,10 +177,11 @@ class ClientPortalQuotePage(BaseModel):
     has_more: bool
 
 
-def _forbidden(exc: ClientPortalForbidden) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail={"error": "client_portal_forbidden", "message": str(exc)},
+def _forbidden(exc: ClientPortalForbidden) -> Forbidden:
+    message = str(exc)
+    return Forbidden(
+        message,
+        extra={"error": "client_portal_forbidden", "message": message},
     )
 
 
@@ -206,9 +208,9 @@ def _cursor_value(value: CursorScalar) -> CursorScalar:
 def _decoded_cursor(cursor: str | None) -> Cursor | None:
     decoded = decode_page_cursor(cursor)
     if decoded is not None and not isinstance(decoded.last_sort_value, str):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
+        raise InvalidCursor(
+            "cursor sort value is invalid for this resource",
+            extra={
                 "error": "invalid_cursor",
                 "message": "cursor sort value is invalid for this resource",
             },

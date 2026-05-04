@@ -6,7 +6,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,15 @@ from app.adapters.db.messaging.repositories import (
 from app.adapters.storage.ports import Storage
 from app.api.deps import current_workspace_context, db_session
 from app.api.pagination import DEFAULT_LIMIT, LimitQuery, decode_cursor, paginate
+from app.domain.errors import (
+    DomainError,
+    Forbidden,
+    Internal,
+    InvalidCursor,
+    NotFound,
+    ServiceUnavailable,
+    Validation,
+)
 from app.domain.messaging.channels import (
     ChatChannelInvalid,
     ChatChannelNotFound,
@@ -118,10 +127,7 @@ def _decode_cursor(value: str | None) -> ChatMessageCursor | None:
             raise ValueError("cursor created_at must be timezone-aware UTC")
         return ChatMessageCursor(created_at=created_at.astimezone(UTC), id=message_id)
     except (ValueError, json.JSONDecodeError) as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"error": "invalid_cursor"},
-        ) from exc
+        raise InvalidCursor(extra={"error": "invalid_cursor"}) from exc
 
 
 def _storage_for_send(request: Request, attachments: list[str]) -> Storage | None:
@@ -129,41 +135,33 @@ def _storage_for_send(request: Request, attachments: list[str]) -> Storage | Non
         return None
     storage: Storage | None = getattr(request.app.state, "storage", None)
     if storage is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "storage_unavailable"},
-        )
+        raise ServiceUnavailable(extra={"error": "storage_unavailable"})
     return storage
 
 
-def _http_for_message_error(exc: Exception) -> HTTPException:
+def _http_for_message_error(exc: Exception) -> DomainError:
     if isinstance(exc, ChatChannelNotFound):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "chat_channel_not_found"},
-        )
+        return NotFound(extra={"error": "chat_channel_not_found"})
     if isinstance(exc, ChatMessageAttachmentMissing):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
+        return NotFound(
+            extra={
                 "error": "attachment_not_found",
                 "blob_hash": exc.blob_hash,
             },
         )
     if isinstance(exc, (ChatChannelPermissionDenied,)):
-        return HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "permission_denied", "message": str(exc)},
+        message = str(exc)
+        return Forbidden(
+            message,
+            extra={"error": "permission_denied", "message": message},
         )
     if isinstance(exc, (ChatChannelInvalid, ChatMessageInvalid)):
-        return HTTPException(
-            status_code=422,
-            detail={"error": "chat_message_invalid", "message": str(exc)},
+        message = str(exc)
+        return Validation(
+            message,
+            extra={"error": "chat_message_invalid", "message": message},
         )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+    return Internal(extra={"error": "internal"})
 
 
 def build_messages_router(*, event_bus: EventBus | None = None) -> APIRouter:

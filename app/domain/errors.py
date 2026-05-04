@@ -16,6 +16,7 @@ listed in ``docs/specs/12-rest-api.md`` §"Errors":
 * :class:`RateLimited` → ``rate_limited``
 * :class:`PayloadTooLarge` → ``payload_too_large``
 * :class:`UnsupportedMediaType` → ``unsupported_media_type``
+* :class:`NotImplementedFeature` → ``not_implemented``
 * :class:`ServiceUnavailable` → ``service_unavailable``
 * :class:`UpstreamUnavailable` → ``upstream_unavailable``
 * :class:`Internal` → ``internal``
@@ -66,6 +67,7 @@ __all__ = [
     "Internal",
     "InvalidCursor",
     "NotFound",
+    "NotImplementedFeature",
     "PayloadTooLarge",
     "RateLimited",
     "ServiceUnavailable",
@@ -268,6 +270,13 @@ class UnsupportedMediaType(DomainError):
 
     title: ClassVar[str] = "Unsupported media type"
     type_name: ClassVar[str] = "unsupported_media_type"
+
+
+class NotImplementedFeature(DomainError):
+    """Reserved API surface is not implemented yet. HTTP 501."""
+
+    title: ClassVar[str] = "Not implemented"
+    type_name: ClassVar[str] = "not_implemented"
 
 
 class ServiceUnavailable(DomainError):

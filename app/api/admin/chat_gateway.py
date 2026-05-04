@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from time import perf_counter
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -30,6 +30,7 @@ from app.domain.chat_gateway.dispatcher import (
     dispatch_inbound_message,
     register_chat_gateway_dispatcher,
 )
+from app.domain.errors import Conflict
 from app.domain.messaging.gateway import ChatGatewayService
 from app.domain.messaging.gateway_types import NormalizedInboundMessage
 from app.events.bus import EventBus
@@ -344,10 +345,7 @@ def build_admin_chat_gateway_router() -> APIRouter:
             or not _secret_is_set(settings.chat_gateway_meta_whatsapp_secret)
             or _workspace_exists(session, workspace_id=workspace_id) is False
         ):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"error": "chat_gateway_provider_not_configured"},
-            )
+            raise Conflict(extra={"error": "chat_gateway_provider_not_configured"})
 
         started = perf_counter()
         correlation_id = new_ulid()

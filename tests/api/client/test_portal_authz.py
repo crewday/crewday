@@ -44,7 +44,7 @@ def test_manager_without_client_grant_is_denied(
     response = client.get("/client/portfolio")
 
     assert response.status_code == 403
-    assert response.json()["detail"]["error"] == "client_portal_forbidden"
+    assert response.json()["error"] == "client_portal_forbidden"
 
 
 def test_property_scoped_client_sees_only_that_property(

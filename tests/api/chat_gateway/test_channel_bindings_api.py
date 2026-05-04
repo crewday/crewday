@@ -9,10 +9,11 @@ from datetime import UTC, datetime
 from typing import Literal
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.responses import JSONResponse
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.models import RoleGrant
@@ -27,6 +28,8 @@ from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.chat_gateway import build_chat_channel_bindings_router
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import _handle_domain_error
+from app.domain.errors import DomainError
 from app.tenancy import WorkspaceContext
 from app.util.ulid import new_ulid
 
@@ -141,6 +144,12 @@ def _ctx(
 
 def _build_app(factory: sessionmaker[Session], ctx: WorkspaceContext) -> FastAPI:
     app = FastAPI()
+
+    async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, DomainError)
+        return _handle_domain_error(request, exc)
+
+    app.add_exception_handler(DomainError, _on_domain_error)
     app.include_router(build_chat_channel_bindings_router())
 
     def _override_ctx() -> WorkspaceContext:
@@ -295,7 +304,7 @@ def test_link_start_cannot_target_another_user(
     )
 
     assert resp.status_code == 403
-    assert resp.json()["detail"]["error"] == "permission_denied"
+    assert resp.json()["error"] == "permission_denied"
 
 
 def test_wrong_verification_code_is_422(
@@ -324,7 +333,7 @@ def test_wrong_verification_code_is_422(
     )
 
     assert resp.status_code == 422
-    assert resp.json()["detail"]["error"] == "chat_channel_binding_invalid"
+    assert resp.json()["error"] == "chat_channel_binding_invalid"
 
 
 def test_provider_status_shape(
@@ -370,8 +379,8 @@ def test_provider_status_requires_chat_gateway_read(
     resp = client.get("/chat/channels/providers")
 
     assert resp.status_code == 403
-    assert resp.json()["detail"]["error"] == "permission_denied"
-    assert resp.json()["detail"]["action_key"] == "chat_gateway.read"
+    assert resp.json()["error"] == "permission_denied"
+    assert resp.json()["action_key"] == "chat_gateway.read"
 
 
 def test_provider_status_last_webhook_is_workspace_scoped(

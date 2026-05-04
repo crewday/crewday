@@ -31,7 +31,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Final
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -57,6 +57,7 @@ from app.api.admin._workspace_state import (
 from app.api.admin.deps import current_deployment_admin_principal
 from app.api.deps import db_session
 from app.api.transport import admin_sse
+from app.domain.errors import NotFound
 from app.tenancy import DeploymentContext, tenant_agnostic
 
 __all__ = [
@@ -274,12 +275,9 @@ def _list_item(
     )
 
 
-def _not_found() -> HTTPException:
+def _not_found() -> NotFound:
     """Canonical 404 envelope — same shape as the admin auth dep emits."""
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"error": "not_found"},
-    )
+    return NotFound(extra={"error": "not_found"})
 
 
 # Rolling-window cutoff for the workspace-summary aggregates.

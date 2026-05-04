@@ -56,7 +56,7 @@ import logging
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -74,6 +74,7 @@ from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.authz import require
 from app.authz.dep import Permission
 from app.authz.enforce import PermissionDenied
+from app.domain.errors import Conflict, Forbidden, NotFound, Validation
 from app.domain.identity.permission_groups import (
     LastOwnerGrantProtected,
     PermissionGroupMemberRef,
@@ -232,44 +233,47 @@ def _member_to_response(ref: PermissionGroupMemberRef) -> PermissionGroupMemberR
     )
 
 
-def _http_for_not_found() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"error": "permission_group_not_found"},
+def _http_for_not_found() -> NotFound:
+    return NotFound(extra={"error": "permission_group_not_found"})
+
+
+def _http_for_slug_taken(exc: PermissionGroupSlugTaken) -> Conflict:
+    message = str(exc)
+    return Conflict(
+        message,
+        extra={"error": "permission_group_slug_taken", "message": message},
     )
 
 
-def _http_for_slug_taken(exc: PermissionGroupSlugTaken) -> HTTPException:
-    return HTTPException(
-        status_code=409,
-        detail={"error": "permission_group_slug_taken", "message": str(exc)},
+def _http_for_system_protected(exc: SystemGroupProtected) -> Conflict:
+    message = str(exc)
+    return Conflict(
+        message,
+        extra={"error": "system_group_protected", "message": message},
     )
 
 
-def _http_for_system_protected(exc: SystemGroupProtected) -> HTTPException:
-    return HTTPException(
-        status_code=409,
-        detail={"error": "system_group_protected", "message": str(exc)},
+def _http_for_unknown_capability(exc: UnknownCapability) -> Validation:
+    message = str(exc)
+    return Validation(
+        message,
+        extra={"error": "unknown_action_key", "message": message},
     )
 
 
-def _http_for_unknown_capability(exc: UnknownCapability) -> HTTPException:
-    return HTTPException(
-        status_code=422,
-        detail={"error": "unknown_action_key", "message": str(exc)},
-    )
-
-
-def _http_for_would_orphan_owners_group(exc: WouldOrphanOwnersGroup) -> HTTPException:
-    return HTTPException(
-        status_code=422,
-        detail={"error": "would_orphan_owners_group", "message": str(exc)},
+def _http_for_would_orphan_owners_group(
+    exc: WouldOrphanOwnersGroup,
+) -> WouldOrphanOwnersGroup:
+    message = str(exc)
+    return WouldOrphanOwnersGroup(
+        message,
+        extra={"error": "would_orphan_owners_group", "message": message},
     )
 
 
 def _http_for_last_owner_grant_protected(
     exc: LastOwnerGrantProtected,
-) -> HTTPException:
+) -> Conflict:
     """Map the admin-reach refusal raised by ``remove_member``.
 
     Mirrors the role-grants surface (``role_grants.delete``): the
@@ -278,9 +282,10 @@ def _http_for_last_owner_grant_protected(
     to mint a replacement ``manager`` grant on a remaining owners-
     group member before dropping this seat.
     """
-    return HTTPException(
-        status_code=409,
-        detail={"error": "last_owner_grant_protected", "message": str(exc)},
+    message = str(exc)
+    return Conflict(
+        message,
+        extra={"error": "last_owner_grant_protected", "message": message},
     )
 
 
@@ -365,9 +370,8 @@ def _gate_member_write(
             scope_id=ctx.workspace_id,
         )
     except PermissionDenied as exc:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "permission_denied", "action_key": action},
+        raise Forbidden(
+            extra={"error": "permission_denied", "action_key": action}
         ) from exc
 
 

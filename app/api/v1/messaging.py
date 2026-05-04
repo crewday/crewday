@@ -46,7 +46,6 @@ from urllib.parse import urlparse
 from fastapi import (
     APIRouter,
     Depends,
-    HTTPException,
     Path,
     Query,
     Request,
@@ -64,6 +63,13 @@ from app.api.messaging.channels import build_channels_router
 from app.api.messaging.messages import build_messages_router
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.audit import write_audit
+from app.domain.errors import (
+    Internal,
+    NotFound,
+    NotImplementedFeature,
+    ServiceUnavailable,
+    Validation,
+)
 from app.domain.messaging.push_tokens import (
     MAX_ENDPOINT_LEN,
     EndpointNotAllowed,
@@ -100,9 +106,9 @@ _Db = Annotated[Session, Depends(db_session)]
 
 def _reject_duplicate_cursor_query(request: Request) -> None:
     if len(request.query_params.getlist("cursor")) > 1:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
+        raise Validation(
+            "cursor may be provided at most once",
+            extra={
                 "error": "validation",
                 "message": "cursor may be provided at most once",
             },
@@ -342,7 +348,7 @@ def _cached_vapid_key(
 # ---------------------------------------------------------------------------
 
 
-def _http_for_push_error(exc: Exception) -> HTTPException:
+def _http_for_push_error(exc: Exception) -> Validation | ServiceUnavailable | Internal:
     """Map a push-domain error to the router's HTTP response shape.
 
     Keeps the mapping centralised so every route returns the same
@@ -355,24 +361,20 @@ def _http_for_push_error(exc: Exception) -> HTTPException:
         # ``HTTP_422_UNPROCESSABLE_CONTENT`` in 2024 and emits a
         # deprecation warning on the old name. The integer is stable.
         # (Same trick in :func:`app.api.v1.time._http_for_shift_error`.)
-        return HTTPException(
-            status_code=422,
-            detail={"error": "endpoint_scheme_invalid", "message": str(exc)},
+        message = str(exc)
+        return Validation(
+            message,
+            extra={"error": "endpoint_scheme_invalid", "message": message},
         )
     if isinstance(exc, EndpointNotAllowed):
-        return HTTPException(
-            status_code=422,
-            detail={"error": "endpoint_not_allowed", "message": str(exc)},
+        message = str(exc)
+        return Validation(
+            message,
+            extra={"error": "endpoint_not_allowed", "message": message},
         )
     if isinstance(exc, VapidNotConfigured):
-        return HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "vapid_not_configured"},
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+        return ServiceUnavailable(extra={"error": "vapid_not_configured"})
+    return Internal(extra={"error": "internal"})
 
 
 def _notification_or_404(
@@ -388,10 +390,7 @@ def _notification_or_404(
         )
     ).one_or_none()
     if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "notification_not_found"},
-        )
+        raise NotFound(extra={"error": "notification_not_found"})
     return row
 
 
@@ -632,10 +631,7 @@ def build_messaging_router(
     ) -> None:
         del body
         del ctx
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={"error": "push_unavailable"},
-        )
+        raise NotImplementedFeature(extra={"error": "push_unavailable"})
 
     @r.delete(
         "/notifications/push/tokens/{token_id}",

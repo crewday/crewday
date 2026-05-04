@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -17,6 +17,14 @@ from app.adapters.db.messaging.repositories import (
 from app.api.deps import current_workspace_context, db_session
 from app.authz import PermissionDenied, require
 from app.config import Settings, get_settings
+from app.domain.errors import (
+    Conflict,
+    DomainError,
+    Forbidden,
+    Internal,
+    NotFound,
+    Validation,
+)
 from app.domain.messaging.channel_bindings import (
     MOCK_LINK_CODE,
     ChatChannelBindingConflict,
@@ -251,31 +259,28 @@ def build_chat_channel_bindings_router() -> APIRouter:
     return router
 
 
-def _http_for_binding_error(exc: Exception) -> HTTPException:
+def _http_for_binding_error(exc: Exception) -> DomainError:
     if isinstance(exc, ChatChannelBindingNotFound):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "chat_channel_binding_not_found"},
-        )
+        return NotFound(extra={"error": "chat_channel_binding_not_found"})
     if isinstance(exc, ChatChannelBindingPermissionDenied):
-        return HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "permission_denied", "message": str(exc)},
+        message = str(exc)
+        return Forbidden(
+            message,
+            extra={"error": "permission_denied", "message": message},
         )
     if isinstance(exc, ChatChannelBindingConflict):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "chat_channel_binding_conflict", "message": str(exc)},
+        message = str(exc)
+        return Conflict(
+            message,
+            extra={"error": "chat_channel_binding_conflict", "message": message},
         )
     if isinstance(exc, ChatChannelBindingInvalid):
-        return HTTPException(
-            status_code=422,
-            detail={"error": "chat_channel_binding_invalid", "message": str(exc)},
+        message = str(exc)
+        return Validation(
+            message,
+            extra={"error": "chat_channel_binding_invalid", "message": message},
         )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+    return Internal(extra={"error": "internal"})
 
 
 def _require_chat_gateway_read(ctx: WorkspaceContext, session: Session) -> None:
@@ -288,9 +293,8 @@ def _require_chat_gateway_read(ctx: WorkspaceContext, session: Session) -> None:
             scope_id=ctx.workspace_id,
         )
     except PermissionDenied as exc:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "permission_denied", "action_key": "chat_gateway.read"},
+        raise Forbidden(
+            extra={"error": "permission_denied", "action_key": "chat_gateway.read"}
         ) from exc
 
 

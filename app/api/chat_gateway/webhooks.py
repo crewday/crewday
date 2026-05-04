@@ -6,7 +6,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -14,6 +14,7 @@ from app.adapters.chat_gateway import UnsupportedProvider, get_adapter
 from app.adapters.db.messaging.repositories import SqlAlchemyChatGatewayRepository
 from app.api.deps import db_session
 from app.config import Settings, get_settings
+from app.domain.errors import BadRequest, NotFound, Unauthorized
 from app.domain.messaging.gateway import ChatGatewayService
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
@@ -78,16 +79,10 @@ def build_chat_gateway_router(
         try:
             adapter = get_adapter(provider)
         except UnsupportedProvider as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "chat_gateway_provider_not_found"},
-            ) from exc
+            raise NotFound(extra={"error": "chat_gateway_provider_not_found"}) from exc
         config = config_by_provider.get(adapter.provider)
         if config is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "chat_gateway_provider_not_configured"},
-            )
+            raise NotFound(extra={"error": "chat_gateway_provider_not_configured"})
         raw_body = await request.body()
         if not adapter.verify(
             request.headers,
@@ -95,16 +90,14 @@ def build_chat_gateway_router(
             config.secret,
             url=str(request.url),
         ):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error": "chat_gateway_signature_invalid"},
-            )
+            raise Unauthorized(extra={"error": "chat_gateway_signature_invalid"})
         try:
             inbound = adapter.normalize(request.headers, raw_body)
         except (ValueError, TypeError, UnicodeDecodeError) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"error": "chat_gateway_payload_invalid", "message": str(exc)},
+            message = str(exc)
+            raise BadRequest(
+                message,
+                extra={"error": "chat_gateway_payload_invalid", "message": message},
             ) from exc
 
         ctx = WorkspaceContext(

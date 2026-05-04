@@ -28,7 +28,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -47,6 +47,7 @@ from app.authz.deployment_owners import (
     deployment_owner_user_ids,
     remove_deployment_owner,
 )
+from app.domain.errors import DomainError, NotFound, Validation
 from app.tenancy import DeploymentContext, tenant_agnostic
 from app.util.ulid import new_ulid
 
@@ -221,17 +222,16 @@ _ERROR_USER_NOT_FOUND = "user_not_found"
 _ERROR_LAST_OWNER = "last_owner"
 
 
-def _problem(error: str, *, message: str, http_status: int = 422) -> HTTPException:
+def _problem(error: str, *, message: str, http_status: int = 422) -> DomainError:
     """Build the canonical typed-error envelope.
 
     Spec §12 "Errors" envelopes — 422 for client-side validation,
     404 for "not found" lookups. Keeps the error code in the body
     so the SPA gates on a single field.
     """
-    return HTTPException(
-        status_code=http_status,
-        detail={"error": error, "message": message},
-    )
+    if http_status == status.HTTP_404_NOT_FOUND:
+        return NotFound(message, extra={"error": error, "message": message})
+    return Validation(message, extra={"error": error, "message": message})
 
 
 def _resolve_target_user(
@@ -381,12 +381,9 @@ def _existing_grant(session: Session, *, user_id: str) -> RoleGrant | None:
         ).first()
 
 
-def _not_found() -> HTTPException:
+def _not_found() -> NotFound:
     """Canonical 404 envelope — same shape as the admin auth dep emits."""
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"error": "not_found"},
-    )
+    return NotFound(extra={"error": "not_found"})
 
 
 def build_admin_admins_router() -> APIRouter:

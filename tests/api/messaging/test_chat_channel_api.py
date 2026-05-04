@@ -306,7 +306,7 @@ class TestChatChannelApi:
         resp = client.post("/chat/channels", json={"kind": "staff", "title": "Staff"})
 
         assert resp.status_code == 403
-        assert resp.json()["detail"]["error"] == "permission_denied"
+        assert resp.json()["error"] == "permission_denied"
 
     def test_invalid_create_maps_to_422(
         self,
@@ -331,14 +331,14 @@ class TestChatChannelApi:
             json={"kind": "staff", "title": "Staff", "external_ref": "wa-1"},
         )
         assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "chat_channel_invalid"
+        assert resp.json()["error"] == "chat_channel_invalid"
 
         gateway = client.post(
             "/chat/channels",
             json={"kind": "chat_gateway", "source": "whatsapp"},
         )
         assert gateway.status_code == 422
-        assert gateway.json()["detail"]["error"] == "chat_channel_invalid"
+        assert gateway.json()["error"] == "chat_channel_invalid"
 
     def test_patch_hidden_or_missing_channel_maps_to_404(
         self,
@@ -383,9 +383,9 @@ class TestChatChannelApi:
         )
 
         assert hidden.status_code == 404
-        assert hidden.json()["detail"]["error"] == "chat_channel_not_found"
+        assert hidden.json()["error"] == "chat_channel_not_found"
         assert missing.status_code == 404
-        assert missing.json()["detail"]["error"] == "chat_channel_not_found"
+        assert missing.json()["error"] == "chat_channel_not_found"
 
     def test_patch_renames_and_soft_archives(
         self,
@@ -472,7 +472,7 @@ class TestChatChannelApi:
         )
 
         assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "chat_channel_invalid"
+        assert resp.json()["error"] == "chat_channel_invalid"
         with factory() as s:
             row = s.get(ChatChannel, channel["id"])
             assert row is not None

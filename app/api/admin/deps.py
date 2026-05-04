@@ -44,7 +44,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Annotated, Final
 
-from fastapi import Cookie, Depends, HTTPException, Request, status
+from fastapi import Cookie, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.api.deps import db_session
@@ -52,6 +52,7 @@ from app.auth import session as auth_session
 from app.auth import tokens as auth_tokens
 from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME
 from app.authz.deployment_admin import is_deployment_admin
+from app.domain.errors import NotFound, Validation
 from app.tenancy import (
     DEPLOYMENT_SCOPE_CATALOG,
     DEPLOYMENT_SCOPE_PREFIX,
@@ -86,8 +87,8 @@ _Db = Annotated[Session, Depends(db_session)]
 # ---------------------------------------------------------------------------
 
 
-def _not_found() -> HTTPException:
-    """Return the canonical 404 ``HTTPException`` for the admin surface.
+def _not_found() -> NotFound:
+    """Return the canonical 404 domain error for the admin surface.
 
     Wraps the spec §12 "the surface does not advertise its own
     existence to tenants" envelope — ``{"error": "not_found"}``.
@@ -96,14 +97,11 @@ def _not_found() -> HTTPException:
     ``status=404``, matching the constant-time response the
     workspace tenancy middleware also emits.
     """
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"error": "not_found"},
-    )
+    return NotFound(extra={"error": "not_found"})
 
 
-def _scope_conflict() -> HTTPException:
-    """Return the canonical 422 ``HTTPException`` for a mixed-scope token.
+def _scope_conflict() -> Validation:
+    """Return the canonical 422 domain error for a mixed-scope token.
 
     Triggered when a ``scoped`` token's ``scope_json`` carries both a
     ``deployment:*`` key and at least one non-``deployment:*`` key.
@@ -112,14 +110,12 @@ def _scope_conflict() -> HTTPException:
     not enumerate tenant data, and a typed 422 is the only signal
     that lets the operator fix the misconfigured mint.
     """
-    return HTTPException(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        detail={
+    message = "deployment-scoped tokens must not mix deployment:* with workspace scopes"
+    return Validation(
+        message,
+        extra={
             "error": DEPLOYMENT_SCOPE_CONFLICT_ERROR,
-            "message": (
-                "deployment-scoped tokens must not mix deployment:* with "
-                "workspace scopes"
-            ),
+            "message": message,
         },
     )
 
@@ -232,7 +228,7 @@ def _resolve_token_principal(
     * delegated token whose delegating user is **not** a deployment
       admin.
 
-    **Raises** :class:`HTTPException` with a 422
+    **Raises** :class:`app.domain.errors.Validation` with a 422
     ``deployment_scope_conflict`` body when a ``scoped`` token mixes
     ``deployment:*`` keys with workspace scopes — the only non-404
     rejection. The check requires verifying the token first (so we

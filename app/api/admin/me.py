@@ -33,7 +33,7 @@ from __future__ import annotations
 from datetime import UTC
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -46,6 +46,7 @@ from app.authz.deployment_owners import (
     deployment_owner_user_ids,
     is_deployment_owner,
 )
+from app.domain.errors import NotFound
 from app.tenancy import DeploymentContext, tenant_agnostic
 
 __all__ = [
@@ -161,10 +162,7 @@ def _resolve_user_or_404(session: Session, *, user_id: str) -> User:
     with tenant_agnostic():
         user = session.get(User, user_id)
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found"},
-        )
+        raise NotFound(extra={"error": "not_found"})
     return user
 
 

@@ -8,11 +8,12 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.responses import JSONResponse
 
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.base import Base
@@ -21,6 +22,7 @@ from app.adapters.db.stays.models import Reservation, StayBundle
 from app.adapters.ical.ports import IcalProvider, IcalValidation, IcalValidationError
 from app.adapters.ical.validator import Fetcher, FetchResponse, Resolver
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import _handle_domain_error
 from app.api.v1.stays import (
     build_stays_public_router,
     build_stays_router,
@@ -36,6 +38,7 @@ from app.api.v1.stays import (
     get_welcome_resolver,
 )
 from app.config import Settings
+from app.domain.errors import DomainError
 from app.domain.stays.guest_link_service import mint_link
 from app.ports.tasks_create_occurrence import RecordingTasksCreateOccurrencePort
 from app.tenancy import WorkspaceContext
@@ -310,6 +313,12 @@ def _build_client(
     resolver: Resolver | None = None,
 ) -> TestClient:
     app = FastAPI()
+
+    async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, DomainError)
+        return _handle_domain_error(request, exc)
+
+    app.add_exception_handler(DomainError, _on_domain_error)
     app.include_router(build_stays_router(), prefix="/stays")
     app.include_router(build_stays_public_router(), prefix="/api/v1/stays")
 
@@ -354,6 +363,12 @@ def _build_public_client(
     settings: Settings,
 ) -> TestClient:
     app = FastAPI()
+
+    async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, DomainError)
+        return _handle_domain_error(request, exc)
+
+    app.add_exception_handler(DomainError, _on_domain_error)
     app.include_router(build_stays_public_router(), prefix="/api/v1/stays")
 
     def _override_db() -> Iterator[Session]:
@@ -605,7 +620,7 @@ def test_guest_token_issue_welcome_read_and_revoke(
 
     gone = client.get(f"/api/v1/stays/welcome/{token}")
     assert gone.status_code == 410
-    assert gone.json()["detail"]["error"] == "welcome_link_revoked"
+    assert gone.json()["error"] == "welcome_link_revoked"
     assert client.get("/api/v1/stays/welcome/not-a-real-token").status_code == 410
 
 
@@ -641,14 +656,13 @@ def test_public_welcome_route_is_anonymous_but_token_gated(
 
     missing_bearer = client.get("/api/v1/stays/welcome")
     assert missing_bearer.status_code == 401
-    assert missing_bearer.json()["detail"]["error"] == "missing_bearer_token"
+    assert missing_bearer.json()["error"] == "missing_bearer_token"
 
     invalid = client.get("/api/v1/stays/welcome/not-a-real-token")
     assert invalid.status_code == 410
-    assert invalid.json()["detail"] == {
-        "error": "welcome_link_expired",
-        "reason": "expired",
-    }
+    body = invalid.json()
+    assert body["error"] == "welcome_link_expired"
+    assert body["reason"] == "expired"
     assert "Villa Sud" not in invalid.text
 
 
@@ -998,7 +1012,7 @@ def test_ical_poll_once_404_for_unknown_feed(
 
     response = client.post("/stays/ical-feeds/does-not-exist/poll-once")
     assert response.status_code == 404
-    assert response.json()["detail"] == {"error": "ical_feed_not_found"}
+    assert response.json()["error"] == "ical_feed_not_found"
 
 
 def test_ical_poll_once_denies_worker_role(

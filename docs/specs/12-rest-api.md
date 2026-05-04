@@ -267,9 +267,9 @@ Canonical error `type` URIs — full URI is
   `conflict` (409), `unauthorized` (401), `forbidden` (403),
   `gone` (410), `rate_limited` (429), `service_unavailable` (503),
   `upstream_unavailable` (502), `payload_too_large` (413),
-  `unsupported_media_type` (415), `idempotency_conflict` (409),
-  `would_orphan_owners_group` (422), `last_owner_grant_protected`
-  (409), `approval_required` (409).
+  `unsupported_media_type` (415), `not_implemented` (501),
+  `idempotency_conflict` (409), `would_orphan_owners_group` (422),
+  `last_owner_grant_protected` (409), `approval_required` (409).
 - `internal` (500) — unexpected server-side failure; also the fallback
   when an unregistered `DomainError` subclass reaches the handler.
   Unknown `HTTPException` statuses fall back to `http_<status>` (e.g.

@@ -24,7 +24,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated, Any, Final
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -38,6 +38,7 @@ from app.audit.tail import (
     AuditTailCursor,
     audit_tail_chunks,
 )
+from app.domain.errors import Validation
 from app.tenancy import DeploymentContext, tenant_agnostic
 
 __all__ = [
@@ -279,11 +280,12 @@ def _parse_iso(value: str | None, *, label: str) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(candidate)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={
+        message = f"{label}: expected ISO-8601 timestamp, got {value!r}"
+        raise Validation(
+            message,
+            extra={
                 "error": "invalid_iso8601",
-                "message": f"{label}: expected ISO-8601 timestamp, got {value!r}",
+                "message": message,
             },
         ) from exc
     if parsed.tzinfo is None:

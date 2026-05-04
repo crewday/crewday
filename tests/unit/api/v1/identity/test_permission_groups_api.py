@@ -181,7 +181,7 @@ class TestCreate:
             },
         )
         assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "unknown_action_key"
+        assert resp.json()["error"] == "unknown_action_key"
 
     def test_duplicate_slug_returns_409(
         self,
@@ -194,7 +194,7 @@ class TestCreate:
             "/permission_groups", json={"slug": "team", "name": "Team 2"}
         )
         assert resp.status_code == 409
-        assert resp.json()["detail"]["error"] == "permission_group_slug_taken"
+        assert resp.json()["error"] == "permission_group_slug_taken"
 
     def test_owners_slug_collides_with_seeded(
         self,
@@ -249,7 +249,7 @@ class TestReadUpdateDelete:
         client = _client(ctx, factory)
         resp = client.get("/permission_groups/01HWANOTHERE0000000000000A")
         assert resp.status_code == 404
-        assert resp.json()["detail"]["error"] == "permission_group_not_found"
+        assert resp.json()["error"] == "permission_group_not_found"
 
     def test_patch_renames(
         self,
@@ -285,7 +285,7 @@ class TestReadUpdateDelete:
             json={"capabilities": {"tasks.create": True}},
         )
         assert resp.status_code == 409
-        assert resp.json()["detail"]["error"] == "system_group_protected"
+        assert resp.json()["error"] == "system_group_protected"
 
     def test_patch_renames_system_group(
         self,
@@ -319,7 +319,7 @@ class TestReadUpdateDelete:
             json={"capabilities": {"unknown.action": True}},
         )
         assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "unknown_action_key"
+        assert resp.json()["error"] == "unknown_action_key"
 
     def test_delete_user_group(
         self,
@@ -348,7 +348,7 @@ class TestReadUpdateDelete:
             owners_id = row.id
         resp = client.delete(f"/permission_groups/{owners_id}")
         assert resp.status_code == 409
-        assert resp.json()["detail"]["error"] == "system_group_protected"
+        assert resp.json()["error"] == "system_group_protected"
 
     def test_delete_unknown_returns_404(
         self,
@@ -488,7 +488,7 @@ class TestMembers:
             owners_id = owners.id
         resp = client.delete(f"/permission_groups/{owners_id}/members/{ctx.actor_id}")
         assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "would_orphan_owners_group"
+        assert resp.json()["error"] == "would_orphan_owners_group"
         # Membership stayed intact (the primary UoW rolled back).
         with factory() as s:
             row = s.get(PermissionGroupMember, (owners_id, ctx.actor_id))

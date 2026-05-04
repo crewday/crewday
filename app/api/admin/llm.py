@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any, Literal, Self
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -35,6 +35,7 @@ from app.domain.agent.compaction import (
     _default_compaction_prompt,
 )
 from app.domain.agent.runtime import _default_system_prompt
+from app.domain.errors import Conflict, NotFound, NotImplementedFeature, Validation
 from app.events.bus import bus as default_event_bus
 from app.events.types import LlmAssignmentChanged
 from app.tenancy import DeploymentContext, tenant_agnostic
@@ -453,10 +454,7 @@ def _current_prompt_default(capability: str) -> str:
         return _default_system_prompt("admin")
     if capability == _COMPACT_CAPABILITY:
         return _default_compaction_prompt()
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail={"error": "prompt_default_unavailable"},
-    )
+    raise NotImplementedFeature(extra={"error": "prompt_default_unavailable"})
 
 
 def _endpoint(provider: LlmProvider) -> str:
@@ -722,21 +720,16 @@ def _load_graph(session: Session) -> LlmGraphPayload:
     )
 
 
-def _not_found() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND, detail={"error": "not_found"}
-    )
+def _not_found() -> NotFound:
+    return NotFound(extra={"error": "not_found"})
 
 
-def _conflict(error: str) -> HTTPException:
-    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"error": error})
+def _conflict(error: str) -> Conflict:
+    return Conflict(extra={"error": error})
 
 
-def _unprocessable(error: str, **extra: object) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        detail={"error": error, **extra},
-    )
+def _unprocessable(error: str, **extra: object) -> Validation:
+    return Validation(extra={"error": error, **extra})
 
 
 def _commit_or_conflict(session: Session, error: str) -> None:
@@ -809,9 +802,8 @@ def _missing_capabilities(
 
 def _raise_missing_capabilities(missing: list[str]) -> None:
     if missing:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
+        raise Validation(
+            extra={
                 "error": "assignment_missing_capability",
                 "missing_capabilities": missing,
             },
@@ -1408,14 +1400,10 @@ def build_admin_llm_router() -> APIRouter:
                 )
                 by_id = {row.id: row for row in rows}
                 if set(by_id) != set(group.ids_in_priority_order):
-                    raise HTTPException(
-                        status_code=422, detail={"error": "assignment_reorder_mismatch"}
-                    )
+                    raise _unprocessable("assignment_reorder_mismatch")
                 workspace_ids = {row.workspace_id for row in rows}
                 if len(workspace_ids) != 1:
-                    raise HTTPException(
-                        status_code=422, detail={"error": "assignment_reorder_mismatch"}
-                    )
+                    raise _unprocessable("assignment_reorder_mismatch")
                 workspace_id = next(iter(workspace_ids))
                 all_group_ids = set(
                     session.scalars(
@@ -1426,9 +1414,7 @@ def build_admin_llm_router() -> APIRouter:
                     ).all()
                 )
                 if all_group_ids != set(group.ids_in_priority_order):
-                    raise HTTPException(
-                        status_code=422, detail={"error": "assignment_reorder_mismatch"}
-                    )
+                    raise _unprocessable("assignment_reorder_mismatch")
                 for priority, assignment_id in enumerate(group.ids_in_priority_order):
                     row = by_id[assignment_id]
                     row.priority = priority

@@ -59,7 +59,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -87,7 +87,7 @@ from app.domain.agent.approval import (
     list_pending as list_pending_service,
 )
 from app.domain.agent.runtime import DelegatedToken, ToolDispatcher
-from app.domain.errors import Forbidden
+from app.domain.errors import Forbidden, ServiceUnavailable
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.tenancy.middleware import ACTOR_STATE_ATTR, ActorIdentity
 from app.util.clock import SystemClock
@@ -417,14 +417,15 @@ def get_tool_dispatcher(request: Request) -> ToolDispatcher:
         request.app.state, "tool_dispatcher", None
     )
     if dispatcher is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
+        message = (
+            "approval replay requires a configured ToolDispatcher; "
+            "this deployment has not wired one yet (cd-z3b7)"
+        )
+        raise ServiceUnavailable(
+            message,
+            extra={
                 "error": "dispatcher_not_configured",
-                "message": (
-                    "approval replay requires a configured ToolDispatcher; "
-                    "this deployment has not wired one yet (cd-z3b7)"
-                ),
+                "message": message,
             },
         )
     return dispatcher

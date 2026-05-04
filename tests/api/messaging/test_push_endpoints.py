@@ -26,10 +26,11 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.responses import JSONResponse
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.base import Base
@@ -38,10 +39,12 @@ from app.adapters.db.messaging.models import PushToken
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.workspace.models import Workspace
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import _handle_domain_error
 from app.api.v1.messaging import (
     _reset_vapid_cache_for_tests,
     build_messaging_router,
 )
+from app.domain.errors import DomainError
 from app.domain.messaging.push_tokens import SETTINGS_KEY_VAPID_PUBLIC
 from app.tenancy.context import WorkspaceContext
 from app.util.ulid import new_ulid
@@ -182,6 +185,13 @@ def _build_app(
 ) -> FastAPI:
     """Mount the messaging router behind pinned ctx + db overrides."""
     app = FastAPI()
+
+    async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, DomainError)
+        return _handle_domain_error(request, exc)
+
+    app.add_exception_handler(DomainError, _on_domain_error)
+
     # Use the factory entry point so tests can inject a fake monotonic
     # without touching the production ``router`` module-level singleton.
     r = build_messaging_router(
@@ -255,7 +265,7 @@ class TestSubscribe:
             },
         )
         assert resp.status_code == 422, resp.text
-        assert resp.json()["detail"]["error"] == "endpoint_not_allowed"
+        assert resp.json()["error"] == "endpoint_not_allowed"
 
     def test_http_scheme_422(
         self,
@@ -270,7 +280,7 @@ class TestSubscribe:
             },
         )
         assert resp.status_code == 422, resp.text
-        assert resp.json()["detail"]["error"] == "endpoint_scheme_invalid"
+        assert resp.json()["error"] == "endpoint_scheme_invalid"
 
     def test_idempotent_second_subscribe(
         self,
@@ -482,4 +492,4 @@ class TestVapidKey:
 
         resp = client.get("/notifications/push/vapid-key")
         assert resp.status_code == 503, resp.text
-        assert resp.json()["detail"]["error"] == "vapid_not_configured"
+        assert resp.json()["error"] == "vapid_not_configured"

@@ -61,6 +61,7 @@ from app.domain.errors import (
     Internal,
     InvalidCursor,
     NotFound,
+    NotImplementedFeature,
     PayloadTooLarge,
     RateLimited,
     ServiceUnavailable,
@@ -115,6 +116,7 @@ _DOMAIN_STATUS_MAP: Final[dict[type[DomainError], int]] = {
     UnsupportedMediaType: 415,
     ServiceUnavailable: 503,
     UpstreamUnavailable: 502,
+    NotImplementedFeature: 501,
     Internal: 500,
     ApprovalRequired: 409,
 }
@@ -136,6 +138,7 @@ _HTTP_STATUS_TYPE_MAP: Final[dict[int, str]] = {
     415: "unsupported_media_type",
     422: "validation",
     429: "rate_limited",
+    501: "not_implemented",
     502: "upstream_unavailable",
     503: "service_unavailable",
 }
@@ -158,6 +161,7 @@ _HTTP_STATUS_TITLE_MAP: Final[dict[int, str]] = {
     422: "Validation error",
     429: "Rate limited",
     500: "Internal server error",
+    501: "Not implemented",
     502: "Upstream unavailable",
     503: "Service unavailable",
 }

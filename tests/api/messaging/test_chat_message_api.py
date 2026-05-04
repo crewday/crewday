@@ -10,10 +10,11 @@ from datetime import UTC, datetime
 from typing import Literal
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.responses import JSONResponse
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.models import RoleGrant
@@ -23,7 +24,9 @@ from app.adapters.db.messaging.models import ChatMessage
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import _handle_domain_error
 from app.api.v1.messaging import build_messaging_router
+from app.domain.errors import DomainError
 from app.events.bus import EventBus
 from app.events.types import ChatMessageSent
 from app.tenancy.context import WorkspaceContext
@@ -146,6 +149,13 @@ def _build_app(
     event_bus: EventBus,
 ) -> FastAPI:
     app = FastAPI()
+
+    async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, DomainError)
+        return _handle_domain_error(request, exc)
+
+    app.add_exception_handler(DomainError, _on_domain_error)
+
     app.include_router(build_messaging_router(event_bus=event_bus))
     if storage is not None:
         app.state.storage = storage
@@ -269,7 +279,7 @@ def test_missing_attachment_is_404_and_writes_nothing(
     )
 
     assert resp.status_code == 404
-    assert resp.json()["detail"]["error"] == "attachment_not_found"
+    assert resp.json()["error"] == "attachment_not_found"
     assert events == []
     with factory() as s:
         assert s.scalars(select(ChatMessage)).all() == []

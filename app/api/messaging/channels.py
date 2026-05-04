@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,7 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
+from app.domain.errors import DomainError, Forbidden, Internal, NotFound, Validation
 from app.domain.messaging.channels import (
     MAX_TITLE_LEN,
     ChatChannelCreate,
@@ -106,26 +107,22 @@ class ChatChannelPatchRequest(BaseModel):
         return self
 
 
-def _http_for_channel_error(exc: Exception) -> HTTPException:
+def _http_for_channel_error(exc: Exception) -> DomainError:
     if isinstance(exc, ChatChannelNotFound):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "chat_channel_not_found"},
-        )
+        return NotFound(extra={"error": "chat_channel_not_found"})
     if isinstance(exc, ChatChannelPermissionDenied):
-        return HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "permission_denied", "message": str(exc)},
+        message = str(exc)
+        return Forbidden(
+            message,
+            extra={"error": "permission_denied", "message": message},
         )
     if isinstance(exc, ChatChannelInvalid):
-        return HTTPException(
-            status_code=422,
-            detail={"error": "chat_channel_invalid", "message": str(exc)},
+        message = str(exc)
+        return Validation(
+            message,
+            extra={"error": "chat_channel_invalid", "message": message},
         )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+    return Internal(extra={"error": "internal"})
 
 
 def build_channels_router() -> APIRouter:

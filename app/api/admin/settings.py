@@ -33,7 +33,7 @@ from dataclasses import dataclass, fields
 from datetime import UTC, datetime
 from typing import Annotated, Any, Final
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
+from fastapi import APIRouter, Depends, Path, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -68,6 +68,7 @@ from app.api.deps import db_session
 from app.api.transport import admin_sse
 from app.capabilities import Capabilities, DeploymentSettings
 from app.config import Settings
+from app.domain.errors import Validation
 from app.tenancy import DeploymentContext, tenant_agnostic
 
 __all__ = [
@@ -541,7 +542,7 @@ def _stored_value_for_write(
     return smtp_envelope_id_from_pointer(pointer)
 
 
-def _problem(error: str, *, message: str) -> HTTPException:
+def _problem(error: str, *, message: str) -> Validation:
     """Build the canonical 422 typed-error envelope.
 
     The ``detail`` dict lifts ``error`` and ``message`` into the
@@ -549,10 +550,7 @@ def _problem(error: str, *, message: str) -> HTTPException:
     :func:`app.api.errors._handle_http_exception`'s dict-detail
     spread), so the SPA reads ``body.error`` directly.
     """
-    return HTTPException(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        detail={"error": error, "message": message},
-    )
+    return Validation(message, extra={"error": error, "message": message})
 
 
 def build_admin_settings_router() -> APIRouter:

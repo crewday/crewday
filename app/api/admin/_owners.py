@@ -20,9 +20,9 @@ surface does not advertise its own existence to tenants" — an
 authenticated admin who is not an owner sees the same canonical
 ``not_found`` envelope as a complete stranger, so the SPA cannot
 infer "you'd be allowed to do this if you were an owner". The
-helper raises the same :class:`HTTPException` shape the admin
-auth dep uses (404 + ``{"error": "not_found"}``) so downstream
-exception handling is uniform.
+helper raises the same domain-error shape the admin auth dep uses
+(404 + ``{"error": "not_found"}``) so downstream exception handling
+is uniform.
 
 See ``docs/specs/12-rest-api.md`` §"Admin surface" and
 ``docs/specs/05-employees-and-roles.md`` §"Permissions: surface,
@@ -31,10 +31,10 @@ groups, and action catalog" §"Deployment groups".
 
 from __future__ import annotations
 
-from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.authz.deployment_owners import is_deployment_owner
+from app.domain.errors import NotFound
 from app.tenancy import DeploymentContext
 
 __all__ = ["ensure_deployment_owner", "is_deployment_owner"]
@@ -63,7 +63,4 @@ def ensure_deployment_owner(session: Session, *, ctx: DeploymentContext) -> None
     "the surface does not advertise its own existence to tenants".
     """
     if not is_deployment_owner(session, user_id=ctx.user_id):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found"},
-        )
+        raise NotFound(extra={"error": "not_found"})
