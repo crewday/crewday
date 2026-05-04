@@ -243,6 +243,15 @@ tokens                         settings
 kb
 ```
 
+The manager employee detail page (`/w/<slug>/employee/<id>`, also
+linked from legacy `/user/<id>` copy) has seven canonical tabs, and
+each tab is a stable hash deep link: `#overview`, `#shifts`,
+`#payslips`, `#leaves`, `#policies`, `#settings`, and `#passkeys`.
+Hash navigation selects the active tab on first load and while the
+page is open. `#settings` is the employee-scoped settings override
+surface; the other non-overview tabs are reserved chrome until their
+own page bodies land.
+
 No workspace-admin SPA pages exist in v1. The
 `/w/<slug>/api/v1/admin/*` tree (OpenAPI tag `workspace_admin`,
 CLI group `workspace-admin` per §13) is a reserved seat for

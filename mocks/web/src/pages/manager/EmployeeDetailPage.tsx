@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
@@ -111,11 +111,33 @@ function SettingsOverridePanel({
   );
 }
 
-type Tab = "overview" | "settings";
+const EMPLOYEE_TABS = [
+  { key: "overview", label: "Overview" },
+  { key: "shifts", label: "Shifts" },
+  { key: "payslips", label: "Payslips" },
+  { key: "leaves", label: "Leaves" },
+  { key: "policies", label: "Policies" },
+  { key: "settings", label: "Settings" },
+  { key: "passkeys", label: "Passkeys" },
+] as const;
+
+type Tab = (typeof EMPLOYEE_TABS)[number]["key"];
+
+function tabFromHash(hash: string): Tab {
+  const key = hash.replace(/^#/, "");
+  return EMPLOYEE_TABS.find((tab) => tab.key === key)?.key ?? "overview";
+}
 
 export default function EmployeeDetailPage() {
   const { eid = "" } = useParams<{ eid: string }>();
-  const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [activeTab, setActiveTab] = useState<Tab>(() => tabFromHash(window.location.hash));
+
+  useEffect(() => {
+    const syncFromHash = () => setActiveTab(tabFromHash(window.location.hash));
+    syncFromHash();
+    window.addEventListener("hashchange", syncFromHash);
+    return () => window.removeEventListener("hashchange", syncFromHash);
+  }, []);
 
   const detailQ = useQuery({
     queryKey: qk.employee(eid),
@@ -155,23 +177,17 @@ export default function EmployeeDetailPage() {
       overflow={[{ label: "Message", onSelect: () => undefined }]}
     >
       <nav className="tabs tabs--h">
-        <a
-          className={"tab-link" + (activeTab === "overview" ? " tab-link--active" : "")}
-          onClick={() => setActiveTab("overview")}
-        >
-          Overview
-        </a>
-        <a className="tab-link">Shifts</a>
-        <a className="tab-link">Payslips</a>
-        <a className="tab-link">Leaves</a>
-        <a className="tab-link">Policies</a>
-        <a
-          className={"tab-link" + (activeTab === "settings" ? " tab-link--active" : "")}
-          onClick={() => setActiveTab("settings")}
-        >
-          Settings
-        </a>
-        <a className="tab-link">Passkeys</a>
+        {EMPLOYEE_TABS.map((tab) => (
+          <a
+            key={tab.key}
+            href={"#" + tab.key}
+            className={"tab-link" + (activeTab === tab.key ? " tab-link--active" : "")}
+            aria-current={activeTab === tab.key ? "page" : undefined}
+            onClick={() => setActiveTab(tab.key)}
+          >
+            {tab.label}
+          </a>
+        ))}
       </nav>
 
       {activeTab === "overview" && (
