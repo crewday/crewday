@@ -418,3 +418,60 @@ def test_before_cursor_paginates_by_created_at_and_id(
     assert page2.status_code == 200
     assert [item["id"] for item in page2.json()["data"]] == [first["id"]]
     assert page2.json()["has_more"] is False
+
+
+def test_empty_before_cursor_matches_first_page(
+    factory: sessionmaker[Session],
+    seeded: tuple[str, str, str],
+) -> None:
+    workspace_id, manager_id, _worker_id = seeded
+    client = TestClient(
+        _build_app(
+            factory,
+            _ctx(workspace_id=workspace_id, actor_id=manager_id, role="manager"),
+            InMemoryStorage(),
+            EventBus(),
+        ),
+        raise_server_exceptions=False,
+    )
+    channel = client.post(
+        "/chat/channels",
+        json={"kind": "staff", "title": "Staff"},
+    ).json()
+    message = client.post(
+        f"/chat/channels/{channel['id']}/messages",
+        json={"body_md": "hello"},
+    ).json()
+
+    resp = client.get(f"/chat/channels/{channel['id']}/messages?before=")
+
+    assert resp.status_code == 200
+    assert [item["id"] for item in resp.json()["data"]] == [message["id"]]
+
+
+def test_invalid_before_cursor_maps_to_422(
+    factory: sessionmaker[Session],
+    seeded: tuple[str, str, str],
+) -> None:
+    workspace_id, manager_id, _worker_id = seeded
+    client = TestClient(
+        _build_app(
+            factory,
+            _ctx(workspace_id=workspace_id, actor_id=manager_id, role="manager"),
+            InMemoryStorage(),
+            EventBus(),
+        ),
+        raise_server_exceptions=False,
+    )
+    channel = client.post(
+        "/chat/channels",
+        json={"kind": "staff", "title": "Staff"},
+    ).json()
+
+    resp = client.get(
+        f"/chat/channels/{channel['id']}/messages",
+        params={"before": "\xff"},
+    )
+
+    assert resp.status_code == 422
+    assert resp.json()["type"].endswith("/invalid_cursor")

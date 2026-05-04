@@ -890,8 +890,11 @@ INCLUDE_ARGS=(
     # ----------------------------------------------------------------
     --include-tag messaging
     # ``messaging.chat_channels.list`` / ``messaging.chat_messages.list``
-    # use opaque signed cursors. Random schema-valid strings correctly
-    # 422 as ``invalid_cursor`` or fail the before-cursor parser.
+    # use opaque signed cursors. Empty cursors are first-page aliases;
+    # non-empty cursor values must be server-issued ``next_cursor``
+    # tokens. Random schema-valid strings correctly 422 as
+    # ``invalid_cursor`` because OpenAPI cannot express the HMAC
+    # runtime invariant.
     --exclude-operation-id 'messaging.chat_channels.list'
     --exclude-operation-id 'messaging.chat_messages.list'
     # ``messaging.chat_channels.update`` requires a seeded live

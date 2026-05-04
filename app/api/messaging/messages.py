@@ -16,7 +16,13 @@ from app.adapters.db.messaging.repositories import (
 )
 from app.adapters.storage.ports import Storage
 from app.api.deps import current_workspace_context, db_session
-from app.api.pagination import DEFAULT_LIMIT, LimitQuery, decode_cursor, paginate
+from app.api.pagination import (
+    DEFAULT_LIMIT,
+    BeforeCursorQuery,
+    LimitQuery,
+    decode_cursor,
+    paginate,
+)
 from app.domain.errors import (
     DomainError,
     Forbidden,
@@ -140,7 +146,7 @@ def _encode_cursor(view: ChatMessageView) -> str:
 
 
 def _decode_cursor(value: str | None) -> ChatMessageCursor | None:
-    if value is None:
+    if value is None or value == "":
         return None
     try:
         raw = decode_cursor(value)
@@ -246,7 +252,7 @@ def build_messages_router(*, event_bus: EventBus | None = None) -> APIRouter:
         channel_id: str,
         ctx: _Ctx,
         session: _Db,
-        before: str | None = None,
+        before: BeforeCursorQuery = None,
         limit: LimitQuery = DEFAULT_LIMIT,
     ) -> ChatMessageListResponse:
         service = ChatMessageService(ctx, event_bus=event_bus)

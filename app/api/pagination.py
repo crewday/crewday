@@ -38,6 +38,7 @@ from app.domain.errors import InvalidCursor, Validation
 __all__ = [
     "DEFAULT_LIMIT",
     "MAX_LIMIT",
+    "BeforeCursorQuery",
     "Cursor",
     "CursorPage",
     "CursorScalar",
@@ -91,9 +92,21 @@ PageCursorQuery = Annotated[
         max_length=256,
         description=(
             "Opaque forward cursor from the previous page's "
-            "``next_cursor``. Omitted on the first call. Bounded to "
-            "256 chars to keep the URL below reverse-proxy header "
-            "limits."
+            "``next_cursor``. Omitted or empty on the first call. "
+            "Bounded to 256 chars to keep the URL below reverse-proxy "
+            "header limits."
+        ),
+    ),
+]
+BeforeCursorQuery = Annotated[
+    str | None,
+    Query(
+        max_length=256,
+        description=(
+            "Opaque boundary cursor from the previous page's "
+            "``next_cursor``. Omitted or empty on the first call. "
+            "Bounded to 256 chars to keep the URL below reverse-proxy "
+            "header limits."
         ),
     ),
 ]

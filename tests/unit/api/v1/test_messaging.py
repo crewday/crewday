@@ -139,6 +139,35 @@ def test_chat_openapi_documents_request_body_invariants() -> None:
     } in message_send["anyOf"]
 
 
+def test_chat_openapi_bounds_opaque_cursor_query_params() -> None:
+    app = FastAPI()
+    app.include_router(build_messaging_router())
+    openapi = app.openapi()
+
+    channel_params = {
+        param["name"]: param
+        for param in openapi["paths"]["/chat/channels"]["get"]["parameters"]
+    }
+    assert channel_params["cursor"]["schema"]["anyOf"] == [
+        {"maxLength": 256, "type": "string"},
+        {"type": "null"},
+    ]
+    assert "Opaque forward cursor" in channel_params["cursor"]["description"]
+    assert "Omitted or empty" in channel_params["cursor"]["description"]
+
+    message_params = {
+        param["name"]: param
+        for param in openapi["paths"]["/chat/channels/{channel_id}/messages"]["get"][
+            "parameters"
+        ]
+    }
+    assert message_params["before"]["schema"]["anyOf"] == [
+        {"maxLength": 256, "type": "string"},
+        {"type": "null"},
+    ]
+    assert "Opaque boundary cursor" in message_params["before"]["description"]
+
+
 def test_notifications_list_rejects_duplicate_cursor_query_params() -> None:
     app = FastAPI()
     add_exception_handlers(app)
