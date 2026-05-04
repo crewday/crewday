@@ -28,6 +28,7 @@ from app.api.deps import (
     get_mime_sniffer,
     get_storage,
 )
+from app.api.errors import add_exception_handlers
 from app.api.v1.billing import build_billing_router
 from app.tenancy import WorkspaceContext
 from app.util.ulid import new_ulid
@@ -172,6 +173,7 @@ def _build_app(
     storage: InMemoryStorage,
 ) -> FastAPI:
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(build_billing_router(), prefix="/billing")
 
     def _override_db() -> Iterator[Session]:
@@ -222,7 +224,7 @@ def test_vendor_invoice_flow(factory: sessionmaker[Session]) -> None:
 
     bad_approve = client.post(f"/billing/vendor-invoices/{invoice['id']}/approve")
     assert bad_approve.status_code == 422
-    assert bad_approve.json()["detail"]["error"] == "vendor_invoice_invalid"
+    assert bad_approve.json()["error"] == "vendor_invoice_invalid"
 
     uploaded = client.post(
         f"/billing/vendor-invoices/{invoice['id']}/pdf",
@@ -266,6 +268,43 @@ def test_vendor_invoice_flow(factory: sessionmaker[Session]) -> None:
     assert paid.json()["payment_method"] == "bank_transfer"
 
 
+def test_vendor_invoice_upload_errors_use_problem_json(
+    factory: sessionmaker[Session],
+) -> None:
+    storage = InMemoryStorage()
+    with factory() as s:
+        workspace_id, manager_id, vendor_org_id = _bootstrap(s)
+        s.commit()
+    client = TestClient(
+        _build_app(factory, _ctx(workspace_id, manager_id), storage),
+        raise_server_exceptions=False,
+    )
+    created = client.post(
+        "/billing/vendor-invoices",
+        json=_create_payload(vendor_org_id),
+    )
+    assert created.status_code == 201
+    invoice_id = created.json()["id"]
+
+    invalid_pdf = client.post(
+        f"/billing/vendor-invoices/{invoice_id}/pdf",
+        files={"file": ("invoice.txt", b"plain text", "text/plain")},
+    )
+    assert invalid_pdf.status_code == 415
+    assert invalid_pdf.json()["error"] == "vendor_invoice_pdf_invalid_type"
+
+    missing_blob = client.post(
+        f"/billing/vendor-invoices/{invoice_id}/paid",
+        json={
+            "paid_at": _PINNED.isoformat(),
+            "payment_method": "bank_transfer",
+            "proof_blob_hash": "f" * 64,
+        },
+    )
+    assert missing_blob.status_code == 422
+    assert missing_blob.json()["error"] == "vendor_invoice_proof_blob_not_found"
+
+
 def test_duplicate_invoice_number_surfaces_clear_error(
     factory: sessionmaker[Session],
 ) -> None:
@@ -287,7 +326,7 @@ def test_duplicate_invoice_number_surfaces_clear_error(
         "/billing/vendor-invoices", json=_create_payload(vendor_org_id)
     )
     assert duplicate.status_code == 422
-    assert "duplicates invoice_number" in duplicate.json()["detail"]["message"]
+    assert "duplicates invoice_number" in duplicate.json()["message"]
 
 
 def test_worker_cannot_approve_or_mark_paid(factory: sessionmaker[Session]) -> None:
@@ -409,4 +448,4 @@ def test_client_upload_proof_is_limited_to_bound_org(
     assert own.json()["proof_of_payment_file_ids"] == [_UPLOAD_PROOF_HASH]
     assert storage.exists(_UPLOAD_PROOF_HASH)
     assert other.status_code == 404
-    assert other.json()["detail"]["error"] == "vendor_invoice_not_found"
+    assert other.json()["error"] == "vendor_invoice_not_found"

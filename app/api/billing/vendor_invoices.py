@@ -7,7 +7,7 @@ import io
 from datetime import date, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Request, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -35,6 +35,14 @@ from app.domain.billing.vendor_invoices import (
     VendorInvoiceNotFound,
     VendorInvoiceService,
     VendorInvoiceView,
+)
+from app.domain.errors import (
+    DomainError,
+    Internal,
+    NotFound,
+    PayloadTooLarge,
+    UnsupportedMediaType,
+    Validation,
 )
 from app.tenancy import WorkspaceContext
 
@@ -151,30 +159,26 @@ class VendorInvoiceMarkPaidRequest(BaseModel):
         )
 
 
-def _http_for_vendor_invoice_error(exc: Exception) -> HTTPException:
+def _http_for_vendor_invoice_error(exc: Exception) -> DomainError:
     if isinstance(exc, VendorInvoiceNotFound):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "vendor_invoice_not_found", "message": str(exc)},
+        return NotFound(
+            str(exc),
+            extra={"error": "vendor_invoice_not_found", "message": str(exc)},
         )
     if isinstance(exc, VendorInvoiceInvalid):
-        return HTTPException(
-            status_code=422,
-            detail={"error": "vendor_invoice_invalid", "message": str(exc)},
+        return Validation(
+            str(exc),
+            extra={"error": "vendor_invoice_invalid", "message": str(exc)},
         )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+    return Internal(extra={"error": "internal"})
 
 
 async def _read_pdf_capped(upload: UploadFile) -> bytes:
     return await read_upload_capped(
         upload,
         max_bytes=_MAX_PDF_BYTES,
-        too_large=lambda: HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail={"error": "vendor_invoice_pdf_too_large"},
+        too_large=lambda: PayloadTooLarge(
+            extra={"error": "vendor_invoice_pdf_too_large"}
         ),
     )
 
@@ -185,9 +189,8 @@ def _sniff_pdf(mime_sniffer: MimeSniffer, payload: bytes, declared_type: str) ->
         payload,
         declared_type=declared_type,
         allowed={"application/pdf"},
-        rejected=lambda _sniffed: HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail={"error": "vendor_invoice_pdf_invalid_type"},
+        rejected=lambda _sniffed: UnsupportedMediaType(
+            extra={"error": "vendor_invoice_pdf_invalid_type"}
         ),
     )
 
@@ -201,10 +204,7 @@ def _check_pdf_content_length(request: Request) -> None:
     except ValueError:
         return
     if size > _MAX_PDF_BODY_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail={"error": "vendor_invoice_pdf_too_large"},
-        )
+        raise PayloadTooLarge(extra={"error": "vendor_invoice_pdf_too_large"})
 
 
 _PdfContentLengthGuard = Annotated[None, Depends(_check_pdf_content_length)]
@@ -214,9 +214,8 @@ async def _read_proof_capped(upload: UploadFile) -> bytes:
     return await read_upload_capped(
         upload,
         max_bytes=_MAX_PROOF_BYTES,
-        too_large=lambda: HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail={"error": "vendor_invoice_proof_too_large"},
+        too_large=lambda: PayloadTooLarge(
+            extra={"error": "vendor_invoice_proof_too_large"}
         ),
     )
 
@@ -227,9 +226,8 @@ def _sniff_proof(mime_sniffer: MimeSniffer, payload: bytes, declared_type: str) 
         payload,
         declared_type=declared_type,
         allowed=_PROOF_MIME_TYPES,
-        rejected=lambda _sniffed: HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail={"error": "vendor_invoice_proof_invalid_type"},
+        rejected=lambda _sniffed: UnsupportedMediaType(
+            extra={"error": "vendor_invoice_proof_invalid_type"}
         ),
     )
 
@@ -243,10 +241,7 @@ def _check_proof_content_length(request: Request) -> None:
     except ValueError:
         return
     if size > _MAX_PROOF_BODY_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail={"error": "vendor_invoice_proof_too_large"},
-        )
+        raise PayloadTooLarge(extra={"error": "vendor_invoice_proof_too_large"})
 
 
 _ProofContentLengthGuard = Annotated[None, Depends(_check_proof_content_length)]
@@ -377,19 +372,15 @@ def build_vendor_invoices_router() -> APIRouter:
         file: Annotated[UploadFile | None, File()] = None,
     ) -> VendorInvoiceResponse:
         if file is None:
-            raise HTTPException(
-                status_code=422,
-                detail={"error": "vendor_invoice_pdf_required"},
-            )
+            raise Validation(extra={"error": "vendor_invoice_pdf_required"})
         try:
             declared_type = require_upload_content_type(
                 file,
-                missing=lambda: HTTPException(
-                    status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                    detail={"error": "vendor_invoice_pdf_content_type_missing"},
+                missing=lambda: UnsupportedMediaType(
+                    extra={"error": "vendor_invoice_pdf_content_type_missing"}
                 ),
             )
-        except HTTPException:
+        except DomainError:
             await file.close()
             raise
         payload = await _read_pdf_capped(file)
@@ -437,10 +428,7 @@ def build_vendor_invoices_router() -> APIRouter:
         if body.proof_blob_hash is not None and not storage.exists(
             body.proof_blob_hash
         ):
-            raise HTTPException(
-                status_code=422,
-                detail={"error": "vendor_invoice_proof_blob_not_found"},
-            )
+            raise Validation(extra={"error": "vendor_invoice_proof_blob_not_found"})
         try:
             view = _service(ctx).mark_paid(_repo(session), invoice_id, body.to_domain())
         except (VendorInvoiceInvalid, VendorInvoiceNotFound) as exc:
@@ -470,19 +458,15 @@ def build_vendor_invoices_router() -> APIRouter:
     ) -> VendorInvoiceResponse:
         _ensure_client_upload_scope(ctx, session, invoice_id)
         if file is None:
-            raise HTTPException(
-                status_code=422,
-                detail={"error": "vendor_invoice_proof_required"},
-            )
+            raise Validation(extra={"error": "vendor_invoice_proof_required"})
         try:
             declared_type = require_upload_content_type(
                 file,
-                missing=lambda: HTTPException(
-                    status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                    detail={"error": "vendor_invoice_proof_content_type_missing"},
+                missing=lambda: UnsupportedMediaType(
+                    extra={"error": "vendor_invoice_proof_content_type_missing"}
                 ),
             )
-        except HTTPException:
+        except DomainError:
             await file.close()
             raise
         payload = await _read_proof_capped(file)

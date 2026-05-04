@@ -22,6 +22,7 @@ from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import add_exception_handlers
 from app.api.v1.billing import build_billing_router
 from app.tenancy import WorkspaceContext
 from app.util.ulid import new_ulid
@@ -195,6 +196,7 @@ def _ctx(
 
 def _build_app(factory: sessionmaker[Session], ctx: WorkspaceContext) -> FastAPI:
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(build_billing_router(), prefix="/billing")
 
     def _override_db() -> Iterator[Session]:
@@ -241,7 +243,7 @@ def test_work_order_crud_and_transitions(factory: sessionmaker[Session]) -> None
 
     bad_complete = client.post(f"/billing/work-orders/{work_order['id']}/complete")
     assert bad_complete.status_code == 422
-    assert bad_complete.json()["detail"]["error"] == "work_order_invalid"
+    assert bad_complete.json()["error"] == "work_order_invalid"
 
     in_progress = client.post(f"/billing/work-orders/{work_order['id']}/in-progress")
     assert in_progress.status_code == 200

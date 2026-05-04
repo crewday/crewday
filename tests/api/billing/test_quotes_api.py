@@ -24,6 +24,7 @@ from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.billing.quotes import build_quotes_public_router
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import add_exception_handlers
 from app.api.v1.billing import build_billing_router
 from app.config import Settings, get_settings
 from app.tenancy import WorkspaceContext
@@ -224,6 +225,7 @@ def _authed_app(
     mailer: InMemoryMailer,
 ) -> FastAPI:
     app = FastAPI()
+    add_exception_handlers(app)
     app.state.mailer = mailer
     app.include_router(build_billing_router(), prefix="/billing")
 
@@ -238,6 +240,7 @@ def _authed_app(
 
 def _public_app(factory: sessionmaker[Session]) -> FastAPI:
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(build_quotes_public_router())
 
     def _override_db() -> Iterator[Session]:
@@ -297,7 +300,7 @@ def test_quote_create_send_lock_and_public_accept_without_session(
 
     locked = authed.patch(f"/billing/quotes/{quote_id}", json={"title": "New title"})
     assert locked.status_code == 422
-    assert "supersede" in locked.json()["detail"]["message"]
+    assert "supersede" in locked.json()["message"]
 
     token = _extract_token(mailer.sent[0].body_text)
     public = TestClient(_public_app(factory), raise_server_exceptions=False)
@@ -336,7 +339,7 @@ def test_quote_api_rejects_line_total_mismatch_and_exposes_supersession(
         },
     )
     assert rejected.status_code == 422
-    assert rejected.json()["detail"]["error"] == "quote_invalid"
+    assert rejected.json()["error"] == "quote_invalid"
 
     non_finite = {
         **_LINES_JSON,
@@ -353,7 +356,7 @@ def test_quote_api_rejects_line_total_mismatch_and_exposes_supersession(
         },
     )
     assert rejected_non_finite.status_code == 422
-    assert rejected_non_finite.json()["detail"]["error"] == "quote_invalid"
+    assert rejected_non_finite.json()["error"] == "quote_invalid"
 
     created = authed.post(
         "/billing/quotes",
@@ -408,7 +411,7 @@ def test_public_quote_rejects_tampered_token(factory: sessionmaker[Session]) -> 
     resp = public.post(f"/q/{quote_id}/accept", params={"token": token[:-1] + "x"})
 
     assert resp.status_code == 401
-    assert resp.json()["detail"]["error"] == "quote_token_invalid"
+    assert resp.json()["error"] == "quote_token_invalid"
 
 
 def test_quote_decision_route_rejects_sent_quote(

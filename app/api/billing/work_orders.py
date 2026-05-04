@@ -6,7 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
@@ -21,6 +21,7 @@ from app.domain.billing.work_orders import (
     WorkOrderService,
     WorkOrderView,
 )
+from app.domain.errors import DomainError, Internal, NotFound, Validation
 from app.tenancy import WorkspaceContext
 
 __all__ = [
@@ -112,21 +113,18 @@ class WorkOrderPatchRequest(BaseModel):
         return WorkOrderPatch(fields=fields)
 
 
-def _http_for_work_order_error(exc: Exception) -> HTTPException:
+def _http_for_work_order_error(exc: Exception) -> DomainError:
     if isinstance(exc, WorkOrderNotFound):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "work_order_not_found", "message": str(exc)},
+        return NotFound(
+            str(exc),
+            extra={"error": "work_order_not_found", "message": str(exc)},
         )
     if isinstance(exc, WorkOrderInvalid):
-        return HTTPException(
-            status_code=422,
-            detail={"error": "work_order_invalid", "message": str(exc)},
+        return Validation(
+            str(exc),
+            extra={"error": "work_order_invalid", "message": str(exc)},
         )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+    return Internal(extra={"error": "internal"})
 
 
 def build_work_orders_router() -> APIRouter:

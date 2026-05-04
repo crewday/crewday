@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
@@ -20,6 +20,7 @@ from app.domain.billing.organizations import (
     OrganizationService,
     OrganizationView,
 )
+from app.domain.errors import DomainError, Internal, NotFound, Validation
 from app.tenancy import WorkspaceContext
 
 __all__ = [
@@ -121,21 +122,18 @@ class OrganizationPatchRequest(BaseModel):
         return OrganizationPatch(fields=fields)
 
 
-def _http_for_organization_error(exc: Exception) -> HTTPException:
+def _http_for_organization_error(exc: Exception) -> DomainError:
     if isinstance(exc, OrganizationNotFound):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "organization_not_found", "message": str(exc)},
+        return NotFound(
+            str(exc),
+            extra={"error": "organization_not_found", "message": str(exc)},
         )
     if isinstance(exc, OrganizationInvalid):
-        return HTTPException(
-            status_code=422,
-            detail={"error": "organization_invalid", "message": str(exc)},
+        return Validation(
+            str(exc),
+            extra={"error": "organization_invalid", "message": str(exc)},
         )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+    return Internal(extra={"error": "internal"})
 
 
 def build_organizations_router() -> APIRouter:

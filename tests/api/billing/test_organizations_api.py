@@ -21,6 +21,7 @@ from app.adapters.db.identity.models import User, canonicalise_email
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import add_exception_handlers
 from app.api.v1.billing import build_billing_router
 from app.tenancy.context import WorkspaceContext
 from app.util.ulid import new_ulid
@@ -135,6 +136,7 @@ def _ctx(
 
 def _build_app(factory: sessionmaker[Session], ctx: WorkspaceContext) -> FastAPI:
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(build_billing_router(), prefix="/billing")
 
     def _override_ctx() -> WorkspaceContext:
@@ -259,8 +261,8 @@ def test_duplicate_names_return_422(
     )
 
     assert duplicate.status_code == 422
-    assert duplicate.json()["detail"]["error"] == "organization_invalid"
-    assert "already exists" in duplicate.json()["detail"]["message"]
+    assert duplicate.json()["error"] == "organization_invalid"
+    assert "already exists" in duplicate.json()["message"]
     listed = client.get("/billing/organizations")
     assert [row["display_name"] for row in listed.json()["data"]] == ["Dupont Family"]
 
@@ -292,8 +294,8 @@ def test_patch_duplicate_name_returns_422(
     )
 
     assert duplicate.status_code == 422
-    assert duplicate.json()["detail"]["error"] == "organization_invalid"
-    assert "already exists" in duplicate.json()["detail"]["message"]
+    assert duplicate.json()["error"] == "organization_invalid"
+    assert "already exists" in duplicate.json()["message"]
 
 
 def test_kind_transition_conflict_maps_to_422(
@@ -332,8 +334,8 @@ def test_kind_transition_conflict_maps_to_422(
     )
 
     assert resp.status_code == 422
-    assert resp.json()["detail"]["error"] == "organization_invalid"
-    assert "cannot become vendor" in resp.json()["detail"]["message"]
+    assert resp.json()["error"] == "organization_invalid"
+    assert "cannot become vendor" in resp.json()["message"]
 
 
 def test_worker_can_view_but_cannot_mutate(

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
@@ -24,6 +24,14 @@ from app.domain.billing.quotes import (
     QuoteService,
     QuoteTokenInvalid,
     QuoteView,
+)
+from app.domain.errors import (
+    DomainError,
+    Internal,
+    NotFound,
+    ServiceUnavailable,
+    Unauthorized,
+    Validation,
 )
 from app.tenancy import WorkspaceContext
 
@@ -183,45 +191,36 @@ class QuoteSendRequest(BaseModel):
     base_url: str | None = None
 
 
-def _http_for_quote_error(exc: Exception) -> HTTPException:
+def _http_for_quote_error(exc: Exception) -> DomainError:
     if isinstance(exc, QuoteNotFound):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "quote_not_found", "message": str(exc)},
+        return NotFound(
+            str(exc),
+            extra={"error": "quote_not_found", "message": str(exc)},
         )
     if isinstance(exc, QuoteTokenInvalid):
-        return HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "quote_token_invalid", "message": str(exc)},
+        return Unauthorized(
+            str(exc),
+            extra={"error": "quote_token_invalid", "message": str(exc)},
         )
     if isinstance(exc, QuoteInvalid):
-        return HTTPException(
-            status_code=422,
-            detail={"error": "quote_invalid", "message": str(exc)},
+        return Validation(
+            str(exc),
+            extra={"error": "quote_invalid", "message": str(exc)},
         )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+    return Internal(extra={"error": "internal"})
 
 
 def _signing_key(settings: Settings) -> bytes:
     try:
         return derive_subkey(settings.root_key, purpose="billing-quote-token")
     except KeyDerivationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "quote_signing_unavailable"},
-        ) from exc
+        raise ServiceUnavailable(extra={"error": "quote_signing_unavailable"}) from exc
 
 
 def _mailer(request: Request) -> Mailer:
     mailer: Mailer | None = getattr(request.app.state, "mailer", None)
     if mailer is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "mailer_unavailable"},
-        )
+        raise ServiceUnavailable(extra={"error": "mailer_unavailable"})
     return mailer
 
 
@@ -321,10 +320,7 @@ def build_quotes_router() -> APIRouter:
     ) -> QuoteResponse:
         base_url = body.base_url if body.base_url is not None else settings.public_url
         if base_url is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"error": "public_url_unavailable"},
-            )
+            raise ServiceUnavailable(extra={"error": "public_url_unavailable"})
         try:
             view = QuoteService(ctx, signing_key=_signing_key(settings)).send(
                 SqlAlchemyQuoteRepository(session),

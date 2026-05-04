@@ -20,6 +20,7 @@ from app.adapters.db.identity.models import User, canonicalise_email
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import add_exception_handlers
 from app.api.v1.billing import build_billing_router
 from app.tenancy.context import WorkspaceContext
 from app.util.ulid import new_ulid
@@ -133,6 +134,7 @@ def _ctx(
 
 def _build_app(factory: sessionmaker[Session], ctx: WorkspaceContext) -> FastAPI:
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(build_billing_router(), prefix="/billing")
 
     def _override_ctx() -> WorkspaceContext:
@@ -270,8 +272,8 @@ def test_overlap_validation_and_bad_rates_map_to_422(
         },
     )
     assert overlap.status_code == 422
-    assert overlap.json()["detail"]["error"] == "rate_card_invalid"
-    assert "overlaps existing window" in overlap.json()["detail"]["message"]
+    assert overlap.json()["error"] == "rate_card_invalid"
+    assert "overlaps existing window" in overlap.json()["message"]
 
     bad_rate = client.post(
         f"/billing/organizations/{org['id']}/rate-cards",
@@ -282,7 +284,7 @@ def test_overlap_validation_and_bad_rates_map_to_422(
         },
     )
     assert bad_rate.status_code == 422
-    assert bad_rate.json()["detail"]["error"] == "rate_card_invalid"
+    assert bad_rate.json()["error"] == "rate_card_invalid"
 
     bool_rate = client.post(
         f"/billing/organizations/{org['id']}/rate-cards",
@@ -299,7 +301,7 @@ def test_overlap_validation_and_bad_rates_map_to_422(
         json={"active_from": "2026-01-15"},
     )
     assert patch_overlap.status_code == 422
-    assert "overlaps existing window" in patch_overlap.json()["detail"]["message"]
+    assert "overlaps existing window" in patch_overlap.json()["message"]
 
     patch_bool_rate = client.patch(
         f"/billing/organizations/{org['id']}/rate-cards/{adjacent.json()['id']}",
