@@ -1015,6 +1015,15 @@ whether or not self-serve signup is enabled:
   to use the manager-mediated `users.reissue_magic_link` path
   instead (§03). The response shape is identical to the success
   case.
+- **Workspace kill-switch timing parity.** If any workspace the
+  user holds a non-archived grant in has
+  `auth.self_service_recovery_enabled = false`, self-service
+  recovery sends no mail and writes
+  `recovery.disabled_by_workspace`; the 202 response is padded with
+  a bounded synthetic delay so its wall-clock timing overlaps the
+  normal known-user branch within ±5 ms under the steady-load
+  harness. The caller cannot distinguish operator-disabled recovery
+  from a sent-if-eligible request by status, body, or latency.
 
 ### Personal task visibility
 

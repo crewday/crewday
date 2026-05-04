@@ -29,10 +29,13 @@ recovery", §"Recovery paths" and ``docs/specs/15-security-privacy.md``
 
 from __future__ import annotations
 
+import os
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from statistics import median
+from typing import Any, cast
 
 import pytest
 from fastapi import FastAPI
@@ -58,9 +61,11 @@ from app.adapters.db.identity.models import (
 from app.adapters.db.identity.models import (
     Session as AuthSession,
 )
+from app.adapters.db.session import FilteredSession
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.deps import db_session as _db_session_dep
 from app.api.v1.auth.recovery import build_recovery_router
+from app.auth import _throttle as throttle_module
 from app.auth import passkey
 from app.auth import recovery as recovery_module
 from app.auth._throttle import Throttle
@@ -80,6 +85,7 @@ pytestmark = pytest.mark.integration
 @dataclass
 class _RecordingMailer:
     sent: list[tuple[tuple[str, ...], str, str]] = field(default_factory=list)
+    delay_seconds: float = 0.0
 
     def send(
         self,
@@ -92,6 +98,8 @@ class _RecordingMailer:
         reply_to: str | None = None,
     ) -> str:
         del body_html, headers, reply_to
+        if self.delay_seconds > 0:
+            time.sleep(self.delay_seconds)
         self.sent.append((tuple(to), subject, body_text))
         return "test-message-id"
 
@@ -262,7 +270,7 @@ def client(
     original_engine = _session_mod._default_engine
     original_factory = _session_mod._default_sessionmaker_
     _session_mod._default_engine = engine
-    _session_mod._default_sessionmaker_ = factory
+    _session_mod._default_sessionmaker_ = cast("sessionmaker[FilteredSession]", factory)
     try:
         with TestClient(app) as c:
             yield c
@@ -922,6 +930,81 @@ class TestRecoveryKillSwitch:
                 ).all()
                 == []
             )
+
+    @pytest.mark.skipif(
+        os.environ.get("CREWDAY_SKIP_TIMING_TEST") == "1",
+        reason="CREWDAY_SKIP_TIMING_TEST=1 set; skipping timing band assertion.",
+    )
+    def test_kill_switch_timing_parity(
+        self,
+        client: TestClient,
+        engine: Engine,
+        mailer: _RecordingMailer,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Kill-switched known users stay inside the normal hit timing band."""
+        samples = 11
+        monkeypatch.setattr(throttle_module, "_REQUEST_LIMIT", 100)
+        monkeypatch.setattr(throttle_module, "_RECOVER_IP_LIMIT", 100)
+        monkeypatch.setattr(throttle_module, "_RECOVER_EMAIL_LIMIT", 100)
+        monkeypatch.setattr(throttle_module, "_RECOVER_GLOBAL_LIMIT", 100)
+        mailer.delay_seconds = recovery_module._KILL_SWITCH_SYNTHETIC_DELAY_SECONDS
+        for i in range(samples):
+            _seed_user_with_killswitch(
+                engine,
+                email=f"timing-hit-{i}@example.com",
+                display_name=f"Timing Hit {i}",
+                kill_switch=False,
+            )
+            _seed_user_with_killswitch(
+                engine,
+                email=f"timing-kill-{i}@example.com",
+                display_name=f"Timing Kill {i}",
+                kill_switch=True,
+            )
+
+        # Warm both paths before measuring so lazy imports, page-cache
+        # fills, and first-write setup do not land on one branch only.
+        client.post(
+            "/api/v1/recover/passkey/request",
+            json={"email": "timing-hit-0@example.com"},
+        )
+        client.post(
+            "/api/v1/recover/passkey/request",
+            json={"email": "timing-kill-0@example.com"},
+        )
+        mailer.sent.clear()
+
+        hit_times: list[int] = []
+        kill_times: list[int] = []
+        for i in range(1, samples):
+            t0 = time.perf_counter_ns()
+            hit = client.post(
+                "/api/v1/recover/passkey/request",
+                json={"email": f"timing-hit-{i}@example.com"},
+            )
+            hit_times.append(time.perf_counter_ns() - t0)
+
+            t0 = time.perf_counter_ns()
+            killed = client.post(
+                "/api/v1/recover/passkey/request",
+                json={"email": f"timing-kill-{i}@example.com"},
+            )
+            kill_times.append(time.perf_counter_ns() - t0)
+
+            assert hit.status_code == 202
+            assert killed.status_code == 202
+            assert hit.json() == killed.json() == {"status": "accepted"}
+
+        hit_median_ms = median(hit_times) / 1_000_000
+        kill_median_ms = median(kill_times) / 1_000_000
+        delta = abs(hit_median_ms - kill_median_ms)
+        assert delta < 5.0, (
+            f"kill-switch timing diverged beyond +/-5 ms: "
+            f"hit={hit_median_ms:.3f}ms, "
+            f"kill={kill_median_ms:.3f}ms, "
+            f"delta={delta:.3f}ms"
+        )
 
     def test_flag_true_everywhere_flows_through_happy_path(
         self,

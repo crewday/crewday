@@ -105,6 +105,7 @@ import hmac
 import logging
 import secrets
 import threading
+import time
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -178,6 +179,13 @@ _HKDF_PURPOSE: Final[str] = "magic-link"
 # the key straight out of the JSON blob so the resolver can stay
 # simple until the richer cd-n6p surface lands.
 _SELF_SERVICE_RECOVERY_KEY: Final[str] = "auth.self_service_recovery_enabled"
+
+# Synthetic wall-clock pad for the workspace kill-switch branch. The
+# branch intentionally sends no mail and mints no nonce, but callers must
+# not be able to distinguish "known user, operator disabled recovery"
+# from the normal hit branch by latency (§15 self-service mitigations).
+_KILL_SWITCH_SYNTHETIC_DELAY_SECONDS: Final[float] = 0.020
+_KILL_SWITCH_MAX_SYNTHETIC_DELAY_SECONDS: Final[float] = 0.050
 
 
 # ---------------------------------------------------------------------------
@@ -631,6 +639,15 @@ def _burn_cpu_for_stepup_refusal(pepper: bytes) -> None:
     hmac.digest(pepper, throwaway, "sha256")
 
 
+def _delay_kill_switch_recovery_response(*, started_at_ns: int) -> None:
+    """Pad kill-switch recovery latency into the normal hit-branch band."""
+    elapsed_seconds = (time.perf_counter_ns() - started_at_ns) / 1_000_000_000
+    remaining = _KILL_SWITCH_SYNTHETIC_DELAY_SECONDS - elapsed_seconds
+    if remaining <= 0:
+        return
+    time.sleep(min(remaining, _KILL_SWITCH_MAX_SYNTHETIC_DELAY_SECONDS))
+
+
 def _send_recovery_link(
     *,
     mailer: Mailer,
@@ -820,6 +837,7 @@ def request_recovery(
     proxy the send. This keeps the magic-link module's template
     dispatch single-purpose.
     """
+    request_started_ns = time.perf_counter_ns()
     dispatch = PendingDispatch()
     resolved_now = now if now is not None else _now(clock)
     pepper = _pepper(settings)
@@ -857,6 +875,7 @@ def request_recovery(
             email_hash=email_hash,
             ip_hash=ip_hash,
         )
+        _delay_kill_switch_recovery_response(started_at_ns=request_started_ns)
         # Empty dispatch — the kill-switch branch sends nothing to the
         # user. The forensic audit row already landed on a fresh UoW
         # in :func:`_audit_recovery_disabled_by_workspace`.
