@@ -15,7 +15,7 @@ Three public entry points wire the spec's four-step flow (§03
    finish the passkey ceremony. Audit ``signup.completed``.
 
 Plus :func:`prune_stale_signups`, the GC callable invoked by the
-future APScheduler wiring (see module note at the end of this file).
+worker scheduler.
 
 **Atomicity.** :func:`complete_signup` never calls ``session.commit()``
 — the caller's UoW owns the transaction boundary (§01). An exception
@@ -1229,11 +1229,10 @@ def prune_stale_signups(
     so the ORM filter would otherwise reject the SELECT for want of a
     predicate.
 
-    **Scheduler wiring.** Today this is a plain callable. APScheduler
-    isn't wired into :mod:`app.worker` yet; the scheduler follow-up
-    will register this at hourly cadence. The function is pure (aside
-    from the DB writes) and idempotent — running it twice in a row
-    deletes nothing the first run didn't already.
+    **Scheduler wiring.** :mod:`app.worker.scheduler` registers this
+    at hourly cadence. The function is pure (aside from the DB writes)
+    and idempotent — running it twice in a row deletes nothing the
+    first run didn't already.
     """
     cutoff = now - _ORPHAN_CUTOFF
     deleted_ids: list[str] = []

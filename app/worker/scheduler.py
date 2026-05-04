@@ -86,6 +86,7 @@ from app.worker.jobs.maintenance import (
     _make_inventory_reorder_body,
     _make_invite_ttl_body,
     _make_retention_rotation_body,
+    _make_signup_gc_body,
     _make_webhook_dispatch_body,
 )
 from app.worker.jobs.messaging import _make_daily_digest_fanout_body
@@ -126,6 +127,8 @@ __all__ = [
     "POLL_ICAL_JOB_ID",
     "POLL_ICAL_MISFIRE_GRACE_SECONDS",
     "RETENTION_ROTATION_JOB_ID",
+    "SIGNUP_GC_INTERVAL_SECONDS",
+    "SIGNUP_GC_JOB_ID",
     "USER_WORKSPACE_REFRESH_INTERVAL_SECONDS",
     "USER_WORKSPACE_REFRESH_JOB_ID",
     "WEBHOOK_DISPATCH_INTERVAL_SECONDS",
@@ -291,6 +294,21 @@ INVITE_TTL_JOB_ID: str = "invite_ttl_sweep"
 # so a status-filtered scan rides the existing ``ix_invite_expires``
 # index without a covering one).
 INVITE_TTL_INTERVAL_SECONDS: int = 900
+
+
+# Stable job id for the self-serve signup orphan-workspace GC (cd-hnk40).
+# The callable in :mod:`app.auth.signup.prune_stale_signups` deletes
+# self-serve workspaces older than one hour that never gained a
+# membership row and still have no completed signup attempt. Cross-
+# tenant by design — signup cleanup is deployment-scope and the pruner
+# enters ``tenant_agnostic`` internally.
+SIGNUP_GC_JOB_ID: str = "signup_gc"
+
+# Interval for the signup GC. Spec §03 says abandoned passkey
+# ceremonies leave only ``signup_attempt`` rows, which ``signup_gc``
+# prunes after one hour; an hourly tick bounds cleanup lag without
+# waking an idle deployment often for a rare path.
+SIGNUP_GC_INTERVAL_SECONDS: int = 3600
 
 
 # Stable job id for the outbound webhook dispatcher tick (cd-q885).
@@ -718,6 +736,7 @@ def register_jobs(
         USER_WORKSPACE_REFRESH_JOB_ID,
         APPROVAL_TTL_JOB_ID,
         INVITE_TTL_JOB_ID,
+        SIGNUP_GC_JOB_ID,
         WEBHOOK_DISPATCH_JOB_ID,
         CHAT_GATEWAY_SWEEP_JOB_ID,
         EXTRACT_DOCUMENT_JOB_ID,
@@ -1021,6 +1040,33 @@ def register_jobs(
         max_instances=1,
         coalesce=True,
         misfire_grace_time=INVITE_TTL_INTERVAL_SECONDS,
+    )
+
+    # --- Hourly self-serve signup GC (cd-hnk40) ---
+    # The callable in :mod:`app.auth.signup.prune_stale_signups`
+    # deletes orphaned self-serve workspaces older than one hour with
+    # no membership rows and no completed signup attempt. The body is
+    # idempotent: once the orphan set is gone, a repeat tick returns
+    # an empty deleted-id list.
+    #
+    # ``misfire_grace_time = SIGNUP_GC_INTERVAL_SECONDS`` — one tick
+    # late is fine (the cutoff only gets older), two-ticks-late is a
+    # stuck-scheduler signal and a skip is preferable to stacked
+    # catch-up. ``coalesce=True`` + ``max_instances=1`` keep a slow
+    # cleanup from stacking on an overloaded DB.
+    scheduler.add_job(
+        wrap_job(
+            _make_signup_gc_body(resolved_clock),
+            job_id=SIGNUP_GC_JOB_ID,
+            clock=resolved_clock,
+        ),
+        trigger=IntervalTrigger(seconds=SIGNUP_GC_INTERVAL_SECONDS),
+        id=SIGNUP_GC_JOB_ID,
+        name=SIGNUP_GC_JOB_ID,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=SIGNUP_GC_INTERVAL_SECONDS,
     )
 
     # --- 30 s outbound webhook dispatcher tick (cd-q885) ---

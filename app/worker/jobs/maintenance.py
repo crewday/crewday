@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
+from app.adapters.db.session import make_uow
 from app.config import get_settings
 from app.util.clock import Clock
 
@@ -95,6 +96,48 @@ def _make_invite_ttl_body(clock: Clock) -> Callable[[], None]:
         # re-emit. Discard the returned report — operators read it
         # off the structured-log stream, not the wrapper's return.
         sweep_expired_invites(clock=clock)
+
+    return _body
+
+
+def _make_signup_gc_body(clock: Clock) -> Callable[[], None]:
+    """Build the hourly self-serve signup GC body (cd-hnk40).
+
+    Factory rather than a bare module-level function so the body
+    closes over the scheduler's injected :class:`Clock` — the orphan
+    cutoff is ``clock.now() - 1h``, and must line up with the
+    scheduler heartbeat under :class:`~app.util.clock.FrozenClock`.
+
+    The returned body opens its own UoW because the worker has no
+    ambient session, then calls
+    :func:`app.auth.signup.prune_stale_signups`. The pruner runs
+    tenant-agnostic internally and returns the deleted workspace ids
+    so this wrapper can emit one operator-visible summary event.
+
+    The auth import is deferred into the closure body so the
+    standalone ``python -m app.worker`` entrypoint can start without
+    importing the full signup/passkey stack until this job fires.
+    """
+
+    def _body() -> None:
+        from sqlalchemy.orm import Session as _Session
+
+        from app.auth.signup import prune_stale_signups
+
+        now = clock.now()
+
+        with make_uow() as session:
+            assert isinstance(session, _Session)
+            deleted_ids = prune_stale_signups(session, now=now)
+
+        _log.info(
+            "signup GC completed",
+            extra={
+                "event": "signup.gc",
+                "deleted": len(deleted_ids),
+                "deleted_workspace_ids": tuple(deleted_ids),
+            },
+        )
 
     return _body
 

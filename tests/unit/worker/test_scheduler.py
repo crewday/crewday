@@ -29,6 +29,7 @@ from app.util.clock import FrozenClock
 from app.worker import scheduler as scheduler_mod
 from app.worker.jobs import identity as identity_jobs
 from app.worker.jobs import llm_budget as llm_budget_jobs
+from app.worker.jobs import maintenance as maintenance_jobs
 from app.worker.jobs import messaging as messaging_jobs
 from app.worker.scheduler import (
     AGENT_COMPACTION_JOB_ID,
@@ -49,6 +50,8 @@ from app.worker.scheduler import (
     OVERDUE_DETECT_JOB_ID,
     POLL_ICAL_JOB_ID,
     RETENTION_ROTATION_JOB_ID,
+    SIGNUP_GC_INTERVAL_SECONDS,
+    SIGNUP_GC_JOB_ID,
     USER_WORKSPACE_REFRESH_INTERVAL_SECONDS,
     USER_WORKSPACE_REFRESH_JOB_ID,
     WEB_PUSH_DISPATCH_JOB_ID,
@@ -111,6 +114,7 @@ class TestRegisterJobs:
             OVERDUE_DETECT_JOB_ID,
             POLL_ICAL_JOB_ID,
             RETENTION_ROTATION_JOB_ID,
+            SIGNUP_GC_JOB_ID,
             USER_WORKSPACE_REFRESH_JOB_ID,
             WEB_PUSH_DISPATCH_JOB_ID,
             WEBHOOK_DISPATCH_JOB_ID,
@@ -156,6 +160,7 @@ class TestRegisterJobs:
             OVERDUE_DETECT_JOB_ID,
             POLL_ICAL_JOB_ID,
             RETENTION_ROTATION_JOB_ID,
+            SIGNUP_GC_JOB_ID,
             USER_WORKSPACE_REFRESH_JOB_ID,
             WEB_PUSH_DISPATCH_JOB_ID,
             WEBHOOK_DISPATCH_JOB_ID,
@@ -766,6 +771,79 @@ class TestInviteTtlJob:
         body()
 
         assert seen_clocks == [clock]
+
+
+# ---------------------------------------------------------------------------
+# Signup GC (cd-hnk40)
+# ---------------------------------------------------------------------------
+
+
+class TestSignupGcJob:
+    """Registration shape + clock/session propagation for signup GC."""
+
+    def test_adds_signup_gc_job_at_hourly_interval(self) -> None:
+        """Registered with the pinned interval + coalesce settings."""
+        from apscheduler.triggers.interval import IntervalTrigger
+
+        sched = create_scheduler()
+        register_jobs(sched)
+
+        job = sched.get_job(SIGNUP_GC_JOB_ID)
+        assert job is not None, f"{SIGNUP_GC_JOB_ID} not registered by register_jobs"
+
+        assert isinstance(job.trigger, IntervalTrigger)
+        assert job.trigger.interval.total_seconds() == 3600.0
+        assert SIGNUP_GC_INTERVAL_SECONDS == 3600
+
+        assert job.misfire_grace_time == SIGNUP_GC_INTERVAL_SECONDS
+        assert job.coalesce is True
+        assert job.max_instances == 1
+
+    def test_is_idempotent(self) -> None:
+        """Re-registering keeps exactly one signup_gc job."""
+        sched = create_scheduler()
+        register_jobs(sched)
+        register_jobs(sched)
+
+        matching = [j for j in sched.get_jobs() if j.id == SIGNUP_GC_JOB_ID]
+        assert len(matching) == 1
+
+    def test_uses_resolved_clock_and_uow_session(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Body calls ``prune_stale_signups`` with the injected clock's now."""
+        import app.auth.signup as _signup_mod
+
+        clock = FrozenClock(datetime(2026, 4, 24, 12, 0, tzinfo=UTC))
+        seen_calls: list[tuple[object, datetime]] = []
+
+        class _FakeSession:
+            pass
+
+        fake_session = _FakeSession()
+
+        def fake_prune(session: object, *, now: datetime) -> list[str]:
+            seen_calls.append((session, now))
+            return ["01HWA00000000000000000WSP1"]
+
+        class _FakeUow:
+            def __enter__(self) -> _FakeSession:
+                return fake_session
+
+            def __exit__(self, *exc: object) -> None:
+                return None
+
+        monkeypatch.setattr(_signup_mod, "prune_stale_signups", fake_prune)
+        monkeypatch.setattr(maintenance_jobs, "make_uow", lambda: _FakeUow())
+        import sqlalchemy.orm as _orm_mod
+
+        monkeypatch.setattr(_orm_mod, "Session", _FakeSession)
+
+        body = maintenance_jobs._make_signup_gc_body(clock)
+        body()
+
+        assert seen_calls == [(fake_session, clock.now())]
 
 
 # ---------------------------------------------------------------------------
