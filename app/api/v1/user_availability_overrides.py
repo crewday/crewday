@@ -47,7 +47,7 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
@@ -64,6 +64,7 @@ from app.api.pagination import (
     paginate,
 )
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.domain.errors import Conflict, DomainError, Forbidden, NotFound, Validation
 from app.domain.identity.user_availability_overrides import (
     UserAvailabilityOverrideAlreadyExists,
     UserAvailabilityOverrideCreate,
@@ -294,53 +295,48 @@ def _view_to_response(
 
 def _http_for_invariant(
     exc: UserAvailabilityOverrideInvariantViolated,
-) -> HTTPException:
-    return HTTPException(
-        status_code=422,
-        detail={
+) -> DomainError:
+    message = str(exc)
+    return Validation(
+        message,
+        extra={
             "error": "user_availability_override_invariant",
-            "message": str(exc),
+            "message": message,
         },
     )
 
 
-def _http_for_not_found() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"error": "user_availability_override_not_found"},
-    )
+def _http_for_not_found() -> DomainError:
+    return NotFound(extra={"error": "user_availability_override_not_found"})
 
 
 def _http_for_permission_denied(
     exc: UserAvailabilityOverridePermissionDenied,
-) -> HTTPException:
+) -> DomainError:
     """Map a domain :class:`UserAvailabilityOverridePermissionDenied` to 403.
 
-    The detail body matches the §12 envelope shape used by the
-    :func:`app.authz.dep.Permission` dependency: ``{"error":
-    "permission_denied", "action_key": "<key>"}``.
+    The problem+json envelope keeps the legacy machine fields:
+    ``{"error": "permission_denied", "action_key": "<key>"}``.
     """
-    return HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail={"error": "permission_denied", "action_key": str(exc)},
-    )
+    return Forbidden(extra={"error": "permission_denied", "action_key": str(exc)})
 
 
 def _http_for_transition(
     exc: UserAvailabilityOverrideTransitionForbidden,
-) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail={
+) -> DomainError:
+    message = str(exc)
+    return Conflict(
+        message,
+        extra={
             "error": "user_availability_override_transition_forbidden",
-            "message": str(exc),
+            "message": message,
         },
     )
 
 
 def _http_for_override_exists(
     exc: UserAvailabilityOverrideAlreadyExists,
-) -> HTTPException:
+) -> DomainError:
     """Map the duplicate-``(user_id, date)`` rejection to 409.
 
     Replaces the previous opaque 500 from the
@@ -348,10 +344,8 @@ def _http_for_override_exists(
     receive a documented ``override_exists`` envelope (§12 REST API,
     409 conflict).
     """
-    return HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail={"error": "override_exists", "message": str(exc)},
-    )
+    message = str(exc)
+    return Conflict(message, extra={"error": "override_exists", "message": message})
 
 
 def _approved_to_status(

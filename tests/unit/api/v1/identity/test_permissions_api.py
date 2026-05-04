@@ -16,6 +16,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.authz.models import RoleGrant
@@ -43,6 +44,14 @@ def _rules_client(ctx: WorkspaceContext, factory: sessionmaker[Session]) -> Test
         factory,
         ctx,
     )
+
+
+def _assert_problem_error(resp: Response, *, error: str) -> dict[str, object]:
+    assert resp.headers["content-type"].startswith("application/problem+json")
+    body = resp.json()
+    assert isinstance(body, dict)
+    assert body["error"] == error
+    return body
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +192,9 @@ class TestPermissionsResolved:
             },
         )
         assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "unknown_action_key"
+        body = _assert_problem_error(resp, error="unknown_action_key")
+        assert body["action_key"] == "totally.fake"
+        assert body["message"] == body["detail"]
 
     def test_invalid_scope_kind_returns_422(
         self,
@@ -202,7 +213,9 @@ class TestPermissionsResolved:
             },
         )
         assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "invalid_scope_kind"
+        body = _assert_problem_error(resp, error="invalid_scope_kind")
+        assert body["action_key"] == "payroll.lock_period"
+        assert body["message"] == body["detail"]
 
     def test_no_match_path(
         self,

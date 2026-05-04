@@ -7,13 +7,16 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_workspace_context, db_session
 from app.api.pagination import DEFAULT_LIMIT, LimitQuery, decode_cursor, encode_cursor
+from app.api.v1._problem_json import PROBLEM_JSON_CONTENT
 from app.authz.dep import Permission
+from app.domain.errors import Conflict, Forbidden, InvalidCursor, NotFound
+from app.domain.errors import Validation as DomainValidation
 from app.services.inventory import (
     item_service,
     movement_service,
@@ -437,73 +440,48 @@ class InventoryStocktakeActivityListResponse(BaseModel):
     data: list[InventoryStocktakeActivityResponse]
 
 
-def _http_for_not_found() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"error": "inventory_item_not_found"},
+def _not_found() -> NotFound:
+    return NotFound(extra={"error": "inventory_item_not_found"})
+
+
+def _property_not_found() -> NotFound:
+    return NotFound(extra={"error": "property_not_found"})
+
+
+def _conflict(exc: item_service.InventoryItemConflict) -> Conflict:
+    return Conflict(
+        extra={"error": "inventory_item_conflict", "field": exc.field},
     )
 
 
-def _http_for_property_not_found() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"error": "property_not_found"},
-    )
-
-
-def _http_for_conflict(exc: item_service.InventoryItemConflict) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail={"error": "inventory_item_conflict", "field": exc.field},
-    )
-
-
-def _http_for_validation(
+def _validation(
     exc: item_service.InventoryItemValidationError,
-) -> HTTPException:
-    return HTTPException(
-        status_code=422,
-        detail={"error": exc.error, "field": exc.field},
-    )
+) -> DomainValidation:
+    return DomainValidation(extra={"error": exc.error, "field": exc.field})
 
 
-def _http_for_movement_validation(
+def _movement_validation(
     exc: movement_service.InventoryMovementValidationError,
-) -> HTTPException:
-    return HTTPException(
-        status_code=422,
-        detail={"error": exc.error, "field": exc.field},
-    )
+) -> DomainValidation:
+    return DomainValidation(extra={"error": exc.error, "field": exc.field})
 
 
-def _http_for_permission_denied(action_key: str) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail={"error": "permission_denied", "action_key": action_key},
-    )
+def _permission_denied(action_key: str) -> Forbidden:
+    return Forbidden(extra={"error": "permission_denied", "action_key": action_key})
 
 
-def _http_for_stocktake_not_found() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"error": "stocktake_not_found"},
-    )
+def _stocktake_not_found() -> NotFound:
+    return NotFound(extra={"error": "stocktake_not_found"})
 
 
-def _http_for_stocktake_committed() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail={"error": "stocktake_already_committed"},
-    )
+def _stocktake_committed() -> Conflict:
+    return Conflict(extra={"error": "stocktake_already_committed"})
 
 
-def _http_for_stocktake_validation(
+def _stocktake_validation(
     exc: stocktake_service.StocktakeValidationError,
-) -> HTTPException:
-    return HTTPException(
-        status_code=422,
-        detail={"error": exc.error, "field": exc.field},
-    )
+) -> DomainValidation:
+    return DomainValidation(extra={"error": exc.error, "field": exc.field})
 
 
 def _route_responses(*codes: int) -> dict[int | str, dict[str, Any]]:
@@ -511,22 +489,12 @@ def _route_responses(*codes: int) -> dict[int | str, dict[str, Any]]:
         status.HTTP_403_FORBIDDEN: "Forbidden",
         status.HTTP_404_NOT_FOUND: "Not found",
         status.HTTP_409_CONFLICT: "Conflict",
+        422: "Validation error",
     }
-    responses: dict[int | str, dict[str, Any]] = {
-        422: {
-            "description": "Validation error",
-            "content": {
-                "application/problem+json": {
-                    "schema": {
-                        "type": "object",
-                        "additionalProperties": True,
-                    }
-                }
-            },
-        }
+    return {
+        code: {"description": descriptions[code], "content": PROBLEM_JSON_CONTENT}
+        for code in (422, *codes)
     }
-    responses.update({code: {"description": descriptions[code]} for code in codes})
-    return responses
 
 
 def _decode_movement_cursor(
@@ -538,7 +506,7 @@ def _decode_movement_cursor(
     if "|" not in raw:
         try:
             decoded = decode_cursor(raw)
-        except HTTPException:
+        except InvalidCursor:
             decoded = None
         if decoded is not None:
             raw = decoded
@@ -546,31 +514,25 @@ def _decode_movement_cursor(
         try:
             return datetime.fromisoformat(raw), None
         except ValueError as exc:
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "error": "invalid_cursor",
-                    "message": "movement cursor timestamp is not ISO-8601",
-                },
+            message = "movement cursor timestamp is not ISO-8601"
+            raise InvalidCursor(
+                message,
+                extra={"error": "invalid_cursor", "message": message},
             ) from exc
     iso, movement_id = raw.split("|", 1)
     if not movement_id:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error": "invalid_cursor",
-                "message": "movement cursor missing movement id",
-            },
+        message = "movement cursor missing movement id"
+        raise InvalidCursor(
+            message,
+            extra={"error": "invalid_cursor", "message": message},
         )
     try:
         return datetime.fromisoformat(iso), movement_id
     except ValueError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error": "invalid_cursor",
-                "message": "movement cursor timestamp is not ISO-8601",
-            },
+        message = "movement cursor timestamp is not ISO-8601"
+        raise InvalidCursor(
+            message,
+            extra={"error": "invalid_cursor", "message": message},
         ) from exc
 
 
@@ -613,11 +575,11 @@ def build_inventory_router() -> APIRouter:
                 else item_service.list(session, ctx, property_id=property_id)
             )
         except item_service.InventoryPropertyNotFound as exc:
-            raise _http_for_property_not_found() from exc
+            raise _property_not_found() from exc
         except item_service.InventoryItemNotFound as exc:
-            raise _http_for_not_found() from exc
+            raise _not_found() from exc
         except item_service.InventoryItemValidationError as exc:
-            raise _http_for_validation(exc) from exc
+            raise _validation(exc) from exc
         return InventoryItemListResponse(
             data=[InventoryItemResponse.from_view(view) for view in views]
         )
@@ -641,7 +603,7 @@ def build_inventory_router() -> APIRouter:
                 property_id=property_id,
             )
         except item_service.InventoryPropertyNotFound as exc:
-            raise _http_for_property_not_found() from exc
+            raise _property_not_found() from exc
         return InventoryItemListResponse(
             data=[InventoryItemResponse.from_view(view) for view in views]
         )
@@ -667,7 +629,7 @@ def build_inventory_router() -> APIRouter:
                 window_days=days,
             )
         except report_service.InventoryReportPropertyNotFound as exc:
-            raise _http_for_property_not_found() from exc
+            raise _property_not_found() from exc
         return InventoryRateReportResponse(
             data=[InventoryRateReportRowResponse.from_view(row) for row in rows]
         )
@@ -693,7 +655,7 @@ def build_inventory_router() -> APIRouter:
                 window_days=days,
             )
         except report_service.InventoryReportPropertyNotFound as exc:
-            raise _http_for_property_not_found() from exc
+            raise _property_not_found() from exc
         return InventoryShrinkageReportResponse(
             data=[InventoryShrinkageReportRowResponse.from_view(row) for row in rows]
         )
@@ -719,7 +681,7 @@ def build_inventory_router() -> APIRouter:
                 limit=limit,
             )
         except report_service.InventoryReportPropertyNotFound as exc:
-            raise _http_for_property_not_found() from exc
+            raise _property_not_found() from exc
         return InventoryStocktakeActivityListResponse(
             data=[InventoryStocktakeActivityResponse.from_view(row) for row in rows]
         )
@@ -755,11 +717,11 @@ def build_inventory_router() -> APIRouter:
                 note=body.note,
             )
         except movement_service.InventoryItemNotFound as exc:
-            raise _http_for_not_found() from exc
+            raise _not_found() from exc
         except movement_service.InventoryMovementPermissionDenied as exc:
-            raise _http_for_permission_denied("inventory.adjust") from exc
+            raise _permission_denied("inventory.adjust") from exc
         except movement_service.InventoryMovementValidationError as exc:
-            raise _http_for_movement_validation(exc) from exc
+            raise _movement_validation(exc) from exc
         return InventoryMovementResponse.from_view(view)
 
     @api.get(
@@ -789,7 +751,7 @@ def build_inventory_router() -> APIRouter:
                 )
             )
         except movement_service.InventoryItemNotFound as exc:
-            raise _http_for_not_found() from exc
+            raise _not_found() from exc
         has_more = len(views) > limit
         items = views[:limit]
         next_cursor = (
@@ -836,11 +798,11 @@ def build_inventory_router() -> APIRouter:
                 note=body.note,
             )
         except movement_service.InventoryItemNotFound as exc:
-            raise _http_for_not_found() from exc
+            raise _not_found() from exc
         except movement_service.InventoryMovementPermissionDenied as exc:
-            raise _http_for_permission_denied("inventory.adjust") from exc
+            raise _permission_denied("inventory.adjust") from exc
         except movement_service.InventoryMovementValidationError as exc:
-            raise _http_for_movement_validation(exc) from exc
+            raise _movement_validation(exc) from exc
         return InventoryMovementResponse.from_view(view)
 
     @api.get(
@@ -861,11 +823,11 @@ def build_inventory_router() -> APIRouter:
                 item_service.get_by_sku(session, ctx, property_id=property_id, sku=sku)
             )
         except item_service.InventoryPropertyNotFound as exc:
-            raise _http_for_property_not_found() from exc
+            raise _property_not_found() from exc
         except item_service.InventoryItemNotFound as exc:
-            raise _http_for_not_found() from exc
+            raise _not_found() from exc
         except item_service.InventoryItemValidationError as exc:
-            raise _http_for_validation(exc) from exc
+            raise _validation(exc) from exc
 
     @api.get(
         "/properties/{property_id}/items/by_barcode/{barcode_ean13}",
@@ -890,11 +852,11 @@ def build_inventory_router() -> APIRouter:
                 )
             )
         except item_service.InventoryPropertyNotFound as exc:
-            raise _http_for_property_not_found() from exc
+            raise _property_not_found() from exc
         except item_service.InventoryItemNotFound as exc:
-            raise _http_for_not_found() from exc
+            raise _not_found() from exc
         except item_service.InventoryItemValidationError as exc:
-            raise _http_for_validation(exc) from exc
+            raise _validation(exc) from exc
 
     @api.post(
         "/properties/{property_id}/items",
@@ -923,11 +885,11 @@ def build_inventory_router() -> APIRouter:
                 body=body.to_service(),
             )
         except item_service.InventoryPropertyNotFound as exc:
-            raise _http_for_property_not_found() from exc
+            raise _property_not_found() from exc
         except item_service.InventoryItemConflict as exc:
-            raise _http_for_conflict(exc) from exc
+            raise _conflict(exc) from exc
         except item_service.InventoryItemValidationError as exc:
-            raise _http_for_validation(exc) from exc
+            raise _validation(exc) from exc
         return InventoryItemResponse.from_view(view)
 
     @api.patch(
@@ -956,11 +918,11 @@ def build_inventory_router() -> APIRouter:
                 body=body.to_service(),
             )
         except item_service.InventoryItemNotFound as exc:
-            raise _http_for_not_found() from exc
+            raise _not_found() from exc
         except item_service.InventoryItemConflict as exc:
-            raise _http_for_conflict(exc) from exc
+            raise _conflict(exc) from exc
         except item_service.InventoryItemValidationError as exc:
-            raise _http_for_validation(exc) from exc
+            raise _validation(exc) from exc
         return InventoryItemResponse.from_view(view)
 
     @api.delete(
@@ -985,7 +947,7 @@ def build_inventory_router() -> APIRouter:
                 item_id=item_id,
             )
         except item_service.InventoryItemNotFound as exc:
-            raise _http_for_not_found() from exc
+            raise _not_found() from exc
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @api.post(
@@ -1014,9 +976,9 @@ def build_inventory_router() -> APIRouter:
                 item_id=item_id,
             )
         except item_service.InventoryItemNotFound as exc:
-            raise _http_for_not_found() from exc
+            raise _not_found() from exc
         except item_service.InventoryItemConflict as exc:
-            raise _http_for_conflict(exc) from exc
+            raise _conflict(exc) from exc
         return InventoryItemResponse.from_view(view)
 
     return api
@@ -1052,9 +1014,9 @@ def build_inventory_stocktakes_router() -> APIRouter:
                 note_md=body.note_md,
             )
         except stocktake_service.StocktakePermissionDenied as exc:
-            raise _http_for_permission_denied("inventory.stocktake") from exc
+            raise _permission_denied("inventory.stocktake") from exc
         except stocktake_service.StocktakeNotFound as exc:
-            raise _http_for_property_not_found() from exc
+            raise _property_not_found() from exc
         return InventoryStocktakeResponse.from_view(view)
 
     @api.get(
@@ -1080,9 +1042,9 @@ def build_inventory_stocktakes_router() -> APIRouter:
                 limit=limit,
             )
         except stocktake_service.StocktakePermissionDenied as exc:
-            raise _http_for_permission_denied("inventory.stocktake") from exc
+            raise _permission_denied("inventory.stocktake") from exc
         except stocktake_service.StocktakeNotFound as exc:
-            raise _http_for_property_not_found() from exc
+            raise _property_not_found() from exc
         return InventoryStocktakeListResponse(
             data=[InventoryStocktakeResponse.from_view(view) for view in views]
         )
@@ -1104,9 +1066,9 @@ def build_inventory_stocktakes_router() -> APIRouter:
         try:
             detail = stocktake_service.get(session, ctx, stocktake_id=stocktake_id)
         except stocktake_service.StocktakePermissionDenied as exc:
-            raise _http_for_permission_denied("inventory.stocktake") from exc
+            raise _permission_denied("inventory.stocktake") from exc
         except stocktake_service.StocktakeNotFound as exc:
-            raise _http_for_stocktake_not_found() from exc
+            raise _stocktake_not_found() from exc
         return InventoryStocktakeDetailResponse.from_detail(detail)
 
     @api.patch(
@@ -1137,13 +1099,13 @@ def build_inventory_stocktakes_router() -> APIRouter:
                 note=body.note,
             )
         except stocktake_service.StocktakePermissionDenied as exc:
-            raise _http_for_permission_denied("inventory.stocktake") from exc
+            raise _permission_denied("inventory.stocktake") from exc
         except stocktake_service.StocktakeAlreadyCommitted as exc:
-            raise _http_for_stocktake_committed() from exc
+            raise _stocktake_committed() from exc
         except stocktake_service.StocktakeNotFound as exc:
-            raise _http_for_stocktake_not_found() from exc
+            raise _stocktake_not_found() from exc
         except stocktake_service.StocktakeValidationError as exc:
-            raise _http_for_stocktake_validation(exc) from exc
+            raise _stocktake_validation(exc) from exc
         return InventoryStocktakeLineResponse.from_view(line)
 
     @api.post(
@@ -1174,15 +1136,15 @@ def build_inventory_stocktakes_router() -> APIRouter:
             )
             detail = stocktake_service.get(session, ctx, stocktake_id=stocktake_id)
         except stocktake_service.StocktakePermissionDenied as exc:
-            raise _http_for_permission_denied("inventory.stocktake") from exc
+            raise _permission_denied("inventory.stocktake") from exc
         except stocktake_service.StocktakeAlreadyCommitted as exc:
-            raise _http_for_stocktake_committed() from exc
+            raise _stocktake_committed() from exc
         except stocktake_service.StocktakeNotFound as exc:
-            raise _http_for_stocktake_not_found() from exc
+            raise _stocktake_not_found() from exc
         except stocktake_service.StocktakeValidationError as exc:
-            raise _http_for_stocktake_validation(exc) from exc
+            raise _stocktake_validation(exc) from exc
         except movement_service.InventoryMovementValidationError as exc:
-            raise _http_for_movement_validation(exc) from exc
+            raise _movement_validation(exc) from exc
         return InventoryStocktakeCommitResponse(
             stocktake=InventoryStocktakeDetailResponse.from_detail(detail),
             movements=[

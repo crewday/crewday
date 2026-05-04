@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.v1.public_holidays import build_public_holidays_router
@@ -26,6 +27,14 @@ def _create(client: TestClient, **overrides: object) -> dict[str, object]:
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert isinstance(body, dict)
+    return body
+
+
+def _assert_problem_error(resp: Response, *, error: str) -> dict[str, object]:
+    assert resp.headers["content-type"].startswith("application/problem+json")
+    body = resp.json()
+    assert isinstance(body, dict)
+    assert body["error"] == error
     return body
 
 
@@ -75,9 +84,10 @@ class TestPublicHolidayCrud:
         client = _client(ctx, factory)
         update = client.patch("/public_holidays/missing", json={"name": "X"})
         assert update.status_code == 404
-        assert update.json()["detail"]["error"] == "public_holiday_not_found"
+        _assert_problem_error(update, error="public_holiday_not_found")
         delete = client.delete("/public_holidays/missing")
         assert delete.status_code == 404
+        _assert_problem_error(delete, error="public_holiday_not_found")
 
 
 class TestPublicHolidayList:
@@ -195,7 +205,8 @@ class TestPublicHolidayValidation:
             },
         )
         assert duplicate.status_code == 409
-        assert duplicate.json()["detail"]["error"] == "public_holiday_conflict"
+        body = _assert_problem_error(duplicate, error="public_holiday_conflict")
+        assert body["message"] == body["detail"]
 
 
 class TestPublicHolidayAuth:

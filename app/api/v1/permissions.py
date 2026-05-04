@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
@@ -51,6 +51,7 @@ from app.authz import (
 )
 from app.authz.dep import Permission
 from app.authz.membership import UnknownSystemGroup
+from app.domain.errors import Internal, Validation
 from app.domain.identity._action_catalog import ACTION_CATALOG, ActionSpec
 from app.tenancy import WorkspaceContext
 
@@ -254,15 +255,12 @@ def _resolve_decision(
             # but for the read-only ``/resolved`` surface we surface
             # the offending slug verbatim so an operator can trace
             # the drift without reading process logs.
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error": "catalog_drift",
-                    "message": (
-                        f"action {action_key!r} lists unknown default_allow "
-                        f"group {slug!r}"
-                    ),
-                },
+            message = (
+                f"action {action_key!r} lists unknown default_allow group {slug!r}"
+            )
+            raise Internal(
+                message,
+                extra={"error": "catalog_drift", "message": message},
             ) from exc
     if matched:
         return ResolvedPermissionResponse(
@@ -401,21 +399,23 @@ def build_permissions_router() -> APIRouter:
                 scope_id=scope_id,
             )
         except UnknownActionKey as exc:
-            raise HTTPException(
-                status_code=422,
-                detail={
+            message = str(exc)
+            raise Validation(
+                message,
+                extra={
                     "error": "unknown_action_key",
                     "action_key": action_key,
-                    "message": str(exc),
+                    "message": message,
                 },
             ) from exc
         except InvalidScope as exc:
-            raise HTTPException(
-                status_code=422,
-                detail={
+            message = str(exc)
+            raise Validation(
+                message,
+                extra={
                     "error": "invalid_scope_kind",
                     "action_key": action_key,
-                    "message": str(exc),
+                    "message": message,
                 },
             ) from exc
 
@@ -448,21 +448,23 @@ def build_permissions_router() -> APIRouter:
                 scope_id=scope_id,
             )
         except UnknownActionKey as exc:
-            raise HTTPException(
-                status_code=422,
-                detail={
+            message = str(exc)
+            raise Validation(
+                message,
+                extra={
                     "error": "unknown_action_key",
                     "action_key": action_key,
-                    "message": str(exc),
+                    "message": message,
                 },
             ) from exc
         except InvalidScope as exc:
-            raise HTTPException(
-                status_code=422,
-                detail={
+            message = str(exc)
+            raise Validation(
+                message,
+                extra={
                     "error": "invalid_scope_kind",
                     "action_key": action_key,
-                    "message": str(exc),
+                    "message": message,
                 },
             ) from exc
 

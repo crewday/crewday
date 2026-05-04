@@ -15,6 +15,7 @@ from app.adapters.db.inventory.models import Item, Movement, Stocktake
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.api.deps import current_workspace_context
 from app.api.deps import db_session as _db_session_dep
+from app.api.errors import add_exception_handlers
 from app.api.v1.inventory import build_inventory_router
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.ulid import new_ulid
@@ -84,6 +85,7 @@ def client(
     ctx, _, _, _ = seeded
     app = FastAPI()
     app.include_router(build_inventory_router(), prefix="/api/v1/inventory")
+    add_exception_handlers(app)
 
     def _session() -> Iterator[Session]:
         yield db_session
@@ -216,7 +218,8 @@ def test_reports_return_404_for_unknown_property_filter(
     )
 
     assert response.status_code == 404, response.text
-    assert response.json()["detail"] == {"error": "property_not_found"}
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["error"] == "property_not_found"
 
 
 def _item(

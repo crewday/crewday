@@ -19,6 +19,7 @@ from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.session import make_engine
 from app.api.deps import current_workspace_context
 from app.api.deps import db_session as _db_session_dep
+from app.api.errors import add_exception_handlers
 from app.api.v1.inventory import (
     build_inventory_router,
     build_inventory_stocktakes_router,
@@ -87,6 +88,7 @@ def test_inventory_openapi_documents_decimal_types_and_error_statuses() -> None:
     app = FastAPI()
     app.include_router(build_inventory_router(), prefix="/api/v1/inventory")
     app.include_router(build_inventory_stocktakes_router(), prefix="/api/v1")
+    add_exception_handlers(app)
 
     schema = app.openapi()
 
@@ -108,6 +110,8 @@ def test_inventory_openapi_documents_decimal_types_and_error_statuses() -> None:
         "post"
     ]["responses"]
     assert {"403", "404", "409"}.issubset(commit_responses)
+    for code in ("403", "404", "409", "422"):
+        assert "application/problem+json" in commit_responses[code]["content"]
 
 
 @pytest.fixture
@@ -186,6 +190,7 @@ def _client(db_session: Session, ctx: WorkspaceContext) -> Iterator[TestClient]:
     app = FastAPI()
     app.include_router(build_inventory_router(), prefix="/api/v1/inventory")
     app.include_router(build_inventory_stocktakes_router(), prefix="/api/v1")
+    add_exception_handlers(app)
 
     def _session() -> Iterator[Session]:
         yield db_session
@@ -255,7 +260,7 @@ def test_stocktake_routes_return_403_without_stocktake_scope(
         )
 
     assert response.status_code == 403, response.text
-    assert response.json()["detail"] == {
-        "error": "permission_denied",
-        "action_key": "inventory.stocktake",
-    }
+    assert response.headers["content-type"].startswith("application/problem+json")
+    body = response.json()
+    assert body["error"] == "permission_denied"
+    assert body["action_key"] == "inventory.stocktake"

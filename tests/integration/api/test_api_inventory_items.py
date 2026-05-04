@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,6 +16,7 @@ from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.api.deps import current_workspace_context
 from app.api.deps import db_session as _db_session_dep
+from app.api.errors import add_exception_handlers
 from app.api.v1.inventory import build_inventory_router
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.ulid import new_ulid
@@ -83,6 +85,7 @@ def client(
     ctx, _ = seeded
     app = FastAPI()
     app.include_router(build_inventory_router(), prefix="/api/v1/inventory")
+    add_exception_handlers(app)
 
     def _session() -> Iterator[Session]:
         yield db_session
@@ -118,6 +121,16 @@ def _create(
     return body
 
 
+def _assert_problem(
+    response: Response, *, status_code: int, error: str
+) -> dict[str, object]:
+    assert response.status_code == status_code, response.text
+    assert response.headers["content-type"].startswith("application/problem+json")
+    body = response.json()
+    assert body["error"] == error
+    return body
+
+
 def test_create_duplicate_sku_returns_409(
     client: TestClient, seeded: tuple[WorkspaceContext, str]
 ) -> None:
@@ -129,11 +142,12 @@ def test_create_duplicate_sku_returns_409(
         json={"name": "Other soap", "sku": "SOAP", "unit": "case"},
     )
 
-    assert response.status_code == 409, response.text
-    assert response.json()["detail"] == {
-        "error": "inventory_item_conflict",
-        "field": "sku",
-    }
+    body = _assert_problem(
+        response,
+        status_code=409,
+        error="inventory_item_conflict",
+    )
+    assert body["field"] == "sku"
 
 
 def test_create_duplicate_barcode_returns_409(
@@ -152,8 +166,12 @@ def test_create_duplicate_barcode_returns_409(
         },
     )
 
-    assert response.status_code == 409, response.text
-    assert response.json()["detail"]["field"] == "barcode_ean13"
+    body = _assert_problem(
+        response,
+        status_code=409,
+        error="inventory_item_conflict",
+    )
+    assert body["field"] == "barcode_ean13"
 
 
 def test_get_with_barcode_returns_single_active_item_or_404(
@@ -232,8 +250,8 @@ def test_blank_required_field_is_422(
         json={"name": "   ", "sku": "BLANK", "unit": "each"},
     )
 
-    assert response.status_code == 422, response.text
-    assert response.json()["detail"] == {"error": "blank", "field": "name"}
+    body = _assert_problem(response, status_code=422, error="blank")
+    assert body["field"] == "name"
 
 
 def test_quantity_precision_error_is_422(
@@ -251,11 +269,8 @@ def test_quantity_precision_error_is_422(
         },
     )
 
-    assert response.status_code == 422, response.text
-    assert response.json()["detail"] == {
-        "error": "quantity_precision",
-        "field": "reorder_point",
-    }
+    body = _assert_problem(response, status_code=422, error="quantity_precision")
+    assert body["field"] == "reorder_point"
 
 
 def test_unit_free_text_is_accepted_and_mutations_audit(

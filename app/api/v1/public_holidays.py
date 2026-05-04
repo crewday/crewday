@@ -6,7 +6,7 @@ import datetime as dt
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.orm import Session
 
@@ -22,6 +22,7 @@ from app.api.pagination import (
 )
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.authz.dep import Permission
+from app.domain.errors import Conflict, InvalidCursor, NotFound, Validation
 from app.domain.identity.public_holidays import (
     PublicHolidayConflict,
     PublicHolidayCreate,
@@ -122,25 +123,21 @@ def _view_to_response(view: PublicHolidayView) -> PublicHolidayResponse:
     )
 
 
-def _not_found(exc: PublicHolidayNotFound) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"error": "public_holiday_not_found"},
+def _not_found(exc: PublicHolidayNotFound) -> NotFound:
+    return NotFound(extra={"error": "public_holiday_not_found"})
+
+
+def _conflict(exc: PublicHolidayConflict) -> Conflict:
+    message = str(exc)
+    return Conflict(
+        message,
+        extra={"error": "public_holiday_conflict", "message": message},
     )
 
 
-def _conflict(exc: PublicHolidayConflict) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail={"error": "public_holiday_conflict", "message": str(exc)},
-    )
-
-
-def _validation(exc: ValidationError) -> HTTPException:
-    return HTTPException(
-        status_code=422,
-        detail={"error": "validation", "message": str(exc)},
-    )
+def _validation(exc: ValidationError) -> Validation:
+    message = str(exc)
+    return Validation(message, extra={"error": "validation", "message": message})
 
 
 def _decode_cursor(cursor: str | None) -> tuple[dt.date, str] | None:
@@ -148,16 +145,16 @@ def _decode_cursor(cursor: str | None) -> tuple[dt.date, str] | None:
     if decoded is None:
         return None
     if not isinstance(decoded.last_sort_value, str):
-        raise HTTPException(
-            status_code=422,
-            detail={"error": "invalid_cursor", "message": "cursor date is malformed"},
+        message = "cursor date is malformed"
+        raise InvalidCursor(
+            message, extra={"error": "invalid_cursor", "message": message}
         )
     try:
         return dt.date.fromisoformat(decoded.last_sort_value), decoded.last_id_ulid
     except ValueError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"error": "invalid_cursor", "message": "cursor date is invalid"},
+        message = "cursor date is invalid"
+        raise InvalidCursor(
+            message, extra={"error": "invalid_cursor", "message": message}
         ) from exc
 
 
@@ -176,19 +173,18 @@ def _filter(
     country: str | None,
 ) -> PublicHolidayListFilter:
     if from_date is not None and to_date is not None and from_date > to_date:
-        raise HTTPException(
-            status_code=422,
-            detail={"error": "invalid_date_range", "message": "from must be <= to"},
+        message = "from must be <= to"
+        raise Validation(
+            message,
+            extra={"error": "invalid_date_range", "message": message},
         )
     if country is not None:
         normalized = country.strip().upper()
         if len(normalized) != 2 or not normalized.isalpha():
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "error": "validation",
-                    "message": "country must be an ISO-3166-1 alpha-2 code",
-                },
+            message = "country must be an ISO-3166-1 alpha-2 code"
+            raise Validation(
+                message,
+                extra={"error": "validation", "message": message},
             )
         country = normalized
     return PublicHolidayListFilter(

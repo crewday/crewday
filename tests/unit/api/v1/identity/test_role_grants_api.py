@@ -23,6 +23,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.authz.models import RoleGrant
@@ -51,6 +52,14 @@ def _client(ctx: WorkspaceContext, factory: sessionmaker[Session]) -> TestClient
         factory,
         ctx,
     )
+
+
+def _assert_problem_error(resp: Response, *, error: str) -> dict[str, object]:
+    assert resp.headers["content-type"].startswith("application/problem+json")
+    body = resp.json()
+    assert isinstance(body, dict)
+    assert body["error"] == error
+    return body
 
 
 def _seed_property_in_workspace(
@@ -196,7 +205,8 @@ class TestCreate:
             json={"user_id": "0", "grant_role": "worker"},
         )
         assert resp.status_code == 404, resp.text
-        assert resp.json()["detail"]["error"] == "user_not_found"
+        body = _assert_problem_error(resp, error="user_not_found")
+        assert body["message"] == body["detail"]
 
     def test_cross_workspace_property_returns_422(
         self,
@@ -233,7 +243,8 @@ class TestCreate:
             },
         )
         assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "cross_workspace_property"
+        body = _assert_problem_error(resp, error="cross_workspace_property")
+        assert body["message"] == body["detail"]
 
     def test_worker_cannot_grant_manager(
         self,
@@ -299,7 +310,8 @@ class TestCreate:
             json={"user_id": target_id, "grant_role": "manager"},
         )
         assert resp.status_code == 403
-        assert resp.json()["detail"]["error"] == "not_authorized_for_role"
+        body = _assert_problem_error(resp, error="not_authorized_for_role")
+        assert body["message"] == body["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +353,7 @@ class TestRevoke:
         client = _client(ctx, factory)
         resp = client.delete("/role_grants/01HWANOTHERE00000000000000")
         assert resp.status_code == 404
-        assert resp.json()["detail"]["error"] == "role_grant_not_found"
+        _assert_problem_error(resp, error="role_grant_not_found")
 
     def test_last_owner_manager_grant_protected(
         self,
@@ -368,7 +380,7 @@ class TestRevoke:
         client = _client(ctx, factory)
         resp = client.delete(f"/role_grants/{grant_id}")
         assert resp.status_code == 409
-        assert resp.json()["detail"]["error"] == "last_owner_grant_protected"
+        _assert_problem_error(resp, error="last_owner_grant_protected")
 
 
 # ---------------------------------------------------------------------------
@@ -481,7 +493,7 @@ class TestPatch:
             json={"scope_property_id": "01HWAFOREIGN0000000000000F"},
         )
         assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "cross_workspace_property"
+        _assert_problem_error(resp, error="cross_workspace_property")
 
     def test_non_owner_manager_cannot_rescope_manager_grant(
         self,
@@ -544,7 +556,7 @@ class TestPatch:
             json={"scope_property_id": prop_id},
         )
         assert resp.status_code == 403
-        assert resp.json()["detail"]["error"] == "not_authorized_for_role"
+        _assert_problem_error(resp, error="not_authorized_for_role")
 
     def test_non_owner_manager_can_rescope_worker_grant(
         self,

@@ -45,7 +45,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
@@ -65,6 +65,7 @@ from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.audit import write_audit
 from app.authz import is_owner_member
 from app.authz.dep import Permission
+from app.domain.errors import Conflict, Forbidden, NotFound, Validation
 from app.domain.identity.role_grants import (
     CrossWorkspaceProperty,
     GrantRoleInvalid,
@@ -205,28 +206,27 @@ def _row_to_ref(row: RoleGrant) -> RoleGrantRef:
     )
 
 
-def _http_for_not_found() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"error": "role_grant_not_found"},
+def _error_for_not_found() -> NotFound:
+    return NotFound(extra={"error": "role_grant_not_found"})
+
+
+def _error_for_invalid_role(exc: GrantRoleInvalid) -> Validation:
+    message = str(exc)
+    return Validation(
+        message,
+        extra={"error": "invalid_grant_role", "message": message},
     )
 
 
-def _http_for_invalid_role(exc: GrantRoleInvalid) -> HTTPException:
-    return HTTPException(
-        status_code=422,
-        detail={"error": "invalid_grant_role", "message": str(exc)},
+def _error_for_cross_workspace(exc: CrossWorkspaceProperty) -> Validation:
+    message = str(exc)
+    return Validation(
+        message,
+        extra={"error": "cross_workspace_property", "message": message},
     )
 
 
-def _http_for_cross_workspace(exc: CrossWorkspaceProperty) -> HTTPException:
-    return HTTPException(
-        status_code=422,
-        detail={"error": "cross_workspace_property", "message": str(exc)},
-    )
-
-
-def _http_for_user_not_found(exc: RoleGrantUserNotFound) -> HTTPException:
+def _error_for_user_not_found(exc: RoleGrantUserNotFound) -> NotFound:
     """Map the unknown-``user_id`` rejection to 404.
 
     The domain pre-flight (:func:`RoleGrantRepository.user_exists`)
@@ -235,13 +235,11 @@ def _http_for_user_not_found(exc: RoleGrantUserNotFound) -> HTTPException:
     404 ``user_not_found`` envelope so callers get the documented 4xx
     instead of the previous opaque 500.
     """
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"error": "user_not_found", "message": str(exc)},
-    )
+    message = str(exc)
+    return NotFound(message, extra={"error": "user_not_found", "message": message})
 
 
-def _http_for_unauthorised(exc: NotAuthorizedForRole) -> HTTPException:
+def _error_for_unauthorised(exc: NotAuthorizedForRole) -> Forbidden:
     """Map the §05 owner-authority rejection to 403.
 
     The :func:`Permission` action gate already cleared the caller for
@@ -251,16 +249,18 @@ def _http_for_unauthorised(exc: NotAuthorizedForRole) -> HTTPException:
     (``not_authorized_for_role``) keeps the SPA's "you can't grant
     that role" message specific.
     """
-    return HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail={"error": "not_authorized_for_role", "message": str(exc)},
+    message = str(exc)
+    return Forbidden(
+        message,
+        extra={"error": "not_authorized_for_role", "message": message},
     )
 
 
-def _http_for_last_owner(exc: LastOwnerGrantProtected) -> HTTPException:
-    return HTTPException(
-        status_code=409,
-        detail={"error": "last_owner_grant_protected", "message": str(exc)},
+def _error_for_last_owner(exc: LastOwnerGrantProtected) -> Conflict:
+    message = str(exc)
+    return Conflict(
+        message,
+        extra={"error": "last_owner_grant_protected", "message": message},
     )
 
 
@@ -380,13 +380,13 @@ def build_role_grants_router() -> APIRouter:
                 scope_property_id=body.scope_property_id,
             )
         except GrantRoleInvalid as exc:
-            raise _http_for_invalid_role(exc) from exc
+            raise _error_for_invalid_role(exc) from exc
         except NotAuthorizedForRole as exc:
-            raise _http_for_unauthorised(exc) from exc
+            raise _error_for_unauthorised(exc) from exc
         except CrossWorkspaceProperty as exc:
-            raise _http_for_cross_workspace(exc) from exc
+            raise _error_for_cross_workspace(exc) from exc
         except RoleGrantUserNotFound as exc:
-            raise _http_for_user_not_found(exc) from exc
+            raise _error_for_user_not_found(exc) from exc
         _publish_role_grant_event(
             ctx, RoleGrantCreated, grant_id=ref.id, user_id=ref.user_id
         )
@@ -441,7 +441,7 @@ def build_role_grants_router() -> APIRouter:
                 )
             ).one_or_none()
             if row is None:
-                raise _http_for_not_found()
+                raise _error_for_not_found()
             return _ref_to_response(_row_to_ref(row))
 
         row = session.scalars(
@@ -452,7 +452,7 @@ def build_role_grants_router() -> APIRouter:
             )
         ).one_or_none()
         if row is None:
-            raise _http_for_not_found()
+            raise _error_for_not_found()
 
         # §05 owner-authority: re-scoping a ``manager`` grant is morally
         # a manager grant write — only ``owners@<workspace>`` members may
@@ -464,7 +464,7 @@ def build_role_grants_router() -> APIRouter:
         if row.grant_role == "manager" and not is_owner_member(
             session, workspace_id=ctx.workspace_id, user_id=ctx.actor_id
         ):
-            raise _http_for_unauthorised(
+            raise _error_for_unauthorised(
                 NotAuthorizedForRole(
                     "only members of 'owners' may re-scope a manager grant"
                 )
@@ -483,7 +483,7 @@ def build_role_grants_router() -> APIRouter:
                 )
             )
             if not session.scalar(stmt):
-                raise _http_for_cross_workspace(
+                raise _error_for_cross_workspace(
                     CrossWorkspaceProperty(
                         f"property {new_scope!r} is not linked to this workspace"
                     )
@@ -569,9 +569,9 @@ def build_role_grants_router() -> APIRouter:
         try:
             revoke(SqlAlchemyRoleGrantRepository(session), ctx, grant_id=grant_id)
         except RoleGrantNotFound as exc:
-            raise _http_for_not_found() from exc
+            raise _error_for_not_found() from exc
         except LastOwnerGrantProtected as exc:
-            raise _http_for_last_owner(exc) from exc
+            raise _error_for_last_owner(exc) from exc
         if existing is not None:
             _publish_role_grant_event(
                 ctx,

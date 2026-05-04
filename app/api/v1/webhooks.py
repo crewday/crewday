@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -25,6 +25,13 @@ from app.adapters.storage.ports import EnvelopeEncryptor
 from app.api.deps import current_workspace_context, db_session
 from app.authz.dep import Permission
 from app.config import Settings, get_settings
+from app.domain.errors import (
+    DomainError,
+    Internal,
+    NotFound,
+    ServiceUnavailable,
+    Validation,
+)
 from app.domain.integrations.webhooks import (
     SubscriptionView,
     create_subscription,
@@ -131,10 +138,7 @@ def get_envelope(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> EnvelopeEncryptor:
     if settings.root_key is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "envelope_unavailable"},
-        )
+        raise ServiceUnavailable(extra={"error": "envelope_unavailable"})
     return Aes256GcmEnvelope(
         settings.root_key,
         repository=SqlAlchemySecretEnvelopeRepository(session),
@@ -165,21 +169,16 @@ def _attach_utc(value: datetime | None) -> datetime | None:
     return value
 
 
-def _error(exc: Exception) -> HTTPException:
+def _error(exc: Exception) -> DomainError:
     if isinstance(exc, LookupError):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "webhook_not_found"},
-        )
+        return NotFound(extra={"error": "webhook_not_found"})
     if isinstance(exc, ValueError):
-        return HTTPException(
-            status_code=422,
-            detail={"error": "invalid_webhook", "message": str(exc)},
+        message = str(exc)
+        return Validation(
+            message,
+            extra={"error": "invalid_webhook", "message": message},
         )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+    return Internal(extra={"error": "internal"})
 
 
 def _delivery_summaries(

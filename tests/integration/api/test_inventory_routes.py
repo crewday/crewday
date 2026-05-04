@@ -9,6 +9,7 @@ from decimal import Decimal
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -16,6 +17,7 @@ from app.adapters.db.inventory.models import Item, Movement
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.api.deps import current_workspace_context
 from app.api.deps import db_session as _db_session_dep
+from app.api.errors import add_exception_handlers
 from app.api.v1.inventory import build_inventory_router
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.ulid import new_ulid
@@ -84,6 +86,7 @@ def client(
     ctx, _ = seeded
     app = FastAPI()
     app.include_router(build_inventory_router(), prefix="/api/v1/inventory")
+    add_exception_handlers(app)
 
     def _session() -> Iterator[Session]:
         yield db_session
@@ -96,6 +99,16 @@ def client(
 
     with TestClient(app) as c:
         yield c
+
+
+def _assert_problem(
+    response: Response, *, status_code: int, error: str
+) -> dict[str, object]:
+    assert response.status_code == status_code, response.text
+    assert response.headers["content-type"].startswith("application/problem+json")
+    body = response.json()
+    assert body["error"] == error
+    return body
 
 
 def _create_item(
@@ -245,11 +258,8 @@ def test_movement_rejects_reason_with_wrong_delta_sign(
         json={"delta": -1, "reason": "restock"},
     )
 
-    assert response.status_code == 422, response.text
-    assert response.json()["detail"] == {
-        "error": "reason_requires_positive",
-        "field": "delta",
-    }
+    body = _assert_problem(response, status_code=422, error="reason_requires_positive")
+    assert body["field"] == "delta"
 
 
 def test_adjust_rejects_reason_that_disagrees_with_computed_delta(
@@ -264,8 +274,5 @@ def test_adjust_rejects_reason_that_disagrees_with_computed_delta(
         json={"observed_on_hand": -1, "reason": "found"},
     )
 
-    assert response.status_code == 422, response.text
-    assert response.json()["detail"] == {
-        "error": "reason_requires_positive",
-        "field": "delta",
-    }
+    body = _assert_problem(response, status_code=422, error="reason_requires_positive")
+    assert body["field"] == "delta"

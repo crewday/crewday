@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.integrations.models import WebhookDelivery, WebhookSubscription
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import add_exception_handlers
 from app.api.v1 import webhooks as webhook_api
 from app.api.v1.webhooks import get_envelope
 from app.api.v1.webhooks import router as webhooks_router
@@ -45,6 +46,7 @@ def _ctx(
 
 def _client(session: Session, ctx: WorkspaceContext) -> TestClient:
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(webhooks_router, prefix="/webhooks")
 
     def override_ctx() -> WorkspaceContext:
@@ -236,7 +238,10 @@ def test_test_delivery_and_rotate_secret(db_session: Session) -> None:
     )
 
     assert bad_event.status_code == 422
-    assert bad_event.json()["detail"]["error"] == "invalid_webhook"
+    assert bad_event.headers["content-type"].startswith("application/problem+json")
+    body = bad_event.json()
+    assert body["error"] == "invalid_webhook"
+    assert body["message"] == "test event must be registered on the subscription"
 
     rotated = client.post(f"/webhooks/{webhook_id}/rotate-secret")
 
@@ -326,10 +331,14 @@ def test_worker_without_settings_permission_is_rejected(db_session: Session) -> 
     response = client.get("/webhooks")
 
     assert response.status_code == 403
-    assert response.json()["detail"] == {
-        "error": "permission_denied",
-        "action_key": "scope.edit_settings",
-    }
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert (
+        response.json().items()
+        >= {
+            "error": "permission_denied",
+            "action_key": "scope.edit_settings",
+        }.items()
+    )
 
 
 def test_foreign_workspace_subscription_is_not_found(db_session: Session) -> None:
@@ -370,12 +379,14 @@ def test_foreign_workspace_subscription_is_not_found(db_session: Session) -> Non
     )
 
     assert response.status_code == 404
-    assert response.json()["detail"] == {"error": "webhook_not_found"}
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["error"] == "webhook_not_found"
 
     deliveries = owner_client.get(f"/webhooks/{created.json()['id']}/deliveries")
 
     assert deliveries.status_code == 404
-    assert deliveries.json()["detail"] == {"error": "webhook_not_found"}
+    assert deliveries.headers["content-type"].startswith("application/problem+json")
+    assert deliveries.json()["error"] == "webhook_not_found"
 
 
 def test_mutations_publish_workspace_changed(

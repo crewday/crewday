@@ -413,7 +413,10 @@ class TestAuthorisation:
             },
         )
         assert resp.status_code == 403
-        assert resp.json()["detail"]["error"] == "permission_denied"
+        assert resp.headers["content-type"].startswith("application/problem+json")
+        body = resp.json()
+        assert body["error"] == "permission_denied"
+        assert body["action_key"] == "availability_overrides.edit_others"
 
     def test_worker_cannot_list_inbox(
         self,
@@ -726,10 +729,10 @@ class TestPatch:
             json={"reason": "x"},
         )
         assert resp.status_code == 409
-        assert (
-            resp.json()["detail"]["error"]
-            == "user_availability_override_transition_forbidden"
-        )
+        assert resp.headers["content-type"].startswith("application/problem+json")
+        body = resp.json()
+        assert body["error"] == "user_availability_override_transition_forbidden"
+        assert body["message"] == body["detail"]
 
     def test_patch_invalid_hours_pairing_422(
         self,
@@ -763,7 +766,10 @@ class TestPatch:
             json={"ends_local": None},
         )
         assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "user_availability_override_invariant"
+        assert resp.headers["content-type"].startswith("application/problem+json")
+        body = resp.json()
+        assert body["error"] == "user_availability_override_invariant"
+        assert body["message"] == body["detail"]
 
     def test_patch_explicit_null_available_is_unchanged(
         self,
