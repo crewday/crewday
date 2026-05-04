@@ -112,6 +112,7 @@ __all__ = [
     "check_budget",
     "default_pricing_table",
     "estimate_cost_cents",
+    "lift_tight_llm_budget_cap",
     "new_ledger_row",
     "normalize_signup_ip_key",
     "record_usage",
@@ -135,6 +136,8 @@ _log = logging.getLogger(__name__)
 # propagates within one deploy window).
 _UNKNOWN_MODEL_DEDUP: set[tuple[str | None, str]] = set()
 _UNKNOWN_MODEL_DEDUP_LOCK = threading.Lock()
+
+_QUOTA_LLM_BUDGET_KEY: Final[str] = "llm_budget_cents_30d"
 
 
 def reset_unknown_model_dedup_for_tests() -> None:
@@ -695,6 +698,47 @@ def _lock_ledger_row(
         .where(BudgetLedger.id == ledger_id)
         .values(updated_at=BudgetLedger.updated_at)
     )
+
+
+def lift_tight_llm_budget_cap(
+    session: Session,
+    *,
+    workspace_id: str,
+    full_cap_cents: int,
+    clock: Clock | None = None,
+) -> int:
+    """Lift the §03 tight initial LLM cap to the full verified cap.
+
+    Future ``verification_state='human_verified'`` flows should call
+    this helper instead of writing either representation directly. It
+    updates the latest :class:`BudgetLedger.cap_cents` and
+    ``Workspace.quota_json['llm_budget_cents_30d']`` in the caller's
+    current transaction and never commits.
+    """
+    if full_cap_cents < 0:
+        raise ValueError("full_cap_cents must be non-negative")
+
+    c = clock or SystemClock()
+    now = c.now()
+    with tenant_agnostic():
+        workspace = session.get(Workspace, workspace_id)
+        if workspace is None:
+            raise LookupError(f"workspace {workspace_id!r} not found")
+        ledger = _load_ledger_row(session, workspace_id=workspace_id)
+        if ledger is None:
+            raise LookupError(f"budget ledger for workspace {workspace_id!r} not found")
+
+        _lock_ledger_row(session, ledger_id=ledger.id)
+        quota = (
+            dict(workspace.quota_json) if isinstance(workspace.quota_json, dict) else {}
+        )
+        quota[_QUOTA_LLM_BUDGET_KEY] = full_cap_cents
+        workspace.quota_json = quota
+        workspace.updated_at = now
+        ledger.cap_cents = full_cap_cents
+        ledger.updated_at = now
+        session.flush()
+    return full_cap_cents
 
 
 # ---------------------------------------------------------------------------

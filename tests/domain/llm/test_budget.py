@@ -44,12 +44,13 @@ from datetime import UTC, datetime, timedelta
 from typing import cast
 
 import pytest
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.llm.models import BudgetLedger
 from app.adapters.db.llm.models import LlmUsage as LlmUsageRow
+from app.adapters.db.workspace.models import Workspace
 from app.domain.llm.budget import (
     WINDOW_DAYS,
     WINDOW_LABEL,
@@ -58,11 +59,13 @@ from app.domain.llm.budget import (
     UsageStatus,
     check_budget,
     estimate_cost_cents,
+    lift_tight_llm_budget_cap,
     record_usage,
     refresh_aggregate,
     reset_unknown_model_dedup_for_tests,
     warm_start_aggregate,
 )
+from app.domain.plans import FREE_TIER_DEFAULTS, seed_free_tier_10pct, tight_cap_cents
 from app.tenancy import tenant_agnostic
 from app.tenancy.current import reset_current, set_current
 from app.tenancy.orm_filter import install_tenant_filter
@@ -217,6 +220,79 @@ def _build_usage(
         attempt=attempt,
         status=cast(UsageStatus, status),
     )
+
+
+class TestTightInitialCapLift:
+    def test_lift_updates_ledger_and_quota_together(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        full_cap_cents = FREE_TIER_DEFAULTS["llm_budget_cents_30d"]
+        tight_cents = tight_cap_cents(full_cap_cents)
+        workspace = seed_workspace(db_session, slug="tight-cap-lift")
+        workspace.quota_json = seed_free_tier_10pct()
+        ledger = _seed_ledger(
+            db_session,
+            workspace_id=workspace.id,
+            cap_cents=tight_cents,
+        )
+        workspace_id = workspace.id
+        ledger_id = ledger.id
+
+        assert ledger.cap_cents == tight_cents
+        assert workspace.quota_json["llm_budget_cents_30d"] == ledger.cap_cents
+
+        lifted_cents = lift_tight_llm_budget_cap(
+            db_session,
+            workspace_id=workspace_id,
+            full_cap_cents=full_cap_cents,
+            clock=clock,
+        )
+        db_session.expire_all()
+
+        with tenant_agnostic():
+            updated_ledger = db_session.get(BudgetLedger, ledger_id)
+            updated_workspace = db_session.get(Workspace, workspace_id)
+        assert updated_ledger is not None
+        assert updated_workspace is not None
+        assert lifted_cents == full_cap_cents
+        assert updated_ledger.cap_cents == full_cap_cents
+        assert (
+            updated_workspace.quota_json["llm_budget_cents_30d"]
+            == updated_ledger.cap_cents
+        )
+
+    def test_missing_workspace_raises_lookup_error(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        with pytest.raises(LookupError, match=r"workspace .* not found"):
+            lift_tight_llm_budget_cap(
+                db_session,
+                workspace_id=new_ulid(),
+                full_cap_cents=FREE_TIER_DEFAULTS["llm_budget_cents_30d"],
+                clock=clock,
+            )
+
+    def test_missing_ledger_raises_without_quota_drift(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        workspace = seed_workspace(db_session, slug="tight-cap-lift-no-ledger")
+        workspace.quota_json = seed_free_tier_10pct()
+        workspace_id = workspace.id
+        original_quota = dict(workspace.quota_json)
+
+        with pytest.raises(LookupError, match=r"budget ledger .* not found"):
+            lift_tight_llm_budget_cap(
+                db_session,
+                workspace_id=workspace_id,
+                full_cap_cents=FREE_TIER_DEFAULTS["llm_budget_cents_30d"],
+                clock=clock,
+            )
+
+        db_session.expire_all()
+        with tenant_agnostic():
+            updated_workspace = db_session.get(Workspace, workspace_id)
+        assert updated_workspace is not None
+        assert updated_workspace.quota_json == original_quota
 
 
 # ---------------------------------------------------------------------------
@@ -1269,9 +1345,7 @@ class TestConcurrency:
             from app.adapters.db.workspace.models import Workspace
 
             with tenant_agnostic():
-                session.execute(
-                    Workspace.__table__.delete().where(Workspace.id == ws_id)
-                )
+                session.execute(delete(Workspace).where(Workspace.id == ws_id))
                 session.commit()
             session.close()
 
@@ -1597,7 +1671,7 @@ class TestNewTelemetryFields:
                 capability="chat.manager",
                 correlation_id="corr",
                 attempt=0,
-                status=cast(UsageStatus, status),
+                status=status,
             )
 
     def test_non_zero_cost_on_ok_status_passes(self) -> None:
