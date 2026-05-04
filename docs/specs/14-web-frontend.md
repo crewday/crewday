@@ -53,7 +53,9 @@ file pair, starting with `PageHeader.tsx` and `routeParents.ts`.
 ## Principles
 
 - **React SPA.** FastAPI serves `index.html` for any non-API GET;
-  React Router owns client-side navigation. See §01 for the
+  React Router owns client-side navigation. Production static serving
+  and the dev-profile Vite HTTP/WebSocket proxy are specified in §16
+  "FastAPI static mount and dev-profile Vite proxy". See §01 for the
   `mocks/app/` + `mocks/web/` split.
 - **Mobile-first** for the worker surface; breakpoints stack up.
 - **Hand-rolled semantic CSS design system** (BEM globals + optional

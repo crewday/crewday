@@ -9,6 +9,43 @@ Two supported recipes; you pick one and stick with it.
 > nothing here references it and self-host deployments never
 > need it.
 
+## App serving model
+
+### FastAPI static mount and dev-profile Vite proxy
+
+`app.api.factory.create_app(settings)` chooses the SPA serving seam from
+`settings.profile` after all API, admin, auth, ops, metrics, SSE, and
+workspace routers have been registered. The SPA seam registers last
+because both production and development use catch-all routes that would
+otherwise shadow more specific FastAPI routes.
+
+In the default `prod` profile, FastAPI serves the built SPA from
+`app/web/dist`: `/assets` is mounted as `StaticFiles`, and any non-API
+`GET` falls through to `index.html` so React Router owns client-side
+navigation. API paths, admin API paths, workspace API paths, and the SSE
+streams remain real FastAPI routes rather than SPA fallback targets.
+
+In the local-only `dev` profile, `create_app` imports
+`app.api.proxy.register_vite_proxy` and installs a development proxy
+instead of the production static mount. The HTTP catch-all at
+`/{full_path:path}` forwards non-API SPA requests to
+`settings.vite_dev_url` (default `http://127.0.0.1:5173`) so the app can
+load Vite modules while the Python API stays on the same origin used by
+the rest of the stack. The same registration also installs a WebSocket
+catch-all at `/{full_path:path}` that forwards Vite HMR upgrades,
+including the root-path `vite-hmr` connection Vite opens during
+development.
+
+Both dev proxy legs share `app.api.proxy._is_non_spa_path`: the guard is
+the union of the API-path predicate and the SSE paths (`/events` plus
+its subtree, and the exact workspace SSE endpoint
+`/w/<slug>/events`). The HTTP handler returns a JSON 404 for guarded
+paths, and the WebSocket handler rejects guarded upgrades before
+`accept()`, so API and SSE traffic never bleeds to Vite. Tests may
+replace `app.state.vite_client` for the HTTP leg and
+`app.state.vite_ws_connect` for the WebSocket leg; those seams are part
+of the specified dev-profile behavior.
+
 ## Recipe A — Single container (SQLite)
 
 Target: a workspace with ≤10 workers, ≤10 properties. Runs fine on a

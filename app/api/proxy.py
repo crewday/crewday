@@ -57,9 +57,9 @@ two surfaces cannot drift — anything the WS route rejects, the HTTP
 route also rejects (and vice versa), which is the invariant the
 self-review of cd-354g flagged.
 
-See ``docs/specs/14-web-frontend.md`` §"Serving the SPA",
-``docs/specs/16-deployment-operations.md`` §"FastAPI static mount",
-Beads ``cd-q1be`` and ``cd-354g``.
+See ``docs/specs/14-web-frontend.md`` §"Principles" and
+``docs/specs/16-deployment-operations.md`` §"FastAPI static mount and
+dev-profile Vite proxy"; Beads ``cd-q1be`` and ``cd-354g``.
 """
 
 from __future__ import annotations
