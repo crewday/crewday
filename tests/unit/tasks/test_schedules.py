@@ -1490,6 +1490,32 @@ class TestPreviewOccurrences:
             "2026-05-04T09:00:00",
         ]
 
+    def test_window_preview_returns_every_occurrence_in_window(self) -> None:
+        out = preview_occurrences(
+            rrule="FREQ=DAILY",
+            dtstart_local="2026-04-20T09:00",
+            n=1,
+            window_days=3,
+        )
+        assert [o.isoformat() for o in out] == [
+            "2026-04-20T09:00:00",
+            "2026-04-21T09:00:00",
+            "2026-04-22T09:00:00",
+        ]
+
+    def test_window_preview_honours_rdate_and_exdate(self) -> None:
+        out = preview_occurrences(
+            rrule="FREQ=DAILY",
+            dtstart_local="2026-04-20T09:00",
+            window_days=2,
+            rdate_local="2026-04-20T12:00\n2026-04-30T09:00",
+            exdate_local="2026-04-21T09:00",
+        )
+        assert [o.isoformat() for o in out] == [
+            "2026-04-20T09:00:00",
+            "2026-04-20T12:00:00",
+        ]
+
     def test_invalid_n_rejected(self) -> None:
         with pytest.raises(ValueError):
             preview_occurrences(
@@ -1498,6 +1524,14 @@ class TestPreviewOccurrences:
         with pytest.raises(ValueError):
             preview_occurrences(
                 rrule="FREQ=WEEKLY", dtstart_local="2026-04-20T09:00", n=10_000
+            )
+
+    def test_invalid_window_days_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            preview_occurrences(
+                rrule="FREQ=WEEKLY",
+                dtstart_local="2026-04-20T09:00",
+                window_days=0,
             )
 
     def test_invalid_rrule_rejected(self) -> None:

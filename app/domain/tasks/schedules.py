@@ -76,7 +76,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from dateutil.rrule import rrulestr
@@ -234,6 +234,7 @@ _MAX_ID_LEN = 64
 # Preview cap matches the §06 mock ("Preview — next 7 days"):
 # callers asking for 1k occurrences are almost always bugs.
 _MAX_PREVIEW_COUNT = 500
+_MAX_PREVIEW_WINDOW_DAYS = 366
 
 
 class _ScheduleBody(BaseModel):
@@ -1131,15 +1132,17 @@ def preview_occurrences(
     dtstart_local: str,
     *,
     n: int = 5,
+    window_days: int | None = None,
     rdate_local: str = "",
     exdate_local: str = "",
 ) -> list[datetime]:
-    """Return the next ``n`` local occurrences of ``rrule``.
+    """Return local occurrences of ``rrule`` by count or day window.
 
     Drives the `/schedules` "Preview — next 7 days" panel and the
-    editor's "next 5 occurrences" preview. RDATE lines are merged
-    in, EXDATE lines subtract; the result is sorted ascending and
-    truncated to ``n``.
+    editor's preview. RDATE lines are merged in, EXDATE lines
+    subtract; the result is sorted ascending. The legacy ``n`` shape
+    returns the next ``n`` occurrences. ``window_days`` returns every
+    occurrence in ``[dtstart_local, dtstart_local + window_days)``.
 
     This function is pure — no DB access, no side effects — so the
     router can call it as a validation helper during schedule-editor
@@ -1148,8 +1151,12 @@ def preview_occurrences(
     Raises :class:`InvalidRRule` on any parse failure so the router
     can map to 422.
     """
-    if n <= 0 or n > _MAX_PREVIEW_COUNT:
+    if window_days is None and (n <= 0 or n > _MAX_PREVIEW_COUNT):
         raise ValueError(f"n must be in 1..{_MAX_PREVIEW_COUNT}; got {n}")
+    if window_days is not None and not (1 <= window_days <= _MAX_PREVIEW_WINDOW_DAYS):
+        raise ValueError(
+            f"window_days must be in 1..{_MAX_PREVIEW_WINDOW_DAYS}; got {window_days}"
+        )
 
     anchor = _parse_local_datetime(dtstart_local)
     try:
@@ -1159,6 +1166,19 @@ def preview_occurrences(
 
     rdates = _parse_rdate_payload(rdate_local, field="rdate_local")
     exdates_set = set(_parse_rdate_payload(exdate_local, field="exdate_local"))
+    if window_days is not None:
+        window_end = anchor + timedelta(days=window_days)
+        window_occurrences = [
+            occ
+            for occ in parsed.between(anchor, window_end, inc=True)
+            if occ < window_end and occ not in exdates_set
+        ]
+        window_seen = set(window_occurrences)
+        for extra in rdates:
+            if anchor <= extra < window_end and extra not in exdates_set | window_seen:
+                window_seen.add(extra)
+                window_occurrences.append(extra)
+        return sorted(window_occurrences)
 
     # Walk the bounded side first: an unbounded rule will yield
     # forever, so we stop as soon as we have enough *unique* dates

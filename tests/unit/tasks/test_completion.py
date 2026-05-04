@@ -2124,7 +2124,7 @@ class TestRevertOverdue:
 
 
 class TestListEvidence:
-    """``list_evidence`` returns every row anchored to a task."""
+    """``list_evidence`` returns visible rows anchored to a task."""
 
     def test_empty_when_no_rows(self, session: Session, clock: FrozenClock) -> None:
         ws = _bootstrap_workspace(session)
@@ -2154,6 +2154,31 @@ class TestListEvidence:
         # created_at ties → ULID tiebreaker keeps order stable.
         assert first.id in ids
         assert second.id in ids
+
+    def test_after_id_and_limit_page_rows(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        ctx = _ctx(ws, actor_id=author)
+        rows = [
+            add_note_evidence(session, ctx, task_id=occ, note_md=str(i), clock=clock)
+            for i in range(3)
+        ]
+
+        first_page = list_evidence(session, ctx, task_id=occ, limit=2)
+        assert [v.id for v in first_page] == [row.id for row in rows[:2]]
+
+        second_page = list_evidence(
+            session,
+            ctx,
+            task_id=occ,
+            after_id=first_page[-1].id,
+            limit=2,
+        )
+        assert [v.id for v in second_page] == [rows[2].id]
 
     def test_unknown_task_raises_not_found(
         self, session: Session, clock: FrozenClock

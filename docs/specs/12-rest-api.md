@@ -1809,7 +1809,8 @@ PATCH  /tasks/{id}/comments/{comment_id} # author only; 409
                                          #   the 5-minute grace window.
 DELETE /tasks/{id}/comments/{comment_id} # author any time; moderators gated
                                          #   on `tasks.comment_moderate`.
-GET    /tasks/{id}/evidence
+GET    /tasks/{id}/evidence        # cursor-paginated; `{data,
+                                   #   next_cursor, has_more}` envelope.
 POST   /tasks/{id}/evidence        # multipart/form-data. Every §06 kind
                                    #   (note / photo / voice / gps) wired
                                    #   end-to-end. note carries the body
@@ -1857,9 +1858,12 @@ PATCH  /schedules/{id}                   # full-body replace; optional
 DELETE /schedules/{id}                   # soft-delete; cancels every linked
                                          #   `state=scheduled` task with
                                          #   `cancellation_reason='schedule deleted'`.
-GET    /schedules/{id}/preview?for=30d   # upcoming occurrences — v1 ships the
-                                         #   `?n=<int>` shape; the `?for=`
-                                         #   window variant lands with cd-lczu.
+GET    /schedules/{id}/preview?for=30d   # upcoming occurrences in the requested
+                                         #   half-open day window; `30d` and
+                                         #   ISO-8601 `P30D` are accepted. The
+                                         #   legacy `?n=<int>` count-bounded
+                                         #   preview remains accepted for
+                                         #   compatibility.
 POST   /schedules/{id}/pause
 POST   /schedules/{id}/resume
 

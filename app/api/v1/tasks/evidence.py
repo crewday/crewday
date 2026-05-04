@@ -15,6 +15,13 @@ from fastapi import (
     status,
 )
 
+from app.api.pagination import (
+    DEFAULT_LIMIT,
+    LimitQuery,
+    PageCursorQuery,
+    decode_cursor,
+    paginate,
+)
 from app.api.uploads import read_upload_capped, require_upload_content_type
 from app.domain.tasks.completion import (
     ChecklistItemNotFound,
@@ -48,23 +55,22 @@ def list_task_evidence_route(
     task_id: str,
     ctx: _Ctx,
     session: _Db,
+    cursor: PageCursorQuery = None,
+    limit: LimitQuery = DEFAULT_LIMIT,
 ) -> EvidenceListResponse:
-    """Return every evidence row anchored to ``task_id``.
-
-    The response envelope carries ``next_cursor`` / ``has_more`` for
-    forward compatibility with cd-evidence-pagination; today the
-    helper returns the full set because the expected per-task
-    evidence count (template checklist + a handful of ad-hoc photos)
-    is well below a single page.
-    """
+    """Return a cursor-paginated page of evidence rows anchored to ``task_id``."""
     try:
-        views = list_evidence(session, ctx, task_id=task_id)
+        after_id = decode_cursor(cursor)
+        views = list_evidence(
+            session, ctx, task_id=task_id, after_id=after_id, limit=limit + 1
+        )
     except CompletionTaskNotFound as exc:
         raise _task_not_found() from exc
+    page = paginate(views, limit=limit, key_getter=lambda v: v.id)
     return EvidenceListResponse(
-        data=[EvidencePayload.from_view(v) for v in views],
-        next_cursor=None,
-        has_more=False,
+        data=[EvidencePayload.from_view(v) for v in page.items],
+        next_cursor=page.next_cursor,
+        has_more=page.has_more,
     )
 
 

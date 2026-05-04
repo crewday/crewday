@@ -1565,8 +1565,10 @@ def list_evidence(
     ctx: WorkspaceContext,
     *,
     task_id: str,
+    after_id: str | None = None,
+    limit: int | None = None,
 ) -> tuple[EvidenceView, ...]:
-    """Return every :class:`Evidence` row anchored to ``task_id``.
+    """Return visible :class:`Evidence` rows anchored to ``task_id``.
 
     The tenant filter is applied by the ORM; we re-assert
     ``workspace_id`` defensively so a mis-wired caller cannot leak
@@ -1575,14 +1577,17 @@ def list_evidence(
     not an empty list on a missing id.
     """
     task = _load_task(session, ctx, task_id)
-    rows = session.scalars(
-        select(Evidence)
-        .where(
-            Evidence.workspace_id == ctx.workspace_id,
-            Evidence.occurrence_id == task.id,
-        )
-        .order_by(Evidence.created_at.asc(), Evidence.id.asc())
-    ).all()
+    statement = select(Evidence).where(
+        Evidence.workspace_id == ctx.workspace_id,
+        Evidence.occurrence_id == task.id,
+        Evidence.deleted_at.is_(None),
+    )
+    if after_id is not None:
+        statement = statement.where(Evidence.id > after_id)
+    statement = statement.order_by(Evidence.id.asc())
+    if limit is not None:
+        statement = statement.limit(limit)
+    rows = session.scalars(statement).all()
     return tuple(_evidence_row_to_view(row) for row in rows)
 
 

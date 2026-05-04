@@ -42,7 +42,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.instructions.models import Instruction, InstructionVersion
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace, Unit
-from app.adapters.db.tasks.models import ChecklistItem, Occurrence, TaskTemplate
+from app.adapters.db.tasks.models import (
+    ChecklistItem,
+    Evidence,
+    Occurrence,
+    TaskTemplate,
+)
 from app.adapters.db.time.models import Shift
 from app.adapters.db.workspace.models import WorkRole
 from app.adapters.storage.mime import FiletypeMimeSniffer
@@ -561,7 +566,35 @@ class TestSchedules:
 
             r = client.get(f"/api/v1/tasks/schedules/{sid}/preview", params={"n": 3})
             assert r.status_code == 200, r.text
-            assert len(r.json()["occurrences"]) == 3
+            assert [row["starts_local"] for row in r.json()["occurrences"]] == [
+                "2026-04-20T09:00",
+                "2026-04-27T09:00",
+                "2026-05-04T09:00",
+            ]
+
+            r = client.get(
+                f"/api/v1/tasks/schedules/{sid}/preview", params={"for": "30d"}
+            )
+            assert r.status_code == 200, r.text
+            assert [row["starts_local"] for row in r.json()["occurrences"]] == [
+                "2026-04-20T09:00",
+                "2026-04-27T09:00",
+                "2026-05-04T09:00",
+                "2026-05-11T09:00",
+                "2026-05-18T09:00",
+            ]
+
+            r = client.get(
+                f"/api/v1/tasks/schedules/{sid}/preview",
+                params={"for": "P28D", "n": 1},
+            )
+            assert r.status_code == 200, r.text
+            assert [row["starts_local"] for row in r.json()["occurrences"]] == [
+                "2026-04-20T09:00",
+                "2026-04-27T09:00",
+                "2026-05-04T09:00",
+                "2026-05-11T09:00",
+            ]
 
             r = client.post(f"/api/v1/tasks/schedules/{sid}/pause")
             assert r.status_code == 200, r.text
@@ -1487,6 +1520,52 @@ class TestEvidence:
             assert r.status_code == 200, r.text
             rows = r.json()["data"]
             assert any(e["note_md"] == "Smells like chlorine" for e in rows)
+
+    def test_evidence_list_cursor_paginates_past_500_rows(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        with session_factory() as s:
+            s.add_all(
+                Evidence(
+                    id=new_ulid(),
+                    workspace_id=seeded["workspace_id"],
+                    occurrence_id=seeded["task_id"],
+                    kind="note",
+                    blob_hash=None,
+                    note_md=f"note {i}",
+                    gps_lat=None,
+                    gps_lon=None,
+                    checklist_snapshot_json=None,
+                    created_at=_PINNED + timedelta(seconds=i),
+                    created_by_user_id=seeded["owner_id"],
+                    deleted_at=None,
+                )
+                for i in range(501)
+            )
+            s.commit()
+
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            first = client.get(
+                f"/api/v1/tasks/{seeded['task_id']}/evidence",
+                params={"limit": 500},
+            )
+            assert first.status_code == 200, first.text
+            first_body = first.json()
+            assert len(first_body["data"]) == 500
+            assert first_body["has_more"] is True
+            assert first_body["next_cursor"] is not None
+
+            second = client.get(
+                f"/api/v1/tasks/{seeded['task_id']}/evidence",
+                params={"limit": 500, "cursor": first_body["next_cursor"]},
+            )
+            assert second.status_code == 200, second.text
+            second_body = second.json()
+            assert len(second_body["data"]) == 1
+            assert second_body["has_more"] is False
+            assert second_body["next_cursor"] is None
 
     # cd-jl0g: photo / voice / gps end-to-end. The PNG and WAV fixtures
     # are pre-rendered constant bytes (no runtime encoder dependency)

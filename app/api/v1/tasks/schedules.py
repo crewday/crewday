@@ -43,6 +43,19 @@ from .payloads import (
 router = APIRouter()
 
 
+def _parse_preview_window(value: str) -> int:
+    """Parse ``30d`` and ISO-8601 ``P30D`` day windows."""
+    normalized = value.strip().lower()
+    if normalized.startswith("p"):
+        normalized = normalized[1:]
+    if not normalized.endswith("d"):
+        raise ValueError("preview window must use day notation, e.g. 30d or P30D")
+    raw_days = normalized[:-1]
+    if not raw_days.isdecimal():
+        raise ValueError("preview window must use day notation, e.g. 30d or P30D")
+    return int(raw_days)
+
+
 @router.get(
     "/schedules",
     response_model=ScheduleListResponse,
@@ -187,7 +200,7 @@ def delete_schedule_route(
     "/schedules/{schedule_id}/preview",
     response_model=SchedulePreviewResponse,
     operation_id="preview_schedule",
-    summary="Return the next N occurrences of a schedule",
+    summary="Return upcoming occurrences of a schedule",
     openapi_extra={"x-cli": {"group": "tasks", "verb": "schedule-preview"}},
 )
 def preview_schedule_route(
@@ -195,28 +208,38 @@ def preview_schedule_route(
     ctx: _Ctx,
     session: _Db,
     n: Annotated[int, Query(ge=1, le=100)] = 5,
+    preview_for: Annotated[
+        str | None,
+        Query(
+            alias="for",
+            max_length=16,
+            description=(
+                "Half-open day window to preview, e.g. ``30d`` or ISO-8601 ``P30D``. "
+                "When present, the legacy ``n`` count is ignored."
+            ),
+        ),
+    ] = None,
 ) -> SchedulePreviewResponse:
-    """Return the next ``n`` local occurrences of the schedule's RRULE.
-
-    The spec's ``?for=30d`` shape is a future enhancement — the
-    current preview is ``n``-bounded so the UI's "next 5 occurrences"
-    panel lines up with the domain helper today. A window-based
-    ``?for=`` filter lands with the cd-schedule-preview-window
-    follow-up once the scheduler UI needs it.
-    """
+    """Return ``?for=30d`` / ``?for=P30D`` windows, or legacy next-``n`` preview."""
     try:
         schedule = read_schedule(session, ctx, schedule_id=schedule_id)
     except ScheduleNotFound as exc:
         raise _schedule_not_found() from exc
     try:
+        window_days = (
+            _parse_preview_window(preview_for) if preview_for is not None else None
+        )
         moments = preview_occurrences(
             schedule.rrule,
             schedule.dtstart_local,
             n=n,
+            window_days=window_days,
             rdate_local=schedule.rdate_local,
             exdate_local=schedule.exdate_local,
         )
     except InvalidRRule as exc:
+        raise _http_for_schedule_mutation(exc) from exc
+    except ValueError as exc:
         raise _http_for_schedule_mutation(exc) from exc
     return SchedulePreviewResponse(
         occurrences=[
