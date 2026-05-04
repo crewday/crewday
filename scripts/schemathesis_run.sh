@@ -184,6 +184,7 @@ if [[ -z "${SESSION}" ]]; then
     exit 1
 fi
 echo "schemathesis: seeded workspace=${SLUG} owner=${EMAIL} (Bearer + session cookie ready)" >&2
+export CREWDAY_SCHEMATHESIS_SESSION_COOKIE="__Host-crewday_session=${SESSION}; crewday_csrf=schemathesis"
 
 # ---------------------------------------------------------------------------
 # Run schemathesis
@@ -332,12 +333,7 @@ INCLUDE_ARGS=(
     # failures across every check). See the `cd-1zw3x` audit notes
     # for the full failure breakdown of the remaining 104 ops.
     #
-    # ``auth.logout`` is intentionally NOT included — invoking it
-    # invalidates the seeded dev session, which then breaks every
-    # subsequent session-cookie-authed op in the same run (esp.
-    # ``auth.me.get``). Re-enable once the runner can re-mint the
-    # session between operations, or once the gate stops sharing one
-    # seed across the suite. Tracked under cd-rfda7.
+    --include-operation-id 'auth.logout'
     --include-operation-id 'auth.passkey.login_start'
     --include-operation-id 'auth.passkey.register_start'
     --include-operation-id 'employees.list'
@@ -936,7 +932,6 @@ done
 SCHEMATHESIS_ARGS=(
     run
     --header "Authorization: Bearer ${TOKEN}"
-    --header "Cookie: __Host-crewday_session=${SESSION}; crewday_csrf=schemathesis"
     --header "X-CSRF: schemathesis"
     --checks all
     --mode all

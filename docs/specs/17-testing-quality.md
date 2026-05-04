@@ -178,16 +178,15 @@ comment).
   legitimately catches but is tracked under per-tag follow-up
   Beads tasks, and (b) including ops one-by-one keeps the gate
   green and CI honest as each follow-up lands. Currently covered:
-  `auth.me.get`, `auth.passkey.login_start`, `auth.passkey.register_start`,
-  `employees.list`, `permissions.action_catalog`, plus the
+  `auth.me.get`, `auth.logout`, `auth.passkey.login_start`,
+  `auth.passkey.register_start`, `employees.list`,
+  `permissions.action_catalog`, plus the
   asset-tag subset. The full identity surface is tracked under
   the cd-1zw3x audit (problem+json content-type, 4xx envelope,
   HTTPValidationError shape, undocumented status codes,
   cross-field invariants, FK / unique-constraint 5xx); each
   category has its own Beads task and re-enables a slice of the
-  allowlist when fixed. ``auth.logout`` is excluded for a
-  runner-architecture reason (single shared session seed) tracked
-  under cd-rfda7.
+  allowlist when fixed.
 
 ## End-to-end
 

@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import os
 import re
+from itertools import count
 from typing import Any, Final
 
 import schemathesis
@@ -46,6 +47,7 @@ __all__ = [
     "constrain_case_workspace_slug",
     "constrain_generated_workspace_slug",
     "constrain_workspace_slug",
+    "refresh_session_cookie_for_call",
 ]
 
 # Workspace slug the runner seeds via ``scripts/_schemathesis_seed.py``.
@@ -57,6 +59,14 @@ __all__ = [
 _WORKSPACE_SLUG: Final[str] = os.environ.get(
     "CREWDAY_SCHEMATHESIS_SLUG", "schemathesis"
 )
+_SESSION_COOKIE_ENV: Final[str] = "CREWDAY_SCHEMATHESIS_SESSION_COOKIE"
+_BASE_EMAIL: Final[str] = os.environ.get(
+    "CREWDAY_SCHEMATHESIS_EMAIL", "schemathesis@dev.local"
+)
+_LOGOUT_EMAIL_ENV: Final[str] = "CREWDAY_SCHEMATHESIS_LOGOUT_EMAIL"
+_SESSION_COOKIE_NAME: Final[str] = "__Host-crewday_session"
+_CSRF_COOKIE: Final[str] = "crewday_csrf=schemathesis"
+_LOGOUT_SESSION_COUNTER = count(1)
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +160,93 @@ def _is_public_path(path: str) -> bool:
     """
     normalised = path.rstrip("/") or "/"
     return any(p.match(normalised) for p in _PUBLIC_PATTERNS)
+
+
+# ---------------------------------------------------------------------------
+# Per-call session cookie injection
+# ---------------------------------------------------------------------------
+
+
+def _operation_id(ctx: schemathesis.HookContext, case: Case) -> str | None:
+    """Return the OpenAPI operationId for ``case`` when available."""
+    for operation in (
+        getattr(ctx, "operation", None),
+        getattr(case, "operation", None),
+    ):
+        raw_def = getattr(operation, "definition", None)
+        raw: dict[str, Any] | None = (
+            raw_def.raw if raw_def is not None and hasattr(raw_def, "raw") else None
+        )
+        if isinstance(raw, dict):
+            operation_id = raw.get("operationId")
+            if isinstance(operation_id, str):
+                return operation_id
+    return None
+
+
+def _with_csrf_cookie(cookie_header: str) -> str:
+    """Return ``cookie_header`` with the runner's CSRF cookie present."""
+    parts = [part.strip() for part in cookie_header.strip().split(";") if part.strip()]
+    if not parts:
+        raise RuntimeError("schemathesis seed helper returned an empty cookie")
+    if not any(part.startswith(f"{_SESSION_COOKIE_NAME}=") for part in parts):
+        raise RuntimeError(
+            "schemathesis seed helper did not return a crewday session cookie"
+        )
+    if not any(part.startswith("crewday_csrf=") for part in parts):
+        parts.append(_CSRF_COOKIE)
+    return "; ".join(parts)
+
+
+def _seed_session_cookie(email: str) -> str:
+    """Mint a fresh dev session through the schemathesis seed helper."""
+    from scripts._schemathesis_seed import mint_seed_session_cookie_value
+
+    cookie_value = mint_seed_session_cookie_value(
+        email=email,
+        workspace_slug=_WORKSPACE_SLUG,
+    )
+    return _with_csrf_cookie(f"{_SESSION_COOKIE_NAME}={cookie_value}")
+
+
+def _base_session_cookie() -> str:
+    """Return the runner-seeded session cookie, minting one as a fallback."""
+    cookie_header = os.environ.get(_SESSION_COOKIE_ENV)
+    if cookie_header:
+        return _with_csrf_cookie(cookie_header)
+    return _seed_session_cookie(_BASE_EMAIL)
+
+
+def _logout_session_email() -> str:
+    """Return the email used for the next logout-only session."""
+    override = os.environ.get(_LOGOUT_EMAIL_ENV)
+    if override:
+        return override
+    suffix = next(_LOGOUT_SESSION_COUNTER)
+    return f"schemathesis-logout-{os.getpid()}-{suffix}@dev.local"
+
+
+@schemathesis.hook("before_call")
+def refresh_session_cookie_for_call(
+    ctx: schemathesis.HookContext, case: Case, **_kwargs: Any
+) -> None:
+    """Inject a session cookie, refreshing it for each ``auth.logout`` call.
+
+    The runner keeps the Bearer token as a Schemathesis global header, but
+    routes such as ``auth.me.get`` authenticate only through the session
+    cookie. Logout invalidates every active session for the cookie's user, so
+    each logout case gets an isolated throwaway actor and a freshly minted
+    session. Other operations keep using the runner's original seeded cookie.
+    """
+    operation_id = _operation_id(ctx, case)
+    if operation_id == "auth.logout":
+        cookie = _seed_session_cookie(_logout_session_email())
+    else:
+        cookie = _base_session_cookie()
+
+    headers = dict(getattr(case, "headers", None) or {})
+    headers["Cookie"] = cookie
+    case.headers = headers
 
 
 # ---------------------------------------------------------------------------

@@ -21,6 +21,8 @@ Output (one line, no trailing newline):
 
 * ``--output token``   : ``<plaintext>``
 * ``--output bearer``  : ``Authorization: Bearer <plaintext>``
+* ``--output session`` : ``<session-cookie-value>``
+* ``--output cookie``  : ``__Host-crewday_session=<session-cookie-value>``
 
 Spec refs: ``docs/specs/03-auth-and-tokens.md`` §"API tokens",
 ``docs/specs/17-testing-quality.md`` §"API contract".
@@ -117,6 +119,17 @@ def _check_gates() -> None:
         )
 
 
+def mint_seed_session_cookie_value(*, email: str, workspace_slug: str) -> str:
+    """Return a dev-login session cookie value for the schemathesis seed actor."""
+    _check_gates()
+    session_result = mint_session(
+        email=email,
+        workspace_slug=workspace_slug,
+        role="owner",
+    )
+    return session_result.session_issue.cookie_value
+
+
 @click.command(
     help=(
         "Dev-only: seed a workspace + mint a Bearer token + dev session "
@@ -150,11 +163,17 @@ def main(email: str, workspace_slug: str, label: str, output: OutputFormat) -> N
     #    + the 4 system permission groups exist. The session is also
     #    surfaced — the runner uses it for bare-host paths that the
     #    workspace Bearer token can't reach.
-    session_result = mint_session(
+    session_cookie_value = mint_seed_session_cookie_value(
         email=email,
         workspace_slug=workspace_slug,
-        role="owner",
     )
+
+    if output == "session":
+        sys.stdout.write(session_cookie_value)
+        return
+    if output == "cookie":
+        sys.stdout.write(f"{_SESSION_COOKIE_NAME}={session_cookie_value}")
+        return
 
     # 2. Resolve the row ids the token mint needs. The dev-login
     #    helper is idempotent on (email, workspace_slug); we look the
@@ -205,14 +224,8 @@ def main(email: str, workspace_slug: str, label: str, output: OutputFormat) -> N
 
     if output == "token":
         sys.stdout.write(plaintext)
-    elif output == "bearer":
+    else:  # output == "bearer"
         sys.stdout.write(f"Authorization: Bearer {plaintext}")
-    elif output == "session":
-        sys.stdout.write(session_result.session_issue.cookie_value)
-    else:  # output == "cookie"
-        sys.stdout.write(
-            f"{_SESSION_COOKIE_NAME}={session_result.session_issue.cookie_value}"
-        )
 
 
 if __name__ == "__main__":
