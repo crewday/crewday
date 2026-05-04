@@ -5,14 +5,17 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
+from starlette.responses import JSONResponse
 
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import _handle_domain_error
 from app.api.v1.issues import router as issues_router
+from app.domain.errors import DomainError
 from app.tenancy.context import ActorGrantRole, WorkspaceContext
 from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user, bootstrap_workspace
@@ -42,6 +45,12 @@ def _ctx(
 def _client(session: Session, ctx: WorkspaceContext) -> TestClient:
     app = FastAPI()
     app.include_router(issues_router, prefix="/issues")
+
+    async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, DomainError)
+        return _handle_domain_error(request, exc)
+
+    app.add_exception_handler(DomainError, _on_domain_error)
 
     def override_ctx() -> WorkspaceContext:
         return ctx
@@ -211,10 +220,10 @@ def test_worker_cannot_create_issue_for_hidden_property(db_session: Session) -> 
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"] == {
-        "error": "not_visible",
-        "field": "property_id",
-    }
+    assert response.headers["content-type"].startswith("application/problem+json")
+    body = response.json()
+    assert body["error"] == "not_visible"
+    assert body["field"] == "property_id"
 
 
 def test_invalid_severity_and_category_are_422(db_session: Session) -> None:

@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -31,6 +31,8 @@ from app.domain.agent.preferences import (
     read_preference,
     save_preference,
 )
+from app.domain.errors import NotFound
+from app.domain.errors import Validation as DomainValidation
 from app.events.bus import bus as default_event_bus
 from app.events.types import UserAgentSettingsChanged, WorkspaceChanged
 from app.tenancy import WorkspaceContext
@@ -219,27 +221,18 @@ def _to_response(row: AgentPreference) -> AgentPreferenceRead:
     )
 
 
-def _save_error(exc: Exception) -> HTTPException:
+def _save_error(exc: Exception) -> DomainValidation:
     if isinstance(exc, PreferenceContainsSecret):
-        return HTTPException(
-            status_code=422,
-            detail={"error": "preference_contains_secret"},
-        )
+        return DomainValidation(extra={"error": "preference_contains_secret"})
     if isinstance(exc, PreferenceTooLarge):
-        return HTTPException(
-            status_code=422,
-            detail={"error": "preference_too_large"},
-        )
+        return DomainValidation(extra={"error": "preference_too_large"})
     raise exc
 
 
 def _get_actor(session: Session, actor_id: str) -> User:
     user = session.get(User, actor_id)
     if user is None or user.archived_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "user_not_found"},
-        )
+        raise NotFound(extra={"error": "user_not_found"})
     return user
 
 
@@ -366,10 +359,7 @@ def put_workspace_agent_prefs(
     session: _Db,
 ) -> AgentPreferenceRead:
     if payload.default_approval_mode not in APPROVAL_MODES:
-        raise HTTPException(
-            status_code=422,
-            detail={"error": "invalid_approval_mode"},
-        )
+        raise DomainValidation(extra={"error": "invalid_approval_mode"})
     try:
         row = save_preference(
             session,

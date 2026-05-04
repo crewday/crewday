@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.payroll.models import PayoutDestination
@@ -17,6 +18,14 @@ from tests.unit.api.v1.identity.conftest import build_client
 
 def _owner_client(ctx: WorkspaceContext, factory: sessionmaker[Session]) -> TestClient:
     return build_client([("", build_work_engagements_router())], factory, ctx)
+
+
+def _assert_problem_error(resp: Response, *, error: str) -> dict[str, object]:
+    assert resp.headers["content-type"].startswith("application/problem+json")
+    body = resp.json()
+    assert isinstance(body, dict)
+    assert body["error"] == error
+    return body
 
 
 def _seed_engagement(
@@ -140,7 +149,7 @@ class TestRead:
         client = _owner_client(ctx, factory)
         resp = client.get("/work_engagements/unknown")
         assert resp.status_code == 404
-        assert resp.json()["detail"]["error"] == "work_engagement_not_found"
+        _assert_problem_error(resp, error="work_engagement_not_found")
 
 
 class TestPatch:
@@ -179,7 +188,8 @@ class TestPatch:
             json={"engagement_kind": "agency_supplied"},
         )
         assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "work_engagement_invariant"
+        body = _assert_problem_error(resp, error="work_engagement_invariant")
+        assert body["message"] == body["detail"]
 
     def test_worker_patch_returns_403(
         self,
@@ -249,6 +259,7 @@ class TestArchiveReinstate:
         client = _owner_client(ctx, factory)
         resp = client.post("/work_engagements/unknown/archive")
         assert resp.status_code == 404
+        _assert_problem_error(resp, error="work_engagement_not_found")
 
     def test_reinstate_conflicting_active_returns_422(
         self,
@@ -272,7 +283,8 @@ class TestArchiveReinstate:
         client = _owner_client(ctx, factory)
         resp = client.post(f"/work_engagements/{archived_id}/reinstate")
         assert resp.status_code == 422, resp.text
-        assert resp.json()["detail"]["error"] == "work_engagement_invariant"
+        body = _assert_problem_error(resp, error="work_engagement_invariant")
+        assert body["message"] == body["detail"]
 
 
 class TestOpenApiShape:

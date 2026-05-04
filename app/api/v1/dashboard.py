@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -33,6 +33,7 @@ from app.api.v1.places import (
     _project_property,
 )
 from app.authz.dep import Permission
+from app.domain.errors import Conflict, NotFound
 from app.services.leave import (
     LeaveDecision,
     LeaveDecisionRequest,
@@ -542,15 +543,9 @@ def _decide_leave(
             body=LeaveDecisionRequest(decision=decision),
         )
     except (LeaveNotFound, LeavePermissionDenied) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "leave_not_found"},
-        ) from exc
+        raise NotFound(extra={"error": "leave_not_found"}) from exc
     except LeaveTransitionForbidden as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "leave_transition_forbidden"},
-        ) from exc
+        raise Conflict(extra={"error": "leave_transition_forbidden"}) from exc
     return _leave_from_view(view)
 
 

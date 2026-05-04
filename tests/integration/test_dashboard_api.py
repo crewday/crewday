@@ -6,10 +6,11 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.responses import JSONResponse
 
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.issues.models import IssueReport
@@ -20,7 +21,9 @@ from app.adapters.db.tasks.models import Occurrence
 from app.adapters.db.time.models import Leave, Shift
 from app.adapters.db.workspace.models import UserWorkspace, WorkEngagement
 from app.api import deps as api_deps
+from app.api.errors import _handle_domain_error
 from app.api.v1.dashboard import build_dashboard_router
+from app.domain.errors import DomainError
 from app.tenancy import WorkspaceContext
 from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user, bootstrap_workspace
@@ -50,6 +53,12 @@ def _ctx(
 def _client(session: Session, ctx: WorkspaceContext) -> TestClient:
     app = FastAPI()
     app.include_router(build_dashboard_router())
+
+    async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, DomainError)
+        return _handle_domain_error(request, exc)
+
+    app.add_exception_handler(DomainError, _on_domain_error)
 
     def override_ctx() -> WorkspaceContext:
         return ctx
@@ -369,6 +378,32 @@ def test_dashboard_leave_decision_alias_rejects_pending_leave(
     row = db_session.scalar(select(Leave).where(Leave.id == leave_id))
     assert row is not None
     assert row.status == "rejected"
+
+
+def test_dashboard_leave_decision_missing_leave_returns_problem_json(
+    db_session: Session,
+) -> None:
+    _ctx, client, _worker_id, _property_id, _leave_id = _seed_dashboard(db_session)
+
+    response = client.post("/leaves/missing_leave/approve")
+
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["error"] == "leave_not_found"
+
+
+def test_dashboard_leave_decision_invalid_transition_returns_problem_json(
+    db_session: Session,
+) -> None:
+    _ctx, client, _worker_id, _property_id, leave_id = _seed_dashboard(db_session)
+    approved = client.post(f"/leaves/{leave_id}/approve")
+    assert approved.status_code == 200
+
+    response = client.post(f"/leaves/{leave_id}/reject")
+
+    assert response.status_code == 409
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["error"] == "leave_transition_forbidden"
 
 
 def test_leaves_inbox_lists_pending_and_upcoming_approved(

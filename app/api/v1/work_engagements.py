@@ -36,7 +36,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -50,6 +50,7 @@ from app.api.pagination import (
 )
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.authz.dep import Permission
+from app.domain.errors import NotFound, Validation
 from app.domain.identity.work_engagements import (
     EngagementKind,
     WorkEngagementInvariantViolated,
@@ -177,17 +178,25 @@ def _view_to_response(view: WorkEngagementView) -> WorkEngagementResponse:
     )
 
 
-def _http_for_not_found() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"error": "work_engagement_not_found"},
-    )
+class WorkEngagementNotFoundError(NotFound):
+    """Work engagement not found in the caller's workspace. HTTP 404."""
 
 
-def _http_for_invariant(exc: WorkEngagementInvariantViolated) -> HTTPException:
-    return HTTPException(
-        status_code=422,
-        detail={"error": "work_engagement_invariant", "message": str(exc)},
+class WorkEngagementInvariantError(Validation):
+    """Work-engagement invariant failed. HTTP 422."""
+
+
+def _http_for_not_found() -> WorkEngagementNotFoundError:
+    return WorkEngagementNotFoundError(extra={"error": "work_engagement_not_found"})
+
+
+def _http_for_invariant(
+    exc: WorkEngagementInvariantViolated,
+) -> WorkEngagementInvariantError:
+    message = str(exc)
+    return WorkEngagementInvariantError(
+        message,
+        extra={"error": "work_engagement_invariant", "message": message},
     )
 
 

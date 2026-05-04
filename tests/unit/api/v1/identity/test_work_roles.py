@@ -20,6 +20,7 @@ shared v1 router harness.
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.v1.work_roles import build_work_roles_router
@@ -29,6 +30,14 @@ from tests.unit.api.v1.identity.conftest import build_client
 
 def _owner_client(ctx: WorkspaceContext, factory: sessionmaker[Session]) -> TestClient:
     return build_client([("", build_work_roles_router())], factory, ctx)
+
+
+def _assert_problem_error(resp: Response, *, error: str) -> dict[str, object]:
+    assert resp.headers["content-type"].startswith("application/problem+json")
+    body = resp.json()
+    assert isinstance(body, dict)
+    assert body["error"] == error
+    return body
 
 
 class TestList:
@@ -100,7 +109,8 @@ class TestCreate:
         client.post("/work_roles", json={"key": "maid", "name": "Maid"})
         resp = client.post("/work_roles", json={"key": "maid", "name": "Dup Maid"})
         assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "work_role_key_conflict"
+        body = _assert_problem_error(resp, error="work_role_key_conflict")
+        assert body["message"] == body["detail"]
 
     def test_worker_create_returns_403(
         self,
@@ -159,7 +169,7 @@ class TestPatch:
         client = _owner_client(ctx, factory)
         resp = client.patch("/work_roles/does-not-exist", json={"name": "X"})
         assert resp.status_code == 404
-        assert resp.json()["detail"]["error"] == "work_role_not_found"
+        _assert_problem_error(resp, error="work_role_not_found")
 
     def test_patch_to_duplicate_key_returns_422(
         self,
@@ -173,7 +183,8 @@ class TestPatch:
         ).json()
         resp = client.patch(f"/work_roles/{driver['id']}", json={"key": "maid"})
         assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "work_role_key_conflict"
+        body = _assert_problem_error(resp, error="work_role_key_conflict")
+        assert body["message"] == body["detail"]
 
     def test_worker_patch_returns_403(
         self,

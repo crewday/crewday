@@ -25,7 +25,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -39,6 +39,7 @@ from app.api.pagination import (
 )
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.authz.dep import Permission
+from app.domain.errors import NotFound, Validation
 from app.domain.identity.user_work_roles import (
     UserWorkRoleCreate,
     UserWorkRoleInvariantViolated,
@@ -141,19 +142,27 @@ def _view_to_response(view: UserWorkRoleView) -> UserWorkRoleResponse:
     )
 
 
-def _http_for_invariant(exc: UserWorkRoleInvariantViolated) -> HTTPException:
+class UserWorkRoleInvariantError(Validation):
+    """User-work-role invariant failed. HTTP 422."""
+
+
+class UserWorkRoleNotFoundError(NotFound):
+    """User-work-role link not found in the caller's workspace. HTTP 404."""
+
+
+def _http_for_invariant(
+    exc: UserWorkRoleInvariantViolated,
+) -> UserWorkRoleInvariantError:
     """Translate a §05 invariant violation into 422."""
-    return HTTPException(
-        status_code=422,
-        detail={"error": "user_work_role_invariant", "message": str(exc)},
+    message = str(exc)
+    return UserWorkRoleInvariantError(
+        message,
+        extra={"error": "user_work_role_invariant", "message": message},
     )
 
 
-def _http_for_not_found() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"error": "user_work_role_not_found"},
-    )
+def _http_for_not_found() -> UserWorkRoleNotFoundError:
+    return UserWorkRoleNotFoundError(extra={"error": "user_work_role_not_found"})
 
 
 # ---------------------------------------------------------------------------

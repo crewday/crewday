@@ -379,7 +379,8 @@ class TestPermissionRules:
             },
         )
         assert resp.status_code == 503
-        assert resp.json()["detail"]["error"] == "permission_rule_table_unavailable"
+        body = _assert_problem_error(resp, error="permission_rule_table_unavailable")
+        assert body["message"] == body["detail"]
 
     def test_owner_delete_returns_503(
         self,
@@ -389,7 +390,8 @@ class TestPermissionRules:
         client = _rules_client(ctx, factory)
         resp = client.delete("/permission_rules/01HWAFAKERULE0000000000000")
         assert resp.status_code == 503
-        assert resp.json()["detail"]["error"] == "permission_rule_table_unavailable"
+        body = _assert_problem_error(resp, error="permission_rule_table_unavailable")
+        assert body["message"] == body["detail"]
 
     def test_non_owner_get_blocked_by_root_only_gate(
         self,

@@ -45,7 +45,7 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
@@ -107,6 +107,7 @@ from app.api.v1.user_leaves import _view_to_response as _leave_view_to_response
 from app.api.v1.user_leaves import (
     make_seam_pair as make_leave_seam_pair,
 )
+from app.domain.errors import Conflict, DomainError, Forbidden, Validation
 from app.domain.identity.me_schedule import (
     SchedulePayload,
     WeeklySlotView,
@@ -470,16 +471,34 @@ def _resolve_self_calendar(
     return rulesets, slots, assignments, tasks, visible_properties
 
 
-def _http_for_window() -> HTTPException:
+def _http_for_window() -> DomainError:
     """Return a 422 envelope when the caller sends a backwards window."""
-    return HTTPException(
-        status_code=422,
-        detail={
+    message = "to must be on or after from"
+    return Validation(
+        message,
+        extra={
             "error": "invalid_field",
             "field": "to",
-            "message": "to must be on or after from",
+            "message": message,
         },
     )
+
+
+def _http_for_leave_permission_denied(exc: UserLeavePermissionDenied) -> DomainError:
+    return Forbidden(extra={"error": "permission_denied", "action_key": str(exc)})
+
+
+def _http_for_override_permission_denied(
+    exc: UserAvailabilityOverridePermissionDenied,
+) -> DomainError:
+    return Forbidden(extra={"error": "permission_denied", "action_key": str(exc)})
+
+
+def _http_for_override_exists(
+    exc: UserAvailabilityOverrideAlreadyExists,
+) -> DomainError:
+    message = str(exc)
+    return Conflict(message, extra={"error": "override_exists", "message": message})
 
 
 # ---------------------------------------------------------------------------
@@ -595,10 +614,7 @@ def build_me_schedule_router() -> APIRouter:
             # in the default catalog; a 403 here implies a deployment
             # that revoked it explicitly. Re-raised through the §12
             # 403 envelope so the SPA renders the right banner.
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={"error": "permission_denied", "action_key": str(exc)},
-            ) from exc
+            raise _http_for_leave_permission_denied(exc) from exc
         except UserLeaveInvariantViolated as exc:
             raise _http_for_leave_invariant(exc) from exc
         return _leave_view_to_response(view)
@@ -709,17 +725,11 @@ def build_me_schedule_router() -> APIRouter:
         try:
             view = create_override(repo, checker, ctx, body=service_body)
         except UserAvailabilityOverridePermissionDenied as exc:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={"error": "permission_denied", "action_key": str(exc)},
-            ) from exc
+            raise _http_for_override_permission_denied(exc) from exc
         except UserAvailabilityOverrideInvariantViolated as exc:
             raise _http_for_override_invariant(exc) from exc
         except UserAvailabilityOverrideAlreadyExists as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"error": "override_exists", "message": str(exc)},
-            ) from exc
+            raise _http_for_override_exists(exc) from exc
         return _override_view_to_response(view)
 
     return api

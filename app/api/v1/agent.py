@@ -13,7 +13,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -26,6 +26,7 @@ from app.agent.tokens import DelegatedTokenFactory
 from app.api.deps import current_workspace_context, db_session, get_llm
 from app.audit import write_audit
 from app.domain.agent.runtime import run_turn
+from app.domain.errors import Forbidden
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import AgentMessageAppended, AgentMessagePayload
@@ -250,15 +251,9 @@ def build_agent_router(
 
 def _require_scope_access(scope: AgentScope, ctx: WorkspaceContext) -> None:
     if scope == "employee" and ctx.actor_grant_role != "worker":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "agent_scope_forbidden"},
-        )
+        raise Forbidden(extra={"error": "agent_scope_forbidden"})
     if scope == "manager" and ctx.actor_grant_role != "manager":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "agent_scope_forbidden"},
-        )
+        raise Forbidden(extra={"error": "agent_scope_forbidden"})
 
 
 def _get_agent_channel(

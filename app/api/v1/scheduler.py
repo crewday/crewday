@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -45,6 +45,8 @@ from app.api.v1._scheduler_resolver import (
     users_by_id,
     weekly_rows_for_users,
 )
+from app.domain.errors import Forbidden
+from app.domain.errors import Validation as DomainValidation
 from app.tenancy import WorkspaceContext
 
 __all__ = ["build_scheduler_router", "router"]
@@ -72,24 +74,21 @@ _PropertyFilterQuery = Annotated[str | None, Query(alias="property")]
 _RoleFilterQuery = Annotated[str | None, Query(alias="role")]
 
 
-def _http_for_window() -> HTTPException:
-    return HTTPException(
-        status_code=422,
-        detail={
+def _invalid_window_error() -> DomainValidation:
+    message = "to must be on or after from"
+    return DomainValidation(
+        message,
+        extra={
             "error": "invalid_field",
             "field": "to",
-            "message": "to must be on or after from",
+            "message": message,
         },
     )
 
 
-def _http_for_forbidden() -> HTTPException:
-    return HTTPException(
-        status_code=403,
-        detail={
-            "error": "permission_denied",
-            "action_key": "scheduler.calendar",
-        },
+def _forbidden_error() -> Forbidden:
+    return Forbidden(
+        extra={"error": "permission_denied", "action_key": "scheduler.calendar"}
     )
 
 
@@ -157,7 +156,7 @@ def _build_payload(
     elif ctx.actor_grant_role in {"worker", "manager"} or ctx.actor_was_owner_member:
         visible_property_ids = set(all_property_ids)
     else:
-        raise _http_for_forbidden()
+        raise _forbidden_error()
     if property_filter is not None:
         visible_property_ids &= {property_filter}
 
@@ -309,7 +308,7 @@ def build_scheduler_router() -> APIRouter:
         role: _RoleFilterQuery = None,
     ) -> SchedulerCalendarResponse:
         if to < from_:
-            raise _http_for_window()
+            raise _invalid_window_error()
         return _build_payload(
             session,
             ctx,

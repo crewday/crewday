@@ -29,7 +29,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -43,6 +43,7 @@ from app.api.pagination import (
 )
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.authz.dep import Permission
+from app.domain.errors import NotFound, Validation
 from app.domain.identity.work_roles import (
     WorkRoleCreate,
     WorkRoleKeyConflict,
@@ -136,12 +137,25 @@ class WorkRoleListResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _http_for_key_conflict(exc: WorkRoleKeyConflict) -> HTTPException:
+class WorkRoleKeyConflictError(Validation):
+    """Duplicate work-role key. HTTP 422."""
+
+
+class WorkRoleNotFoundError(NotFound):
+    """Work role not found in the caller's workspace. HTTP 404."""
+
+
+def _http_for_key_conflict(exc: WorkRoleKeyConflict) -> WorkRoleKeyConflictError:
     """Translate a duplicate-key into a 422 ``work_role_key_conflict``."""
-    return HTTPException(
-        status_code=422,
-        detail={"error": "work_role_key_conflict", "message": str(exc)},
+    message = str(exc)
+    return WorkRoleKeyConflictError(
+        message,
+        extra={"error": "work_role_key_conflict", "message": message},
     )
+
+
+def _http_for_not_found() -> WorkRoleNotFoundError:
+    return WorkRoleNotFoundError(extra={"error": "work_role_not_found"})
 
 
 def _view_to_response(view: WorkRoleView) -> WorkRoleResponse:
@@ -260,10 +274,7 @@ def build_work_roles_router() -> APIRouter:
                 session, ctx, work_role_id=work_role_id, body=service_body
             )
         except WorkRoleNotFound as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "work_role_not_found"},
-            ) from exc
+            raise _http_for_not_found() from exc
         except WorkRoleKeyConflict as exc:
             raise _http_for_key_conflict(exc) from exc
         return _view_to_response(view)

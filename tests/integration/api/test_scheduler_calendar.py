@@ -7,10 +7,11 @@ from collections.abc import Iterator
 from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.responses import JSONResponse
 
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.availability.models import UserWeeklyAvailability
@@ -25,7 +26,9 @@ from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.tasks.models import Occurrence
 from app.adapters.db.workspace.models import UserWorkRole, WorkRole
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import _handle_domain_error
 from app.api.v1.scheduler import build_scheduler_router
+from app.domain.errors import DomainError
 from app.tenancy import WorkspaceContext
 from app.tenancy.context import ActorGrantRole
 from app.util.ulid import new_ulid
@@ -96,6 +99,12 @@ def _client(
 ) -> TestClient:
     app = FastAPI()
     app.include_router(build_scheduler_router())
+
+    async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, DomainError)
+        return _handle_domain_error(request, exc)
+
+    app.add_exception_handler(DomainError, _on_domain_error)
 
     def _override_ctx() -> WorkspaceContext:
         return ctx
@@ -683,11 +692,11 @@ class TestSchedulerCalendar:
         )
 
         assert resp.status_code == 422
-        assert resp.json()["detail"] == {
-            "error": "invalid_field",
-            "field": "to",
-            "message": "to must be on or after from",
-        }
+        assert resp.headers["content-type"].startswith("application/problem+json")
+        body = resp.json()
+        assert body["error"] == "invalid_field"
+        assert body["field"] == "to"
+        assert body["message"] == "to must be on or after from"
 
     def test_guest_role_is_forbidden(
         self, scheduler_factory: sessionmaker[Session]
@@ -709,10 +718,10 @@ class TestSchedulerCalendar:
         )
 
         assert resp.status_code == 403
-        assert resp.json()["detail"] == {
-            "error": "permission_denied",
-            "action_key": "scheduler.calendar",
-        }
+        assert resp.headers["content-type"].startswith("application/problem+json")
+        body = resp.json()
+        assert body["error"] == "permission_denied"
+        assert body["action_key"] == "scheduler.calendar"
 
     def test_openapi_lists_scheduler_calendar(
         self, scheduler_factory: sessionmaker[Session]

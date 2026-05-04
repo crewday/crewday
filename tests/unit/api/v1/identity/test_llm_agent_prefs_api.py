@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -221,7 +222,24 @@ def test_agent_preferences_reject_secret_like_body(
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"]["error"] == "preference_contains_secret"
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["error"] == "preference_contains_secret"
+
+
+def test_agent_preferences_reject_oversized_body(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+) -> None:
+    ctx, factory, _workspace_id = owner_ctx
+    client = _client(ctx, factory)
+
+    response = client.put(
+        "/workspace/agent_prefs",
+        json={"body_md": "x" * 64_004},
+    )
+
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["error"] == "preference_too_large"
 
 
 def test_my_agent_approval_mode_round_trip(
@@ -241,6 +259,19 @@ def test_my_agent_approval_mode_round_trip(
     readback = client.get("/me/agent_approval_mode")
     assert readback.status_code == 200
     assert readback.json() == {"mode": "auto"}
+
+
+def test_my_agent_approval_mode_missing_user_returns_problem_json(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+) -> None:
+    ctx, factory, _workspace_id = owner_ctx
+    client = _client(replace(ctx, actor_id="missing_user"), factory)
+
+    response = client.get("/me/agent_approval_mode")
+
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["error"] == "user_not_found"
 
 
 def test_my_agent_approval_mode_update_publishes_user_scoped_event(

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, time, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -41,7 +42,12 @@ from app.adapters.db.workspace.models import (
     WorkEngagement,
     WorkRole,
 )
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON
 from app.api.v1.me_schedule import build_me_schedule_router
+from app.domain.identity.user_availability_overrides import (
+    UserAvailabilityOverridePermissionDenied,
+)
+from app.domain.identity.user_leaves import UserLeavePermissionDenied
 from app.tenancy import WorkspaceContext
 from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user
@@ -770,9 +776,11 @@ class TestMeSchedule:
             params={"from": "2026-05-15", "to": "2026-05-01"},
         )
         assert resp.status_code == 422
-        detail = resp.json()["detail"]
-        assert detail["error"] == "invalid_field"
-        assert detail["field"] == "to"
+        assert resp.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+        body = resp.json()
+        assert body["error"] == "invalid_field"
+        assert body["field"] == "to"
+        assert body["message"] == body["detail"]
 
     def test_me_schedule_property_legend_only_touched_properties(
         self,
@@ -895,6 +903,34 @@ class TestMeLeavesCreate:
         assert body["approved_at"] is None
         assert body["approved_by"] is None
 
+    def test_me_leaves_permission_denied_uses_problem_json(
+        self,
+        worker_ctx: tuple[WorkspaceContext, sessionmaker[Session], str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Permission failures keep the legacy action_key at top level."""
+
+        def _deny(*_args: object, **_kwargs: object) -> object:
+            raise UserLeavePermissionDenied("leaves.create_self")
+
+        monkeypatch.setattr("app.api.v1.me_schedule.create_leave", _deny)
+        ctx, factory, _ws_id, _worker_id = worker_ctx
+        client = _client(ctx, factory)
+
+        resp = client.post(
+            "/me/leaves",
+            json={
+                "starts_on": "2026-07-01",
+                "ends_on": "2026-07-02",
+                "category": "personal",
+            },
+        )
+        assert resp.status_code == 403, resp.text
+        assert resp.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+        body = resp.json()
+        assert body["error"] == "permission_denied"
+        assert body["action_key"] == "leaves.create_self"
+
 
 # ---------------------------------------------------------------------------
 # /me/availability_overrides — POST
@@ -975,6 +1011,61 @@ class TestMeAvailabilityOverridesCreate:
             },
         )
         assert resp.status_code == 422
+
+    def test_me_availability_overrides_duplicate_uses_problem_json(
+        self,
+        worker_ctx: tuple[WorkspaceContext, sessionmaker[Session], str, str],
+    ) -> None:
+        """Duplicate ``(caller, date)`` returns 409 ``override_exists``."""
+        ctx, factory, _ws_id, _worker_id = worker_ctx
+        client = _client(ctx, factory)
+        body = {
+            "date": "2026-05-04",
+            "available": True,
+            "starts_local": "09:00:00",
+            "ends_local": "13:00:00",
+        }
+
+        first = client.post("/me/availability_overrides", json=body)
+        assert first.status_code == 201, first.text
+
+        resp = client.post("/me/availability_overrides", json=body)
+        assert resp.status_code == 409, resp.text
+        assert resp.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+        problem = resp.json()
+        assert problem["error"] == "override_exists"
+        assert problem["message"] == problem["detail"]
+
+    def test_me_availability_overrides_permission_denied_uses_problem_json(
+        self,
+        worker_ctx: tuple[WorkspaceContext, sessionmaker[Session], str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Permission failures keep the legacy action_key at top level."""
+
+        def _deny(*_args: object, **_kwargs: object) -> object:
+            raise UserAvailabilityOverridePermissionDenied(
+                "availability_overrides.create_self"
+            )
+
+        monkeypatch.setattr("app.api.v1.me_schedule.create_override", _deny)
+        ctx, factory, _ws_id, _worker_id = worker_ctx
+        client = _client(ctx, factory)
+
+        resp = client.post(
+            "/me/availability_overrides",
+            json={
+                "date": "2026-05-04",
+                "available": True,
+                "starts_local": "09:00:00",
+                "ends_local": "13:00:00",
+            },
+        )
+        assert resp.status_code == 403, resp.text
+        assert resp.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+        body = resp.json()
+        assert body["error"] == "permission_denied"
+        assert body["action_key"] == "availability_overrides.create_self"
 
 
 # ---------------------------------------------------------------------------

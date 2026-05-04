@@ -9,11 +9,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.responses import JSONResponse
 
 from app.adapters.db.base import Base
 from app.adapters.db.identity.models import User, canonicalise_email
@@ -29,10 +30,12 @@ from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.adapters.llm.ports import LLMResponse, LLMUsage
 from app.api.deps import current_workspace_context, db_session
 from app.api.deps import get_llm as get_llm_dep
+from app.api.errors import _handle_domain_error
 from app.api.factory import create_app
 from app.api.v1.agent import build_agent_router, get_agent_token_factory
 from app.config import Settings
 from app.domain.agent.runtime import DelegatedToken
+from app.domain.errors import DomainError
 from app.events.bus import EventBus
 from app.events.types import AgentMessageAppended, ChatMessageSent
 from app.tenancy import WorkspaceContext
@@ -218,6 +221,12 @@ def _client(
         prefix="/w/{slug}/api/v1",
     )
 
+    async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, DomainError)
+        return _handle_domain_error(request, exc)
+
+    app.add_exception_handler(DomainError, _on_domain_error)
+
     def _override_ctx() -> WorkspaceContext:
         return ctx
 
@@ -384,3 +393,28 @@ def test_agent_log_endpoint_mounts_and_returns_agent_message_list(
         ("agent", "I can help.", None),
     }
     assert {message["at"] for message in messages} == {"2026-04-29T12:00:00Z"}
+
+
+@pytest.mark.parametrize(
+    ("scope", "role"),
+    [
+        ("employee", "manager"),
+        ("manager", "worker"),
+    ],
+)
+def test_agent_scope_mismatch_returns_problem_json(
+    factory: sessionmaker[Session],
+    scope: Literal["employee", "manager"],
+    role: Literal["manager", "worker"],
+) -> None:
+    workspace_id, user_id = _bootstrap(factory, role=role)
+    client = _client(
+        factory,
+        _ctx(workspace_id=workspace_id, actor_id=user_id, role=role),
+    )
+
+    response = client.get(f"/w/agent-test/api/v1/agent/{scope}/log")
+
+    assert response.status_code == 403
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["error"] == "agent_scope_forbidden"

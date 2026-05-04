@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.workspace.models import UserWorkRole, UserWorkspace, WorkRole
@@ -26,6 +27,14 @@ def _owner_client(ctx: WorkspaceContext, factory: sessionmaker[Session]) -> Test
         factory,
         ctx,
     )
+
+
+def _assert_problem_error(resp: Response, *, error: str) -> dict[str, object]:
+    assert resp.headers["content-type"].startswith("application/problem+json")
+    body = resp.json()
+    assert isinstance(body, dict)
+    assert body["error"] == error
+    return body
 
 
 def _seed_work_role(factory: sessionmaker[Session], workspace_id: str) -> str:
@@ -101,7 +110,8 @@ class TestCreate:
             },
         )
         assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "user_work_role_invariant"
+        body = _assert_problem_error(resp, error="user_work_role_invariant")
+        assert body["message"] == body["detail"]
 
     def test_worker_cannot_create(
         self,
@@ -236,6 +246,7 @@ class TestPatch:
         client = _owner_client(ctx, factory)
         resp = client.patch("/user_work_roles/nope", json={"ended_on": "2026-05-01"})
         assert resp.status_code == 404
+        _assert_problem_error(resp, error="user_work_role_not_found")
 
 
 class TestDelete:
@@ -270,6 +281,7 @@ class TestDelete:
         client = _owner_client(ctx, factory)
         resp = client.delete("/user_work_roles/nope")
         assert resp.status_code == 404
+        _assert_problem_error(resp, error="user_work_role_not_found")
 
 
 class TestOpenApiShape:

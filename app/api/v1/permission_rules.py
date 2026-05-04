@@ -42,7 +42,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Final, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -58,6 +58,7 @@ from app.api.v1._problem_json import (
     PROBLEM_JSON_CONTENT,
 )
 from app.authz.dep import Permission
+from app.domain.errors import ServiceUnavailable
 from app.tenancy import WorkspaceContext
 
 __all__ = [
@@ -154,7 +155,11 @@ _ActionKeyFilter = Annotated[
 # ---------------------------------------------------------------------------
 
 
-def _http_for_table_unavailable() -> HTTPException:
+class PermissionRuleTableUnavailableError(ServiceUnavailable):
+    """Permission-rule table has not shipped yet. HTTP 503."""
+
+
+def _http_for_table_unavailable() -> PermissionRuleTableUnavailableError:
     """503 stub used until the ``permission_rule`` table ships.
 
     The action gate (root-only) already cleared the caller; signalling
@@ -162,15 +167,16 @@ def _http_for_table_unavailable() -> HTTPException:
     state. Reads are always honest-empty so a misconfigured admin UI
     can still render.
     """
-    return HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail={
+    message = (
+        "permission_rule table not present in v1 schema; rule "
+        "writes land with the cd-dzp follow-up that ships the "
+        "table"
+    )
+    return PermissionRuleTableUnavailableError(
+        message,
+        extra={
             "error": "permission_rule_table_unavailable",
-            "message": (
-                "permission_rule table not present in v1 schema; rule "
-                "writes land with the cd-dzp follow-up that ships the "
-                "table"
-            ),
+            "message": message,
         },
     )
 

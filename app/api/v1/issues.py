@@ -6,11 +6,13 @@ from dataclasses import asdict
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_workspace_context, db_session
+from app.domain.errors import DomainError, Forbidden, Internal, NotFound
+from app.domain.errors import Validation as DomainValidation
 from app.domain.issues import (
     IssueAccessDenied,
     IssueCreate,
@@ -109,26 +111,16 @@ class IssueListResponse(BaseModel):
     data: list[IssueResponse]
 
 
-def _http_for_issue_error(exc: Exception) -> HTTPException:
+def _domain_error_for_issue_error(exc: Exception) -> DomainError:
     if isinstance(exc, IssueNotFound):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "issue_not_found"},
-        )
+        return NotFound(extra={"error": "issue_not_found"})
     if isinstance(exc, IssueAccessDenied):
-        return HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "permission_denied", "action_key": "issues.report"},
+        return Forbidden(
+            extra={"error": "permission_denied", "action_key": "issues.report"}
         )
     if isinstance(exc, IssueValidationError):
-        return HTTPException(
-            status_code=422,
-            detail={"error": exc.error, "field": exc.field},
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+        return DomainValidation(extra={"error": exc.error, "field": exc.field})
+    return Internal(extra={"error": "internal"})
 
 
 @router.get(
@@ -148,7 +140,7 @@ def list_route(
     try:
         views = list_issues(session, ctx, state=state, property_id=property_id)
     except (IssueAccessDenied, IssueValidationError) as exc:
-        raise _http_for_issue_error(exc) from exc
+        raise _domain_error_for_issue_error(exc) from exc
     return IssueListResponse(data=[IssueResponse.from_view(view) for view in views])
 
 
@@ -167,7 +159,7 @@ def create_route(
     try:
         view = create_issue(session, ctx, body=body.to_domain())
     except (IssueAccessDenied, IssueValidationError) as exc:
-        raise _http_for_issue_error(exc) from exc
+        raise _domain_error_for_issue_error(exc) from exc
     return IssueResponse.from_view(view)
 
 
@@ -186,7 +178,7 @@ def update_route(
     try:
         view = update_issue(session, ctx, issue_id, body=body.to_domain())
     except (IssueAccessDenied, IssueNotFound, IssueValidationError) as exc:
-        raise _http_for_issue_error(exc) from exc
+        raise _domain_error_for_issue_error(exc) from exc
     return IssueResponse.from_view(view)
 
 
@@ -200,7 +192,7 @@ def convert_to_task_route(issue_id: str, ctx: _Ctx, session: _Db) -> Response:
     try:
         get_issue(session, ctx, issue_id)
     except (IssueAccessDenied, IssueNotFound) as exc:
-        raise _http_for_issue_error(exc) from exc
+        raise _domain_error_for_issue_error(exc) from exc
     return Response(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         media_type="application/json",
