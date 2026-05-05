@@ -30,11 +30,10 @@ import logging
 import sys
 from collections.abc import Callable
 from functools import wraps
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as _pkg_version
 
 import click
 
+from app.util.version import resolve_package_version
 from crewday import _config
 from crewday._globals import (
     DEFAULT_OUTPUT,
@@ -112,17 +111,13 @@ class RateLimited(CrewdayError):
 def _resolve_version() -> str:
     """Return the installed package version, or a dev fallback.
 
-    Mirrors :func:`app.api.factory._resolve_version`'s pattern: ask
-    ``importlib.metadata``, fall back to a sentinel when the package
-    is running from an editable checkout that hasn't been installed
-    (``uv run`` with a virtual project). The fallback keeps
-    ``crewday --version`` working in every dev environment without
-    hard-coding a literal.
+    Mirrors :func:`app.util.version.resolve_package_version`'s pattern:
+    ask ``importlib.metadata``, fall back to a sentinel when the package is
+    running from an editable checkout that hasn't been installed (``uv run``
+    with a virtual project). The fallback keeps ``crewday --version`` working
+    in every dev environment without hard-coding lookup behavior here.
     """
-    try:
-        return _pkg_version("crewday")
-    except PackageNotFoundError:
-        return "0.0.0+unknown"
+    return resolve_package_version("0.0.0+unknown")
 
 
 def handle_errors[**P, R](func: Callable[P, R]) -> Callable[P, R]:
