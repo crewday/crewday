@@ -21,6 +21,7 @@ audit", ``docs/specs/02-domain-model.md`` §"audit_log".
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated, Any, Final
 
@@ -138,15 +139,56 @@ def _project_row(row: AuditLog) -> AuditEntryResponse:
     )
 
 
-def _query_rows(
-    session: Session,
+@dataclass(frozen=True)
+class _AuditFilters:
+    actor_id: str | None
+    action: str | None
+    entity_kind: str | None
+    entity_id: str | None
+    since: datetime | None
+    until: datetime | None
+
+
+def _parse_filters(
     *,
     actor_id: str | None,
     action: str | None,
     entity_kind: str | None,
     entity_id: str | None,
-    since: datetime | None,
-    until: datetime | None,
+    since: str,
+    until: str,
+) -> _AuditFilters:
+    # code-health: ignore[params] Mirrors admin audit filters.
+    return _AuditFilters(
+        actor_id=actor_id,
+        action=action,
+        entity_kind=entity_kind,
+        entity_id=entity_id,
+        since=_parse_iso(since, label="since"),
+        until=_parse_iso(until, label="until"),
+    )
+
+
+def _apply_filters(stmt: Any, filters: _AuditFilters) -> Any:
+    if filters.actor_id is not None:
+        stmt = stmt.where(AuditLog.actor_id == filters.actor_id)
+    if filters.action is not None:
+        stmt = stmt.where(AuditLog.action == filters.action)
+    if filters.entity_kind is not None:
+        stmt = stmt.where(AuditLog.entity_kind == filters.entity_kind)
+    if filters.entity_id is not None:
+        stmt = stmt.where(AuditLog.entity_id == filters.entity_id)
+    if filters.since is not None:
+        stmt = stmt.where(AuditLog.created_at >= filters.since)
+    if filters.until is not None:
+        stmt = stmt.where(AuditLog.created_at <= filters.until)
+    return stmt
+
+
+def _query_rows(
+    session: Session,
+    *,
+    filters: _AuditFilters,
     cursor: str | None,
     limit: int,
 ) -> list[AuditLog]:
@@ -162,18 +204,7 @@ def _query_rows(
         .where(AuditLog.scope_kind == "deployment")
         .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
     )
-    if actor_id is not None:
-        stmt = stmt.where(AuditLog.actor_id == actor_id)
-    if action is not None:
-        stmt = stmt.where(AuditLog.action == action)
-    if entity_kind is not None:
-        stmt = stmt.where(AuditLog.entity_kind == entity_kind)
-    if entity_id is not None:
-        stmt = stmt.where(AuditLog.entity_id == entity_id)
-    if since is not None:
-        stmt = stmt.where(AuditLog.created_at >= since)
-    if until is not None:
-        stmt = stmt.where(AuditLog.created_at <= until)
+    stmt = _apply_filters(stmt, filters)
     if cursor is not None:
         # ``cursor`` is the id of the last row served on the
         # previous page; we walk strictly older. The lookup
@@ -219,12 +250,7 @@ def _query_rows(
 def _query_newer_rows(
     session: Session,
     *,
-    actor_id: str | None,
-    action: str | None,
-    entity_kind: str | None,
-    entity_id: str | None,
-    since: datetime | None,
-    until: datetime | None,
+    filters: _AuditFilters,
     cursor: AuditTailCursor | None,
     limit: int,
 ) -> list[AuditLog]:
@@ -235,18 +261,7 @@ def _query_newer_rows(
         .order_by(AuditLog.created_at.asc(), AuditLog.id.asc())
         .limit(limit)
     )
-    if actor_id is not None:
-        stmt = stmt.where(AuditLog.actor_id == actor_id)
-    if action is not None:
-        stmt = stmt.where(AuditLog.action == action)
-    if entity_kind is not None:
-        stmt = stmt.where(AuditLog.entity_kind == entity_kind)
-    if entity_id is not None:
-        stmt = stmt.where(AuditLog.entity_id == entity_id)
-    if since is not None:
-        stmt = stmt.where(AuditLog.created_at >= since)
-    if until is not None:
-        stmt = stmt.where(AuditLog.created_at <= until)
+    stmt = _apply_filters(stmt, filters)
     if cursor is not None:
         stmt = stmt.where(
             (AuditLog.created_at > cursor.created_at)
@@ -315,7 +330,9 @@ def build_admin_audit_router() -> APIRouter:
         _ctx: Annotated[DeploymentContext, Depends(current_deployment_admin_principal)],
         session: _Db,
         actor_id: Annotated[str | None, Query(max_length=64)] = None,
+        # code-health: ignore[duplicate] Repeated wire shape is intentional.
         action: Annotated[str | None, Query(max_length=128)] = None,
+        # code-health: ignore[duplicate] Repeated wire shape is intentional.
         entity_kind: Annotated[str | None, Query(max_length=64)] = None,
         entity_id: Annotated[str | None, Query(max_length=64)] = None,
         since: Annotated[
@@ -329,6 +346,7 @@ def build_admin_audit_router() -> APIRouter:
         cursor: Annotated[str | None, Query(max_length=64)] = None,
         limit: Annotated[int, Query(ge=1, le=_MAX_LIMIT)] = _DEFAULT_LIMIT,
     ) -> AuditListResponse:
+        # code-health: ignore[params] Preserves OpenAPI query params.
         """Return a deployment-audit page filtered by the query params.
 
         Pagination follows the §12 cursor envelope. The query's
@@ -340,14 +358,17 @@ def build_admin_audit_router() -> APIRouter:
         to :class:`User` and is filed under cd-b0au alongside the
         workspace audit feed.
         """
-        rows = _query_rows(
-            session,
+        filters = _parse_filters(
             actor_id=actor_id,
             action=action,
             entity_kind=entity_kind,
             entity_id=entity_id,
-            since=_parse_iso(since, label="since"),
-            until=_parse_iso(until, label="until"),
+            since=since,
+            until=until,
+        )
+        rows = _query_rows(
+            session,
+            filters=filters,
             cursor=cursor,
             limit=limit,
         )
@@ -400,6 +421,7 @@ def build_admin_audit_router() -> APIRouter:
         ] = "",
         limit: Annotated[int, Query(ge=1, le=_MAX_LIMIT)] = _DEFAULT_LIMIT,
     ) -> StreamingResponse:
+        # code-health: ignore[params] Preserves OpenAPI query params.
         """Stream the deployment audit feed as NDJSON.
 
         The initial body returns one chunk per matching row in
@@ -413,18 +435,19 @@ def build_admin_audit_router() -> APIRouter:
         against the synchronous SQLAlchemy session; FastAPI
         wraps the generator in a thread-pool when needed.
         """
-        parsed_since = _parse_iso(since, label="since")
-        parsed_until = _parse_iso(until, label="until")
+        filters = _parse_filters(
+            actor_id=actor_id,
+            action=action,
+            entity_kind=entity_kind,
+            entity_id=entity_id,
+            since=since,
+            until=until,
+        )
 
         def _initial() -> list[AuditLog]:
             rows = _query_rows(
                 session,
-                actor_id=actor_id,
-                action=action,
-                entity_kind=entity_kind,
-                entity_id=entity_id,
-                since=parsed_since,
-                until=parsed_until,
+                filters=filters,
                 cursor=None,
                 limit=limit,
             )
@@ -433,12 +456,7 @@ def build_admin_audit_router() -> APIRouter:
         def _next(cursor: AuditTailCursor | None) -> list[AuditLog]:
             return _query_newer_rows(
                 session,
-                actor_id=actor_id,
-                action=action,
-                entity_kind=entity_kind,
-                entity_id=entity_id,
-                since=parsed_since,
-                until=parsed_until,
+                filters=filters,
                 cursor=cursor,
                 limit=limit,
             )

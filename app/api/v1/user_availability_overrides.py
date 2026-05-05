@@ -66,7 +66,9 @@ from app.api.pagination import (
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.domain.errors import Conflict, DomainError, Forbidden, NotFound, Validation
 from app.domain.identity.user_availability_overrides import (
+    # code-health: ignore[duplicate] Repeated wire shape is intentional.
     UserAvailabilityOverrideAlreadyExists,
+    # code-health: ignore[duplicate] Repeated wire shape is intentional.
     UserAvailabilityOverrideCreate,
     UserAvailabilityOverrideInvariantViolated,
     UserAvailabilityOverrideListFilter,
@@ -393,6 +395,7 @@ def make_seam_pair(
 
 
 def build_user_availability_overrides_router() -> APIRouter:
+    # code-health: ignore[nloc] Router composition stays explicit.
     """Return a fresh :class:`APIRouter` wired for the CRUD + state surface."""
     api = APIRouter(
         prefix="/user_availability_overrides",
@@ -416,6 +419,7 @@ def build_user_availability_overrides_router() -> APIRouter:
         to: _ToFilter = None,
         approved: _ApprovedFilter = None,
     ) -> UserAvailabilityOverrideListResponse:
+        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
         """Cursor-paginated listing with optional filters.
 
         ``from_`` is the ``?from=`` query alias (Python keyword

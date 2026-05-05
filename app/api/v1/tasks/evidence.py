@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 from fastapi import (
     APIRouter,
@@ -158,6 +158,166 @@ async def _read_file_capped(upload: UploadFile, *, kind: str) -> bytes:
     )
 
 
+async def _add_note_payload(
+    session: _Db,
+    ctx: _Ctx,
+    *,
+    task_id: str,
+    note_md: str | None,
+    file: UploadFile | None,
+) -> EvidencePayload:
+    if file is not None:
+        await file.close()
+        raise _http(
+            422,
+            "evidence_note_with_file",
+            message="kind='note' evidence must not carry a file upload",
+        )
+    if note_md is None or not note_md.strip():
+        raise _http(
+            422,
+            "evidence_note_empty",
+            message="kind='note' evidence requires a non-empty note_md",
+        )
+    try:
+        view = add_note_evidence(session, ctx, task_id=task_id, note_md=note_md)
+    except CompletionTaskNotFound as exc:
+        raise _task_not_found() from exc
+    except ValueError as exc:
+        raise _http(422, "evidence_note_empty", message=str(exc)) from exc
+    return EvidencePayload.from_view(view)
+
+
+async def _require_file_upload(
+    *,
+    kind: str,
+    note_md: str | None,
+    file: UploadFile | None,
+) -> UploadFile:
+    if kind not in _FILE_EVIDENCE_KINDS:
+        if file is not None:
+            await file.close()
+        raise _http(
+            422,
+            "evidence_invalid_kind",
+            message=(
+                f"kind={kind!r} is not a valid evidence kind; expected "
+                "one of 'note', 'photo', 'voice', 'gps'"
+            ),
+        )
+    if file is None:
+        raise _http(
+            422,
+            "evidence_file_required",
+            message=f"kind={kind!r} evidence requires a multipart file upload",
+        )
+    if note_md is not None:
+        await file.close()
+        raise _http(
+            422,
+            "evidence_file_with_note",
+            message=(
+                f"kind={kind!r} evidence must not carry a 'note_md' form field; "
+                "use kind='note' for notes"
+            ),
+        )
+    return file
+
+
+async def _require_declared_type(
+    file: UploadFile,
+    *,
+    kind: str,
+    missing_message: str,
+) -> str:
+    try:
+        return require_upload_content_type(
+            file,
+            missing=lambda: _http(
+                status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                "evidence_content_type_missing",
+                kind=kind,
+                message=missing_message,
+            ),
+        )
+    except HTTPException:
+        await file.close()
+        raise
+
+
+def _file_kind(kind: str) -> FileEvidenceKind:
+    if kind == "photo":
+        return "photo"
+    if kind == "voice":
+        return "voice"
+    return "gps"
+
+
+def _raise_file_evidence_error(exc: Exception, *, declared_type: str) -> NoReturn:
+    if isinstance(exc, CompletionTaskNotFound):
+        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        raise _task_not_found() from exc
+    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    if isinstance(exc, EvidenceContentTypeNotAllowed):
+        raise _http(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            "evidence_content_type_rejected",
+            kind=exc.kind,
+            content_type=exc.content_type,
+            sniffed_type=exc.content_type,
+            declared_type=declared_type,
+            message=str(exc),
+        ) from exc
+    if isinstance(exc, EvidenceTooLarge):
+        raise _http(
+            status.HTTP_413_CONTENT_TOO_LARGE,
+            "evidence_too_large",
+            kind=exc.kind,
+            size_bytes=exc.size_bytes,
+            cap_bytes=exc.cap_bytes,
+            message=str(exc),
+        ) from exc
+    if isinstance(exc, EvidenceGpsPayloadInvalid):
+        raise _http(422, "evidence_gps_payload_invalid", message=str(exc)) from exc
+    if isinstance(exc, ValueError):
+        raise _http(422, "evidence_invalid", message=str(exc)) from exc
+    raise exc
+
+
+def _raise_checklist_evidence_error(exc: Exception, *, declared_type: str) -> NoReturn:
+    if isinstance(exc, CompletionTaskNotFound | ChecklistItemNotFound):
+        raise _task_not_found() from exc
+    if isinstance(exc, TaskTerminal):
+        raise _http(
+            status.HTTP_409_CONFLICT,
+            "task_terminal",
+            state=exc.state,
+            message=str(exc),
+        ) from exc
+    if isinstance(exc, EvidenceContentTypeNotAllowed):
+        raise _http(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            "evidence_content_type_rejected",
+            kind=exc.kind,
+            content_type=exc.content_type,
+            sniffed_type=exc.content_type,
+            declared_type=declared_type,
+            message=str(exc),
+        ) from exc
+    if isinstance(exc, EvidenceTooLarge):
+        raise _http(
+            status.HTTP_413_CONTENT_TOO_LARGE,
+            "evidence_too_large",
+            kind=exc.kind,
+            size_bytes=exc.size_bytes,
+            cap_bytes=exc.cap_bytes,
+            message=str(exc),
+        ) from exc
+    if isinstance(exc, ValueError):
+        raise _http(422, "evidence_invalid", message=str(exc)) from exc
+    raise exc
+
+
 @router.post(
     "/{task_id}/evidence",
     status_code=status.HTTP_201_CREATED,
@@ -176,6 +336,7 @@ async def upload_task_evidence_route(
     note_md: Annotated[str | None, Form(max_length=20_000)] = None,
     file: Annotated[UploadFile | None, File()] = None,
 ) -> EvidencePayload:
+    # code-health: ignore[params] Preserves multipart OpenAPI fields.
     """Accept ``multipart/form-data``; wire every §06 evidence kind end-to-end.
 
     Routing by ``kind``:
@@ -203,148 +364,39 @@ async def upload_task_evidence_route(
       pipeline.
     """
     if kind == "note":
-        if file is not None:
-            # A note carries no binary payload; reject the mix so a
-            # confused client learns loudly.
-            await file.close()
-            raise _http(
-                422,
-                "evidence_note_with_file",
-                message="kind='note' evidence must not carry a file upload",
-            )
-        if note_md is None or not note_md.strip():
-            raise _http(
-                422,
-                "evidence_note_empty",
-                message="kind='note' evidence requires a non-empty note_md",
-            )
-        try:
-            view = add_note_evidence(session, ctx, task_id=task_id, note_md=note_md)
-        except CompletionTaskNotFound as exc:
-            raise _task_not_found() from exc
-        except ValueError as exc:
-            raise _http(422, "evidence_note_empty", message=str(exc)) from exc
-        return EvidencePayload.from_view(view)
-
-    if kind not in _FILE_EVIDENCE_KINDS:
-        # Anything outside the §06 "Evidence" enum is caller error —
-        # 422 ``evidence_invalid_kind``. Consume any uploaded stream
-        # first so the multipart parser doesn't leak a tempfile.
-        if file is not None:
-            await file.close()
-        raise _http(
-            422,
-            "evidence_invalid_kind",
-            message=(
-                f"kind={kind!r} is not a valid evidence kind; expected "
-                "one of 'note', 'photo', 'voice', 'gps'"
-            ),
+        return await _add_note_payload(
+            session,
+            ctx,
+            task_id=task_id,
+            note_md=note_md,
+            file=file,
         )
 
-    # File-bearing kind. The upload body is required.
-    if file is None:
-        raise _http(
-            422,
-            "evidence_file_required",
-            message=f"kind={kind!r} evidence requires a multipart file upload",
-        )
-    if note_md is not None:
-        # A photo / voice / gps payload carries the body, not the
-        # field. Any ``note_md`` (including whitespace-only) signals a
-        # confused client; reject so the contract stays narrow and a
-        # misuse never silently slips past as an empty string.
-        await file.close()
-        raise _http(
-            422,
-            "evidence_file_with_note",
-            message=(
-                f"kind={kind!r} evidence must not carry a 'note_md' form field; "
-                "use kind='note' for notes"
-            ),
-        )
-    try:
-        declared_type = require_upload_content_type(
-            file,
-            missing=lambda: _http(
-                status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                "evidence_content_type_missing",
-                kind=kind,
-                message=(
-                    f"kind={kind!r} evidence requires a 'Content-Type' header on the "
-                    "uploaded file part"
-                ),
-            ),
-        )
-    except HTTPException:
-        await file.close()
-        raise
+    file = await _require_file_upload(kind=kind, note_md=note_md, file=file)
+    declared_type = await _require_declared_type(
+        file,
+        kind=kind,
+        missing_message=(
+            f"kind={kind!r} evidence requires a 'Content-Type' header on the "
+            "uploaded file part"
+        ),
+    )
 
     payload = await _read_file_capped(file, kind=kind)
-    # Narrow ``kind`` from the loose ``str`` form field to the typed
-    # :data:`FileEvidenceKind` Literal the domain seam expects. The
-    # earlier ``in _FILE_EVIDENCE_KINDS`` check guarantees membership;
-    # the per-branch ``cast`` keeps mypy --strict honest without an
-    # explicit ``cast(...)`` call.
-    file_kind: FileEvidenceKind
-    if kind == "photo":
-        file_kind = "photo"
-    elif kind == "voice":
-        file_kind = "voice"
-    else:
-        file_kind = "gps"
 
     try:
         view = add_file_evidence(
             session,
             ctx,
             task_id=task_id,
-            kind=file_kind,
+            kind=_file_kind(kind),
             payload=payload,
             content_type=declared_type,
             storage=storage,
             mime_sniffer=mime_sniffer,
         )
-    except CompletionTaskNotFound as exc:
-        raise _task_not_found() from exc
-    except EvidenceContentTypeNotAllowed as exc:
-        # ``exc.content_type`` carries the **sniffed** type per spec
-        # §15 ("MIME sniffed server-side; we trust the sniff, not the
-        # header"). Surface both ``content_type`` (the sniff) and
-        # ``sniffed_type`` (an explicit alias) so the operator
-        # inspecting the audit envelope sees the actual shape of the
-        # bytes — ``application/x-msdownload`` for a PE smuggled as
-        # ``image/png`` — rather than the multipart-form lie.
-        # ``declared_type`` is preserved alongside for the forensic
-        # "client claimed X, sniff said Y" trail.
-        raise _http(
-            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            "evidence_content_type_rejected",
-            kind=exc.kind,
-            content_type=exc.content_type,
-            sniffed_type=exc.content_type,
-            declared_type=declared_type,
-            message=str(exc),
-        ) from exc
-    except EvidenceTooLarge as exc:
-        raise _http(
-            status.HTTP_413_CONTENT_TOO_LARGE,
-            "evidence_too_large",
-            kind=exc.kind,
-            size_bytes=exc.size_bytes,
-            cap_bytes=exc.cap_bytes,
-            message=str(exc),
-        ) from exc
-    except EvidenceGpsPayloadInvalid as exc:
-        raise _http(
-            422,
-            "evidence_gps_payload_invalid",
-            message=str(exc),
-        ) from exc
-    except ValueError as exc:
-        # Remaining ValueErrors (empty payload, unknown kind that the
-        # earlier branch let through somehow) collapse to 422 with a
-        # generic envelope so the client still learns the rejection.
-        raise _http(422, "evidence_invalid", message=str(exc)) from exc
+    except Exception as exc:
+        _raise_file_evidence_error(exc, declared_type=declared_type)
     return EvidencePayload.from_view(view)
 
 
@@ -365,6 +417,7 @@ async def attach_task_checklist_evidence_route(
     _: _EvidenceContentLengthGuard,
     file: Annotated[UploadFile, File()],
 ) -> TaskChecklistItemPayload:
+    # code-health: ignore[params] Preserves multipart OpenAPI fields.
     """Stamp a checklist item's :attr:`evidence_blob_hash` from a multipart upload.
 
     Mirrors :func:`upload_task_evidence_route`'s photo branch
@@ -382,22 +435,14 @@ async def attach_task_checklist_evidence_route(
     per-item pointer and the evidence list is the ad-hoc trail (§02 /
     §06 keep them cleanly separated).
     """
-    try:
-        declared_type = require_upload_content_type(
-            file,
-            missing=lambda: _http(
-                status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                "evidence_content_type_missing",
-                kind="photo",
-                message=(
-                    "checklist evidence requires a 'Content-Type' header on the "
-                    "uploaded file part"
-                ),
-            ),
-        )
-    except HTTPException:
-        await file.close()
-        raise
+    declared_type = await _require_declared_type(
+        file,
+        kind="photo",
+        missing_message=(
+            "checklist evidence requires a 'Content-Type' header on the "
+            "uploaded file part"
+        ),
+    )
 
     payload = await _read_file_capped(file, kind="photo")
 
@@ -412,45 +457,6 @@ async def attach_task_checklist_evidence_route(
             storage=storage,
             mime_sniffer=mime_sniffer,
         )
-    except (CompletionTaskNotFound, ChecklistItemNotFound) as exc:
-        # Cross-tenant + cross-task item ids collapse to 404 (§14).
-        raise _task_not_found() from exc
-    except TaskTerminal as exc:
-        raise _http(
-            status.HTTP_409_CONFLICT,
-            "task_terminal",
-            state=exc.state,
-            message=str(exc),
-        ) from exc
-    except EvidenceContentTypeNotAllowed as exc:
-        # ``exc.content_type`` carries the **sniffed** type per spec
-        # §15. Surface both ``content_type`` (the sniff) and
-        # ``sniffed_type`` (an explicit alias) so the operator
-        # inspecting the audit envelope sees the actual shape rather
-        # than the multipart-form lie. ``declared_type`` is preserved
-        # alongside for the forensic "client claimed X, sniff said Y"
-        # trail — same envelope as the ad-hoc evidence route.
-        raise _http(
-            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            "evidence_content_type_rejected",
-            kind=exc.kind,
-            content_type=exc.content_type,
-            sniffed_type=exc.content_type,
-            declared_type=declared_type,
-            message=str(exc),
-        ) from exc
-    except EvidenceTooLarge as exc:
-        raise _http(
-            status.HTTP_413_CONTENT_TOO_LARGE,
-            "evidence_too_large",
-            kind=exc.kind,
-            size_bytes=exc.size_bytes,
-            cap_bytes=exc.cap_bytes,
-            message=str(exc),
-        ) from exc
-    except ValueError as exc:
-        # Empty payload + any other domain-side rejection collapse to
-        # 422 with a generic envelope so the client still learns the
-        # rejection. Mirrors :func:`upload_task_evidence_route`'s tail.
-        raise _http(422, "evidence_invalid", message=str(exc)) from exc
+    except Exception as exc:
+        _raise_checklist_evidence_error(exc, declared_type=declared_type)
     return TaskChecklistItemPayload.from_evidence_view(view)

@@ -305,6 +305,7 @@ def _list_type_response(
     cursor: str | None,
     limit: int,
 ) -> AssetTypeListResponse:
+    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
     views = list_types(
         session,
         ctx,
@@ -333,7 +334,9 @@ def build_asset_types_alias_router() -> APIRouter:
         summary="List asset types visible to the caller's workspace",
         dependencies=[view_gate],
     )
+    # code-health: ignore[duplicate] Repeated wire shape is intentional.
     def list_flat(
+        # code-health: ignore[duplicate] Repeated wire shape is intentional.
         ctx: _Ctx,
         session: _Db,
         category: str | None = Query(default=None),

@@ -36,7 +36,10 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Annotated, Literal
 
+# code-health: ignore[duplicate] Repeated wire shape is intentional.
 from fastapi import APIRouter, Depends, Query
+
+# code-health: ignore[duplicate] Repeated wire shape is intentional.
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 

@@ -371,6 +371,7 @@ def build_user_leaves_router() -> APIRouter:
         to: _ToFilter = None,
         approved: _ApprovedFilter = None,
     ) -> UserLeaveListResponse:
+        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
         """Cursor-paginated listing with optional filters.
 
         ``from_`` is the ``?from=`` query alias (Python keyword

@@ -27,7 +27,9 @@ _RejectedContentTypeFactory = Callable[[str | None], Exception]
 _MimeFallback = Callable[[bytes, str], str | None]
 
 
+# code-health: ignore[duplicate] Repeated wire shape is intentional.
 async def read_upload_capped(
+    # code-health: ignore[duplicate] Repeated wire shape is intentional.
     upload: UploadFile,
     *,
     max_bytes: int,

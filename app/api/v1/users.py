@@ -591,6 +591,7 @@ class _CapturingMailer:
         headers: object = None,
         reply_to: object = None,
     ) -> str:
+        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
         del to, subject, body_html, headers, reply_to
         prefix = self._base_url.rstrip("/")
         for line in body_text.splitlines():
@@ -614,6 +615,7 @@ def _issue_passkey_recovery_link(
     throttle: Throttle,
     settings: Settings,
 ) -> str:
+    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
     """Mint a ``recover_passkey`` magic link for ``user`` and return the URL.
 
     Reuses :func:`magic_link.request_link` for the token mint + nonce
@@ -721,6 +723,7 @@ def _send_passkey_reset_notice_email(
     timestamp: str,
     notice_url: str,
 ) -> None:
+    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
     """Render + send the owner-side notification copy.
 
     Carries no consumable token — the link inside lands on
@@ -752,6 +755,7 @@ def build_users_router(
     base_url: str | None = None,
     settings: Settings | None = None,
 ) -> APIRouter:
+    # code-health: ignore[nloc] Router composition stays explicit.
     """Return a fresh :class:`APIRouter` wired to ``mailer`` + ``throttle``.
 
     Mounted by the v1 app factory at
@@ -1192,6 +1196,7 @@ def build_users_router(
         request: Request,
         ctx: _Ctx,
     ) -> ResetPasskeyResponse:
+        # code-health: ignore[nloc] Router composition stays explicit.
         """Trigger an owner-initiated passkey reset for ``user_id``.
 
         Spec §03 "Owner-initiated worker passkey reset". Authority

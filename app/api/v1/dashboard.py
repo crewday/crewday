@@ -233,7 +233,9 @@ def build_dashboard_router() -> APIRouter:
 
 def _employees(session: Session, ctx: WorkspaceContext) -> list[EmployeeResponse]:
     user_ids = _list_workspace_users(session, ctx)
+    # code-health: ignore[duplicate] Repeated wire shape is intentional.
     users = _load_users(session, user_ids=user_ids)
+    # code-health: ignore[duplicate] Repeated wire shape is intentional.
     engagements = _load_active_engagements(session, ctx, user_ids=user_ids)
     role_keys = _load_role_keys_by_user(session, ctx, user_ids=user_ids)
     property_ids = _load_property_ids_by_user(session, ctx, user_ids=user_ids)

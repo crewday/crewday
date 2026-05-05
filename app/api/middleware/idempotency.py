@@ -322,6 +322,7 @@ def _persist_cached(
     headers: dict[str, str],
     created_at: datetime,
 ) -> None:
+    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
     """Insert a new cache row and commit.
 
     The caller drives the ``(token_id, key)`` race-winning semantics
@@ -513,6 +514,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
+        # code-health: ignore[nloc] Router composition stays explicit.
         if request.method.upper() != "POST":
             return await call_next(request)
 

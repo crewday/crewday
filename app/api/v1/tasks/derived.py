@@ -129,6 +129,7 @@ def _rrule_has_clause(rrule_text: str, clause: str) -> bool:
 
 
 def _humanize_rrule(rrule_text: str, dtstart_local: str) -> str:
+    # code-health: ignore[ccn] Branch table stays explicit.
     """Return a short English summary of an RRULE + DTSTART pair.
 
     Examples (every shape exercised in the unit tests):

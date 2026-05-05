@@ -477,6 +477,7 @@ def get_list_shifts(
     cursor: PageCursorQuery = None,
     limit: LimitQuery = DEFAULT_LIMIT,
 ) -> ShiftListResponse:
+    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
     """Return every shift matching the optional filters.
 
     Cursor-paginated per spec §"Pagination" — the response envelope

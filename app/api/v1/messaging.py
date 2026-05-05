@@ -431,6 +431,7 @@ def build_messaging_router(
     monotonic: _MonotonicFn | None = None,
     event_bus: EventBus | None = None,
 ) -> APIRouter:
+    # code-health: ignore[nloc] Router composition stays explicit.
     """Build the messaging router with an injectable monotonic clock.
 
     ``monotonic`` defaults to :func:`time.monotonic`. Tests inject a

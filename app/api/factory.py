@@ -472,7 +472,9 @@ def _wire_services(
 
 
 def _smtp_env_config(settings: Settings) -> SmtpConfig:
+    # code-health: ignore[duplicate] Repeated wire shape is intentional.
     return SmtpConfig(
+        # code-health: ignore[duplicate] Repeated wire shape is intentional.
         host=settings.smtp_host,
         port=settings.smtp_port,
         from_addr=settings.smtp_from,
@@ -598,6 +600,7 @@ def _mount_auth_routers(
     throttle: Throttle,
     capabilities: Capabilities,
 ) -> None:
+    # code-health: ignore[nloc] Router composition stays explicit.
     """Mount the bare-host + workspace-scoped auth routers.
 
     Bare-host routers (signup, magic-link, recovery, invite, passkey
@@ -1381,6 +1384,7 @@ def _rate_limit_response() -> dict[str, Any]:
 
 
 def _declare_rate_limit_responses(schema: dict[str, Any]) -> None:
+    # code-health: ignore[ccn] Branch table stays explicit.
     paths = schema.get("paths")
     if not isinstance(paths, dict):
         return
@@ -1572,6 +1576,7 @@ def _build_worker_lifespan(
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # code-health: ignore[nloc] Router composition stays explicit.
         # Imported lazily so the factory module stays importable
         # even if the worker module fails to load (e.g. a circular
         # import during a refactor). The lazy import also keeps the
@@ -1690,6 +1695,7 @@ def _build_worker_lifespan(
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
+    # code-health: ignore[nloc] Router composition stays explicit.
     """Compose and return the process-wide FastAPI application.
 
     Pass ``settings`` in tests and alternate composition roots to

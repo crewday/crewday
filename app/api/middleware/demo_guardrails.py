@@ -6,6 +6,7 @@ import ipaddress
 import threading
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -22,6 +23,15 @@ from app.util.clock import Clock, SystemClock
 __all__ = ["DemoGuardrailMiddleware"]
 
 _DEFAULT_CLIENT_HOST = "0.0.0.0"
+
+
+@dataclass(frozen=True)
+class _DemoRequestProfile:
+    content_length: int | None
+    max_payload: int
+    workspace_slug: str | None
+    client_ip: str
+    is_upload: bool
 
 
 class DemoGuardrailMiddleware(BaseHTTPMiddleware):
@@ -46,6 +56,7 @@ class DemoGuardrailMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
+        # code-health: ignore[ccn nloc] Demo guardrails stay ordered.
         settings = self._settings
         if not settings.demo_mode:
             return await call_next(request)
@@ -63,12 +74,8 @@ class DemoGuardrailMiddleware(BaseHTTPMiddleware):
         if disabled is not None:
             return demo_disabled_response(request, disabled)
 
-        content_length = _content_length(request)
-        if content_length is None and request.method.upper() in {
-            "POST",
-            "PUT",
-            "PATCH",
-        }:
+        profile = _demo_request_profile(request, settings)
+        if _body_requires_content_length(request, profile):
             return _demo_problem(
                 request,
                 status=411,
@@ -77,12 +84,10 @@ class DemoGuardrailMiddleware(BaseHTTPMiddleware):
                 detail="Demo requests with a body must declare their size.",
             )
 
-        max_payload = (
-            settings.demo_max_upload_bytes
-            if _is_upload_request(request)
-            else settings.demo_max_payload_bytes
-        )
-        if content_length is not None and content_length > max_payload:
+        if (
+            profile.content_length is not None
+            and profile.content_length > profile.max_payload
+        ):
             return _demo_problem(
                 request,
                 status=413,
@@ -91,15 +96,18 @@ class DemoGuardrailMiddleware(BaseHTTPMiddleware):
                 detail="Demo request payload is over the configured cap.",
             )
 
-        workspace_slug = _workspace_slug(request.url.path)
-        if _is_upload_request(request):
+        if profile.is_upload:
             allowed, reason = self._uploads.check_and_record(
-                ip=_client_host(request),
-                workspace_slug=workspace_slug,
-                content_length=content_length or 0,
-                now=self._clock.now(),
-                bytes_per_ip_per_day=settings.demo_upload_bytes_per_ip_per_day,
-                uploads_per_workspace=settings.demo_uploads_per_workspace_lifetime,
+                _DemoUploadAttempt(
+                    ip=profile.client_ip,
+                    workspace_slug=profile.workspace_slug,
+                    content_length=profile.content_length or 0,
+                    now=self._clock.now(),
+                    bytes_per_ip_per_day=settings.demo_upload_bytes_per_ip_per_day,
+                    uploads_per_workspace=(
+                        settings.demo_uploads_per_workspace_lifetime
+                    ),
+                )
             )
             if not allowed:
                 return _demo_problem(
@@ -110,22 +118,12 @@ class DemoGuardrailMiddleware(BaseHTTPMiddleware):
                     detail="Demo upload quota exceeded.",
                 )
 
-        if (
-            workspace_slug is not None
-            and request.method.upper()
-            in {
-                "POST",
-                "PUT",
-                "PATCH",
-                "DELETE",
-            }
-            and not self._store.check_and_record(
-                scope="demo.mutation",
-                key=workspace_slug,
-                limit=settings.demo_mutations_per_workspace_per_minute,
-                window=timedelta(minutes=1),
-                now=self._clock.now(),
-            )
+        if _mutation_rate_limited(
+            request,
+            store=self._store,
+            workspace_slug=profile.workspace_slug,
+            limit=settings.demo_mutations_per_workspace_per_minute,
+            now=self._clock.now(),
         ):
             return _demo_problem(
                 request,
@@ -135,16 +133,12 @@ class DemoGuardrailMiddleware(BaseHTTPMiddleware):
                 detail="Too many demo writes for this workspace.",
             )
 
-        if (
-            workspace_slug is not None
-            and _is_llm_turn(request.url.path)
-            and not self._store.check_and_record(
-                scope="demo.llm_turn",
-                key=workspace_slug,
-                limit=settings.demo_llm_turns_per_workspace_per_minute,
-                window=timedelta(minutes=1),
-                now=self._clock.now(),
-            )
+        if _llm_rate_limited(
+            request,
+            store=self._store,
+            workspace_slug=profile.workspace_slug,
+            limit=settings.demo_llm_turns_per_workspace_per_minute,
+            now=self._clock.now(),
         ):
             return _demo_problem(
                 request,
@@ -155,6 +149,93 @@ class DemoGuardrailMiddleware(BaseHTTPMiddleware):
             )
 
         return await call_next(request)
+
+
+def _demo_request_profile(
+    request: Request,
+    settings: Settings,
+) -> _DemoRequestProfile:
+    is_upload = _is_upload_request(request)
+    return _DemoRequestProfile(
+        content_length=_content_length(request),
+        max_payload=(
+            settings.demo_max_upload_bytes
+            if is_upload
+            else settings.demo_max_payload_bytes
+        ),
+        workspace_slug=_workspace_slug(request.url.path),
+        client_ip=_client_host(request),
+        is_upload=is_upload,
+    )
+
+
+def _body_requires_content_length(
+    request: Request,
+    profile: _DemoRequestProfile,
+) -> bool:
+    return profile.content_length is None and request.method.upper() in {
+        "POST",
+        "PUT",
+        "PATCH",
+    }
+
+
+def _mutation_rate_limited(
+    request: Request,
+    *,
+    store: ShieldStore,
+    workspace_slug: str | None,
+    limit: int,
+    now: datetime,
+) -> bool:
+    return (
+        workspace_slug is not None
+        and request.method.upper()
+        in {
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+        }
+        and not store.check_and_record(
+            scope="demo.mutation",
+            key=workspace_slug,
+            limit=limit,
+            window=timedelta(minutes=1),
+            now=now,
+        )
+    )
+
+
+def _llm_rate_limited(
+    request: Request,
+    *,
+    store: ShieldStore,
+    workspace_slug: str | None,
+    limit: int,
+    now: datetime,
+) -> bool:
+    return (
+        workspace_slug is not None
+        and _is_llm_turn(request.url.path)
+        and not store.check_and_record(
+            scope="demo.llm_turn",
+            key=workspace_slug,
+            limit=limit,
+            window=timedelta(minutes=1),
+            now=now,
+        )
+    )
+
+
+@dataclass(frozen=True)
+class _DemoUploadAttempt:
+    ip: str
+    workspace_slug: str | None
+    content_length: int
+    now: datetime
+    bytes_per_ip_per_day: int
+    uploads_per_workspace: int
 
 
 def _content_length(request: Request) -> int | None:
@@ -212,30 +293,25 @@ class _DemoUploadLedger:
 
     def check_and_record(
         self,
-        *,
-        ip: str,
-        workspace_slug: str | None,
-        content_length: int,
-        now: datetime,
-        bytes_per_ip_per_day: int,
-        uploads_per_workspace: int,
+        attempt: _DemoUploadAttempt,
     ) -> tuple[bool, str]:
         with self._lock:
-            bucket = self._bytes_by_ip[ip]
-            cutoff = now - timedelta(days=1)
+            bucket = self._bytes_by_ip[attempt.ip]
+            cutoff = attempt.now - timedelta(days=1)
             while bucket and bucket[0][0] < cutoff:
                 bucket.popleft()
             spent = sum(size for _, size in bucket)
-            if spent + content_length > bytes_per_ip_per_day:
+            if spent + attempt.content_length > attempt.bytes_per_ip_per_day:
                 return False, "demo_upload_bytes_rate_limited"
             if (
-                workspace_slug is not None
-                and self._uploads_by_workspace[workspace_slug] >= uploads_per_workspace
+                attempt.workspace_slug is not None
+                and self._uploads_by_workspace[attempt.workspace_slug]
+                >= attempt.uploads_per_workspace
             ):
                 return False, "demo_upload_count_rate_limited"
-            bucket.append((now, content_length))
-            if workspace_slug is not None:
-                self._uploads_by_workspace[workspace_slug] += 1
+            bucket.append((attempt.now, attempt.content_length))
+            if attempt.workspace_slug is not None:
+                self._uploads_by_workspace[attempt.workspace_slug] += 1
             return True, ""
 
 

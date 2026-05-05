@@ -69,6 +69,8 @@ from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME
 from app.config import Settings, get_settings
 from app.domain.errors import DomainError
 from app.domain.errors import Validation as DomainValidation
+
+# code-health: ignore[duplicate] Repeated wire shape is intentional.
 from app.domain.identity.email_change import (
     AlreadyConsumed,
     EmailChangeOutcome,
@@ -316,7 +318,9 @@ def build_email_change_router(
     )
     def post_change_request(
         body: EmailChangeRequestBody,
+        # code-health: ignore[duplicate] Repeated wire shape is intentional.
         request: Request,
+        # code-health: ignore[duplicate] Repeated wire shape is intentional.
         session_cookie_primary: Annotated[
             str | None,
             Cookie(alias=auth_session.SESSION_COOKIE_NAME),

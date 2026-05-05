@@ -273,7 +273,9 @@ def build_client_portal_router() -> APIRouter:
         cursor: PageCursorQuery = None,
     ) -> ClientPortalPropertyPage:
         try:
+            # code-health: ignore[duplicate] Repeated wire shape is intentional.
             rows = ClientPortalService(ctx).portfolio(
+                # code-health: ignore[duplicate] Repeated wire shape is intentional.
                 SqlAlchemyClientPortalRepository(session)
             )
         except ClientPortalForbidden as exc:

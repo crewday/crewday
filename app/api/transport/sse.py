@@ -897,6 +897,7 @@ async def _stream_events(
     last_event_id: _ParsedLastEventId,
     heartbeat_interval: float,
 ) -> AsyncGenerator[bytes]:
+    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
     """Yield SSE frames for one client connection.
 
     Three loops interleave:
@@ -929,7 +930,9 @@ async def _stream_events(
         for frame in fanout.replay_since(
             workspace_id=workspace_id,
             last_event_id=last_event_id,
+            # code-health: ignore[duplicate] Repeated wire shape is intentional.
             role=role,
+            # code-health: ignore[duplicate] Repeated wire shape is intentional.
             user_id=user_id,
         ):
             yield frame

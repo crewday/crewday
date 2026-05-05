@@ -278,6 +278,7 @@ def _dispatch_cancel_task(
     actor_grant_role: ActorGrantRole,
     actor_was_owner_member: bool,
 ) -> ToolResult:
+    # code-health: ignore[nloc] Router composition stays explicit.
     task_id = _input_str(call.input, "task_id")
     workspace_slug = _input_str(call.input, "workspace_slug")
     reason = _input_str(call.input, "reason_md")

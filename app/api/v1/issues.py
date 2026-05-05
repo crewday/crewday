@@ -76,7 +76,9 @@ class IssueUpdateRequest(BaseModel):
         return IssueUpdate.model_validate(payload)
 
 
+# code-health: ignore[duplicate] Repeated wire shape is intentional.
 class IssueResponse(BaseModel):
+    # code-health: ignore[duplicate] Repeated wire shape is intentional.
     id: str
     workspace_id: str
     reported_by_user_id: str

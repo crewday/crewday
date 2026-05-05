@@ -304,6 +304,7 @@ def _revoke_personal_for_user(
 
 
 def build_me_tokens_router() -> APIRouter:
+    # code-health: ignore[nloc] Router composition stays explicit.
     """Return a fresh :class:`APIRouter` for the identity-scoped PAT surface.
 
     Factory shape matches every other auth router in the package so
@@ -353,6 +354,7 @@ def build_me_tokens_router() -> APIRouter:
             Cookie(alias=DEV_SESSION_COOKIE_NAME),
         ] = None,
     ) -> MintPersonalTokenResponse:
+        # code-health: ignore[nloc] Router composition stays explicit.
         """Create a PAT for the session user, limited to the ``me:*`` scopes."""
         user_id = _resolve_session_user(
             session,

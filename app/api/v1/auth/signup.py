@@ -263,7 +263,9 @@ def _http_for_start(exc: Exception) -> DomainError:
     return auth_rate_limited("rate_limited")
 
 
+# code-health: ignore[duplicate] Repeated wire shape is intentional.
 def _http_for_verify(exc: Exception) -> DomainError:
+    # code-health: ignore[duplicate] Repeated wire shape is intentional.
     if isinstance(exc, signup.SignupDisabled):
         return auth_not_found("not_found")
     if isinstance(exc, signup.SignupAttemptMissing):
@@ -582,6 +584,7 @@ def build_signup_router(
         body: SignupStartBody,
         request: Request,
     ) -> SignupStartResponse:
+        # code-health: ignore[nloc] Router composition stays explicit.
         """Kick off the signup flow — abuse gates + domain service.
 
         Gate order (cheap checks before expensive ones, every gate

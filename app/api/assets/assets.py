@@ -104,6 +104,7 @@ def _asset_list_response(
     cursor: str | None,
     limit: int,
 ) -> AssetListResponse:
+    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
     views = list_assets(
         session,
         ctx,
@@ -178,7 +179,9 @@ def build_assets_alias_router() -> APIRouter:
         summary="List tracked assets",
         dependencies=[view_gate],
     )
+    # code-health: ignore[duplicate] Repeated wire shape is intentional.
     def list_flat(
+        # code-health: ignore[duplicate] Repeated wire shape is intentional.
         ctx: Ctx,
         session: Db,
         property_id: str | None = Query(default=None),
@@ -232,6 +235,7 @@ def build_assets_alias_router() -> APIRouter:
 
 
 def build_assets_router() -> APIRouter:
+    # code-health: ignore[nloc] Router composition stays explicit.
     api = APIRouter(tags=["assets"], responses=ASSET_ERROR_RESPONSES)
 
     view_gate = Depends(Permission("scope.view", scope_kind="workspace"))

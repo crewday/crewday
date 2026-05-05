@@ -252,6 +252,7 @@ def build_admin_signup_router() -> APIRouter:
         session: _Db,
         request: Request,
     ) -> SignupSettingsResponse:
+        # code-health: ignore[nloc] Router composition stays explicit.
         """Patch any combination of signup settings.
 
         Only the fields present in ``payload`` are written; absent

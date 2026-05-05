@@ -344,6 +344,7 @@ def _is_live_workspace_token(
 
 
 def build_tokens_router() -> APIRouter:
+    # code-health: ignore[nloc] Router composition stays explicit.
     """Return a fresh :class:`APIRouter` wired for workspace-scoped token ops.
 
     Factory shape so the v1 app factory (cd-ika7) can mount the

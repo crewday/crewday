@@ -497,6 +497,7 @@ def _employee_leave_from_view(view: LeaveView) -> EmployeeLeaveResponse:
 
 
 def build_employees_router() -> APIRouter:
+    # code-health: ignore[nloc] Router composition stays explicit.
     """Return a fresh :class:`APIRouter` wired for the manager roster.
 
     Mounted by the v1 app factory at

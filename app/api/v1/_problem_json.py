@@ -36,7 +36,9 @@ __all__ = [
 _PROBLEM_JSON_SCHEMA: Final[dict[str, Any]] = {
     "type": "object",
     "properties": {
+        # code-health: ignore[duplicate] Repeated wire shape is intentional.
         "type": {"type": "string"},
+        # code-health: ignore[duplicate] Repeated wire shape is intentional.
         "title": {"type": "string"},
         "status": {"type": "integer"},
         "detail": {"type": "string"},

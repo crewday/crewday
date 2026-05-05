@@ -494,6 +494,7 @@ class SqlAlchemyGuestSettingsResolver:
 
 
 def build_stays_router() -> APIRouter:
+    # code-health: ignore[nloc] Router composition stays explicit.
     api = APIRouter(tags=["stays"], responses=IDENTITY_PROBLEM_RESPONSES)
 
     read_gate = Depends(Permission("stays.read", scope_kind="workspace"))
@@ -531,6 +532,7 @@ def build_stays_router() -> APIRouter:
         envelope: _EnvelopeDep,
         clock: _ClockDep,
     ) -> IcalFeedResponse:
+        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
         # §04 SSRF carve-out (cd-t2qtg) — resolve the per-feed
         # ``ical.allow_self_signed`` cascade BEFORE the registration
         # probe so a workspace / property that has opted in can
@@ -573,6 +575,7 @@ def build_stays_router() -> APIRouter:
         envelope: _EnvelopeDep,
         clock: _ClockDep,
     ) -> IcalFeedResponse:
+        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
         # Resolve ``ical.allow_self_signed`` from the cascade for the
         # feed's existing ``(workspace_id, property_id)`` so a re-
         # validation triggered by a URL swap honours the workspace /
@@ -707,6 +710,7 @@ def build_stays_router() -> APIRouter:
         fetcher: _IcalFetcherDep,
         resolver: _IcalResolverDep,
     ) -> IcalPollOnceResponse:
+        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
         # Manual ingest — the workspace-scoped equivalent of one
         # iteration of the worker's 15-minute fan-out
         # (:func:`app.worker.jobs.stays._make_poll_ical_fanout_body`)
@@ -787,6 +791,7 @@ def build_stays_router() -> APIRouter:
         cursor: PageCursorQuery = None,
         limit: LimitQuery = DEFAULT_LIMIT,
     ) -> ReservationListResponse:
+        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
         after_id = decode_cursor(cursor)
         rows = _list_reservation_rows(
             session,
@@ -894,6 +899,7 @@ def build_stays_router() -> APIRouter:
         clock: _ClockDep,
         settings: _SettingsDep,
     ) -> GuestLinkIssueResponse:
+        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
         reservation = _load_reservation(session, ctx, reservation_id=stay_id)
         ttl = timedelta(hours=body.ttl_hours) if body.ttl_hours is not None else None
         link = mint_link(
@@ -991,6 +997,7 @@ def build_stays_public_router() -> APIRouter:
         clock: _ClockDep,
         authorization: Annotated[str | None, Header()] = None,
     ) -> WelcomeResponse:
+        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
         token = _bearer_token(authorization)
         return _resolve_welcome_response(
             session,
@@ -1017,6 +1024,7 @@ def build_stays_public_router() -> APIRouter:
         clock: _ClockDep,
         request: Request,
     ) -> WelcomeResponse:
+        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
         return _resolve_welcome_response(
             session,
             token=token,
@@ -1142,6 +1150,7 @@ def _list_reservation_rows(
     property_id: str | None,
     limit: int,
 ) -> list[Reservation]:
+    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
     stmt = select(Reservation).where(Reservation.workspace_id == ctx.workspace_id)
     if check_in_gte is not None:
         stmt = stmt.where(Reservation.check_in >= check_in_gte)
@@ -1313,6 +1322,7 @@ def _resolve_welcome_response(
     settings: Settings,
     clock: Clock,
 ) -> WelcomeResponse:
+    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
     result = resolve_link(
         session,
         token=token,

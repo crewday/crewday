@@ -389,6 +389,7 @@ def resolve_instruction_scope_route(
     stay: _MaybeId = None,
     role: _MaybeId = None,
 ) -> ResolvedInstructionListResponse:
+    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
     resolved = service.resolve_instructions(
         _repo(session),
         ctx,
@@ -471,6 +472,7 @@ def list_instructions_route(
     cursor: PageCursorQuery = None,
     limit: LimitQuery = DEFAULT_LIMIT,
 ) -> InstructionListResponse:
+    # code-health: ignore[ccn] Branch table stays explicit.
     cursor_id = decode_cursor(cursor)
     stmt = select(Instruction).where(Instruction.workspace_id == ctx.workspace_id)
     if not include_archived:

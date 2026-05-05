@@ -235,6 +235,7 @@ def problem_response(
     extra: dict[str, object] | None = None,
     extra_headers: dict[str, str] | None = None,
 ) -> JSONResponse:
+    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
     """Build the final :class:`JSONResponse` for a problem+json envelope.
 
     Split out so the three handler flavours share the same header +

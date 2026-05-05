@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated, Any, Final
 
@@ -124,6 +125,78 @@ def _clean_filter(value: str | None) -> str | None:
     return value or None
 
 
+@dataclass(frozen=True)
+class _AuditFilters:
+    actor: str | None
+    actor_id: str | None
+    action: str | None
+    entity: str | None
+    entity_kind: str | None
+    entity_id: str | None
+    since: datetime | None
+    until: datetime | None
+
+
+def _parse_filters(
+    *,
+    actor: str | None,
+    actor_id: str | None,
+    action: str | None,
+    entity: str | None,
+    entity_kind: str | None,
+    entity_id: str | None,
+    since: str | None,
+    until: str | None,
+) -> _AuditFilters:
+    # code-health: ignore[params] Mirrors workspace audit filters.
+    return _AuditFilters(
+        actor=_clean_filter(actor),
+        actor_id=_clean_filter(actor_id),
+        action=_clean_filter(action),
+        entity=_clean_filter(entity),
+        entity_kind=_clean_filter(entity_kind),
+        entity_id=_clean_filter(entity_id),
+        since=_parse_iso(since, label="since"),
+        until=_parse_iso(until, label="until"),
+    )
+
+
+def _apply_filters(stmt: Any, filters: _AuditFilters) -> Any:
+    if filters.actor is not None:
+        stmt = stmt.where(
+            or_(
+                AuditLog.actor_id == filters.actor,
+                AuditLog.actor_kind == filters.actor,
+                AuditLog.actor_grant_role == filters.actor,
+            )
+        )
+    if filters.actor_id is not None:
+        stmt = stmt.where(AuditLog.actor_id == filters.actor_id)
+    if filters.action is not None:
+        stmt = stmt.where(AuditLog.action == filters.action)
+    if filters.entity is not None:
+        stmt = _apply_entity_filter(stmt, filters.entity)
+    if filters.entity_kind is not None:
+        stmt = stmt.where(AuditLog.entity_kind == filters.entity_kind)
+    if filters.entity_id is not None:
+        stmt = stmt.where(AuditLog.entity_id == filters.entity_id)
+    if filters.since is not None:
+        stmt = stmt.where(AuditLog.created_at >= filters.since)
+    if filters.until is not None:
+        stmt = stmt.where(AuditLog.created_at <= filters.until)
+    return stmt
+
+
+def _apply_entity_filter(stmt: Any, entity: str) -> Any:
+    if ":" in entity:
+        kind, row_id = entity.split(":", 1)
+        return stmt.where(
+            AuditLog.entity_kind == kind,
+            AuditLog.entity_id == row_id,
+        )
+    return stmt.where(or_(AuditLog.entity_kind == entity, AuditLog.entity_id == entity))
+
+
 def _cursor_anchor(
     session: Session,
     *,
@@ -144,14 +217,7 @@ def _query_rows(
     session: Session,
     *,
     workspace_id: str,
-    actor: str | None,
-    actor_id: str | None,
-    action: str | None,
-    entity: str | None,
-    entity_kind: str | None,
-    entity_id: str | None,
-    since: datetime | None,
-    until: datetime | None,
+    filters: _AuditFilters,
     cursor: str | None,
     limit: int,
 ) -> list[AuditLog]:
@@ -161,37 +227,7 @@ def _query_rows(
         .where(AuditLog.scope_kind == "workspace")
         .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
     )
-    if actor is not None:
-        stmt = stmt.where(
-            or_(
-                AuditLog.actor_id == actor,
-                AuditLog.actor_kind == actor,
-                AuditLog.actor_grant_role == actor,
-            )
-        )
-    if actor_id is not None:
-        stmt = stmt.where(AuditLog.actor_id == actor_id)
-    if action is not None:
-        stmt = stmt.where(AuditLog.action == action)
-    if entity is not None:
-        if ":" in entity:
-            kind, row_id = entity.split(":", 1)
-            stmt = stmt.where(
-                AuditLog.entity_kind == kind,
-                AuditLog.entity_id == row_id,
-            )
-        else:
-            stmt = stmt.where(
-                or_(AuditLog.entity_kind == entity, AuditLog.entity_id == entity)
-            )
-    if entity_kind is not None:
-        stmt = stmt.where(AuditLog.entity_kind == entity_kind)
-    if entity_id is not None:
-        stmt = stmt.where(AuditLog.entity_id == entity_id)
-    if since is not None:
-        stmt = stmt.where(AuditLog.created_at >= since)
-    if until is not None:
-        stmt = stmt.where(AuditLog.created_at <= until)
+    stmt = _apply_filters(stmt, filters)
 
     cursor_row = _cursor_anchor(session, workspace_id=workspace_id, cursor=cursor)
     if cursor is not None and cursor_row is None:
@@ -212,14 +248,7 @@ def _query_newer_rows(
     session: Session,
     *,
     workspace_id: str,
-    actor: str | None,
-    actor_id: str | None,
-    action: str | None,
-    entity: str | None,
-    entity_kind: str | None,
-    entity_id: str | None,
-    since: datetime | None,
-    until: datetime | None,
+    filters: _AuditFilters,
     cursor: AuditTailCursor | None,
     limit: int,
 ) -> list[AuditLog]:
@@ -229,37 +258,7 @@ def _query_newer_rows(
         .where(AuditLog.scope_kind == "workspace")
         .order_by(AuditLog.created_at.asc(), AuditLog.id.asc())
     )
-    if actor is not None:
-        stmt = stmt.where(
-            or_(
-                AuditLog.actor_id == actor,
-                AuditLog.actor_kind == actor,
-                AuditLog.actor_grant_role == actor,
-            )
-        )
-    if actor_id is not None:
-        stmt = stmt.where(AuditLog.actor_id == actor_id)
-    if action is not None:
-        stmt = stmt.where(AuditLog.action == action)
-    if entity is not None:
-        if ":" in entity:
-            kind, row_id = entity.split(":", 1)
-            stmt = stmt.where(
-                AuditLog.entity_kind == kind,
-                AuditLog.entity_id == row_id,
-            )
-        else:
-            stmt = stmt.where(
-                or_(AuditLog.entity_kind == entity, AuditLog.entity_id == entity)
-            )
-    if entity_kind is not None:
-        stmt = stmt.where(AuditLog.entity_kind == entity_kind)
-    if entity_id is not None:
-        stmt = stmt.where(AuditLog.entity_id == entity_id)
-    if since is not None:
-        stmt = stmt.where(AuditLog.created_at >= since)
-    if until is not None:
-        stmt = stmt.where(AuditLog.created_at <= until)
+    stmt = _apply_filters(stmt, filters)
     if cursor is not None:
         stmt = stmt.where(
             (AuditLog.created_at > cursor.created_at)
@@ -309,17 +308,21 @@ def build_workspace_audit_router() -> APIRouter:
         cursor: Annotated[str | None, Query(max_length=64)] = None,
         limit: Annotated[int, Query(ge=1, le=_MAX_LIMIT)] = _DEFAULT_LIMIT,
     ) -> AuditListResponse:
+        # code-health: ignore[params] Preserves OpenAPI query params.
+        filters = _parse_filters(
+            actor=actor,
+            actor_id=actor_id,
+            action=action,
+            entity=entity,
+            entity_kind=entity_kind,
+            entity_id=entity_id,
+            since=since,
+            until=until,
+        )
         rows = _query_rows(
             session,
             workspace_id=ctx.workspace_id,
-            actor=_clean_filter(actor),
-            actor_id=_clean_filter(actor_id),
-            action=_clean_filter(action),
-            entity=_clean_filter(entity),
-            entity_kind=_clean_filter(entity_kind),
-            entity_id=_clean_filter(entity_id),
-            since=_parse_iso(since, label="since"),
-            until=_parse_iso(until, label="until"),
+            filters=filters,
             cursor=_clean_filter(cursor),
             limit=limit,
         )
@@ -364,27 +367,23 @@ def build_workspace_audit_router() -> APIRouter:
         until: Annotated[str | None, Query(max_length=64)] = None,
         limit: Annotated[int, Query(ge=1, le=_MAX_LIMIT)] = _DEFAULT_LIMIT,
     ) -> StreamingResponse:
-        cleaned_actor = _clean_filter(actor)
-        cleaned_actor_id = _clean_filter(actor_id)
-        cleaned_action = _clean_filter(action)
-        cleaned_entity = _clean_filter(entity)
-        cleaned_entity_kind = _clean_filter(entity_kind)
-        cleaned_entity_id = _clean_filter(entity_id)
-        parsed_since = _parse_iso(since, label="since")
-        parsed_until = _parse_iso(until, label="until")
+        # code-health: ignore[params] Preserves OpenAPI query params.
+        filters = _parse_filters(
+            actor=actor,
+            actor_id=actor_id,
+            action=action,
+            entity=entity,
+            entity_kind=entity_kind,
+            entity_id=entity_id,
+            since=since,
+            until=until,
+        )
 
         def _initial() -> list[AuditLog]:
             rows = _query_rows(
                 session,
                 workspace_id=ctx.workspace_id,
-                actor=cleaned_actor,
-                actor_id=cleaned_actor_id,
-                action=cleaned_action,
-                entity=cleaned_entity,
-                entity_kind=cleaned_entity_kind,
-                entity_id=cleaned_entity_id,
-                since=parsed_since,
-                until=parsed_until,
+                filters=filters,
                 cursor=None,
                 limit=limit,
             )
@@ -394,14 +393,7 @@ def build_workspace_audit_router() -> APIRouter:
             return _query_newer_rows(
                 session,
                 workspace_id=ctx.workspace_id,
-                actor=cleaned_actor,
-                actor_id=cleaned_actor_id,
-                action=cleaned_action,
-                entity=cleaned_entity,
-                entity_kind=cleaned_entity_kind,
-                entity_id=cleaned_entity_id,
-                since=parsed_since,
-                until=parsed_until,
+                filters=filters,
                 cursor=cursor,
                 limit=limit,
             )

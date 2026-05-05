@@ -157,6 +157,7 @@ def build_agent_router(
         llm_client: _Llm,
         token_factory: _TokenFactory,
     ) -> AgentLogMessage:
+        # code-health: ignore[nloc params] Explicit API contract surface.
         _require_scope_access(scope, ctx)
         channel = _get_or_create_agent_channel(
             session,

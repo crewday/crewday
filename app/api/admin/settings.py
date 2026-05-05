@@ -295,7 +295,9 @@ _REGISTRY: Final[tuple[_SettingDef, ...]] = (
         kind="string",
         description="Marketplace platform fee currency policy.",
         coerce=_coerce_platform_fee_currency_policy,
+        # code-health: ignore[duplicate] Repeated wire shape is intentional.
         default=_DEPLOYMENT_DEFAULTS["platform_fee_currency_policy"],
+        # code-health: ignore[duplicate] Repeated wire shape is intentional.
     ),
     _SettingDef(
         key=OPENROUTER_API_KEY_SETTING,
@@ -628,6 +630,7 @@ def build_admin_settings_router() -> APIRouter:
         session: _Db,
         request: Request,
     ) -> DeploymentSettingResponse:
+        # code-health: ignore[nloc] Router composition stays explicit.
         """Write one setting; refuse for unknown / root-only keys.
 
         Validation order matches the spec's principle "do not

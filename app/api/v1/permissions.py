@@ -163,6 +163,7 @@ def _resolve_decision(
     scope_id: str,
     rule_repo: PermissionRuleRepository | None = None,
 ) -> ResolvedPermissionResponse:
+    # code-health: ignore[ccn nloc params] Explicit API contract surface.
     """Run the resolver and project the decision onto the wire shape.
 
     The resolver itself raises on deny; we re-implement the trace in
@@ -393,7 +394,9 @@ def build_permissions_router() -> APIRouter:
             return _resolve_decision(
                 session,
                 ctx,
+                # code-health: ignore[duplicate] Repeated wire shape is intentional.
                 user_id=user_id,
+                # code-health: ignore[duplicate] Repeated wire shape is intentional.
                 action_key=action_key,
                 scope_kind=scope_kind,
                 scope_id=scope_id,

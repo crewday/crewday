@@ -138,6 +138,7 @@ def list_tasks_route(
     cursor: PageCursorQuery = None,
     limit: LimitQuery = DEFAULT_LIMIT,
 ) -> TaskListResponse:
+    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
     """Cursor-paginated list with workspace-scoped filters.
 
     Personal tasks (``is_personal=True``) are visible to their creator

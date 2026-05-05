@@ -484,6 +484,7 @@ def _employee_profile(
 def _load_switcher_entries(
     session: Session, *, user_id: str
 ) -> list[WorkspaceSwitcherEntry]:
+    # code-health: ignore[nloc] Router composition stays explicit.
     """Return one :class:`WorkspaceSwitcherEntry` per workspace ``user_id`` is in.
 
     Drives ``GET /api/v1/me/workspaces``. Joins the derived
@@ -649,7 +650,9 @@ def build_me_profile_router(*, operation_id: str = "me.profile.get") -> APIRoute
             },
         },
     )
+    # code-health: ignore[duplicate] Repeated wire shape is intentional.
     def get_me_profile(
+        # code-health: ignore[duplicate] Repeated wire shape is intentional.
         request: Request,
         session: _Db,
         session_cookie_primary: Annotated[

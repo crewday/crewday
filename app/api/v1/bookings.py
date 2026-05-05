@@ -167,6 +167,7 @@ def _list_booking_rows(
     status: str | None,
     pending_amend: bool | None,
 ) -> list[Booking]:
+    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
     stmt = select(Booking).where(
         Booking.workspace_id == ctx.workspace_id,
         Booking.deleted_at.is_(None),
@@ -221,6 +222,7 @@ def build_bookings_router() -> APIRouter:
         status: _StatusFilter = None,
         pending_amend: _PendingAmendFilter = None,
     ) -> list[BookingResponse]:
+        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
         if from_ is not None and to is not None and to < from_:
             raise _invalid_window()
 

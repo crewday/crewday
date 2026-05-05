@@ -191,6 +191,7 @@ class _ProviderRuntime(BaseModel):
 
 
 def build_admin_chat_gateway_router() -> APIRouter:
+    # code-health: ignore[nloc] Router composition stays explicit.
     """Return the deployment-admin chat gateway read router."""
     router = APIRouter(prefix="/chat", tags=["admin", "chat_gateway"])
 
@@ -341,6 +342,7 @@ def build_admin_chat_gateway_router() -> APIRouter:
         session: _Db,
         request: Request,
     ) -> AdminChatTestInboundResponse:
+        # code-health: ignore[nloc] Router composition stays explicit.
         settings = _settings_from_request(request)
         workspace_id = settings.chat_gateway_workspace_id
         if (

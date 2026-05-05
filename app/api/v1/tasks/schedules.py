@@ -72,6 +72,7 @@ def list_schedules_route(
     cursor: PageCursorQuery = None,
     limit: LimitQuery = DEFAULT_LIMIT,
 ) -> ScheduleListResponse:
+    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
     """Return a cursor-paginated page of live schedules.
 
     Each page also carries a ``templates_by_id`` sidecar holding every

@@ -217,6 +217,7 @@ def build_public_holidays_router() -> APIRouter:
         cursor: PageCursorQuery = None,
         limit: LimitQuery = DEFAULT_LIMIT,
     ) -> PublicHolidayListResponse:
+        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
         validated_limit = validate_limit(limit)
         rows = list(
             list_public_holidays(

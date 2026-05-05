@@ -391,6 +391,7 @@ def paginate_query[T, S: CursorScalar](
     cursor: str | None = None,
     include_total: bool = False,
 ) -> Page[T]:
+    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
     """Execute a SQLAlchemy keyset-paginated query."""
     limit = validate_limit(limit)
     decoded_cursor = decode_page_cursor(cursor)

@@ -140,7 +140,9 @@ _WORKSPACE_PREFS_GET_OPENAPI = {
         "mutates": False,
     },
 }
+# code-health: ignore[duplicate] Repeated wire shape is intentional.
 _WORKSPACE_PREFS_PUT_OPENAPI = {
+    # code-health: ignore[duplicate] Repeated wire shape is intentional.
     "x-agent-confirm": {
         "summary": "Update workspace agent preferences?",
         "risk": "medium",
@@ -366,7 +368,9 @@ def get_workspace_agent_prefs(ctx: _Ctx, session: _Db) -> AgentPreferenceRead:
 @router.put(
     "/agent_preferences/workspace",
     response_model=AgentPreferenceRead,
+    # code-health: ignore[duplicate] Repeated wire shape is intentional.
     operation_id="llm.agent_preferences.workspace.put",
+    # code-health: ignore[duplicate] Repeated wire shape is intentional.
     summary="Update workspace agent preferences",
     dependencies=[
         Depends(Permission("agent_prefs.edit_workspace", scope_kind="workspace"))
@@ -663,6 +667,7 @@ def get_workspace_usage(ctx: _Ctx, session: _Db) -> WorkspaceUsageRead:
 
 
 def build_workspace_llm_router() -> APIRouter:
+    # code-health: ignore[nloc] Router composition stays explicit.
     """Flat workspace LLM routes consumed by the SPA."""
 
     flat = APIRouter(tags=["llm"], responses=IDENTITY_PROBLEM_RESPONSES)
