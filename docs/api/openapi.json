@@ -24917,6 +24917,8 @@
         "description": "Request body for ``POST /signup/verify``.",
         "properties": {
           "token": {
+            "maxLength": 4096,
+            "minLength": 1,
             "title": "Token",
             "type": "string"
           }
@@ -24931,6 +24933,8 @@
         "additionalProperties": false,
         "properties": {
           "token": {
+            "maxLength": 4096,
+            "minLength": 1,
             "title": "Token",
             "type": "string"
           }

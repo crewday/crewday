@@ -23,7 +23,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from webauthn.helpers.structs import (
@@ -70,6 +70,32 @@ from app.domain.errors import CANONICAL_TYPE_BASE, DomainError
 from app.tenancy import InvalidSlug
 
 _PINNED = datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)
+
+
+class TestVerifyBodyTokenLength:
+    """``POST /signup/verify`` token bounds reject nuisance-size bodies early."""
+
+    def test_max_length_4096_accepts_boundary(self) -> None:
+        body = signup_api.VerifyBody(token="x" * 4096)
+        assert len(body.token) == 4096
+
+    def test_token_above_4096_raises_validation_error(self) -> None:
+        with pytest.raises(ValidationError) as excinfo:
+            signup_api.VerifyBody(token="x" * 4097)
+
+        errors = excinfo.value.errors()
+        assert len(errors) == 1
+        assert errors[0]["loc"] == ("token",)
+        assert errors[0]["type"] == "string_too_long"
+
+    def test_empty_token_raises_validation_error(self) -> None:
+        with pytest.raises(ValidationError) as excinfo:
+            signup_api.VerifyBody(token="")
+
+        errors = excinfo.value.errors()
+        assert len(errors) == 1
+        assert errors[0]["loc"] == ("token",)
+        assert errors[0]["type"] == "string_too_short"
 
 
 # cd-9slq reshaped :func:`app.auth.signup.start_signup` to return a

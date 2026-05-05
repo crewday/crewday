@@ -134,7 +134,7 @@ class SignupStartResponse(BaseModel):
 class VerifyBody(BaseModel):
     """Request body for ``POST /signup/verify``."""
 
-    token: str
+    token: Annotated[str, Field(min_length=1, max_length=4096)]
 
 
 class VerifyResponse(BaseModel):

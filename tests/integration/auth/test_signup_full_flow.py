@@ -54,6 +54,7 @@ from app.adapters.db.identity.models import (
 )
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.deps import db_session as _db_session_dep
+from app.api.errors import add_exception_handlers
 from app.api.v1.auth.signup import build_signup_router
 from app.auth import passkey
 from app.auth._throttle import Throttle
@@ -206,6 +207,7 @@ def client(
         settings=settings,
     )
     app.include_router(router, prefix="/api/v1")
+    add_exception_handlers(app)
 
     factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
 
@@ -399,4 +401,4 @@ class TestSignupRouterErrors:
 
         replay = client.post("/api/v1/signup/verify", json={"token": token})
         assert replay.status_code == 409
-        assert replay.json()["detail"]["error"] == "already_consumed"
+        assert replay.json()["error"] == "already_consumed"

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
+from pydantic import ValidationError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
-from app.api.v1.settings import build_settings_router
+from app.api.v1.settings import VerifyOwnershipConsumeBody, build_settings_router
 from app.tenancy import WorkspaceContext
 from tests.factories.identity import bootstrap_user, bootstrap_workspace
 from tests.unit.api.v1.identity.conftest import build_client, ctx_for
@@ -57,6 +59,32 @@ def _seed(factory: sessionmaker[Session]) -> tuple[WorkspaceContext, str]:
 
 def _client(ctx: WorkspaceContext, factory: sessionmaker[Session]) -> TestClient:
     return build_client([("", build_settings_router())], factory, ctx)
+
+
+class TestVerifyOwnershipConsumeBodyTokenLength:
+    """Workspace ownership verify tokens use the same bounded body shape."""
+
+    def test_max_length_4096_accepts_boundary(self) -> None:
+        body = VerifyOwnershipConsumeBody(token="x" * 4096)
+        assert len(body.token) == 4096
+
+    def test_token_above_4096_raises_validation_error(self) -> None:
+        with pytest.raises(ValidationError) as excinfo:
+            VerifyOwnershipConsumeBody(token="x" * 4097)
+
+        errors = excinfo.value.errors()
+        assert len(errors) == 1
+        assert errors[0]["loc"] == ("token",)
+        assert errors[0]["type"] == "string_too_long"
+
+    def test_empty_token_raises_validation_error(self) -> None:
+        with pytest.raises(ValidationError) as excinfo:
+            VerifyOwnershipConsumeBody(token="")
+
+        errors = excinfo.value.errors()
+        assert len(errors) == 1
+        assert errors[0]["loc"] == ("token",)
+        assert errors[0]["type"] == "string_too_short"
 
 
 def test_settings_read_merges_workspace_values_with_catalog_defaults(

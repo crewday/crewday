@@ -22,7 +22,7 @@ from collections.abc import Mapping
 from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, Request, status
-from pydantic import BaseModel, ConfigDict, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel
 from sqlalchemy.orm import Session
 
 from app.adapters.db.session import make_uow
@@ -167,7 +167,7 @@ class VerifyOwnershipRequestResponse(BaseModel):
 class VerifyOwnershipConsumeBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    token: str
+    token: Annotated[str, Field(min_length=1, max_length=4096)]
 
 
 class VerifyOwnershipConsumeResponse(BaseModel):
