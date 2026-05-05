@@ -462,7 +462,6 @@ class JobSpec:
     misfire_grace_time: int
     demo_only: bool = False
     skip_in_demo: bool = False
-    pause_on_register: bool = False
 
 
 def create_scheduler(*, clock: Clock | None = None) -> AsyncIOScheduler:
@@ -741,7 +740,6 @@ def _job_specs() -> tuple[
             _static_body(_heartbeat_only_body),
             _interval(HEARTBEAT_JOB_INTERVAL_SECONDS),
             HEARTBEAT_JOB_INTERVAL_SECONDS,
-            pause_on_register=True,
         ),
         JobSpec(
             GENERATOR_JOB_ID,
@@ -899,9 +897,6 @@ def _add_registered_job(
     clock: Clock,
     settings: Settings | None,
 ) -> None:
-    add_job_kwargs: dict[str, Any] = {}
-    if spec.pause_on_register:
-        add_job_kwargs["next_run_time"] = None
     scheduler.add_job(
         wrap_job(
             spec.body_factory(clock, settings),
@@ -915,7 +910,6 @@ def _add_registered_job(
         max_instances=1,
         coalesce=True,
         misfire_grace_time=spec.misfire_grace_time,
-        **add_job_kwargs,
     )
 
 
@@ -963,10 +957,42 @@ def start(scheduler: AsyncIOScheduler) -> None:
         )
         return
     scheduler.start()
+    _write_startup_heartbeat(scheduler)
     _log.info(
         "scheduler started",
         extra={"event": "worker.scheduler.started"},
     )
+
+
+def _write_startup_heartbeat(scheduler: AsyncIOScheduler) -> None:
+    """Seed readiness before the first scheduled heartbeat tick."""
+    if scheduler.get_job(HEARTBEAT_JOB_ID) is None:
+        return
+    try:
+        if _is_dead(HEARTBEAT_JOB_ID):
+            _log.warning(
+                "worker startup heartbeat skipped: job is dead",
+                extra={
+                    "event": "worker.heartbeat.startup_dead_skip",
+                    "job_id": HEARTBEAT_JOB_ID,
+                },
+            )
+            return
+    except Exception:
+        _log.exception(
+            "worker startup heartbeat dead-state read failed; writing heartbeat",
+            extra={
+                "event": "worker.heartbeat.startup_dead_read_error",
+                "job_id": HEARTBEAT_JOB_ID,
+            },
+        )
+    try:
+        _write_heartbeat(HEARTBEAT_JOB_ID, _clock_for(scheduler))
+    except Exception:
+        _log.exception(
+            "worker startup heartbeat write failed",
+            extra={"event": "worker.heartbeat.startup_error"},
+        )
 
 
 def stop(scheduler: AsyncIOScheduler, *, wait: bool = False) -> None:

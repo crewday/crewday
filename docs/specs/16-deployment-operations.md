@@ -779,9 +779,14 @@ A full env reference lives in `deploy/.env.example`.
 ## Healthchecks
 
 - `/healthz` — returns 200 if the process is up. No DB query.
-- `/readyz` — returns 200 only if DB, storage, and mail send can be
-  done (mail check is `NOOP` in `ready=true` handshake, not a real
-  send; see implementation).
+- `/readyz` — returns 200 only if the root key is loaded, the DB is
+  reachable, migrations are at the shipped Alembic head, and the
+  worker heartbeat is fresh. `CREWDAY_WORKER=internal` seeds a
+  heartbeat during app startup and then advances the
+  `scheduler_heartbeat` row every 30 s; `CREWDAY_WORKER=external`
+  depends on the standalone worker process doing the same. A missing
+  or stale heartbeat keeps readiness at 503 so operators do not route
+  traffic to an app whose scheduler is stopped.
 - `/version` — git sha, release tag, OpenAPI hash.
 
 ## Observability

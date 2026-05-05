@@ -172,8 +172,8 @@ class TestRegisterJobs:
         assert len(ids) == len(expected_ids)
         assert len(sched.get_jobs()) == len(expected_ids)
 
-    def test_heartbeat_next_run_time_matches_previous_registration(self) -> None:
-        """Heartbeat keeps the explicit paused first-run registration."""
+    def test_heartbeat_schedules_first_interval_tick(self) -> None:
+        """Heartbeat must not stay paused after scheduler startup."""
 
         async def _run() -> None:
             sched = create_scheduler()
@@ -182,7 +182,7 @@ class TestRegisterJobs:
             try:
                 job = sched.get_job(HEARTBEAT_JOB_ID)
                 assert job is not None
-                assert job.next_run_time is None
+                assert job.next_run_time is not None
             finally:
                 stop(sched)
 
@@ -871,15 +871,22 @@ class TestSignupGcJob:
 
 
 class TestStartStop:
-    def test_start_is_idempotent(self) -> None:
+    def test_start_is_idempotent(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Calling :func:`start` on a running scheduler is a no-op.
 
         Drives the coroutine via :func:`asyncio.run` so the AsyncIO
         scheduler's internal loop reference resolves correctly.
         """
+        seen_heartbeats: list[str] = []
+        monkeypatch.setattr(
+            scheduler_mod,
+            "_write_heartbeat",
+            lambda job_id, _clock: seen_heartbeats.append(job_id),
+        )
 
         async def _run() -> None:
             sched = create_scheduler()
+            register_jobs(sched)
             start(sched)
             assert sched.running
             # Second start must not raise SchedulerAlreadyRunningError.
@@ -888,6 +895,78 @@ class TestStartStop:
             stop(sched)
 
         asyncio.run(_run())
+        assert seen_heartbeats == [HEARTBEAT_JOB_ID]
+
+    def test_startup_heartbeat_failure_does_not_abort_start(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A DB fault leaves /readyz red without killing the ASGI lifespan."""
+
+        def fake_write(_job_id: str, _clock: object) -> None:
+            raise RuntimeError("db unavailable")
+
+        monkeypatch.setattr(scheduler_mod, "_write_heartbeat", fake_write)
+
+        async def _run() -> None:
+            sched = create_scheduler()
+            register_jobs(sched)
+            with caplog.at_level(logging.ERROR, logger="app.worker.scheduler"):
+                start(sched)
+            assert sched.running
+            stop(sched)
+
+        asyncio.run(_run())
+        assert any(
+            record.__dict__.get("event") == "worker.heartbeat.startup_error"
+            for record in caplog.records
+        )
+
+    def test_startup_heartbeat_respects_dead_job(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A killed heartbeat job must stay red across scheduler restarts."""
+        seen_heartbeats: list[str] = []
+        monkeypatch.setattr(scheduler_mod, "_is_dead", lambda _job_id: True)
+        monkeypatch.setattr(
+            scheduler_mod,
+            "_write_heartbeat",
+            lambda job_id, _clock: seen_heartbeats.append(job_id),
+        )
+
+        async def _run() -> None:
+            sched = create_scheduler()
+            register_jobs(sched)
+            with caplog.at_level(logging.WARNING, logger="app.worker.scheduler"):
+                start(sched)
+            assert sched.running
+            stop(sched)
+
+        asyncio.run(_run())
+        assert seen_heartbeats == []
+        assert any(
+            record.__dict__.get("event") == "worker.heartbeat.startup_dead_skip"
+            for record in caplog.records
+        )
+
+    def test_start_without_registered_heartbeat_does_not_seed_readiness(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A scheduler with no heartbeat job must not look ready."""
+        seen_heartbeats: list[str] = []
+        monkeypatch.setattr(
+            scheduler_mod,
+            "_write_heartbeat",
+            lambda job_id, _clock: seen_heartbeats.append(job_id),
+        )
+
+        async def _run() -> None:
+            sched = create_scheduler()
+            start(sched)
+            assert sched.running
+            stop(sched)
+
+        asyncio.run(_run())
+        assert seen_heartbeats == []
 
     def test_stop_is_idempotent(self) -> None:
         """Calling :func:`stop` on a stopped scheduler is a no-op."""
