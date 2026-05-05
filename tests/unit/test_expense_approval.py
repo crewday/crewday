@@ -29,7 +29,7 @@ no tenant filter — pure ORM round-trip + pure-Python DTO validators
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -63,6 +63,7 @@ from app.domain.expenses import (
 )
 from app.domain.expenses import approval as _approval_module
 from app.domain.expenses import claims as _claims_module
+from app.domain.messaging.notifications import NotificationKind
 from app.events import (
     ExpenseApproved,
     ExpenseReimbursed,
@@ -75,6 +76,21 @@ from app.util.ulid import new_ulid
 
 _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
 _PURCHASED = _PINNED - timedelta(days=2)
+
+
+class _RecordingNotificationSink:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, NotificationKind, dict[str, object]]] = []
+
+    def notify(
+        self,
+        *,
+        recipient_user_id: str,
+        kind: NotificationKind,
+        payload: Mapping[str, object],
+    ) -> str:
+        self.calls.append((recipient_user_id, kind, dict(payload)))
+        return f"notification-{len(self.calls)}"
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +146,7 @@ def approve_claim(
     claim_id: str,
     edits: ApprovalEdits | None = None,
     clock: FrozenClock | None = None,
+    notification_sink: _RecordingNotificationSink | None = None,
 ) -> ExpenseClaimView:
     repo, checker = _make_seam_pair(session, ctx)
     return _approval_module.approve_claim(
@@ -139,6 +156,7 @@ def approve_claim(
         claim_id=claim_id,
         edits=edits,
         clock=clock,
+        notification_sink=notification_sink,
     )
 
 
@@ -149,6 +167,7 @@ def reject_claim(
     claim_id: str,
     reason_md: str,
     clock: FrozenClock | None = None,
+    notification_sink: _RecordingNotificationSink | None = None,
 ) -> ExpenseClaimView:
     repo, checker = _make_seam_pair(session, ctx)
     return _approval_module.reject_claim(
@@ -158,6 +177,7 @@ def reject_claim(
         claim_id=claim_id,
         reason_md=reason_md,
         clock=clock,
+        notification_sink=notification_sink,
     )
 
 
@@ -710,11 +730,51 @@ class TestApproveClaim:
         ],
     ) -> None:
         worker_ctx, manager_ctx, _wid, _mid, eng_id, clock = manager_and_worker
+        sink = _RecordingNotificationSink()
         claim_id = _create_and_submit(session, worker_ctx, eng_id, clock)
-        approve_claim(session, manager_ctx, claim_id=claim_id, clock=clock)
+        approve_claim(
+            session,
+            manager_ctx,
+            claim_id=claim_id,
+            clock=clock,
+            notification_sink=sink,
+        )
         # State is now ``approved`` — a second approve is a 409.
         with pytest.raises(ClaimNotApprovable):
-            approve_claim(session, manager_ctx, claim_id=claim_id, clock=clock)
+            approve_claim(
+                session,
+                manager_ctx,
+                claim_id=claim_id,
+                clock=clock,
+                notification_sink=sink,
+            )
+        assert [(recipient, kind) for recipient, kind, _payload in sink.calls] == [
+            (_wid, NotificationKind.EXPENSE_APPROVED)
+        ]
+
+    def test_approve_notifies_submitter(
+        self,
+        session: Session,
+        manager_and_worker: tuple[
+            WorkspaceContext, WorkspaceContext, str, str, str, FrozenClock
+        ],
+    ) -> None:
+        worker_ctx, manager_ctx, worker_id, _mid, eng_id, clock = manager_and_worker
+        claim_id = _create_and_submit(session, worker_ctx, eng_id, clock)
+        sink = _RecordingNotificationSink()
+
+        approve_claim(
+            session,
+            manager_ctx,
+            claim_id=claim_id,
+            clock=clock,
+            notification_sink=sink,
+        )
+
+        assert [(recipient, kind) for recipient, kind, _payload in sink.calls] == [
+            (worker_id, NotificationKind.EXPENSE_APPROVED)
+        ]
+        assert sink.calls[0][2]["claim_id"] == claim_id
 
     def test_approve_without_capability_rejected(
         self,
@@ -825,6 +885,31 @@ class TestRejectClaim:
         actions = [r.action for r in rows if r.entity_kind == "expense_claim"]
         assert "expense.claim.rejected" in actions
 
+    def test_reject_notifies_submitter(
+        self,
+        session: Session,
+        manager_and_worker: tuple[
+            WorkspaceContext, WorkspaceContext, str, str, str, FrozenClock
+        ],
+    ) -> None:
+        worker_ctx, manager_ctx, worker_id, _mid, eng_id, clock = manager_and_worker
+        claim_id = _create_and_submit(session, worker_ctx, eng_id, clock)
+        sink = _RecordingNotificationSink()
+
+        reject_claim(
+            session,
+            manager_ctx,
+            claim_id=claim_id,
+            reason_md="Out of policy.",
+            clock=clock,
+            notification_sink=sink,
+        )
+
+        assert [(recipient, kind) for recipient, kind, _payload in sink.calls] == [
+            (worker_id, NotificationKind.EXPENSE_REJECTED)
+        ]
+        assert sink.calls[0][2]["claim_id"] == claim_id
+
     def test_reject_non_submitted_raises(
         self,
         session: Session,
@@ -848,6 +933,39 @@ class TestRejectClaim:
                 reason_md="No.",
                 clock=clock,
             )
+
+    def test_reject_already_rejected_does_not_notify_again(
+        self,
+        session: Session,
+        manager_and_worker: tuple[
+            WorkspaceContext, WorkspaceContext, str, str, str, FrozenClock
+        ],
+    ) -> None:
+        worker_ctx, manager_ctx, worker_id, _mid, eng_id, clock = manager_and_worker
+        claim_id = _create_and_submit(session, worker_ctx, eng_id, clock)
+        sink = _RecordingNotificationSink()
+        reject_claim(
+            session,
+            manager_ctx,
+            claim_id=claim_id,
+            reason_md="Out of policy.",
+            clock=clock,
+            notification_sink=sink,
+        )
+
+        with pytest.raises(ClaimNotApprovable):
+            reject_claim(
+                session,
+                manager_ctx,
+                claim_id=claim_id,
+                reason_md="Still no.",
+                clock=clock,
+                notification_sink=sink,
+            )
+
+        assert [(recipient, kind) for recipient, kind, _payload in sink.calls] == [
+            (worker_id, NotificationKind.EXPENSE_REJECTED)
+        ]
 
     def test_reject_without_capability_rejected(
         self,

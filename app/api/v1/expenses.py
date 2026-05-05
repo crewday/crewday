@@ -112,7 +112,9 @@ from app.adapters.db.expenses.repositories import (
     SqlAlchemyCapabilityChecker,
     SqlAlchemyExpensesRepository,
 )
+from app.adapters.db.messaging.repositories import SqlAlchemyEmailDeliveryRepository
 from app.adapters.llm.ports import LLMClient
+from app.adapters.mail.null import NullMailer
 from app.adapters.storage.ports import Storage
 from app.api.deps import current_workspace_context, db_session, get_llm, get_storage
 from app.api.pagination import (
@@ -180,6 +182,7 @@ from app.domain.expenses.autofill import (
 )
 from app.domain.expenses.ports import ExpensesRepository
 from app.domain.llm.consent import load_consent_set
+from app.domain.messaging.notifications import NotificationService
 from app.tenancy import WorkspaceContext
 from app.util.clock import SystemClock
 from app.util.ulid import new_ulid
@@ -253,6 +256,18 @@ def make_seam_pair(
     return (
         SqlAlchemyExpensesRepository(session),
         SqlAlchemyCapabilityChecker(session, ctx),
+    )
+
+
+def _expense_notification_sink(
+    repo: SqlAlchemyExpensesRepository,
+    ctx: WorkspaceContext,
+) -> NotificationService:
+    return NotificationService(
+        session=repo.session,
+        ctx=ctx,
+        mailer=NullMailer(),
+        email_deliveries=SqlAlchemyEmailDeliveryRepository(repo.session),
     )
 
 
@@ -928,7 +943,13 @@ def submit_expense_claim_route(
     """
     repo, checker = make_seam_pair(session, ctx)
     try:
-        view = submit_claim(repo, checker, ctx, claim_id=claim_id)
+        view = submit_claim(
+            repo,
+            checker,
+            ctx,
+            claim_id=claim_id,
+            notification_sink=_expense_notification_sink(repo, ctx),
+        )
     except (
         ClaimNotFound,
         ClaimPermissionDenied,
@@ -1166,7 +1187,14 @@ def approve_expense_claim_route(
     """
     repo, checker = make_seam_pair(session, ctx)
     try:
-        view = approve_claim(repo, checker, ctx, claim_id=claim_id, edits=body)
+        view = approve_claim(
+            repo,
+            checker,
+            ctx,
+            claim_id=claim_id,
+            edits=body,
+            notification_sink=_expense_notification_sink(repo, ctx),
+        )
     except (
         ClaimNotFound,
         ClaimNotApprovable,
@@ -1204,6 +1232,7 @@ def reject_expense_claim_route(
             ctx,
             claim_id=claim_id,
             reason_md=body.reason_md,
+            notification_sink=_expense_notification_sink(repo, ctx),
         )
     except (
         ClaimNotFound,

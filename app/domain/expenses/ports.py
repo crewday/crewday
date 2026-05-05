@@ -341,6 +341,14 @@ class ExpensesRepository(Protocol):
         """
         ...
 
+    def list_expense_approver_user_ids(self, *, workspace_id: str) -> tuple[str, ...]:
+        """Return owners/managers who can receive expense approval notifications.
+
+        Mirrors the ``expenses.approve`` default audience for workspace-scoped
+        approvals. The adapter deduplicates owners who also hold a manager grant.
+        """
+        ...
+
     # -- Claim CRUD ------------------------------------------------------
 
     def get_claim(

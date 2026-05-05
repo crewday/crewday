@@ -96,6 +96,11 @@ from app.domain.expenses.claims import (
     _validate_purchased_at_not_future,
     _view_to_diff_dict,
 )
+from app.domain.expenses.notifications import (
+    ExpenseNotificationSink,
+    notify_expense_approved,
+    notify_expense_rejected,
+)
 from app.domain.expenses.ports import (
     CapabilityChecker,
     ExpenseClaimRow,
@@ -513,6 +518,7 @@ def approve_claim(
     claim_id: str,
     edits: ApprovalEdits | None = None,
     clock: Clock | None = None,
+    notification_sink: ExpenseNotificationSink | None = None,
 ) -> ExpenseClaimView:
     """Transition a submitted claim to ``approved``.
 
@@ -619,6 +625,12 @@ def approve_claim(
             had_edits=had_edits,
         )
     )
+    if notification_sink is not None:
+        notify_expense_approved(
+            claim=row,
+            submitter_user_id=submitter_user_id,
+            sink=notification_sink,
+        )
     return after
 
 
@@ -635,6 +647,7 @@ def reject_claim(
     claim_id: str,
     reason_md: str,
     clock: Clock | None = None,
+    notification_sink: ExpenseNotificationSink | None = None,
 ) -> ExpenseClaimView:
     """Transition a submitted claim to ``rejected``.
 
@@ -725,6 +738,12 @@ def reject_claim(
             decided_by_user_id=ctx.actor_id,
         )
     )
+    if notification_sink is not None:
+        notify_expense_rejected(
+            claim=row,
+            submitter_user_id=submitter_user_id,
+            sink=notification_sink,
+        )
     return after
 
 

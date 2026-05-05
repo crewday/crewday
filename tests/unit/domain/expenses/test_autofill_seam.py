@@ -121,6 +121,9 @@ class _FakeRepo:
     ) -> dict[str, str]:
         raise NotImplementedError("autofill should not read engagement users")
 
+    def list_expense_approver_user_ids(self, *, workspace_id: str) -> tuple[str, ...]:
+        raise NotImplementedError("autofill should not read expense approvers")
+
     def list_claims_for_user(
         self,
         *,

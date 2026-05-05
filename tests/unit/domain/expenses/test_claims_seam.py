@@ -138,6 +138,9 @@ class _FakeRepo:
                 out[eid] = eng.user_id
         return out
 
+    def list_expense_approver_user_ids(self, *, workspace_id: str) -> tuple[str, ...]:
+        return ()
+
     # -- claim CRUD -----------------------------------------------------
     def get_claim(
         self,

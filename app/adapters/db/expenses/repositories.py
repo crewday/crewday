@@ -39,6 +39,11 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.adapters.db.authz.models import (
+    PermissionGroup,
+    PermissionGroupMember,
+    RoleGrant,
+)
 from app.adapters.db.expenses.models import ExpenseAttachment, ExpenseClaim
 from app.adapters.db.identity.models import User
 from app.adapters.db.llm.models import LlmUsage as LlmUsageRow
@@ -265,6 +270,23 @@ class SqlAlchemyExpensesRepository(ExpensesRepository):
             WorkEngagement.id.in_(engagement_ids),
         )
         return {eid: uid for eid, uid in self._session.execute(stmt).all()}
+
+    def list_expense_approver_user_ids(self, *, workspace_id: str) -> tuple[str, ...]:
+        owner_ids = self._session.scalars(
+            select(PermissionGroupMember.user_id)
+            .join(PermissionGroup, PermissionGroup.id == PermissionGroupMember.group_id)
+            .where(PermissionGroup.workspace_id == workspace_id)
+            .where(PermissionGroupMember.workspace_id == workspace_id)
+            .where(PermissionGroup.slug == "owners")
+        ).all()
+        manager_ids = self._session.scalars(
+            select(RoleGrant.user_id)
+            .where(RoleGrant.workspace_id == workspace_id)
+            .where(RoleGrant.scope_kind == "workspace")
+            .where(RoleGrant.grant_role == "manager")
+            .where(RoleGrant.revoked_at.is_(None))
+        ).all()
+        return tuple(sorted(set(owner_ids).union(manager_ids)))
 
     # -- Claim CRUD ------------------------------------------------------
 

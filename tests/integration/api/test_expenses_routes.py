@@ -30,14 +30,22 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.authz.models import RoleGrant
+from app.adapters.db.messaging.models import Notification
 from app.adapters.db.workspace.models import WorkEngagement
 from app.api.deps import current_workspace_context, db_session, get_storage
 from app.api.v1.expenses import router as expenses_router
-from app.events import ExpenseCancelled, ExpenseCreated, ExpenseSubmitted, bus
+from app.domain.messaging.notifications import NotificationKind
+from app.events import (
+    ExpenseCancelled,
+    ExpenseCreated,
+    ExpenseSubmitted,
+    NotificationCreated,
+    bus,
+)
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.ulid import new_ulid
 from tests._fakes.storage import InMemoryStorage
@@ -1054,6 +1062,113 @@ class TestManagerFlow:
             body = r.json()
             assert body["state"] == "approved"
             assert body["decided_by"] == seeded["manager_id"]
+
+    def test_submit_approve_reject_emit_notification_rows_and_sse(
+        self,
+        session_factory: sessionmaker[Session],
+        storage: InMemoryStorage,
+        seeded: dict[str, Any],
+    ) -> None:
+        bus._reset_for_tests()
+        captured: list[NotificationCreated] = []
+
+        @bus.subscribe(NotificationCreated)
+        def _on_notification(event: NotificationCreated) -> None:
+            captured.append(event)
+
+        try:
+            with _client_for(session_factory, seeded["worker_ctx"], storage) as client:
+                first = client.post(
+                    "/api/v1/expenses",
+                    json=_create_body(work_engagement_id=seeded["worker_eng_id"]),
+                )
+                first_id = first.json()["id"]
+                second = client.post(
+                    "/api/v1/expenses",
+                    json=_create_body(
+                        work_engagement_id=seeded["worker_eng_id"],
+                        vendor="Rejectable Vendor",
+                    ),
+                )
+                second_id = second.json()["id"]
+                assert (
+                    client.post(f"/api/v1/expenses/{first_id}/submit").status_code
+                    == 200
+                )
+                assert (
+                    client.post(f"/api/v1/expenses/{second_id}/submit").status_code
+                    == 200
+                )
+
+            with _client_for(session_factory, seeded["manager_ctx"], storage) as client:
+                assert (
+                    client.post(f"/api/v1/expenses/{first_id}/approve").status_code
+                    == 200
+                )
+                rejected = client.post(
+                    f"/api/v1/expenses/{second_id}/reject",
+                    json={"reason_md": "duplicate"},
+                )
+                assert rejected.status_code == 200, rejected.text
+        finally:
+            bus._reset_for_tests()
+
+        with session_factory() as session:
+            rows = list(
+                session.scalars(
+                    select(Notification)
+                    .where(Notification.workspace_id == seeded["workspace_id"])
+                    .where(
+                        Notification.kind.in_(
+                            [
+                                NotificationKind.EXPENSE_SUBMITTED.value,
+                                NotificationKind.EXPENSE_APPROVED.value,
+                                NotificationKind.EXPENSE_REJECTED.value,
+                            ]
+                        )
+                    )
+                ).all()
+            )
+
+        by_kind: dict[str, list[Notification]] = {}
+        for row in rows:
+            by_kind.setdefault(row.kind, []).append(row)
+
+        assert len(by_kind[NotificationKind.EXPENSE_SUBMITTED.value]) == 4
+        assert len(by_kind[NotificationKind.EXPENSE_APPROVED.value]) == 1
+        assert len(by_kind[NotificationKind.EXPENSE_REJECTED.value]) == 1
+        assert {
+            row.recipient_user_id
+            for row in by_kind[NotificationKind.EXPENSE_SUBMITTED.value]
+        } == {seeded["owner_id"], seeded["manager_id"]}
+        assert (
+            by_kind[NotificationKind.EXPENSE_APPROVED.value][0].recipient_user_id
+            == seeded["worker_id"]
+        )
+        assert (
+            by_kind[NotificationKind.EXPENSE_REJECTED.value][0].recipient_user_id
+            == seeded["worker_id"]
+        )
+        events_by_kind: dict[str, list[NotificationCreated]] = {}
+        for event in captured:
+            if event.kind.startswith("expense_"):
+                events_by_kind.setdefault(event.kind, []).append(event)
+        submitted_event_recipients = sorted(
+            [
+                seeded["manager_id"],
+                seeded["owner_id"],
+                seeded["manager_id"],
+                seeded["owner_id"],
+            ]
+        )
+        assert {
+            kind: sorted(event.actor_user_id for event in events)
+            for kind, events in events_by_kind.items()
+        } == {
+            NotificationKind.EXPENSE_SUBMITTED.value: submitted_event_recipients,
+            NotificationKind.EXPENSE_APPROVED.value: [seeded["worker_id"]],
+            NotificationKind.EXPENSE_REJECTED.value: [seeded["worker_id"]],
+        }
 
     def test_approve_with_edits(
         self,

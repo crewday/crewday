@@ -1,0 +1,7 @@
+Hi {{ recipient_display_name | default("there") }},
+
+An expense claim from {{ vendor }} is waiting for approval.
+
+Amount: {{ currency }} {{ "%.2f"|format(total_amount_cents / 100) }}
+
+Open crew.day to review the claim.

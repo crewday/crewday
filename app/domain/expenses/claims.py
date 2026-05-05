@@ -118,6 +118,10 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
 from app.adapters.storage.ports import Storage
 from app.audit import write_audit
+from app.domain.expenses.notifications import (
+    ExpenseNotificationSink,
+    notify_expense_submitted,
+)
 from app.domain.expenses.ports import (
     AttachmentAlreadyExistsConflict,
     CapabilityChecker,
@@ -1712,6 +1716,7 @@ def submit_claim(
     *,
     claim_id: str,
     clock: Clock | None = None,
+    notification_sink: ExpenseNotificationSink | None = None,
 ) -> ExpenseClaimView:
     """Transition a draft claim to ``submitted``.
 
@@ -1794,6 +1799,14 @@ def submit_claim(
             total_amount_cents=submitted_row.total_amount_cents,
         )
     )
+    if notification_sink is not None:
+        notify_expense_submitted(
+            repo,
+            ctx,
+            claim=submitted_row,
+            submitter_user_id=ctx.actor_id,
+            sink=notification_sink,
+        )
     return after
 
 

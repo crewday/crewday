@@ -1,0 +1,7 @@
+Hi {{ recipient_display_name | default("there") }},
+
+Your expense claim from {{ vendor }} was rejected.
+
+Amount: {{ currency }} {{ "%.2f"|format(total_amount_cents / 100) }}
+
+Open crew.day to see the claim details.

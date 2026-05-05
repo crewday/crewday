@@ -23,7 +23,7 @@ Covers the acceptance criteria called out in the task brief:
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -63,6 +63,7 @@ from app.domain.expenses import (
     TooManyAttachments,
 )
 from app.domain.expenses import claims as _claims_module
+from app.domain.messaging.notifications import NotificationKind
 from app.events import ExpenseCancelled, ExpenseCreated, ExpenseSubmitted, bus
 from app.tenancy.context import ActorGrantRole, WorkspaceContext
 from app.util.clock import FrozenClock
@@ -71,6 +72,21 @@ from tests._fakes.storage import InMemoryStorage
 
 _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
 _PURCHASED = _PINNED - timedelta(days=2)
+
+
+class _RecordingNotificationSink:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, NotificationKind, dict[str, object]]] = []
+
+    def notify(
+        self,
+        *,
+        recipient_user_id: str,
+        kind: NotificationKind,
+        payload: Mapping[str, object],
+    ) -> str:
+        self.calls.append((recipient_user_id, kind, dict(payload)))
+        return f"notification-{len(self.calls)}"
 
 
 # ---------------------------------------------------------------------------
@@ -179,10 +195,16 @@ def submit_claim(
     *,
     claim_id: str,
     clock: FrozenClock | None = None,
+    notification_sink: _RecordingNotificationSink | None = None,
 ) -> ExpenseClaimView:
     repo, checker = _make_seam_pair(session, ctx)
     return _claims_module.submit_claim(
-        repo, checker, ctx, claim_id=claim_id, clock=clock
+        repo,
+        checker,
+        ctx,
+        claim_id=claim_id,
+        clock=clock,
+        notification_sink=notification_sink,
     )
 
 
@@ -1549,12 +1571,93 @@ class TestSubmitClaim:
         worker_env: tuple[WorkspaceContext, str, str, FrozenClock],
     ) -> None:
         ctx, _user_id, eng_id, clock = worker_env
+        sink = _RecordingNotificationSink()
         created = create_claim(
             session, ctx, body=_create_body(work_engagement_id=eng_id), clock=clock
         )
-        submit_claim(session, ctx, claim_id=created.id, clock=clock)
+        submit_claim(
+            session,
+            ctx,
+            claim_id=created.id,
+            clock=clock,
+            notification_sink=sink,
+        )
         with pytest.raises(ClaimStateTransitionInvalid):
-            submit_claim(session, ctx, claim_id=created.id, clock=clock)
+            submit_claim(
+                session,
+                ctx,
+                claim_id=created.id,
+                clock=clock,
+                notification_sink=sink,
+            )
+        assert len(sink.calls) == 0
+
+    def test_submit_notifies_owner_manager_recipients_once(
+        self,
+        session: Session,
+    ) -> None:
+        ws_id = _bootstrap_workspace(session, slug="submit-notify")
+        owner_id = _bootstrap_user(session, email="o@x.com", display_name="O")
+        manager_id = _bootstrap_user(session, email="m@x.com", display_name="M")
+        worker_id = _bootstrap_user(session, email="w@x.com", display_name="W")
+        from app.adapters.db.authz.models import PermissionGroup, PermissionGroupMember
+
+        group_id = new_ulid()
+        session.add(
+            PermissionGroup(
+                id=group_id,
+                workspace_id=ws_id,
+                slug="owners",
+                name="Owners",
+                system=True,
+                capabilities_json={},
+                created_at=_PINNED,
+            )
+        )
+        session.add(
+            PermissionGroupMember(
+                group_id=group_id,
+                user_id=owner_id,
+                workspace_id=ws_id,
+                added_at=_PINNED,
+                added_by_user_id=None,
+            )
+        )
+        _grant(session, workspace_id=ws_id, user_id=owner_id, grant_role="manager")
+        _grant(session, workspace_id=ws_id, user_id=manager_id, grant_role="manager")
+        _grant(session, workspace_id=ws_id, user_id=worker_id, grant_role="worker")
+        eng_id = _bootstrap_engagement(session, workspace_id=ws_id, user_id=worker_id)
+        session.commit()
+
+        ctx = _ctx(workspace_id=ws_id, actor_id=worker_id, grant_role="worker")
+        clock = FrozenClock(_PINNED)
+        sink = _RecordingNotificationSink()
+        created = create_claim(
+            session, ctx, body=_create_body(work_engagement_id=eng_id), clock=clock
+        )
+
+        submit_claim(
+            session,
+            ctx,
+            claim_id=created.id,
+            clock=clock,
+            notification_sink=sink,
+        )
+        with pytest.raises(ClaimStateTransitionInvalid):
+            submit_claim(
+                session,
+                ctx,
+                claim_id=created.id,
+                clock=clock,
+                notification_sink=sink,
+            )
+
+        assert {(recipient, kind) for recipient, kind, _payload in sink.calls} == {
+            (manager_id, NotificationKind.EXPENSE_SUBMITTED),
+            (owner_id, NotificationKind.EXPENSE_SUBMITTED),
+        }
+        assert len(sink.calls) == 2
+        assert {call[2]["claim_id"] for call in sink.calls} == {created.id}
 
     def test_submit_without_capability_rejected(
         self,
