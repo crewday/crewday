@@ -81,10 +81,14 @@ __all__ = [
     "CapabilityChecker",
     "SeamPermissionDenied",
     "UserAvailabilityOverrideExistsError",
+    "UserAvailabilityOverrideInsert",
     "UserAvailabilityOverrideRepository",
     "UserAvailabilityOverrideRow",
+    "UserAvailabilityOverrideUpdate",
+    "UserLeaveInsert",
     "UserLeaveRepository",
     "UserLeaveRow",
+    "UserLeaveUpdate",
     "UserWeeklyAvailabilityRow",
 ]
 
@@ -218,6 +222,62 @@ class UserLeaveRow:
     deleted_at: datetime | None
 
 
+@dataclass(frozen=True, slots=True)
+class UserAvailabilityOverrideInsert:
+    id: str
+    workspace_id: str
+    user_id: str
+    date: date
+    available: bool
+    starts_local: time | None
+    ends_local: time | None
+    reason: str | None
+    approval_required: bool
+    approved_at: datetime | None
+    approved_by: str | None
+    now: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class UserAvailabilityOverrideUpdate:
+    workspace_id: str
+    id: str
+    available: bool | None
+    starts_local: time | None
+    ends_local: time | None
+    reason: str | None
+    clear_starts_local: bool
+    clear_ends_local: bool
+    clear_reason: bool
+    now: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class UserLeaveInsert:
+    id: str
+    workspace_id: str
+    user_id: str
+    starts_on: date
+    ends_on: date
+    category: str
+    note_md: str | None
+    approved_at: datetime | None
+    approved_by: str | None
+    now: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class UserLeaveUpdate:
+    workspace_id: str
+    id: str
+    starts_on: date | None
+    ends_on: date | None
+    category: str | None
+    note_md: str | None
+    clear_note_md: bool
+    now: datetime
+
+
 # ---------------------------------------------------------------------------
 # UserAvailabilityOverrideRepository
 # ---------------------------------------------------------------------------
@@ -343,18 +403,7 @@ class UserAvailabilityOverrideRepository(Protocol):
     def insert(
         self,
         *,
-        override_id: str,
-        workspace_id: str,
-        user_id: str,
-        date: date,
-        available: bool,
-        starts_local: time | None,
-        ends_local: time | None,
-        reason: str | None,
-        approval_required: bool,
-        approved_at: datetime | None,
-        approved_by: str | None,
-        now: datetime,
+        payload: UserAvailabilityOverrideInsert,
     ) -> UserAvailabilityOverrideRow:
         """Insert a new ``user_availability_override`` row and return its projection.
 
@@ -368,22 +417,12 @@ class UserAvailabilityOverrideRepository(Protocol):
         clock-resolved insertion time, used for both ``created_at``
         and ``updated_at``.
         """
-        # code-health: ignore[params] Port contract.
         ...
 
     def update_fields(
         self,
         *,
-        workspace_id: str,
-        override_id: str,
-        available: bool | None = None,
-        starts_local: time | None = None,
-        ends_local: time | None = None,
-        reason: str | None = None,
-        clear_starts_local: bool = False,
-        clear_ends_local: bool = False,
-        clear_reason: bool = False,
-        now: datetime,
+        payload: UserAvailabilityOverrideUpdate,
     ) -> UserAvailabilityOverrideRow:
         """Apply the explicit-sparse partial update and return the refreshed projection.
 
@@ -400,7 +439,6 @@ class UserAvailabilityOverrideRepository(Protocol):
         BOTH-OR-NEITHER + ``ends > starts`` invariants, and filtered
         zero-delta calls — this method is a pure SA write.
         """
-        # code-health: ignore[params] Port contract.
         ...
 
     def stamp_approved(
@@ -531,16 +569,7 @@ class UserLeaveRepository(Protocol):
     def insert(
         self,
         *,
-        leave_id: str,
-        workspace_id: str,
-        user_id: str,
-        starts_on: date,
-        ends_on: date,
-        category: str,
-        note_md: str | None,
-        approved_at: datetime | None,
-        approved_by: str | None,
-        now: datetime,
+        payload: UserLeaveInsert,
     ) -> UserLeaveRow:
         """Insert a new ``user_leave`` row and return its projection.
 
@@ -549,20 +578,12 @@ class UserLeaveRepository(Protocol):
         the caller's clock-resolved insertion time — used for both
         ``created_at`` and ``updated_at``.
         """
-        # code-health: ignore[params] Port contract.
         ...
 
     def update_fields(
         self,
         *,
-        workspace_id: str,
-        leave_id: str,
-        starts_on: date | None = None,
-        ends_on: date | None = None,
-        category: str | None = None,
-        note_md: str | None = None,
-        clear_note_md: bool = False,
-        now: datetime,
+        payload: UserLeaveUpdate,
     ) -> UserLeaveRow:
         """Apply the explicit-sparse partial update and return the refreshed projection.
 
@@ -576,7 +597,6 @@ class UserLeaveRepository(Protocol):
         ``ends_on >= starts_on`` invariant, and filtered zero-delta
         calls — this method is a pure SA write.
         """
-        # code-health: ignore[params] Port contract.
         ...
 
     def stamp_approved(

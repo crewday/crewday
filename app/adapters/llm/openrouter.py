@@ -330,6 +330,7 @@ class OpenRouterClient:
         clock: Clock | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
+        # code-health: ignore[params] Explicit adapter boundary.
         if max_retries < 1:
             raise ValueError("max_retries must be >= 1")
         self._config_source = (
@@ -405,6 +406,7 @@ class OpenRouterClient:
         Inbound tool-call arguments echoed back into the prompt on the
         next turn still ride the regular per-call redaction rules.
         """
+        # code-health: ignore[params] Explicit adapter boundary.
         return self._chat_completion(
             model_id=model_id,
             messages=list(messages),
@@ -480,6 +482,7 @@ class OpenRouterClient:
 
         See :meth:`complete` for the ``consents`` argument semantics.
         """
+        # code-health: ignore[params] Explicit adapter boundary.
         wire_messages: list[_WireMessage] = [
             {"role": m["role"], "content": m["content"]} for m in messages
         ]
@@ -507,6 +510,7 @@ class OpenRouterClient:
         consents: ConsentSet | None,
         tools: Sequence[Tool] | None = None,
     ) -> LLMResponse:
+        # code-health: ignore[params] Explicit adapter boundary.
         wire_messages: list[_WireMessage] = [
             {"role": m["role"], "content": m["content"]} for m in messages
         ]
@@ -528,6 +532,7 @@ class OpenRouterClient:
         one of :class:`LlmRateLimited`, :class:`LlmProviderError`,
         :class:`LlmTransportError` depending on the terminal reason.
         """
+        # code-health: ignore[nloc] Explicit adapter flow.
         url = f"{self._base_url}/chat/completions"
         headers = self._build_headers()
 

@@ -39,6 +39,7 @@ from app.adapters.db.availability.models import (
 from app.adapters.db.base import Base
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import add_exception_handlers
 from app.api.v1.user_availability_overrides import (
     build_user_availability_overrides_router,
 )
@@ -145,6 +146,7 @@ def _build_app(factory: sessionmaker[Session], ctx: WorkspaceContext) -> FastAPI
                 reset_current(token)
 
     app.add_middleware(_PinCtxMiddleware)
+    add_exception_handlers(app)
     app.include_router(build_user_availability_overrides_router())
 
     def _override_ctx() -> WorkspaceContext:
@@ -556,7 +558,7 @@ class TestEndToEnd:
         )
         assert second.status_code == 409, second.text
         body = second.json()
-        assert body["detail"]["error"] == "override_exists"
+        assert body["error"] == "override_exists"
         # The earlier write survives — the SAVEPOINT keeps the outer UoW
         # alive so the first row is still visible after the second
         # request rolls back.
@@ -606,7 +608,7 @@ class TestEndToEnd:
             json={"date": "2026-05-04", "available": False, "user_id": owner_id},
         )
         assert resubmit.status_code == 409, resubmit.text
-        assert resubmit.json()["detail"]["error"] == "override_exists"
+        assert resubmit.json()["error"] == "override_exists"
 
 
 class TestUpsertedEvent:

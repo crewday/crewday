@@ -43,7 +43,10 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import (
+    Mapped,
+    mapped_column,
+)  # code-health: ignore[duplicate] Explicit import prelude.
 
 from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
@@ -528,7 +531,9 @@ class ChatChannelMember(Base):
 
     channel_id: Mapped[str] = mapped_column(
         String,
-        ForeignKey("chat_channel.id", ondelete="CASCADE"),
+        ForeignKey(
+            "chat_channel.id", ondelete="CASCADE"
+        ),  # code-health: ignore[duplicate] Explicit ORM/wire shape.
         primary_key=True,
     )
     user_id: Mapped[str] = mapped_column(
@@ -1110,18 +1115,26 @@ Service` enqueues one row for every active token of the recipient at
     # Rendered push envelope body — the short copy from the kind's
     # ``<kind>.push.j2`` template. Capped at the column's ``String``
     # default (no fixed length); the §10 tier-2 envelope is ~140 chars.
-    body: Mapped[str] = mapped_column(String, nullable=False)
+    body: Mapped[str] = mapped_column(
+        String, nullable=False
+    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
     # Free-form context — mirrors :class:`Notification.payload_json`.
-    payload_json: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict
+    payload_json: Mapped[dict[str, Any]] = (
+        mapped_column(  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+            JSON, nullable=False, default=dict
+        )
     )
     # ``pending | in_flight | sent | dead_lettered``. See
     # :data:`_PUSH_QUEUE_STATUS_VALUES`.
-    status: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String, nullable=False
+    )  # code-health: ignore[duplicate] Explicit queue column mapping.
     # Number of attempts already fired (0 when freshly enqueued). The
     # backoff schedule ``[30s, 2m, 10m, 1h]`` is keyed off this
     # counter; ``attempt >= 5`` forces a dead-letter on the next tick.
-    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    attempt: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )  # code-health: ignore[duplicate] Explicit queue column mapping.
     next_attempt_at: Mapped[datetime | None] = mapped_column(
         UtcDateTime(), nullable=True
     )

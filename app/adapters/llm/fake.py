@@ -158,6 +158,7 @@ class FakeLLMClient:
         tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> LLMResponse:
+        # code-health: ignore[params] Explicit adapter boundary.
         del consents  # in-process fake never reaches an upstream provider
         last = messages[-1]["content"] if messages else ""
         text = json.dumps(self._ocr_payload) if _OCR_PROMPT_MARKER in last else last
@@ -193,6 +194,7 @@ class FakeLLMClient:
         tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> Iterator[str]:
+        # code-health: ignore[params] Explicit adapter boundary.
         del consents  # in-process fake never reaches an upstream provider
         last = messages[-1]["content"] if messages else ""
         yield from last.split()

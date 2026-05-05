@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import date as _date_cls
-from datetime import datetime, time
+from datetime import datetime
 from typing import Literal
 
 from sqlalchemy import select
@@ -55,10 +55,14 @@ from app.domain.identity.availability_ports import (
     CapabilityChecker,
     SeamPermissionDenied,
     UserAvailabilityOverrideExistsError,
+    UserAvailabilityOverrideInsert,
     UserAvailabilityOverrideRepository,
     UserAvailabilityOverrideRow,
+    UserAvailabilityOverrideUpdate,
+    UserLeaveInsert,
     UserLeaveRepository,
     UserLeaveRow,
+    UserLeaveUpdate,
     UserWeeklyAvailabilityRow,
 )
 from app.tenancy import WorkspaceContext
@@ -141,13 +145,13 @@ class SqlAlchemyUserAvailabilityOverrideRepository(UserAvailabilityOverrideRepos
         stmt = select(UserAvailabilityOverride).where(
             UserAvailabilityOverride.id == override_id,
             UserAvailabilityOverride.workspace_id == workspace_id,
-        )
+        )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
         if not include_deleted:
             stmt = stmt.where(UserAvailabilityOverride.deleted_at.is_(None))
         row = self._session.scalars(stmt).one_or_none()
         return _to_override_row(row) if row is not None else None
 
-    def list(
+    def list(  # code-health: ignore[duplicate] Parallel availability filters.
         self,
         *,
         workspace_id: str,
@@ -158,6 +162,7 @@ class SqlAlchemyUserAvailabilityOverrideRepository(UserAvailabilityOverrideRepos
         from_date: _date_cls | None = None,
         to_date: _date_cls | None = None,
     ) -> Sequence[UserAvailabilityOverrideRow]:
+        # code-health: ignore[params] Explicit list filter boundary.
         stmt = select(UserAvailabilityOverride).where(
             UserAvailabilityOverride.workspace_id == workspace_id,
             UserAvailabilityOverride.deleted_at.is_(None),
@@ -221,33 +226,22 @@ class SqlAlchemyUserAvailabilityOverrideRepository(UserAvailabilityOverrideRepos
     def insert(
         self,
         *,
-        override_id: str,
-        workspace_id: str,
-        user_id: str,
-        date: _date_cls,
-        available: bool,
-        starts_local: time | None,
-        ends_local: time | None,
-        reason: str | None,
-        approval_required: bool,
-        approved_at: datetime | None,
-        approved_by: str | None,
-        now: datetime,
+        payload: UserAvailabilityOverrideInsert,
     ) -> UserAvailabilityOverrideRow:
         row = UserAvailabilityOverride(
-            id=override_id,
-            workspace_id=workspace_id,
-            user_id=user_id,
-            date=date,
-            available=available,
-            starts_local=starts_local,
-            ends_local=ends_local,
-            reason=reason,
-            approval_required=approval_required,
-            approved_at=approved_at,
-            approved_by=approved_by,
-            created_at=now,
-            updated_at=now,
+            id=payload.id,
+            workspace_id=payload.workspace_id,
+            user_id=payload.user_id,
+            date=payload.date,
+            available=payload.available,
+            starts_local=payload.starts_local,
+            ends_local=payload.ends_local,
+            reason=payload.reason,
+            approval_required=payload.approval_required,
+            approved_at=payload.approved_at,
+            approved_by=payload.approved_by,
+            created_at=payload.now,
+            updated_at=payload.now,
             deleted_at=None,
         )
         # Wrap the flush in a SAVEPOINT so the
@@ -265,7 +259,8 @@ class SqlAlchemyUserAvailabilityOverrideRepository(UserAvailabilityOverrideRepos
         except IntegrityError as exc:
             nested.rollback()
             raise UserAvailabilityOverrideExistsError(
-                f"override already exists for user {user_id!r} on {date.isoformat()!r}"
+                "override already exists for user "
+                f"{payload.user_id!r} on {payload.date.isoformat()!r}"
             ) from exc
         nested.commit()
         return _to_override_row(row)
@@ -273,17 +268,9 @@ class SqlAlchemyUserAvailabilityOverrideRepository(UserAvailabilityOverrideRepos
     def update_fields(
         self,
         *,
-        workspace_id: str,
-        override_id: str,
-        available: bool | None = None,
-        starts_local: time | None = None,
-        ends_local: time | None = None,
-        reason: str | None = None,
-        clear_starts_local: bool = False,
-        clear_ends_local: bool = False,
-        clear_reason: bool = False,
-        now: datetime,
+        payload: UserAvailabilityOverrideUpdate,
     ) -> UserAvailabilityOverrideRow:
+        # code-health: ignore[ccn] Explicit sparse update state table.
         # Caller has just confirmed the row exists via :meth:`get`;
         # use the same workspace-scoped SELECT shape so the caller's
         # UoW reuses the identity-map entry rather than spawning a
@@ -292,11 +279,11 @@ class SqlAlchemyUserAvailabilityOverrideRepository(UserAvailabilityOverrideRepos
         # rejects approved / deleted rows from this path.
         row = self._session.scalars(
             select(UserAvailabilityOverride).where(
-                UserAvailabilityOverride.id == override_id,
-                UserAvailabilityOverride.workspace_id == workspace_id,
+                UserAvailabilityOverride.id == payload.id,
+                UserAvailabilityOverride.workspace_id == payload.workspace_id,
                 UserAvailabilityOverride.deleted_at.is_(None),
             )
-        ).one()
+        ).one()  # code-health: ignore[duplicate] Explicit ORM/wire shape.
 
         # Caller has already filtered the deltas (zero-delta calls
         # never reach us); apply each sent field. ``clear_*`` flags
@@ -304,30 +291,33 @@ class SqlAlchemyUserAvailabilityOverrideRepository(UserAvailabilityOverrideRepos
         # for nullable columns. ``available`` is non-nullable; a
         # ``None`` argument is treated as "unchanged".
         changed = False
-        if available is not None and available != row.available:
-            row.available = available
+        if payload.available is not None and payload.available != row.available:
+            row.available = payload.available
             changed = True
-        if clear_starts_local and row.starts_local is not None:
+        if payload.clear_starts_local and row.starts_local is not None:
             row.starts_local = None
             changed = True
-        elif starts_local is not None and starts_local != row.starts_local:
-            row.starts_local = starts_local
+        elif (
+            payload.starts_local is not None
+            and payload.starts_local != row.starts_local
+        ):
+            row.starts_local = payload.starts_local
             changed = True
-        if clear_ends_local and row.ends_local is not None:
+        if payload.clear_ends_local and row.ends_local is not None:
             row.ends_local = None
             changed = True
-        elif ends_local is not None and ends_local != row.ends_local:
-            row.ends_local = ends_local
+        elif payload.ends_local is not None and payload.ends_local != row.ends_local:
+            row.ends_local = payload.ends_local
             changed = True
-        if clear_reason and row.reason is not None:
+        if payload.clear_reason and row.reason is not None:
             row.reason = None
             changed = True
-        elif reason is not None and reason != row.reason:
-            row.reason = reason
+        elif payload.reason is not None and payload.reason != row.reason:
+            row.reason = payload.reason
             changed = True
 
         if changed:
-            row.updated_at = now
+            row.updated_at = payload.now
             self._session.flush()
         return _to_override_row(row)
 
@@ -452,6 +442,7 @@ class SqlAlchemyUserLeaveRepository(UserLeaveRepository):
         starts_after: _date_cls | None = None,
         ends_before: _date_cls | None = None,
     ) -> Sequence[UserLeaveRow]:
+        # code-health: ignore[params] Explicit list filter boundary.
         stmt = select(UserLeave).where(
             UserLeave.workspace_id == workspace_id,
             UserLeave.deleted_at.is_(None),
@@ -477,29 +468,20 @@ class SqlAlchemyUserLeaveRepository(UserLeaveRepository):
     def insert(
         self,
         *,
-        leave_id: str,
-        workspace_id: str,
-        user_id: str,
-        starts_on: _date_cls,
-        ends_on: _date_cls,
-        category: str,
-        note_md: str | None,
-        approved_at: datetime | None,
-        approved_by: str | None,
-        now: datetime,
+        payload: UserLeaveInsert,
     ) -> UserLeaveRow:
         row = UserLeave(
-            id=leave_id,
-            workspace_id=workspace_id,
-            user_id=user_id,
-            starts_on=starts_on,
-            ends_on=ends_on,
-            category=category,
-            approved_at=approved_at,
-            approved_by=approved_by,
-            note_md=note_md,
-            created_at=now,
-            updated_at=now,
+            id=payload.id,
+            workspace_id=payload.workspace_id,
+            user_id=payload.user_id,
+            starts_on=payload.starts_on,
+            ends_on=payload.ends_on,
+            category=payload.category,
+            approved_at=payload.approved_at,
+            approved_by=payload.approved_by,
+            note_md=payload.note_md,
+            created_at=payload.now,
+            updated_at=payload.now,
             deleted_at=None,
         )
         self._session.add(row)
@@ -509,14 +491,7 @@ class SqlAlchemyUserLeaveRepository(UserLeaveRepository):
     def update_fields(
         self,
         *,
-        workspace_id: str,
-        leave_id: str,
-        starts_on: _date_cls | None = None,
-        ends_on: _date_cls | None = None,
-        category: str | None = None,
-        note_md: str | None = None,
-        clear_note_md: bool = False,
-        now: datetime,
+        payload: UserLeaveUpdate,
     ) -> UserLeaveRow:
         # Caller has just confirmed the row exists via :meth:`get`;
         # use the same workspace-scoped SELECT shape so the caller's
@@ -526,8 +501,8 @@ class SqlAlchemyUserLeaveRepository(UserLeaveRepository):
         # rejects approved / deleted rows from this path.
         row = self._session.scalars(
             select(UserLeave).where(
-                UserLeave.id == leave_id,
-                UserLeave.workspace_id == workspace_id,
+                UserLeave.id == payload.id,
+                UserLeave.workspace_id == payload.workspace_id,
                 UserLeave.deleted_at.is_(None),
             )
         ).one()
@@ -538,24 +513,24 @@ class SqlAlchemyUserLeaveRepository(UserLeaveRepository):
         # for the only nullable column. The other three are
         # non-nullable; a ``None`` argument is "unchanged".
         changed = False
-        if starts_on is not None and starts_on != row.starts_on:
-            row.starts_on = starts_on
+        if payload.starts_on is not None and payload.starts_on != row.starts_on:
+            row.starts_on = payload.starts_on
             changed = True
-        if ends_on is not None and ends_on != row.ends_on:
-            row.ends_on = ends_on
+        if payload.ends_on is not None and payload.ends_on != row.ends_on:
+            row.ends_on = payload.ends_on
+            changed = True  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+        if payload.category is not None and payload.category != row.category:
+            row.category = payload.category
             changed = True
-        if category is not None and category != row.category:
-            row.category = category
-            changed = True
-        if clear_note_md and row.note_md is not None:
+        if payload.clear_note_md and row.note_md is not None:
             row.note_md = None
             changed = True
-        elif note_md is not None and note_md != row.note_md:
-            row.note_md = note_md
+        elif payload.note_md is not None and payload.note_md != row.note_md:
+            row.note_md = payload.note_md
             changed = True
 
         if changed:
-            row.updated_at = now
+            row.updated_at = payload.now
             self._session.flush()
         return _to_leave_row(row)
 

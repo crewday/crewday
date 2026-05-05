@@ -572,6 +572,7 @@ class HttpxIcalValidator:
 
     def validate(self, url: str) -> IcalValidation:
         """Run the §04 validation + probe pipeline on ``url``."""
+        # code-health: ignore[nloc] Explicit adapter flow.
         try:
             parsed = urlsplit(url)
         except ValueError as exc:

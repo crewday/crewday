@@ -124,9 +124,13 @@ from app.domain.identity.availability_ports import (
     CapabilityChecker,
     SeamPermissionDenied,
     UserAvailabilityOverrideExistsError,
+    UserAvailabilityOverrideInsert,
     UserAvailabilityOverrideRepository,
     UserAvailabilityOverrideRow,
     UserWeeklyAvailabilityRow,
+)
+from app.domain.identity.availability_ports import (
+    UserAvailabilityOverrideUpdate as UserAvailabilityOverrideUpdatePayload,
 )
 from app.events import UserAvailabilityOverrideUpserted, bus
 from app.tenancy import WorkspaceContext
@@ -761,18 +765,20 @@ def create_override(
     row_id = new_ulid(clock=clock)
     try:
         row = repo.insert(
-            override_id=row_id,
-            workspace_id=ctx.workspace_id,
-            user_id=target_user_id,
-            date=body.date,
-            available=body.available,
-            starts_local=body.starts_local,
-            ends_local=body.ends_local,
-            reason=body.reason,
-            approval_required=approval_required,
-            approved_at=approved_at,
-            approved_by=approved_by,
-            now=now,
+            payload=UserAvailabilityOverrideInsert(
+                id=row_id,
+                workspace_id=ctx.workspace_id,
+                user_id=target_user_id,
+                date=body.date,
+                available=body.available,
+                starts_local=body.starts_local,
+                ends_local=body.ends_local,
+                reason=body.reason,
+                approval_required=approval_required,
+                approved_at=approved_at,
+                approved_by=approved_by,
+                now=now,
+            )
         )
     except UserAvailabilityOverrideExistsError as exc:
         raise UserAvailabilityOverrideAlreadyExists(
@@ -927,16 +933,18 @@ def update_override(
         return before
 
     after_row = repo.update_fields(
-        workspace_id=ctx.workspace_id,
-        override_id=override_id,
-        available=body.available if available_changed else None,
-        starts_local=body.starts_local if starts_set else None,
-        ends_local=body.ends_local if ends_set else None,
-        reason=body.reason if reason_set else None,
-        clear_starts_local=starts_clear_effective,
-        clear_ends_local=ends_clear_effective,
-        clear_reason=reason_clear_effective,
-        now=now,
+        payload=UserAvailabilityOverrideUpdatePayload(
+            workspace_id=ctx.workspace_id,
+            id=override_id,
+            available=body.available if available_changed else None,
+            starts_local=body.starts_local if starts_set else None,
+            ends_local=body.ends_local if ends_set else None,
+            reason=body.reason if reason_set else None,
+            clear_starts_local=starts_clear_effective,
+            clear_ends_local=ends_clear_effective,
+            clear_reason=reason_clear_effective,
+            now=now,
+        )
     )
     after = _row_to_view(after_row)
 

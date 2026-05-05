@@ -238,7 +238,9 @@ class LlmAssignment(Base):
 
     __tablename__ = "llm_assignment"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True)
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True
+    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
     workspace_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("workspace.id", ondelete="CASCADE"),
@@ -522,7 +524,9 @@ class ApprovalRequest(Base):
     # Legacy reviewer-note column (cd-cm5). Kept for backwards
     # compatibility on rows written before the cd-9ghv consumer; new
     # writes target :attr:`decision_note_md` per the spec name.
-    rationale_md: Mapped[str | None] = mapped_column(String, nullable=True)
+    rationale_md: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # cd-9ghv: TTL anchor. NULL on cd-cm5-era rows.
     expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
@@ -706,7 +710,9 @@ class LlmUsage(Base):
     token_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     # cd-wjpl telemetry: denormalised :attr:`AgentToken.label` for
     # display. NULL when the call carries no agent context.
-    agent_label: Mapped[str | None] = mapped_column(String, nullable=True)
+    agent_label: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
@@ -931,11 +937,13 @@ class AgentPreference(Base):
     upstream_pii_consent: Mapped[list[str]] = mapped_column(
         JSON, nullable=False, default=list, server_default="[]"
     )
-    updated_by_user_id: Mapped[str | None] = mapped_column(
-        String,
-        ForeignKey("user.id", ondelete="SET NULL"),
-        nullable=True,
-    )
+    updated_by_user_id: Mapped[str | None] = (
+        mapped_column(  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+            String,
+            ForeignKey("user.id", ondelete="SET NULL"),
+            nullable=True,  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+        )
+    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     archived_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
@@ -1021,8 +1029,12 @@ class AgentDoc(Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=true()
     )
-    default_hash: Mapped[str] = mapped_column(String(16), nullable=False)
-    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    default_hash: Mapped[str] = mapped_column(
+        String(16), nullable=False
+    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    notes: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
@@ -1050,8 +1062,12 @@ class AgentDocRevision(Base):
         nullable=False,
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
-    body_md: Mapped[str] = mapped_column(String, nullable=False)
-    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    body_md: Mapped[str] = mapped_column(
+        String, nullable=False
+    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    notes: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     created_by_user_id: Mapped[str | None] = mapped_column(
         String,

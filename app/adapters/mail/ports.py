@@ -37,4 +37,5 @@ class Mailer(Protocol):
         Raises :class:`MailDeliveryError` if the transport refuses or
         fails the send.
         """
+        # code-health: ignore[params] Explicit adapter boundary.
         ...

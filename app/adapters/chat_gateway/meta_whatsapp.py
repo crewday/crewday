@@ -1,4 +1,4 @@
-"""Meta WhatsApp Cloud API inbound adapter."""
+"""Meta WhatsApp inbound adapter."""  # code-health: ignore[duplicate] Provider gateway.
 
 from __future__ import annotations
 

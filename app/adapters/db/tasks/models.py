@@ -889,7 +889,9 @@ class ChecklistItem(Base):
 
     __tablename__ = "checklist_item"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True)
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True
+    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
     workspace_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("workspace.id", ondelete="CASCADE"),

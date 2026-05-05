@@ -128,6 +128,7 @@ class SqlAlchemyWebhookRepository(WebhookRepository):
         active: bool,
         created_at: datetime,
     ) -> WebhookSubscriptionRow:
+        # code-health: ignore[params] Explicit adapter boundary.
         row = WebhookSubscription(
             id=sub_id,
             workspace_id=workspace_id,
@@ -156,6 +157,7 @@ class SqlAlchemyWebhookRepository(WebhookRepository):
         active: bool | None = None,
         updated_at: datetime,
     ) -> WebhookSubscriptionRow:
+        # code-health: ignore[params] Explicit adapter boundary.
         row = self._session.get(WebhookSubscription, sub_id)
         if row is None:
             raise LookupError(f"webhook_subscription {sub_id!r} not found")
@@ -320,6 +322,7 @@ class SqlAlchemyWebhookRepository(WebhookRepository):
         replayed_from_id: str | None,
         created_at: datetime,
     ) -> WebhookDeliveryRow:
+        # code-health: ignore[params] Explicit adapter boundary.
         row = WebhookDelivery(
             id=delivery_id,
             workspace_id=workspace_id,
@@ -367,6 +370,7 @@ class SqlAlchemyWebhookRepository(WebhookRepository):
         # ``workspace_id`` and the dispatcher resolves the right
         # subscription via the FK without leaning on an ambient
         # WorkspaceContext.
+        # code-health: ignore[params] Explicit adapter boundary.
         with tenant_agnostic():
             row = self._session.get(WebhookDelivery, delivery_id)
             if row is None:

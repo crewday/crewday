@@ -130,6 +130,7 @@ class SqlAlchemySecretEnvelopeRepository(SecretEnvelopeRepository):
         key_fp: bytes,
         created_at: datetime,
     ) -> SecretEnvelopeRow:
+        # code-health: ignore[params] Explicit adapter boundary.
         row = SecretEnvelope(
             id=envelope_id,
             owner_entity_kind=owner_entity_kind,

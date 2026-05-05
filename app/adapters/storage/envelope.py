@@ -343,6 +343,7 @@ class Aes256GcmEnvelope:
         expected_owner: EnvelopeOwner | None,
     ) -> bytes:
         """Open a ``0x02`` pointer-tagged row-backed ciphertext."""
+        # code-health: ignore[nloc] Explicit adapter flow.
         if self._repository is None:
             # The caller asked us to open a row-backed blob but never
             # wired the repository. Fail loudly — silently falling

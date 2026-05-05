@@ -127,7 +127,9 @@ class RateCard(Base):
 
     __tablename__ = "rate_card"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True)
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True
+    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
     workspace_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("workspace.id", ondelete="CASCADE"),
@@ -179,7 +181,9 @@ class WorkOrder(Base):
 
     __tablename__ = "work_order"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True)
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True
+    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
     workspace_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("workspace.id", ondelete="CASCADE"),

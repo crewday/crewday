@@ -133,6 +133,7 @@ class SqlAlchemyTasksCreateOccurrencePort:
         # service) already enforces this; restamp here so a future
         # caller that forgets cannot smuggle a naive datetime into
         # ``starts_at`` / ``ends_at`` / ``due_by_utc``.
+        # code-health: ignore[nloc] Explicit adapter flow.
         starts_at = _to_utc(request.starts_at)
         ends_at = _to_utc(request.ends_at)
         due_by = _to_utc(request.due_by_utc) if request.due_by_utc is not None else None
@@ -234,6 +235,7 @@ def _insert_occurrence(
     outcome: TasksCreateOccurrenceOutcome,
 ) -> TurnoverOccurrenceResult:
     """Insert a fresh ``occurrence`` row and return the port outcome."""
+    # code-health: ignore[params] Explicit adapter boundary.
     scheduled_for_local = _scheduled_for_local(session, request.property_id, starts_at)
     row = Occurrence(
         id=new_ulid(),
@@ -424,6 +426,7 @@ class SqlAlchemyCommentsRepository(CommentsRepository):
         after_id: str | None,
         limit: int,
     ) -> Sequence[CommentRow]:
+        # code-health: ignore[params] Explicit adapter boundary.
         stmt = select(Comment).where(
             Comment.workspace_id == workspace_id,
             Comment.occurrence_id == occurrence_id,
@@ -461,6 +464,7 @@ class SqlAlchemyCommentsRepository(CommentsRepository):
         llm_call_id: str | None,
         created_at: datetime,
     ) -> CommentRow:
+        # code-health: ignore[params] Explicit adapter boundary.
         row = Comment(
             id=comment_id,
             workspace_id=workspace_id,

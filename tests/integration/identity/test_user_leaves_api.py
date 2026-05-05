@@ -46,6 +46,7 @@ from app.adapters.db.availability.models import UserLeave
 from app.adapters.db.base import Base
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import add_exception_handlers
 from app.api.v1.user_leaves import build_user_leaves_router
 from app.events import UserLeaveUpserted, bus
 from app.tenancy import WorkspaceContext, registry
@@ -176,6 +177,7 @@ def _build_app(factory: sessionmaker[Session], ctx: WorkspaceContext) -> FastAPI
                 reset_current(token)
 
     app.add_middleware(_PinCtxMiddleware)
+    add_exception_handlers(app)
     app.include_router(build_user_leaves_router())
 
     def _override_ctx() -> WorkspaceContext:

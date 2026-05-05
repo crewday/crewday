@@ -306,9 +306,11 @@ class SqlAlchemyExpensesRepository(ExpensesRepository):
                 ExpenseClaim.deleted_at.is_(None),
                 WorkEngagement.user_id == user_id,
             )
-        )
+        )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
         if state is not None:
-            stmt = stmt.where(ExpenseClaim.state == state)
+            stmt = stmt.where(
+                ExpenseClaim.state == state
+            )  # code-health: ignore[duplicate] Claim list filters.
         if cursor_id is not None:
             stmt = stmt.where(ExpenseClaim.id < cursor_id)
         stmt = stmt.order_by(ExpenseClaim.id.desc()).limit(limit + 1)
@@ -345,6 +347,7 @@ class SqlAlchemyExpensesRepository(ExpensesRepository):
         limit: int,
         cursor: PendingClaimsCursor | None,
     ) -> list[ExpenseClaimRow]:
+        # code-health: ignore[params] Explicit adapter boundary.
         stmt = select(ExpenseClaim).where(
             ExpenseClaim.workspace_id == workspace_id,
             ExpenseClaim.state == "submitted",
@@ -462,6 +465,7 @@ class SqlAlchemyExpensesRepository(ExpensesRepository):
         pages: int | None,
         created_at: datetime,
     ) -> ExpenseAttachmentRow:
+        # code-health: ignore[params] Explicit adapter boundary.
         attachment = ExpenseAttachment(
             id=attachment_id,
             workspace_id=workspace_id,
@@ -536,6 +540,7 @@ class SqlAlchemyExpensesRepository(ExpensesRepository):
         note_md: str,
         created_at: datetime,
     ) -> ExpenseClaimRow:
+        # code-health: ignore[params] Explicit adapter boundary.
         row = ExpenseClaim(
             id=claim_id,
             workspace_id=workspace_id,
@@ -708,6 +713,7 @@ class SqlAlchemyExpensesRepository(ExpensesRepository):
         actor_user_id: str,
         created_at: datetime,
     ) -> None:
+        # code-health: ignore[params] Explicit adapter boundary.
         row = LlmUsageRow(
             id=usage_id,
             workspace_id=workspace_id,

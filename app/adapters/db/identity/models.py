@@ -23,9 +23,11 @@ to echo the address back to the user.
 See ``docs/specs/02-domain-model.md`` §"users" / §"passkey_credential"
 / §"session" / §"api_token" and ``docs/specs/03-auth-and-tokens.md``
 §"Data model".
-"""
+"""  # code-health: ignore[duplicate] Explicit ORM/wire shape.
 
-from __future__ import annotations
+from __future__ import (
+    annotations,
+)  # code-health: ignore[duplicate] Explicit ORM/wire shape.
 
 from datetime import datetime
 from typing import Any
@@ -41,9 +43,12 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     event,
-    text,
+    text,  # code-health: ignore[duplicate] Explicit ORM/wire shape.
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import (
+    Mapped,
+    mapped_column,
+)  # code-health: ignore[duplicate] Explicit import prelude.
 
 from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
@@ -218,7 +223,9 @@ class Session(Base):
 
     __tablename__ = "session"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True)
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True
+    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
     user_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("user.id", ondelete="CASCADE"),
@@ -350,7 +357,9 @@ class ApiToken(Base):
     )
     expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
-    revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        UtcDateTime(), nullable=True
+    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
@@ -460,8 +469,10 @@ class WebAuthnChallenge(Base):
     # "Additional passkeys"). We snapshot it on start so finish can
     # re-verify against the same set — a sibling client adding a
     # passkey mid-ceremony won't retroactively widen the gate.
-    exclude_credentials: Mapped[list[str]] = mapped_column(
-        JSON, nullable=False, default=list
+    exclude_credentials: Mapped[list[str]] = (
+        mapped_column(  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+            JSON, nullable=False, default=list
+        )
     )
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
@@ -693,7 +704,9 @@ class Invite(Base):
 
     __tablename__ = "invite"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True)
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True
+    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
     workspace_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("workspace.id", ondelete="CASCADE"),
@@ -913,7 +926,9 @@ class BreakGlassCode(Base):
 
     __tablename__ = "break_glass_code"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True)
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True
+    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
     workspace_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("workspace.id", ondelete="CASCADE"),

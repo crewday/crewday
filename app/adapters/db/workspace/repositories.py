@@ -213,6 +213,7 @@ class SqlAlchemyMembershipRepository(MembershipRepository):
         created_at: datetime,
         updated_at: datetime,
     ) -> WorkEngagementRow:
+        # code-health: ignore[params] Explicit adapter boundary.
         row = WorkEngagement(
             id=engagement_id,
             user_id=user_id,

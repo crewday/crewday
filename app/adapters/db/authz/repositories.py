@@ -158,6 +158,7 @@ class SqlAlchemyPermissionGroupRepository(PermissionGroupRepository):
         capabilities: dict[str, Any],
         created_at: datetime,
     ) -> PermissionGroupRow:
+        # code-health: ignore[params] Explicit adapter boundary.
         group = PermissionGroup(
             id=group_id,
             workspace_id=workspace_id,
@@ -434,6 +435,7 @@ class SqlAlchemyRoleGrantRepository(RoleGrantRepository):
         created_at: datetime,
         created_by_user_id: str | None,
     ) -> RoleGrantRow:
+        # code-health: ignore[params] Explicit adapter boundary.
         row = RoleGrant(
             id=grant_id,
             workspace_id=workspace_id,

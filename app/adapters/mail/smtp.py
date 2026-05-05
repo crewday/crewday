@@ -143,6 +143,7 @@ class SMTPMailer:
         Return-Path, envelope) needs it; a missing From is a config
         error, not a runtime surprise.
         """
+        # code-health: ignore[params] Explicit adapter boundary.
         if config_source is None and not from_addr:
             raise ValueError(
                 "SMTPMailer requires a non-empty from_addr (set CREWDAY_SMTP_FROM)"
@@ -191,6 +192,7 @@ class SMTPMailer:
         separate id — the Message-ID we mint is the one the recipient's
         MTA logs and the one a future bounce webhook will echo back.
         """
+        # code-health: ignore[params] Explicit adapter boundary.
         if not to:
             raise ValueError("SMTPMailer.send requires at least one recipient")
 
@@ -242,6 +244,7 @@ class SMTPMailer:
         ``multipart/alternative`` with plaintext first (so non-HTML
         readers see the text without scrolling past MIME delimiters).
         """
+        # code-health: ignore[params] Explicit adapter boundary.
         assert config.from_addr is not None
         bounce_domain = config.bounce_domain or _parse_domain(config.from_addr)
         message = EmailMessage()

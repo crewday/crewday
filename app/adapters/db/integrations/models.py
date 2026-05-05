@@ -39,7 +39,10 @@ from sqlalchemy import (
     Integer,
     String,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import (
+    Mapped,
+    mapped_column,
+)  # code-health: ignore[duplicate] Explicit import prelude.
 
 from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base

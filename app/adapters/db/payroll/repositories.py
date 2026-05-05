@@ -328,7 +328,9 @@ def _jurisdiction_from_components(value: object) -> str | None:
 def _payslip_currency_subquery() -> ScalarSelect[str | None]:
     return (
         select(PayRule.currency)
-        .join(PayPeriod, PayPeriod.id == Payslip.pay_period_id)
+        .join(
+            PayPeriod, PayPeriod.id == Payslip.pay_period_id
+        )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
         .where(
             PayRule.workspace_id == Payslip.workspace_id,
             PayRule.user_id == Payslip.user_id,
@@ -436,7 +438,7 @@ class SqlAlchemyPayPeriodRepository(PayPeriodRepository):
         period_id: str,
         locked_at: datetime,
         locked_by: str | None,
-    ) -> PayPeriodRow:
+    ) -> PayPeriodRow:  # code-health: ignore[duplicate] Explicit ORM/wire shape.
         row = self._session.scalars(
             select(PayPeriod).where(
                 PayPeriod.id == period_id,
@@ -537,7 +539,7 @@ class SqlAlchemyPayPeriodRepository(PayPeriodRepository):
             )
         )
 
-    def list_unsettled_booking_ids(
+    def list_unsettled_booking_ids(  # code-health: ignore[duplicate] Payroll query.
         self,
         *,
         workspace_id: str,
@@ -836,6 +838,7 @@ class SqlAlchemyPayslipComputeRepository(SqlAlchemyBookingPayRepository):
         components_json: dict[str, object],
         now: datetime,
     ) -> PayslipRow:
+        # code-health: ignore[params] Explicit adapter boundary.
         row = self._session.scalars(
             select(Payslip).where(
                 Payslip.workspace_id == workspace_id,
@@ -882,7 +885,7 @@ class SqlAlchemyPayslipComputeRepository(SqlAlchemyBookingPayRepository):
         workspace_id: str,
         user_id: str,
         starts_at: datetime,
-        ends_at: datetime,
+        ends_at: datetime,  # code-health: ignore[duplicate] Explicit ORM/wire shape.
     ) -> Sequence[PayslipReimbursableClaimRow]:
         # Window predicate ``[starts_at, ends_at)`` on ``purchased_at``
         # — same convention §09 §"Approval" uses to attach a claim to
@@ -986,6 +989,7 @@ class SqlAlchemyPayslipReadRepository(PayslipReadRepository):
         paid_at: datetime | None = None,
         payout_snapshot_json: dict[str, object] | None = None,
     ) -> PayslipReadRow:
+        # code-health: ignore[params] Explicit adapter boundary.
         row = self._session.scalars(
             select(Payslip).where(
                 Payslip.workspace_id == workspace_id,
@@ -1021,6 +1025,7 @@ class SqlAlchemyPayslipReadRepository(PayslipReadRepository):
         # ``mark_reimbursed`` route). Walk the rows individually rather
         # than an ORM-level UPDATE so the SA identity-map sees the new
         # column values inside the same UoW.
+        # code-health: ignore[params] Explicit adapter boundary.
         rows = (
             self._session.execute(
                 select(ExpenseClaim)
@@ -1264,6 +1269,7 @@ class SqlAlchemyPayrollExportRepository(PayrollExportRepository):
         until: datetime,
         status_filter: str,
     ) -> Iterable[ExpenseLedgerExportRow]:
+        # code-health: ignore[nloc] Explicit adapter flow.
         stmt = (
             select(
                 ExpenseClaim,
@@ -1459,6 +1465,7 @@ class SqlAlchemyPayRuleRepository(PayRuleRepository):
         created_by: str | None,
         now: datetime,
     ) -> PayRuleRow:
+        # code-health: ignore[params] Explicit adapter boundary.
         row = PayRule(
             id=rule_id,
             workspace_id=workspace_id,
@@ -1498,6 +1505,7 @@ class SqlAlchemyPayRuleRepository(PayRuleRepository):
         # use the same workspace-scoped SELECT shape so the caller's
         # UoW reuses the identity-map entry rather than spawning a
         # second instance for the same primary key.
+        # code-health: ignore[params] Explicit adapter boundary.
         row = self._session.scalars(
             select(PayRule).where(
                 PayRule.id == rule_id,

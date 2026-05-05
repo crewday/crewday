@@ -109,8 +109,12 @@ from app.audit import write_audit
 from app.domain.identity.availability_ports import (
     CapabilityChecker,
     SeamPermissionDenied,
+    UserLeaveInsert,
     UserLeaveRepository,
     UserLeaveRow,
+)
+from app.domain.identity.availability_ports import (
+    UserLeaveUpdate as UserLeaveUpdatePayload,
 )
 from app.events import UserLeaveUpserted, bus
 from app.tenancy import WorkspaceContext
@@ -623,16 +627,18 @@ def create_leave(
 
     row_id = new_ulid(clock=clock)
     row = repo.insert(
-        leave_id=row_id,
-        workspace_id=ctx.workspace_id,
-        user_id=target_user_id,
-        starts_on=body.starts_on,
-        ends_on=body.ends_on,
-        category=body.category,
-        note_md=body.note_md,
-        approved_at=approved_at,
-        approved_by=approved_by,
-        now=now,
+        payload=UserLeaveInsert(
+            id=row_id,
+            workspace_id=ctx.workspace_id,
+            user_id=target_user_id,
+            starts_on=body.starts_on,
+            ends_on=body.ends_on,
+            category=body.category,
+            note_md=body.note_md,
+            approved_at=approved_at,
+            approved_by=approved_by,
+            now=now,
+        )
     )
 
     view = _row_to_view(row)
@@ -766,14 +772,16 @@ def update_leave(
         return before
 
     after_row = repo.update_fields(
-        workspace_id=ctx.workspace_id,
-        leave_id=leave_id,
-        starts_on=body.starts_on if starts_changed else None,
-        ends_on=body.ends_on if ends_changed else None,
-        category=body.category if category_changed else None,
-        note_md=body.note_md if note_set else None,
-        clear_note_md=note_clear_effective,
-        now=now,
+        payload=UserLeaveUpdatePayload(
+            workspace_id=ctx.workspace_id,
+            id=leave_id,
+            starts_on=body.starts_on if starts_changed else None,
+            ends_on=body.ends_on if ends_changed else None,
+            category=body.category if category_changed else None,
+            note_md=body.note_md if note_set else None,
+            clear_note_md=note_clear_effective,
+            now=now,
+        )
     )
     after = _row_to_view(after_row)
 
