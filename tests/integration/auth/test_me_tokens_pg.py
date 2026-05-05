@@ -31,6 +31,7 @@ from collections.abc import Iterator
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from pydantic import SecretStr
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -41,6 +42,7 @@ from app.adapters.db.identity.models import ApiToken, User
 from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.workspace.models import Workspace
 from app.api.deps import db_session as db_session_dep
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.auth import me_tokens as me_tokens_module
 from app.auth.audit import AGNOSTIC_ACTOR_ID, AGNOSTIC_WORKSPACE_ID
 from app.auth.session import SESSION_COOKIE_NAME, issue
@@ -52,6 +54,7 @@ from app.auth.tokens import (
     verify as verify_token,
 )
 from app.config import Settings
+from app.domain.errors import CANONICAL_TYPE_BASE
 from app.tenancy import tenant_agnostic
 from app.util.clock import SystemClock
 from app.util.ulid import new_ulid
@@ -197,6 +200,7 @@ def client(
     monkeypatch.setattr("app.auth.session.get_settings", lambda: settings)
 
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(
         me_tokens_module.build_me_tokens_router(),
         prefix="/api/v1",
@@ -245,6 +249,31 @@ def _issue_session(
         )
         s.commit()
         return result.cookie_value
+
+
+def _assert_problem_json_error(
+    response: Response,
+    *,
+    status_code: int,
+    type_name: str,
+    title: str,
+    instance: str,
+    error: str,
+    detail: str | None = None,
+) -> dict[str, object]:
+    assert response.status_code == status_code, response.text
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    body = response.json()
+    assert body["type"] == f"{CANONICAL_TYPE_BASE}{type_name}"
+    assert body["title"] == title
+    assert body["status"] == status_code
+    assert body["instance"] == instance
+    assert body["error"] == error
+    if detail is None:
+        assert "detail" not in body
+    else:
+        assert body["detail"] == detail
+    return body
 
 
 # ---------------------------------------------------------------------------
@@ -333,8 +362,20 @@ class TestMeTokensHttpFlow:
             "/api/v1/me/tokens",
             json={"label": "bad", "scopes": {}},
         )
-        assert r.status_code == 422
-        assert r.json()["detail"]["error"] == "scopes_required"
+        _assert_problem_json_error(
+            r,
+            status_code=422,
+            type_name="validation",
+            title="Validation error",
+            instance="/api/v1/me/tokens",
+            error="scopes_required",
+            detail="personal access tokens require at least one me:* scope",
+        )
+        with session_factory() as s:
+            rows = s.scalars(
+                select(ApiToken).where(ApiToken.subject_user_id == seed_user)
+            ).all()
+        assert rows == []
 
     def test_workspace_scope_is_422_me_scope_conflict(
         self,
@@ -354,8 +395,15 @@ class TestMeTokensHttpFlow:
                 "scopes": {"me.tasks:read": True, "tasks:read": True},
             },
         )
-        assert r.status_code == 422
-        assert r.json()["detail"]["error"] == "me_scope_conflict"
+        _assert_problem_json_error(
+            r,
+            status_code=422,
+            type_name="validation",
+            title="Validation error",
+            instance="/api/v1/me/tokens",
+            error="me_scope_conflict",
+            detail="personal access tokens accept only me:* scopes — got 'tasks:read'",
+        )
 
     def test_sixth_pat_is_422_too_many_personal(
         self,
@@ -381,8 +429,15 @@ class TestMeTokensHttpFlow:
             "/api/v1/me/tokens",
             json={"label": "6th", "scopes": {"me.tasks:read": True}},
         )
-        assert r.status_code == 422
-        assert r.json()["detail"]["error"] == "too_many_personal_tokens"
+        _assert_problem_json_error(
+            r,
+            status_code=422,
+            type_name="validation",
+            title="Validation error",
+            instance="/api/v1/me/tokens",
+            error="too_many_personal_tokens",
+            detail=f"user {seed_user!r} already has 5 active personal tokens (max 5)",
+        )
 
     def test_no_session_cookie_is_401(self, client: TestClient) -> None:
         client.cookies.clear()
@@ -390,22 +445,40 @@ class TestMeTokensHttpFlow:
             "/api/v1/me/tokens",
             json={"label": "no-sess", "scopes": {"me.tasks:read": True}},
         )
-        assert r.status_code == 401
-        assert r.json()["detail"]["error"] == "session_required"
+        _assert_problem_json_error(
+            r,
+            status_code=401,
+            type_name="unauthorized",
+            title="Unauthorized",
+            instance="/api/v1/me/tokens",
+            error="session_required",
+        )
 
     def test_get_without_session_cookie_is_401(self, client: TestClient) -> None:
         """``GET /me/tokens`` shares the session-required gate."""
         client.cookies.clear()
         r = client.get("/api/v1/me/tokens")
-        assert r.status_code == 401
-        assert r.json()["detail"]["error"] == "session_required"
+        _assert_problem_json_error(
+            r,
+            status_code=401,
+            type_name="unauthorized",
+            title="Unauthorized",
+            instance="/api/v1/me/tokens",
+            error="session_required",
+        )
 
     def test_delete_without_session_cookie_is_401(self, client: TestClient) -> None:
         """``DELETE /me/tokens/{id}`` shares the session-required gate."""
         client.cookies.clear()
         r = client.delete("/api/v1/me/tokens/01HWA00000000000000000NOPE")
-        assert r.status_code == 401
-        assert r.json()["detail"]["error"] == "session_required"
+        _assert_problem_json_error(
+            r,
+            status_code=401,
+            type_name="unauthorized",
+            title="Unauthorized",
+            instance="/api/v1/me/tokens/01HWA00000000000000000NOPE",
+            error="session_required",
+        )
 
     def test_delete_unknown_token_is_404(
         self,
@@ -419,8 +492,14 @@ class TestMeTokensHttpFlow:
         )
         client.cookies.set(SESSION_COOKIE_NAME, cookie_value)
         r = client.delete("/api/v1/me/tokens/01HWA00000000000000000NOPE")
-        assert r.status_code == 404
-        assert r.json()["detail"]["error"] == "token_not_found"
+        _assert_problem_json_error(
+            r,
+            status_code=404,
+            type_name="not_found",
+            title="Not found",
+            instance="/api/v1/me/tokens/01HWA00000000000000000NOPE",
+            error="token_not_found",
+        )
 
     def test_post_revoke_alias_is_idempotent(
         self,
@@ -514,8 +593,14 @@ class TestMeTokensHttpFlow:
         )
         client.cookies.set(SESSION_COOKIE_NAME, caller_cookie)
         r = client.post(f"/api/v1/me/tokens/{foreign_id}/rotate")
-        assert r.status_code == 404
-        assert r.json()["detail"]["error"] == "token_not_found"
+        _assert_problem_json_error(
+            r,
+            status_code=404,
+            type_name="not_found",
+            title="Not found",
+            instance=f"/api/v1/me/tokens/{foreign_id}/rotate",
+            error="token_not_found",
+        )
 
     def test_audit_returns_personal_lifecycle_and_request_rows(
         self,
