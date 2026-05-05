@@ -309,28 +309,45 @@ class TestFourSystemGroups:
         system_slugs = {g.slug for g in groups if g.system}
         assert system_slugs == self._EXPECTED_SYSTEM_SLUGS
 
-    def test_first_user_in_owners_only(
+    def test_first_user_seeded_explicitly_in_owners_only(
         self, env: tuple[Session, WorkspaceContext, str]
     ) -> None:
-        """First user is in ``owners`` and NOT in any other system group.
+        """First user has an explicit member row only in ``owners``.
 
-        Preserves the cd-3i5 behaviour: the three non-owners system
-        groups carry derived membership that will populate at
-        resolver time (cd-zkr), not at seed time.
+        The three non-owners system groups are derived from
+        ``role_grants`` (§02), so ``list_members`` may return the
+        bootstrap user for ``managers`` because the seed path also
+        creates the required manager surface grant. The seed invariant
+        is narrower: only ``owners`` gets a ``permission_group_member``
+        row.
         """
         session, ctx, user_id = env
         groups = list_groups(_repo(session), ctx)
         for g in groups:
             if not g.system:
                 continue
-            members = list_members(_repo(session), ctx, group_id=g.id)
-            member_ids = {m.user_id for m in members}
-            if g.slug == "owners":
-                assert user_id in member_ids
-            else:
-                assert user_id not in member_ids, (
-                    f"first user must not be a seed member of system group {g.slug!r}"
+            explicit_member_ids = set(
+                session.scalars(
+                    select(PermissionGroupMember.user_id).where(
+                        PermissionGroupMember.group_id == g.id,
+                        PermissionGroupMember.workspace_id == ctx.workspace_id,
+                    )
                 )
+            )
+            if g.slug == "owners":
+                assert explicit_member_ids == {user_id}
+            else:
+                assert explicit_member_ids == set(), (
+                    f"derived system group {g.slug!r} must not have explicit "
+                    "permission_group_member rows"
+                )
+
+        managers_group_id = next(g.id for g in groups if g.slug == "managers")
+        manager_member_ids = {
+            m.user_id
+            for m in list_members(_repo(session), ctx, group_id=managers_group_id)
+        }
+        assert user_id in manager_member_ids
 
 
 # ---------------------------------------------------------------------------
