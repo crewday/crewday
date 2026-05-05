@@ -114,10 +114,7 @@ IDEMPOTENCY_HEADER: Final[str] = "Idempotency-Key"
 
 # Response header the middleware adds on a cache hit so clients can
 # tell a replayed response from a fresh one (e.g. for metric
-# reporting). Not named in spec §12 today — it's a common convention
-# (Stripe, IETF draft ``draft-ietf-httpapi-idempotency-key-header``)
-# we adopt here; tracked for spec pickup under the cd-z6fk spec
-# follow-up.
+# reporting), matching the replay contract in spec §12.
 IDEMPOTENCY_REPLAY_HEADER: Final[str] = "Idempotency-Replay"
 
 # TTL for persisted cache rows. Spec §12 pins 24 h.
