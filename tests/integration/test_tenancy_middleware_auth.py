@@ -31,6 +31,7 @@ from datetime import UTC, datetime
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from pydantic import SecretStr
 from sqlalchemy import Engine, delete, or_, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -93,6 +94,23 @@ _TENANCY_TEST_SLUGS = (
     "int-del-inactive",
     "int-pat-inactive",
 )
+_PROBLEM_TYPE_BASE = "https://crewday.dev/errors/"
+
+
+def _assert_user_state_problem(
+    response: Response,
+    *,
+    type_name: str,
+    instance: str,
+) -> None:
+    assert response.status_code == 401
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json() == {
+        "type": f"{_PROBLEM_TYPE_BASE}{type_name}",
+        "title": "Unauthorized",
+        "status": 401,
+        "instance": instance,
+    }
 
 
 @pytest.fixture
@@ -456,11 +474,11 @@ class TestCrossTenantConstantTime:
 
 
 class TestArchivedDelegatingSubjectUser:
-    """cd-et6y — middleware emits 401 with a typed error code.
+    """cd-et6y — middleware emits 401 with a typed problem URI.
 
     §03 "Delegated tokens" / "Personal access tokens": when the
     delegating / subject user is archived, the bearer-token request
-    returns ``401`` with a typed code, NOT the constant-time 404
+    returns ``401`` with a typed problem URI, NOT the constant-time 404
     that "unknown slug / not a member" branches collapse into.
     """
 
@@ -516,13 +534,13 @@ class TestArchivedDelegatingSubjectUser:
                 "/w/int-del-arch/api/v1/ping",
                 headers={"Authorization": f"Bearer {minted.token}"},
             )
-        # 401 with the typed error code — distinct from the 404
+        # 401 with the typed problem URI — distinct from the 404
         # "unknown / not-a-member" envelope.
-        assert response.status_code == 401
-        assert response.json() == {
-            "error": "delegating_user_archived",
-            "detail": None,
-        }
+        _assert_user_state_problem(
+            response,
+            type_name="delegating_user_archived",
+            instance="/w/int-del-arch/api/v1/ping",
+        )
         assert CORRELATION_ID_HEADER in response.headers
 
     def test_personal_token_archived_user_returns_401(
@@ -574,11 +592,11 @@ class TestArchivedDelegatingSubjectUser:
                 "/w/int-pat-arch/api/v1/ping",
                 headers={"Authorization": f"Bearer {minted.token}"},
             )
-        assert response.status_code == 401
-        assert response.json() == {
-            "error": "subject_user_archived",
-            "detail": None,
-        }
+        _assert_user_state_problem(
+            response,
+            type_name="subject_user_archived",
+            instance="/w/int-pat-arch/api/v1/ping",
+        )
         assert CORRELATION_ID_HEADER in response.headers
 
     def test_scoped_token_unaffected_by_user_archive(
@@ -697,11 +715,11 @@ class TestArchivedSessionUser:
             client.cookies.set(SESSION_COOKIE_NAME, issued.cookie_value)
             response = client.get("/w/int-sess-arch/api/v1/ping")
 
-        assert response.status_code == 401
-        assert response.json() == {
-            "error": "subject_user_archived",
-            "detail": None,
-        }
+        _assert_user_state_problem(
+            response,
+            type_name="subject_user_archived",
+            instance="/w/int-sess-arch/api/v1/ping",
+        )
         assert CORRELATION_ID_HEADER in response.headers
 
     def test_session_clearing_archive_re_admits_request(
@@ -794,7 +812,7 @@ def _soft_revoke_all_grants(
 
 
 class TestInactiveDelegatingSubjectUser:
-    """cd-ljvs — middleware emits 401 with the inactive-shape error code.
+    """cd-ljvs — middleware emits 401 with the inactive-shape problem URI.
 
     §03 "Delegated tokens" / "Personal access tokens": when the
     delegating / subject user has lost every non-revoked grant
@@ -852,11 +870,11 @@ class TestInactiveDelegatingSubjectUser:
                 "/w/int-del-inactive/api/v1/ping",
                 headers={"Authorization": f"Bearer {minted.token}"},
             )
-        assert response.status_code == 401
-        assert response.json() == {
-            "error": "delegating_user_inactive",
-            "detail": None,
-        }
+        _assert_user_state_problem(
+            response,
+            type_name="delegating_user_inactive",
+            instance="/w/int-del-inactive/api/v1/ping",
+        )
         assert CORRELATION_ID_HEADER in response.headers
 
     def test_personal_token_inactive_user_returns_401(
@@ -895,9 +913,9 @@ class TestInactiveDelegatingSubjectUser:
                 "/w/int-pat-inactive/api/v1/ping",
                 headers={"Authorization": f"Bearer {minted.token}"},
             )
-        assert response.status_code == 401
-        assert response.json() == {
-            "error": "subject_user_inactive",
-            "detail": None,
-        }
+        _assert_user_state_problem(
+            response,
+            type_name="subject_user_inactive",
+            instance="/w/int-pat-inactive/api/v1/ping",
+        )
         assert CORRELATION_ID_HEADER in response.headers

@@ -662,9 +662,10 @@ auth dep edge alongside the change_request / verify routes.
   non-loopback hosts keep `Secure`.
 - **Archive gate.** If the session-owning user has
   `users.archived_at IS NOT NULL`, every subsequent request returns
-  `401` with `error = "subject_user_archived"` — the same wire code
-  the PAT-side gate emits, because both gates carry the same operator
-  remediation (reinstate the user). Reinstating
+  `401` problem+json with
+  `type = "https://crewday.dev/errors/subject_user_archived"` — the
+  same wire type the PAT-side gate emits, because both gates carry the
+  same operator remediation (reinstate the user). Reinstating
   (`archived_at` → NULL) clears the gate on the next request without
   re-issuing the cookie. Mirrors the `subject_user_archived` /
   `delegating_user_archived` checks in "Personal access tokens" /
@@ -736,15 +737,17 @@ Key properties:
   immediately.
 - If the delegating user is archived, globally deactivated, or loses
   every non-revoked grant in the token's workspace, requests with
-  the token return `401` with one of two typed error codes:
-  - `error = "delegating_user_archived"` when
+  the token return `401` problem+json with one of two typed problem
+  `type` URIs:
+  - `type = "https://crewday.dev/errors/delegating_user_archived"` when
     `users.archived_at IS NOT NULL` for the delegating user.
     Reinstating the user (clearing `archived_at` back to NULL)
     restores the token.
-  - `error = "delegating_user_inactive"` when the delegating user
-    holds zero `role_grant` rows with `revoked_at IS NULL` in the
-    token's workspace (every grant has been soft-retired by
-    `cd-x1xh`'s soft-revoke flow). Granting the user a fresh role
+  - `type = "https://crewday.dev/errors/delegating_user_inactive"`
+    when the delegating user holds zero `role_grant` rows with
+    `revoked_at IS NULL` in the token's workspace (every grant has
+    been soft-retired by `cd-x1xh`'s soft-revoke flow). Granting the
+    user a fresh role
     in the workspace restores the token. The check is workspace-
     scoped: a live grant in a *sibling* workspace does not unblock
     this token because the delegated token's authority is anchored
@@ -835,16 +838,17 @@ Key properties:
   actions"), not an action-catalog entry.
 - If the subject user is archived, globally deactivated, or loses
   every non-revoked grant in every workspace, PAT requests return
-  `401` with one of two typed error codes:
-  - `error = "subject_user_archived"` when
+  `401` problem+json with one of two typed problem `type` URIs:
+  - `type = "https://crewday.dev/errors/subject_user_archived"` when
     `users.archived_at IS NOT NULL` for the subject user.
     Reinstating the user reinstates their PATs only if they
     survived archive (spec is archive-preserves-rows;
     `users.archived_at` is set, the token stays but returns 401
     until the archive flag clears).
-  - `error = "subject_user_inactive"` when the subject user holds
-    zero `role_grant` rows with `revoked_at IS NULL` across every
-    workspace. Granting the user a fresh role in any workspace
+  - `type = "https://crewday.dev/errors/subject_user_inactive"` when
+    the subject user holds zero `role_grant` rows with
+    `revoked_at IS NULL` across every workspace. Granting the user a
+    fresh role in any workspace
     reinstates the PAT — PATs are workspace-agnostic at issue time
     (`workspace_id IS NULL`) so the liveness check is too.
 

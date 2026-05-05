@@ -281,11 +281,11 @@ def _not_found(request: Request) -> JSONResponse:
     )
 
 
-def _archived_user_401(error_code: str) -> JSONResponse:
-    """Return the canonical 401 shape for a deactivated delegating / subject user.
+def _archived_user_401(request: Request, error_code: str) -> JSONResponse:
+    """Return the canonical 401 problem for a deactivated delegating / subject user.
 
     §03 "Delegated tokens" / "Personal access tokens" / "Sessions"
-    all pin a ``401`` with a clear message when the delegating /
+    all pin a ``401`` with a typed problem URI when the delegating /
     subject / session-owning user has been deactivated — distinct
     from the constant-time 404 the middleware emits for "unknown
     slug / not a member" so the caller sees "you ARE authenticated
@@ -307,22 +307,18 @@ def _archived_user_401(error_code: str) -> JSONResponse:
     * ``subject_user_inactive`` (cd-ljvs) — PAT's subject user holds
       zero live ``role_grant`` rows in any workspace.
 
-    The agent / SDK surfaces ``error_code`` in its own UI so the
-    operator can route the recovery (reinstate vs re-grant).
-
-    The envelope is the legacy ``{"error": <code>, "detail": null}``
-    shape spec §03 names by field. It deliberately diverges from
-    :func:`_not_found`'s RFC 7807 ``problem+json`` envelope —
-    migrating this 401 to ``problem+json`` is its own follow-up
-    because §03 contracts the ``error`` field name, not the §12
-    ``type`` URI. We do not carry the user_id in ``detail`` — even
-    though a token holder already proved knowledge of the secret, a
-    non-enumerable error keeps the audit trail (and any inadvertent
-    log capture) PII-clean.
+    The agent / SDK surfaces the problem ``type`` URI in its own UI
+    so the operator can route the recovery (reinstate vs re-grant).
+    We do not carry the user_id in ``detail`` — even though a token
+    holder already proved knowledge of the secret, a non-enumerable
+    error keeps the audit trail (and any inadvertent log capture)
+    PII-clean.
     """
-    return JSONResponse(
-        status_code=401,
-        content={"error": error_code, "detail": None},
+    return problem_response(
+        request,
+        status=401,
+        type_name=error_code,
+        title="Unauthorized",
     )
 
 
@@ -401,7 +397,7 @@ def resolve_actor(
                 # DelegatingUserInactive / SubjectUserInactive) are
                 # NOT caught here on purpose: they propagate so the
                 # middleware can emit the spec-mandated 401 with a
-                # typed error code (cd-et6y + cd-ljvs, §03).
+                # typed problem URI (cd-et6y + cd-ljvs, §03).
                 return None
             return ActorIdentity(
                 user_id=verified.user_id,
@@ -892,7 +888,7 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
             # cd-et6y / §03 "Delegated tokens": the agent proved
             # knowledge of the secret and verified cleanly at the row
             # level, but the human they act for is archived. Return
-            # 401 with a typed error code instead of the constant-
+            # 401 with a typed problem URI instead of the constant-
             # time 404 — the agent needs a clear "your principal is
             # gone" signal, not the opaque enumeration shield.
             _log_tenancy_event(
@@ -907,7 +903,7 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
                 skip_path=False,
                 outcome="delegating_user_archived",
             )
-            response = _archived_user_401("delegating_user_archived")
+            response = _archived_user_401(request, "delegating_user_archived")
             response.headers[CORRELATION_ID_HEADER] = correlation_id
             return response
         except SubjectUserArchived:
@@ -925,7 +921,7 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
                 skip_path=False,
                 outcome="subject_user_archived",
             )
-            response = _archived_user_401("subject_user_archived")
+            response = _archived_user_401(request, "subject_user_archived")
             response.headers[CORRELATION_ID_HEADER] = correlation_id
             return response
         except UserArchived:
@@ -952,14 +948,14 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
                 skip_path=False,
                 outcome=USER_ARCHIVED_WIRE_CODE,
             )
-            response = _archived_user_401(USER_ARCHIVED_WIRE_CODE)
+            response = _archived_user_401(request, USER_ARCHIVED_WIRE_CODE)
             response.headers[CORRELATION_ID_HEADER] = correlation_id
             return response
         except DelegatingUserInactive:
             # cd-ljvs / §03 "Delegated tokens": secret verified, user
             # not archived, but the human has no live ``role_grant``
             # row in the token's workspace — every grant has been
-            # soft-retired. 401 with the typed code so the agent
+            # soft-retired. 401 with the typed problem URI so the agent
             # surfaces "you need a fresh grant", not the opaque 404.
             _log_tenancy_event(
                 slug=_parse_scoped_path(path),
@@ -972,7 +968,7 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
                 skip_path=False,
                 outcome="delegating_user_inactive",
             )
-            response = _archived_user_401("delegating_user_inactive")
+            response = _archived_user_401(request, "delegating_user_inactive")
             response.headers[CORRELATION_ID_HEADER] = correlation_id
             return response
         except SubjectUserInactive:
@@ -991,7 +987,7 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
                 skip_path=False,
                 outcome="subject_user_inactive",
             )
-            response = _archived_user_401("subject_user_inactive")
+            response = _archived_user_401(request, "subject_user_inactive")
             response.headers[CORRELATION_ID_HEADER] = correlation_id
             return response
 

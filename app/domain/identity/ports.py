@@ -385,8 +385,8 @@ class RoleGrantRepository(Protocol):
         (:func:`app.auth.tokens.verify`) to enforce §03 "Delegated
         tokens": a delegated token whose delegating user has lost
         every non-revoked grant in the token's workspace returns 401
-        with ``error = "delegating_user_inactive"`` (cd-ljvs). The
-        check is workspace-scoped — a live grant in a *sibling*
+        with the ``delegating_user_inactive`` problem type (cd-ljvs).
+        The check is workspace-scoped — a live grant in a *sibling*
         workspace does not unblock the token because the delegated
         token's authority is anchored on its issuing workspace. The
         SA implementation runs under
@@ -404,8 +404,8 @@ class RoleGrantRepository(Protocol):
         (cd-x1xh) do not count. Used by the token verifier
         (:func:`app.auth.tokens.verify`) to enforce §03 "Personal
         access tokens": a PAT whose subject user has lost every
-        non-revoked grant across every workspace returns 401 with
-        ``error = "subject_user_inactive"`` (cd-ljvs). The check is
+        non-revoked grant across every workspace returns 401 with the
+        ``subject_user_inactive`` problem type (cd-ljvs). The check is
         workspace-agnostic — PATs carry ``workspace_id IS NULL`` so
         a live grant in *any* workspace keeps the token usable.
         Runs under :func:`app.tenancy.tenant_agnostic` semantics in

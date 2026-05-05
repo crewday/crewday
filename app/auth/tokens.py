@@ -496,9 +496,10 @@ class DelegatingUserArchived(ValueError):
     every non-revoked grant, requests with the token return 401 with
     a clear message"). Distinct from :class:`InvalidToken` /
     :class:`TokenRevoked` / :class:`TokenExpired` so the HTTP layer
-    can return ``error = "delegating_user_archived"`` instead of the
-    opaque "not a real token" 404 — the agent gets a clear signal
-    that re-minting won't help; the human owner has to be reinstated.
+    can return the ``delegating_user_archived`` problem type instead
+    of the opaque "not a real token" 404 — the agent gets a clear
+    signal that re-minting won't help; the human owner has to be
+    reinstated.
     """
 
 
@@ -515,10 +516,10 @@ class SubjectUserArchived(ValueError):
     archive-preserves-rows; ``users.archived_at`` is set, the token
     stays but returns 401 until the archive flag clears)"). Distinct
     from :class:`InvalidToken` / :class:`TokenRevoked` /
-    :class:`TokenExpired` so the HTTP layer can return
-    ``error = "subject_user_archived"`` instead of the opaque "not a
-    real token" 404 — the user needs to be reinstated, not re-mint
-    a fresh token.
+    :class:`TokenExpired` so the HTTP layer can return the
+    ``subject_user_archived`` problem type instead of the opaque
+    "not a real token" 404 — the user needs to be reinstated, not
+    re-mint a fresh token.
     """
 
 
@@ -540,11 +541,11 @@ class DelegatingUserInactive(ValueError):
 
     Distinct from :class:`InvalidToken` / :class:`TokenRevoked` /
     :class:`TokenExpired` / :class:`DelegatingUserArchived` so the
-    HTTP layer can return ``error = "delegating_user_inactive"``
-    instead of the opaque "not a real token" 404 — the agent gets a
-    clear signal that re-minting won't help; granting the human a
-    fresh role grant in the workspace will. Ordered AFTER the
-    archive check so an archived user with no grants surfaces as
+    HTTP layer can return the ``delegating_user_inactive`` problem
+    type instead of the opaque "not a real token" 404 — the agent
+    gets a clear signal that re-minting won't help; granting the
+    human a fresh role grant in the workspace will. Ordered AFTER
+    the archive check so an archived user with no grants surfaces as
     ``delegating_user_archived`` (the older / lower-level fact).
     """
 
@@ -564,10 +565,10 @@ class SubjectUserInactive(ValueError):
 
     Distinct from :class:`InvalidToken` / :class:`TokenRevoked` /
     :class:`TokenExpired` / :class:`SubjectUserArchived` so the HTTP
-    layer can return ``error = "subject_user_inactive"`` instead of
-    the opaque "not a real token" 404 — granting the user a fresh
-    role grant in any workspace reinstates the PAT. Ordered AFTER
-    the archive check so an archived subject with no grants
+    layer can return the ``subject_user_inactive`` problem type
+    instead of the opaque "not a real token" 404 — granting the user
+    a fresh role grant in any workspace reinstates the PAT. Ordered
+    AFTER the archive check so an archived subject with no grants
     surfaces as ``subject_user_archived``.
     """
 

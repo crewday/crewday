@@ -270,6 +270,9 @@ Canonical error `type` URIs — full URI is
   `unsupported_media_type` (415), `not_implemented` (501),
   `idempotency_conflict` (409), `would_orphan_owners_group` (422),
   `last_owner_grant_protected` (409), `approval_required` (409).
+- Auth user-state gates from §03 also use specific 401 type URIs:
+  `delegating_user_archived`, `subject_user_archived`,
+  `delegating_user_inactive`, `subject_user_inactive`.
 - `internal` (500) — unexpected server-side failure; also the fallback
   when an unregistered `DomainError` subclass reaches the handler.
   Unknown `HTTPException` statuses fall back to `http_<status>` (e.g.
@@ -1022,14 +1025,15 @@ dataclass on success and otherwise:
   deployment admin, a personal access token (PATs are forbidden
   here), or a scoped token whose `scope_json` carries no
   `deployment:*` keys at all. The 404 envelope is the canonical
-  RFC 7807 problem+json shape with `error = "not_found"`; the
-  surface stays invisible to tenants.
+  RFC 7807 problem+json shape with
+  `type = "https://crewday.dev/errors/not_found"`; the surface stays
+  invisible to tenants.
 * **422 `deployment_scope_conflict`** — and only this — when a
   scoped token's `scope_json` carries at least one `deployment:*`
   key together with at least one non-`deployment:*` key. The
   caller has already proved knowledge of a real token, so leaking
-  the typed code does not enumerate tenant data, and the operator
-  needs the signal to fix the misconfigured mint.
+  the typed problem URI does not enumerate tenant data, and the
+  operator needs the signal to fix the misconfigured mint.
 
 `DeploymentContext.actor_kind ∈ {"user", "delegated", "agent"}`
 mirrors the principal arms: `user` for a passkey-session admin,

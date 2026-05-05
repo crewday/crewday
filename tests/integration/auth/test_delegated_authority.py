@@ -35,6 +35,7 @@ from typing import Annotated
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from pydantic import SecretStr
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -55,6 +56,18 @@ pytestmark = pytest.mark.integration
 
 
 _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
+_PROBLEM_TYPE_BASE = "https://crewday.dev/errors/"
+
+
+def _assert_delegating_user_inactive(response: Response, *, instance: str) -> None:
+    assert response.status_code == 401, response.text
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json() == {
+        "type": f"{_PROBLEM_TYPE_BASE}delegating_user_inactive",
+        "title": "Unauthorized",
+        "status": 401,
+        "instance": instance,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -375,11 +388,10 @@ class TestAuthorityFollowsUser:
             #    pins the 401 verify-time gate, which is what the
             #    agent now sees.
             r = client.get("/w/del-auth/api/v1/protected", headers=headers)
-            assert r.status_code == 401, r.text
-            assert r.json() == {
-                "error": "delegating_user_inactive",
-                "detail": None,
-            }
+            _assert_delegating_user_inactive(
+                r,
+                instance="/w/del-auth/api/v1/protected",
+            )
 
             # 2) Grant the outsider 'manager' — same token, same call,
             #    now passes. No re-mint, no token round-trip.
@@ -417,11 +429,10 @@ class TestAuthorityFollowsUser:
                 assert s.get(RoleGrant, grant_id) is None
 
             r = client.get("/w/del-auth/api/v1/protected", headers=headers)
-            assert r.status_code == 401, r.text
-            assert r.json() == {
-                "error": "delegating_user_inactive",
-                "detail": None,
-            }
+            _assert_delegating_user_inactive(
+                r,
+                instance="/w/del-auth/api/v1/protected",
+            )
 
     def test_scoped_token_authority_unaffected_by_user_grants(
         self,
