@@ -192,11 +192,18 @@ export default function App() {
               )}
             </Route>
 
-            {/* Worker-only surfaces. /chat is the worker mobile full-
-                screen chat entry; on desktop both shells use
-                AgentSidebar instead. */}
+            {/* /chat is the worker mobile full-screen chat entry; on
+                desktop both shells use AgentSidebar instead. Non-worker
+                direct hits return to RoleHome so managers land back in
+                the manager shell. */}
+            {role === "employee" ? (
+              <Route element={<EmployeeLayout />}>
+                <Route path="/chat" element={<ChatPage />} />
+              </Route>
+            ) : (
+              <Route path="/chat" element={<Navigate to="/" replace />} />
+            )}
             <Route element={<EmployeeLayout />}>
-              <Route path="/chat" element={<ChatPage />} />
               <Route path="/asset/scan" element={<AssetScanPage />} />
               <Route path="/asset/scan/:token" element={<AssetScanPage />} />
             </Route>

@@ -146,9 +146,7 @@ def _signature_accepts_ctx(
         # provider/callback parameters such as
         # ``Callable[[Session, WorkspaceContext], ...]`` do not get
         # mistaken for repository methods.
-        if isinstance(annotation, str) and _is_workspace_context_annotation(
-            annotation
-        ):
+        if isinstance(annotation, str) and _is_workspace_context_annotation(annotation):
             return True
     return False
 
@@ -822,9 +820,7 @@ class TestRepositoryParityGate:
             "typing.Optional[WorkspaceContext]",
         ],
     )
-    def test_signature_discovery_accepts_optional_ctx(
-        self, annotation: str
-    ) -> None:
+    def test_signature_discovery_accepts_optional_ctx(self, annotation: str) -> None:
         params = {
             "ctx": inspect.Parameter(
                 "ctx",
