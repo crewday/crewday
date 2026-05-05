@@ -17,6 +17,7 @@ from app.adapters.db.messaging.repositories import SqlAlchemyEmailDeliveryReposi
 from app.adapters.db.session import make_engine
 from app.adapters.mail.null import NullMailer
 from app.adapters.notifications.ports import NotificationKind
+from app.api.messaging.broadcasts import SqlAlchemyBroadcastGateway
 from app.api.middleware.approval import InProcessApprovalDispatcher
 from app.domain.agent.runtime import DelegatedToken, ToolCall
 from app.domain.errors import Validation
@@ -149,9 +150,11 @@ def test_single_recipient_broadcast_sends_immediately(
 ) -> None:
     sink = _FakeSink()
     with factory() as session:
+        gateway = SqlAlchemyBroadcastGateway(session)
         outcome = send_or_queue_broadcast(
             session,
             persona.ctx,
+            audience=gateway,
             target="selected",
             selected_recipient_user_ids=[persona.worker_ids[0]],
             confirmed_recipient_count=1,
@@ -189,15 +192,18 @@ def test_multi_recipient_broadcast_queues_approval_without_fanout(
 ) -> None:
     sink = _FakeSink()
     with factory() as session:
+        gateway = SqlAlchemyBroadcastGateway(session)
         outcome = send_or_queue_broadcast(
             session,
             persona.ctx,
+            audience=gateway,
             target="selected",
             selected_recipient_user_ids=list(persona.worker_ids),
             confirmed_recipient_count=2,
             subject="Storm watch",
             body_md="Bring patio furniture inside before 16:00.",
             notification_sink=sink,
+            approval_queue=gateway,
             clock=FrozenClock(_PINNED),
         )
         session.commit()
@@ -221,7 +227,9 @@ def test_recipient_preview_lists_current_workspace_staff(
     factory: sessionmaker[Session], persona: _Persona
 ) -> None:
     with factory() as session:
-        recipients = list_broadcast_recipients(session, persona.ctx)
+        recipients = list_broadcast_recipients(
+            SqlAlchemyBroadcastGateway(session), persona.ctx
+        )
 
     assert {recipient.user_id for recipient in recipients}.issuperset(
         set(persona.worker_ids)
@@ -286,6 +294,7 @@ def test_broadcast_execution_is_idempotent_by_broadcast_id(
         first = execute_broadcast(
             session,
             persona.ctx,
+            audience=SqlAlchemyBroadcastGateway(session),
             subject="Approved broadcast",
             body_md="This message was approved.",
             recipient_user_ids=persona.worker_ids,
@@ -296,6 +305,7 @@ def test_broadcast_execution_is_idempotent_by_broadcast_id(
         second = execute_broadcast(
             session,
             persona.ctx,
+            audience=SqlAlchemyBroadcastGateway(session),
             subject="Approved broadcast",
             body_md="This message was approved.",
             recipient_user_ids=persona.worker_ids,
@@ -354,6 +364,7 @@ def test_broadcast_execution_rejects_cross_workspace_recipient(
             execute_broadcast(
                 session,
                 persona.ctx,
+                audience=SqlAlchemyBroadcastGateway(session),
                 subject="Wrong audience",
                 body_md="This should not leave the workspace.",
                 recipient_user_ids=(outsider.id,),

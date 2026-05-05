@@ -4,37 +4,23 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.authz.models import (
-    PermissionGroup,
-    PermissionGroupMember,
-    RoleGrant,
-)
-from app.adapters.db.identity.models import User
-from app.adapters.db.llm.models import ApprovalRequest
-from app.adapters.db.messaging.audiences import list_owner_manager_user_ids
-from app.adapters.db.messaging.models import Notification
-from app.adapters.db.workspace.models import WorkEngagement
-from app.adapters.notifications.ports import NotificationSink
+from app.adapters.notifications.ports import NotificationKind, NotificationSink
 from app.audit import write_audit
-from app.domain.agent.notifications import (
-    ApprovalNotificationSink,
-    approval_notification_view_from_row,
-    notify_approval_needed,
-)
-from app.domain.agent.runtime import APPROVAL_REQUEST_TTL
 from app.domain.errors import Conflict, Validation
-from app.domain.messaging.notifications import NotificationKind
-from app.tenancy import WorkspaceContext, tenant_agnostic
+from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
 
 __all__ = [
     "BROADCAST_TOOL_NAME",
+    "BroadcastApprovalDraft",
+    "BroadcastApprovalOutcome",
+    "BroadcastApprovalQueue",
+    "BroadcastAudience",
     "BroadcastRecipient",
     "BroadcastSendOutcome",
     "broadcast_tool_input",
@@ -60,6 +46,24 @@ class BroadcastRecipient:
 
 
 @dataclass(frozen=True, slots=True)
+class BroadcastApprovalDraft:
+    broadcast_id: str
+    recipient_count: int
+    tool_call_id: str
+    tool_input: dict[str, object]
+    card_summary: str
+    card_risk: Literal["medium"]
+    card_fields: dict[str, object]
+    pre_approval_source: str
+
+
+@dataclass(frozen=True, slots=True)
+class BroadcastApprovalOutcome:
+    approval_request_id: str
+    expires_at_iso: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class BroadcastSendOutcome:
     status: Literal["sent", "pending_approval"]
     recipient_count: int
@@ -68,71 +72,64 @@ class BroadcastSendOutcome:
     expires_at_iso: str | None
 
 
+class BroadcastAudience(Protocol):
+    """Read seam for broadcast recipients and idempotency checks."""
+
+    def list_recipients(self, ctx: WorkspaceContext) -> Sequence[BroadcastRecipient]:
+        """Return current-workspace staff/users eligible for broadcasts."""
+        ...
+
+    def existing_notification_ids_by_recipient(
+        self,
+        ctx: WorkspaceContext,
+        *,
+        broadcast_id: str,
+    ) -> Mapping[str, str]:
+        """Return already-created notification ids keyed by recipient id."""
+        ...
+
+
+class BroadcastApprovalQueue(Protocol):
+    """Write seam for multi-recipient broadcast approval requests."""
+
+    def queue_broadcast_approval(
+        self,
+        ctx: WorkspaceContext,
+        *,
+        draft: BroadcastApprovalDraft,
+        clock: Clock,
+    ) -> BroadcastApprovalOutcome:
+        """Persist a replayable approval request for ``draft``."""
+        ...
+
+
 def list_broadcast_recipients(
-    session: Session,
+    audience: BroadcastAudience,
     ctx: WorkspaceContext,
 ) -> tuple[BroadcastRecipient, ...]:
     """Return live current-workspace staff/users eligible for broadcasts."""
-    with tenant_agnostic():
-        role_user_ids = session.scalars(
-            select(RoleGrant.user_id).where(
-                RoleGrant.workspace_id == ctx.workspace_id,
-                RoleGrant.scope_kind == "workspace",
-                RoleGrant.grant_role.in_(("manager", "worker")),
-                RoleGrant.revoked_at.is_(None),
-            )
-        ).all()
-        engaged_user_ids = session.scalars(
-            select(WorkEngagement.user_id).where(
-                WorkEngagement.workspace_id == ctx.workspace_id,
-                WorkEngagement.archived_on.is_(None),
-            )
-        ).all()
-        owner_user_ids = session.scalars(
-            select(PermissionGroupMember.user_id)
-            .join(PermissionGroup, PermissionGroup.id == PermissionGroupMember.group_id)
-            .where(
-                PermissionGroup.workspace_id == ctx.workspace_id,
-                PermissionGroupMember.workspace_id == ctx.workspace_id,
-                PermissionGroup.slug == "owners",
-            )
-        ).all()
-        user_ids = sorted(set(role_user_ids).union(engaged_user_ids, owner_user_ids))
-        if not user_ids:
-            return ()
-        users = session.scalars(
-            select(User)
-            .where(User.id.in_(user_ids), User.archived_at.is_(None))
-            .order_by(User.display_name.asc(), User.id.asc())
-        ).all()
-    return tuple(
-        BroadcastRecipient(
-            user_id=row.id,
-            display_name=row.display_name,
-            email=row.email,
-        )
-        for row in users
-    )
+    return tuple(audience.list_recipients(ctx))
 
 
 def send_or_queue_broadcast(
     session: Session,
     ctx: WorkspaceContext,
     *,
+    audience: BroadcastAudience,
     target: BroadcastTarget,
     selected_recipient_user_ids: Sequence[str],
     confirmed_recipient_count: int,
     subject: str,
     body_md: str,
     notification_sink: NotificationSink,
-    approval_notification_sink: ApprovalNotificationSink | None = None,
+    approval_queue: BroadcastApprovalQueue | None = None,
     clock: Clock | None = None,
 ) -> BroadcastSendOutcome:
     """Send a single-recipient broadcast or queue multi-recipient approval."""
     eff_clock = clock if clock is not None else SystemClock()
     clean_subject, clean_body = _validate_content(subject=subject, body_md=body_md)
     recipients = _resolve_recipients(
-        session,
+        audience,
         ctx,
         target=target,
         selected_recipient_user_ids=selected_recipient_user_ids,
@@ -152,6 +149,7 @@ def send_or_queue_broadcast(
         ids = execute_broadcast(
             session,
             ctx,
+            audience=audience,
             subject=clean_subject,
             body_md=clean_body,
             recipient_user_ids=(recipients[0].user_id,),
@@ -167,30 +165,29 @@ def send_or_queue_broadcast(
             expires_at_iso=None,
         )
 
-    row = _queue_approval(
-        session,
+    if approval_queue is None:
+        raise Validation(
+            "approval queue is required for multi-recipient broadcasts",
+            extra={"error": "approval_queue_required"},
+        )
+    approval = approval_queue.queue_broadcast_approval(
         ctx,
-        subject=clean_subject,
-        body_md=clean_body,
-        recipient_user_ids=tuple(r.user_id for r in recipients),
-        broadcast_id=broadcast_id,
+        draft=_approval_draft(
+            ctx,
+            subject=clean_subject,
+            body_md=clean_body,
+            recipient_user_ids=tuple(r.user_id for r in recipients),
+            broadcast_id=broadcast_id,
+            clock=eff_clock,
+        ),
         clock=eff_clock,
     )
-    if approval_notification_sink is not None:
-        notify_approval_needed(
-            approval=approval_notification_view_from_row(row),
-            recipient_user_ids=list_owner_manager_user_ids(
-                session,
-                workspace_id=ctx.workspace_id,
-            ),
-            sink=approval_notification_sink,
-        )
     return BroadcastSendOutcome(
         status="pending_approval",
         recipient_count=len(recipients),
         notification_ids=(),
-        approval_request_id=row.id,
-        expires_at_iso=row.expires_at.isoformat() if row.expires_at else None,
+        approval_request_id=approval.approval_request_id,
+        expires_at_iso=approval.expires_at_iso,
     )
 
 
@@ -198,6 +195,7 @@ def execute_broadcast(
     session: Session,
     ctx: WorkspaceContext,
     *,
+    audience: BroadcastAudience,
     subject: str,
     body_md: str,
     recipient_user_ids: Sequence[str],
@@ -213,10 +211,9 @@ def execute_broadcast(
             "broadcast requires at least one recipient",
             extra={"error": "no_recipients"},
         )
-    recipients = _validate_recipient_scope(session, ctx, recipient_user_ids)
+    recipients = _validate_recipient_scope(audience, ctx, recipient_user_ids)
     resolved_broadcast_id = broadcast_id or new_ulid(clock=eff_clock)
-    existing_by_recipient = _existing_notification_ids_by_recipient(
-        session,
+    existing_by_recipient = audience.existing_notification_ids_by_recipient(
         ctx,
         broadcast_id=resolved_broadcast_id,
     )
@@ -280,13 +277,13 @@ def _validate_content(*, subject: str, body_md: str) -> tuple[str, str]:
 
 
 def _resolve_recipients(
-    session: Session,
+    audience: BroadcastAudience,
     ctx: WorkspaceContext,
     *,
     target: BroadcastTarget,
     selected_recipient_user_ids: Sequence[str],
 ) -> tuple[BroadcastRecipient, ...]:
-    available = list_broadcast_recipients(session, ctx)
+    available = list_broadcast_recipients(audience, ctx)
     by_id = {recipient.user_id: recipient for recipient in available}
     if target == "all_staff":
         recipients = available
@@ -318,7 +315,7 @@ def _resolve_recipients(
 
 
 def _validate_recipient_scope(
-    session: Session,
+    audience: BroadcastAudience,
     ctx: WorkspaceContext,
     recipient_user_ids: Sequence[str],
 ) -> tuple[str, ...]:
@@ -329,7 +326,7 @@ def _validate_recipient_scope(
             extra={"error": "too_many_recipients"},
         )
     available_ids = {
-        recipient.user_id for recipient in list_broadcast_recipients(session, ctx)
+        recipient.user_id for recipient in list_broadcast_recipients(audience, ctx)
     }
     missing = [user_id for user_id in recipients if user_id not in available_ids]
     if missing:
@@ -340,27 +337,7 @@ def _validate_recipient_scope(
     return recipients
 
 
-def _existing_notification_ids_by_recipient(
-    session: Session,
-    ctx: WorkspaceContext,
-    *,
-    broadcast_id: str,
-) -> dict[str, str]:
-    rows = session.scalars(
-        select(Notification).where(
-            Notification.workspace_id == ctx.workspace_id,
-            Notification.kind == NotificationKind.AGENT_MESSAGE.value,
-        )
-    ).all()
-    by_recipient: dict[str, str] = {}
-    for row in rows:
-        if row.payload_json.get("broadcast_id") == broadcast_id:
-            by_recipient.setdefault(row.recipient_user_id, row.id)
-    return by_recipient
-
-
-def _queue_approval(
-    session: Session,
+def _approval_draft(
     ctx: WorkspaceContext,
     *,
     subject: str,
@@ -368,63 +345,28 @@ def _queue_approval(
     recipient_user_ids: Sequence[str],
     broadcast_id: str,
     clock: Clock,
-) -> ApprovalRequest:
-    now = clock.now()
-    row = ApprovalRequest(
-        id=new_ulid(clock=clock),
-        workspace_id=ctx.workspace_id,
-        requester_actor_id=ctx.actor_id,
-        action_json={
-            "tool_name": BROADCAST_TOOL_NAME,
-            "tool_call_id": new_ulid(clock=clock),
-            "tool_input": {
-                "workspace_slug": ctx.workspace_slug,
-                "broadcast_id": broadcast_id,
-                "subject": subject,
-                "body_md": body_md,
-                "recipient_user_ids": list(recipient_user_ids),
-                "confirmed_recipient_count": len(recipient_user_ids),
-            },
-            "card_summary": (
-                f"Broadcast {subject!r} to {len(recipient_user_ids)} recipients?"
-            ),
-            "card_risk": "medium",
-            "card_fields": {
-                "recipient_count": len(recipient_user_ids),
-                "subject": subject,
-            },
-            "pre_approval_source": "workspace_configurable",
-        },
-        status="pending",
-        decided_by=None,
-        decided_at=None,
-        rationale_md=None,
-        decision_note_md=None,
-        result_json=None,
-        expires_at=now + APPROVAL_REQUEST_TTL,
-        inline_channel="desk_only",
-        for_user_id=None,
-        resolved_user_mode=None,
-        created_at=now,
-    )
-    session.add(row)
-    session.flush()
-    write_audit(
-        session,
-        ctx,
-        entity_kind="approval_request",
-        entity_id=row.id,
-        action="approval.requested",
-        diff={
-            "approval_request_id": row.id,
-            "action_key": "messaging.broadcast",
-            "recipient_count": len(recipient_user_ids),
+) -> BroadcastApprovalDraft:
+    recipient_count = len(recipient_user_ids)
+    return BroadcastApprovalDraft(
+        broadcast_id=broadcast_id,
+        recipient_count=recipient_count,
+        tool_call_id=new_ulid(clock=clock),
+        tool_input={
+            "workspace_slug": ctx.workspace_slug,
             "broadcast_id": broadcast_id,
+            "subject": subject,
+            "body_md": body_md,
+            "recipient_user_ids": list(recipient_user_ids),
+            "confirmed_recipient_count": recipient_count,
         },
-        via="api",
-        clock=clock,
+        card_summary=f"Broadcast {subject!r} to {recipient_count} recipients?",
+        card_risk="medium",
+        card_fields={
+            "recipient_count": recipient_count,
+            "subject": subject,
+        },
+        pre_approval_source="workspace_configurable",
     )
-    return row
 
 
 def broadcast_tool_input(

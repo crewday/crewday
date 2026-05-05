@@ -64,6 +64,7 @@ from app.adapters.db.messaging.repositories import (
 )
 from app.adapters.mail.null import NullMailer
 from app.api.deps import current_workspace_context, db_session
+from app.api.messaging.broadcasts import SqlAlchemyBroadcastGateway
 from app.api.messaging.channels import build_channels_router
 from app.api.messaging.messages import build_messages_router
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES, PROBLEM_JSON_CONTENT
@@ -545,7 +546,8 @@ def build_messaging_router(
         ctx: _Ctx,
         session: _Db,
     ) -> BroadcastRecipientsResponse:
-        recipients = list_broadcast_recipients(session, ctx)
+        broadcast_gateway = SqlAlchemyBroadcastGateway(session)
+        recipients = list_broadcast_recipients(broadcast_gateway, ctx)
         data = [BroadcastRecipientPayload.from_view(view) for view in recipients]
         return BroadcastRecipientsResponse(data=data, total=len(data))
 
@@ -577,16 +579,21 @@ def build_messaging_router(
             ctx,
             event_bus=event_bus,
         )
+        broadcast_gateway = SqlAlchemyBroadcastGateway(
+            session,
+            approval_notification_sink=service,
+        )
         outcome = send_or_queue_broadcast(
             session,
             ctx,
+            audience=broadcast_gateway,
             target=body.target,
             selected_recipient_user_ids=body.selected_recipient_user_ids,
             confirmed_recipient_count=body.confirmed_recipient_count,
             subject=body.subject,
             body_md=body.body_md,
             notification_sink=service,
-            approval_notification_sink=service,
+            approval_queue=broadcast_gateway,
         )
         return BroadcastSendResponse(
             status=outcome.status,

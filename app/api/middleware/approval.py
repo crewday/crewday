@@ -21,6 +21,7 @@ from app.adapters.db.messaging.repositories import SqlAlchemyEmailDeliveryReposi
 from app.adapters.db.session import make_uow
 from app.adapters.llm.ports import Tool
 from app.adapters.mail.null import NullMailer
+from app.api.messaging.broadcasts import SqlAlchemyBroadcastGateway
 from app.domain.agent.notifications import (
     approval_notification_view_from_row,
     notify_approval_needed,
@@ -357,6 +358,7 @@ def _dispatch_broadcast(
             notification_ids = execute_broadcast(
                 session,
                 ctx,
+                audience=SqlAlchemyBroadcastGateway(session),
                 subject=subject,
                 body_md=body_md,
                 recipient_user_ids=recipient_user_ids,
