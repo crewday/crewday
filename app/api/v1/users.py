@@ -682,13 +682,15 @@ def _send_recovery_link_email(
     TTL string matches the magic-link service's per-purpose ceiling
     for ``recover_passkey``.
     """
-    subject, body_text = render_auth_email(
+    subject, body_text, body_html = render_auth_email(
         "recovery_new_link",
         display_name=display_name,
         url=url,
         ttl_minutes="10",
     )
-    mailer.send(to=[to_email], subject=subject, body_text=body_text)
+    mailer.send(
+        to=[to_email], subject=subject, body_text=body_text, body_html=body_html
+    )
 
 
 def _send_passkey_reset_worker_email(
@@ -701,7 +703,7 @@ def _send_passkey_reset_worker_email(
     url: str,
 ) -> None:
     """Render + send the worker-side passkey-reset email."""
-    subject, body_text = render_auth_email(
+    subject, body_text, body_html = render_auth_email(
         "passkey_reset_worker",
         display_name=worker_display_name,
         owner_display_name=owner_display_name,
@@ -709,7 +711,9 @@ def _send_passkey_reset_worker_email(
         url=url,
         ttl_minutes="10",
     )
-    mailer.send(to=[to_email], subject=subject, body_text=body_text)
+    mailer.send(
+        to=[to_email], subject=subject, body_text=body_text, body_html=body_html
+    )
 
 
 def _send_passkey_reset_notice_email(
@@ -731,7 +735,7 @@ def _send_passkey_reset_notice_email(
     reset". The body explicitly tells the owner clicking the URL is
     NOT an enrolment action.
     """
-    subject, body_text = render_auth_email(
+    subject, body_text, body_html = render_auth_email(
         "passkey_reset_notice",
         owner_display_name=owner_display_name,
         worker_display_name=worker_display_name,
@@ -740,7 +744,9 @@ def _send_passkey_reset_notice_email(
         timestamp=timestamp,
         notice_url=notice_url,
     )
-    mailer.send(to=[to_email], subject=subject, body_text=body_text)
+    mailer.send(
+        to=[to_email], subject=subject, body_text=body_text, body_html=body_html
+    )
 
 
 # ---------------------------------------------------------------------------

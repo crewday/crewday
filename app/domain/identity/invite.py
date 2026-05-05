@@ -1322,7 +1322,7 @@ def _send_invite_email(
     re-frame the body copy with workspace / inviter context without
     a round-trip through a recording mailer.
     """
-    subject, body_text = render_auth_email(
+    subject, body_text, body_html = render_auth_email(
         "invite_accept",
         invitee_display_name=invitee_display_name,
         inviter_display_name=inviter_display_name,
@@ -1330,7 +1330,9 @@ def _send_invite_email(
         url=captured_url,
         ttl_hours="24",
     )
-    mailer.send(to=[to_email], subject=subject, body_text=body_text)
+    mailer.send(
+        to=[to_email], subject=subject, body_text=body_text, body_html=body_html
+    )
 
 
 # ---------------------------------------------------------------------------

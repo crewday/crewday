@@ -9,24 +9,26 @@ On-disk convention (matches §10 "Email template system"):
 * ``app/mail/templates/auth/<name>.subject.j2`` — subject line.
 * ``app/mail/templates/auth/<name>.body_text.j2`` —
   plaintext body.
+* ``app/mail/templates/auth/<name>.body_html.j2`` —
+  optional HTML alternative body.
 
 Locale-aware variants (``<name>.<locale>.<channel>.j2``) are not in
 use today for auth flows. If a future revision ships localised auth
 copy, this renderer can grow the same fallback chain as notification
 templates without importing the messaging domain.
 
-Autoescape is **disabled** here. The auth bodies are plain-text only
-(magic-link URLs, masked email addresses) and HTML escaping would
-mangle ``&`` characters in URLs and produce ``&lt;``/``&gt;`` in
-plaintext bodies that the recipient would see verbatim. Notification
-templates keep autoescape on for their HTML / Markdown variants — the
-two surfaces have different rendering needs, so they get separate
-:class:`~jinja2.Environment` instances.
+Autoescape is **disabled** for the subject and plaintext body channels:
+magic-link URLs, masked email addresses, and ``&`` characters must
+render exactly as text recipients see them. Optional
+``body_html.j2`` templates render through a separate environment with
+autoescape on, so user-controlled names and masked addresses cannot
+inject markup into the HTML alternative part.
 
 Public surface:
 
-* :func:`render_auth_email` — render ``(subject, body_text)`` for the
-  named template with the supplied context.
+* :func:`render_auth_email` — render ``(subject, body_text, body_html)``
+  for the named template with the supplied context. ``body_html`` is
+  ``None`` when the template has no HTML alternative.
 * :func:`purpose_label` — magic-link purpose → human-readable phrase
   ("verify your email and finish signing up", "recover your account",
   ...). Kept as a Python map because the lookup is data, not template
@@ -42,7 +44,7 @@ from functools import cache
 from pathlib import Path
 from typing import Any, Final
 
-from jinja2 import Environment, FileSystemLoader, StrictUndefined
+from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 from jinja2 import TemplateNotFound as _JinjaTemplateNotFound
 
 __all__ = [
@@ -76,8 +78,8 @@ class AuthTemplateNotFound(LookupError):
 
 
 @cache
-def _env() -> Environment:
-    """Return a process-wide Jinja2 :class:`Environment` for auth templates.
+def _env_text() -> Environment:
+    """Return a process-wide Jinja2 environment for text auth templates.
 
     Cached because the environment is stateless once configured — every
     render call shares the compiled-template cache. Tests that point
@@ -103,33 +105,51 @@ def _env() -> Environment:
     )
 
 
+@cache
+def _env_html() -> Environment:
+    """Return a process-wide Jinja2 environment for HTML auth templates."""
+    return Environment(
+        loader=FileSystemLoader(str(AUTH_TEMPLATE_ROOT)),
+        autoescape=select_autoescape(["html", "j2"]),
+        undefined=StrictUndefined,
+        keep_trailing_newline=True,
+    )
+
+
 def render_auth_email(
     name: str,
     /,
     **context: Any,
-) -> tuple[str, str]:
-    """Return ``(subject, body_text)`` for the auth template ``name``.
+) -> tuple[str, str, str | None]:
+    """Return ``(subject, body_text, body_html)`` for auth template ``name``.
 
     Subject is right-stripped of trailing newline so the rendered value
     is one line (Jinja's ``keep_trailing_newline`` adds one to match
     the body's storage shape; the subject header has no use for it).
 
     Raises :class:`AuthTemplateNotFound` when either the subject or
-    the body file is absent on disk.
+    plaintext body file is absent on disk. The HTML body is optional.
     """
-    env = _env()
+    text_env = _env_text()
     try:
-        subject_template = env.get_template(f"{name}.subject.j2")
+        subject_template = text_env.get_template(f"{name}.subject.j2")
     except _JinjaTemplateNotFound as exc:
         raise AuthTemplateNotFound(name=name, channel="subject") from exc
     try:
-        body_template = env.get_template(f"{name}.body_text.j2")
+        body_template = text_env.get_template(f"{name}.body_text.j2")
     except _JinjaTemplateNotFound as exc:
         raise AuthTemplateNotFound(name=name, channel="body_text") from exc
+    try:
+        body_html_template = _env_html().get_template(f"{name}.body_html.j2")
+    except _JinjaTemplateNotFound:
+        body_html_template = None
 
     subject = subject_template.render(**context).rstrip("\n")
     body_text = body_template.render(**context)
-    return subject, body_text
+    body_html = (
+        None if body_html_template is None else body_html_template.render(**context)
+    )
+    return subject, body_text, body_html
 
 
 # Magic-link purpose → human-readable phrase. Kept as a Python map

@@ -44,18 +44,21 @@ daily digest, agent message, ...) live at the top level as
 `<kind>.<channel>.j2` files (channels: `subject`, `body_md`, `push`).
 Auth-flow templates (magic link, invite, recovery, passkey reset,
 email change) live separately under `app/mail/templates/auth/` as
-`<name>.<channel>.j2` (channels: `subject`, `body_text` — auth
-emails are plain-text only in v1) so identity/auth flows do not depend
-on the messaging domain package. MJML for HTML notification bodies is
-a future addition; v1 ships subject + Markdown body for notifications
-and subject + plain text for auth flows.
+`<name>.<channel>.j2` (channels: `subject`, `body_text`, and optional
+`body_html`) so identity/auth flows do not depend on the messaging
+domain package. MJML for HTML notification bodies is a future addition;
+v1 ships subject + Markdown body for notifications and subject + plain
+text for auth flows, with optional HTML alternative parts when an auth
+template provides `body_html`.
 
 The notification rendering helper is
 `app.domain.messaging.notifications.Jinja2TemplateLoader` (autoescape
 on, `StrictUndefined`); auth flows render through
-`app.mail.auth_templates.render_auth_email` which uses a sibling
-`jinja2.Environment` with autoescape off (auth bodies are plain-text
-and HTML escaping would mangle URLs and mask copy in the inbox).
+`app.mail.auth_templates.render_auth_email` which uses a text
+`jinja2.Environment` with autoescape off for subjects and plain-text
+bodies (HTML escaping would mangle URLs and mask copy in the inbox)
+and a separate HTML environment with autoescape on for optional
+`body_html` templates.
 
 Email templates are **filesystem-resident** and authored in code;
 they deliberately do **not** use the hash-self-seeded primitive
@@ -123,13 +126,16 @@ legally equivalent) cannot be unsubscribed but throttle by priority.
 Authentication and identity-lifecycle emails do **not** go through
 `NotificationService`. They render via
 `app.mail.auth_templates.render_auth_email` (subject + plain-text
-body, autoescape off) and dispatch directly through the configured
-`Mailer`. They never write a `notification` inbox row, never fire
-the SSE event, and are never opt-outable — losing one of these would
-lock the user out.
+body, plus optional HTML alternative body) and dispatch directly
+through the configured `Mailer`. Plain-text auth channels render with
+autoescape off; optional HTML auth bodies render with autoescape on.
+They never write a `notification` inbox row, never fire the SSE event,
+and are never opt-outable — losing one of these would lock the user
+out.
 
 Templates live under `app/mail/templates/auth/` as
-`<name>.<channel>.j2` files (channels: `subject`, `body_text`).
+`<name>.<channel>.j2` files (channels: `subject`, `body_text`, and
+optional `body_html`).
 The set today:
 
 | template name           | description                                                | recipient                       |

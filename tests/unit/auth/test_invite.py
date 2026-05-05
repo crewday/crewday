@@ -265,7 +265,7 @@ class TestInviteOutboxOrdering:
             session,
             ctx,
             email="lazy@example.com",
-            display_name="Lazy",
+            display_name="Lazy <script>",
             grants=[
                 {
                     "scope_kind": "workspace",
@@ -277,8 +277,8 @@ class TestInviteOutboxOrdering:
             throttle=throttle,
             base_url=_BASE_URL,
             settings=settings,
-            inviter_display_name="Owner",
-            workspace_name=ctx.workspace_slug,
+            inviter_display_name="Owner & Co",
+            workspace_name="A & B Villas",
             dispatch=dispatch,
             link_port=MagicLinkAdapter(session),
         )
@@ -290,6 +290,14 @@ class TestInviteOutboxOrdering:
         assert mailer.sent == [], f"mailer fired before deliver(): {mailer.sent!r}"
         dispatch.deliver()
         assert len(mailer.sent) == 1
+        message = mailer.sent[0]
+        assert message.body_html is not None
+        assert "Hi Lazy <script>" in message.body_text
+        assert "Hi Lazy &lt;script&gt;" in message.body_html
+        assert "Owner & Co invited you to join A & B Villas" in message.body_text
+        assert (
+            "Owner &amp; Co invited you to join A &amp; B Villas" in message.body_html
+        )
 
     def test_commit_failure_before_deliver_does_not_send_email(
         self,

@@ -666,13 +666,15 @@ def _send_recovery_link(
     """
     url = f"{base_url.rstrip('/')}/recover/enroll?token={token}"
     ttl_minutes = max(1, int(ttl.total_seconds() // 60))
-    subject, body_text = render_auth_email(
+    subject, body_text, body_html = render_auth_email(
         "recovery_new_link",
         display_name=display_name,
         url=url,
         ttl_minutes=str(ttl_minutes),
     )
-    mailer.send(to=[to_email], subject=subject, body_text=body_text)
+    mailer.send(
+        to=[to_email], subject=subject, body_text=body_text, body_html=body_html
+    )
 
 
 def _revoke_passkeys(session: SqlaSession, *, user_id: str) -> int:

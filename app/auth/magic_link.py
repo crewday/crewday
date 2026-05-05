@@ -935,13 +935,15 @@ def _send_link_email(
     url = f"{base_url.rstrip('/')}/auth/magic/{token}"
     ttl_minutes = max(1, int(ttl.total_seconds() // 60))
     label = magic_link_purpose_label(purpose)
-    subject, body_text = render_auth_email(
+    subject, body_text, body_html = render_auth_email(
         "magic_link",
         purpose_label=label,
         url=url,
         ttl_minutes=str(ttl_minutes),
     )
-    mailer.send(to=[to_email], subject=subject, body_text=body_text)
+    mailer.send(
+        to=[to_email], subject=subject, body_text=body_text, body_html=body_html
+    )
 
 
 # ---------------------------------------------------------------------------

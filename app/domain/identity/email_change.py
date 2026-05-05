@@ -402,7 +402,7 @@ def _send_notice_to_old(
     recovers. A 5xx surfacing here would shadow the typed domain
     error vocabulary the router relies on.
     """
-    subject, body = render_auth_email(
+    subject, body, body_html = render_auth_email(
         "email_change_notice",
         display_name=display_name,
         masked_new_email=masked_new_email,
@@ -410,7 +410,9 @@ def _send_notice_to_old(
         ttl_minutes=str(ttl_minutes),
     )
     try:
-        mailer.send(to=[old_email], subject=subject, body_text=body)
+        mailer.send(
+            to=[old_email], subject=subject, body_text=body, body_html=body_html
+        )
     except MailDeliveryError:
         _log.warning(
             "email-change notice send failed; swallowing per enumeration guard",
@@ -429,13 +431,15 @@ def _send_confirmation_to_new(
 
     Same swallow-and-log policy as the notice send.
     """
-    subject, body = render_auth_email(
+    subject, body, body_html = render_auth_email(
         "email_change_confirmed",
         display_name=display_name,
         masked_old_email=masked_old_email,
     )
     try:
-        mailer.send(to=[new_email], subject=subject, body_text=body)
+        mailer.send(
+            to=[new_email], subject=subject, body_text=body, body_html=body_html
+        )
     except MailDeliveryError:
         _log.warning(
             "email-change confirmation send failed; swallowing",
@@ -462,7 +466,7 @@ def _send_revert_link_to_old(
     # code-health: ignore[params] Port params are adapter API contract.
     url = f"{base_url.rstrip('/')}/auth/email/revert?token={token}"
     ttl_hours = max(1, int(ttl.total_seconds() // 3600))
-    subject, body = render_auth_email(
+    subject, body, body_html = render_auth_email(
         "email_change_revert",
         display_name=display_name,
         masked_new_email=masked_new_email,
@@ -470,7 +474,9 @@ def _send_revert_link_to_old(
         ttl_hours=str(ttl_hours),
     )
     try:
-        mailer.send(to=[old_email], subject=subject, body_text=body)
+        mailer.send(
+            to=[old_email], subject=subject, body_text=body, body_html=body_html
+        )
     except MailDeliveryError:
         _log.warning(
             "email-change revert-link send failed; swallowing",

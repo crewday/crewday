@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>{{ inviter_display_name }} invited you to {{ workspace_name }}</title>
+  </head>
+  <body>
+    <p>Hi {{ invitee_display_name }},</p>
+    <p>{{ inviter_display_name }} invited you to join {{ workspace_name }} on crew.day.</p>
+    <p><a href="{{ url }}">Accept the invite</a></p>
+    <p>This link expires in the next {{ ttl_hours }} hours.</p>
+    <p>crew.day</p>
+  </body>
+</html>
