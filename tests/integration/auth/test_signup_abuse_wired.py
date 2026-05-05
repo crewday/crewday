@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from pydantic import SecretStr
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -32,11 +33,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.identity.models import MagicLinkNonce, SignupAttempt
 from app.api.deps import db_session as _db_session_dep
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.auth.signup import build_signup_router
 from app.auth import signup_abuse
 from app.auth._throttle import _SIGNUP_IP_LIMIT, Throttle
 from app.capabilities import Capabilities, DeploymentSettings, Features
 from app.config import Settings
+from app.domain.errors import CANONICAL_TYPE_BASE
 
 pytestmark = pytest.mark.integration
 
@@ -63,6 +66,46 @@ class _RecordingMailer:
         del body_html, headers, reply_to
         self.sent.append((tuple(to), subject, body_text))
         return "test-message-id"
+
+
+def _type_uri(name: str) -> str:
+    return f"{CANONICAL_TYPE_BASE}{name}"
+
+
+def _assert_abuse_problem(
+    response: Response,
+    *,
+    status_code: int,
+    type_name: str,
+    title: str,
+    error: str,
+    retry_after_seconds: int | None = None,
+) -> dict[str, object]:
+    assert response.status_code == status_code, response.text
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    body = response.json()
+    assert body["type"] == _type_uri(type_name)
+    assert body["title"] == title
+    assert body["status"] == status_code
+    assert body["instance"] == "/api/v1/signup/start"
+    assert body["error"] == error
+    if retry_after_seconds is None:
+        assert "retry_after_seconds" not in body
+        assert "Retry-After" not in response.headers
+        assert set(body) == {"type", "title", "status", "instance", "error"}
+    else:
+        assert type(body["retry_after_seconds"]) is int
+        assert body["retry_after_seconds"] == retry_after_seconds
+        assert response.headers["Retry-After"] == str(retry_after_seconds)
+        assert set(body) == {
+            "type",
+            "title",
+            "status",
+            "instance",
+            "error",
+            "retry_after_seconds",
+        }
+    return body
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +199,7 @@ def _make_client(
         settings=settings,
     )
     app_obj.include_router(router, prefix="/api/v1")
+    add_exception_handlers(app_obj)
 
     factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
 
@@ -272,10 +316,17 @@ class TestRateLimitRefusal:
                 "captcha_token": "test-pass",
             },
         )
-        assert r.status_code == 429, r.text
-        assert r.json()["detail"]["error"] == "rate_limited"
         retry_after = int(r.headers["retry-after"])
         assert retry_after > 0
+        body = _assert_abuse_problem(
+            r,
+            status_code=429,
+            type_name="rate_limited",
+            title="Rate limited",
+            error="rate_limited",
+            retry_after_seconds=retry_after,
+        )
+        assert body["retry_after_seconds"] > 0
 
         # Audit row landed with hashes only (no raw IP / email).
         factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
@@ -314,8 +365,13 @@ class TestDisposableRefusal:
                 "captcha_token": "test-pass",
             },
         )
-        assert r.status_code == 422, r.text
-        assert r.json()["detail"]["error"] == "disposable_email"
+        _assert_abuse_problem(
+            r,
+            status_code=422,
+            type_name="validation",
+            title="Validation error",
+            error="disposable_email",
+        )
 
         # No signup_attempt row inserted — refusal fired before the
         # domain service.
@@ -359,8 +415,13 @@ class TestCaptchaRefusal:
                 "desired_slug": "nocap-ws",
             },
         )
-        assert r.status_code == 422, r.text
-        assert r.json()["detail"]["error"] == "captcha_required"
+        _assert_abuse_problem(
+            r,
+            status_code=422,
+            type_name="validation",
+            title="Validation error",
+            error="captcha_required",
+        )
 
     def test_test_fail_token_rejected(
         self,
@@ -375,8 +436,13 @@ class TestCaptchaRefusal:
                 "captcha_token": "test-fail",
             },
         )
-        assert r.status_code == 422, r.text
-        assert r.json()["detail"]["error"] == "captcha_failed"
+        _assert_abuse_problem(
+            r,
+            status_code=422,
+            type_name="validation",
+            title="Validation error",
+            error="captcha_failed",
+        )
 
         # Audit refusal reason = captcha_rejected (upstream rejection).
         factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
