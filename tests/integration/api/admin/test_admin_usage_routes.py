@@ -42,6 +42,18 @@ pytestmark = pytest.mark.integration
 _TEST_UA = "pytest-admin-cd-ccu9-integration"
 _TEST_ACCEPT_LANGUAGE = "en"
 _PINNED = datetime(2026, 4, 25, 12, 0, 0, tzinfo=UTC)
+_TEST_EMAILS = frozenset(
+    {
+        "admin-usage-list-admin@example.com",
+        "admin-usage-cap-admin@example.com",
+    }
+)
+_TEST_WORKSPACE_SLUGS = frozenset(
+    {
+        "admin-usage-list-prod",
+        "admin-usage-cap-prod",
+    }
+)
 
 
 @pytest.fixture
@@ -220,21 +232,92 @@ def _add_llm_usage(
 
 def _wipe(session_factory: sessionmaker[Session]) -> None:
     with session_factory() as s, tenant_agnostic():
-        for model in (
-            LlmUsage,
-            ApiToken,
-            SessionRow,
-            UserWorkspace,
-            DeploymentOwner,
-            RoleGrant,
-            AuditLog,
-            DeploymentSetting,
-            Workspace,
-            User,
-        ):
-            for row in s.scalars(select(model)).all():
+        user_ids = list(
+            s.scalars(select(User.id).where(User.email.in_(_TEST_EMAILS))).all()
+        )
+        workspace_ids = list(
+            s.scalars(
+                select(Workspace.id).where(Workspace.slug.in_(_TEST_WORKSPACE_SLUGS))
+            ).all()
+        )
+
+        if workspace_ids:
+            for row in s.scalars(
+                select(LlmUsage).where(LlmUsage.workspace_id.in_(workspace_ids))
+            ).all():
+                s.delete(row)
+            for row in s.scalars(
+                select(ApiToken).where(ApiToken.workspace_id.in_(workspace_ids))
+            ).all():
+                s.delete(row)
+            for row in s.scalars(
+                select(SessionRow).where(SessionRow.workspace_id.in_(workspace_ids))
+            ).all():
+                s.delete(row)
+            for row in s.scalars(
+                select(UserWorkspace).where(
+                    UserWorkspace.workspace_id.in_(workspace_ids)
+                )
+            ).all():
+                s.delete(row)
+            for row in s.scalars(
+                select(RoleGrant).where(RoleGrant.workspace_id.in_(workspace_ids))
+            ).all():
+                s.delete(row)
+            for row in s.scalars(
+                select(AuditLog).where(AuditLog.workspace_id.in_(workspace_ids))
+            ).all():
+                s.delete(row)
+
+        if user_ids:
+            for row in s.scalars(
+                select(ApiToken).where(ApiToken.user_id.in_(user_ids))
+            ).all():
+                s.delete(row)
+            for row in s.scalars(
+                select(SessionRow).where(SessionRow.user_id.in_(user_ids))
+            ).all():
+                s.delete(row)
+            for row in s.scalars(
+                select(DeploymentOwner).where(DeploymentOwner.user_id.in_(user_ids))
+            ).all():
+                s.delete(row)
+            for row in s.scalars(
+                select(RoleGrant).where(RoleGrant.user_id.in_(user_ids))
+            ).all():
+                s.delete(row)
+            for row in s.scalars(
+                select(AuditLog).where(AuditLog.actor_id.in_(user_ids))
+            ).all():
+                s.delete(row)
+            for row in s.scalars(
+                select(DeploymentSetting).where(
+                    DeploymentSetting.updated_by.in_(user_ids)
+                )
+            ).all():
+                s.delete(row)
+
+        if workspace_ids:
+            for row in s.scalars(
+                select(Workspace).where(Workspace.id.in_(workspace_ids))
+            ).all():
+                s.delete(row)
+
+        if user_ids:
+            for row in s.scalars(select(User).where(User.id.in_(user_ids))).all():
                 s.delete(row)
         s.commit()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_admin_usage_rows(
+    session_factory: sessionmaker[Session],
+) -> Iterator[None]:
+    _wipe(session_factory)
+    try:
+        yield
+    finally:
+        _wipe(session_factory)
 
 
 class TestUsageListRoute:
@@ -247,10 +330,10 @@ class TestUsageListRoute:
         try:
             user_id = _seed_admin(
                 session_factory,
-                email="ada@example.com",
+                email="admin-usage-list-admin@example.com",
                 display_name="Ada",
             )
-            ws = _seed_workspace(session_factory, slug="usage-list-prod")
+            ws = _seed_workspace(session_factory, slug="admin-usage-list-prod")
             now = datetime.now(UTC)
             actor_id = "01HW0000000000000000ACTRP1"
             _add_llm_usage(
@@ -271,7 +354,7 @@ class TestUsageListRoute:
             )
             client.cookies.set(SESSION_COOKIE_NAME, cookie)
 
-            resp = client.get("/admin/api/v1/usage")
+            resp = client.get("/admin/api/v1/usage", params={"workspace_id": ws})
             assert resp.status_code == 200, resp.text
             body = resp.json()
             assert body["has_more"] is False
@@ -325,10 +408,10 @@ class TestUsageCapRoute:
         try:
             user_id = _seed_admin(
                 session_factory,
-                email="cap-admin@example.com",
+                email="admin-usage-cap-admin@example.com",
                 display_name="Cap Admin",
             )
-            ws = _seed_workspace(session_factory, slug="usage-cap-prod")
+            ws = _seed_workspace(session_factory, slug="admin-usage-cap-prod")
             cookie = _issue_session(
                 session_factory, user_id=user_id, settings=pinned_settings
             )
