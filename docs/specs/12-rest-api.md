@@ -1744,10 +1744,16 @@ GET    /history?tab=tasks|chats|expenses|leaves   # self-only "everything wrappe
                                           #     leaves   — Leave rows for caller,
                                           #                status='approved' AND
                                           #                ends_at < today (UTC).
-                                          #     chats    — archived agent chats;
-                                          #                surface not yet built,
-                                          #                returns []. Tracked as
-                                          #                a follow-up Beads task.
+                                          #     chats    — archived agent chat
+                                          #                channels owned by the
+                                          #                caller
+                                          #                (agent:<scope>:<user_id>),
+                                          #                projected as
+                                          #                {id, title, last_at,
+                                          #                summary}; summary is
+                                          #                the live compaction
+                                          #                summary when present,
+                                          #                otherwise "".
                                           #   Every array is populated regardless
                                           #   of `tab`; the param echoes back so
                                           #   the SPA can switch tabs client-side

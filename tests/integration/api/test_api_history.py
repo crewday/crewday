@@ -16,7 +16,7 @@ chats[]}``. These tests drive the full router → DB chain and assert:
     ``{approved, reimbursed, rejected}``.
   - ``leaves`` — caller's ``Leave`` rows with ``status='approved'`` and
     ``ends_at < today (UTC)``.
-  - ``chats`` — always ``[]`` (archive surface not yet built).
+  - ``chats`` — caller-owned archived agent chat channels.
 
 * Cross-user isolation: rows belonging to a peer never leak into the
   caller's history (the service keys on ``ctx.actor_id`` and ignores
@@ -43,6 +43,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.expenses.models import ExpenseClaim
+from app.adapters.db.messaging.models import ChatChannel, ChatMessage
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.tasks.models import Occurrence
 from app.adapters.db.time.models import Leave
@@ -399,6 +400,78 @@ def _seed_leave(
     return leave_id
 
 
+def _seed_archived_chat(
+    session: Session,
+    *,
+    workspace_id: str,
+    user_id: str,
+    scope: str = "employee",
+    title: str = "Archived agent chat",
+    archived_at: datetime = _PAST,
+    latest_at: datetime | None = None,
+    latest_body: str = "Latest chat message",
+    summary: str | None = "Archived chat summary",
+) -> str:
+    """Seed an archived agent channel and one visible message."""
+    channel_id = new_ulid()
+    session.add(
+        ChatChannel(
+            id=channel_id,
+            workspace_id=workspace_id,
+            kind="manager" if scope == "manager" else "staff",
+            source="app",
+            external_ref=f"agent:{scope}:{user_id}",
+            title=title,
+            created_at=archived_at - timedelta(days=2),
+            archived_at=archived_at,
+        )
+    )
+    latest_id = new_ulid()
+    session.add(
+        ChatMessage(
+            id=latest_id,
+            workspace_id=workspace_id,
+            channel_id=channel_id,
+            author_user_id=user_id,
+            author_label="History Caller",
+            body_md=latest_body,
+            kind="message",
+            attachments_json=[],
+            source="app",
+            provider_message_id=None,
+            gateway_binding_id=None,
+            dispatched_to_agent_at=None,
+            summary_range_from_id=None,
+            summary_range_to_id=None,
+            compacted_into_id=None,
+            created_at=latest_at or archived_at,
+        )
+    )
+    if summary is not None:
+        session.add(
+            ChatMessage(
+                id=new_ulid(),
+                workspace_id=workspace_id,
+                channel_id=channel_id,
+                author_user_id=None,
+                author_label="compact-worker",
+                body_md=summary,
+                kind="summary",
+                attachments_json=[],
+                source="app",
+                provider_message_id=None,
+                gateway_binding_id=None,
+                dispatched_to_agent_at=None,
+                summary_range_from_id=latest_id,
+                summary_range_to_id=latest_id,
+                compacted_into_id=None,
+                created_at=archived_at,
+            )
+        )
+    session.flush()
+    return channel_id
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -579,9 +652,30 @@ def test_leaves_tab_returns_past_approved_only(db_session: Session) -> None:
     assert body["leaves"][0]["approved_at"] is not None
 
 
-def test_chats_tab_returns_empty(db_session: Session) -> None:
-    """Chats tab is a documented placeholder until the archive surface ships."""
-    caller_ctx, _peer_ctx, *_ = _seed_workspace(db_session)
+def test_chats_tab_returns_archived_agent_chats(db_session: Session) -> None:
+    """Chats tab projects archived per-caller agent channels."""
+    caller_ctx, _peer_ctx, workspace_id, caller_id, *_ = _seed_workspace(db_session)
+    older_id = _seed_archived_chat(
+        db_session,
+        workspace_id=workspace_id,
+        user_id=caller_id,
+        title="Older agent chat",
+        archived_at=_PAST,
+        latest_at=_PAST - timedelta(hours=1),
+        latest_body="Older raw body must not leak",
+        summary=None,
+    )
+    newer_id = _seed_archived_chat(
+        db_session,
+        workspace_id=workspace_id,
+        user_id=caller_id,
+        scope="manager",
+        title="Newer agent chat",
+        archived_at=_PAST + timedelta(days=1),
+        latest_at=_PAST + timedelta(hours=22),
+        latest_body="Newer raw body must not leak",
+        summary="Compacted summary",
+    )
     db_session.commit()
 
     client = _client(db_session, caller_ctx)
@@ -590,7 +684,16 @@ def test_chats_tab_returns_empty(db_session: Session) -> None:
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["tab"] == "chats"
-    assert body["chats"] == []
+    assert [row["id"] for row in body["chats"]] == [newer_id, older_id]
+    assert body["chats"][0] == {
+        "id": newer_id,
+        "title": "Newer agent chat",
+        "last_at": "2024-06-02T10:00:00+00:00",
+        "summary": "Compacted summary",
+    }
+    assert set(body["chats"][0]) == {"id", "title", "last_at", "summary"}
+    assert body["chats"][1]["summary"] == ""
+    assert "raw body" not in str(body["chats"])
 
 
 def test_cross_user_rows_are_excluded(db_session: Session) -> None:
@@ -628,6 +731,12 @@ def test_cross_user_rows_are_excluded(db_session: Session) -> None:
         ends_at=_PAST - timedelta(days=8),
         decided_by=caller_id,
     )
+    caller_chat_id = _seed_archived_chat(
+        db_session,
+        workspace_id=workspace_id,
+        user_id=caller_id,
+        title="Caller chat",
+    )
 
     # Peer rows — must NOT bleed into the caller's history.
     _seed_occurrence(
@@ -657,6 +766,25 @@ def test_cross_user_rows_are_excluded(db_session: Session) -> None:
         ends_at=_PAST - timedelta(days=11),
         decided_by=peer_id,
     )
+    _seed_archived_chat(
+        db_session,
+        workspace_id=workspace_id,
+        user_id=peer_id,
+        title="Peer chat",
+    )
+    _, _, foreign_workspace_id, foreign_caller_id, *_ = _seed_workspace(db_session)
+    _seed_archived_chat(
+        db_session,
+        workspace_id=foreign_workspace_id,
+        user_id=caller_id,
+        title="Foreign workspace chat",
+    )
+    _seed_archived_chat(
+        db_session,
+        workspace_id=foreign_workspace_id,
+        user_id=foreign_caller_id,
+        title="Foreign workspace other user chat",
+    )
     db_session.commit()
 
     client = _client(db_session, caller_ctx)
@@ -671,6 +799,8 @@ def test_cross_user_rows_are_excluded(db_session: Session) -> None:
     assert [row["id"] for row in body["expenses"]] == [caller_claim_id]
     # Leaves: only the caller's leave.
     assert [row["id"] for row in body["leaves"]] == [caller_leave_id]
+    # Chats: only the caller's archived agent channel in this workspace.
+    assert [row["id"] for row in body["chats"]] == [caller_chat_id]
 
 
 def test_tasks_tab_caps_to_fifty_rows_newest_first(

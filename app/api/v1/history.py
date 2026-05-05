@@ -62,9 +62,8 @@ fit comfortably under the cap.
 * ``tab=leaves``: ``Leave`` rows for the caller with
   ``status='approved'`` and ``ends_at < today (UTC)``. Matches the
   mock's ``approved_at IS NOT NULL AND ends_on < today`` rule.
-* ``tab=chats``: archived agent chats. The chat-archive surface
-  doesn't exist yet in production — returns ``[]`` and is tracked
-  as a follow-up Beads task.
+* ``tab=chats``: archived agent chat channels owned by the caller
+  (``external_ref = agent:<scope>:<actor_id>``), newest first.
 
 See ``docs/specs/12-rest-api.md`` §"Self-service shortcuts",
 ``docs/specs/14-web-frontend.md`` §"Worker history".
@@ -80,6 +79,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.adapters.db.messaging.models import ChatChannel, ChatMessage
 from app.adapters.db.tasks.models import Occurrence
 from app.adapters.db.time.models import Leave
 from app.api.deps import current_workspace_context, db_session
@@ -136,10 +136,9 @@ class HistoryChatItem(BaseModel):
     """One archived agent chat row.
 
     Mirrors the SPA's ``HistoryPayload.chats`` shape
-    (``app/web/src/types/dashboard.ts``). Production has no chat-
-    archive surface yet; this type exists so the OpenAPI schema
-    documents the eventual contract and the SPA can render the
-    empty state without conditional types.
+    (``app/web/src/types/dashboard.ts``). Rows are projected from
+    archived per-user agent channels; the endpoint never accepts a
+    user selector.
     """
 
     id: str
@@ -289,6 +288,75 @@ def _list_history_leaves(
     return [_leave_from_row(row) for row in rows]
 
 
+def _list_history_chats(
+    session: Session,
+    ctx: WorkspaceContext,
+) -> list[HistoryChatItem]:
+    """Return up to :data:`_TAB_CAP` archived agent chats for the caller."""
+    rows = list(
+        session.scalars(
+            select(ChatChannel)
+            .where(
+                ChatChannel.workspace_id == ctx.workspace_id,
+                ChatChannel.source == "app",
+                ChatChannel.kind.in_(("staff", "manager")),
+                ChatChannel.external_ref.in_(
+                    (
+                        f"agent:employee:{ctx.actor_id}",
+                        f"agent:manager:{ctx.actor_id}",
+                    )
+                ),
+                ChatChannel.archived_at.is_not(None),
+            )
+            .order_by(ChatChannel.archived_at.desc(), ChatChannel.id.desc())
+            .limit(_TAB_CAP)
+        ).all()
+    )
+    return [_chat_from_channel(session, row) for row in rows]
+
+
+def _chat_from_channel(session: Session, row: ChatChannel) -> HistoryChatItem:
+    summary = session.scalar(
+        select(ChatMessage.body_md)
+        .where(
+            ChatMessage.workspace_id == row.workspace_id,
+            ChatMessage.channel_id == row.id,
+            ChatMessage.kind == "summary",
+            ChatMessage.compacted_into_id.is_(None),
+        )
+        .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
+        .limit(1)
+    )
+    latest_at = session.scalar(
+        select(ChatMessage.created_at)
+        .where(
+            ChatMessage.workspace_id == row.workspace_id,
+            ChatMessage.channel_id == row.id,
+            ChatMessage.kind != "summary",
+        )
+        .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
+        .limit(1)
+    )
+    return HistoryChatItem(
+        id=row.id,
+        title=row.title or _chat_fallback_title(row),
+        last_at=_history_time(latest_at or row.archived_at),
+        summary=summary or "",
+    )
+
+
+def _chat_fallback_title(row: ChatChannel) -> str:
+    return "Manager agent chat" if row.kind == "manager" else "Employee agent chat"
+
+
+def _history_time(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat()
+
+
 def build_history_router() -> APIRouter:
     """Return a fresh :class:`APIRouter` wired for the history surface."""
     api = APIRouter(
@@ -333,7 +401,7 @@ def build_history_router() -> APIRouter:
             tasks=_list_history_tasks(session, ctx),
             expenses=_list_history_expenses(session, ctx),
             leaves=_list_history_leaves(session, ctx, now=now),
-            chats=[],
+            chats=_list_history_chats(session, ctx),
         )
 
     return api
