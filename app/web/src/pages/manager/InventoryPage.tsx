@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import {
   useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { fetchJson } from "@/lib/api";
+import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import DeskPage from "@/components/DeskPage";
@@ -62,6 +63,15 @@ interface WireInventoryItem {
   reorder_point: number | null;
   reorder_target: number | null;
   tags: string[];
+}
+
+interface InventoryItemCreateBody {
+  name: string;
+  sku: string | null;
+  unit: string;
+  reorder_point: number;
+  reorder_target: number | null;
+  barcode_ean13: string | null;
 }
 
 interface ListEnvelope<T> {
@@ -180,6 +190,25 @@ function fmtWhen(iso: string): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+function errorCopy(error: Error, fallback: string): string {
+  if (error instanceof ApiError) {
+    const field = error.problem?.field;
+    const code = error.problem?.error;
+    if (code === "inventory_item_conflict" && field === "sku") {
+      return "SKU already exists for this property.";
+    }
+    if (code === "inventory_item_conflict" && field === "barcode_ean13") {
+      return "Barcode already exists for this property.";
+    }
+    if (code === "required" && field === "name") return "Name is required.";
+    if (code === "blank" && field === "name") return "Name is required.";
+    if (code === "required" && field === "unit") return "Unit is required.";
+    if (code === "blank" && field === "unit") return "Unit is required.";
+    return error.detail ?? error.title ?? error.message ?? fallback;
+  }
+  return error.message || fallback;
+}
+
 interface MovementsPage {
   items: InventoryMovement[];
   next_cursor: string | null;
@@ -205,13 +234,21 @@ export default function InventoryPage() {
 
   const [openItemId, setOpenItemId] = useState<string | null>(null);
   const [stocktakePid, setStocktakePid] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const stocktakeRef = useRef<HTMLDialogElement>(null);
+  const createItemRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     if (!stocktakePid) return;
     const dialog = stocktakeRef.current;
     if (dialog && !dialog.open) dialog.showModal();
   }, [stocktakePid]);
+
+  useEffect(() => {
+    const dialog = createItemRef.current;
+    if (creating && dialog && !dialog.open) dialog.showModal();
+    if (!creating && dialog?.open) dialog.close();
+  }, [creating]);
 
   function closeStocktake() {
     stocktakeRef.current?.close();
@@ -221,19 +258,13 @@ export default function InventoryPage() {
   const sub =
     "Per-property stock. Items at or below par trigger a procurement task. Click a row to see full history and adjust.";
   const actions = (
-    <span className="page-action-disabled">
-      <button
-        type="button"
-        className="btn btn--moss"
-        disabled
-        aria-describedby="inventory-new-item-disabled-reason"
-      >
-        + New item
-      </button>
-      <span id="inventory-new-item-disabled-reason" className="page-action-disabled__reason">
-        Item creation is not implemented yet.
-      </span>
-    </span>
+    <button
+      type="button"
+      className="btn btn--moss"
+      onClick={() => setCreating(true)}
+    >
+      + New item
+    </button>
   );
   const overflow = [
     {
@@ -375,7 +406,249 @@ export default function InventoryPage() {
           />
         )}
       </dialog>
+
+      <dialog
+        ref={createItemRef}
+        className="modal modal--sheet inv-create-dialog"
+        aria-labelledby="inventory-create-title"
+        onClose={() => setCreating(false)}
+      >
+        {creating && (
+          <NewInventoryItemForm
+            properties={propsQ.data}
+            onClose={() => setCreating(false)}
+          />
+        )}
+      </dialog>
     </DeskPage>
+  );
+}
+
+function NewInventoryItemForm({
+  properties,
+  onClose,
+}: {
+  properties: Property[];
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [propertyId, setPropertyId] = useState(properties[0]?.id ?? "");
+  const [name, setName] = useState("");
+  const [unit, setUnit] = useState("each");
+  const [sku, setSku] = useState("");
+  const [barcode, setBarcode] = useState("");
+  const [reorderPoint, setReorderPoint] = useState("0");
+  const [reorderTarget, setReorderTarget] = useState("");
+  const [clientErr, setClientErr] = useState<string | null>(null);
+  const [serverErr, setServerErr] = useState<string | null>(null);
+
+  const create = useMutation({
+    mutationFn: (body: InventoryItemCreateBody) =>
+      fetchJson<WireInventoryItem>(
+        `/api/v1/inventory/properties/${propertyId}/items`,
+        {
+          method: "POST",
+          body,
+        },
+      ),
+    onSuccess: async () => {
+      setServerErr(null);
+      await qc.invalidateQueries({ queryKey: qk.inventory() });
+      onClose();
+    },
+    onError: (error: Error) => {
+      setServerErr(errorCopy(error, "Item creation failed"));
+    },
+  });
+
+  function optionalText(value: string): string | null {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  const err = clientErr ?? serverErr;
+  const errId = err ? "inventory-create-error" : undefined;
+
+  function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const trimmedName = name.trim();
+    const trimmedUnit = unit.trim();
+    const point = Number.parseFloat(reorderPoint);
+    const target =
+      reorderTarget.trim() === "" ? null : Number.parseFloat(reorderTarget);
+
+    if (!propertyId) {
+      setClientErr("Choose a property.");
+      return;
+    }
+    if (!trimmedName) {
+      setClientErr("Name is required.");
+      return;
+    }
+    if (!trimmedUnit) {
+      setClientErr("Unit is required.");
+      return;
+    }
+    if (!Number.isFinite(point) || point < 0) {
+      setClientErr("Reorder point must be zero or more.");
+      return;
+    }
+    if (target !== null && (!Number.isFinite(target) || target < 0)) {
+      setClientErr("Reorder target must be zero or more.");
+      return;
+    }
+    if (target !== null && target < point) {
+      setClientErr("Reorder target must be at least the reorder point.");
+      return;
+    }
+
+    setClientErr(null);
+    setServerErr(null);
+    create.mutate({
+      name: trimmedName,
+      unit: trimmedUnit,
+      sku: optionalText(sku),
+      barcode_ean13: optionalText(barcode),
+      reorder_point: point,
+      reorder_target: target,
+    });
+  }
+
+  return (
+    <form className="inv-create" onSubmit={submit} noValidate>
+      <header className="inv-create__head">
+        <div>
+          <p className="inv-drawer__eyebrow">New inventory item</p>
+          <h3 id="inventory-create-title" className="inv-create__title">
+            Create item
+          </h3>
+        </div>
+        <button
+          type="button"
+          className="inv-drawer__close"
+          onClick={onClose}
+          aria-label="Close"
+        >
+          ×
+        </button>
+      </header>
+
+      <div className="inv-create__body">
+        {properties.length > 1 && (
+          <label className="field inv-create__field">
+            <span>Property</span>
+            <select
+              value={propertyId}
+              onChange={(e) => setPropertyId(e.target.value)}
+              required
+              aria-invalid={clientErr === "Choose a property."}
+              aria-describedby={errId}
+            >
+              {properties.map((property) => (
+                <option key={property.id} value={property.id}>
+                  {property.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className="field inv-create__field">
+          <span>Name</span>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            aria-invalid={clientErr === "Name is required."}
+            aria-describedby={errId}
+          />
+        </label>
+        <div className="inv-create__grid">
+          <label className="field inv-create__field">
+            <span>Unit</span>
+            <input
+              value={unit}
+              onChange={(e) => setUnit(e.target.value)}
+              required
+              list="inventory-unit-options"
+              aria-invalid={clientErr === "Unit is required."}
+              aria-describedby={errId}
+            />
+            <datalist id="inventory-unit-options">
+              <option value="each" />
+              <option value="roll" />
+              <option value="pack" />
+              <option value="bottle" />
+              <option value="kg" />
+              <option value="L" />
+            </datalist>
+          </label>
+          <label className="field inv-create__field">
+            <span>SKU</span>
+            <input
+              value={sku}
+              onChange={(e) => setSku(e.target.value)}
+              aria-invalid={serverErr === "SKU already exists for this property."}
+              aria-describedby={errId}
+            />
+          </label>
+        </div>
+        <label className="field inv-create__field">
+          <span>Barcode</span>
+          <input
+            value={barcode}
+            onChange={(e) => setBarcode(e.target.value)}
+            aria-invalid={serverErr === "Barcode already exists for this property."}
+            aria-describedby={errId}
+          />
+        </label>
+        <div className="inv-create__grid">
+          <label className="field inv-create__field">
+            <span>Reorder point</span>
+            <input
+              className="mono"
+              type="number"
+              step="0.01"
+              min="0"
+              value={reorderPoint}
+              onChange={(e) => setReorderPoint(e.target.value)}
+              required
+              aria-invalid={clientErr === "Reorder point must be zero or more."}
+              aria-describedby={errId}
+            />
+          </label>
+          <label className="field inv-create__field">
+            <span>Reorder target</span>
+            <input
+              className="mono"
+              type="number"
+              step="0.01"
+              min="0"
+              value={reorderTarget}
+              onChange={(e) => setReorderTarget(e.target.value)}
+              aria-invalid={
+                clientErr === "Reorder target must be zero or more." ||
+                clientErr === "Reorder target must be at least the reorder point."
+              }
+              aria-describedby={errId}
+            />
+          </label>
+        </div>
+        {err && (
+          <p id="inventory-create-error" className="form-error" role="alert">
+            {err}
+          </p>
+        )}
+      </div>
+
+      <footer className="inv-create__footer">
+        <button type="button" className="btn btn--ghost" onClick={onClose}>
+          Cancel
+        </button>
+        <button type="submit" className="btn btn--moss" disabled={create.isPending}>
+          Create item
+        </button>
+      </footer>
+    </form>
   );
 }
 

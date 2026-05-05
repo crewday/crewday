@@ -287,7 +287,7 @@ Route: `/inventory`.
 
 - [ ] Item table renders localized decimal quantities and units.
 - [ ] Inventory filters by property, area, category, low stock, vendor, and archived/deleted.
-- [ ] Create/edit item validates SKU/barcode uniqueness, reorder threshold, unit, property, vendor, and initial quantity.
+- [ ] Create/edit item validates SKU/barcode uniqueness, reorder threshold, unit, property, and vendor. Initial quantity is validated through adjustment/stocktake flows until the item-create API accepts an opening movement.
 - [ ] Delete/archive/restore follows confirmation and preserves movement history.
 - [ ] Row drawer shows movement ledger, reason taxonomy, actor, task/stay link, and running balance.
 - [ ] Adjustment flow requires reason and note where specified.

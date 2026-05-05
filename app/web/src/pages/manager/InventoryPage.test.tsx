@@ -36,6 +36,22 @@ const PROPERTIES: Property[] = [
   },
 ];
 
+const SECOND_PROPERTY: Property = {
+  id: "prop_2",
+  name: "Casa Azul",
+  city: "Lisbon",
+  timezone: "Europe/Lisbon",
+  color: "sky",
+  kind: "str",
+  areas: ["Kitchen"],
+  evidence_policy: "inherit",
+  country: "PT",
+  locale: "pt-PT",
+  settings_override: {},
+  client_org_id: null,
+  owner_user_id: null,
+};
+
 const ITEMS = [
   {
     id: "item_1",
@@ -77,12 +93,72 @@ const MOVEMENTS = [
   },
 ];
 
-function installFetch(items = ITEMS) {
+function installFetch(
+  items = ITEMS,
+  properties: Property[] = PROPERTIES,
+  options: { createStatus?: number; createBody?: unknown } = {},
+) {
+  const secondPropertyItems: typeof ITEMS = [];
   const env = installFetchRouteHandlers([
-    { path: "/w/acme/api/v1/properties", respond: { body: PROPERTIES } },
+    { path: "/w/acme/api/v1/properties", respond: { body: properties } },
     {
       path: "/w/acme/api/v1/inventory/properties/prop_1/items",
       respond: { body: { data: items } },
+    },
+    {
+      path: "/w/acme/api/v1/inventory/properties/prop_1/items",
+      method: "POST",
+      respond: (request) => {
+        if (options.createStatus && options.createStatus >= 400) {
+          return { status: options.createStatus, body: options.createBody };
+        }
+        const created = {
+          ...ITEMS[0],
+          ...(request.body as Record<string, unknown>),
+          id: "item_new",
+          workspace_id: "ws_1",
+          property_id: "prop_1",
+          on_hand: 0,
+          tags: [],
+          vendor: null,
+          vendor_url: null,
+          unit_cost_cents: null,
+          notes_md: null,
+          created_at: "2026-05-05T10:00:00Z",
+          updated_at: null,
+          deleted_at: null,
+        };
+        items.push(created as (typeof ITEMS)[number]);
+        return { status: 201, body: created };
+      },
+    },
+    {
+      path: "/w/acme/api/v1/inventory/properties/prop_2/items",
+      respond: { body: { data: secondPropertyItems } },
+    },
+    {
+      path: "/w/acme/api/v1/inventory/properties/prop_2/items",
+      method: "POST",
+      respond: (request) => {
+        const created = {
+          ...ITEMS[0],
+          ...(request.body as Record<string, unknown>),
+          id: "item_new_2",
+          workspace_id: "ws_1",
+          property_id: "prop_2",
+          on_hand: 0,
+          tags: [],
+          vendor: null,
+          vendor_url: null,
+          unit_cost_cents: null,
+          notes_md: null,
+          created_at: "2026-05-05T10:00:00Z",
+          updated_at: null,
+          deleted_at: null,
+        };
+        secondPropertyItems.push(created as (typeof ITEMS)[number]);
+        return { status: 201, body: created };
+      },
     },
     {
       path: "/w/acme/api/v1/inventory/item_1/movements",
@@ -193,18 +269,180 @@ describe("<InventoryPage>", () => {
     }
   });
 
-  it("marks create and export inventory actions as unavailable", async () => {
+  it("keeps export inventory action unavailable", async () => {
     const fake = installFetch();
     try {
       render(<Harness />);
 
       expect(await screen.findByText("Paper towels")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "+ New item" })).toBeDisabled();
-      expect(screen.getByText("Item creation is not implemented yet.")).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "More actions" }));
       expect(screen.getByRole("menuitem", { name: /Export CSV/ })).toBeDisabled();
       expect(screen.getByText("Inventory export needs a specified API endpoint first.")).toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("opens the new item form with property choices for multi-property workspaces", async () => {
+    const fake = installFetch([...ITEMS], [PROPERTIES[0]!, SECOND_PROPERTY]);
+    try {
+      render(<Harness />);
+      await screen.findByText("Paper towels");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Create item" });
+      expect(within(dialog).getByRole("heading", { name: "Create item" })).toBeInTheDocument();
+      expect(within(dialog).getByLabelText("Property")).toHaveValue("prop_1");
+      expect(within(dialog).getByRole("option", { name: "Casa Azul" })).toBeInTheDocument();
+      expect(within(dialog).getByLabelText("Name")).toBeInTheDocument();
+      expect(within(dialog).getByLabelText("Unit")).toHaveValue("each");
+      expect(within(dialog).getByLabelText("SKU")).toBeInTheDocument();
+      expect(within(dialog).getByLabelText("Barcode")).toBeInTheDocument();
+      expect(within(dialog).getByLabelText("Reorder point")).toHaveValue(0);
+      expect(within(dialog).getByLabelText("Reorder target")).toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("shows client validation near the new item form", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+      await screen.findByText("Paper towels");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
+      const dialog = await screen.findByRole("dialog", { name: "Create item" });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create item" }));
+
+      expect(await within(dialog).findByText("Name is required.")).toBeInTheDocument();
+      expect(
+        fake.requests.some((r) => r.method === "POST" && r.path.includes("/inventory/properties/")),
+      ).toBe(false);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("posts a valid new item and shows it after inventory invalidation", async () => {
+    const liveItems = [...ITEMS];
+    const fake = installFetch(liveItems);
+    try {
+      render(<Harness />);
+      await screen.findByText("Paper towels");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
+      const dialog = await screen.findByRole("dialog", { name: "Create item" });
+      fireEvent.change(within(dialog).getByLabelText("Name"), {
+        target: { value: "Dish soap" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Unit"), {
+        target: { value: "bottle" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("SKU"), {
+        target: { value: "DS-1" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Barcode"), {
+        target: { value: "0123456789012" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Reorder point"), {
+        target: { value: "4" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Reorder target"), {
+        target: { value: "8" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create item" }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name: "Create item" })).not.toBeInTheDocument();
+      });
+      expect(await screen.findByText("Dish soap")).toBeInTheDocument();
+      expect(
+        fake.requests.find(
+          (r) =>
+            r.method === "POST" &&
+            r.url === "/w/acme/api/v1/inventory/properties/prop_1/items",
+        )?.body,
+      ).toEqual({
+        name: "Dish soap",
+        unit: "bottle",
+        sku: "DS-1",
+        barcode_ean13: "0123456789012",
+        reorder_point: 4,
+        reorder_target: 8,
+      });
+      expect(
+        fake.requests.filter(
+          (r) =>
+            r.method === "GET" &&
+            r.url === "/w/acme/api/v1/inventory/properties/prop_1/items",
+        ),
+      ).toHaveLength(2);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("posts a new item to the selected property", async () => {
+    const fake = installFetch([...ITEMS], [PROPERTIES[0]!, SECOND_PROPERTY]);
+    try {
+      render(<Harness />);
+      await screen.findByText("Paper towels");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
+      const dialog = await screen.findByRole("dialog", { name: "Create item" });
+      fireEvent.change(within(dialog).getByLabelText("Property"), {
+        target: { value: "prop_2" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Name"), {
+        target: { value: "Olive oil" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create item" }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name: "Create item" })).not.toBeInTheDocument();
+      });
+      expect(await screen.findByText("Olive oil")).toBeInTheDocument();
+      expect(
+        fake.requests.some(
+          (r) =>
+            r.method === "POST" &&
+            r.url === "/w/acme/api/v1/inventory/properties/prop_2/items",
+        ),
+      ).toBe(true);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("shows server validation copy when new item creation fails", async () => {
+    const fake = installFetch([...ITEMS], PROPERTIES, {
+      createStatus: 409,
+      createBody: {
+        type: "https://crewday.dev/errors/conflict",
+        title: "Conflict",
+        status: 409,
+        error: "inventory_item_conflict",
+        field: "sku",
+      },
+    });
+    try {
+      render(<Harness />);
+      await screen.findByText("Paper towels");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
+      const dialog = await screen.findByRole("dialog", { name: "Create item" });
+      fireEvent.change(within(dialog).getByLabelText("Name"), {
+        target: { value: "Duplicate towels" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create item" }));
+
+      expect(
+        await within(dialog).findByText("SKU already exists for this property."),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: "Create item" })).toBeInTheDocument();
     } finally {
       fake.restore();
     }
