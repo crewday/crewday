@@ -1,5 +1,5 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { fetchJson } from "@/lib/api";
+import { fetchJson, openApiDownload } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
 import DeskPage from "@/components/DeskPage";
@@ -171,7 +171,7 @@ export default function PayPage() {
     {
       label: "Export CSV",
       onSelect: () => undefined,
-      disabledReason: "Payroll export is not implemented yet.",
+      disabledReason: "Payroll data is still loading.",
     },
   ];
 
@@ -184,6 +184,18 @@ export default function PayPage() {
 
   const empById = new Map(employeesQ.data.map((e) => [e.id, e]));
   const { current, previous } = payQ.data;
+  const currentPeriodId = current[0]?.pay_period_id ?? null;
+  const exportOverflow = [
+    {
+      label: "Export CSV",
+      onSelect: () => {
+        if (!currentPeriodId) return;
+        const params = new URLSearchParams({ period_id: currentPeriodId });
+        openApiDownload(`/api/v1/payroll/exports/payslips.csv?${params.toString()}`);
+      },
+      disabledReason: currentPeriodId ? undefined : "No open payroll period is available to export.",
+    },
+  ];
   const defaultCurrency = current[0]?.currency ?? "EUR";
   const pendingTotals = pending?.totals_by_currency ?? [];
   const engagementUserById = new Map<string, string>();
@@ -207,7 +219,7 @@ export default function PayPage() {
           .join(" + ");
 
   return (
-    <DeskPage title="Pay" sub={sub} actions={actions} overflow={overflow}>
+    <DeskPage title="Pay" sub={sub} actions={actions} overflow={exportOverflow}>
       <section className="grid grid--stats">
         <StatCard label="Current period" value="April 2026" sub="open · closes 30 Apr" />
         <StatCard label="Drafts" value={current.length} sub="payslips pending issue" />

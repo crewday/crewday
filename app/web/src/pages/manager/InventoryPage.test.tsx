@@ -204,7 +204,7 @@ describe("<InventoryPage>", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "More actions" }));
       expect(screen.getByRole("menuitem", { name: /Export CSV/ })).toBeDisabled();
-      expect(screen.getByText("Inventory export is not implemented yet.")).toBeInTheDocument();
+      expect(screen.getByText("Inventory export needs a specified API endpoint first.")).toBeInTheDocument();
     } finally {
       fake.restore();
     }

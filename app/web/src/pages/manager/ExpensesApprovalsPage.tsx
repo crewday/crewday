@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { qk } from "@/lib/queryKeys";
+import { openApiDownload } from "@/lib/api";
 import { fetchAllExpenseClaims } from "@/lib/expenses";
 import { useDecideMutation } from "@/lib/useDecideMutation";
 import { formatMoney } from "@/lib/money";
@@ -20,6 +21,28 @@ function totalLabel(xs: Expense[]): string {
   if (xs.length === 0) return "0.00 total";
   const cur = xs[0]?.currency ?? "EUR";
   return formatMoney(sumCents(xs), cur) + " total";
+}
+
+function utcDayStart(iso: string): number | null {
+  const time = new Date(iso).getTime();
+  if (!Number.isFinite(time)) return null;
+  const date = new Date(time);
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+}
+
+function expensesExportPath(expenses: Expense[]): string | null {
+  const dayStarts = expenses
+    .map((expense) => utcDayStart(expense.purchased_at))
+    .filter((time): time is number => time !== null)
+    .sort((a, b) => a - b);
+  const sinceMs = dayStarts[0];
+  const latestDayMs = dayStarts[dayStarts.length - 1];
+  if (sinceMs === undefined || latestDayMs === undefined) return null;
+  const params = new URLSearchParams({
+    since: new Date(sinceMs).toISOString(),
+    until: new Date(latestDayMs + 24 * 60 * 60 * 1000).toISOString(),
+  });
+  return `/api/v1/payroll/exports/expense-ledger.csv?${params.toString()}`;
 }
 
 /**
@@ -66,7 +89,7 @@ export default function ExpensesApprovalsPage() {
     {
       label: "Export CSV",
       onSelect: () => undefined,
-      disabledReason: "Expense export is not implemented in the browser yet.",
+      disabledReason: "Expense data is still loading.",
     },
   ];
 
@@ -78,13 +101,23 @@ export default function ExpensesApprovalsPage() {
   }
 
   const all = expensesQ.data;
+  const exportPath = expensesExportPath(all);
+  const exportOverflow = [
+    {
+      label: "Export CSV",
+      onSelect: () => {
+        if (exportPath) openApiDownload(exportPath);
+      },
+      disabledReason: exportPath ? undefined : "No visible expenses are available to export.",
+    },
+  ];
   const pending = all.filter((x) => x.state === "submitted");
   const approved = all.filter((x) => x.state === "approved");
   const rejected = all.filter((x) => x.state === "rejected");
   const reimbursed = all.filter((x) => x.state === "reimbursed");
 
   return (
-    <DeskPage title="Expense approvals" sub={sub} overflow={overflow}>
+    <DeskPage title="Expense approvals" sub={sub} overflow={exportOverflow}>
       <section className="grid grid--stats">
         <StatCard
           label="Needs decision"

@@ -64,6 +64,27 @@ function installFetch() {
               deleted_at: null,
               attachments: [],
             },
+            {
+              id: "claim_2",
+              workspace_id: "ws_1",
+              work_engagement_id: "eng_2",
+              vendor: "Stationers",
+              purchased_at: "2026-05-02T16:30:00Z",
+              currency: "EUR",
+              total_amount_cents: 899,
+              category: "supplies",
+              property_id: null,
+              note_md: "Printer paper",
+              state: "approved",
+              submitted_at: "2026-05-02T17:00:00Z",
+              decided_by: "usr_1",
+              decided_at: "2026-05-02T18:00:00Z",
+              decision_note_md: null,
+              pay_period_id: null,
+              created_at: "2026-05-02T16:30:00Z",
+              deleted_at: null,
+              attachments: [],
+            },
           ],
           next_cursor: null,
           has_more: false,
@@ -106,8 +127,9 @@ afterEach(() => {
 });
 
 describe("<ExpensesApprovalsPage>", () => {
-  it("marks missing expense export and field-edit actions as unavailable", async () => {
+  it("keeps field editing disabled and exports the visible expense date range", async () => {
     const fake = installFetch();
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
     try {
       render(<Harness />);
 
@@ -116,8 +138,12 @@ describe("<ExpensesApprovalsPage>", () => {
       expect(screen.getByText("Manager field editing is not implemented yet.")).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "More actions" }));
-      expect(screen.getByRole("menuitem", { name: /Export CSV/ })).toBeDisabled();
-      expect(screen.getByText("Expense export is not implemented in the browser yet.")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("menuitem", { name: /Export CSV/ }));
+      expect(open).toHaveBeenCalledWith(
+        "/w/acme/api/v1/payroll/exports/expense-ledger.csv?since=2026-04-29T00%3A00%3A00.000Z&until=2026-05-03T00%3A00%3A00.000Z",
+        "_blank",
+        "noopener,noreferrer",
+      );
     } finally {
       fake.restore();
     }

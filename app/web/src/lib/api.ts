@@ -138,6 +138,10 @@ export function resolveApiPath(path: string, slug: string | null = workspaceSlug
   return path;
 }
 
+export function openApiDownload(path: string): void {
+  window.open(resolveApiPath(path), "_blank", "noopener,noreferrer");
+}
+
 function readCookie(name: string): string | null {
   const target = name + "=";
   for (const chunk of document.cookie.split(";")) {

@@ -131,8 +131,9 @@ afterEach(() => {
 });
 
 describe("<PayPage>", () => {
-  it("marks missing payroll actions as unavailable", async () => {
+  it("keeps missing payroll actions disabled and exports the current period CSV", async () => {
     const fake = installFetch();
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
     try {
       render(<Harness />);
 
@@ -143,8 +144,12 @@ describe("<PayPage>", () => {
       expect(screen.getByText("Payslip PDF preview is not implemented yet.")).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "More actions" }));
-      expect(screen.getByRole("menuitem", { name: /Export CSV/ })).toBeDisabled();
-      expect(screen.getByText("Payroll export is not implemented yet.")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("menuitem", { name: /Export CSV/ }));
+      expect(open).toHaveBeenCalledWith(
+        "/w/acme/api/v1/payroll/exports/payslips.csv?period_id=period_1",
+        "_blank",
+        "noopener,noreferrer",
+      );
     } finally {
       fake.restore();
     }

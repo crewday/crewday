@@ -1,7 +1,7 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
-import { fetchJson } from "@/lib/api";
+import { fetchJson, openApiDownload } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import { Chip, Loading } from "@/components/common";
@@ -41,6 +41,16 @@ function auditPath(filters: Record<FilterKey, string>, cursor: string | null): s
   return qs ? `/api/v1/audit?${qs}` : "/api/v1/audit";
 }
 
+function auditExportPath(filters: Record<FilterKey, string>): string {
+  const params = new URLSearchParams();
+  for (const key of FILTER_KEYS) {
+    if (filters[key]) params.set(key, filters[key]);
+  }
+  params.set("limit", "500");
+  const qs = params.toString();
+  return `/api/v1/audit/tail?${qs}`;
+}
+
 export default function AuditPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = filtersFromSearch(searchParams);
@@ -57,8 +67,7 @@ export default function AuditPage() {
   const overflow = [
     {
       label: "Export JSONL",
-      onSelect: () => undefined,
-      disabledReason: "Audit export is not implemented in the browser yet.",
+      onSelect: () => openApiDownload(auditExportPath(filters)),
     },
   ];
 

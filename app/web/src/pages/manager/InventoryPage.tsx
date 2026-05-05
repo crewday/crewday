@@ -239,7 +239,7 @@ export default function InventoryPage() {
     {
       label: "Export CSV",
       onSelect: () => undefined,
-      disabledReason: "Inventory export is not implemented yet.",
+      disabledReason: "Inventory export needs a specified API endpoint first.",
     },
   ];
 

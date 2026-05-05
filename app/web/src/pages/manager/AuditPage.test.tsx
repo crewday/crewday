@@ -219,16 +219,21 @@ describe("<AuditPage>", () => {
     }
   });
 
-  it("marks audit export as unavailable instead of exposing a no-op", async () => {
+  it("opens the audit export with the current filters in the workspace URL", async () => {
     const fake = installFetch();
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
     try {
-      render(<Harness />);
+      render(<Harness initial="/audit?actor=usr_1&action=asset.updated&entity=asset%3Aasset_1" />);
 
       expect(await screen.findByText("asset.updated")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: /Export JSONL/ }));
 
-      expect(screen.getByRole("menuitem", { name: /Export JSONL/ })).toBeDisabled();
-      expect(screen.getByText("Audit export is not implemented in the browser yet.")).toBeInTheDocument();
+      expect(open).toHaveBeenCalledWith(
+        "/w/acme/api/v1/audit/tail?actor=usr_1&action=asset.updated&entity=asset%3Aasset_1&limit=500",
+        "_blank",
+        "noopener,noreferrer",
+      );
     } finally {
       fake.restore();
     }

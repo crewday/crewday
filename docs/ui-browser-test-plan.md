@@ -295,7 +295,7 @@ Route: `/inventory`.
 - [ ] Transfer between properties handles source/destination quantities and pending/complete state if implemented.
 - [ ] Stocktake starts, walks items, records counted quantities, shows variance, commits, abandons, and handles concurrent item changes.
 - [ ] Barcode scan finds item, handles unknown barcode, and offers create/link flow.
-- [ ] Low-stock report, burn-rate report, production report, shrinkage report, and vendor report render and export if specified.
+- [ ] Low-stock report, burn-rate report, production report, shrinkage report, and vendor report render and export only after a REST export endpoint is specified; the current API contract exposes report reads but no inventory CSV download.
 - [ ] Task completion consuming inventory updates visible stock via SSE.
 
 ## Manager Assets And Documents
@@ -512,7 +512,7 @@ The `site/` implementation is absent in this worktree; these checks are derived 
 
 - `cd-noi8g`: Resolve expense pending reimbursement route naming drift.
 - `cd-sfiod`: Clarify site demo chat intent copy against shipped chat model.
-- `cd-lv141`: Implement manager browser export actions.
+- `cd-lv141`: Implement manager browser export actions against the shipped workspace-scoped export routes; inventory export remains blocked until an inventory export API contract exists.
 - `cd-043gk`: Implement inventory item creation UI.
 - `cd-z23ji`: Implement stay create and iCal import workflows.
 - `cd-ijbm9`: Implement pay period close and payslip preview UI.
