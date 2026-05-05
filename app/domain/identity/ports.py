@@ -418,11 +418,12 @@ class RoleGrantRepository(Protocol):
     def is_property_in_workspace(self, *, workspace_id: str, property_id: str) -> bool:
         """Return ``True`` iff ``property_id`` is linked to ``workspace_id``.
 
-        The check runs against ``property_workspace`` — the
-        authoritative junction table for "this property belongs to
-        this workspace" (§02 "property_workspace"). An unknown
-        property id returns ``False`` the same way a sibling-workspace
-        id does; the caller maps both to a single
+        The check runs against ``property_workspace`` joined to
+        ``property`` — the authoritative relation for "this
+        workspace actively operates this live property" (§02
+        "property_workspace"). Unknown ids, sibling-workspace ids,
+        soft-deleted properties, and non-active junction rows all
+        return ``False``; the caller maps them to a single
         ``CrossWorkspaceProperty`` error.
         """
         ...

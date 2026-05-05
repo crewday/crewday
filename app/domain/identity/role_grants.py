@@ -298,11 +298,12 @@ def _assert_scope_property_in_workspace(
     """Fail if ``scope_property_id`` isn't linked to the caller's workspace.
 
     The check runs against ``property_workspace`` — the junction
-    table is the authoritative "this property belongs to this
-    workspace" relation (§02 "property_workspace"). The ``property``
-    table itself is tenant-agnostic and therefore cannot be filtered
-    through the ORM tenant filter directly; the junction is
-    workspace-scoped, so its own tenant predicate runs automatically.
+    table joined to ``property`` is the authoritative "this
+    workspace actively operates this live property" relation (§02
+    "property_workspace"). The ``property`` table itself is
+    tenant-agnostic and therefore cannot be filtered through the ORM
+    tenant filter directly; the junction is workspace-scoped, so its
+    own tenant predicate runs automatically.
     """
     if not repo.is_property_in_workspace(
         workspace_id=ctx.workspace_id, property_id=scope_property_id
