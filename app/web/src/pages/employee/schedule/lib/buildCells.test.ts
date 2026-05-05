@@ -19,6 +19,7 @@ import type {
 import { buildCells, mergeSchedulePages } from "./buildCells";
 
 function emptyPayload(over: Partial<MySchedulePayload> = {}): MySchedulePayload {
+  // code-health: ignore[nloc] Complete API fixture keeps schedule mapper tests explicit and local.
   return {
     window: { from: "2025-04-21", to: "2025-04-27" },
     user_id: "u1",

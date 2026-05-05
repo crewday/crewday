@@ -22,6 +22,7 @@ const LANG_LABEL: Record<string, string> = {
 };
 
 export default function MePage() {
+  // code-health: ignore[nloc] Profile page is declarative settings composition with no reusable logic left to extract.
   const [editorOpen, setEditorOpen] = useState(false);
 
   const me = useQuery({

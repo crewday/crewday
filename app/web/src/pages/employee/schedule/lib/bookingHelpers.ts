@@ -92,90 +92,97 @@ export const TASK_CHIP_MIN_PX = 20;
 export const TASK_CHIP_GAP_PX = 2;
 
 export function computeWindow(cells: DayCellLite[]): TimeWindow {
+  const bounds = eventBounds(cells);
+  const [startMin, endMin] = expandedBounds(bounds.startMin, bounds.endMin);
+  const pxPerMin = weekScale(cells);
+  const totalPx = (endMin - startMin) * pxPerMin;
+  return { startMin, endMin, pxPerMin, totalPx };
+}
+
+function eventBounds(cells: DayCellLite[]): { startMin: number; endMin: number } {
   let minStart = Infinity;
   let maxEnd = -Infinity;
   for (const cell of cells) {
-    for (const r of cell.rota) {
-      minStart = Math.min(minStart, hhmmToMin(r.slot.starts_local));
-      maxEnd = Math.max(maxEnd, hhmmToMin(r.slot.ends_local));
-    }
-    for (const b of cell.bookings) {
-      minStart = Math.min(minStart, isoToMinOfDay(b.scheduled_start));
-      maxEnd = Math.max(maxEnd, isoToMinOfDay(b.scheduled_end));
-    }
-    for (const t of cell.tasks) {
-      const s = isoToMinOfDay(t.scheduled_start);
-      const e = s + (t.estimated_minutes || 30);
-      minStart = Math.min(minStart, s);
-      maxEnd = Math.max(maxEnd, e);
-    }
-    // Weekly pattern keeps an "Off" or 09–17 week visually anchored
-    // even when nothing concrete is scheduled.
-    if (cell.pattern?.starts_local && cell.pattern.ends_local) {
-      minStart = Math.min(minStart, hhmmToMin(cell.pattern.starts_local));
-      maxEnd = Math.max(maxEnd, hhmmToMin(cell.pattern.ends_local));
-    }
+    const bounds = cellBounds(cell);
+    minStart = Math.min(minStart, bounds.startMin);
+    maxEnd = Math.max(maxEnd, bounds.endMin);
   }
+  return { startMin: minStart, endMin: maxEnd };
+}
+
+function cellBounds(cell: DayCellLite): { startMin: number; endMin: number } {
+  const ranges: [number, number][] = [
+    ...cell.rota.map(
+      (r): [number, number] => [hhmmToMin(r.slot.starts_local), hhmmToMin(r.slot.ends_local)],
+    ),
+    ...cell.bookings.map(
+      (b): [number, number] => [isoToMinOfDay(b.scheduled_start), isoToMinOfDay(b.scheduled_end)],
+    ),
+    ...cell.tasks.map((t) => {
+      const start = isoToMinOfDay(t.scheduled_start);
+      return [start, start + (t.estimated_minutes || 30)] as [number, number];
+    }),
+    ...patternRange(cell),
+  ];
+  return {
+    startMin: Math.min(...ranges.map(([start]) => start)),
+    endMin: Math.max(...ranges.map(([, end]) => end)),
+  };
+}
+
+function patternRange(cell: DayCellLite): [number, number][] {
+  if (!cell.pattern?.starts_local || !cell.pattern.ends_local) return [];
+  return [[hhmmToMin(cell.pattern.starts_local), hhmmToMin(cell.pattern.ends_local)]];
+}
+
+function expandedBounds(rawStart: number, rawEnd: number): [number, number] {
+  let minStart = rawStart;
+  let maxEnd = rawEnd;
   if (!isFinite(minStart) || !isFinite(maxEnd)) {
-    // Fully empty week — default to a 9–17 office window so the hour
-    // grid still renders as a "paused" planner page.
     minStart = 9 * 60;
     maxEnd = 17 * 60;
   }
   minStart = Math.max(0, Math.floor((minStart - 30) / 60) * 60);
   maxEnd = Math.min(24 * 60, Math.ceil((maxEnd + 30) / 60) * 60);
   if (maxEnd - minStart < 360) {
-    // Ensure at least 6 hours visible so a single 9am task doesn't
-    // render a pillbox-height timeline. Expand symmetrically around
-    // the midpoint, clamped to [00:00, 24:00].
     const mid = (minStart + maxEnd) / 2;
     minStart = Math.max(0, Math.floor((mid - 180) / 60) * 60);
     maxEnd = Math.min(24 * 60, Math.ceil((mid + 180) / 60) * 60);
   }
-  const totalMin = maxEnd - minStart;
+  return [minStart, maxEnd];
+}
 
-  // Baseline scale keeps quiet weeks compact. When any booking in
-  // the loaded set holds more tasks than its clock-time range can
-  // show at that scale, bump the scale for the WHOLE row so all
-  // seven cards keep sharing one top/bottom hour grid — the user's
-  // "all cards in a week expand by the same so hours stay aligned"
-  // rule.
+function weekScale(cells: DayCellLite[]): number {
   let pxPerMin = 0.5;
   for (const cell of cells) {
     for (const b of cell.bookings) {
-      const bStart = isoToMinOfDay(b.scheduled_start);
-      const bEnd = isoToMinOfDay(b.scheduled_end);
-      const tasksInBooking = cell.tasks.filter((t) => {
-        if (t.property_id !== b.property_id) return false;
-        const tStart = isoToMinOfDay(t.scheduled_start);
-        return tStart >= bStart && tStart < bEnd;
-      });
-      if (tasksInBooking.length === 0) continue;
-      // Sort by start so we evaluate worst-case crowding at the
-      // shortest gap between consecutive tasks (or between the first
-      // task and the booking's start).
-      const starts = tasksInBooking
-        .map((t) => isoToMinOfDay(t.scheduled_start))
-        .sort((a, b2) => a - b2);
-      let minGap = Math.max(1, starts[0]! - bStart);
-      for (let i = 1; i < starts.length; i++) {
-        minGap = Math.min(minGap, starts[i]! - starts[i - 1]!);
-      }
-      // We need at least TASK_CHIP_MIN_PX of vertical space per gap
-      // so consecutive task chips don't stack on top of each other.
-      const needPerGap = (TASK_CHIP_MIN_PX + TASK_CHIP_GAP_PX) / minGap;
-      if (needPerGap > pxPerMin) pxPerMin = needPerGap;
+      pxPerMin = Math.max(pxPerMin, bookingScale(b, cell.tasks));
     }
   }
-  // Cap the scale — past 1.5 px/min the canvas becomes taller than
-  // the viewport and loses its "glanceable week" quality. An
-  // unusually crowded booking (tasks every few minutes) would then
-  // overflow its lane, but the drawer remains the canonical read
-  // surface for those.
-  pxPerMin = Math.min(pxPerMin, 1.5);
+  return Math.min(pxPerMin, 1.5);
+}
 
-  const totalPx = totalMin * pxPerMin;
-  return { startMin: minStart, endMin: maxEnd, pxPerMin, totalPx };
+function bookingScale(
+  booking: DayCellLite["bookings"][number],
+  tasks: DayCellLite["tasks"],
+): number {
+  const bookingStart = isoToMinOfDay(booking.scheduled_start);
+  const bookingEnd = isoToMinOfDay(booking.scheduled_end);
+  const starts = tasks
+    .filter((task) => task.property_id === booking.property_id)
+    .map((task) => isoToMinOfDay(task.scheduled_start))
+    .filter((start) => start >= bookingStart && start < bookingEnd)
+    .sort((a, b) => a - b);
+  if (starts.length === 0) return 0.5;
+  return (TASK_CHIP_MIN_PX + TASK_CHIP_GAP_PX) / smallestGap(starts, bookingStart);
+}
+
+function smallestGap(starts: number[], bookingStart: number): number {
+  let minGap = Math.max(1, starts[0]! - bookingStart);
+  for (let i = 1; i < starts.length; i++) {
+    minGap = Math.min(minGap, starts[i]! - starts[i - 1]!);
+  }
+  return minGap;
 }
 
 export function posTop(minutes: number, window: TimeWindow): number {

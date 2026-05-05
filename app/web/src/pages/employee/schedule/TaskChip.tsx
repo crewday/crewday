@@ -12,15 +12,7 @@ import { Link } from "react-router-dom";
 import type { SchedulerTaskView } from "@/types/api";
 import { timeOfTask } from "./lib/dateHelpers";
 
-export function TaskChipLink({
-  task,
-  tint,
-  solid,
-  idx,
-  orphan,
-  standalone,
-  top,
-}: {
+interface TaskChipLinkProps {
   task: SchedulerTaskView;
   tint: string;
   solid: string;
@@ -34,7 +26,10 @@ export function TaskChipLink({
    *  chips, rota column for orphans). Computed from the task's
    *  clock-time start so the chip sits on the right hour. */
   top: number;
-}) {
+}
+
+export function TaskChipLink(props: TaskChipLinkProps) {
+  const { task, tint, solid, idx, orphan, standalone, top } = props;
   return (
     <Link
       to={"/task/" + task.id}

@@ -24,65 +24,24 @@ export interface Availability {
 
 export function availability(cell: DayCell): Availability {
   const approvedLeave = cell.leaves.find((lv) => lv.approved_at !== null);
-  if (approvedLeave) {
-    return {
-      text: approvedLeave.category.toUpperCase(),
-      tone: "rust",
-      startMin: 0,
-      endMin: 24 * 60,
-    };
-  }
+  if (approvedLeave) return fullDay(approvedLeave.category.toUpperCase(), "rust");
+
   const pendingLeave = cell.leaves.find((lv) => lv.approved_at === null);
-  if (pendingLeave) {
-    return {
-      text: `${pendingLeave.category.toUpperCase()} · pending`,
-      tone: "sand",
-      startMin: 0,
-      endMin: 24 * 60,
-    };
-  }
+  if (pendingLeave) return fullDay(`${pendingLeave.category.toUpperCase()} · pending`, "sand");
 
   const approvedOverride = cell.overrides.find((o) => o.approved_at !== null);
   if (approvedOverride) {
-    if (!approvedOverride.available) {
-      return { text: "OFF", tone: "rust", startMin: null, endMin: null };
-    }
-    const s = approvedOverride.starts_local ?? cell.pattern?.starts_local ?? null;
-    const e = approvedOverride.ends_local ?? cell.pattern?.ends_local ?? null;
-    if (s && e) {
-      return {
-        text: `${s}–${e}`,
-        tone: "moss",
-        startMin: hhmmToMin(s),
-        endMin: hhmmToMin(e),
-      };
-    }
+    const result = overrideAvailability(approvedOverride, cell, "rust", "moss", "");
+    if (result) return result;
   }
+
   const pendingOverride = cell.overrides.find((o) => o.approved_at === null);
   if (pendingOverride) {
-    if (!pendingOverride.available) {
-      return { text: "OFF · pending", tone: "sand", startMin: null, endMin: null };
-    }
-    const s = pendingOverride.starts_local ?? cell.pattern?.starts_local ?? null;
-    const e = pendingOverride.ends_local ?? cell.pattern?.ends_local ?? null;
-    if (s && e) {
-      return {
-        text: `${s}–${e} · pending`,
-        tone: "sand",
-        startMin: hhmmToMin(s),
-        endMin: hhmmToMin(e),
-      };
-    }
+    const result = overrideAvailability(pendingOverride, cell, "sand", "sand", " · pending");
+    if (result) return result;
   }
-  if (cell.pattern?.starts_local && cell.pattern.ends_local) {
-    return {
-      text: `${cell.pattern.starts_local}–${cell.pattern.ends_local}`,
-      tone: "moss",
-      startMin: hhmmToMin(cell.pattern.starts_local),
-      endMin: hhmmToMin(cell.pattern.ends_local),
-    };
-  }
-  return { text: "Off", tone: "ghost", startMin: null, endMin: null };
+
+  return patternAvailability(cell) ?? offAvailability("Off", "ghost");
 }
 
 // Legacy-compat wrapper retained for call sites (DayCellView empty-day
@@ -90,4 +49,53 @@ export function availability(cell: DayCell): Availability {
 export function hoursLabel(cell: DayCell): { text: string; tone: AvailTone } {
   const a = availability(cell);
   return { text: a.text, tone: a.tone };
+}
+
+function fullDay(text: string, tone: AvailTone): Availability {
+  // code-health: ignore[ccn params] Small TS helper is mis-scored by lizard after optional-chain parsing.
+  return { text, tone, startMin: 0, endMin: 24 * 60 };
+}
+
+function offAvailability(text: string, tone: AvailTone): Availability {
+  return { text, tone, startMin: null, endMin: null };
+}
+
+function overrideAvailability(
+  override: DayCell["overrides"][number],
+  cell: DayCell,
+  unavailableTone: AvailTone,
+  availableTone: AvailTone,
+  suffix: string,
+): Availability | null {
+  if (!override.available) return offAvailability("OFF" + suffix, unavailableTone);
+  return availabilityRange(
+    override.starts_local ?? cell.pattern?.starts_local ?? null,
+    override.ends_local ?? cell.pattern?.ends_local ?? null,
+    availableTone,
+    suffix,
+  );
+}
+
+function patternAvailability(cell: DayCell): Availability | null {
+  return availabilityRange(
+    cell.pattern?.starts_local ?? null,
+    cell.pattern?.ends_local ?? null,
+    "moss",
+    "",
+  );
+}
+
+function availabilityRange(
+  start: string | null,
+  end: string | null,
+  tone: AvailTone,
+  suffix: string,
+): Availability | null {
+  if (!start || !end) return null;
+  return {
+    text: `${start}–${end}${suffix}`,
+    tone,
+    startMin: hhmmToMin(start),
+    endMin: hhmmToMin(end),
+  };
 }

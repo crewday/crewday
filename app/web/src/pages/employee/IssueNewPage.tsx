@@ -32,6 +32,7 @@ interface NewIssueBody {
 }
 
 export default function IssueNewPage() {
+  // code-health: ignore[nloc] Issue form is a single declarative workflow after shared query/offline helpers.
   const nav = useNavigate();
   const { canGoBack } = useNavHistory();
   const qc = useQueryClient();

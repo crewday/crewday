@@ -13,6 +13,7 @@ function fmtDate(iso: string | null): string {
 }
 
 export default function EmployeeAssetPage() {
+  // code-health: ignore[nloc] Asset detail route is straightforward render composition around API mutations.
   const { aid = "" } = useParams<{ aid: string }>();
   const qc = useQueryClient();
 

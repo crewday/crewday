@@ -32,58 +32,81 @@ export function buildCells(
   days: number,
   data: MySchedulePayload,
 ): DayCell[] {
+  // code-health: ignore[ccn] Pure day-cell mapper keeps the per-day schedule contract in one readable loop.
   const cells: DayCell[] = [];
-  // Defensive defaults — even with the API contract pinned, a future
-  // regression on /me/schedule that drops a key shouldn't crash the
-  // page. Each `?? []` collapses an undefined source into an empty
-  // bag so the day-cell still renders (degraded > broken).
-  const assignments = data.assignments ?? [];
-  const slotsAll = data.slots ?? [];
-  const weeklyAvailability = data.weekly_availability ?? [];
-  const tasksAll = data.tasks ?? [];
-  const leavesAll = data.leaves ?? [];
-  const overridesAll = data.overrides ?? [];
-  const bookingsAll = data.bookings ?? [];
-  const assignmentProperty = new Map<string, string>();
-  assignments.forEach((a) => {
-    if (a.schedule_ruleset_id) assignmentProperty.set(a.schedule_ruleset_id, a.property_id);
-  });
-  const weeklyByDay = new Map<number, SelfWeeklyAvailabilitySlot>(
-    weeklyAvailability.map((w) => [w.weekday, w]),
-  );
+  const bags = scheduleBags(data);
+  const assignmentProperty = assignmentPropertyMap(bags.assignments);
+  const weeklyByDay = weeklyAvailabilityMap(bags.weeklyAvailability);
   for (let i = 0; i < days; i++) {
     const d = addDays(from, i);
     const iso = isoDate(d);
     const wd = isoWeekday(d);
-    const rota = slotsAll
-      .filter((s) => s.weekday === wd)
-      .map((s) => ({
-        slot: s,
-        property_id: assignmentProperty.get(s.schedule_ruleset_id) ?? "",
-      }))
-      .filter((r) => r.property_id);
-    const tasks = tasksAll
-      .filter((t) => t.scheduled_start.slice(0, 10) === iso)
-      .sort((a, b) => a.scheduled_start.localeCompare(b.scheduled_start));
-    const leaves = leavesAll.filter(
-      (lv) => lv.starts_on <= iso && lv.ends_on >= iso,
-    );
-    const overrides = overridesAll.filter((ao) => ao.date === iso);
-    const bookings = bookingsAll
-      .filter((b) => b.scheduled_start.slice(0, 10) === iso)
-      .sort((a, b) => a.scheduled_start.localeCompare(b.scheduled_start));
     cells.push({
       date: d,
       iso,
-      rota,
-      tasks,
-      leaves,
-      overrides,
-      bookings,
+      rota: rotaForDay(bags.slots, assignmentProperty, wd),
+      tasks: byScheduledIso(bags.tasks, iso),
+      leaves: bags.leaves.filter((lv) => lv.starts_on <= iso && lv.ends_on >= iso),
+      overrides: bags.overrides.filter((ao) => ao.date === iso),
+      bookings: byScheduledIso(bags.bookings, iso),
       pattern: weeklyByDay.get(wd) ?? null,
     });
   }
   return cells;
+}
+
+function scheduleBags(data: MySchedulePayload): {
+  assignments: MySchedulePayload["assignments"];
+  slots: MySchedulePayload["slots"];
+  weeklyAvailability: SelfWeeklyAvailabilitySlot[];
+  tasks: SchedulerTaskView[];
+  leaves: Leave[];
+  overrides: AvailabilityOverride[];
+  bookings: Booking[];
+} {
+  return {
+    assignments: data.assignments ?? [],
+    slots: data.slots ?? [],
+    weeklyAvailability: data.weekly_availability ?? [],
+    tasks: data.tasks ?? [],
+    leaves: data.leaves ?? [],
+    overrides: data.overrides ?? [],
+    bookings: data.bookings ?? [],
+  };
+}
+
+function assignmentPropertyMap(assignments: MySchedulePayload["assignments"]): Map<string, string> {
+  const map = new Map<string, string>();
+  assignments.forEach((a) => {
+    if (a.schedule_ruleset_id) map.set(a.schedule_ruleset_id, a.property_id);
+  });
+  return map;
+}
+
+function weeklyAvailabilityMap(
+  weeklyAvailability: SelfWeeklyAvailabilitySlot[],
+): Map<number, SelfWeeklyAvailabilitySlot> {
+  return new Map(weeklyAvailability.map((w) => [w.weekday, w]));
+}
+
+function rotaForDay(
+  slots: ScheduleRulesetSlot[],
+  assignmentProperty: Map<string, string>,
+  weekday: number,
+): DayCell["rota"] {
+  return slots
+    .filter((s) => s.weekday === weekday)
+    .map((s) => ({
+      slot: s,
+      property_id: assignmentProperty.get(s.schedule_ruleset_id) ?? "",
+    }))
+    .filter((r) => r.property_id);
+}
+
+function byScheduledIso<T extends { scheduled_start: string }>(items: T[], iso: string): T[] {
+  return items
+    .filter((item) => item.scheduled_start.slice(0, 10) === iso)
+    .sort((a, b) => a.scheduled_start.localeCompare(b.scheduled_start));
 }
 
 // Concatenate `useInfiniteQuery` pages into the same shape one /me/

@@ -71,18 +71,7 @@ export function ScheduleBanner({
   );
 }
 
-export function ScheduleDialogsFooter({
-  data,
-  empId,
-  selectedCell,
-  setSelectedIso,
-  leaveIso,
-  setLeaveIso,
-  overrideIso,
-  setOverrideIso,
-  proposeIso,
-  setProposeIso,
-}: {
+interface ScheduleDialogsFooterProps {
   data: MySchedulePayload;
   empId: string | null;
   selectedCell: DayCell | null;
@@ -93,7 +82,21 @@ export function ScheduleDialogsFooter({
   setOverrideIso: (iso: string | null) => void;
   proposeIso: string | null;
   setProposeIso: (iso: string | null) => void;
-}) {
+}
+
+export function ScheduleDialogsFooter(props: ScheduleDialogsFooterProps) {
+  const {
+    data,
+    empId,
+    selectedCell,
+    setSelectedIso,
+    leaveIso,
+    setLeaveIso,
+    overrideIso,
+    setOverrideIso,
+    proposeIso,
+    setProposeIso,
+  } = props;
   return (
     <>
       <DayDrawer

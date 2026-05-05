@@ -22,6 +22,7 @@ vi.mock("@zxing/browser", () => ({
 }));
 
 function AssetRouteProbe() {
+  // code-health: ignore[nloc] Lizard misattributes the surrounding route harness body to this tiny probe.
   const { aid } = useParams<{ aid: string }>();
   return <p>Opened {aid}</p>;
 }

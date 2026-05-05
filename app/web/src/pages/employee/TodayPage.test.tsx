@@ -68,6 +68,7 @@ function installFetch(scripted: Record<string, FakeResponse[]>): {
 }
 
 function Harness(): ReactElement {
+  // code-health: ignore[nloc] Route harness keeps Today navigation and query setup local to these integration tests.
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>

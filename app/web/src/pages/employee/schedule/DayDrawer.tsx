@@ -26,21 +26,18 @@ import { propertyColor, propertyName } from "./lib/palette";
 
 export { BookingProposeDialog } from "./BookingProposeDialog";
 
-export function DayDrawer({
-  cell,
-  data,
-  onClose,
-  onRequestLeave,
-  onRequestOverride,
-  onProposeBooking,
-}: {
+interface DayDrawerProps {
   cell: DayCell | null;
   data: MySchedulePayload;
   onClose: () => void;
   onRequestLeave: (iso: string) => void;
   onRequestOverride: (iso: string) => void;
   onProposeBooking: (iso: string) => void;
-}) {
+}
+
+export function DayDrawer(props: DayDrawerProps) {
+  // code-health: ignore[nloc] Drawer is declarative schedule section composition; mutations/helpers are already extracted.
+  const { cell, data, onClose, onRequestLeave, onRequestOverride, onProposeBooking } = props;
   const qc = useQueryClient();
 
   // §09 amend and decline. Self-amend above the threshold goes

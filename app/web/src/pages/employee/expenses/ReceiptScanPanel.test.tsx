@@ -200,6 +200,7 @@ describe("ReceiptScanPanel — happy path", () => {
 
 describe("ReceiptScanPanel — client-side validation", () => {
   it("rejects a non-receipt mime without hitting the server", async () => {
+    // code-health: ignore[nloc] End-to-end component assertion keeps validation, callback, and fetch checks together.
     const env = installFetch([]);
     try {
       const onScanStarted = vi.fn();
@@ -277,6 +278,7 @@ describe("ReceiptScanPanel — client-side validation", () => {
 });
 
 describe("ReceiptScanPanel — server error mapping", () => {
+  // code-health: ignore[nloc] Table-driven error cases document all user-facing server failure branches together.
   // Drive each server error through the component and assert (a) the
   // parent flips back via `onScanFailed`, and (b) the inline notice
   // says the right plain-English line.

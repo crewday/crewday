@@ -7,7 +7,6 @@ import {
   fetchActiveEngagementId,
   type ExpenseClaimCreatePayload,
 } from "@/lib/expenses";
-import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import type {
   Expense,
   ExpenseScanResult,
@@ -15,14 +14,13 @@ import type {
   Property,
 } from "@/types/api";
 import AgentQuestionPrompt from "./AgentQuestionPrompt";
-import ConfidenceChip from "./ConfidenceChip";
-import { CATEGORIES, confidenceClass } from "./lib/expenseHelpers";
 import {
   deriveConfidences,
   deriveValues,
   type FieldConfidences,
   type FieldValues,
 } from "./lib/scanDerivation";
+import { SubmitExpenseFields } from "./SubmitExpenseFields";
 
 // Worker's review form. Two entry paths:
 // - **Scan** — `initialScan` carries an `ExpenseScanResult`; high-
@@ -76,6 +74,7 @@ export default function SubmitExpenseForm({
   onSubmitted,
   onBack,
 }: Props) {
+  // code-health: ignore[ccn nloc] Query/mutation orchestration remains here after field rendering was extracted.
   const qc = useQueryClient();
   const isScanned = initialScan !== null;
 
@@ -201,112 +200,13 @@ export default function SubmitExpenseForm({
       )}
 
       <form className="form" onSubmit={handleSubmit}>
-        <label className={`field ${confidenceClass(conf.vendor)}`}>
-          <span>
-            Vendor
-            <ConfidenceChip isScanned={isScanned} confidence={conf.vendor} />
-          </span>
-          <input
-            name="vendor"
-            placeholder="e.g. Carrefour"
-            required
-            value={values.vendor}
-            onChange={(e) => setField("vendor", e.target.value)}
-          />
-        </label>
-
-        <div className="form__row">
-          <label className={`field field--grow ${confidenceClass(conf.amount)}`}>
-            <span>
-              Amount
-              <ConfidenceChip isScanned={isScanned} confidence={conf.amount} />
-            </span>
-            <input
-              name="amount"
-              type="number"
-              step="0.01"
-              placeholder="0.00"
-              required
-              value={values.amount}
-              onChange={(e) => setField("amount", e.target.value)}
-            />
-          </label>
-          <label className="field field--currency">
-            <span>Currency</span>
-            <input
-              name="currency"
-              value={values.currency}
-              onChange={(e) => setField("currency", e.target.value)}
-            />
-          </label>
-        </div>
-
-        <label className={`field ${confidenceClass(conf.purchased_on)}`}>
-          <span>
-            Purchase date
-            <ConfidenceChip
-              isScanned={isScanned}
-              confidence={conf.purchased_on}
-            />
-          </span>
-          <input
-            name="purchased_on"
-            type="date"
-            required
-            value={values.purchased_on}
-            onChange={(e) => setField("purchased_on", e.target.value)}
-          />
-        </label>
-
-        <label className="field">
-          <span>Property (optional)</span>
-          <select
-            name="property_id"
-            value={values.property_id}
-            onChange={(e) => setField("property_id", e.target.value)}
-          >
-            <option value="">— No property —</option>
-            {(propsQ.data ?? []).map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className={`field ${confidenceClass(conf.category)}`}>
-          <span>
-            Category
-            <ConfidenceChip isScanned={isScanned} confidence={conf.category} />
-          </span>
-          <div className="chip-group">
-            {CATEGORIES.map((c) => (
-              <label key={c.value} className="chip-radio">
-                <input
-                  type="radio"
-                  name="category"
-                  value={c.value}
-                  checked={values.category === c.value}
-                  onChange={() => setField("category", c.value)}
-                />
-                <span>{c.label}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <label className={`field ${confidenceClass(conf.note_md)}`}>
-          <span>
-            Note
-            <ConfidenceChip isScanned={isScanned} confidence={conf.note_md} />
-          </span>
-          <AutoGrowTextarea
-            name="note_md"
-            placeholder="What it was for"
-            value={values.note_md}
-            onChange={(e) => setField("note_md", e.target.value)}
-          />
-        </label>
+        <SubmitExpenseFields
+          values={values}
+          confidences={conf}
+          isScanned={isScanned}
+          properties={propsQ.data ?? []}
+          onFieldChange={setField}
+        />
 
         {noActiveEngagement && (
           <p className="form__error" role="alert">

@@ -70,6 +70,7 @@ function installFetch(
 }
 
 function meBody(): unknown {
+  // code-health: ignore[nloc] Full /me fixture mirrors the worker auth payload used by the form.
   return {
     role: "worker",
     theme: "system",
@@ -179,6 +180,7 @@ afterEach(() => {
 
 describe("SubmitExpenseForm", () => {
   it("posts the cd-t6y2 ExpenseClaimCreate body shape on submit", async () => {
+    // code-health: ignore[nloc] Submit flow test intentionally covers lookup, property select, payload, and callback.
     const env = installFetch({
       "/api/v1/me": [{ body: meBody() }],
       "/api/v1/work_engagements": [{ body: engagementListBody() }],

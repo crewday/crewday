@@ -12,14 +12,7 @@ import type { DayCell } from "./lib/buildCells";
 import { dayLabel, isoWeekday } from "./lib/dateHelpers";
 import { WEEKDAYS } from "./lib/palette";
 
-export function ScheduleWeekGrid({
-  cells,
-  data,
-  today,
-  onOpen,
-  label,
-  hideLabel = false,
-}: {
+interface ScheduleWeekGridProps {
   cells: DayCell[];
   data: MySchedulePayload;
   today: Date;
@@ -30,7 +23,10 @@ export function ScheduleWeekGrid({
    *  the infinite stream has no separator above it, so it still
    *  renders the label for orientation on first paint. */
   hideLabel?: boolean;
-}) {
+}
+
+export function ScheduleWeekGrid(props: ScheduleWeekGridProps) {
+  const { cells, data, today, onOpen, label, hideLabel = false } = props;
   // One window per week so every cell in the row shares top/bottom
   // hours and identical height (see §14 "Shared time window per ISO
   // week"). Next week recomputes — a quiet week doesn't inherit an

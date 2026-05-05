@@ -11,14 +11,7 @@ import { bookingNeedsAttention, type TimeWindow } from "./lib/bookingHelpers";
 import type { DayCell } from "./lib/buildCells";
 import { dayLabel, sameDate } from "./lib/dateHelpers";
 
-export function DayCellView({
-  cell,
-  data,
-  onOpen,
-  today,
-  window: w,
-  collapseEmpty,
-}: {
+interface DayCellViewProps {
   cell: DayCell;
   data: MySchedulePayload;
   onOpen: (iso: string) => void;
@@ -28,7 +21,10 @@ export function DayCellView({
    *  timeline and render a short "rest" card. Desktop cells keep the
    *  full-height skeleton so the 7-col week row stays uniform. */
   collapseEmpty: boolean;
-}) {
+}
+
+export function DayCellView(props: DayCellViewProps) {
+  const { cell, data, onOpen, today, window: w, collapseEmpty } = props;
   const isToday = sameDate(cell.date, today);
   const label = dayLabel(cell.date);
   const pendingBookings = cell.bookings.filter(bookingNeedsAttention);
