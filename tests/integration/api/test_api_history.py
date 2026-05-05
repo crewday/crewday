@@ -1,8 +1,8 @@
-"""Integration coverage for ``GET /history`` (cd-wnsr).
+"""Integration coverage for ``GET /history``.
 
-The aggregator returns the SPA's ``HistoryPayload`` shape verbatim — a
-single object carrying ``{tab, tasks[], expenses[], leaves[],
-chats[]}``. These tests drive the full router → DB chain and assert:
+The endpoint returns the spec §12 cursor envelope for one requested tab:
+``{data, next_cursor, has_more}``. These tests drive the full router →
+DB chain and assert:
 
 * 401 surfaces from :func:`current_workspace_context` for anonymous
   callers.
@@ -21,8 +21,8 @@ chats[]}``. These tests drive the full router → DB chain and assert:
 * Cross-user isolation: rows belonging to a peer never leak into the
   caller's history (the service keys on ``ctx.actor_id`` and ignores
   any caller-supplied user pointer).
-* Cap enforcement: a tab with more than :data:`_TAB_CAP` matching rows
-  trims to the newest 50.
+* Pagination: a tab with more than the requested page size returns the
+  newest page plus a cursor for the older rows.
 
 See ``app/api/v1/history.py`` for the route, ``mocks/app/main.py:3539-3562``
 for the filter reference the production filter mirrors, and
@@ -50,7 +50,8 @@ from app.adapters.db.time.models import Leave
 from app.adapters.db.workspace.models import UserWorkspace, WorkEngagement
 from app.api import deps as api_deps
 from app.api.errors import add_exception_handlers
-from app.api.v1.history import _TAB_CAP, build_history_router
+from app.api.pagination import DEFAULT_LIMIT
+from app.api.v1.history import build_history_router
 from app.tenancy import WorkspaceContext
 from app.util.ulid import new_ulid
 from tests.factories.identity import (
@@ -498,6 +499,17 @@ def test_unknown_tab_surfaces_422(db_session: Session) -> None:
     assert response.status_code == 422, response.text
 
 
+def test_invalid_cursor_surfaces_422_invalid_cursor(db_session: Session) -> None:
+    """Malformed cursors fail instead of silently resetting to page one."""
+    caller_ctx, _peer_ctx, *_ = _seed_workspace(db_session)
+    client = _client(db_session, caller_ctx)
+
+    response = client.get("/history?tab=tasks&cursor=not-a-valid-cursor")
+
+    assert response.status_code == 422, response.text
+    assert response.json()["type"].endswith("/invalid_cursor")
+
+
 def test_tasks_tab_returns_completed_and_skipped_only(
     db_session: Session,
 ) -> None:
@@ -545,10 +557,11 @@ def test_tasks_tab_returns_completed_and_skipped_only(
 
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["tab"] == "tasks"
-    task_ids = {row["id"] for row in body["tasks"]}
+    assert set(body) == {"data", "next_cursor", "has_more"}
+    assert body["next_cursor"] is None
+    assert body["has_more"] is False
+    task_ids = {row["id"] for row in body["data"]}
     assert task_ids == {completed_id, skipped_id}
-    assert body["chats"] == []
 
 
 def test_expenses_tab_returns_decided_states_only(
@@ -598,10 +611,12 @@ def test_expenses_tab_returns_decided_states_only(
 
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["tab"] == "expenses"
-    states = {row["state"] for row in body["expenses"]}
+    assert set(body) == {"data", "next_cursor", "has_more"}
+    assert body["next_cursor"] is None
+    assert body["has_more"] is False
+    states = {row["state"] for row in body["data"]}
     assert states == {"approved", "reimbursed", "rejected"}
-    ids = {row["id"] for row in body["expenses"]}
+    ids = {row["id"] for row in body["data"]}
     assert ids == {approved_id, reimbursed_id, rejected_id}
 
 
@@ -646,10 +661,12 @@ def test_leaves_tab_returns_past_approved_only(db_session: Session) -> None:
 
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["tab"] == "leaves"
-    assert [row["id"] for row in body["leaves"]] == [past_approved_id]
+    assert set(body) == {"data", "next_cursor", "has_more"}
+    assert body["next_cursor"] is None
+    assert body["has_more"] is False
+    assert [row["id"] for row in body["data"]] == [past_approved_id]
     # ``approved_at`` mirrors ``decided_at`` for approved rows.
-    assert body["leaves"][0]["approved_at"] is not None
+    assert body["data"][0]["approved_at"] is not None
 
 
 def test_chats_tab_returns_archived_agent_chats(db_session: Session) -> None:
@@ -683,17 +700,19 @@ def test_chats_tab_returns_archived_agent_chats(db_session: Session) -> None:
 
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["tab"] == "chats"
-    assert [row["id"] for row in body["chats"]] == [newer_id, older_id]
-    assert body["chats"][0] == {
+    assert set(body) == {"data", "next_cursor", "has_more"}
+    assert body["next_cursor"] is None
+    assert body["has_more"] is False
+    assert [row["id"] for row in body["data"]] == [newer_id, older_id]
+    assert body["data"][0] == {
         "id": newer_id,
         "title": "Newer agent chat",
         "last_at": "2024-06-02T10:00:00+00:00",
         "summary": "Compacted summary",
     }
-    assert set(body["chats"][0]) == {"id", "title", "last_at", "summary"}
-    assert body["chats"][1]["summary"] == ""
-    assert "raw body" not in str(body["chats"])
+    assert set(body["data"][0]) == {"id", "title", "last_at", "summary"}
+    assert body["data"][1]["summary"] == ""
+    assert "raw body" not in str(body["data"])
 
 
 def test_cross_user_rows_are_excluded(db_session: Session) -> None:
@@ -788,25 +807,31 @@ def test_cross_user_rows_are_excluded(db_session: Session) -> None:
     db_session.commit()
 
     client = _client(db_session, caller_ctx)
-    response = client.get("/history?tab=tasks")
+    tasks_response = client.get("/history?tab=tasks")
+    expenses_response = client.get("/history?tab=expenses")
+    leaves_response = client.get("/history?tab=leaves")
+    chats_response = client.get("/history?tab=chats")
 
-    assert response.status_code == 200, response.text
-    body = response.json()
+    assert tasks_response.status_code == 200, tasks_response.text
+    assert expenses_response.status_code == 200, expenses_response.text
+    assert leaves_response.status_code == 200, leaves_response.text
+    assert chats_response.status_code == 200, chats_response.text
     # Tasks: only the caller's row.
-    assert [row["id"] for row in body["tasks"]] == [caller_task_id]
-    assert all(row["assigned_user_id"] == caller_id for row in body["tasks"])
+    tasks_body = tasks_response.json()
+    assert [row["id"] for row in tasks_body["data"]] == [caller_task_id]
+    assert all(row["assigned_user_id"] == caller_id for row in tasks_body["data"])
     # Expenses: only the caller's claim.
-    assert [row["id"] for row in body["expenses"]] == [caller_claim_id]
+    assert [row["id"] for row in expenses_response.json()["data"]] == [caller_claim_id]
     # Leaves: only the caller's leave.
-    assert [row["id"] for row in body["leaves"]] == [caller_leave_id]
+    assert [row["id"] for row in leaves_response.json()["data"]] == [caller_leave_id]
     # Chats: only the caller's archived agent channel in this workspace.
-    assert [row["id"] for row in body["chats"]] == [caller_chat_id]
+    assert [row["id"] for row in chats_response.json()["data"]] == [caller_chat_id]
 
 
-def test_tasks_tab_caps_to_fifty_rows_newest_first(
+def test_tasks_tab_paginates_newest_first(
     db_session: Session,
 ) -> None:
-    """Above :data:`_TAB_CAP`, the tasks tab keeps the newest rows only."""
+    """Above the requested limit, tasks return a cursor for older rows."""
     caller_ctx, _peer_ctx, workspace_id, caller_id, _peer_id, _eng, _peer_eng = (
         _seed_workspace(db_session)
     )
@@ -831,11 +856,204 @@ def test_tasks_tab_caps_to_fifty_rows_newest_first(
     db_session.commit()
 
     client = _client(db_session, caller_ctx)
+    response = client.get("/history?tab=tasks&limit=2")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body["data"]) == 2
+    assert body["has_more"] is True
+    assert body["next_cursor"] is not None
+    # Newest-first: the first page returns the last two ULIDs by sort order.
+    expected_sorted = sorted(seeded_ids, reverse=True)
+    assert [row["id"] for row in body["data"]] == expected_sorted[:2]
+
+    next_response = client.get(
+        f"/history?tab=tasks&limit=2&cursor={body['next_cursor']}"
+    )
+
+    assert next_response.status_code == 200, next_response.text
+    next_body = next_response.json()
+    assert [row["id"] for row in next_body["data"]] == expected_sorted[2:4]
+
+
+def test_expenses_tab_paginates_requested_tab_only(
+    db_session: Session,
+) -> None:
+    """Expenses page independently across the decided-state merge."""
+    caller_ctx, _peer_ctx, workspace_id, _caller_id, _peer_id, eng_id, _peer_eng = (
+        _seed_workspace(db_session)
+    )
+    seeded_ids = [
+        _seed_claim(
+            db_session,
+            workspace_id=workspace_id,
+            work_engagement_id=eng_id,
+            state="approved",
+            vendor="Approved one",
+            purchased_at=_PAST,
+        ),
+        _seed_claim(
+            db_session,
+            workspace_id=workspace_id,
+            work_engagement_id=eng_id,
+            state="reimbursed",
+            vendor="Reimbursed one",
+            purchased_at=_PAST + timedelta(seconds=1),
+        ),
+        _seed_claim(
+            db_session,
+            workspace_id=workspace_id,
+            work_engagement_id=eng_id,
+            state="rejected",
+            vendor="Rejected one",
+            purchased_at=_PAST + timedelta(seconds=2),
+        ),
+    ]
+    db_session.commit()
+
+    client = _client(db_session, caller_ctx)
+    response = client.get("/history?tab=expenses&limit=2")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    expected_sorted = sorted(seeded_ids, reverse=True)
+    assert [row["id"] for row in body["data"]] == expected_sorted[:2]
+    assert body["has_more"] is True
+    assert body["next_cursor"] is not None
+
+    next_response = client.get(
+        f"/history?tab=expenses&limit=2&cursor={body['next_cursor']}"
+    )
+
+    assert next_response.status_code == 200, next_response.text
+    assert [row["id"] for row in next_response.json()["data"]] == expected_sorted[2:]
+
+
+def test_leaves_tab_paginates_requested_tab_only(db_session: Session) -> None:
+    """Leaves use the same cursor envelope without leaking other tabs."""
+    caller_ctx, _peer_ctx, workspace_id, caller_id, *_ = _seed_workspace(db_session)
+    seeded_ids = [
+        _seed_leave(
+            db_session,
+            workspace_id=workspace_id,
+            user_id=caller_id,
+            status="approved",
+            starts_at=_PAST - timedelta(days=12),
+            ends_at=_PAST - timedelta(days=11),
+            decided_by=caller_id,
+        ),
+        _seed_leave(
+            db_session,
+            workspace_id=workspace_id,
+            user_id=caller_id,
+            status="approved",
+            starts_at=_PAST - timedelta(days=10),
+            ends_at=_PAST - timedelta(days=9),
+            decided_by=caller_id,
+        ),
+        _seed_leave(
+            db_session,
+            workspace_id=workspace_id,
+            user_id=caller_id,
+            status="approved",
+            starts_at=_PAST - timedelta(days=8),
+            ends_at=_PAST - timedelta(days=7),
+            decided_by=caller_id,
+        ),
+    ]
+    db_session.commit()
+
+    client = _client(db_session, caller_ctx)
+    response = client.get("/history?tab=leaves&limit=2")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    expected_sorted = sorted(seeded_ids, reverse=True)
+    assert [row["id"] for row in body["data"]] == expected_sorted[:2]
+    assert body["has_more"] is True
+    assert body["next_cursor"] is not None
+
+    next_response = client.get(
+        f"/history?tab=leaves&limit=2&cursor={body['next_cursor']}"
+    )
+
+    assert next_response.status_code == 200, next_response.text
+    assert [row["id"] for row in next_response.json()["data"]] == expected_sorted[2:]
+
+
+def test_chats_tab_paginates_by_archived_at_then_id(db_session: Session) -> None:
+    """Chats keep stable newest-first pagination for tied archive times."""
+    caller_ctx, _peer_ctx, workspace_id, caller_id, *_ = _seed_workspace(db_session)
+    tied_archive_time = _PAST + timedelta(days=1)
+    seeded_ids = [
+        _seed_archived_chat(
+            db_session,
+            workspace_id=workspace_id,
+            user_id=caller_id,
+            title="Chat one",
+            archived_at=tied_archive_time,
+        ),
+        _seed_archived_chat(
+            db_session,
+            workspace_id=workspace_id,
+            user_id=caller_id,
+            title="Chat two",
+            archived_at=tied_archive_time,
+        ),
+        _seed_archived_chat(
+            db_session,
+            workspace_id=workspace_id,
+            user_id=caller_id,
+            title="Chat three",
+            archived_at=tied_archive_time,
+        ),
+    ]
+    db_session.commit()
+
+    client = _client(db_session, caller_ctx)
+    response = client.get("/history?tab=chats&limit=2")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    expected_sorted = sorted(seeded_ids, reverse=True)
+    assert [row["id"] for row in body["data"]] == expected_sorted[:2]
+    assert body["has_more"] is True
+    assert body["next_cursor"] is not None
+
+    next_response = client.get(
+        f"/history?tab=chats&limit=2&cursor={body['next_cursor']}"
+    )
+
+    assert next_response.status_code == 200, next_response.text
+    assert [row["id"] for row in next_response.json()["data"]] == expected_sorted[2:]
+
+
+def test_tasks_tab_default_limit_is_spec_default(
+    db_session: Session,
+) -> None:
+    """Omitting ``limit`` uses the shared §12 default."""
+    caller_ctx, _peer_ctx, workspace_id, caller_id, _peer_id, _eng, _peer_eng = (
+        _seed_workspace(db_session)
+    )
+    property_id = _seed_property(db_session, workspace_id)
+    for index in range(DEFAULT_LIMIT + 1):
+        _seed_occurrence(
+            db_session,
+            workspace_id=workspace_id,
+            assignee_user_id=caller_id,
+            state="completed",
+            title=f"Default page task {index:02d}",
+            property_id=property_id,
+            starts_at=_PAST + timedelta(seconds=index),
+            created_by_user_id=caller_id,
+        )
+    db_session.commit()
+
+    client = _client(db_session, caller_ctx)
     response = client.get("/history?tab=tasks")
 
     assert response.status_code == 200, response.text
     body = response.json()
-    assert len(body["tasks"]) == _TAB_CAP
-    # Newest-first: the returned set is the last 50 ULIDs by sort order.
-    expected_newest = sorted(seeded_ids, reverse=True)[:_TAB_CAP]
-    assert [row["id"] for row in body["tasks"]] == expected_newest
+    assert len(body["data"]) == DEFAULT_LIMIT
+    assert body["has_more"] is True
+    assert body["next_cursor"] is not None

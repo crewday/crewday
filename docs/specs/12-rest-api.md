@@ -1709,7 +1709,8 @@ POST   /me/availability_overrides         # body: {date, available, starts_local
                                           #   UI does not need to re-derive it. 409
                                           #   `override_exists` when an override
                                           #   already covers `(caller, date)`.
-GET    /history?tab=tasks|chats|expenses|leaves   # self-only "everything wrapped up"
+GET    /history?tab=tasks|chats|expenses|leaves&cursor=…&limit=…
+                                          # self-only "everything wrapped up"
                                           #   feed for §14 worker history page.
                                           #   Sibling of /me/schedule: keys on
                                           #   ctx.actor_id, ignores any user_id
@@ -1717,20 +1718,16 @@ GET    /history?tab=tasks|chats|expenses|leaves   # self-only "everything wrappe
                                           #   surfaces — /tasks?assignee_user_id=…,
                                           #   /expenses?user_id=…, /employees/{id}/
                                           #   leaves — for cross-user inspection).
-                                          #   Returns the SPA's HistoryPayload
-                                          #   verbatim — a single object carrying
-                                          #   {tab, tasks[], expenses[], leaves[],
-                                          #   chats[]}. This is intentionally NOT
-                                          #   the standard {data, next_cursor,
-                                          #   has_more} envelope: the four-array
-                                          #   fan-out doesn't fit a single cursor
-                                          #   page, and the SPA already consumes
-                                          #   this exact shape from the mock.
-                                          #   Each array is bounded to 50 rows
-                                          #   newest-first (hard truncation past
-                                          #   that — history is a "recent activity"
-                                          #   surface, not an audit log; cursor
-                                          #   migration is a tracked follow-up).
+                                          #   Returns the standard §12 cursor
+                                          #   envelope for the requested tab only:
+                                          #   {data, next_cursor, has_more}.
+                                          #   `data` row shape depends on `tab`:
+                                          #   tasks use the dashboard task row,
+                                          #   expenses use ExpenseClaimPayload,
+                                          #   leaves use the dashboard leave row,
+                                          #   chats use {id,title,last_at,summary}.
+                                          #   Each tab is newest-first and paged
+                                          #   independently with `cursor`/`limit`.
                                           #   Filters mirror the mock at
                                           #   mocks/app/main.py:3539-3562:
                                           #     tasks    — Occurrence rows assigned
@@ -1754,12 +1751,9 @@ GET    /history?tab=tasks|chats|expenses|leaves   # self-only "everything wrappe
                                           #                the live compaction
                                           #                summary when present,
                                           #                otherwise "".
-                                          #   Every array is populated regardless
-                                          #   of `tab`; the param echoes back so
-                                          #   the SPA can switch tabs client-side
-                                          #   without a refetch. Unknown `tab`
-                                          #   values surface as 422 (FastAPI
-                                          #   Pydantic Literal validation).
+                                          #   Unknown `tab` values surface as
+                                          #   422 (FastAPI Pydantic Literal
+                                          #   validation).
 ```
 
 ### Tasks / templates / schedules

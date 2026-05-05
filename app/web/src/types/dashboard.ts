@@ -7,14 +7,25 @@ import type { ApprovalRequest } from "./approval";
 import type { Expense } from "./expense";
 import type { Leave } from "./employee";
 import type { Stay, Property } from "./property";
+import type { ListEnvelope } from "../lib/listResponse";
 
-export interface HistoryPayload {
-  tab: "tasks" | "chats" | "expenses" | "leaves";
-  tasks: Task[];
-  expenses: Expense[];
-  leaves: Leave[];
-  chats: { id: string; title: string; last_at: string; summary: string }[];
+export type HistoryTab = "tasks" | "chats" | "expenses" | "leaves";
+
+export interface HistoryChat {
+  id: string;
+  title: string;
+  last_at: string;
+  summary: string;
 }
+
+export interface HistoryRowsByTab {
+  tasks: Task;
+  chats: HistoryChat;
+  expenses: Expense;
+  leaves: Leave;
+}
+
+export type HistoryPagePayload<T extends HistoryTab> = ListEnvelope<HistoryRowsByTab[T]>;
 
 export interface DashboardPayload {
   on_booking: Employee[];

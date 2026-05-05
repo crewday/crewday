@@ -9336,7 +9336,7 @@
         "type": "object"
       },
       "HistoryChatItem": {
-        "description": "One archived agent chat row.\n\nMirrors the SPA's ``HistoryPayload.chats`` shape\n(``app/web/src/types/dashboard.ts``). Production has no chat-\narchive surface yet; this type exists so the OpenAPI schema\ndocuments the eventual contract and the SPA can render the\nempty state without conditional types.",
+        "description": "One archived agent chat row.\n\nMirrors the SPA's history chat row shape\n(``app/web/src/types/dashboard.ts``). Rows are projected from\narchived per-user agent channels; the endpoint never accepts a\nuser selector.",
         "properties": {
           "id": {
             "title": "Id",
@@ -9364,55 +9364,53 @@
         "title": "HistoryChatItem",
         "type": "object"
       },
+      "HistoryItem": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/DashboardTask"
+          },
+          {
+            "$ref": "#/components/schemas/ExpenseClaimPayload"
+          },
+          {
+            "$ref": "#/components/schemas/DashboardLeave"
+          },
+          {
+            "$ref": "#/components/schemas/HistoryChatItem"
+          }
+        ]
+      },
       "HistoryPayload": {
         "additionalProperties": false,
-        "description": "Worker history envelope.\n\nSingle object carrying all four arrays plus the active ``tab``\necho, matching the SPA's ``HistoryPayload`` interface verbatim.\nSee module docstring for why this deviates from the \u00a712\ncursor envelope.\n\n``tasks`` reuses :class:`DashboardTask` (not the production\n``TaskPayload``) so the row shape lines up with the SPA's\n``Task`` interface in ``app/web/src/types/task.ts`` \u2014\n``scheduled_start`` / ``status`` / ``area`` / ``checklist`` etc.\nThe dashboard endpoint already projects this exact shape, so\nre-using it keeps the SPA's task renderer single-sourced\nacross ``/dashboard`` and ``/history``. Every array is\nrequired (``chats=[]`` is always emitted; the SPA reads\n``q.data.chats.length`` unconditionally).",
+        "description": "Standard \u00a712 cursor envelope for one selected history tab.",
         "properties": {
-          "chats": {
+          "data": {
             "items": {
-              "$ref": "#/components/schemas/HistoryChatItem"
+              "$ref": "#/components/schemas/HistoryItem"
             },
-            "title": "Chats",
+            "title": "Data",
             "type": "array"
           },
-          "expenses": {
-            "items": {
-              "$ref": "#/components/schemas/ExpenseClaimPayload"
-            },
-            "title": "Expenses",
-            "type": "array"
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
           },
-          "leaves": {
-            "items": {
-              "$ref": "#/components/schemas/DashboardLeave"
-            },
-            "title": "Leaves",
-            "type": "array"
-          },
-          "tab": {
-            "enum": [
-              "chats",
-              "expenses",
-              "leaves",
-              "tasks"
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Tab",
-            "type": "string"
-          },
-          "tasks": {
-            "items": {
-              "$ref": "#/components/schemas/DashboardTask"
-            },
-            "title": "Tasks",
-            "type": "array"
+            "title": "Next Cursor"
           }
         },
         "required": [
-          "chats",
-          "expenses",
-          "leaves",
-          "tab",
-          "tasks"
+          "data",
+          "has_more",
+          "next_cursor"
         ],
         "title": "HistoryPayload",
         "type": "object"
@@ -109283,17 +109281,17 @@
     },
     "/w/{slug}/api/v1/history": {
       "get": {
-        "description": "Return the four-array history envelope for the caller.\n\nEach array is bounded to :data:`_TAB_CAP` rows (newest-\nfirst). The ``tab`` query param echoes back on the response;\nevery array is populated regardless of the active tab so the\nSPA can switch tabs without a refetch (matches the mock\nbehaviour at ``mocks/app/main.py:3539``).\n\nUnknown ``tab`` values surface as 422 from FastAPI's default\nPydantic ``Literal`` validation. Anonymous callers surface\nas 401 from :func:`current_workspace_context`.\n\nPagination follows the cd-wnsr Option A \"fixed cap\" strategy\n(see module docstring); a cursor envelope migration is\ntracked as a follow-up Beads task.",
+        "description": "Return one cursor-paginated history tab for the caller.\n\nUnknown ``tab`` values surface as 422 from FastAPI's default\nPydantic ``Literal`` validation. Anonymous callers surface\nas 401 from :func:`current_workspace_context`.",
         "operationId": "me.history.get",
         "parameters": [
           {
-            "description": "Active tab the SPA is rendering. The response carries every tab's array regardless of this value (so the page can switch tabs client-side without a refetch); ``tab`` echoes back so the caller can assert which view it asked for. Unknown values surface as 422 via FastAPI's default Pydantic Literal validation.",
+            "description": "History tab to return. Unknown values surface as 422 via FastAPI's default Pydantic Literal validation.",
             "in": "query",
             "name": "tab",
             "required": false,
             "schema": {
               "default": "tasks",
-              "description": "Active tab the SPA is rendering. The response carries every tab's array regardless of this value (so the page can switch tabs client-side without a refetch); ``tab`` echoes back so the caller can assert which view it asked for. Unknown values surface as 422 via FastAPI's default Pydantic Literal validation.",
+              "description": "History tab to return. Unknown values surface as 422 via FastAPI's default Pydantic Literal validation.",
               "enum": [
                 "chats",
                 "expenses",
@@ -109302,6 +109300,39 @@
               ],
               "title": "Tab",
               "type": "string"
+            }
+          },
+          {
+            "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           }
         ],

@@ -1,5 +1,6 @@
 import { Link, useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
@@ -7,11 +8,11 @@ import { fmtDate, fmtDateTime } from "@/lib/dates";
 import { cap } from "@/lib/strings";
 import { Loading } from "@/components/common";
 import PageHeader from "@/components/PageHeader";
-import type { HistoryPayload, Property } from "@/types/api";
+import type { HistoryPagePayload, HistoryTab, Property } from "@/types/api";
 
-type Tab = "tasks" | "chats" | "expenses" | "leaves";
+type Tab = HistoryTab;
 
-const TABS: [Tab, string][] = [
+const TABS: [HistoryTab, string][] = [
   ["tasks", "Tasks"],
   ["chats", "Chats"],
   ["expenses", "Expenses"],
@@ -27,10 +28,10 @@ export default function HistoryPage() {
   const raw = params.get("tab") ?? "tasks";
   const tab: Tab = isTab(raw) ? raw : "tasks";
 
-  const q = useQuery({
-    queryKey: qk.history(tab),
-    queryFn: () => fetchJson<HistoryPayload>("/api/v1/history?tab=" + tab),
-  });
+  const tasksQ = useHistoryTabQuery("tasks", tab === "tasks");
+  const chatsQ = useHistoryTabQuery("chats", tab === "chats");
+  const expensesQ = useHistoryTabQuery("expenses", tab === "expenses");
+  const leavesQ = useHistoryTabQuery("leaves", tab === "leaves");
 
   const propsQ = useQuery({
     queryKey: qk.properties(),
@@ -58,54 +59,123 @@ export default function HistoryPage() {
         ))}
       </nav>
 
-      <HistoryContent
-        isPending={q.isPending}
-        isError={q.isError}
-        tab={tab}
-        data={q.data}
-        propsById={propsById}
-      />
+      {tab === "tasks" ? (
+        <HistoryContent
+          isPending={tasksQ.isPending}
+          isError={tasksQ.isError}
+          hasNextPage={tasksQ.hasNextPage}
+          isFetchingNextPage={tasksQ.isFetchingNextPage}
+          onLoadMore={() => void tasksQ.fetchNextPage()}
+        >
+          <TaskHistory
+            tasks={tasksQ.data?.pages.flatMap((page) => page.data) ?? []}
+            propsById={propsById}
+          />
+        </HistoryContent>
+      ) : null}
+      {tab === "chats" ? (
+        <HistoryContent
+          isPending={chatsQ.isPending}
+          isError={chatsQ.isError}
+          hasNextPage={chatsQ.hasNextPage}
+          isFetchingNextPage={chatsQ.isFetchingNextPage}
+          onLoadMore={() => void chatsQ.fetchNextPage()}
+        >
+          <ChatHistory chats={chatsQ.data?.pages.flatMap((page) => page.data) ?? []} />
+        </HistoryContent>
+      ) : null}
+      {tab === "expenses" ? (
+        <HistoryContent
+          isPending={expensesQ.isPending}
+          isError={expensesQ.isError}
+          hasNextPage={expensesQ.hasNextPage}
+          isFetchingNextPage={expensesQ.isFetchingNextPage}
+          onLoadMore={() => void expensesQ.fetchNextPage()}
+        >
+          <ExpenseHistory
+            expenses={expensesQ.data?.pages.flatMap((page) => page.data) ?? []}
+          />
+        </HistoryContent>
+      ) : null}
+      {tab === "leaves" ? (
+        <HistoryContent
+          isPending={leavesQ.isPending}
+          isError={leavesQ.isError}
+          hasNextPage={leavesQ.hasNextPage}
+          isFetchingNextPage={leavesQ.isFetchingNextPage}
+          onLoadMore={() => void leavesQ.fetchNextPage()}
+        >
+          <LeaveHistory leaves={leavesQ.data?.pages.flatMap((page) => page.data) ?? []} />
+        </HistoryContent>
+      ) : null}
       </section>
     </>
   );
 }
 
+function useHistoryTabQuery<T extends HistoryTab>(tab: T, enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: qk.history(tab),
+    queryFn: ({ pageParam }) => fetchHistoryPage(tab, pageParam),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.has_more ? (lastPage.next_cursor ?? undefined) : undefined,
+    enabled,
+  });
+}
+
+function fetchHistoryPage<T extends HistoryTab>(
+  tab: T,
+  cursor: string | null,
+): Promise<HistoryPagePayload<T>> {
+  const params = new URLSearchParams({ tab });
+  if (cursor !== null) params.set("cursor", cursor);
+  return fetchJson<HistoryPagePayload<T>>("/api/v1/history?" + params.toString());
+}
+
 function HistoryContent({
   isPending,
   isError,
-  tab,
-  data,
-  propsById,
+  hasNextPage,
+  isFetchingNextPage,
+  onLoadMore,
+  children,
 }: {
   isPending: boolean;
   isError: boolean;
-  tab: Tab;
-  data: HistoryPayload | undefined;
-  propsById: Map<string, Property>;
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  onLoadMore: () => void;
+  children: ReactNode;
 }) {
   if (isPending) {
     return <Loading />;
   }
-  if (isError || !data) {
+  if (isError) {
     return <p className="muted">Failed to load.</p>;
   }
-  if (tab === "tasks") {
-    return <TaskHistory tasks={data.tasks} propsById={propsById} />;
-  }
-  if (tab === "chats") {
-    return <ChatHistory chats={data.chats} />;
-  }
-  if (tab === "expenses") {
-    return <ExpenseHistory expenses={data.expenses} />;
-  }
-  return <LeaveHistory leaves={data.leaves} />;
+  return (
+    <>
+      {children}
+      {hasNextPage ? (
+        <button
+          type="button"
+          className="btn btn--secondary"
+          onClick={onLoadMore}
+          disabled={isFetchingNextPage}
+        >
+          {isFetchingNextPage ? "Loading..." : "Load more"}
+        </button>
+      ) : null}
+    </>
+  );
 }
 
 function TaskHistory({
   tasks,
   propsById,
 }: {
-  tasks: HistoryPayload["tasks"];
+  tasks: HistoryPagePayload<"tasks">["data"];
   propsById: Map<string, Property>;
 }) {
   return (
@@ -134,7 +204,7 @@ function TaskHistory({
   );
 }
 
-function ChatHistory({ chats }: { chats: HistoryPayload["chats"] }) {
+function ChatHistory({ chats }: { chats: HistoryPagePayload<"chats">["data"] }) {
   return (
     <ul className="task-list">
       {chats.length === 0 ? (
@@ -154,7 +224,11 @@ function ChatHistory({ chats }: { chats: HistoryPayload["chats"] }) {
   );
 }
 
-function ExpenseHistory({ expenses }: { expenses: HistoryPayload["expenses"] }) {
+function ExpenseHistory({
+  expenses,
+}: {
+  expenses: HistoryPagePayload<"expenses">["data"];
+}) {
   return (
     <ul className="task-list">
       {expenses.length === 0 ? (
@@ -183,7 +257,7 @@ function ExpenseHistory({ expenses }: { expenses: HistoryPayload["expenses"] }) 
   );
 }
 
-function LeaveHistory({ leaves }: { leaves: HistoryPayload["leaves"] }) {
+function LeaveHistory({ leaves }: { leaves: HistoryPagePayload<"leaves">["data"] }) {
   return (
     <ul className="task-list">
       {leaves.length === 0 ? (
