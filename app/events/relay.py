@@ -57,6 +57,11 @@ from sqlalchemy import Engine, text
 
 from app.events.bus import EventBus
 from app.events.registry import Event, EventNotFound, get_event_type
+from app.observability.metrics import (
+    EVENTS_RELAY_NOTIFY_BYTES,
+    EVENTS_RELAY_NOTIFY_DROPPED_TOTAL,
+    sanitize_label,
+)
 
 __all__ = [
     "CHANNEL_NAME",
@@ -300,6 +305,7 @@ class PostgresListenNotifyRelay:
     # ---- Send path ---------------------------------------------------
 
     def forward(self, event: Event) -> None:
+        metric_kind = sanitize_label(type(event).name)
         try:
             payload = _envelope(event, worker_id=self._worker_id)
         except (TypeError, ValueError) as exc:
@@ -315,19 +321,30 @@ class PostgresListenNotifyRelay:
                     "kind": type(event).name,
                 },
             )
+            EVENTS_RELAY_NOTIFY_DROPPED_TOTAL.labels(
+                kind=metric_kind,
+                reason="serialise",
+            ).inc()
             return
 
-        if len(payload.encode("utf-8")) > _NOTIFY_PAYLOAD_LIMIT:
+        payload_size = len(payload.encode("utf-8"))
+        EVENTS_RELAY_NOTIFY_BYTES.labels(kind=metric_kind).observe(payload_size)
+
+        if payload_size > _NOTIFY_PAYLOAD_LIMIT:
             _log.warning(
                 "events.relay: dropping oversized NOTIFY (%d bytes) for %s",
-                len(payload),
+                payload_size,
                 type(event).name,
                 extra={
                     "event": "events.relay.oversized",
                     "kind": type(event).name,
-                    "size": len(payload),
+                    "size": payload_size,
                 },
             )
+            EVENTS_RELAY_NOTIFY_DROPPED_TOTAL.labels(
+                kind=metric_kind,
+                reason="oversize",
+            ).inc()
             return
 
         try:
@@ -355,6 +372,10 @@ class PostgresListenNotifyRelay:
                     "kind": type(event).name,
                 },
             )
+            EVENTS_RELAY_NOTIFY_DROPPED_TOTAL.labels(
+                kind=metric_kind,
+                reason="send_failed",
+            ).inc()
 
     # ---- Receive path ------------------------------------------------
 

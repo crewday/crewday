@@ -13,10 +13,13 @@ See ``app/events/relay.py``.
 from __future__ import annotations
 
 import json
+import math
 from datetime import UTC, datetime
+from typing import Any, ClassVar
 from unittest.mock import MagicMock
 
 import pytest
+from prometheus_client import generate_latest
 
 from app.events.bus import EventBus
 from app.events.relay import (
@@ -28,6 +31,7 @@ from app.events.relay import (
     build_relay,
 )
 from app.events.types import NotificationCreated, ShiftChanged
+from app.observability.metrics import METRICS_REGISTRY
 
 # Pinned-shape constants reused across cases.
 _WS = "01HX00000000000000000WS0000"
@@ -36,6 +40,44 @@ _CORR = "01HX00000000000000000COR000"
 _SHIFT = "01HX00000000000000000SHF000"
 _NOTIF = "01HX00000000000000000NOT000"
 _UTC = datetime(2026, 4, 24, 12, 0, 0, tzinfo=UTC)
+
+
+def _metric_sample_value(name: str, **labels: str) -> float:
+    body = generate_latest(METRICS_REGISTRY).decode("utf-8")
+    label_parts = ",".join(f'{key}="{value}"' for key, value in labels.items())
+    prefix = f"{name}{{{label_parts}}} "
+    for line in body.splitlines():
+        if line.startswith(prefix):
+            return float(line.removeprefix(prefix))
+    return 0.0
+
+
+def _notify_count(kind: str) -> float:
+    return _metric_sample_value("events_relay_notify_bytes_count", kind=kind)
+
+
+def _notify_sum(kind: str) -> float:
+    return _metric_sample_value("events_relay_notify_bytes_sum", kind=kind)
+
+
+def _dropped_count(*, kind: str, reason: str) -> float:
+    return _metric_sample_value(
+        "events_relay_notify_dropped_total",
+        kind=kind,
+        reason=reason,
+    )
+
+
+def _notification_created(*, kind: str = "task_assigned") -> NotificationCreated:
+    return NotificationCreated(
+        workspace_id=_WS,
+        actor_id=_ACTOR,
+        correlation_id=_CORR,
+        occurred_at=_UTC,
+        notification_id=_NOTIF,
+        kind=kind,
+        actor_user_id=_ACTOR,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -419,6 +461,24 @@ def test_channel_name_is_stable() -> None:
 
 
 class TestForwardSendPath:
+    def test_successful_forward_records_payload_size(self) -> None:
+        bus = EventBus()
+        engine = MagicMock()
+        engine.dialect.name = "postgresql"
+        conn = engine.connect.return_value.__enter__.return_value
+        relay = PostgresListenNotifyRelay(engine=engine, bus=bus, worker_id="worker")
+        event = _notification_created()
+        kind = type(event).name
+        before_count = _notify_count(kind)
+        before_sum = _notify_sum(kind)
+
+        relay.forward(event)
+
+        conn.execution_options.return_value.execute.assert_called_once()
+        assert _notify_count(kind) == before_count + 1
+        payload_size = len(_envelope(event, worker_id="worker").encode("utf-8"))
+        assert math.isclose(_notify_sum(kind), before_sum + payload_size)
+
     def test_oversized_payload_is_dropped_without_calling_engine(self) -> None:
         bus = EventBus()
         engine = MagicMock()
@@ -429,19 +489,18 @@ class TestForwardSendPath:
         # ``NotificationCreated.kind`` is plain text; pad it past the
         # 7900-byte limit so the relay short-circuits.
         oversized_kind = "x" * 8000
-        event = NotificationCreated(
-            workspace_id=_WS,
-            actor_id=_ACTOR,
-            correlation_id=_CORR,
-            occurred_at=_UTC,
-            notification_id=_NOTIF,
-            kind=oversized_kind,
-            actor_user_id=_ACTOR,
-        )
+        event = _notification_created(kind=oversized_kind)
+        kind = type(event).name
+        before_notify_count = _notify_count(kind)
+        before_drop_count = _dropped_count(kind=kind, reason="oversize")
+
         relay.forward(event)
+
         # Engine must not have been touched — the size guard fires
         # before any connection is opened.
         engine.connect.assert_not_called()
+        assert _notify_count(kind) == before_notify_count + 1
+        assert _dropped_count(kind=kind, reason="oversize") == before_drop_count + 1
 
     def test_engine_failure_is_swallowed(self) -> None:
         """A DB failure mid-publish must not propagate to the caller."""
@@ -451,7 +510,28 @@ class TestForwardSendPath:
         engine.connect.side_effect = RuntimeError("DB down")
         relay = PostgresListenNotifyRelay(engine=engine, bus=bus)
 
-        event = NotificationCreated(
+        event = _notification_created()
+        kind = type(event).name
+        before_notify_count = _notify_count(kind)
+        before_drop_count = _dropped_count(kind=kind, reason="send_failed")
+
+        # Should not raise.
+        relay.forward(event)
+        assert _notify_count(kind) == before_notify_count + 1
+        assert _dropped_count(kind=kind, reason="send_failed") == before_drop_count + 1
+
+    def test_serialise_failure_records_drop_without_payload_size(self) -> None:
+        class BrokenNotificationCreated(NotificationCreated):
+            name: ClassVar[str] = "notification.created"
+
+            def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+                raise TypeError("cannot dump")
+
+        bus = EventBus()
+        engine = MagicMock()
+        engine.dialect.name = "postgresql"
+        relay = PostgresListenNotifyRelay(engine=engine, bus=bus)
+        event = BrokenNotificationCreated(
             workspace_id=_WS,
             actor_id=_ACTOR,
             correlation_id=_CORR,
@@ -460,5 +540,12 @@ class TestForwardSendPath:
             kind="task_assigned",
             actor_user_id=_ACTOR,
         )
-        # Should not raise.
+        kind = type(event).name
+        before_notify_count = _notify_count(kind)
+        before_drop_count = _dropped_count(kind=kind, reason="serialise")
+
         relay.forward(event)
+
+        engine.connect.assert_not_called()
+        assert _notify_count(kind) == before_notify_count
+        assert _dropped_count(kind=kind, reason="serialise") == before_drop_count + 1

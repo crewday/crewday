@@ -19,6 +19,8 @@ from prometheus_client.parser import text_string_to_metric_families
 
 from app.observability import metrics as metrics_mod
 from app.observability.metrics import (
+    EVENTS_RELAY_NOTIFY_BYTES,
+    EVENTS_RELAY_NOTIFY_DROPPED_TOTAL,
     HTTP_REQUEST_DURATION_SECONDS,
     HTTP_REQUESTS_TOTAL,
     LLM_CALLS_TOTAL,
@@ -68,6 +70,12 @@ class TestRegistryShape:
     def test_worker_job_duration_label_names(self) -> None:
         assert WORKER_JOB_DURATION_SECONDS._labelnames == ("job",)
 
+    def test_events_relay_notify_bytes_label_names(self) -> None:
+        assert EVENTS_RELAY_NOTIFY_BYTES._labelnames == ("kind",)
+
+    def test_events_relay_notify_dropped_total_label_names(self) -> None:
+        assert EVENTS_RELAY_NOTIFY_DROPPED_TOTAL._labelnames == ("kind", "reason")
+
     def test_metrics_render_via_generate_latest(self) -> None:
         """The registry round-trips through the Prometheus exposer.
 
@@ -87,14 +95,17 @@ class TestRegistryShape:
         assert "crewday_llm_calls" in names
         assert "crewday_llm_cost_usd" in names
         assert "crewday_worker_jobs" in names
+        assert "events_relay_notify_dropped" in names
         # Histogram families: name preserved verbatim.
         assert "crewday_http_request_duration_seconds" in names
         assert "crewday_worker_job_duration_seconds" in names
+        assert "events_relay_notify_bytes" in names
         # Wire-form sanity: the ``_total`` suffix appears in the
         # raw exposition body, which is what Prometheus actually
         # scrapes.
         assert "crewday_http_requests_total" in body
         assert "crewday_llm_calls_total" in body
+        assert "events_relay_notify_dropped_total" in body
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +238,8 @@ def test_module_publishes_expected_surface() -> None:
         "LLM_CALLS_TOTAL",
         "LLM_COST_USD_TOTAL",
         "METRICS_REGISTRY",
+        "EVENTS_RELAY_NOTIFY_BYTES",
+        "EVENTS_RELAY_NOTIFY_DROPPED_TOTAL",
         "WORKER_JOBS_TOTAL",
         "WORKER_JOB_DURATION_SECONDS",
         "sanitize_workspace_label",

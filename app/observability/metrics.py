@@ -18,6 +18,10 @@ exposing the §16-pinned metrics:
   scheduler tick (status ``ok``/``error``).
 * ``crewday_worker_job_duration_seconds{job}`` — Histogram of per-tick
   durations (seconds).
+* ``events_relay_notify_bytes{kind}`` — Histogram of serialized Postgres
+  NOTIFY payload sizes by event kind.
+* ``events_relay_notify_dropped_total{kind, reason}`` — Counter for relay
+  NOTIFY drops (``oversize`` / ``serialise`` / ``send_failed``).
 
 The registry is **per-process** — one in the API container, another
 in the worker container under Recipe D (§16). Prometheus scrapes
@@ -67,6 +71,8 @@ from prometheus_client import CollectorRegistry, Counter, Histogram
 from app.util.redact import ConsentSet, redact
 
 __all__ = [
+    "EVENTS_RELAY_NOTIFY_BYTES",
+    "EVENTS_RELAY_NOTIFY_DROPPED_TOTAL",
     "HTTP_REQUESTS_TOTAL",
     "HTTP_REQUEST_DURATION_SECONDS",
     "LLM_CALLS_TOTAL",
@@ -107,6 +113,23 @@ _DURATION_BUCKETS: Final[tuple[float, ...]] = (
     5.0,
     10.0,
     30.0,
+)
+
+
+# Histogram buckets in bytes for the Postgres LISTEN/NOTIFY relay.
+# Postgres rejects NOTIFY payloads above 8000 bytes; the relay's own
+# preflight cap is 7900 bytes, so the buckets get denser near the
+# boundary operators care about.
+_NOTIFY_PAYLOAD_BUCKETS: Final[tuple[float, ...]] = (
+    128.0,
+    256.0,
+    512.0,
+    1024.0,
+    2048.0,
+    4096.0,
+    6144.0,
+    7168.0,
+    7900.0,
 )
 
 
@@ -185,6 +208,24 @@ WORKER_SWEEP_REQUEUED_TOTAL: Final[Counter] = Counter(
     "crewday_worker_sweep_requeued_total",
     "Per-row outcomes for restart-safety sweep ticks (requeued | failed).",
     labelnames=("job", "outcome"),
+    registry=METRICS_REGISTRY,
+)
+
+
+# --- Events relay ------------------------------------------------------------
+
+EVENTS_RELAY_NOTIFY_BYTES: Final[Histogram] = Histogram(
+    "events_relay_notify_bytes",
+    "Serialized Postgres NOTIFY payload size by event kind (bytes).",
+    labelnames=("kind",),
+    buckets=_NOTIFY_PAYLOAD_BUCKETS,
+    registry=METRICS_REGISTRY,
+)
+
+EVENTS_RELAY_NOTIFY_DROPPED_TOTAL: Final[Counter] = Counter(
+    "events_relay_notify_dropped_total",
+    "Total Postgres NOTIFY relay payloads dropped by reason.",
+    labelnames=("kind", "reason"),
     registry=METRICS_REGISTRY,
 )
 
