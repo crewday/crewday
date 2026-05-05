@@ -7,6 +7,7 @@ import { useWorkspace } from "@/context/WorkspaceContext";
 import DeskPage from "@/components/DeskPage";
 import { Chip, Loading } from "@/components/common";
 import type { AuthMe } from "@/auth/types";
+import type { ResolvedPermission } from "@/types/auth";
 import type {
   Organization,
   Property,
@@ -199,6 +200,15 @@ async function fetchOrganizations(): Promise<Organization[]> {
   return rows.data.map(mapOrganization);
 }
 
+async function fetchCreatePropertyPermission(activeWsId: string): Promise<ResolvedPermission> {
+  const params = new URLSearchParams({
+    action_key: "properties.create",
+    scope_kind: "workspace",
+    scope_id: activeWsId,
+  });
+  return fetchJson<ResolvedPermission>("/api/v1/permissions/resolved/self?" + params);
+}
+
 export default function PropertiesPage() {
   // code-health: ignore[ccn nloc] Properties route composes query mapping, selected card state, and promoted table layout.
   const { workspaceId } = useWorkspace();
@@ -234,17 +244,73 @@ export default function PropertiesPage() {
   });
   const pwPending = propsQ.isPending || (propsQ.data ? pwQs.some((q) => q.isPending) : false);
   const closuresPending = propsQ.isPending || (propsQ.data ? closureQs.some((q) => q.isPending) : false);
+  const activeWsId = meQ.data?.current_workspace_id ?? (workspaceId ? wsQ.data?.find((w) => w.slug === workspaceId)?.id : null) ?? null;
+  const currentUserId = meQ.data?.user_id ?? null;
+  const createPermissionQ = useQuery({
+    queryKey:
+      currentUserId && activeWsId
+        ? qk.permissionResolved(currentUserId, "properties.create", "workspace", activeWsId)
+        : ["permission", "unresolved", "properties.create", "workspace"],
+    enabled: Boolean(currentUserId && activeWsId),
+    queryFn: () => fetchCreatePropertyPermission(activeWsId ?? ""),
+    retry: false,
+  });
+  const canCreateProperty = createPermissionQ.data?.effect === "allow";
+  const createPermissionLookupFailed = meQ.isError || wsQ.isError || createPermissionQ.isError;
+  const isCheckingCreatePermission =
+    meQ.isPending ||
+    (workspaceId !== null && !meQ.data?.current_workspace_id && wsQ.isPending) ||
+    (Boolean(currentUserId && activeWsId) && createPermissionQ.isPending);
+  const createPropertyAction = canCreateProperty
+    ? <button type="button" className="btn btn--moss">+ Add property</button>
+    : null;
 
-  if (propsQ.isPending || staysQ.isPending || wsQ.isPending || orgsQ.isPending || pwPending || closuresPending) {
+  if (propsQ.isPending) {
     return (
-      <DeskPage title="Properties" actions={<button className="btn btn--moss">+ Add property</button>}>
+      <DeskPage title="Properties" actions={createPropertyAction}>
+        <Loading />
+      </DeskPage>
+    );
+  }
+  if (propsQ.isError || !propsQ.data) {
+    return (
+      <DeskPage title="Properties" actions={createPropertyAction}>
+        Failed to load.
+      </DeskPage>
+    );
+  }
+  if (propsQ.data.length === 0) {
+    return (
+      <DeskPage title="Properties">
+        <section className="empty-state" aria-labelledby="properties-empty-title">
+          <h2 id="properties-empty-title">No properties visible</h2>
+          <p>
+            Properties added to this workspace or shared with it will appear here.
+          </p>
+          {canCreateProperty ? (
+            <button type="button" className="btn btn--moss">Add property</button>
+          ) : isCheckingCreatePermission ? (
+            <p className="muted" role="status" aria-live="polite">Checking whether you can add a property.</p>
+          ) : createPermissionLookupFailed ? (
+            <p className="muted">Could not verify whether you can add a property. Refresh or ask an owner or manager.</p>
+          ) : (
+            <p className="muted">Ask an owner or manager to add a property or share one with this workspace.</p>
+          )}
+        </section>
+      </DeskPage>
+    );
+  }
+
+  if (staysQ.isPending || wsQ.isPending || orgsQ.isPending || pwPending || closuresPending) {
+    return (
+      <DeskPage title="Properties" actions={createPropertyAction}>
         <Loading />
       </DeskPage>
     );
   }
   if (!propsQ.data || !staysQ.data || !wsQ.data || !orgsQ.data || pwQs.some((q) => !q.data) || closureQs.some((q) => !q.data)) {
     return (
-      <DeskPage title="Properties" actions={<button className="btn btn--moss">+ Add property</button>}>
+      <DeskPage title="Properties" actions={createPropertyAction}>
         Failed to load.
       </DeskPage>
     );
@@ -269,12 +335,11 @@ export default function PropertiesPage() {
     }
   }
   const orgById = new Map(orgsQ.data.map((o) => [o.id, o]));
-  const activeWsId = meQ.data?.current_workspace_id ?? (workspaceId ? wsQ.data.find((w) => w.slug === workspaceId)?.id : null) ?? null;
 
   return (
     <DeskPage
       title="Properties"
-      actions={<button className="btn btn--moss">+ Add property</button>}
+      actions={createPropertyAction}
     >
       <section className="grid grid--cards">
         {properties.map((p) => {

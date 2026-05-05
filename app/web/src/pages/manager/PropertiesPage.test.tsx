@@ -9,7 +9,17 @@ import * as preferences from "@/lib/preferences";
 import PropertiesPage from "./PropertiesPage";
 import { jsonResponse } from "@/test/helpers";
 
-function installFetch({ failProperties = false }: { failProperties?: boolean } = {}) {
+function installFetch({
+  createPermission = "allow",
+  emptyProperties = false,
+  failProperties = false,
+  holdPermission = false,
+}: {
+  createPermission?: "allow" | "deny";
+  emptyProperties?: boolean;
+  failProperties?: boolean;
+  holdPermission?: boolean;
+} = {}) {
   const calls: string[] = [];
   const original = globalThis.fetch;
   const spy = vi.fn(async (url: string | URL | Request) => {
@@ -41,6 +51,9 @@ function installFetch({ failProperties = false }: { failProperties?: boolean } =
       if (failProperties) {
         return jsonResponse({ type: "server_error", title: "Server error" }, 500);
       }
+      if (emptyProperties) {
+        return jsonResponse([]);
+      }
       return jsonResponse([
         {
           id: "prop_1",
@@ -58,6 +71,21 @@ function installFetch({ failProperties = false }: { failProperties?: boolean } =
           owner_user_id: null,
         },
       ]);
+    }
+    if (resolved.startsWith("/w/acme/api/v1/permissions/resolved/self?")) {
+      const parsed = new URL(resolved, "http://test.local");
+      expect(parsed.searchParams.get("action_key")).toBe("properties.create");
+      expect(parsed.searchParams.get("scope_kind")).toBe("workspace");
+      expect(parsed.searchParams.get("scope_id")).toBe("ws_owner");
+      if (holdPermission) {
+        return new Promise<Response>(() => undefined);
+      }
+      return jsonResponse({
+        effect: createPermission,
+        source_layer: "default",
+        source_rule_id: null,
+        matched_groups: createPermission === "allow" ? ["managers"] : [],
+      });
     }
     if (resolved === "/w/acme/api/v1/stays/reservations?limit=500") {
       return jsonResponse({
@@ -188,6 +216,51 @@ describe("<PropertiesPage>", () => {
       expect(fake.calls).toContain("/api/v1/auth/me");
       expect(fake.calls).toContain("/api/v1/me/workspaces");
       expect(fake.calls).toContain("/w/acme/api/v1/properties/prop_1/share");
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("renders a zero-property empty state with the create action for permitted users", async () => {
+    const fake = installFetch({ emptyProperties: true });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByRole("heading", { name: "No properties visible" })).toBeInTheDocument();
+      expect(screen.getByText("Properties added to this workspace or shared with it will appear here.")).toBeInTheDocument();
+      expect(await screen.findByRole("button", { name: "Add property" })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Villa Rosa" })).toBeNull();
+      expect(fake.calls).not.toContain("/w/acme/api/v1/properties/prop_1/share");
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("keeps the zero-property empty state distinct when the user cannot create properties", async () => {
+    const fake = installFetch({ createPermission: "deny", emptyProperties: true });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByRole("heading", { name: "No properties visible" })).toBeInTheDocument();
+      expect(
+        await screen.findByText("Ask an owner or manager to add a property or share one with this workspace."),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Add property" })).toBeNull();
+      expect(screen.queryByText("Failed to load.")).toBeNull();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("keeps zero-property permission checks distinct from denied users", async () => {
+    const fake = installFetch({ emptyProperties: true, holdPermission: true });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByRole("heading", { name: "No properties visible" })).toBeInTheDocument();
+      expect(screen.getByRole("status")).toHaveTextContent("Checking whether you can add a property.");
+      expect(screen.queryByText("Ask an owner or manager to add a property or share one with this workspace.")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Add property" })).toBeNull();
     } finally {
       fake.restore();
     }
