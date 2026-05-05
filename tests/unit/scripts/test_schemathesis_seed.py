@@ -7,13 +7,14 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.llm.models import AgentDoc
+from app.adapters.db.messaging.models import Notification
 from app.adapters.db.workspace.models import Workspace
 from app.domain.messaging.push_tokens import SETTINGS_KEY_VAPID_PUBLIC
 from tests.unit.api.admin._helpers import engine_fixture, seed_user, seed_workspace
 
 
-def test_admin_contract_path_resources_are_live_and_idempotent() -> None:
-    from scripts._schemathesis_seed import seed_admin_contract_path_resources
+def test_contract_path_resources_are_live_and_idempotent() -> None:
+    from scripts._schemathesis_seed import seed_contract_path_resources
 
     engine_iter = engine_fixture()
     engine = next(engine_iter)
@@ -27,12 +28,12 @@ def test_admin_contract_path_resources_are_live_and_idempotent() -> None:
             )
             workspace_id = seed_workspace(session, slug="schemathesis")
 
-            first = seed_admin_contract_path_resources(
+            first = seed_contract_path_resources(
                 session,
                 actor_user_id=actor_id,
                 workspace_id=workspace_id,
             )
-            second = seed_admin_contract_path_resources(
+            second = seed_contract_path_resources(
                 session,
                 actor_user_id=actor_id,
                 workspace_id=workspace_id,
@@ -42,6 +43,7 @@ def test_admin_contract_path_resources_are_live_and_idempotent() -> None:
             doc = session.scalar(
                 select(AgentDoc).where(AgentDoc.slug == first.agent_doc_slug)
             )
+            notification = session.get(Notification, first.notification_id)
     finally:
         engine.dispose()
 
@@ -53,6 +55,10 @@ def test_admin_contract_path_resources_are_live_and_idempotent() -> None:
     assert grant.user_id != actor_id
     assert doc is not None
     assert doc.is_active is True
+    assert notification is not None
+    assert notification.workspace_id == workspace_id
+    assert notification.recipient_user_id == actor_id
+    assert notification.kind == "agent_message"
 
 
 def test_contract_vapid_public_key_seed_is_idempotent() -> None:

@@ -191,7 +191,10 @@ export CREWDAY_SCHEMATHESIS_SESSION_COOKIE="__Host-crewday_session=${SESSION}; c
 # slug. Without these IDs, Schemathesis generates random ``{id}`` /
 # agent-doc ``{slug}`` values and mostly exercises the missing-resource
 # 404 branch. ``tests/contract/hooks.py`` reads these variables and pins
-# those operation-specific path parameters to live rows.
+# those operation-specific path parameters to live rows. The same helper
+# also exports one messaging notification id so the messaging tag reaches
+# the notification detail / update handlers instead of sampling random
+# missing ids on every generated case.
 #
 # ``admin.admins.revoke`` is a destructive one-shot route: the seeded
 # grant is live for the first positive example, then correctly 404s once
@@ -205,7 +208,7 @@ ADMIN_CONTRACT_ENV=$(${PYTHON_BIN} -m scripts._schemathesis_seed \
     --output admin-contract-env)
 
 if [[ -z "${ADMIN_CONTRACT_ENV}" ]]; then
-    echo "schemathesis: failed to seed admin path resources" >&2
+    echo "schemathesis: failed to seed contract path resources" >&2
     exit 1
 fi
 
@@ -220,16 +223,20 @@ while IFS='=' read -r key value; do
         CREWDAY_SCHEMATHESIS_ADMIN_AGENT_DOC_SLUG)
             export CREWDAY_SCHEMATHESIS_ADMIN_AGENT_DOC_SLUG="${value}"
             ;;
+        CREWDAY_SCHEMATHESIS_NOTIFICATION_ID)
+            export CREWDAY_SCHEMATHESIS_NOTIFICATION_ID="${value}"
+            ;;
     esac
 done <<< "${ADMIN_CONTRACT_ENV}"
 
 if [[ -z "${CREWDAY_SCHEMATHESIS_ADMIN_WORKSPACE_ID:-}" ]] \
     || [[ -z "${CREWDAY_SCHEMATHESIS_ADMIN_REVOKE_GRANT_ID:-}" ]] \
-    || [[ -z "${CREWDAY_SCHEMATHESIS_ADMIN_AGENT_DOC_SLUG:-}" ]]; then
-    echo "schemathesis: admin seed did not export every path resource" >&2
+    || [[ -z "${CREWDAY_SCHEMATHESIS_ADMIN_AGENT_DOC_SLUG:-}" ]] \
+    || [[ -z "${CREWDAY_SCHEMATHESIS_NOTIFICATION_ID:-}" ]]; then
+    echo "schemathesis: contract seed did not export every path resource" >&2
     exit 1
 fi
-echo "schemathesis: seeded admin path resources workspace_id=${CREWDAY_SCHEMATHESIS_ADMIN_WORKSPACE_ID} agent_doc=${CREWDAY_SCHEMATHESIS_ADMIN_AGENT_DOC_SLUG} revoke_grant=${CREWDAY_SCHEMATHESIS_ADMIN_REVOKE_GRANT_ID}" >&2
+echo "schemathesis: seeded contract path resources workspace_id=${CREWDAY_SCHEMATHESIS_ADMIN_WORKSPACE_ID} agent_doc=${CREWDAY_SCHEMATHESIS_ADMIN_AGENT_DOC_SLUG} revoke_grant=${CREWDAY_SCHEMATHESIS_ADMIN_REVOKE_GRANT_ID} notification=${CREWDAY_SCHEMATHESIS_NOTIFICATION_ID}" >&2
 
 # ---------------------------------------------------------------------------
 # Run schemathesis

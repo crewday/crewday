@@ -42,6 +42,7 @@ from sqlalchemy.orm import Session as SqlaSession
 from app.adapters.db.authz.models import DeploymentOwner, RoleGrant
 from app.adapters.db.identity.models import User, canonicalise_email
 from app.adapters.db.llm.models import AgentDoc
+from app.adapters.db.messaging.models import Notification
 from app.adapters.db.session import make_uow
 from app.adapters.db.workspace.models import Workspace
 from app.auth.tokens import mint as mint_token
@@ -63,10 +64,11 @@ _DEV_AUTH_ENV_VAR: Final[str] = "CREWDAY_DEV_AUTH"
 
 
 @dataclass(frozen=True, slots=True)
-class AdminContractPathResources:
+class ContractPathResources:
     workspace_id: str
     admin_revoke_grant_id: str
     agent_doc_slug: str
+    notification_id: str
 
 
 def _ensure_deployment_admin(
@@ -179,13 +181,46 @@ def _ensure_contract_vapid_public_key(workspace: Workspace) -> None:
     workspace.settings_json = settings
 
 
-def seed_admin_contract_path_resources(
+def _ensure_contract_notification(
+    session: SqlaSession,
+    *,
+    workspace_id: str,
+    user_id: str,
+) -> str:
+    with tenant_agnostic():
+        existing_id = session.scalar(
+            select(Notification.id)
+            .where(Notification.workspace_id == workspace_id)
+            .where(Notification.recipient_user_id == user_id)
+            .order_by(Notification.id.asc())
+            .limit(1)
+        )
+        if existing_id is not None:
+            return existing_id
+
+        notification = Notification(
+            id=new_ulid(),
+            workspace_id=workspace_id,
+            recipient_user_id=user_id,
+            kind="agent_message",
+            subject="Schemathesis contract notification",
+            body_md="Seed row for notification detail contract coverage.",
+            read_at=None,
+            created_at=SystemClock().now(),
+            payload_json={},
+        )
+        session.add(notification)
+        session.flush()
+        return notification.id
+
+
+def seed_contract_path_resources(
     session: SqlaSession,
     *,
     actor_user_id: str,
     workspace_id: str,
-) -> AdminContractPathResources:
-    """Seed live path resources for the admin Schemathesis tag."""
+) -> ContractPathResources:
+    """Seed live path resources consumed by Schemathesis hooks."""
     seed_agent_docs(session)
     with tenant_agnostic():
         agent_doc_slug = session.scalar(
@@ -196,23 +231,29 @@ def seed_admin_contract_path_resources(
         )
     if agent_doc_slug is None:
         raise RuntimeError("no active agent docs available for schemathesis seed")
-    return AdminContractPathResources(
+    return ContractPathResources(
         workspace_id=workspace_id,
         admin_revoke_grant_id=_ensure_revokable_admin_grant(
             session,
             actor_user_id=actor_user_id,
         ),
         agent_doc_slug=agent_doc_slug,
+        notification_id=_ensure_contract_notification(
+            session,
+            workspace_id=workspace_id,
+            user_id=actor_user_id,
+        ),
     )
 
 
-def _format_admin_contract_env(resources: AdminContractPathResources) -> str:
+def _format_contract_env(resources: ContractPathResources) -> str:
     return "\n".join(
         (
             f"CREWDAY_SCHEMATHESIS_ADMIN_WORKSPACE_ID={resources.workspace_id}",
             "CREWDAY_SCHEMATHESIS_ADMIN_REVOKE_GRANT_ID="
             f"{resources.admin_revoke_grant_id}",
             f"CREWDAY_SCHEMATHESIS_ADMIN_AGENT_DOC_SLUG={resources.agent_doc_slug}",
+            f"CREWDAY_SCHEMATHESIS_NOTIFICATION_ID={resources.notification_id}",
         )
     )
 
@@ -319,12 +360,12 @@ def main(email: str, workspace_slug: str, label: str, output: OutputFormat) -> N
             _ensure_contract_vapid_public_key(workspace)
 
         if output == "admin-contract-env":
-            resources = seed_admin_contract_path_resources(
+            resources = seed_contract_path_resources(
                 uow,
                 actor_user_id=user.id,
                 workspace_id=workspace.id,
             )
-            sys.stdout.write(_format_admin_contract_env(resources))
+            sys.stdout.write(_format_contract_env(resources))
             return
 
         # 3. Mint a workspace-scoped token. ``scopes`` is left empty

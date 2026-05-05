@@ -74,6 +74,9 @@ _ADMIN_REVOKE_GRANT_ID: Final[str | None] = os.environ.get(
 _ADMIN_AGENT_DOC_SLUG: Final[str | None] = os.environ.get(
     "CREWDAY_SCHEMATHESIS_ADMIN_AGENT_DOC_SLUG"
 )
+_MESSAGING_NOTIFICATION_ID: Final[str | None] = os.environ.get(
+    "CREWDAY_SCHEMATHESIS_NOTIFICATION_ID"
+)
 _LOGOUT_EMAIL_ENV: Final[str] = "CREWDAY_SCHEMATHESIS_LOGOUT_EMAIL"
 _SESSION_COOKIE_NAME: Final[str] = "__Host-crewday_session"
 _CSRF_COOKIE: Final[str] = "crewday_csrf=schemathesis"
@@ -403,6 +406,19 @@ def _admin_path_parameter_overrides(operation_id: str | None) -> dict[str, str]:
     return {}
 
 
+def _messaging_path_parameter_overrides(operation_id: str | None) -> dict[str, str]:
+    if (
+        operation_id
+        in {
+            "messaging.notifications.get",
+            "messaging.notifications.update",
+        }
+        and _MESSAGING_NOTIFICATION_ID
+    ):
+        return {"notification_id": _MESSAGING_NOTIFICATION_ID}
+    return {}
+
+
 def _constrain_path_parameters(
     operation_id: str | None,
     path_parameters: dict[str, Any] | None,
@@ -411,6 +427,9 @@ def _constrain_path_parameters(
         return None
 
     overrides = _admin_path_parameter_overrides(operation_id)
+    if overrides:
+        return {**path_parameters, **overrides}
+    overrides = _messaging_path_parameter_overrides(operation_id)
     if overrides:
         return {**path_parameters, **overrides}
     if "slug" in path_parameters:
