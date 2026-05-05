@@ -461,7 +461,7 @@ def _handle_http_exception(
       ``HTTPException(detail={"error": "token_not_found"})`` surfaces
       ``"error": "token_not_found"`` at envelope top level, not as
       a Python-repr string inside ``detail``). The dict's ``"message"``
-      key — if any — becomes the ``detail`` field; every other key
+      key — if any — also becomes the ``detail`` field; the full dict
       flows through :paramref:`problem_response.extra`, which already
       guards the reserved envelope keys against accidental override.
     * Any other type (list, tuple, int, …) → ``str(exc.detail)``
@@ -482,15 +482,15 @@ def _handle_http_exception(
     elif isinstance(exc.detail, dict):
         # Dict-shaped details are the router idiom for structured
         # error symbols (``{"error": "token_not_found"}``). Spread
-        # every non-``message`` key into ``extra`` so the envelope
-        # surfaces them as first-class JSON fields; the ``message``
-        # key (if present) is the human-readable detail. Skip the
-        # title-dedup pass here because a dict detail is explicit —
-        # the caller chose these exact fields and didn't fall back
-        # to the FastAPI ``HTTPStatus.phrase`` default.
+        # the full dict into ``extra`` so the envelope surfaces them as
+        # first-class JSON fields; the ``message`` key (if present) is
+        # also the human-readable detail. Skip the title-dedup pass
+        # here because a dict detail is explicit — the caller chose
+        # these exact fields and didn't fall back to the FastAPI
+        # ``HTTPStatus.phrase`` default.
         raw_detail = exc.detail.get("message")
         detail_value = str(raw_detail) if raw_detail is not None else None
-        envelope_extra = {k: v for k, v in exc.detail.items() if k != "message"}
+        envelope_extra = dict(exc.detail)
     elif isinstance(exc.detail, str):
         detail_value = exc.detail
         if detail_value.casefold() == title.casefold():

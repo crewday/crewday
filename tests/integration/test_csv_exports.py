@@ -22,7 +22,9 @@ from app.adapters.db.time.models import Shift
 from app.adapters.db.workspace.models import WorkEngagement
 from app.api.deps import current_workspace_context
 from app.api.deps import db_session as _db_session_dep
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.payroll import build_payroll_router
+from app.domain.errors import CANONICAL_TYPE_BASE
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.ulid import new_ulid
 from tests.factories.identity import (
@@ -313,6 +315,7 @@ def client(
     seeded: SeededCsvExport,
 ) -> Iterator[TestClient]:
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(
         build_payroll_router(),
         prefix=f"/w/{seeded.ctx.workspace_slug}/api/v1/payroll",
@@ -463,7 +466,15 @@ def test_expense_ledger_rejects_unknown_status_filter(
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"]["error"] == "invalid_expense_status"
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    body = response.json()
+    assert body["type"] == f"{CANONICAL_TYPE_BASE}validation"
+    assert body["title"] == "Validation error"
+    assert body["status"] == 422
+    assert body["instance"] == _export_url(seeded.ctx, "expense-ledger")
+    assert body["detail"] == "unknown expense status filter: approve"
+    assert body["error"] == "invalid_expense_status"
+    assert body["message"] == "unknown expense status filter: approve"
 
 
 def test_empty_window_returns_header_only_and_audits_zero_rows(

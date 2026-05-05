@@ -95,7 +95,8 @@ def _build_probe_router() -> APIRouter:
     @r.get("/api/_probe/http/dict_detail_with_message", include_in_schema=False)
     def probe_dict_detail_with_message() -> None:
         # ``message`` inside a dict detail becomes the envelope's
-        # ``detail`` field; every other key flows through ``extra``.
+        # ``detail`` field and remains available as the API ``message``
+        # extension.
         raise HTTPException(
             status_code=422,
             detail={"error": "too_many_tokens", "message": "cap is 5 per user"},
@@ -249,11 +250,12 @@ class TestDictDetailSpreadsIntoEnvelope:
         assert body["status"] == 422
         # ``message`` lifted into envelope's ``detail`` field.
         assert body["detail"] == "cap is 5 per user"
-        # Other keys flow through as extension fields.
+        # Structured fields, including the API ``message`` extension,
+        # also flow through at envelope top level. ``message`` is not an
+        # RFC 7807 reserved field, so it does not conflict with
+        # ``detail``.
         assert body["error"] == "too_many_tokens"
-        # ``message`` is consumed into ``detail`` — it must not also
-        # appear as an extension field.
-        assert "message" not in body
+        assert body["message"] == "cap is 5 per user"
 
     def test_dict_detail_cannot_overwrite_reserved_envelope_keys(
         self, composed_client: TestClient

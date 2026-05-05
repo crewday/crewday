@@ -402,6 +402,20 @@ class TestHTTPExceptionEnvelope:
         body = client.get("/boom").json()
         assert body["detail"] == "missing row"
 
+    def test_dict_detail_message_is_preserved_as_extension(self) -> None:
+        client = _client(
+            _app_raising(
+                HTTPException(
+                    status_code=422,
+                    detail={"error": "invalid_window", "message": "bad range"},
+                )
+            )
+        )
+        body = client.get("/boom").json()
+        assert body["detail"] == "bad range"
+        assert body["error"] == "invalid_window"
+        assert body["message"] == "bad range"
+
     def test_default_detail_equals_title_is_suppressed(self) -> None:
         """FastAPI defaults ``detail = HTTPStatus.phrase`` — avoid the
         duplicate ``detail == title`` in the envelope body.
