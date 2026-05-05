@@ -3,17 +3,35 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from sqlalchemy import Engine, select
+from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import JSONResponse
 
+from app.adapters.db.authz.models import RoleGrant
+from app.adapters.db.base import Base
+from app.adapters.db.llm.models import ApprovalRequest
+from app.adapters.db.messaging.models import Notification
+from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.api.deps import current_workspace_context, db_session
 from app.api.errors import _handle_domain_error, add_exception_handlers
 from app.api.v1.messaging import build_messaging_router
 from app.domain.errors import DomainError
 from app.domain.messaging.push_tokens import validate_endpoint
-from app.tenancy import WorkspaceContext
+from app.tenancy import WorkspaceContext, tenant_agnostic
+from app.util.clock import FrozenClock
+from app.util.ulid import new_ulid
+from tests.factories.identity import (
+    bootstrap_user,
+    bootstrap_workspace,
+    build_workspace_context,
+)
+
+_PINNED = datetime(2026, 5, 5, 12, 0, tzinfo=UTC)
 
 
 def _ctx() -> WorkspaceContext:
@@ -26,6 +44,96 @@ def _ctx() -> WorkspaceContext:
         actor_was_owner_member=True,
         audit_correlation_id="corr_test",
     )
+
+
+def _load_all_models() -> None:
+    import importlib
+    import pkgutil
+
+    import app.adapters.db as pkg
+
+    for modinfo in pkgutil.iter_modules(pkg.__path__, prefix=f"{pkg.__name__}."):
+        if not modinfo.ispkg:
+            continue
+        try:
+            importlib.import_module(f"{modinfo.name}.models")
+        except ModuleNotFoundError as exc:
+            if exc.name == f"{modinfo.name}.models":
+                continue
+            raise
+
+
+def _seed_broadcast_workspace(
+    factory: sessionmaker[Session],
+) -> tuple[WorkspaceContext, tuple[str, str]]:
+    with factory() as session:
+        owner = bootstrap_user(
+            session,
+            email="router-broadcast-owner@example.com",
+            display_name="Router Broadcast Owner",
+            clock=FrozenClock(_PINNED),
+        )
+        workspace = bootstrap_workspace(
+            session,
+            slug="router-broadcasts",
+            name="Router broadcasts",
+            owner_user_id=owner.id,
+            clock=FrozenClock(_PINNED),
+        )
+        worker_ids: list[str] = []
+        with tenant_agnostic():
+            for idx in range(2):
+                worker = bootstrap_user(
+                    session,
+                    email=f"router-broadcast-worker-{idx}@example.com",
+                    display_name=f"Router Broadcast Worker {idx}",
+                    clock=FrozenClock(_PINNED),
+                )
+                worker_ids.append(worker.id)
+                session.add(
+                    RoleGrant(
+                        id=new_ulid(),
+                        workspace_id=workspace.id,
+                        user_id=worker.id,
+                        grant_role="worker",
+                        scope_kind="workspace",
+                        scope_property_id=None,
+                        created_at=_PINNED,
+                        created_by_user_id=owner.id,
+                    )
+                )
+        session.commit()
+        ctx = build_workspace_context(
+            workspace_id=workspace.id,
+            workspace_slug=workspace.slug,
+            actor_id=owner.id,
+            actor_kind="user",
+            actor_grant_role="manager",
+            actor_was_owner_member=True,
+        )
+    return ctx, (worker_ids[0], worker_ids[1])
+
+
+def _build_db_client(
+    factory: sessionmaker[Session],
+    ctx: WorkspaceContext,
+) -> TestClient:
+    app = FastAPI()
+    add_exception_handlers(app)
+    app.include_router(build_messaging_router(), prefix="/messaging")
+
+    def _override_ctx() -> WorkspaceContext:
+        return ctx
+
+    def _override_db() -> Iterator[Session]:
+        uow = UnitOfWorkImpl(session_factory=factory)
+        with uow as session:
+            assert isinstance(session, Session)
+            yield session
+
+    app.dependency_overrides[current_workspace_context] = _override_ctx
+    app.dependency_overrides[db_session] = _override_db
+    return TestClient(app, raise_server_exceptions=False)
 
 
 def test_messaging_router_declares_notifications_and_push_management_routes() -> None:
@@ -51,7 +159,92 @@ def test_messaging_router_declares_notifications_and_push_management_routes() ->
         "messaging.chat_channels.update",
         "messaging.chat_messages.list",
         "messaging.chat_messages.send",
+        "messaging.broadcast.recipients",
+        "messaging.broadcast.send",
     }.issubset(operations)
+
+
+def test_broadcast_single_recipient_creates_notification_row() -> None:
+    _load_all_models()
+    engine: Engine = make_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    try:
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        ctx, worker_ids = _seed_broadcast_workspace(factory)
+        client = _build_db_client(factory, ctx)
+
+        preview = client.get("/messaging/broadcast/recipients")
+        assert preview.status_code == 200
+        assert preview.json()["total"] >= 2
+
+        resp = client.post(
+            "/messaging/broadcast",
+            json={
+                "target": "selected",
+                "selected_recipient_user_ids": [worker_ids[0]],
+                "confirmed_recipient_count": 1,
+                "subject": "Water shutoff",
+                "body_md": "Water will be off between 14:00 and 15:00.",
+            },
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "sent"
+        assert body["recipient_count"] == 1
+        assert body["approval_request_id"] is None
+        assert len(body["notification_ids"]) == 1
+
+        with factory() as session, tenant_agnostic():
+            row = session.get(Notification, body["notification_ids"][0])
+            assert row is not None
+            assert row.recipient_user_id == worker_ids[0]
+            assert row.kind == "agent_message"
+            assert row.payload_json["broadcast_subject"] == "Water shutoff"
+    finally:
+        engine.dispose()
+
+
+def test_broadcast_multi_recipient_returns_approval_without_fanout() -> None:
+    _load_all_models()
+    engine: Engine = make_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    try:
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        ctx, worker_ids = _seed_broadcast_workspace(factory)
+        client = _build_db_client(factory, ctx)
+
+        resp = client.post(
+            "/messaging/broadcast",
+            json={
+                "target": "selected",
+                "selected_recipient_user_ids": list(worker_ids),
+                "confirmed_recipient_count": 2,
+                "subject": "Storm watch",
+                "body_md": "Bring patio furniture inside before 16:00.",
+            },
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "pending_approval"
+        assert body["recipient_count"] == 2
+        assert body["notification_ids"] == []
+        assert body["approval_request_id"] is not None
+
+        with factory() as session, tenant_agnostic():
+            broadcast_rows = session.scalars(
+                select(Notification).where(Notification.kind == "agent_message")
+            ).all()
+            approval = session.get(ApprovalRequest, body["approval_request_id"])
+            assert broadcast_rows == []
+            assert approval is not None
+            assert approval.action_json["tool_name"] == "messaging.broadcast"
+            assert approval.action_json["tool_input"]["recipient_user_ids"] == list(
+                worker_ids
+            )
+    finally:
+        engine.dispose()
 
 
 def test_messaging_router_documents_problem_json_validation_errors() -> None:

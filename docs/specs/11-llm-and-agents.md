@@ -1485,7 +1485,7 @@ A small starter list of routes that carry
 | `POST /inventory/{id}/restock`                | "Restock *{id|inventory:name}* by {qty} {unit}?"                     |
 | `POST /schedules`                             | "Add schedule *{template_id|template:name}* on {rrule}?"             |
 | `POST /stays`                                 | "Create stay at {property_id|property:name} {check_in}–{check_out}?" |
-| `POST /messaging/broadcast` (single-recipient path) | "Message {recipient_user_id|user:display_name}: *{subject}*?" |
+| `POST /messaging/broadcast` (single-recipient path) | "Send broadcast *{subject}*?" |
 
 Routes not in this starter list (and not in the workspace policy
 lists) execute silently in `auto` mode; the list grows
@@ -1539,7 +1539,7 @@ The canonical list, configurable per workspace:
 - Payslip issuance and paid transition (`payroll.issue`, `payroll.pay`).
 - Granting a new scope to an existing token.
 - Rotating another token.
-- Sending a broadcast email to more than one recipient.
+- Sending a broadcast email/message to more than one recipient.
 - Bulk schedule changes affecting > 50 future tasks.
 
 **Always-gated (not configurable)** — these actions touch money

@@ -100,6 +100,7 @@ export const qk = {
   mySchedulePrefix: () => [...ws(), "my-schedule"] as const,
   meOverrides: () => [...ws(), "me", "availability_overrides"] as const,
   dashboard: () => [...ws(), "dashboard"] as const,
+  broadcastRecipients: () => [...ws(), "messaging", "broadcast", "recipients"] as const,
   expenses: (scope: "all" | "mine") => [...ws(), "expenses", scope] as const,
   expensesPendingReimbursement: (userId: "me" | string) =>
     [...ws(), "expenses", "pending_reimbursement", userId] as const,

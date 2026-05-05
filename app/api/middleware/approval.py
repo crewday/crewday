@@ -32,6 +32,12 @@ from app.domain.agent.runtime import (
     ToolDispatcher,
     ToolResult,
 )
+from app.domain.errors import Validation
+from app.domain.messaging.broadcasts import (
+    BROADCAST_TOOL_NAME,
+    broadcast_tool_input,
+    execute_broadcast,
+)
 from app.domain.messaging.notifications import NotificationService
 from app.domain.tasks.completion import (
     InvalidStateTransition,
@@ -268,7 +274,7 @@ class InProcessApprovalDispatcher(ToolDispatcher):
         headers: Mapping[str, str],
     ) -> ToolResult:
         del token
-        if call.name != "cancel_task":
+        if call.name not in (BROADCAST_TOOL_NAME, "cancel_task"):
             return ToolResult(
                 call_id=call.id,
                 status_code=404,
@@ -283,6 +289,16 @@ class InProcessApprovalDispatcher(ToolDispatcher):
                 body={"error": "missing_replay_actor"},
                 mutated=False,
             )
+        if call.name == BROADCAST_TOOL_NAME:
+            return _dispatch_broadcast(
+                call,
+                actor_id=actor_id,
+                actor_grant_role=_actor_grant_role_from_header(
+                    headers.get("X-Crewday-Replay-Actor-Role")
+                ),
+                actor_was_owner_member=headers.get("X-Crewday-Replay-Actor-Is-Owner")
+                == "1",
+            )
         return _dispatch_cancel_task(
             call,
             actor_id=actor_id,
@@ -292,6 +308,83 @@ class InProcessApprovalDispatcher(ToolDispatcher):
             actor_was_owner_member=headers.get("X-Crewday-Replay-Actor-Is-Owner")
             == "1",
         )
+
+
+def _dispatch_broadcast(
+    call: ToolCall,
+    *,
+    actor_id: str,
+    actor_grant_role: ActorGrantRole,
+    actor_was_owner_member: bool,
+) -> ToolResult:
+    parsed = broadcast_tool_input(call.input)
+    workspace_slug = _input_str(call.input, "workspace_slug")
+    if parsed is None or workspace_slug is None:
+        return ToolResult(
+            call_id=call.id,
+            status_code=422,
+            body={"error": "invalid_broadcast_input"},
+            mutated=False,
+        )
+    subject, body_md, recipient_user_ids, broadcast_id = parsed
+    with make_uow() as session:
+        if not isinstance(session, Session):
+            return ToolResult(
+                call_id=call.id,
+                status_code=500,
+                body={"error": "unsupported_session"},
+                mutated=False,
+            )
+        workspace_id = _workspace_id_for_slug(session, workspace_slug)
+        if workspace_id is None:
+            return ToolResult(
+                call_id=call.id,
+                status_code=404,
+                body={"error": "workspace_not_found"},
+                mutated=False,
+            )
+        ctx = WorkspaceContext(
+            workspace_id=workspace_id,
+            workspace_slug=workspace_slug,
+            actor_id=actor_id,
+            actor_kind="user",
+            actor_grant_role=actor_grant_role,
+            actor_was_owner_member=actor_was_owner_member,
+            audit_correlation_id=call.id,
+            principal_kind="session",
+        )
+        try:
+            notification_ids = execute_broadcast(
+                session,
+                ctx,
+                subject=subject,
+                body_md=body_md,
+                recipient_user_ids=recipient_user_ids,
+                notification_sink=NotificationService(
+                    session=session,
+                    ctx=ctx,
+                    mailer=NullMailer(),
+                    email_deliveries=SqlAlchemyEmailDeliveryRepository(session),
+                ),
+                broadcast_id=broadcast_id,
+            )
+        except Validation as exc:
+            return ToolResult(
+                call_id=call.id,
+                status_code=422,
+                body={"error": exc.extra.get("error", "validation")},
+                mutated=False,
+            )
+    return ToolResult(
+        call_id=call.id,
+        status_code=200,
+        body={
+            "status": "sent",
+            "recipient_count": len(notification_ids),
+            "notification_ids": list(notification_ids),
+        },
+        mutated=True,
+    )
 
 
 def _dispatch_cancel_task(

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
@@ -97,6 +97,39 @@ function installFetch() {
       },
     },
     { path: "/w/acme/api/v1/properties", respond: { body: [] } },
+    {
+      path: "/w/acme/api/v1/messaging/broadcast/recipients",
+      respond: {
+        body: {
+          data: [
+            {
+              user_id: "usr_worker_1",
+              display_name: "Maya Santos",
+              email: "maya@example.com",
+            },
+            {
+              user_id: "usr_worker_2",
+              display_name: "Ivo Costa",
+              email: "ivo@example.com",
+            },
+          ],
+          total: 2,
+        },
+      },
+    },
+    {
+      path: "/w/acme/api/v1/messaging/broadcast",
+      method: "POST",
+      respond: {
+        body: {
+          status: "pending_approval",
+          recipient_count: 2,
+          notification_ids: [],
+          approval_request_id: "appr_1",
+          expires_at: "2026-05-12T12:00:00Z",
+        },
+      },
+    },
   ]);
 }
 
@@ -133,7 +166,7 @@ afterEach(() => {
 });
 
 describe("<DashboardPage>", () => {
-  it("opens the real new-task dialog and disables broadcast messaging", async () => {
+  it("opens the real new-task and broadcast dialogs", async () => {
     const fake = installFetch();
     try {
       render(<Harness />);
@@ -142,8 +175,35 @@ describe("<DashboardPage>", () => {
       expect(await screen.findByRole("heading", { name: "New task" })).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "More actions" }));
-      expect(screen.getByRole("menuitem", { name: /Broadcast message/ })).toBeDisabled();
-      expect(screen.getByText("Broadcast messaging is not implemented yet.")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("menuitem", { name: /Broadcast message/ }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Broadcast message" });
+      expect(await within(dialog).findByText(/2 recipients/)).toBeInTheDocument();
+      fireEvent.change(within(dialog).getByLabelText("Subject"), {
+        target: { value: "Storm watch" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Body"), {
+        target: { value: "Bring patio furniture inside before 16:00." },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Request approval" }));
+
+      await waitFor(() => {
+        expect(within(dialog).getByRole("status")).toHaveTextContent(
+          "Queued for approval before sending to 2 recipients.",
+        );
+      });
+      expect(screen.queryByText("Broadcast messaging is not implemented yet.")).not.toBeInTheDocument();
+      expect(fake.requests).toContainEqual(
+        expect.objectContaining({
+          method: "POST",
+          path: "/w/acme/api/v1/messaging/broadcast",
+          body: expect.objectContaining({
+            target: "all_staff",
+            confirmed_recipient_count: 2,
+            subject: "Storm watch",
+          }),
+        }),
+      );
     } finally {
       fake.restore();
     }

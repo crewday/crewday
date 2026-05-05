@@ -190,6 +190,26 @@ earlier drafts are subsumed by `approval_needed` / `approval_decided`
 in §10.1 — the approvals subsystem (§11) is the one source of truth
 for both the agent-driven and human-driven branches.
 
+#### §10.5 Manager broadcast messages
+
+`GET /messaging/broadcast/recipients` returns the current workspace
+staff/user preview used by the manager dashboard compose flow:
+owners, live managers/workers, and active work-engagement users,
+excluding archived identities. `POST /messaging/broadcast` requires
+`subject`, `body_md`, `target` (`all_staff` or `selected`),
+`selected_recipient_user_ids`, and `confirmed_recipient_count`; the
+confirmed count must match the server-resolved recipient set so a
+manager explicitly sees the fanout size before submit.
+
+Single-recipient sends execute immediately for callers allowed by
+`messaging.manager_channel` and fan out through `NotificationService`
+with `NotificationKind.agent_message`, producing normal
+`notification`, `email_delivery` (when mail is configured), SSE, push,
+and audit rows. Multi-recipient sends do not fan out immediately:
+they create a replayable `approval_request` row and notify
+owners/managers with `approval_needed`. Approval replay performs the
+same `NotificationService` fanout.
+
 ### `email_opt_out`
 
 | field         | type    | notes                                          |

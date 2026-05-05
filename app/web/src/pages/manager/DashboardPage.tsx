@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
@@ -5,7 +6,7 @@ import { qk } from "@/lib/queryKeys";
 import { useDecideMutation } from "@/lib/useDecideMutation";
 import DeskPage from "@/components/DeskPage";
 import NewTaskButton from "@/components/NewTaskModal";
-import { Avatar, Chip, Loading, Panel, StatCard } from "@/components/common";
+import { Avatar, Checkbox, Chip, Loading, Panel, StatCard } from "@/components/common";
 import { fmtTime } from "@/lib/dates";
 import {
   APPROVAL_RISK_TONE,
@@ -15,10 +16,36 @@ import {
 } from "@/lib/tones";
 import type { DashboardPayload as Dashboard, Me } from "@/types/api";
 
+interface BroadcastRecipient {
+  user_id: string;
+  display_name: string;
+  email: string | null;
+}
+
+interface BroadcastRecipientsResponse {
+  data: BroadcastRecipient[];
+  total: number;
+}
+
+interface BroadcastSendResponse {
+  status: "sent" | "pending_approval";
+  recipient_count: number;
+  notification_ids: string[];
+  approval_request_id: string | null;
+  expires_at: string | null;
+}
+
 export default function DashboardPage() {
   const d = useQuery({ queryKey: qk.dashboard(), queryFn: () => fetchJson<Dashboard>("/api/v1/dashboard") });
   const me = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
   const qc = useQueryClient();
+  const broadcastRef = useRef<HTMLDialogElement>(null);
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
+  const [broadcastTarget, setBroadcastTarget] = useState<"all_staff" | "selected">("all_staff");
+  const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
+  const [broadcastSubject, setBroadcastSubject] = useState("");
+  const [broadcastBody, setBroadcastBody] = useState("");
+  const [broadcastNotice, setBroadcastNotice] = useState<string | null>(null);
 
   const decideApproval = useMutation({
     mutationFn: ({ id, decision }: { id: string; decision: "approve" | "reject" }) =>
@@ -34,6 +61,55 @@ export default function DashboardPage() {
     }),
     alsoInvalidate: [qk.leaves()],
   });
+  const broadcastRecipients = useQuery({
+    queryKey: qk.broadcastRecipients(),
+    queryFn: () =>
+      fetchJson<BroadcastRecipientsResponse>("/api/v1/messaging/broadcast/recipients"),
+    enabled: broadcastOpen,
+  });
+  const recipientCount =
+    broadcastTarget === "all_staff"
+      ? (broadcastRecipients.data?.total ?? 0)
+      : selectedRecipients.length;
+  const sendBroadcast = useMutation({
+    mutationFn: () =>
+      fetchJson<BroadcastSendResponse>("/api/v1/messaging/broadcast", {
+        method: "POST",
+        body: {
+          target: broadcastTarget,
+          selected_recipient_user_ids:
+            broadcastTarget === "selected" ? selectedRecipients : [],
+          confirmed_recipient_count: recipientCount,
+          subject: broadcastSubject.trim(),
+          body_md: broadcastBody.trim(),
+        },
+      }),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: qk.dashboard() });
+      if (result.status === "pending_approval") {
+        setBroadcastNotice(`Queued for approval before sending to ${result.recipient_count} recipients.`);
+        return;
+      }
+      broadcastRef.current?.close();
+    },
+  });
+
+  const resetBroadcast = () => {
+    setBroadcastTarget("all_staff");
+    setSelectedRecipients([]);
+    setBroadcastSubject("");
+    setBroadcastBody("");
+    setBroadcastNotice(null);
+    setBroadcastOpen(false);
+    sendBroadcast.reset();
+  };
+
+  const openBroadcast = () => {
+    setBroadcastNotice(null);
+    sendBroadcast.reset();
+    setBroadcastOpen(true);
+    broadcastRef.current?.showModal();
+  };
 
   if (d.isPending || me.isPending) return <DeskPage title="Dashboard"><Loading /></DeskPage>;
   if (!d.data || !me.data) return <DeskPage title="Dashboard">Failed to load.</DeskPage>;
@@ -59,11 +135,146 @@ export default function DashboardPage() {
       overflow={[
         {
           label: "Broadcast message",
-          onSelect: () => undefined,
-          disabledReason: "Broadcast messaging is not implemented yet.",
+          onSelect: openBroadcast,
         },
       ]}
     >
+      <dialog className="modal modal--sheet" ref={broadcastRef} onClose={resetBroadcast} aria-label="Broadcast message">
+        <form
+          className="modal__body"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!broadcastSubject.trim() || !broadcastBody.trim() || recipientCount < 1) return;
+            sendBroadcast.mutate();
+          }}
+        >
+          <h3 className="modal__title">Broadcast message</h3>
+          <p className="modal__sub">
+            {recipientCount} recipient{recipientCount === 1 ? "" : "s"}
+            {recipientCount > 1 ? " · approval required before fanout" : ""}
+          </p>
+
+          {broadcastNotice && (
+            <div className="form-notice form-notice--success" role="status">
+              {broadcastNotice}
+            </div>
+          )}
+          {sendBroadcast.isError && (
+            <div className="form-notice form-notice--error" role="alert">
+              Broadcast could not be sent.
+            </div>
+          )}
+          {broadcastRecipients.isError && (
+            <div className="form-notice form-notice--error" role="alert">
+              Recipients could not be loaded.
+            </div>
+          )}
+
+          <div className="form" role="radiogroup" aria-label="Broadcast target">
+            <label className="checkbox checkbox--block">
+              <input
+                type="radio"
+                className="checkbox__input"
+                name="broadcast-target"
+                checked={broadcastTarget === "all_staff"}
+                onChange={() => setBroadcastTarget("all_staff")}
+              />
+              <span className="checkbox__box" aria-hidden="true">
+                <svg className="checkbox__tick" viewBox="0 0 18 18">
+                  <path d="M3.8 9.6 L7.4 13 L14.2 5.4" />
+                </svg>
+              </span>
+              <span className="checkbox__label">All staff ({broadcastRecipients.data?.total ?? 0})</span>
+            </label>
+            <label className="checkbox checkbox--block">
+              <input
+                type="radio"
+                className="checkbox__input"
+                name="broadcast-target"
+                checked={broadcastTarget === "selected"}
+                onChange={() => setBroadcastTarget("selected")}
+              />
+              <span className="checkbox__box" aria-hidden="true">
+                <svg className="checkbox__tick" viewBox="0 0 18 18">
+                  <path d="M3.8 9.6 L7.4 13 L14.2 5.4" />
+                </svg>
+              </span>
+              <span className="checkbox__label">Selected recipients ({selectedRecipients.length})</span>
+            </label>
+          </div>
+
+          {broadcastTarget === "selected" && (
+            <div className="task-list task-list--desk" aria-label="Broadcast recipients">
+              {broadcastRecipients.isPending && <div className="empty-state empty-state--quiet">Loading recipients.</div>}
+              {(broadcastRecipients.data?.data ?? []).map((recipient) => (
+                <Checkbox
+                  key={recipient.user_id}
+                  checked={selectedRecipients.includes(recipient.user_id)}
+                  onChange={(e) => {
+                    setSelectedRecipients((prev) =>
+                      e.target.checked
+                        ? [...prev, recipient.user_id]
+                        : prev.filter((id) => id !== recipient.user_id),
+                    );
+                  }}
+                  label={recipient.display_name}
+                  hint={recipient.email ?? undefined}
+                  block
+                />
+              ))}
+            </div>
+          )}
+
+          <label className="field">
+            <span>Subject</span>
+            <input
+              required
+              maxLength={160}
+              value={broadcastSubject}
+              onChange={(e) => setBroadcastSubject(e.target.value)}
+              placeholder="e.g. Storm watch"
+            />
+          </label>
+
+          <label className="field">
+            <span>Body</span>
+            <textarea
+              required
+              rows={6}
+              maxLength={20000}
+              value={broadcastBody}
+              onChange={(e) => setBroadcastBody(e.target.value)}
+              placeholder="Write the message staff will receive."
+            />
+          </label>
+
+          <div className="modal__actions">
+            <button type="button" className="btn btn--ghost" onClick={() => broadcastRef.current?.close()}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn--moss"
+              disabled={
+                sendBroadcast.isPending ||
+                broadcastNotice !== null ||
+                !broadcastSubject.trim() ||
+                !broadcastBody.trim() ||
+                recipientCount < 1
+              }
+            >
+              {sendBroadcast.isPending
+                ? "Sending..."
+                : broadcastNotice !== null
+                  ? "Queued"
+                  : recipientCount > 1
+                    ? "Request approval"
+                    : "Send"}
+            </button>
+          </div>
+        </form>
+      </dialog>
+
       <section className="grid grid--stats">
         <StatCard
           label="Tasks today"

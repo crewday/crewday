@@ -40,7 +40,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 from threading import Lock
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import urlparse
 
 from fastapi import (
@@ -58,18 +58,29 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.messaging.models import Notification, PushToken
-from app.adapters.db.messaging.repositories import SqlAlchemyPushTokenRepository
+from app.adapters.db.messaging.repositories import (
+    SqlAlchemyEmailDeliveryRepository,
+    SqlAlchemyPushTokenRepository,
+)
+from app.adapters.mail.null import NullMailer
 from app.api.deps import current_workspace_context, db_session
 from app.api.messaging.channels import build_channels_router
 from app.api.messaging.messages import build_messages_router
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES, PROBLEM_JSON_CONTENT
 from app.audit import write_audit
+from app.authz.dep import Permission
 from app.domain.errors import (
     Internal,
     NotFound,
     ServiceUnavailable,
     Validation,
 )
+from app.domain.messaging.broadcasts import (
+    BroadcastRecipient,
+    list_broadcast_recipients,
+    send_or_queue_broadcast,
+)
+from app.domain.messaging.notifications import NotificationService
 from app.domain.messaging.push_tokens import (
     MAX_ENDPOINT_LEN,
     EndpointNotAllowed,
@@ -87,6 +98,10 @@ from app.tenancy import WorkspaceContext
 from app.util.clock import SystemClock
 
 __all__ = [
+    "BroadcastRecipientPayload",
+    "BroadcastRecipientsResponse",
+    "BroadcastSendRequest",
+    "BroadcastSendResponse",
     "BulkMarkReadRequest",
     "NotificationListResponse",
     "NotificationPatchRequest",
@@ -171,6 +186,18 @@ class PushTokenUnavailableRequest(BaseModel):
     app_version: str | None = Field(default=None, max_length=64)
 
 
+class BroadcastSendRequest(BaseModel):
+    """Request body for ``POST /broadcast``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target: Literal["all_staff", "selected"]
+    selected_recipient_user_ids: list[str] = Field(default_factory=list, max_length=500)
+    confirmed_recipient_count: int = Field(ge=1, le=500)
+    subject: str = Field(min_length=1, max_length=160, pattern=r"\S")
+    body_md: str = Field(min_length=1, max_length=20_000, pattern=r"\S")
+
+
 # ---------------------------------------------------------------------------
 # Response schemas
 # ---------------------------------------------------------------------------
@@ -253,6 +280,39 @@ class VapidKeyPayload(BaseModel):
     """
 
     key: str
+
+
+class BroadcastRecipientPayload(BaseModel):
+    """One current-workspace staff/user visible in broadcast preview."""
+
+    user_id: str
+    display_name: str
+    email: str | None
+
+    @classmethod
+    def from_view(cls, view: BroadcastRecipient) -> BroadcastRecipientPayload:
+        return cls(
+            user_id=view.user_id,
+            display_name=view.display_name,
+            email=view.email,
+        )
+
+
+class BroadcastRecipientsResponse(BaseModel):
+    """Recipient preview envelope for dashboard broadcast compose."""
+
+    data: list[BroadcastRecipientPayload]
+    total: int
+
+
+class BroadcastSendResponse(BaseModel):
+    """Result of a broadcast send attempt."""
+
+    status: str
+    recipient_count: int
+    notification_ids: list[str]
+    approval_request_id: str | None
+    expires_at: str | None
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +481,32 @@ def _mark_notification(
     return row
 
 
+def _notification_service(
+    request: Request,
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    event_bus: EventBus | None,
+) -> NotificationService:
+    mailer = getattr(request.app.state, "mailer", None)
+    resolved_mailer = mailer if mailer is not None else NullMailer()
+    email_deliveries = SqlAlchemyEmailDeliveryRepository(session)
+    if event_bus is None:
+        return NotificationService(
+            session=session,
+            ctx=ctx,
+            mailer=resolved_mailer,
+            email_deliveries=email_deliveries,
+        )
+    return NotificationService(
+        session=session,
+        ctx=ctx,
+        mailer=resolved_mailer,
+        bus=event_bus,
+        email_deliveries=email_deliveries,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
@@ -443,6 +529,72 @@ def build_messaging_router(
     r = APIRouter(tags=["messaging"], responses=IDENTITY_PROBLEM_RESPONSES)
     r.include_router(build_channels_router())
     r.include_router(build_messages_router(event_bus=event_bus))
+    broadcast_gate = Depends(
+        Permission("messaging.manager_channel", scope_kind="workspace")
+    )
+
+    @r.get(
+        "/broadcast/recipients",
+        response_model=BroadcastRecipientsResponse,
+        operation_id="messaging.broadcast.recipients",
+        summary="Preview broadcast recipients",
+        dependencies=[broadcast_gate],
+        openapi_extra={"x-cli": {"group": "messaging", "verb": "broadcast-recipients"}},
+    )
+    def get_broadcast_recipients(
+        ctx: _Ctx,
+        session: _Db,
+    ) -> BroadcastRecipientsResponse:
+        recipients = list_broadcast_recipients(session, ctx)
+        data = [BroadcastRecipientPayload.from_view(view) for view in recipients]
+        return BroadcastRecipientsResponse(data=data, total=len(data))
+
+    @r.post(
+        "/broadcast",
+        response_model=BroadcastSendResponse,
+        operation_id="messaging.broadcast.send",
+        summary="Send or request approval for a broadcast message",
+        dependencies=[broadcast_gate],
+        openapi_extra={
+            "x-agent-confirm": {
+                "summary": "Send broadcast *{subject}*?",
+                "risk": "medium",
+                "fields_to_show": ["subject", "target", "confirmed_recipient_count"],
+                "verb": "Send broadcast message",
+            },
+            "x-cli": {"group": "messaging", "verb": "broadcast-send"},
+        },
+    )
+    def post_broadcast(
+        request: Request,
+        body: BroadcastSendRequest,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> BroadcastSendResponse:
+        service = _notification_service(
+            request,
+            session,
+            ctx,
+            event_bus=event_bus,
+        )
+        outcome = send_or_queue_broadcast(
+            session,
+            ctx,
+            target=body.target,
+            selected_recipient_user_ids=body.selected_recipient_user_ids,
+            confirmed_recipient_count=body.confirmed_recipient_count,
+            subject=body.subject,
+            body_md=body.body_md,
+            notification_sink=service,
+            approval_notification_sink=service,
+        )
+        return BroadcastSendResponse(
+            status=outcome.status,
+            recipient_count=outcome.recipient_count,
+            notification_ids=list(outcome.notification_ids),
+            approval_request_id=outcome.approval_request_id,
+            expires_at=outcome.expires_at_iso,
+        )
 
     @r.get(
         "/notifications",
