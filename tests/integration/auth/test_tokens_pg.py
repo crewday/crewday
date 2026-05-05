@@ -1111,7 +1111,12 @@ class TestAuditTimelineHttp:
         assert "api_token.minted" in actions
         first = entries[0]
         # The wire shape mirrors the SPA's `ApiTokenAuditEntry`.
-        assert set(first.keys()) == {"at", "action", "actor_id", "correlation_id"}
+        base_fields = {"at", "action", "actor_id", "correlation_id"}
+        request_fields = {"method", "path", "status", "ip_prefix", "user_agent"}
+        assert set(first.keys()) == base_fields | request_fields
+        assert {name: first[name] for name in request_fields} == {
+            name: None for name in request_fields
+        }
         assert first["actor_id"] == seeded_ctx.actor_id
 
     def test_audit_returns_full_lifecycle_newest_first(
