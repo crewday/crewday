@@ -18,7 +18,7 @@ from app.adapters.db.assets.bootstrap import seed_asset_type_catalog
 from app.adapters.db.authz.bootstrap import seed_owners_system_group
 from app.adapters.db.identity.models import User, canonicalise_email
 from app.adapters.db.workspace.models import Workspace
-from app.domain.identity.user_workspace_refresh import reconcile_user_workspace
+from app.domain.identity.user_workspace_refresh import reconcile_user_workspace_for
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -205,8 +205,8 @@ def bootstrap_workspace(
         )
         seed_asset_type_catalog(session, ctx, clock=clock)
     # The derived ``user_workspace`` row materialises through
-    # :func:`reconcile_user_workspace` (cd-yqm4): the production
-    # worker runs this reconciler every
+    # :func:`reconcile_user_workspace_for` (cd-yqm4): the production
+    # worker runs the global reconciler every
     # :data:`~app.worker.scheduler.USER_WORKSPACE_REFRESH_INTERVAL_SECONDS`
     # seconds, but the test harness has no worker — so we drive the
     # reconciler synchronously here so downstream tests see the
@@ -214,5 +214,10 @@ def bootstrap_workspace(
     # before cd-yqm4 removed the inline write. The reconciler runs
     # ``tenant_agnostic`` internally so this call is safe outside
     # the bracket above.
-    reconcile_user_workspace(session, now=now)
+    reconcile_user_workspace_for(
+        session,
+        user_id=owner_user_id,
+        workspace_id=workspace_id,
+        now=now,
+    )
     return workspace

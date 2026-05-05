@@ -248,6 +248,65 @@ def captured_api_token_events() -> Iterator[list[ApiTokenLifecycleEvent]]:
         default_event_bus._reset_for_tests()
 
 
+def test_bootstrap_workspace_reconciles_only_seeded_owner(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """The fixture bootstrap must not global-refresh unrelated suite residue."""
+    tag = new_ulid()[-8:].lower()
+
+    with session_factory() as s:
+        unrelated_user = bootstrap_user(
+            s,
+            email=f"unrelated-{tag}@example.com",
+            display_name="Unrelated",
+        )
+        with tenant_agnostic():
+            unrelated_ws_id = new_ulid()
+            s.add(
+                Workspace(
+                    id=unrelated_ws_id,
+                    slug=f"unrelated-{tag}",
+                    name="Unrelated",
+                    plan="free",
+                    quota_json={},
+                    created_at=_PINNED,
+                )
+            )
+            s.flush()
+            s.add(
+                RoleGrant(
+                    id=new_ulid(),
+                    workspace_id=unrelated_ws_id,
+                    user_id=unrelated_user.id,
+                    grant_role="manager",
+                    scope_property_id=None,
+                    created_at=_PINNED,
+                    created_by_user_id=None,
+                )
+            )
+            s.flush()
+
+        owner = bootstrap_user(
+            s,
+            email=f"owner-{tag}@example.com",
+            display_name="Owner",
+        )
+        ws = bootstrap_workspace(
+            s,
+            slug=f"owner-{tag}",
+            name="Owner",
+            owner_user_id=owner.id,
+        )
+
+        with tenant_agnostic():
+            owner_row = s.get(UserWorkspace, (owner.id, ws.id))
+            unrelated_row = s.get(UserWorkspace, (unrelated_user.id, unrelated_ws_id))
+
+        assert owner_row is not None
+        assert owner_row.source == "workspace_grant"
+        assert unrelated_row is None
+
+
 # ---------------------------------------------------------------------------
 # End-to-end happy path
 # ---------------------------------------------------------------------------
