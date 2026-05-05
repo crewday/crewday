@@ -1911,7 +1911,7 @@ POST   /scheduler/tasks/{id}/reschedule  # manager-only inline edit from /schedu
                                          #     approved-override boundaries with
                                          #     422 `availability_conflict`. Emits
                                          #     `task.updated` SSE.
-POST   /scheduler/tasks/{id}/reassign    # body: {assigned_user_id}. Runs the §06
+POST   /scheduler/tasks/{id}/reassign    # body: {assignee_user_id}. Runs the §06
                                          #   availability precedence stack; 422
                                          #   `availability_conflict` if the new
                                          #   assignee is not available for

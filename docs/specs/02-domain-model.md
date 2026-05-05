@@ -250,7 +250,7 @@ erDiagram
 Entities in the diagram but not detailed inline here have their
 columns defined in the section referenced in the catalog below.
 `task_assignment` is not an entity — task assignment is captured as
-`occurrence.assigned_user_id` (see §06). Worker-facing operational policy
+`occurrence.assignee_user_id` (see §06). Worker-facing operational policy
 is resolved through the structured settings cascade below; there is
 no separate runtime "capability" resolver. Authority
 (who-may-do-what) lives on the `permission_rule` + action
@@ -1876,7 +1876,7 @@ The unified `search.search_tasks(q, scope)` interface returns rows
 ranked by a simple weighted sum:
 
 - title: weight 4
-- checklist item text: weight 2
+- checklist item label: weight 2
 - description_md: weight 2
 - completion_note_md: weight 1
 - comment.body_md: weight 1

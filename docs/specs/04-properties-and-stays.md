@@ -292,7 +292,7 @@ edits, and show in the UI as coherent groups. **Edit semantics:**
 - For `after_checkout` bundles: if
   `|new.check_out_at - old.check_out_at| < 4h` **and** the stay is
   not yet in `checked_out` state: patch `scheduled_for_local`,
-  `scheduled_for_utc`, `due_by_utc`, and `assigned_user_id` on
+  `scheduled_for_utc`, `due_by_utc`, and `assignee_user_id` on
   the existing bundle's tasks in place (state-gated to
   `scheduled | pending`).
 - For `before_checkin` bundles: same logic keyed on
@@ -542,9 +542,11 @@ A tokenized URL shared with each guest. No login. Read-only.
 - House rules.
 - Trash/recycling schedule.
 - Local tips (markdown from property or manager-overridden per stay).
-- **Check-out checklist** — a subset of the stay task bundle's
-  checklist flagged `guest_visible = true`, rendered as a simple
-  "Before you leave:" list.
+- **Check-out checklist** — a future stay-lifecycle projection of
+  guest-visible checklist lines, rendered as a simple "Before you
+  leave:" list. This is not a current `checklist_item` column; the
+  task checklist schema remains the §06 `label` / `position` /
+  `requires_photo` / `checked` shape.
 - Emergency contacts.
 - A "Report an issue" button that opens a mailto link to the manager.
 - **Equipment** — when `assets.show_guest_assets` is `true` for the

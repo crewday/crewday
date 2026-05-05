@@ -1957,7 +1957,7 @@ Response:
   "preview_id": "nlp_…",
   "resolved": {
     "property_id": "prop_…",
-    "assigned_user_id": "usr_…",
+    "assignee_user_id": "usr_…",
     "template": {…},
     "schedule": { "rrule": "FREQ=WEEKLY;BYDAY=TU", … }
   },

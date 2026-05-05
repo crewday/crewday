@@ -134,7 +134,7 @@ fix the offender.
   visible.
 - **Assignment.** The linkage of a user to a work_role+property
   (`property_work_role_assignment`) and, per task, the pointer
-  `occurrence.assigned_user_id`. There is no separate `task_assignment`
+  `occurrence.assignee_user_id`. There is no separate `task_assignment`
   entity — task assignment is just a column.
 - **Audit log.** Append-only ledger of all state-changing actions.
 - **Availability override.** A date-specific override of a user's
@@ -158,8 +158,9 @@ fix the offender.
   fair | poor | needs_replacement`. Changes are audit-logged as
   `asset.condition_changed`. See §21.
 - **Checklist item.** A row in `checklist_item` — one tickable
-  line on a task, seeded from the template's
-  `checklist_template_json`. Per-item tick state is authoritative.
+  line on a task, seeded from the template's checklist rows. The
+  `checklist_template_json` value is a client editing cache; per-item
+  tick state is authoritative on `checklist_item`.
 - **Client (grant role).** A user granted read-visibility to data
   they are billed for, plus the ability to accept/reject quotes
   and invoices tied to them. Held via a `role_grants` row with
@@ -496,8 +497,9 @@ fix the offender.
   next hour (or already past for a one-off). Distinct from
   `scheduled`; used to populate the worker "today" list (§06).
 - **Personal task.** A task with `is_personal = true`: visible only to
-  the `created_by` user and workspace owners; hidden from non-owner
-  managers, team dashboards, reports, and audit surfaces. Created via
+  the user identified by `created_by_user_id` and workspace owners;
+  hidden from non-owner managers, team dashboards, reports, and audit
+  surfaces. Created via
   quick-add on `/today` or `/schedule` where personal is the default; the
   creator may flip "share to team" before submitting. See §06
   "Self-created and personal tasks" and §15 "Personal task visibility".

@@ -43,7 +43,7 @@ their bundles.
 | listed_property_ids            | ULID[]    |                                       |
 | area_scope                     | enum      | `any | one | listed | derived`        |
 | listed_area_ids                | ULID[]    |                                       |
-| checklist_template_json        | jsonb     | list of checklist items; see "Checklist template shape" below |
+| checklist_template_json        | jsonb     | client editing cache for checklist items; authoritative rows live in `checklist_template_item` |
 | photo_evidence                 | enum      | `disabled | optional | required`      |
 | linked_instruction_ids         | ULID[]    | §07                                   |
 | priority                       | enum      | `low | normal | high | urgent`        |
@@ -54,14 +54,18 @@ their bundles.
 
 ### Checklist template shape
 
-`checklist_template_json` is a JSON array of items. Each item is:
+The current database stores implemented template checklist columns in
+`checklist_template_item` (`label`, `position`, `requires_photo`);
+`checklist_template_json` mirrors the editable item shape for clients.
+The `key`, `rrule`, and `dtstart_local` metadata below remain in that
+JSON cache until a follow-up migration promotes them to row columns.
+Each item is:
 
 ```json
 {
   "key": "clean_fridge",
-  "text": "Clean the fridge",
-  "required": true,
-  "guest_visible": false,
+  "label": "Clean the fridge",
+  "requires_photo": false,
   "rrule": "FREQ=MONTHLY;BYMONTHDAY=1",
   "dtstart_local": "2026-01-01"
 }
@@ -73,8 +77,8 @@ Field semantics:
   checklist). Used by §21 `asset_action.checklist_item_key` and by
   reports so two revisions of the same item stay identifiable across
   edits.
-- **`text`**, **`required`**, **`guest_visible`** — as on
-  `checklist_item` (see "Checklist items" below).
+- **`label`**, **`requires_photo`** — copied onto
+  `checklist_item` rows (see "Checklist items" below).
 - **`rrule`** (optional, RFC 5545) — calendar-anchored recurrence
   filter. When present, the item is materialised onto a generated
   task **only** if the task's `scheduled_for_local.date()` is an
@@ -92,14 +96,14 @@ Field semantics:
 **Ad-hoc tasks always include every item**, regardless of RRULE —
 the RRULE filter applies only when the materialising path has a
 stable calendar anchor (a schedule or a stay). Items materialised
-from an RRULE-filtered template carry the same text and `required`
-flags as the template line; the RRULE is a **visibility filter**,
-not a per-item state machine. A task whose generated date matches
-no item's RRULE still materialises (with only the no-RRULE items,
-if any); the task is not itself skipped.
+from an RRULE-filtered template carry the same `label` and
+`requires_photo` values as the template line; the RRULE is a
+**visibility filter**, not a per-item state machine. A task whose
+generated date matches no item's RRULE still materialises (with only
+the no-RRULE items, if any); the task is not itself skipped.
 
 **Authoring UI (§14).** The template editor exposes two views:
-*Simple* (checkbox + `required` + "appears every N occurrences /
+*Simple* (photo-required toggle + "appears every N occurrences /
 every N weeks / monthly / …") that compiles to an RRULE, and
 *Advanced* (raw RRULE field with a live "next 8 occurrences"
 preview). Behaviour is identical; both write the same RRULE string.
@@ -212,13 +216,13 @@ triggered — is one `occurrence` row. The schema:
 | checklist_snapshot_json      | jsonb     | initial snapshot from template; authoritative list is in `checklist_item` rows |
 | linked_instruction_ids       | ULID[]    |                                               |
 | expected_role_id             | ULID FK?  |                                               |
-| assigned_user_id             | ULID FK?  | null = unassigned                             |
+| assignee_user_id             | ULID FK?  | null = unassigned                             |
 | completed_at                 | tstz?     |                                               |
 | completed_by_user_id         | ULID FK?  |                                               |
 | completion_note_md           | text?     |                                               |
 | skipped_reason               | text?     |                                               |
 | cancellation_reason          | text?     |                                               |
-| created_by                   | ULID FK   | user who originated the task (NOT NULL)       |
+| created_by_user_id           | ULID FK?  | user who originated the task; null only for pre-migration/generated rows |
 | is_personal                  | bool      | task is private to creator + workspace owners. Column default is `false` (used by scheduled/imported tasks and any direct `POST /api/v1/tasks` without an explicit flag). The quick-add UI on `/today` and `/schedule` supplies `true` explicitly — see "Self-created and personal tasks" below. |
 | llm_generated                | bool      | created by an agent                           |
 | llm_correlation_id           | ULID?     | if llm_generated                              |
@@ -236,7 +240,7 @@ in the workspace. State-machine columns (`state`, `overdue_since`,
 `completed_at`, `completed_by_user_id`, `completion_note_md`,
 `skipped_reason`, `cancellation_reason`) move only through the
 dedicated verbs (`/start`, `/complete`, `/skip`, `/cancel`);
-assignment columns (`assigned_user_id`) move through `/assign`.
+assignment columns (`assignee_user_id`) move through `/assign`.
 Successful PATCH emits `task.updated` SSE so subscribed clients
 refresh.
 
@@ -697,9 +701,8 @@ During generation (step 5, above):
 From the worker PWA: tap → "Mark done". If `photo_evidence =
 required`, the camera picker opens; the file is uploaded and linked
 before state flips. If the resolved setting
-`tasks.checklist_required = true`,
-every `checklist_item` with `required = true` must have
-`completed_at` set.
+`tasks.checklist_required = true`, every `checklist_item` row must have
+`checked = true`.
 
 Server-side:
 
@@ -726,22 +729,21 @@ Server-side:
 ## Checklist items
 
 `checklist_item` is the authoritative list of ticks for a task. The
-template's `checklist_template_json` seeds the items at task creation
-and is then denormalized into rows so each tick carries its own
-timestamp and actor.
+template's `checklist_template_item` rows seed the items at task
+creation, with `checklist_template_json` acting only as the client
+editing cache. Each tick carries its own timestamp.
 
 | field               | type     | notes                                   |
 |---------------------|----------|-----------------------------------------|
 | id                  | ULID PK  |                                         |
 | workspace_id        | ULID FK  |                                         |
 | occurrence_id       | ULID FK  | parent task row (`occurrence.id`)       |
-| ordinal             | int      | display order                           |
-| text                | text     | the line as it appears to the worker    |
-| required            | bool     | if `tasks.checklist_required = true`, all required items must be ticked to complete |
-| guest_visible       | bool     | surfaced on the guest welcome page for stay task bundles (§04) |
-| completed_at        | tstz?    |                                         |
-| completed_by_user_id | ULID FK? |                                        |
-| note                | text?    | optional per-item note                  |
+| position            | int      | display order                           |
+| label               | text     | the line as it appears to the worker    |
+| requires_photo      | bool     | per-item photo required before completion |
+| checked             | bool     | tick state                              |
+| checked_at          | tstz?    | when the item was ticked                |
+| evidence_blob_hash  | text?    | per-item photo blob hash, when present  |
 
 Ticking an item is an idempotent PATCH; untick is allowed while the
 parent task is not yet terminal. An item row is also created when an
@@ -760,8 +762,9 @@ audits `task.checklist.evidence.add`. Like the tick / untick PATCH, it
 is rejected once the parent task is terminal.
 
 **Seeding is RRULE-filtered.** At task generation, the bundle/schedule
-worker expands `task_template.checklist_template_json` into
-`checklist_item` rows by evaluating each item's optional
+worker expands the template's checklist rows into `checklist_item`
+rows. Once `rrule` metadata is promoted from the JSON cache into the
+row model, generation evaluates each item's optional
 `rrule` against the task's `scheduled_for_local.date()` (see "Checklist
 template shape" above). Items whose RRULE does not match on that date
 are **not** inserted for this task. Items with no RRULE are always
@@ -1103,11 +1106,12 @@ workers — see §05 action catalog) may originate a task via
 `POST /api/v1/tasks` or the quick-add modal available on `/today` and
 `/schedule`.
 
-The quick-add default is `is_personal = true, assigned_user_id =
-created_by` (self-assigned). The user may flip "share to team" before
+The quick-add default is `is_personal = true, assignee_user_id =
+created_by_user_id` (self-assigned). The user may flip "share to team" before
 submitting, which sets `is_personal = false` and optionally re-assigns
 to another user. Once created, the `is_personal` flag can only be
-changed by the `created_by` user or a workspace owner.
+changed by the creator identified in `created_by_user_id` or a
+workspace owner.
 
 Personal tasks (`is_personal = true`) are not visible to non-owner
 managers, team dashboards, or reports. Visibility rule lives in §15
