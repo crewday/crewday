@@ -306,12 +306,12 @@ def test_owner_invites_worker_and_worker_completes_first_task(
         mark_done = invitee_page.get_by_role("button", name="Mark done")
         expect(mark_done).to_be_visible(timeout=15_000)
         complete_url = (
-            f"{base_url.rstrip('/')}/w/{workspace_slug}"
-            f"/api/v1/tasks/{task_id}/complete"
+            f"{base_url.rstrip('/')}/w/{workspace_slug}/api/v1/tasks/{task_id}/complete"
         )
         with invitee_page.expect_response(
-            lambda response: response.request.method == "POST"
-            and response.url == complete_url
+            lambda response: (
+                response.request.method == "POST" and response.url == complete_url
+            )
         ) as complete_response_info:
             mark_done.click()
         complete_resp = complete_response_info.value
@@ -517,6 +517,7 @@ def _post_json(
     if not isinstance(payload, dict):
         raise AssertionError(f"{url} returned non-object JSON: {payload!r}")
     return payload
+
 
 def _poll_task_state_via_page(
     page: Page,

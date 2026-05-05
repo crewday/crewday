@@ -30,7 +30,7 @@ bring compose up first.
 
 Use the compose command above for passkey tests. `./scripts/dev-stack-up.sh`
 starts the normal dev stack only, which advertises `rp_id=dev.crew.day`;
-the e2e preflight fails with the same command when `CREWDAY_E2E_BASE_URL`
+the e2e preflight skips with the same command when `CREWDAY_E2E_BASE_URL`
 is `http://localhost:8100`.
 
 ## Why `localhost`, not `127.0.0.1`
