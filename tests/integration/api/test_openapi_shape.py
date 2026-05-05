@@ -218,6 +218,32 @@ class TestOpenapiIntegration:
         assert "application/problem+json" in response["content"]
         assert "application/json" not in response["content"]
 
+    def test_tasks_approval_required_responses_match_runtime_envelope(
+        self, pinned_settings: Settings, real_make_uow: None
+    ) -> None:
+        """Task routes that can mint approvals document the 409 envelope."""
+        resp = _client(pinned_settings).get("/api/openapi.json")
+        paths = resp.json()["paths"]
+
+        for path, method in (
+            ("/w/{slug}/api/v1/tasks", "post"),
+            ("/w/{slug}/api/v1/tasks/{task_id}/assign", "post"),
+            ("/w/{slug}/api/v1/tasks/{task_id}/cancel", "post"),
+        ):
+            response = paths[path][method]["responses"]["409"]
+            assert response["description"] == "Approval required"
+            assert "application/problem+json" in response["content"]
+            assert "application/json" not in response["content"]
+            problem_schema = response["content"]["application/problem+json"]["schema"]
+            assert problem_schema["properties"]["error"] == {
+                "const": "approval_required",
+                "type": "string",
+            }
+            assert "approval_request_id" in problem_schema["required"]
+            assert problem_schema["properties"]["approval_request_id"] == {
+                "type": "string"
+            }
+
     def test_stays_welcome_gone_response_matches_runtime_envelope(
         self, pinned_settings: Settings, real_make_uow: None
     ) -> None:

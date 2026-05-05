@@ -168489,7 +168489,14 @@
                 "schema": {
                   "additionalProperties": true,
                   "properties": {
+                    "approval_request_id": {
+                      "type": "string"
+                    },
                     "detail": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "const": "approval_required",
                       "type": "string"
                     },
                     "errors": {
@@ -168497,6 +168504,17 @@
                         "type": "object"
                       },
                       "type": "array"
+                    },
+                    "expires_at": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "instance": {
                       "type": "string"
@@ -168512,6 +168530,8 @@
                     }
                   },
                   "required": [
+                    "approval_request_id",
+                    "error",
                     "instance",
                     "status",
                     "title",
@@ -168521,7 +168541,7 @@
                 }
               }
             },
-            "description": "Conflict"
+            "description": "Approval required"
           },
           "410": {
             "content": {
@@ -178249,7 +178269,14 @@
                 "schema": {
                   "additionalProperties": true,
                   "properties": {
+                    "approval_request_id": {
+                      "type": "string"
+                    },
                     "detail": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "const": "approval_required",
                       "type": "string"
                     },
                     "errors": {
@@ -178257,6 +178284,17 @@
                         "type": "object"
                       },
                       "type": "array"
+                    },
+                    "expires_at": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "instance": {
                       "type": "string"
@@ -178272,6 +178310,8 @@
                     }
                   },
                   "required": [
+                    "approval_request_id",
+                    "error",
                     "instance",
                     "status",
                     "title",
@@ -178281,7 +178321,7 @@
                 }
               }
             },
-            "description": "Conflict"
+            "description": "Approval required"
           },
           "410": {
             "content": {
@@ -178793,7 +178833,14 @@
                 "schema": {
                   "additionalProperties": true,
                   "properties": {
+                    "approval_request_id": {
+                      "type": "string"
+                    },
                     "detail": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "const": "approval_required",
                       "type": "string"
                     },
                     "errors": {
@@ -178801,6 +178848,17 @@
                         "type": "object"
                       },
                       "type": "array"
+                    },
+                    "expires_at": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "instance": {
                       "type": "string"
@@ -178816,6 +178874,8 @@
                     }
                   },
                   "required": [
+                    "approval_request_id",
+                    "error",
                     "instance",
                     "status",
                     "title",
@@ -178825,7 +178885,7 @@
                 }
               }
             },
-            "description": "Conflict"
+            "description": "Approval required"
           },
           "410": {
             "content": {

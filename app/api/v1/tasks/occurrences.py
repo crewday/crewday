@@ -13,7 +13,7 @@ on the local ``router`` and is included via ``include_router`` from
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Final, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Query, Request, status
@@ -27,6 +27,7 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
+from app.api.v1._problem_json import APPROVAL_REQUIRED_PROBLEM_RESPONSE
 from app.authz import ApprovalRequired, require
 from app.authz import PermissionDenied as AuthzPermissionDenied
 from app.authz.approval_mint import mint_and_envelope_for_http
@@ -80,6 +81,9 @@ from .payloads import (
 )
 
 router = APIRouter()
+_APPROVAL_REQUIRED_RESPONSES: Final[dict[int | str, dict[str, Any]]] = {
+    status.HTTP_409_CONFLICT: APPROVAL_REQUIRED_PROBLEM_RESPONSE
+}
 
 _OccurrenceState = Literal[
     "scheduled",
@@ -378,6 +382,7 @@ def patch_task_checklist_item_route(
 @router.post(
     "/{task_id}/assign",
     response_model=AssignmentPayload,
+    responses=_APPROVAL_REQUIRED_RESPONSES,
     operation_id="assign_task",
     summary="Assign a task to a specific user",
 )
@@ -524,6 +529,7 @@ def skip_task_route(
 @router.post(
     "/{task_id}/cancel",
     response_model=TaskStatePayload,
+    responses=_APPROVAL_REQUIRED_RESPONSES,
     operation_id="cancel_task",
     summary="Cancel a task with a reason (manager / owner only)",
 )

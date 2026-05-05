@@ -25,6 +25,7 @@ from __future__ import annotations
 from typing import Any, Final
 
 __all__ = [
+    "APPROVAL_REQUIRED_PROBLEM_RESPONSE",
     "IDENTITY_PROBLEM_RESPONSES",
     "PROBLEM_JSON_CONTENT",
 ]
@@ -52,6 +53,33 @@ _PROBLEM_JSON_SCHEMA: Final[dict[str, Any]] = {
 
 PROBLEM_JSON_CONTENT: Final[dict[str, Any]] = {
     "application/problem+json": {"schema": _PROBLEM_JSON_SCHEMA},
+}
+
+_APPROVAL_REQUIRED_SCHEMA: Final[dict[str, Any]] = {
+    **_PROBLEM_JSON_SCHEMA,
+    "properties": {
+        **_PROBLEM_JSON_SCHEMA["properties"],
+        "error": {"type": "string", "const": "approval_required"},
+        "approval_request_id": {"type": "string"},
+        "expires_at": {
+            "anyOf": [
+                {"type": "string", "format": "date-time"},
+                {"type": "null"},
+            ]
+        },
+    },
+    "required": [
+        *_PROBLEM_JSON_SCHEMA["required"],
+        "error",
+        "approval_request_id",
+    ],
+}
+
+APPROVAL_REQUIRED_PROBLEM_RESPONSE: Final[dict[str, Any]] = {
+    "description": "Approval required",
+    "content": {
+        "application/problem+json": {"schema": _APPROVAL_REQUIRED_SCHEMA},
+    },
 }
 
 

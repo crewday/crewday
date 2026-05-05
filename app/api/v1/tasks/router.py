@@ -15,7 +15,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, status
 
-from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1._problem_json import (
+    APPROVAL_REQUIRED_PROBLEM_RESPONSE,
+    IDENTITY_PROBLEM_RESPONSES,
+)
 
 from .comments import router as comments_router
 from .evidence import router as evidence_router
@@ -67,6 +70,7 @@ router.post(
     "",
     status_code=status.HTTP_201_CREATED,
     response_model=TaskPayload,
+    responses={status.HTTP_409_CONFLICT: APPROVAL_REQUIRED_PROBLEM_RESPONSE},
     operation_id="create_task",
     summary="Create a one-off task",
 )(_create_task_route)
