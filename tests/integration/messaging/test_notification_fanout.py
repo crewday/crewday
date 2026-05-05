@@ -28,9 +28,11 @@ See ``docs/specs/10-messaging-notifications.md`` §"Channels" and
 
 from __future__ import annotations
 
+import ast
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -64,6 +66,7 @@ pytestmark = pytest.mark.integration
 
 
 _PINNED = datetime(2026, 4, 24, 12, 0, 0, tzinfo=UTC)
+_APP_ROOT = Path(__file__).resolve().parents[3] / "app"
 
 
 # Messaging tables are workspace-scoped; a sibling unit test's autouse
@@ -125,6 +128,46 @@ class FakePushQueue:
                 payload=dict(payload),
             )
         )
+
+
+# ---------------------------------------------------------------------------
+# Emit-site coverage
+# ---------------------------------------------------------------------------
+
+
+def _notification_kind_name(node: ast.AST) -> str | None:
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "NotificationKind"
+    ):
+        return node.attr
+    return None
+
+
+def _app_emit_site_kinds() -> frozenset[str]:
+    kinds: set[str] = set()
+    for path in sorted(_APP_ROOT.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            for keyword in node.keywords:
+                if keyword.arg != "kind":
+                    continue
+                if kind_name := _notification_kind_name(keyword.value):
+                    kinds.add(kind_name)
+    return frozenset(kinds)
+
+
+def test_every_notification_kind_has_app_emit_site() -> None:
+    emit_site_kinds = _app_emit_site_kinds()
+    enum_kinds = frozenset(kind.name for kind in NotificationKind)
+    assert emit_site_kinds == enum_kinds, (
+        "NotificationKind emit-site drift: "
+        f"missing_emit_sites={sorted(enum_kinds - emit_site_kinds)}, "
+        f"unknown_emit_site_kinds={sorted(emit_site_kinds - enum_kinds)}."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -389,6 +432,33 @@ class TestFanoutEndToEnd:
                     ),
                 },
                 "Pool clean missed its scheduled window",
+            ),
+            (
+                NotificationKind.DAILY_DIGEST,
+                {
+                    "subject": "Your crew.day daily digest",
+                    "body_md": "Today you have 2 tasks and 1 upcoming stay.",
+                },
+                "Your crew.day daily digest",
+            ),
+            (
+                NotificationKind.PRIVACY_EXPORT_READY,
+                {
+                    "recipient_display_name": "Recipient",
+                    "download_url": "memory://privacy/export.zip",
+                    "expires_at": "2026-04-25T12:00:00+00:00",
+                },
+                "Your crew.day data export is ready",
+            ),
+            (
+                NotificationKind.WEBHOOK_AUTO_PAUSED,
+                {
+                    "subscription_id": "webhook-1",
+                    "subscription_name": "Task completed receiver",
+                    "observed_deliveries": 3,
+                    "webhook_health_window_h": 24,
+                },
+                "Task completed receiver",
             ),
         ],
     )
