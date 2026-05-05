@@ -9,15 +9,7 @@ import * as preferences from "@/lib/preferences";
 import AssetDetailPage from "./AssetDetailPage";
 import appSource from "../../App.tsx?raw";
 import type { AssetAction, AssetDetailPayload } from "@/types/api";
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status >= 200 && status < 300 ? "OK" : "Error",
-    text: async () => JSON.stringify(body),
-  } as unknown as Response;
-}
+import { jsonResponse } from "@/test/helpers";
 
 const ACTION: AssetAction = {
   id: "act_filter",

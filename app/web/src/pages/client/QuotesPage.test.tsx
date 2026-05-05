@@ -8,15 +8,7 @@ import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
 import * as preferences from "@/lib/preferences";
 import type { Me } from "@/types/api";
 import QuotesPage from "./QuotesPage";
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status >= 200 && status < 300 ? "OK" : "Error",
-    text: async () => JSON.stringify(body),
-  } as unknown as Response;
-}
+import { installFetchRouteHandlers } from "@/test/helpers";
 
 function mePayload(overrides: Partial<Me> = {}): Me {
   return {
@@ -91,42 +83,45 @@ function installFetch(
     pendingApproval?: boolean;
   } = {},
 ) {
+  // code-health: ignore[nloc] Route fixtures stay local; shared fetch mechanics live in test/helpers.
   let quoteListCalls = 0;
-  const requests: Array<{ url: string; method: string; body: unknown }> = [];
-  const original = globalThis.fetch;
-  const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    const resolved = typeof url === "string" ? url : url.toString();
-    const method = init?.method ?? "GET";
-    const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
-    requests.push({ url: resolved, method, body });
-    if (resolved === "/api/v1/auth/me") {
-      return jsonResponse({
-        user_id: "usr_client",
-        display_name: "Clara Client",
-        email: "clara@example.com",
-        available_workspaces: [],
-        current_workspace_id: "ws_agency",
-      });
-    }
-    if (resolved === "/api/v1/me/workspaces") {
-      return jsonResponse([
-        {
+  const env = installFetchRouteHandlers([
+    {
+      path: "/api/v1/auth/me",
+      respond: {
+        body: {
+          user_id: "usr_client",
+          display_name: "Clara Client",
+          email: "clara@example.com",
+          available_workspaces: [],
+          current_workspace_id: "ws_agency",
+        },
+      },
+    },
+    {
+      path: "/api/v1/me/workspaces",
+      respond: () => ({
+        body: [{
           workspace_id: "ws_agency",
           slug: "acme",
           name: "Acme Agency",
           current_role: role,
           last_seen_at: null,
           settings_override: {},
-        },
-      ]);
-    }
-    if (resolved === "/w/acme/api/v1/me") {
-      return jsonResponse(mePayload({ role, client_binding_org_ids: role === "client" ? ["org_client"] : [] }));
-    }
-    if (resolved === "/w/acme/api/v1/client/portfolio?limit=500") {
-      return jsonResponse({
-        data: [
-          {
+        }],
+      }),
+    },
+    {
+      path: "/w/acme/api/v1/me",
+      respond: () => ({
+        body: mePayload({ role, client_binding_org_ids: role === "client" ? ["org_client"] : [] }),
+      }),
+    },
+    {
+      path: "/w/acme/api/v1/client/portfolio?limit=500",
+      respond: {
+        body: {
+          data: [{
             id: "prop_1",
             organization_id: "org_client",
             organization_name: "Luxe Guests",
@@ -136,37 +131,47 @@ function installFetch(
             country: "PT",
             timezone: "Europe/Lisbon",
             default_currency: "EUR",
-          },
-        ],
-        next_cursor: null,
-        has_more: false,
-      });
-    }
-    if (resolved === "/w/acme/api/v1/client/quotes?limit=500") {
-      quoteListCalls += 1;
-      return jsonResponse({
-        data: quoteListCalls > 1 && quotesAfterDecision ? quotesAfterDecision : quotes,
-        next_cursor: null,
-        has_more: false,
-      });
-    }
-    if (resolved === "/w/acme/api/v1/billing/quotes/quote_1/accept" && method === "POST") {
-      if (pendingApproval) {
-        return jsonResponse({ status: "pending_approval", approval_request_id: "approval_1" });
-      }
-      return jsonResponse({ ...quoteRows[0]!, status: "accepted", decided_at: "2026-04-30T12:00:00Z" });
-    }
-    if (resolved === "/w/acme/api/v1/billing/quotes/quote_1/reject" && method === "POST") {
-      return jsonResponse({ ...quoteRows[0]!, status: "rejected", decided_at: "2026-04-30T12:00:00Z" });
-    }
-    throw new Error(`Unexpected fetch call: ${resolved}`);
-  });
-  (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
-  return {
-    requests,
-    restore: () => {
-      (globalThis as { fetch: typeof fetch }).fetch = original;
+          }],
+          next_cursor: null,
+          has_more: false,
+        },
+      },
     },
+    {
+      path: "/w/acme/api/v1/client/quotes?limit=500",
+      respond: () => {
+        quoteListCalls += 1;
+        return {
+          body: {
+            data: quoteListCalls > 1 && quotesAfterDecision ? quotesAfterDecision : quotes,
+            next_cursor: null,
+            has_more: false,
+          },
+        };
+      },
+    },
+    {
+      path: "/w/acme/api/v1/billing/quotes/quote_1/accept",
+      method: "POST",
+      respond: () => ({
+        body: pendingApproval
+          ? { status: "pending_approval", approval_request_id: "approval_1" }
+          : { ...quoteRows[0]!, status: "accepted", decided_at: "2026-04-30T12:00:00Z" },
+      }),
+    },
+    {
+      path: "/w/acme/api/v1/billing/quotes/quote_1/reject",
+      method: "POST",
+      respond: {
+        body: { ...quoteRows[0]!, status: "rejected", decided_at: "2026-04-30T12:00:00Z" },
+      },
+    },
+  ]);
+  return {
+    get requests() {
+      return env.requests.map(({ url, method, body }) => ({ url, method, body }));
+    },
+    restore: env.restore,
   };
 }
 

@@ -16,15 +16,7 @@ import * as preferences from "@/lib/preferences";
 import type { Property } from "@/types/api";
 import InventoryPage from "./InventoryPage";
 import appSource from "../../App.tsx?raw";
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status >= 200 && status < 300 ? "OK" : "Error",
-    text: async () => JSON.stringify(body),
-  } as unknown as Response;
-}
+import { installFetchRouteHandlers } from "@/test/helpers";
 
 const PROPERTIES: Property[] = [
   {
@@ -85,86 +77,46 @@ const MOVEMENTS = [
   },
 ];
 
-interface CapturedRequest {
-  url: string;
-  method: string;
-  body: unknown;
-  headers: Record<string, string>;
-}
-
-function parseBody(body: BodyInit | null | undefined): unknown {
-  if (typeof body !== "string") return null;
-  return JSON.parse(body);
-}
-
 function installFetch(items = ITEMS) {
-  const requests: CapturedRequest[] = [];
-  const original = globalThis.fetch;
-  const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    const resolved = typeof url === "string" ? url : url.toString();
-    const parsed = new URL(resolved, "http://crewday.test");
-    const method = init?.method ?? "GET";
-    const headers = (init?.headers ?? {}) as Record<string, string>;
-    requests.push({
-      url: parsed.pathname + parsed.search,
-      method,
-      body: parseBody(init?.body),
-      headers,
-    });
-
-    if (parsed.pathname === "/w/acme/api/v1/properties" && method === "GET") {
-      return jsonResponse(PROPERTIES);
-    }
-    if (
-      parsed.pathname === "/w/acme/api/v1/inventory/properties/prop_1/items" &&
-      method === "GET"
-    ) {
-      return jsonResponse({ data: items });
-    }
-    if (
-      parsed.pathname === "/w/acme/api/v1/inventory/item_1/movements" &&
-      method === "GET"
-    ) {
-      return jsonResponse({ data: MOVEMENTS, next_cursor: null, has_more: false });
-    }
-    if (
-      parsed.pathname === "/w/acme/api/v1/inventory/item_1/adjust" &&
-      method === "POST"
-    ) {
-      return jsonResponse({ ...MOVEMENTS[0], id: "move_adjust", delta: 4 }, 201);
-    }
-    if (
-      parsed.pathname === "/w/acme/api/v1/inventory/properties/prop_1/items/item_1" &&
-      method === "PATCH"
-    ) {
-      return jsonResponse({ ...ITEMS[0], reorder_point: 8, reorder_target: 20 });
-    }
-    if (
-      parsed.pathname === "/w/acme/api/v1/properties/prop_1/stocktakes" &&
-      method === "POST"
-    ) {
-      return jsonResponse({ id: "stock_1" }, 201);
-    }
-    if (
-      parsed.pathname === "/w/acme/api/v1/stocktakes/stock_1/lines/item_1" &&
-      method === "PATCH"
-    ) {
-      return jsonResponse({ stocktake_id: "stock_1", item_id: "item_1" });
-    }
-    if (
-      parsed.pathname === "/w/acme/api/v1/stocktakes/stock_1/commit" &&
-      method === "POST"
-    ) {
-      return jsonResponse({ stocktake: { id: "stock_1" }, movements: [] });
-    }
-    throw new Error(`Unexpected fetch call: ${method} ${resolved}`);
-  });
-  (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
-  return {
-    requests,
-    restore: () => {
-      (globalThis as { fetch: typeof fetch }).fetch = original;
+  const env = installFetchRouteHandlers([
+    { path: "/w/acme/api/v1/properties", respond: { body: PROPERTIES } },
+    {
+      path: "/w/acme/api/v1/inventory/properties/prop_1/items",
+      respond: { body: { data: items } },
     },
+    {
+      path: "/w/acme/api/v1/inventory/item_1/movements",
+      respond: { body: { data: MOVEMENTS, next_cursor: null, has_more: false } },
+    },
+    {
+      path: "/w/acme/api/v1/inventory/item_1/adjust",
+      method: "POST",
+      respond: { status: 201, body: { ...MOVEMENTS[0], id: "move_adjust", delta: 4 } },
+    },
+    {
+      path: "/w/acme/api/v1/inventory/properties/prop_1/items/item_1",
+      method: "PATCH",
+      respond: { body: { ...ITEMS[0], reorder_point: 8, reorder_target: 20 } },
+    },
+    {
+      path: "/w/acme/api/v1/properties/prop_1/stocktakes",
+      method: "POST",
+      respond: { status: 201, body: { id: "stock_1" } },
+    },
+    {
+      path: "/w/acme/api/v1/stocktakes/stock_1/lines/item_1",
+      method: "PATCH",
+      respond: { body: { stocktake_id: "stock_1", item_id: "item_1" } },
+    },
+    {
+      path: "/w/acme/api/v1/stocktakes/stock_1/commit",
+      method: "POST",
+      respond: { body: { stocktake: { id: "stock_1" }, movements: [] } },
+    },
+  ]);
+  return {
+    requests: env.requests,
+    restore: env.restore,
   };
 }
 

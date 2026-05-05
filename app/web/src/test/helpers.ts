@@ -36,6 +36,24 @@ export interface FakeResponse {
   body?: unknown;
 }
 
+export interface FetchRouteRequest extends FetchCall {
+  path: string;
+  method: string;
+  body: unknown;
+  headers: Record<string, string>;
+}
+
+export type FetchRouteReply = FakeResponse | Response;
+export type FetchRouteResponder =
+  | FetchRouteReply
+  | ((request: FetchRouteRequest) => FetchRouteReply | Promise<FetchRouteReply>);
+
+export interface FetchRoute {
+  path: string;
+  method?: string;
+  respond: FetchRouteResponder;
+}
+
 /**
  * Build a JSON `Response` for use in fetch stubs. Defaults to 200.
  *
@@ -70,6 +88,63 @@ function swapGlobalFetch(spy: typeof globalThis.fetch): () => void {
   };
 }
 
+async function captureFetchCall(
+  url: string | URL | Request,
+  init: RequestInit | undefined,
+): Promise<FetchCall> {
+  if (!(url instanceof Request)) {
+    return {
+      url: typeof url === "string" ? url : url.toString(),
+      init: init ?? {},
+    };
+  }
+
+  const requestInit: RequestInit = {
+    method: url.method,
+    headers: url.headers,
+  };
+  if (!url.bodyUsed) {
+    const body = await url.clone().text();
+    if (body) requestInit.body = body;
+  }
+  return {
+    url: url.url,
+    init: { ...requestInit, ...(init ?? {}) },
+  };
+}
+
+function parseBody(body: BodyInit | null | undefined): unknown {
+  if (typeof body !== "string") return body ?? null;
+  if (!body) return null;
+  try {
+    return JSON.parse(body);
+  } catch {
+    return body;
+  }
+}
+
+function normalizeHeaders(headers: HeadersInit | undefined): Record<string, string> {
+  if (!headers) return {};
+  if (headers instanceof Headers) return Object.fromEntries(headers.entries());
+  if (Array.isArray(headers)) return Object.fromEntries(headers);
+  return headers;
+}
+
+function isResponse(value: FetchRouteReply): value is Response {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "text" in value &&
+    typeof value.text === "function" &&
+    "ok" in value
+  );
+}
+
+function toResponse(reply: FetchRouteReply): Response {
+  if (isResponse(reply)) return reply;
+  return jsonResponse(reply.body, reply.status ?? 200);
+}
+
 /**
  * Install a custom `fetch` handler. The handler receives `{ url, init }`
  * and returns (or resolves to) a `Response`. The shared `calls` array
@@ -84,8 +159,7 @@ export function installFetch(
 ): { calls: FetchCall[]; restore: () => void } {
   const calls: FetchCall[] = [];
   const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    const resolved = typeof url === "string" ? url : url.toString();
-    const captured: FetchCall = { url: resolved, init: init ?? {} };
+    const captured = await captureFetchCall(url, init);
     calls.push(captured);
     return handler(captured);
   }) as unknown as typeof globalThis.fetch;
@@ -166,4 +240,34 @@ export function installFetchRoutes(
     if (!next) throw new Error(`No more responses for: ${url}`);
     return jsonResponse(next.body, next.status ?? 200);
   });
+}
+
+export function installFetchRouteHandlers(
+  routes: FetchRoute[],
+): { calls: FetchCall[]; requests: FetchRouteRequest[]; restore: () => void } {
+  const requests: FetchRouteRequest[] = [];
+  const env = installFetch(async ({ url, init }) => {
+    const parsed = new URL(url, "http://crewday.test");
+    const method = (init.method ?? "GET").toUpperCase();
+    const request: FetchRouteRequest = {
+      url,
+      init,
+      path: parsed.pathname + parsed.search,
+      method,
+      body: parseBody(init.body),
+      headers: normalizeHeaders(init.headers),
+    };
+    requests.push(request);
+    const route = routes.find((candidate) => {
+      return (
+        candidate.path === request.path &&
+        (candidate.method ?? "GET").toUpperCase() === method
+      );
+    });
+    if (!route) throw new Error(`Unscripted fetch: ${method} ${request.path}`);
+    const reply =
+      typeof route.respond === "function" ? await route.respond(request) : route.respond;
+    return toResponse(reply);
+  });
+  return { ...env, requests };
 }

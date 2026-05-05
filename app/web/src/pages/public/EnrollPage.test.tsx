@@ -38,50 +38,12 @@ import { type ReactElement, type ReactNode } from "react";
 import EnrollPage from "./EnrollPage";
 import { AuthProvider, __resetAuthStoreForTests } from "@/auth";
 import { __resetApiProvidersForTests } from "@/lib/api";
+import { installFetchRoutes, type FakeResponse } from "@/test/helpers";
 
 // ── Test harness ──────────────────────────────────────────────────
 
-interface FakeResponse {
-  status: number;
-  body?: unknown;
-}
-
-/**
- * Scripted `fetch`. One FIFO queue per URL suffix so a multi-request
- * test (verify → start → finish → /me) can assert on order without
- * fighting a shared `responses[]`. Mirrors `RecoverPage.test.tsx`.
- */
-function installFetch(scripted: Record<string, FakeResponse[]>): {
-  calls: Array<{ url: string; init: RequestInit }>;
-  restore: () => void;
-} {
-  const calls: Array<{ url: string; init: RequestInit }> = [];
-  const original = globalThis.fetch;
-  const queues: Record<string, FakeResponse[]> = {};
-  for (const [k, v] of Object.entries(scripted)) queues[k] = [...v];
-  const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    const resolved = typeof url === "string" ? url : url.toString();
-    calls.push({ url: resolved, init: init ?? {} });
-    const suffix = Object.keys(queues).find((s) => resolved.endsWith(s));
-    if (!suffix) throw new Error(`Unscripted fetch: ${resolved}`);
-    const next = queues[suffix]!.shift();
-    if (!next) throw new Error(`No more responses for: ${resolved}`);
-    const ok = next.status >= 200 && next.status < 300;
-    const text = next.body === undefined ? "" : JSON.stringify(next.body);
-    return {
-      ok,
-      status: next.status,
-      statusText: ok ? "OK" : "Error",
-      text: async () => text,
-    } as unknown as Response;
-  });
-  (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
-  return {
-    calls,
-    restore: () => {
-      (globalThis as { fetch: typeof fetch }).fetch = original;
-    },
-  };
+function installFetch(scripted: Record<string, FakeResponse[]>) {
+  return installFetchRoutes(scripted, { match: "endsWith" });
 }
 
 /**

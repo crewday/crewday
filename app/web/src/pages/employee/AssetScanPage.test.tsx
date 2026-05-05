@@ -7,6 +7,7 @@ import { __resetApiProvidersForTests } from "@/lib/api";
 import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
 import * as preferences from "@/lib/preferences";
 import AssetScanPage from "./AssetScanPage";
+import { jsonResponse } from "@/test/helpers";
 
 const zxing = vi.hoisted(() => ({
   decodeFromConstraints: vi.fn(),
@@ -19,15 +20,6 @@ vi.mock("@zxing/browser", () => ({
     decodeFromConstraints = zxing.decodeFromConstraints;
   },
 }));
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status >= 200 && status < 300 ? "OK" : "Error",
-    text: async () => JSON.stringify(body),
-  } as unknown as Response;
-}
 
 function AssetRouteProbe() {
   const { aid } = useParams<{ aid: string }>();

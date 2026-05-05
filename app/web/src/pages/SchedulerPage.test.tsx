@@ -9,21 +9,13 @@ import * as preferences from "@/lib/preferences";
 import type { Role, SchedulerCalendarPayload } from "@/types/api";
 import SchedulerPage from "./SchedulerPage";
 import appSource from "../App.tsx?raw";
+import { jsonResponse } from "@/test/helpers";
 
 const roleState = vi.hoisted(() => ({ role: "manager" as Role }));
 
 vi.mock("@/context/RoleContext", () => ({
   useRole: () => ({ role: roleState.role, setRole: vi.fn() }),
 }));
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status >= 200 && status < 300 ? "OK" : "Error",
-    text: async () => JSON.stringify(body),
-  } as unknown as Response;
-}
 
 const CALENDAR: SchedulerCalendarPayload = {
   window: { from: "2026-05-04", to: "2026-05-10" },

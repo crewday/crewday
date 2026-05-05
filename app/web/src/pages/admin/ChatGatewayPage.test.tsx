@@ -12,6 +12,7 @@ import type {
 } from "@/types/api";
 import ChatGatewayPage from "./ChatGatewayPage";
 import appSource from "../../App.tsx?raw";
+import { jsonResponse } from "@/test/helpers";
 
 interface FakeResponse {
   status?: number;
@@ -21,15 +22,6 @@ interface FakeResponse {
 interface FetchCall {
   url: string;
   init: RequestInit;
-}
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status >= 200 && status < 300 ? "OK" : "Error",
-    text: async () => JSON.stringify(body),
-  } as unknown as Response;
 }
 
 function installFetch(scripted: Record<string, FakeResponse[]> = {}) {

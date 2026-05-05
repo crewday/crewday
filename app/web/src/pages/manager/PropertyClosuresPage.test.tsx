@@ -7,67 +7,57 @@ import { __resetApiProvidersForTests } from "@/lib/api";
 import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
 import * as preferences from "@/lib/preferences";
 import PropertyClosuresPage from "./PropertyClosuresPage";
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status >= 200 && status < 300 ? "OK" : "Error",
-    text: async () => JSON.stringify(body),
-  } as unknown as Response;
-}
-
-function emptyResponse(status = 204): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status >= 200 && status < 300 ? "OK" : "Error",
-    text: async () => "",
-  } as unknown as Response;
-}
+import { installFetchRouteHandlers } from "@/test/helpers";
 
 function installFetch({ failClosures = false }: { failClosures?: boolean } = {}) {
-  const calls: string[] = [];
-  const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-  const original = globalThis.fetch;
-  const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    const resolved = typeof url === "string" ? url : url.toString();
-    calls.push(resolved);
-    requests.push({ url: resolved, init });
-    if (resolved === "/w/acme/api/v1/property_closures" && init?.method === "POST") {
-      return jsonResponse({
-        id: "closure_new",
-        property_id: "prop_1",
-        unit_id: null,
-        starts_at: "2026-04-16T00:00:00Z",
-        ends_at: "2026-04-18T00:00:00Z",
-        reason: "seasonal",
-        source_ical_feed_id: null,
-        created_by_user_id: "user_1",
-        created_at: "2026-04-16T12:00:00Z",
-        deleted_at: null,
-      }, 201);
-    }
-    if (resolved === "/w/acme/api/v1/property_closures/closure_1" && init?.method === "PATCH") {
-      return jsonResponse({
-        id: "closure_1",
-        property_id: "prop_1",
-        unit_id: null,
-        starts_at: "2026-04-11T00:00:00Z",
-        ends_at: "2026-04-12T00:00:00Z",
-        reason: "owner_stay",
-        source_ical_feed_id: null,
-        created_by_user_id: "user_1",
-        created_at: "2026-04-10T12:00:00Z",
-        deleted_at: null,
-      });
-    }
-    if (resolved === "/w/acme/api/v1/property_closures/closure_1" && init?.method === "DELETE") {
-      return emptyResponse();
-    }
-    if (resolved === "/w/acme/api/v1/properties") {
-      return jsonResponse([
-        {
+  // code-health: ignore[nloc] Route fixtures stay local; shared fetch mechanics live in test/helpers.
+  const env = installFetchRouteHandlers([
+    {
+      path: "/w/acme/api/v1/property_closures",
+      method: "POST",
+      respond: {
+        status: 201,
+        body: {
+          id: "closure_new",
+          property_id: "prop_1",
+          unit_id: null,
+          starts_at: "2026-04-16T00:00:00Z",
+          ends_at: "2026-04-18T00:00:00Z",
+          reason: "seasonal",
+          source_ical_feed_id: null,
+          created_by_user_id: "user_1",
+          created_at: "2026-04-16T12:00:00Z",
+          deleted_at: null,
+        },
+      },
+    },
+    {
+      path: "/w/acme/api/v1/property_closures/closure_1",
+      method: "PATCH",
+      respond: {
+        body: {
+          id: "closure_1",
+          property_id: "prop_1",
+          unit_id: null,
+          starts_at: "2026-04-11T00:00:00Z",
+          ends_at: "2026-04-12T00:00:00Z",
+          reason: "owner_stay",
+          source_ical_feed_id: null,
+          created_by_user_id: "user_1",
+          created_at: "2026-04-10T12:00:00Z",
+          deleted_at: null,
+        },
+      },
+    },
+    {
+      path: "/w/acme/api/v1/property_closures/closure_1",
+      method: "DELETE",
+      respond: { status: 204 },
+    },
+    {
+      path: "/w/acme/api/v1/properties",
+      respond: {
+        body: [{
           id: "prop_1",
           name: "Villa Rosa",
           city: "Porto",
@@ -81,29 +71,32 @@ function installFetch({ failClosures = false }: { failClosures?: boolean } = {})
           settings_override: {},
           client_org_id: null,
           owner_user_id: null,
+        }],
+      },
+    },
+    {
+      path: "/w/acme/api/v1/properties/prop_1",
+      respond: {
+        body: {
+          id: "prop_1",
+          name: "Villa Rosa",
+          kind: "str",
+          address_json: { city: "Porto" },
+          country: "PT",
+          locale: "pt-PT",
+          timezone: "Europe/Lisbon",
+          client_org_id: null,
+          owner_user_id: null,
         },
-      ]);
-    }
-    if (resolved === "/w/acme/api/v1/properties/prop_1") {
-      return jsonResponse({
-        id: "prop_1",
-        name: "Villa Rosa",
-        kind: "str",
-        address_json: { city: "Porto" },
-        country: "PT",
-        locale: "pt-PT",
-        timezone: "Europe/Lisbon",
-        client_org_id: null,
-        owner_user_id: null,
-      });
-    }
-    if (resolved === "/w/acme/api/v1/property_closures?property_id=prop_1&limit=100") {
-      if (failClosures) {
-        return jsonResponse({ type: "server_error", title: "Server error" }, 500);
-      }
-      return jsonResponse({
-        data: [
-          {
+      },
+    },
+    {
+      path: "/w/acme/api/v1/property_closures?property_id=prop_1&limit=100",
+      respond: () => failClosures
+        ? { status: 500, body: { type: "server_error", title: "Server error" } }
+        : {
+          body: {
+            data: [{
             id: "closure_1",
             property_id: "prop_1",
             starts_at: "2026-04-10T00:00:00Z",
@@ -116,16 +109,17 @@ function installFetch({ failClosures = false }: { failClosures?: boolean } = {})
             starts_at: "2026-04-20T00:00:00Z",
             ends_at: "2026-04-22T00:00:00Z",
             reason: "ical_unavailable",
+          }],
+            next_cursor: null,
+            has_more: false,
           },
-        ],
-        next_cursor: null,
-        has_more: false,
-      });
-    }
-    if (resolved === "/w/acme/api/v1/stays/reservations?property_id=prop_1&limit=100") {
-      return jsonResponse({
-        data: [
-          {
+        },
+    },
+    {
+      path: "/w/acme/api/v1/stays/reservations?property_id=prop_1&limit=100",
+      respond: {
+        body: {
+          data: [{
             id: "res_1",
             property_id: "prop_1",
             check_in: "2026-04-15T15:00:00Z",
@@ -134,47 +128,50 @@ function installFetch({ failClosures = false }: { failClosures?: boolean } = {})
             guest_count: 2,
             status: "scheduled",
             source: "api",
-          },
-        ],
-        next_cursor: null,
-        has_more: false,
-      });
-    }
-    if (resolved === "/w/acme/api/v1/me") {
-      return jsonResponse({
-        role: "manager",
-        theme: "system",
-        agent_sidebar_collapsed: false,
-        employee: {
-          id: "emp_1",
-          user_id: "user_1",
-          first_name: "Mina",
-          last_name: "Manager",
-          email: "mina@example.test",
-          phone: null,
-          avatar_url: null,
+          }],
+          next_cursor: null,
+          has_more: false,
         },
-        manager_name: "Mina",
-        today: "2026-04-16",
-        now: "2026-04-16T12:00:00Z",
-        user_id: "user_1",
-        agent_approval_mode: "confirm",
-        current_workspace_id: "ws_1",
-        available_workspaces: [],
-        client_binding_org_ids: [],
-        is_deployment_admin: false,
-        is_deployment_owner: false,
-      });
-    }
-    throw new Error(`Unexpected fetch call: ${resolved}`);
-  });
-  (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
-  return {
-    calls,
-    requests,
-    restore: () => {
-      (globalThis as { fetch: typeof fetch }).fetch = original;
+      },
     },
+    {
+      path: "/w/acme/api/v1/me",
+      respond: {
+        body: {
+          role: "manager",
+          theme: "system",
+          agent_sidebar_collapsed: false,
+          employee: {
+            id: "emp_1",
+            user_id: "user_1",
+            first_name: "Mina",
+            last_name: "Manager",
+            email: "mina@example.test",
+            phone: null,
+            avatar_url: null,
+          },
+          manager_name: "Mina",
+          today: "2026-04-16",
+          now: "2026-04-16T12:00:00Z",
+          user_id: "user_1",
+          agent_approval_mode: "confirm",
+          current_workspace_id: "ws_1",
+          available_workspaces: [],
+          client_binding_org_ids: [],
+          is_deployment_admin: false,
+          is_deployment_owner: false,
+        },
+      },
+    },
+  ]);
+  return {
+    get calls() {
+      return env.requests.map((request) => request.url);
+    },
+    get requests() {
+      return env.requests.map(({ url, init }) => ({ url, init }));
+    },
+    restore: env.restore,
   };
 }
 

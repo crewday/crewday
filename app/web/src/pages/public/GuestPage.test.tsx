@@ -5,15 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { __resetApiProvidersForTests } from "@/lib/api";
 import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
 import GuestPage from "./GuestPage";
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status >= 200 && status < 300 ? "OK" : "Error",
-    text: async () => JSON.stringify(body),
-  } as unknown as Response;
-}
+import { jsonResponse } from "@/test/helpers";
 
 function renderGuest(initial = "/w/acme/guest/token-123") {
   const qc = new QueryClient({

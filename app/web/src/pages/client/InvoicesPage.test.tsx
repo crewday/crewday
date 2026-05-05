@@ -8,15 +8,7 @@ import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
 import * as preferences from "@/lib/preferences";
 import type { Me } from "@/types/api";
 import InvoicesPage from "./InvoicesPage";
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status >= 200 && status < 300 ? "OK" : "Error",
-    text: async () => JSON.stringify(body),
-  } as unknown as Response;
-}
+import { installFetchRouteHandlers } from "@/test/helpers";
 
 function mePayload(overrides: Partial<Me> = {}): Me {
   return {
@@ -96,40 +88,43 @@ function installFetch(
   } = {},
 ) {
   let proofUploaded = false;
-  const requests: Array<{ url: string; method: string; body: BodyInit | null }> = [];
-  const original = globalThis.fetch;
-  const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    const resolved = typeof url === "string" ? url : url.toString();
-    const method = init?.method ?? "GET";
-    requests.push({ url: resolved, method, body: init?.body ?? null });
-    if (resolved === "/api/v1/auth/me") {
-      return jsonResponse({
-        user_id: "usr_client",
-        display_name: "Clara Client",
-        email: "clara@example.com",
-        available_workspaces: [],
-        current_workspace_id: "ws_agency",
-      });
-    }
-    if (resolved === "/api/v1/me/workspaces") {
-      return jsonResponse([
-        {
+  const env = installFetchRouteHandlers([
+    {
+      path: "/api/v1/auth/me",
+      respond: {
+        body: {
+          user_id: "usr_client",
+          display_name: "Clara Client",
+          email: "clara@example.com",
+          available_workspaces: [],
+          current_workspace_id: "ws_agency",
+        },
+      },
+    },
+    {
+      path: "/api/v1/me/workspaces",
+      respond: () => ({
+        body: [{
           workspace_id: "ws_agency",
           slug: "acme",
           name: "Acme Agency",
           current_role: role,
           last_seen_at: null,
           settings_override: {},
-        },
-      ]);
-    }
-    if (resolved === "/w/acme/api/v1/me") {
-      return jsonResponse(mePayload({ role, client_binding_org_ids: role === "client" ? ["org_client"] : [] }));
-    }
-    if (resolved === "/w/acme/api/v1/client/portfolio?limit=500") {
-      return jsonResponse({
-        data: [
-          {
+        }],
+      }),
+    },
+    {
+      path: "/w/acme/api/v1/me",
+      respond: () => ({
+        body: mePayload({ role, client_binding_org_ids: role === "client" ? ["org_client"] : [] }),
+      }),
+    },
+    {
+      path: "/w/acme/api/v1/client/portfolio?limit=500",
+      respond: {
+        body: {
+          data: [{
             id: "prop_1",
             organization_id: "org_client",
             organization_name: "Luxe Guests",
@@ -139,35 +134,38 @@ function installFetch(
             country: "PT",
             timezone: "Europe/Lisbon",
             default_currency: "EUR",
-          },
-        ],
-        next_cursor: null,
-        has_more: false,
-      });
-    }
-    if (resolved === "/w/acme/api/v1/client/invoices?limit=500") {
-      return jsonResponse({
-        data: proofUploaded ? withUploadedProof(invoices) : invoices,
-        next_cursor: null,
-        has_more: false,
-      });
-    }
-    if (resolved === "/w/acme/api/v1/billing/vendor-invoices/invoice_1/proof" && method === "POST") {
-      proofUploaded = true;
-      return jsonResponse({
-        id: "invoice_1",
-        status: "approved",
-        proof_of_payment_file_ids: ["proof_hash"],
-      });
-    }
-    throw new Error(`Unexpected fetch call: ${resolved}`);
-  });
-  (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
-  return {
-    requests,
-    restore: () => {
-      (globalThis as { fetch: typeof fetch }).fetch = original;
+          }],
+          next_cursor: null,
+          has_more: false,
+        },
+      },
     },
+    {
+      path: "/w/acme/api/v1/client/invoices?limit=500",
+      respond: () => ({
+        body: { data: proofUploaded ? withUploadedProof(invoices) : invoices, next_cursor: null, has_more: false },
+      }),
+    },
+    {
+      path: "/w/acme/api/v1/billing/vendor-invoices/invoice_1/proof",
+      method: "POST",
+      respond: () => {
+        proofUploaded = true;
+        return {
+          body: {
+            id: "invoice_1",
+            status: "approved",
+            proof_of_payment_file_ids: ["proof_hash"],
+          },
+        };
+      },
+    },
+  ]);
+  return {
+    get requests() {
+      return env.requests.map(({ url, method, body }) => ({ url, method, body }));
+    },
+    restore: env.restore,
   };
 }
 

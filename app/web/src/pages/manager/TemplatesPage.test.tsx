@@ -3,6 +3,11 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactElement } from "react";
+import {
+  installFetchRouteHandlers,
+  type FakeResponse,
+  type FetchCall,
+} from "@/test/helpers";
 
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { __resetApiProvidersForTests } from "@/lib/api";
@@ -12,25 +17,6 @@ import type { TaskTemplate } from "@/types/task";
 import type { WorkRole } from "@/types/employee";
 
 import TemplatesPage from "./TemplatesPage";
-
-interface FakeResponse {
-  status?: number;
-  body: unknown;
-}
-
-interface FetchCall {
-  url: string;
-  init: RequestInit;
-}
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status >= 200 && status < 300 ? "OK" : "Error",
-    text: async () => JSON.stringify(body),
-  } as unknown as Response;
-}
 
 function makeTemplate(overrides: Partial<TaskTemplate> = {}): TaskTemplate {
   return {
@@ -75,49 +61,38 @@ function installFetch(opts: {
   initialTemplate?: TaskTemplate;
   patchResponses?: FakeResponse[];
 } = {}): FetchHarness {
-  const calls: FetchCall[] = [];
+  // code-health: ignore[nloc] Route fixtures stay local; shared fetch mechanics live in test/helpers.
   const initial = opts.initialTemplate ?? makeTemplate();
   const listQueue: FakeResponse[] = [
     { body: { data: [initial], next_cursor: null, has_more: false } },
   ];
   const patchQueue: FakeResponse[] = [...(opts.patchResponses ?? [])];
-  const original = globalThis.fetch;
-  const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    const resolved = typeof url === "string" ? url : url.toString();
-    const initRecord = init ?? {};
-    calls.push({ url: resolved, init: initRecord });
-    const pathname = new URL(resolved, "http://crewday.test").pathname;
-    if (pathname === "/w/acme/api/v1/task_templates" && (initRecord.method ?? "GET") === "GET") {
+  const env = installFetchRouteHandlers([
+    {
+      path: "/w/acme/api/v1/task_templates",
+      respond: () => {
       const next = listQueue.shift();
-      if (!next) {
-        return jsonResponse({ data: [initial], next_cursor: null, has_more: false });
-      }
-      return jsonResponse(next.body, next.status ?? 200);
-    }
-    if (pathname === "/w/acme/api/v1/work_roles") {
-      return jsonResponse({ data: ROLES, next_cursor: null, has_more: false });
-    }
-    if (
-      pathname === `/w/acme/api/v1/task_templates/${initial.id}` &&
-      initRecord.method === "PATCH"
-    ) {
-      const next = patchQueue.shift();
-      if (!next) {
-        const body = JSON.parse(String(initRecord.body)) as Record<string, unknown>;
-        return jsonResponse({ ...initial, ...body });
-      }
-      return jsonResponse(next.body, next.status ?? 200);
-    }
-    throw new Error(`Unscripted fetch: ${initRecord.method ?? "GET"} ${pathname}`);
-  });
-  (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
+        return next ?? { body: { data: [initial], next_cursor: null, has_more: false } };
+      },
+    },
+    {
+      path: "/w/acme/api/v1/work_roles",
+      respond: { body: { data: ROLES, next_cursor: null, has_more: false } },
+    },
+    {
+      path: `/w/acme/api/v1/task_templates/${initial.id}`,
+      method: "PATCH",
+      respond: (request) => {
+        const next = patchQueue.shift();
+        return next ?? { body: { ...initial, ...(request.body as Record<string, unknown>) } };
+      },
+    },
+  ]);
   return {
-    calls,
+    calls: env.calls,
     patchQueue,
     listQueue,
-    restore: () => {
-      (globalThis as { fetch: typeof fetch }).fetch = original;
-    },
+    restore: env.restore,
   };
 }
 
