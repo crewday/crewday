@@ -528,463 +528,115 @@ def run_turn(
     agent_message_recipient_user_id: str | None = None,
     agent_message_delivery_is_fallback: bool = False,
 ) -> TurnOutcome:
-    """Run one agent turn end-to-end.
+    """Run one agent turn end-to-end without committing the caller's session.
 
-    See module docstring for the loop semantics. The arguments are:
-
-    * ``ctx`` — the delegating user's :class:`WorkspaceContext`. The
-      runtime audits and routes every tool call as this user.
-    * ``session`` — the open SQLAlchemy session; the caller's UoW
-      owns the transaction boundary (the runtime never commits).
-    * ``scope`` — ``employee | manager | admin | task`` per §11
-      "Embedded agents". Drives the system prompt and the SSE
-      event payload.
-    * ``thread_id`` — chat-channel id for an ``event``-trigger turn;
-      ``None`` for a ``schedule``-trigger turn that has no thread.
-      A ``None`` thread on an ``event`` trigger raises
-      :class:`AgentTurnError` (the chat surface contract requires
-      a channel for the message + reply to land on).
-    * ``user_message`` — the user's text. For ``schedule`` triggers,
-      the cron worker passes the synthetic system prompt
-      (e.g. ``"Daily digest"``).
-    * ``trigger`` — see :data:`TurnTrigger`.
-    * ``llm_client`` — port-typed; the production wiring is
-      :class:`~app.adapters.llm.openrouter.OpenRouterClient`,
-      tests use ``EchoLLMClient`` or a richer fake.
-    * ``tool_dispatcher`` — see :class:`ToolDispatcher`.
-    * ``token_factory`` — see :class:`TokenFactory`.
-    * ``agent_label`` — denormalised onto every audit row + every
-      ``llm_usage`` row this turn writes. Mirrors the chat agent's
-      label (``manager-chat-agent``, ``worker-chat-agent``,
-      ``admin-chat-agent``).
-    * ``capability`` — §11 capability key the router resolves
-      (``chat.manager`` / ``chat.employee`` / ``chat.admin``).
-    * ``pricing`` — pricing table for budget projection. ``None``
-      uses :func:`default_pricing_table` (every model is unknown
-      and falls back to ``(0, 0)``); production wires the real
-      table from the registry.
-    * ``event_bus`` — bus for the started / finished SSE events.
-      Defaults to the production singleton.
-    * ``clock`` — test seam; defaults to :class:`SystemClock`.
-    * ``max_iterations`` / ``wall_clock_timeout_s`` /
-      ``history_cap`` — caps with §11-pinned defaults; tests dial
-      them down for the timeout / iteration-cap branches.
-    * ``include_user_message`` — append ``user_message`` as the
-      trailing user turn. HTTP chat endpoints pass ``False`` after
-      flushing the user row because recent history already includes
-      that message.
-
-    Never raises on the §11 expected failure modes (capability
-    unassigned, budget exceeded, iteration cap, wall-clock cap) —
-    each becomes a :class:`TurnOutcome` with the right
-    ``outcome`` / ``error_code`` so the API layer surfaces a clean
-    response. A truly-unexpected failure (dispatcher raised, LLM
-    adapter raised something other than the documented errors) does
-    bubble — the API layer maps the cascade to 500, the operator
-    sees the traceback, and the next turn re-runs from scratch.
+    See the module docstring for loop semantics and argument details.
+    Expected §11 failures collapse into :class:`TurnOutcome`: capability
+    unassigned, budget exceeded, iteration cap, and wall-clock cap.
+    Unexpected LLM or dispatcher failures still bubble to the caller.
     """
-    # code-health: ignore[ccn,nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
-    bus = event_bus if event_bus is not None else default_event_bus
-    eff_clock: Clock = clock if clock is not None else SystemClock()
-    eff_pricing: PricingTable = (
-        pricing if pricing is not None else default_pricing_table()
-    )
-
-    correlation_id = new_ulid(clock=eff_clock)
-    started_at = eff_clock.now()
-
-    # Validate the trigger / thread coupling early so a misuse fails
-    # before any side-effect lands. The cron worker always passes
-    # ``thread_id=None`` (no chat surface for a daily digest); the
-    # chat-gateway always passes a concrete id (the channel the
-    # message arrived on).
-    if trigger == "event" and thread_id is None:
-        raise AgentTurnError(
-            "trigger='event' requires a chat thread_id; "
-            "scheduled turns pass trigger='schedule' instead."
-        )
-
-    bus.publish(
-        AgentTurnStarted(
-            workspace_id=ctx.workspace_id,
-            actor_id=ctx.actor_id,
-            actor_user_id=ctx.actor_id,
-            correlation_id=correlation_id,
-            occurred_at=started_at,
-            scope=scope,
-            thread_id=thread_id,
-            trigger=trigger,
-            started_at=started_at,
-        )
-    )
-
-    # Resolve the capability. ``CapabilityUnassignedError`` is the
-    # router's typed signal that no enabled assignment exists for
-    # this workspace; collapse to ``outcome=error`` with the spec
-    # code.
-    try:
-        model_pick = resolve_primary(session, ctx, capability, clock=eff_clock)
-    except CapabilityUnassignedError as exc:
-        return _finish_error(
-            bus=bus,
-            ctx=ctx,
-            scope=scope,
-            thread_id=thread_id,
-            trigger=trigger,
-            correlation_id=correlation_id,
-            started_at=started_at,
-            ended_at=eff_clock.now(),
-            error_code="capability_unassigned",
-            error_message=str(exc),
-        )
-
-    # Budget pre-flight. A refusal short-circuits before the LLM
-    # call leaves the client; no ``llm_usage`` row is written
-    # (§11 "At-cap behaviour"). The estimator works on the projected
-    # token counts because the runtime can't pre-tokenise the
-    # prompt at this layer; a real tokenizer hook is part of cd-um36.
-    projected_cost = estimate_cost_cents(
-        prompt_tokens=_PROJECTED_PROMPT_TOKENS,
-        max_output_tokens=_PROJECTED_COMPLETION_TOKENS,
-        api_model_id=model_pick.api_model_id,
-        pricing=eff_pricing,
-        workspace_id=ctx.workspace_id,
-    )
-    try:
-        check_budget(
-            session,
+    # code-health: ignore[params] Public entry point preserves API compatibility.
+    return _run_turn_impl(
+        _build_turn_run(
             ctx,
-            capability=capability,
-            projected_cost_cents=projected_cost,
-            clock=eff_clock,
-        )
-    except BudgetExceeded as exc:
-        return _finish_error(
-            bus=bus,
-            ctx=ctx,
+            session=session,
             scope=scope,
             thread_id=thread_id,
+            user_message=user_message,
             trigger=trigger,
-            correlation_id=correlation_id,
-            started_at=started_at,
-            ended_at=eff_clock.now(),
-            error_code=exc.error_code,
-            error_message=exc.message_text,
-        )
-
-    # Mint the delegated token. The factory may reuse an existing
-    # row (a long-running chat thread doesn't need a fresh argon2id
-    # hash on every turn); the contract is "the dispatcher can use
-    # this Bearer to act as the delegating user".
-    #
-    # ``DELEGATED_TOKEN_TTL_S`` (10 minutes) sizes the lease so the
-    # whole turn — even a worst-case tool loop — comfortably finishes
-    # before the token expires, while keeping the long-tail blast
-    # radius of a leaked plaintext small. Math: the iteration cap is
-    # ``DEFAULT_MAX_ITERATIONS`` (8) and a slow tool call lands in
-    # ~10 seconds, so the worst credible turn is ~80 seconds plus
-    # network jitter — well under the 60s wall-clock cap, and an
-    # order of magnitude under the 10-minute TTL. Headroom covers a
-    # future lift of the iteration cap or a slow LLM response without
-    # forcing the dispatcher to deal with mid-turn token rotation.
-    # Out-of-band revocation is per-token via ``app.auth.tokens.revoke``.
-    token_expires_at = eff_clock.now() + DELEGATED_TOKEN_TTL
-    token = token_factory.mint_for(
-        ctx, agent_label=agent_label, expires_at=token_expires_at
-    )
-
-    # Resolve the channel's external_ref once so every audit row
-    # the turn writes carries the same ``agent_conversation_ref``.
-    # ``None`` for a scheduled turn or a thread with no external
-    # binding — perfectly fine, the audit column is nullable.
-    agent_conversation_ref = _resolve_external_ref(session, thread_id=thread_id)
-
-    headers: dict[str, str] = {
-        "X-Agent-Channel": _channel_header_value(scope),
-        "X-Agent-Reason": f"agent.turn:{correlation_id}",
-    }
-    if agent_conversation_ref is not None:
-        headers["X-Agent-Conversation-Ref"] = agent_conversation_ref
-
-    attribution = AgentAttribution(
-        actor_user_id=ctx.actor_id,
-        token_id=token.token_id,
-        agent_label=agent_label,
-        agent_conversation_ref=agent_conversation_ref,
-    )
-    preferences = resolve_preferences(
-        session,
-        ctx,
-        capability=capability,
-        user_id=ctx.actor_id,
-    )
-    system_prompt = get_active_prompt(
-        session,
-        capability,
-        default=_default_system_prompt(scope),
-        clock=eff_clock.now,
-    )
-
-    history = _assemble_history(
-        session,
-        thread_id=thread_id,
-        user_message=user_message,
-        history_cap=history_cap,
-        preferences=preferences,
-        system_prompt=system_prompt,
-        include_user_message=include_user_message,
-    )
-
-    tool_calls_made = 0
-    llm_calls_made = 0
-    deadline = started_at + timedelta(seconds=wall_clock_timeout_s)
-
-    try:
-        for iteration in range(max_iterations):
-            _check_wall_clock(eff_clock, deadline)
-
-            response = _call_llm(
-                llm_client=llm_client,
-                session=session,
-                ctx=ctx,
-                model_pick=model_pick,
-                history=history,
-                tools=tool_dispatcher.tools,
-                capability=capability,
-                correlation_id=correlation_id,
-                attempt=iteration,
-                attribution=attribution,
-                pricing=eff_pricing,
-                clock=eff_clock,
-            )
-            llm_calls_made += 1
-
-            tool_call = _resolve_tool_call(response)
-            if tool_call is None:
-                # Plain-text reply path: write the chat message,
-                # emit ``finished``, return. The reply lands as an
-                # ``agent``-labelled row pointing at the delegating
-                # user (per §23 ``chat_message`` "Authored" shape).
-                chat_message_id = _write_chat_reply(
-                    session,
-                    ctx=ctx,
-                    thread_id=thread_id,
-                    body_md=response.text
-                    or "",  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
-                    scope=scope,
-                    event_bus=bus,
-                    correlation_id=correlation_id,
-                    clock=eff_clock,
-                    agent_message_notification_sink=agent_message_notification_sink,
-                    agent_message_recipient_user_id=agent_message_recipient_user_id,
-                    agent_message_delivery_is_fallback=agent_message_delivery_is_fallback,
-                )
-                ended_at = eff_clock.now()  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
-                bus.publish(  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
-                    AgentTurnFinished(
-                        workspace_id=ctx.workspace_id,
-                        actor_id=ctx.actor_id,
-                        actor_user_id=ctx.actor_id,
-                        correlation_id=correlation_id,
-                        occurred_at=ended_at,
-                        scope=scope,
-                        thread_id=thread_id,
-                        trigger=trigger,
-                        finished_at=ended_at,
-                        outcome="replied",
-                    )
-                )
-                return TurnOutcome(
-                    outcome="replied",
-                    chat_message_id=chat_message_id,
-                    approval_request_id=None,
-                    tool_calls_made=tool_calls_made,
-                    llm_calls_made=llm_calls_made,
-                    started_at=started_at,
-                    ended_at=ended_at,
-                    correlation_id=correlation_id,
-                )
-
-            # Tool-call branch: gate decision first.
-            tool_calls_made += 1
-            if is_action_blocked(preferences, tool_call.name):
-                history = _append_tool_result_to_history(
-                    history,
-                    tool_call,
-                    ToolResult(
-                        call_id=tool_call.id,
-                        status_code=403,
-                        body=blocked_action_result_body(tool_call.name),
-                        mutated=False,
-                    ),
-                )
-                continue
-            builtin_result = _dispatch_builtin_read_tool(
-                session,
-                ctx,
-                thread_id=thread_id,
-                tool_call=tool_call,
-            )
-            if builtin_result is not None:
-                history = _append_tool_result_to_history(
-                    history,
-                    tool_call,
-                    builtin_result,
-                )
-                continue
-            decision = tool_dispatcher.is_gated(tool_call)
-            if decision.gated:
-                # The chat-trigger turn always has a delegating user
-                # (``ctx.actor_id``) the inline approval card belongs
-                # to; a scheduled-trigger turn has no chat surface
-                # but still routes to the delegating user the cron
-                # capability runs as. Both paths set ``for_user_id``
-                # to ``ctx.actor_id`` — desk-only approvals (no
-                # delegating user at all) are a follow-up surface
-                # (cd-6bcl) that does not currently mint rows
-                # through this path. Per-user agent approval mode
-                # (§11 "Per-user agent approval mode") is not yet
-                # threaded into the runtime; ``resolved_user_mode``
-                # stays ``None`` until that column lands on
-                # :class:`User`.
-                # The returned ``expires_at`` is recorded on the row
-                # but not surfaced through :class:`TurnOutcome` today —
-                # callers that need it (e.g. an HTTP handler that
-                # wants to put it in the 409 envelope) re-read the
-                # row. A future TurnOutcome extension can carry it
-                # if a hot path emerges; bind to ``_`` so the pair-
-                # return contract stays explicit at the call site.
-                approval_id, _ = _write_approval_request(
-                    session,
-                    ctx=ctx,
-                    tool_call=tool_call,
-                    decision=decision,
-                    correlation_id=correlation_id,
-                    requester_actor_id=ctx.actor_id,
-                    inline_channel=_channel_header_value(scope),
-                    for_user_id=ctx.actor_id,
-                    resolved_user_mode=None,
-                    clock=eff_clock,
-                )
-                if approval_notification_sink is not None:
-                    row = session.get(ApprovalRequest, approval_id)
-                    if row is not None:
-                        notify_approval_needed(
-                            approval=approval_notification_view_from_row(row),
-                            recipient_user_ids=approval_recipient_user_ids,
-                            sink=approval_notification_sink,
-                        )
-                ended_at = eff_clock.now()
-                # Publish the inline approval-card SSE event to the
-                # delegating user's tabs. ``AgentActionPending`` is
-                # ``user_scoped=True`` so the SSE transport filters
-                # the fan-out to the actor whose ``actor_user_id``
-                # matches; the §11 inline-card surface drops the
-                # card on the wrong tabs without this event.
-                bus.publish(
-                    AgentActionPending(
-                        workspace_id=ctx.workspace_id,
-                        actor_id=ctx.actor_id,
-                        actor_user_id=ctx.actor_id,
-                        correlation_id=correlation_id,
-                        occurred_at=ended_at,
-                        approval_request_id=approval_id,
-                        scope=scope,
-                        thread_id=thread_id,
-                    )
-                )
-                bus.publish(
-                    AgentTurnFinished(
-                        workspace_id=ctx.workspace_id,
-                        actor_id=ctx.actor_id,
-                        actor_user_id=ctx.actor_id,
-                        correlation_id=correlation_id,
-                        occurred_at=ended_at,
-                        scope=scope,
-                        thread_id=thread_id,
-                        trigger=trigger,
-                        finished_at=ended_at,
-                        outcome="action",
-                    )
-                )
-                return TurnOutcome(
-                    outcome="action",
-                    chat_message_id=None,
-                    approval_request_id=approval_id,
-                    tool_calls_made=tool_calls_made,
-                    llm_calls_made=llm_calls_made,
-                    started_at=started_at,
-                    ended_at=ended_at,
-                    correlation_id=correlation_id,
-                )
-
-            # Non-gated dispatch.
-            result = tool_dispatcher.dispatch(
-                tool_call,
-                token=token,
-                headers=headers,
-            )
-            if result.mutated:
-                _audit_tool_call(
-                    session,
-                    ctx=ctx,
-                    tool_call=tool_call,
-                    result=result,
-                    token_id=token.token_id,
-                    agent_label=agent_label,
-                    agent_conversation_ref=agent_conversation_ref,
-                    correlation_id=correlation_id,
-                    clock=eff_clock,
-                )
-
-            # Append the result to the history so the LLM can react
-            # in the next iteration. We render the result as a
-            # human-readable assistant turn rather than a raw JSON
-            # blob so the next prompt doesn't have to re-parse it;
-            # the model's free-text protocol benefits from the
-            # explicit framing.
-            history = _append_tool_result_to_history(history, tool_call, result)
-        # Loop fell out without returning → iteration cap fired.
-        raise TimeoutReply("iteration_cap")
-    except TimeoutReply:
-        chat_message_id = _write_chat_reply(
-            session,
-            ctx=ctx,
-            thread_id=thread_id,
-            body_md=_TIMEOUT_REPLY_TEXT,
-            scope=scope,
-            event_bus=bus,
-            correlation_id=correlation_id,
-            clock=eff_clock,
+            llm_client=llm_client,
+            tool_dispatcher=tool_dispatcher,
+            token_factory=token_factory,
+            agent_label=agent_label,
+            capability=capability,
+            pricing=pricing,
+            event_bus=event_bus,
+            clock=clock,
+            max_iterations=max_iterations,
+            wall_clock_timeout_s=wall_clock_timeout_s,
+            history_cap=history_cap,
+            include_user_message=include_user_message,
+            approval_notification_sink=approval_notification_sink,
+            approval_recipient_user_ids=approval_recipient_user_ids,
             agent_message_notification_sink=agent_message_notification_sink,
             agent_message_recipient_user_id=agent_message_recipient_user_id,
             agent_message_delivery_is_fallback=agent_message_delivery_is_fallback,
         )
-        ended_at = eff_clock.now()
-        bus.publish(
-            AgentTurnFinished(
-                workspace_id=ctx.workspace_id,
-                actor_id=ctx.actor_id,
-                actor_user_id=ctx.actor_id,
-                correlation_id=correlation_id,
-                occurred_at=ended_at,
-                scope=scope,
-                thread_id=thread_id,
-                trigger=trigger,
-                finished_at=ended_at,
-                outcome="timeout",
-            )
-        )
-        return TurnOutcome(
-            outcome="timeout",
-            chat_message_id=chat_message_id,
-            approval_request_id=None,
-            tool_calls_made=tool_calls_made,
-            llm_calls_made=llm_calls_made,
-            started_at=started_at,
-            ended_at=ended_at,
-            correlation_id=correlation_id,
-        )
+    )
+
+
+def _build_turn_run(
+    ctx: WorkspaceContext,
+    *,
+    session: Session,
+    scope: AgentTurnScope,
+    thread_id: str | None,
+    user_message: str,
+    trigger: TurnTrigger,
+    llm_client: LLMClient,
+    tool_dispatcher: ToolDispatcher,
+    token_factory: TokenFactory,
+    agent_label: str,
+    capability: str,
+    pricing: PricingTable | None,
+    event_bus: EventBus | None,
+    clock: Clock | None,
+    max_iterations: int,
+    wall_clock_timeout_s: int,
+    history_cap: int,
+    include_user_message: bool,
+    approval_notification_sink: ApprovalNotificationSink | None,
+    approval_recipient_user_ids: Sequence[str],
+    agent_message_notification_sink: AgentMessageNotificationSink | None,
+    agent_message_recipient_user_id: str | None,
+    agent_message_delivery_is_fallback: bool,
+) -> _TurnRun:
+    # code-health: ignore[params] Builder mirrors the public compatibility API.
+    eff_clock: Clock = clock if clock is not None else SystemClock()
+    correlation_id = new_ulid(clock=eff_clock)
+    started_at = eff_clock.now()
+    return _TurnRun(
+        ctx,
+        session,
+        scope,
+        thread_id,
+        user_message,
+        trigger,
+        llm_client,
+        tool_dispatcher,
+        token_factory,
+        agent_label,
+        capability,
+        pricing if pricing is not None else default_pricing_table(),
+        event_bus if event_bus is not None else default_event_bus,
+        eff_clock,
+        correlation_id,
+        started_at,
+        max_iterations,
+        started_at + timedelta(seconds=wall_clock_timeout_s),
+        history_cap,
+        include_user_message,
+        _ApprovalNotifications(approval_notification_sink, approval_recipient_user_ids),
+        _AgentMessageNotifications(
+            agent_message_notification_sink,
+            agent_message_recipient_user_id,
+            agent_message_delivery_is_fallback,
+        ),
+    )
+
+
+def _run_turn_impl(run: _TurnRun) -> TurnOutcome:
+    _validate_turn_start(run)
+    _publish_turn_started(run)
+
+    model_pick = _resolve_model_or_error(run)
+    if isinstance(model_pick, TurnOutcome):
+        return model_pick
+    budget_error = _check_budget_or_error(run, model_pick)
+    if budget_error is not None:
+        return budget_error
+
+    return _run_active_turn(_prepare_active_turn(run, model_pick))
 
 
 # ---------------------------------------------------------------------------
@@ -1002,52 +654,479 @@ _TIMEOUT_REPLY_TEXT: Final[str] = (
 )
 
 
-def _finish_error(
-    *,
-    bus: EventBus,
-    ctx: WorkspaceContext,
-    scope: AgentTurnScope,
-    thread_id: str | None,
-    trigger: TurnTrigger,
-    correlation_id: str,
-    started_at: datetime,
+@dataclass(frozen=True, slots=True)
+class _ApprovalNotifications:
+    sink: ApprovalNotificationSink | None
+    recipient_user_ids: Sequence[str]
+
+
+@dataclass(frozen=True, slots=True)
+class _AgentMessageNotifications:
+    sink: AgentMessageNotificationSink | None
+    recipient_user_id: str | None
+    delivery_is_fallback: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _TurnRun:
+    ctx: WorkspaceContext
+    session: Session
+    scope: AgentTurnScope
+    thread_id: str | None
+    user_message: str
+    trigger: TurnTrigger
+    llm_client: LLMClient
+    tool_dispatcher: ToolDispatcher
+    token_factory: TokenFactory
+    agent_label: str
+    capability: str
+    pricing: PricingTable
+    bus: EventBus
+    clock: Clock
+    correlation_id: str
+    started_at: datetime
+    max_iterations: int
+    deadline: datetime
+    history_cap: int
+    include_user_message: bool
+    approval_notifications: _ApprovalNotifications
+    agent_message_notifications: _AgentMessageNotifications
+
+
+@dataclass(slots=True)
+class _ActiveTurn:
+    run: _TurnRun
+    model_pick: ModelPick
+    token: DelegatedToken
+    headers: Mapping[str, str]
+    attribution: AgentAttribution
+    preferences: PreferenceBundle
+    history: list[LlmChatMessage]
+    agent_conversation_ref: str | None
+    tool_calls_made: int = 0
+    llm_calls_made: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class _TurnTerminal:
+    outcome: AgentTurnOutcome
+    ended_at: datetime
+    tool_calls_made: int = 0
+    llm_calls_made: int = 0
+    chat_message_id: str | None = None
+    approval_request_id: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+def _validate_turn_start(run: _TurnRun) -> None:
+    """Validate trigger/thread coupling before any side effect lands."""
+    if run.trigger == "event" and run.thread_id is None:
+        raise AgentTurnError(
+            "trigger='event' requires a chat thread_id; "
+            "scheduled turns pass trigger='schedule' instead."
+        )
+
+
+def _publish_turn_started(run: _TurnRun) -> None:
+    run.bus.publish(
+        AgentTurnStarted(
+            workspace_id=run.ctx.workspace_id,
+            actor_id=run.ctx.actor_id,
+            actor_user_id=run.ctx.actor_id,
+            correlation_id=run.correlation_id,
+            occurred_at=run.started_at,
+            scope=run.scope,
+            thread_id=run.thread_id,
+            trigger=run.trigger,
+            started_at=run.started_at,
+        )
+    )
+
+
+def _resolve_model_or_error(run: _TurnRun) -> ModelPick | TurnOutcome:
+    try:
+        return resolve_primary(
+            run.session,
+            run.ctx,
+            run.capability,
+            clock=run.clock,
+        )
+    except CapabilityUnassignedError as exc:
+        return _finish_error(
+            run,
+            error_code="capability_unassigned",
+            error_message=str(exc),
+        )
+
+
+def _check_budget_or_error(
+    run: _TurnRun,
+    model_pick: ModelPick,
+) -> TurnOutcome | None:
+    projected_cost = estimate_cost_cents(
+        prompt_tokens=_PROJECTED_PROMPT_TOKENS,
+        max_output_tokens=_PROJECTED_COMPLETION_TOKENS,
+        api_model_id=model_pick.api_model_id,
+        pricing=run.pricing,
+        workspace_id=run.ctx.workspace_id,
+    )
+    try:
+        check_budget(
+            run.session,
+            run.ctx,
+            capability=run.capability,
+            projected_cost_cents=projected_cost,
+            clock=run.clock,
+        )
+    except BudgetExceeded as exc:
+        return _finish_error(
+            run,
+            error_code=exc.error_code,
+            error_message=exc.message_text,
+        )
+    return None
+
+
+def _prepare_active_turn(run: _TurnRun, model_pick: ModelPick) -> _ActiveTurn:
+    token_expires_at = run.clock.now() + DELEGATED_TOKEN_TTL
+    token = run.token_factory.mint_for(
+        run.ctx,
+        agent_label=run.agent_label,
+        expires_at=token_expires_at,
+    )
+    agent_conversation_ref = _resolve_external_ref(
+        run.session,
+        thread_id=run.thread_id,
+    )
+    preferences = resolve_preferences(
+        run.session,
+        run.ctx,
+        capability=run.capability,
+        user_id=run.ctx.actor_id,
+    )
+    return _ActiveTurn(
+        run=run,
+        model_pick=model_pick,
+        token=token,
+        headers=_agent_headers(run, agent_conversation_ref),
+        attribution=AgentAttribution(
+            actor_user_id=run.ctx.actor_id,
+            token_id=token.token_id,
+            agent_label=run.agent_label,
+            agent_conversation_ref=agent_conversation_ref,
+        ),
+        preferences=preferences,
+        history=_initial_turn_history(run, preferences),
+        agent_conversation_ref=agent_conversation_ref,
+    )
+
+
+def _agent_headers(
+    run: _TurnRun,
+    agent_conversation_ref: str | None,
+) -> Mapping[str, str]:
+    headers: dict[str, str] = {
+        "X-Agent-Channel": _channel_header_value(run.scope),
+        "X-Agent-Reason": f"agent.turn:{run.correlation_id}",
+    }
+    if agent_conversation_ref is not None:
+        headers["X-Agent-Conversation-Ref"] = agent_conversation_ref
+    return headers
+
+
+def _initial_turn_history(
+    run: _TurnRun,
+    preferences: PreferenceBundle,
+) -> list[LlmChatMessage]:
+    system_prompt = get_active_prompt(
+        run.session,
+        run.capability,
+        default=_default_system_prompt(run.scope),
+        clock=run.clock.now,
+    )
+    return _assemble_history(
+        run.session,
+        thread_id=run.thread_id,
+        user_message=run.user_message,
+        history_cap=run.history_cap,
+        preferences=preferences,
+        system_prompt=system_prompt,
+        include_user_message=run.include_user_message,
+    )
+
+
+def _run_active_turn(turn: _ActiveTurn) -> TurnOutcome:
+    try:
+        for iteration in range(turn.run.max_iterations):
+            outcome = _run_turn_iteration(turn, iteration)
+            if outcome is not None:
+                return outcome
+        raise TimeoutReply("iteration_cap")
+    except TimeoutReply:
+        return _finish_timeout(turn)
+
+
+def _run_turn_iteration(
+    turn: _ActiveTurn,
+    iteration: int,
+) -> TurnOutcome | None:
+    run = turn.run
+    _check_wall_clock(run.clock, run.deadline)
+    response = _call_llm(
+        llm_client=run.llm_client,
+        session=run.session,
+        ctx=run.ctx,
+        model_pick=turn.model_pick,
+        history=turn.history,
+        tools=run.tool_dispatcher.tools,
+        capability=run.capability,
+        correlation_id=run.correlation_id,
+        attempt=iteration,
+        attribution=turn.attribution,
+        pricing=run.pricing,
+        clock=run.clock,
+    )
+    turn.llm_calls_made += 1
+
+    tool_call = _resolve_tool_call(response)
+    if tool_call is None:
+        return _finish_reply(turn, response.text or "")
+
+    turn.tool_calls_made += 1
+    return _handle_tool_call(turn, tool_call)
+
+
+def _handle_tool_call(
+    turn: _ActiveTurn,
+    tool_call: ToolCall,
+) -> TurnOutcome | None:
+    if is_action_blocked(turn.preferences, tool_call.name):
+        _append_result(turn, _blocked_tool_result(tool_call), tool_call)
+        return None
+
+    builtin_result = _dispatch_builtin_read_tool(
+        turn.run.session,
+        turn.run.ctx,
+        thread_id=turn.run.thread_id,
+        tool_call=tool_call,
+    )
+    if builtin_result is not None:
+        _append_result(turn, builtin_result, tool_call)
+        return None
+
+    decision = turn.run.tool_dispatcher.is_gated(tool_call)
+    if decision.gated:
+        return _finish_approval_required(turn, tool_call, decision)
+
+    _dispatch_allowed_tool(turn, tool_call)
+    return None
+
+
+def _blocked_tool_result(tool_call: ToolCall) -> ToolResult:
+    return ToolResult(
+        call_id=tool_call.id,
+        status_code=403,
+        body=blocked_action_result_body(tool_call.name),
+        mutated=False,
+    )
+
+
+def _dispatch_allowed_tool(turn: _ActiveTurn, tool_call: ToolCall) -> None:
+    run = turn.run
+    result = run.tool_dispatcher.dispatch(
+        tool_call,
+        token=turn.token,
+        headers=turn.headers,
+    )
+    if result.mutated:
+        _audit_tool_call(
+            run.session,
+            ctx=run.ctx,
+            tool_call=tool_call,
+            result=result,
+            token_id=turn.token.token_id,
+            agent_label=run.agent_label,
+            agent_conversation_ref=turn.agent_conversation_ref,
+            correlation_id=run.correlation_id,
+            clock=run.clock,
+        )
+    _append_result(turn, result, tool_call)
+
+
+def _append_result(
+    turn: _ActiveTurn,
+    result: ToolResult,
+    tool_call: ToolCall,
+) -> None:
+    turn.history = _append_tool_result_to_history(turn.history, tool_call, result)
+
+
+def _finish_reply(turn: _ActiveTurn, body_md: str) -> TurnOutcome:
+    run = turn.run
+    notifications = run.agent_message_notifications
+    chat_message_id = _write_chat_reply(
+        run.session,
+        ctx=run.ctx,
+        thread_id=run.thread_id,
+        body_md=body_md,
+        scope=run.scope,
+        event_bus=run.bus,
+        correlation_id=run.correlation_id,
+        clock=run.clock,
+        agent_message_notification_sink=notifications.sink,
+        agent_message_recipient_user_id=notifications.recipient_user_id,
+        agent_message_delivery_is_fallback=notifications.delivery_is_fallback,
+    )
+    return _finish_turn(
+        run,
+        _TurnTerminal(
+            outcome="replied",
+            ended_at=run.clock.now(),
+            tool_calls_made=turn.tool_calls_made,
+            llm_calls_made=turn.llm_calls_made,
+            chat_message_id=chat_message_id,
+        ),
+    )
+
+
+def _finish_approval_required(
+    turn: _ActiveTurn,
+    tool_call: ToolCall,
+    decision: GateDecision,
+) -> TurnOutcome:
+    run = turn.run
+    approval_id, _ = _write_approval_request(
+        run.session,
+        ctx=run.ctx,
+        tool_call=tool_call,
+        decision=decision,
+        correlation_id=run.correlation_id,
+        requester_actor_id=run.ctx.actor_id,
+        inline_channel=_channel_header_value(run.scope),
+        for_user_id=run.ctx.actor_id,
+        resolved_user_mode=None,
+        clock=run.clock,
+    )
+    _notify_approval_if_requested(run, approval_id)
+    ended_at = run.clock.now()
+    _publish_action_pending(run, approval_id, ended_at)
+    return _finish_turn(
+        run,
+        _TurnTerminal(
+            outcome="action",
+            ended_at=ended_at,
+            tool_calls_made=turn.tool_calls_made,
+            llm_calls_made=turn.llm_calls_made,
+            approval_request_id=approval_id,
+        ),
+    )
+
+
+def _notify_approval_if_requested(run: _TurnRun, approval_id: str) -> None:
+    notifications = run.approval_notifications
+    if notifications.sink is None:
+        return
+    row = run.session.get(ApprovalRequest, approval_id)
+    if row is None:
+        return
+    notify_approval_needed(
+        approval=approval_notification_view_from_row(row),
+        recipient_user_ids=notifications.recipient_user_ids,
+        sink=notifications.sink,
+    )
+
+
+def _publish_action_pending(
+    run: _TurnRun,
+    approval_id: str,
     ended_at: datetime,
+) -> None:
+    run.bus.publish(
+        AgentActionPending(
+            workspace_id=run.ctx.workspace_id,
+            actor_id=run.ctx.actor_id,
+            actor_user_id=run.ctx.actor_id,
+            correlation_id=run.correlation_id,
+            occurred_at=ended_at,
+            approval_request_id=approval_id,
+            scope=run.scope,
+            thread_id=run.thread_id,
+        )
+    )
+
+
+def _finish_timeout(turn: _ActiveTurn) -> TurnOutcome:
+    run = turn.run
+    notifications = run.agent_message_notifications
+    chat_message_id = _write_chat_reply(
+        run.session,
+        ctx=run.ctx,
+        thread_id=run.thread_id,
+        body_md=_TIMEOUT_REPLY_TEXT,
+        scope=run.scope,
+        event_bus=run.bus,
+        correlation_id=run.correlation_id,
+        clock=run.clock,
+        agent_message_notification_sink=notifications.sink,
+        agent_message_recipient_user_id=notifications.recipient_user_id,
+        agent_message_delivery_is_fallback=notifications.delivery_is_fallback,
+    )
+    return _finish_turn(
+        run,
+        _TurnTerminal(
+            outcome="timeout",
+            ended_at=run.clock.now(),
+            tool_calls_made=turn.tool_calls_made,
+            llm_calls_made=turn.llm_calls_made,
+            chat_message_id=chat_message_id,
+        ),
+    )
+
+
+def _finish_error(
+    run: _TurnRun,
+    *,
     error_code: str,
     error_message: str,
 ) -> TurnOutcome:
-    """Emit ``agent.turn.finished(outcome=error)`` and return the outcome.
-
-    Centralised so every error branch (capability unassigned,
-    budget exceeded, future error families) emits the SSE event
-    with a consistent payload and the caller surfaces the same
-    typed ``error_code``.
-    """
-    # code-health: ignore[params] Port params are adapter API contract.
-    bus.publish(
-        AgentTurnFinished(
-            workspace_id=ctx.workspace_id,
-            actor_id=ctx.actor_id,
-            actor_user_id=ctx.actor_id,
-            correlation_id=correlation_id,
-            occurred_at=ended_at,
-            scope=scope,
-            thread_id=thread_id,
-            trigger=trigger,
-            finished_at=ended_at,
+    return _finish_turn(
+        run,
+        _TurnTerminal(
             outcome="error",
+            ended_at=run.clock.now(),
+            error_code=error_code,
+            error_message=error_message,
+        ),
+    )
+
+
+def _finish_turn(run: _TurnRun, terminal: _TurnTerminal) -> TurnOutcome:
+    run.bus.publish(
+        AgentTurnFinished(
+            workspace_id=run.ctx.workspace_id,
+            actor_id=run.ctx.actor_id,
+            actor_user_id=run.ctx.actor_id,
+            correlation_id=run.correlation_id,
+            occurred_at=terminal.ended_at,
+            scope=run.scope,
+            thread_id=run.thread_id,
+            trigger=run.trigger,
+            finished_at=terminal.ended_at,
+            outcome=terminal.outcome,
         )
     )
     return TurnOutcome(
-        outcome="error",
-        chat_message_id=None,
-        approval_request_id=None,
-        tool_calls_made=0,
-        llm_calls_made=0,
-        started_at=started_at,
-        ended_at=ended_at,
-        correlation_id=correlation_id,
-        error_code=error_code,
-        error_message=error_message,
+        outcome=terminal.outcome,
+        chat_message_id=terminal.chat_message_id,
+        approval_request_id=terminal.approval_request_id,
+        tool_calls_made=terminal.tool_calls_made,
+        llm_calls_made=terminal.llm_calls_made,
+        started_at=run.started_at,
+        ended_at=terminal.ended_at,
+        correlation_id=run.correlation_id,
+        error_code=terminal.error_code,
+        error_message=terminal.error_message,
     )
 
 
