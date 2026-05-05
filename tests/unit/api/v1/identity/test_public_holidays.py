@@ -208,6 +208,46 @@ class TestPublicHolidayValidation:
         body = _assert_problem_error(duplicate, error="public_holiday_conflict")
         assert body["message"] == body["detail"]
 
+    def test_payroll_multiplier_matches_numeric_scale(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        ctx, factory, _ = owner_ctx
+        client = _client(ctx, factory)
+        tiny = client.post(
+            "/public_holidays",
+            json={
+                "name": "Tiny",
+                "date": "2026-05-01",
+                "scheduling_effect": "allow",
+                "payroll_multiplier": "8.896171441267871E-7",
+            },
+        )
+        assert tiny.status_code == 422
+        too_precise = client.post(
+            "/public_holidays",
+            json={
+                "name": "Precise",
+                "date": "2026-05-02",
+                "scheduling_effect": "allow",
+                "payroll_multiplier": "1.234",
+            },
+        )
+        assert too_precise.status_code == 422
+        valid = _create(
+            client,
+            name="Valid",
+            date="2026-05-03",
+            scheduling_effect="allow",
+            payroll_multiplier="999.99",
+        )
+        assert valid["payroll_multiplier"] == "999.99"
+        patch = client.patch(
+            f"/public_holidays/{valid['id']}",
+            json={"payroll_multiplier": "1.234"},
+        )
+        assert patch.status_code == 422
+
 
 class TestPublicHolidayAuth:
     def test_worker_is_denied_by_manager_gate(

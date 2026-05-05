@@ -62,7 +62,9 @@ class PublicHolidayCreateRequest(BaseModel):
     scheduling_effect: _SchedulingEffect
     reduced_starts_local: dt.time | None = None
     reduced_ends_local: dt.time | None = None
-    payroll_multiplier: Decimal | None = Field(default=None, ge=Decimal("0"))
+    payroll_multiplier: Decimal | None = Field(
+        default=None, ge=Decimal("0"), max_digits=5, decimal_places=2
+    )
     recurrence: _Recurrence | None = None
     notes_md: str | None = Field(default=None, max_length=20_000)
 
@@ -76,7 +78,9 @@ class PublicHolidayUpdateRequest(BaseModel):
     scheduling_effect: _SchedulingEffect | None = None
     reduced_starts_local: dt.time | None = None
     reduced_ends_local: dt.time | None = None
-    payroll_multiplier: Decimal | None = Field(default=None, ge=Decimal("0"))
+    payroll_multiplier: Decimal | None = Field(
+        default=None, ge=Decimal("0"), max_digits=5, decimal_places=2
+    )
     recurrence: _Recurrence | None = None
     notes_md: str | None = Field(default=None, max_length=20_000)
 
