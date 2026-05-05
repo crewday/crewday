@@ -142,11 +142,30 @@ def _signature_accepts_ctx(
         if annotation is WorkspaceContext:
             return True
         # String annotation (``from __future__ import annotations``
-        # defers evaluation). Match by suffix so both
-        # ``WorkspaceContext`` and the qualified form resolve.
-        if isinstance(annotation, str) and annotation.endswith("WorkspaceContext"):
+        # defers evaluation). Match only direct ctx annotations so
+        # provider/callback parameters such as
+        # ``Callable[[Session, WorkspaceContext], ...]`` do not get
+        # mistaken for repository methods.
+        if isinstance(annotation, str) and _is_workspace_context_annotation(
+            annotation
+        ):
             return True
     return False
+
+
+def _is_workspace_context_annotation(annotation: str) -> bool:
+    compact = annotation.replace(" ", "")
+    if "|" in compact:
+        return any(
+            _is_workspace_context_annotation(part) for part in compact.split("|")
+        )
+    for prefix in ("Optional[", "typing.Optional[", "Union[", "typing.Union["):
+        if compact.startswith(prefix) and compact.endswith("]"):
+            inner = compact[len(prefix) : -1]
+            return any(
+                _is_workspace_context_annotation(part) for part in inner.split(",")
+            )
+    return compact == "WorkspaceContext" or compact.endswith(".WorkspaceContext")
 
 
 # ---------------------------------------------------------------------------
@@ -525,6 +544,13 @@ COVERED_METHODS: frozenset[str] = frozenset(
         # same sink.
         "app.domain.llm.notifications.notify_anomaly_detected",
         "app.domain.llm.usage_recorder.record",
+        # §10.5 manager broadcasts: recipient enumeration and
+        # idempotency use the ctx-bound ``BroadcastAudience`` seam;
+        # notification / approval writes flow through sinks that stamp
+        # rows with ``ctx.workspace_id``.
+        "app.domain.messaging.broadcasts.execute_broadcast",
+        "app.domain.messaging.broadcasts.list_broadcast_recipients",
+        "app.domain.messaging.broadcasts.send_or_queue_broadcast",
         # cd-95zb: receipt OCR / autofill. Loads claim + attachment
         # through ``_load_claim`` / ``_load_attachment`` which scope
         # the SELECT by ``ctx.workspace_id``; the persist path
@@ -787,6 +813,45 @@ class TestRepositoryParityGate:
     extend :class:`TestScopedRowIsolation` with a method-specific
     case OR add a ``# justification:`` opt-out entry.
     """
+
+    @pytest.mark.parametrize(
+        "annotation",
+        [
+            "WorkspaceContext | None",
+            "app.tenancy.WorkspaceContext | None",
+            "typing.Optional[WorkspaceContext]",
+        ],
+    )
+    def test_signature_discovery_accepts_optional_ctx(
+        self, annotation: str
+    ) -> None:
+        params = {
+            "ctx": inspect.Parameter(
+                "ctx",
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                annotation=annotation,
+            )
+        }
+        assert _signature_accepts_ctx(params)
+
+    @pytest.mark.parametrize(
+        "annotation",
+        [
+            "Callable[[Session, WorkspaceContext], object]",
+            "SessionContextProvider",
+        ],
+    )
+    def test_signature_discovery_rejects_provider_annotations(
+        self, annotation: str
+    ) -> None:
+        params = {
+            "session_provider": inspect.Parameter(
+                "session_provider",
+                inspect.Parameter.KEYWORD_ONLY,
+                annotation=annotation,
+            )
+        }
+        assert not _signature_accepts_ctx(params)
 
     def test_every_method_covered_or_opted_out(self) -> None:
         """Every discovered method is in COVERED_METHODS or OPTOUTS.
