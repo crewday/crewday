@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { type FormEvent, useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
-import { fetchJson } from "@/lib/api";
+import { ApiError, fetchJson } from "@/lib/api";
+import type { ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
 import { fmtDate, fmtDateTime } from "@/lib/dates";
@@ -18,6 +19,7 @@ import type {
   SettingDefinition,
   Task,
   TaskStatus,
+  WorkRole,
 } from "@/types/api";
 
 interface EmployeeDetail {
@@ -26,6 +28,52 @@ interface EmployeeDetail {
   subject_expenses: Expense[];
   subject_leaves: Leave[];
   subject_payslips: PaySlip[];
+}
+
+interface UserWorkRole {
+  id: string;
+  user_id: string;
+  workspace_id: string;
+  work_role_id: string;
+  started_on: string;
+  ended_on: string | null;
+  pay_rule_id: string | null;
+  created_at: string;
+  deleted_at: string | null;
+}
+
+interface RoleEditorPayload {
+  employeeId: string;
+  startedOn: string;
+  addRoleIds: string[];
+  removeLinkIds: string[];
+}
+
+class RoleSaveError extends Error {
+  readonly original: unknown;
+  readonly partial: boolean;
+
+  constructor(original: unknown, partial: boolean) {
+    super("Role changes could not be saved.");
+    this.name = "RoleSaveError";
+    this.original = original;
+    this.partial = partial;
+  }
+}
+
+async function fetchAllList<T>(path: string): Promise<T[]> {
+  const rows: T[] = [];
+  let cursor: string | null = null;
+
+  do {
+    const params = new URLSearchParams({ limit: "500" });
+    if (cursor !== null) params.set("cursor", cursor);
+    const page = await fetchJson<ListEnvelope<T>>(path + "?" + params.toString());
+    rows.push(...page.data);
+    cursor = page.has_more ? page.next_cursor : null;
+  } while (cursor !== null);
+
+  return rows;
 }
 
 const STATUS_TONE: Record<TaskStatus, "moss" | "sky" | "ghost" | "rust" | "sand"> = {
@@ -51,6 +99,56 @@ function formatValue(value: unknown): string {
   if (value === false) return "no";
   if (value === null || value === undefined) return "--";
   return String(value);
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function roleErrorMessage(error: unknown): string {
+  if (error instanceof RoleSaveError) {
+    const base = roleErrorMessage(error.original);
+    if (!error.partial) return base;
+    return base + " Some role changes may have been saved; review the refreshed selection before saving again.";
+  }
+  if (error instanceof ApiError) {
+    if (error.status === 403) return "You do not have permission to edit work roles.";
+    if (error.status === 422) return error.message || "The selected role change is not valid.";
+    return error.message || "Role changes could not be saved.";
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return "Role changes could not be saved.";
+}
+
+async function saveEmployeeRoles({
+  employeeId,
+  startedOn,
+  addRoleIds,
+  removeLinkIds,
+}: RoleEditorPayload): Promise<void> {
+  let savedChanges = 0;
+
+  try {
+    for (const roleId of addRoleIds) {
+      await fetchJson<UserWorkRole>("/api/v1/user_work_roles", {
+        method: "POST",
+        body: {
+          user_id: employeeId,
+          work_role_id: roleId,
+          started_on: startedOn,
+        },
+      });
+      savedChanges += 1;
+    }
+    for (const linkId of removeLinkIds) {
+      await fetchJson<void>("/api/v1/user_work_roles/" + encodeURIComponent(linkId), {
+        method: "DELETE",
+      });
+      savedChanges += 1;
+    }
+  } catch (error) {
+    throw new RoleSaveError(error, savedChanges > 0);
+  }
 }
 
 function SettingsOverridePanel({
@@ -132,6 +230,10 @@ function tabFromHash(hash: string): Tab {
 export default function EmployeeDetailPage() {
   const { eid = "" } = useParams<{ eid: string }>();
   const [activeTab, setActiveTab] = useState<Tab>(() => tabFromHash(window.location.hash));
+  const [roleDialogOpen, setRoleDialogOpen] = useState(false);
+  const [selectedRoleIds, setSelectedRoleIds] = useState<Set<string>>(new Set());
+  const roleDialogRef = useRef<HTMLDialogElement>(null);
+  const qc = useQueryClient();
 
   useEffect(() => {
     const syncFromHash = () => setActiveTab(tabFromHash(window.location.hash));
@@ -145,6 +247,35 @@ export default function EmployeeDetailPage() {
     queryFn: () => fetchJson<EmployeeDetail>("/api/v1/employees/" + eid),
     enabled: eid !== "",
   });
+  const workRolesQ = useQuery({
+    queryKey: qk.workRoles(),
+    queryFn: () => fetchAllList<WorkRole>("/api/v1/work_roles"),
+    enabled: roleDialogOpen,
+  });
+  const userWorkRolesQ = useQuery({
+    queryKey: [...qk.employee(eid), "user_work_roles"],
+    queryFn: () => fetchAllList<UserWorkRole>("/api/v1/users/" + eid + "/user_work_roles"),
+    enabled: eid !== "" && roleDialogOpen,
+  });
+  const invalidateEmployeeRoleQueries = () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: qk.employee(eid) }),
+      qc.invalidateQueries({ queryKey: qk.employees() }),
+      qc.invalidateQueries({ queryKey: [...qk.employee(eid), "user_work_roles"] }),
+    ]);
+  const roleSave = useMutation({
+    mutationFn: saveEmployeeRoles,
+    onError: invalidateEmployeeRoleQueries,
+    onSuccess: async () => {
+      await invalidateEmployeeRoleQueries();
+      roleDialogRef.current?.close();
+    },
+  });
+
+  useEffect(() => {
+    if (!roleDialogOpen || !userWorkRolesQ.data) return;
+    setSelectedRoleIds(new Set(userWorkRolesQ.data.map((link) => link.work_role_id)));
+  }, [roleDialogOpen, userWorkRolesQ.data]);
   const propsQ = useQuery({
     queryKey: qk.properties(),
     queryFn: () => fetchJson<Property[]>("/api/v1/properties"),
@@ -169,25 +300,54 @@ export default function EmployeeDetailPage() {
 
   const { subject, subject_tasks, subject_expenses } = detailQ.data;
   const propsById = new Map(propsQ.data.map((p) => [p.id, p]));
+  const roleRows = workRolesQ.data ?? [];
+  const currentLinks = userWorkRolesQ.data ?? [];
+  const currentRoleIds = new Set(currentLinks.map((link) => link.work_role_id));
+
+  function openRoleDialog() {
+    setRoleDialogOpen(true);
+    roleSave.reset();
+    roleDialogRef.current?.showModal();
+  }
+
+  function closeRoleDialog() {
+    roleDialogRef.current?.close();
+  }
+
+  function toggleRole(roleId: string, checked: boolean) {
+    setSelectedRoleIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(roleId);
+      } else {
+        next.delete(roleId);
+      }
+      return next;
+    });
+  }
+
+  function submitRoleDialog(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const addRoleIds = [...selectedRoleIds].filter((roleId) => !currentRoleIds.has(roleId));
+    const removeLinkIds = currentLinks
+      .filter((link) => !selectedRoleIds.has(link.work_role_id))
+      .map((link) => link.id);
+    roleSave.mutate({
+      employeeId: subject.id,
+      startedOn: subject.started_on || todayIso(),
+      addRoleIds,
+      removeLinkIds,
+    });
+  }
 
   return (
     <DeskPage
       title={subject.name}
       sub={subject.roles.join(" · ") + " · " + subject.phone}
       actions={
-        <span className="page-action-disabled">
-          <button
-            type="button"
-            className="btn btn--ghost"
-            disabled
-            aria-describedby="employee-edit-roles-disabled-reason"
-          >
-            Edit roles
-          </button>
-          <span id="employee-edit-roles-disabled-reason" className="page-action-disabled__reason">
-            Role editing is not implemented yet.
-          </span>
-        </span>
+        <button type="button" className="btn btn--ghost" onClick={openRoleDialog}>
+          Edit roles
+        </button>
       }
       overflow={[
         {
@@ -210,6 +370,70 @@ export default function EmployeeDetailPage() {
           </a>
         ))}
       </nav>
+
+      <dialog
+        ref={roleDialogRef}
+        className="modal"
+        aria-labelledby="employee-role-dialog-title"
+        onClose={() => {
+          setRoleDialogOpen(false);
+          roleSave.reset();
+        }}
+      >
+        <form className="modal__body" onSubmit={submitRoleDialog}>
+          <h3 id="employee-role-dialog-title" className="modal__title">Edit work roles</h3>
+          <p className="modal__sub">
+            These are scheduling and assignment roles from the workspace work-role catalog.
+          </p>
+          {workRolesQ.isPending || userWorkRolesQ.isPending ? (
+            <Loading />
+          ) : workRolesQ.isError || userWorkRolesQ.isError ? (
+            <p className="form-error" role="alert">
+              Work roles could not be loaded.
+            </p>
+          ) : roleRows.length === 0 ? (
+            <p className="muted">No work roles exist in this workspace.</p>
+          ) : (
+            <fieldset className="field">
+              <legend>Work roles</legend>
+              {roleRows.map((role) => (
+                <label key={role.id} className="field--inline">
+                  <input
+                    type="checkbox"
+                    checked={selectedRoleIds.has(role.id)}
+                    onChange={(event) => toggleRole(role.id, event.currentTarget.checked)}
+                  />
+                  <span>{role.name}</span>
+                  <code className="inline-code">{role.key}</code>
+                </label>
+              ))}
+            </fieldset>
+          )}
+          {roleSave.isError ? (
+            <p className="form-error" role="alert">
+              {roleErrorMessage(roleSave.error)}
+            </p>
+          ) : null}
+          <div className="modal__actions">
+            <button type="button" className="btn btn--ghost" onClick={closeRoleDialog}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn--moss"
+              disabled={
+                roleSave.isPending ||
+                workRolesQ.isPending ||
+                userWorkRolesQ.isPending ||
+                workRolesQ.isError ||
+                userWorkRolesQ.isError
+              }
+            >
+              {roleSave.isPending ? "Saving..." : "Save roles"}
+            </button>
+          </div>
+        </form>
+      </dialog>
 
       {activeTab === "overview" && (
         <section className="grid grid--split">
