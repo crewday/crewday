@@ -19,8 +19,12 @@ from prometheus_client.parser import text_string_to_metric_families
 
 from app.observability import metrics as metrics_mod
 from app.observability.metrics import (
+    EVENTS_RELAY_LISTENER_LAST_ERROR_UNIXTIME,
+    EVENTS_RELAY_LISTENER_RECONNECTS_TOTAL,
     EVENTS_RELAY_NOTIFY_BYTES,
     EVENTS_RELAY_NOTIFY_DROPPED_TOTAL,
+    EVENTS_RELAY_NOTIFY_RECEIVED_TOTAL,
+    EVENTS_RELAY_NOTIFY_SELF_SKIPPED_TOTAL,
     HTTP_REQUEST_DURATION_SECONDS,
     HTTP_REQUESTS_TOTAL,
     LLM_CALLS_TOTAL,
@@ -76,6 +80,18 @@ class TestRegistryShape:
     def test_events_relay_notify_dropped_total_label_names(self) -> None:
         assert EVENTS_RELAY_NOTIFY_DROPPED_TOTAL._labelnames == ("kind", "reason")
 
+    def test_events_relay_notify_received_total_label_names(self) -> None:
+        assert EVENTS_RELAY_NOTIFY_RECEIVED_TOTAL._labelnames == ("kind",)
+
+    def test_events_relay_notify_self_skipped_total_has_no_labels(self) -> None:
+        assert EVENTS_RELAY_NOTIFY_SELF_SKIPPED_TOTAL._labelnames == ()
+
+    def test_events_relay_listener_reconnects_total_has_no_labels(self) -> None:
+        assert EVENTS_RELAY_LISTENER_RECONNECTS_TOTAL._labelnames == ()
+
+    def test_events_relay_listener_last_error_unixtime_has_no_labels(self) -> None:
+        assert EVENTS_RELAY_LISTENER_LAST_ERROR_UNIXTIME._labelnames == ()
+
     def test_metrics_render_via_generate_latest(self) -> None:
         """The registry round-trips through the Prometheus exposer.
 
@@ -96,6 +112,10 @@ class TestRegistryShape:
         assert "crewday_llm_cost_usd" in names
         assert "crewday_worker_jobs" in names
         assert "events_relay_notify_dropped" in names
+        assert "events_relay_notify_received" in names
+        assert "events_relay_notify_self_skipped" in names
+        assert "events_relay_listener_reconnects" in names
+        assert "events_relay_listener_last_error_unixtime" in names
         # Histogram families: name preserved verbatim.
         assert "crewday_http_request_duration_seconds" in names
         assert "crewday_worker_job_duration_seconds" in names
@@ -106,6 +126,10 @@ class TestRegistryShape:
         assert "crewday_http_requests_total" in body
         assert "crewday_llm_calls_total" in body
         assert "events_relay_notify_dropped_total" in body
+        assert "events_relay_notify_received_total" in body
+        assert "events_relay_notify_self_skipped_total" in body
+        assert "events_relay_listener_reconnects_total" in body
+        assert "events_relay_listener_last_error_unixtime" in body
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +264,10 @@ def test_module_publishes_expected_surface() -> None:
         "METRICS_REGISTRY",
         "EVENTS_RELAY_NOTIFY_BYTES",
         "EVENTS_RELAY_NOTIFY_DROPPED_TOTAL",
+        "EVENTS_RELAY_NOTIFY_RECEIVED_TOTAL",
+        "EVENTS_RELAY_NOTIFY_SELF_SKIPPED_TOTAL",
+        "EVENTS_RELAY_LISTENER_LAST_ERROR_UNIXTIME",
+        "EVENTS_RELAY_LISTENER_RECONNECTS_TOTAL",
         "WORKER_JOBS_TOTAL",
         "WORKER_JOB_DURATION_SECONDS",
         "sanitize_workspace_label",

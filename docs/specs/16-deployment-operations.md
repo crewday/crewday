@@ -532,7 +532,13 @@ layer by RLS (§15). Payments are **not** in scope for v1
   Operators watch `events_relay_notify_bytes{kind}` for event kinds
   approaching the NOTIFY cap and
   `events_relay_notify_dropped_total{kind,reason}` for relay drops
-  (`reason` is `oversize`, `serialise`, or `send_failed`).
+  (`reason` is `oversize`, `serialise`, or `send_failed`). On the
+  receive side, `events_relay_notify_received_total{kind}` tracks
+  decoded inbound NOTIFYs, `events_relay_notify_self_skipped_total`
+  tracks the originator echo drops, and
+  `events_relay_listener_reconnects_total` plus
+  `events_relay_listener_last_error_unixtime` expose listener
+  reconnect/error health.
 - LLM model-assignment edits use a narrower sibling bridge:
   `app/domain/llm/invalidation_bridge.py`. On Postgres, each
   worker opens a long-lived `LISTEN llm_assignment`
@@ -847,6 +853,10 @@ A full env reference lives in `deploy/.env.example`.
   - `events_relay_notify_bytes{kind}`
   - `events_relay_notify_dropped_total{kind, reason}` — `reason` is
     one of `oversize`, `serialise`, or `send_failed`.
+  - `events_relay_notify_received_total{kind}`
+  - `events_relay_notify_self_skipped_total`
+  - `events_relay_listener_reconnects_total`
+  - `events_relay_listener_last_error_unixtime`
 - Future additions: DB pool gauges, email delivery counters,
   webhook delivery histogram. Each lands as a Beads task with
   the same label-hygiene gate.

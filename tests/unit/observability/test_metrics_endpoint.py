@@ -25,8 +25,12 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.observability.endpoint import build_metrics_router
 from app.observability.metrics import (
+    EVENTS_RELAY_LISTENER_LAST_ERROR_UNIXTIME,
+    EVENTS_RELAY_LISTENER_RECONNECTS_TOTAL,
     EVENTS_RELAY_NOTIFY_BYTES,
     EVENTS_RELAY_NOTIFY_DROPPED_TOTAL,
+    EVENTS_RELAY_NOTIFY_RECEIVED_TOTAL,
+    EVENTS_RELAY_NOTIFY_SELF_SKIPPED_TOTAL,
     HTTP_REQUESTS_TOTAL,
     LLM_CALLS_TOTAL,
     METRICS_REGISTRY,
@@ -308,11 +312,19 @@ class TestMetricsBody:
             kind="notification.created",
             reason="oversize",
         ).inc()
+        EVENTS_RELAY_NOTIFY_RECEIVED_TOTAL.labels(kind="notification.created").inc()
+        EVENTS_RELAY_NOTIFY_SELF_SKIPPED_TOTAL.inc()
+        EVENTS_RELAY_LISTENER_RECONNECTS_TOTAL.inc()
+        EVENTS_RELAY_LISTENER_LAST_ERROR_UNIXTIME.set(1_777_777_777)
 
         app = _build_app(_settings())
         resp = _loopback_client(app).get("/metrics")
         assert "events_relay_notify_bytes_bucket" in resp.text
         assert "events_relay_notify_dropped_total" in resp.text
+        assert "events_relay_notify_received_total" in resp.text
+        assert "events_relay_notify_self_skipped_total" in resp.text
+        assert "events_relay_listener_reconnects_total" in resp.text
+        assert "events_relay_listener_last_error_unixtime" in resp.text
         assert 'kind="notification.created"' in resp.text
         assert 'reason="oversize"' in resp.text
 

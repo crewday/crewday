@@ -22,6 +22,14 @@ exposing the §16-pinned metrics:
   NOTIFY payload sizes by event kind.
 * ``events_relay_notify_dropped_total{kind, reason}`` — Counter for relay
   NOTIFY drops (``oversize`` / ``serialise`` / ``send_failed``).
+* ``events_relay_notify_received_total{kind}`` — Counter for decoded
+  inbound Postgres NOTIFY payloads received by the listener.
+* ``events_relay_notify_self_skipped_total`` — Counter for
+  self-originated NOTIFY payloads skipped by the listener.
+* ``events_relay_listener_reconnects_total`` — Counter for listener
+  reconnect attempts after errors.
+* ``events_relay_listener_last_error_unixtime`` — Gauge containing the
+  last listener-error unix timestamp.
 
 The registry is **per-process** — one in the API container, another
 in the worker container under Recipe D (§16). Prometheus scrapes
@@ -66,13 +74,17 @@ from __future__ import annotations
 
 from typing import Final
 
-from prometheus_client import CollectorRegistry, Counter, Histogram
+from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
 
 from app.util.redact import ConsentSet, redact
 
 __all__ = [
+    "EVENTS_RELAY_LISTENER_LAST_ERROR_UNIXTIME",
+    "EVENTS_RELAY_LISTENER_RECONNECTS_TOTAL",
     "EVENTS_RELAY_NOTIFY_BYTES",
     "EVENTS_RELAY_NOTIFY_DROPPED_TOTAL",
+    "EVENTS_RELAY_NOTIFY_RECEIVED_TOTAL",
+    "EVENTS_RELAY_NOTIFY_SELF_SKIPPED_TOTAL",
     "HTTP_REQUESTS_TOTAL",
     "HTTP_REQUEST_DURATION_SECONDS",
     "LLM_CALLS_TOTAL",
@@ -226,6 +238,31 @@ EVENTS_RELAY_NOTIFY_DROPPED_TOTAL: Final[Counter] = Counter(
     "events_relay_notify_dropped_total",
     "Total Postgres NOTIFY relay payloads dropped by reason.",
     labelnames=("kind", "reason"),
+    registry=METRICS_REGISTRY,
+)
+
+EVENTS_RELAY_NOTIFY_RECEIVED_TOTAL: Final[Counter] = Counter(
+    "events_relay_notify_received_total",
+    "Total decoded Postgres NOTIFY payloads received by the listener.",
+    labelnames=("kind",),
+    registry=METRICS_REGISTRY,
+)
+
+EVENTS_RELAY_NOTIFY_SELF_SKIPPED_TOTAL: Final[Counter] = Counter(
+    "events_relay_notify_self_skipped_total",
+    "Total self-originated Postgres NOTIFY payloads skipped by the listener.",
+    registry=METRICS_REGISTRY,
+)
+
+EVENTS_RELAY_LISTENER_RECONNECTS_TOTAL: Final[Counter] = Counter(
+    "events_relay_listener_reconnects_total",
+    "Total Postgres LISTEN relay reconnect attempts after listener errors.",
+    registry=METRICS_REGISTRY,
+)
+
+EVENTS_RELAY_LISTENER_LAST_ERROR_UNIXTIME: Final[Gauge] = Gauge(
+    "events_relay_listener_last_error_unixtime",
+    "Unix timestamp of the last Postgres LISTEN relay listener error.",
     registry=METRICS_REGISTRY,
 )
 

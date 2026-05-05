@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import math
+import sys
+import types
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 from unittest.mock import MagicMock
@@ -21,6 +23,7 @@ from unittest.mock import MagicMock
 import pytest
 from prometheus_client import generate_latest
 
+from app.events import relay as relay_mod
 from app.events.bus import EventBus
 from app.events.relay import (
     CHANNEL_NAME,
@@ -44,8 +47,11 @@ _UTC = datetime(2026, 4, 24, 12, 0, 0, tzinfo=UTC)
 
 def _metric_sample_value(name: str, **labels: str) -> float:
     body = generate_latest(METRICS_REGISTRY).decode("utf-8")
-    label_parts = ",".join(f'{key}="{value}"' for key, value in labels.items())
-    prefix = f"{name}{{{label_parts}}} "
+    if labels:
+        label_parts = ",".join(f'{key}="{value}"' for key, value in labels.items())
+        prefix = f"{name}{{{label_parts}}} "
+    else:
+        prefix = f"{name} "
     for line in body.splitlines():
         if line.startswith(prefix):
             return float(line.removeprefix(prefix))
@@ -66,6 +72,22 @@ def _dropped_count(*, kind: str, reason: str) -> float:
         kind=kind,
         reason=reason,
     )
+
+
+def _received_count(*, kind: str) -> float:
+    return _metric_sample_value("events_relay_notify_received_total", kind=kind)
+
+
+def _self_skipped_count() -> float:
+    return _metric_sample_value("events_relay_notify_self_skipped_total")
+
+
+def _listener_reconnect_count() -> float:
+    return _metric_sample_value("events_relay_listener_reconnects_total")
+
+
+def _listener_last_error_unixtime() -> float:
+    return _metric_sample_value("events_relay_listener_last_error_unixtime")
 
 
 def _notification_created(*, kind: str = "task_assigned") -> NotificationCreated:
@@ -334,6 +356,9 @@ class TestSelfSkip:
         engine = MagicMock()
         engine.dialect.name = "postgresql"
         relay = PostgresListenNotifyRelay(engine=engine, bus=bus, worker_id="self")
+        metric_kind = "notification.created"
+        before_received = _received_count(kind=metric_kind)
+        before_self_skipped = _self_skipped_count()
 
         # Self-originated envelope: must NOT reach the local bus.
         own_payload = _envelope(
@@ -350,6 +375,9 @@ class TestSelfSkip:
         )
         relay._dispatch(own_payload)
         assert delivered == []
+        assert _received_count(kind=metric_kind) == before_received + 1
+        self_skipped_after_own = _self_skipped_count()
+        assert self_skipped_after_own == before_self_skipped + 1
 
         # Sibling-originated envelope: must reach the local bus.
         sibling_payload = _envelope(
@@ -366,6 +394,8 @@ class TestSelfSkip:
         )
         relay._dispatch(sibling_payload)
         assert len(delivered) == 1
+        assert _received_count(kind=metric_kind) == before_received + 2
+        assert _self_skipped_count() == self_skipped_after_own
 
     def test_dispatch_drops_malformed_payload_silently(self) -> None:
         """A garbage NOTIFY (e.g. external pg_notify probe) is logged + dropped."""
@@ -373,9 +403,31 @@ class TestSelfSkip:
         engine = MagicMock()
         engine.dialect.name = "postgresql"
         relay = PostgresListenNotifyRelay(engine=engine, bus=bus)
+        before_received = _received_count(kind="notification.created")
         # Should not raise, nothing to assert beyond "no exception".
         relay._dispatch("not a json envelope")
         relay._dispatch(json.dumps({"missing": "keys"}))
+        assert _received_count(kind="notification.created") == before_received
+
+    def test_dispatch_sanitizes_received_kind_label(self, monkeypatch) -> None:
+        bus = EventBus()
+        engine = MagicMock()
+        engine.dialect.name = "postgresql"
+        relay = PostgresListenNotifyRelay(engine=engine, bus=bus)
+        event = _notification_created()
+        raw_kind = "notification.created." + ("x" * 200)
+        metric_kind = raw_kind[:64]
+        before_received = _received_count(kind=metric_kind)
+
+        monkeypatch.setattr(
+            relay_mod,
+            "_decode_envelope",
+            lambda _raw: (raw_kind, "other_worker", event),
+        )
+
+        relay._dispatch("ignored by patched decoder")
+
+        assert _received_count(kind=metric_kind) == before_received + 1
 
     def test_dispatch_swallows_subscriber_exception(self) -> None:
         """A buggy local subscriber must not tear down the receive loop."""
@@ -400,6 +452,37 @@ class TestSelfSkip:
         )
         # Must not raise — the receive loop survives one bad handler.
         relay._dispatch(sibling_payload)
+
+    async def test_run_records_listener_error_metrics(self, monkeypatch) -> None:
+        class _FailingAsyncConnection:
+            @staticmethod
+            async def connect(dsn: str, *, autocommit: bool) -> object:
+                assert dsn == "postgresql://relay-test"
+                assert autocommit is True
+                raise RuntimeError("listener down")
+
+        async def fake_sleep(delay: float) -> None:
+            assert delay == 1.0
+            relay._stopping = True
+
+        bus = EventBus()
+        engine = MagicMock()
+        engine.dialect.name = "postgresql"
+        engine.url.set.return_value.render_as_string.return_value = (
+            "postgresql://relay-test"
+        )
+        relay = PostgresListenNotifyRelay(engine=engine, bus=bus)
+        before_reconnects = _listener_reconnect_count()
+        before_error_time = _listener_last_error_unixtime()
+
+        fake_psycopg = types.SimpleNamespace(AsyncConnection=_FailingAsyncConnection)
+        monkeypatch.setitem(sys.modules, "psycopg", fake_psycopg)
+        monkeypatch.setattr(relay_mod.asyncio, "sleep", fake_sleep)
+
+        await relay._run()
+
+        assert _listener_reconnect_count() == before_reconnects + 1
+        assert _listener_last_error_unixtime() >= before_error_time
 
 
 # ---------------------------------------------------------------------------

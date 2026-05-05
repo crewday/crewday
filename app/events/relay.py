@@ -50,6 +50,7 @@ import asyncio
 import json
 import logging
 import threading
+import time
 import uuid
 from typing import Final, Protocol
 
@@ -58,8 +59,12 @@ from sqlalchemy import Engine, text
 from app.events.bus import EventBus
 from app.events.registry import Event, EventNotFound, get_event_type
 from app.observability.metrics import (
+    EVENTS_RELAY_LISTENER_LAST_ERROR_UNIXTIME,
+    EVENTS_RELAY_LISTENER_RECONNECTS_TOTAL,
     EVENTS_RELAY_NOTIFY_BYTES,
     EVENTS_RELAY_NOTIFY_DROPPED_TOTAL,
+    EVENTS_RELAY_NOTIFY_RECEIVED_TOTAL,
+    EVENTS_RELAY_NOTIFY_SELF_SKIPPED_TOTAL,
     sanitize_label,
 )
 
@@ -458,6 +463,8 @@ class PostgresListenNotifyRelay:
             except Exception as exc:
                 if self._stopping:
                     return
+                EVENTS_RELAY_LISTENER_RECONNECTS_TOTAL.inc()
+                EVENTS_RELAY_LISTENER_LAST_ERROR_UNIXTIME.set(time.time())
                 _log.warning(
                     "events.relay: listener errored, retrying in %.1fs: %s",
                     backoff,
@@ -483,8 +490,10 @@ class PostgresListenNotifyRelay:
         decoded = _decode_envelope(raw_payload)
         if decoded is None:
             return
-        _kind, worker_id, event = decoded
+        kind, worker_id, event = decoded
+        EVENTS_RELAY_NOTIFY_RECEIVED_TOTAL.labels(kind=sanitize_label(kind)).inc()
         if worker_id == self._worker_id:
+            EVENTS_RELAY_NOTIFY_SELF_SKIPPED_TOTAL.inc()
             return
         # ``publish_local`` skips the relay re-entry that
         # ``publish`` would otherwise trigger, breaking the loop.
