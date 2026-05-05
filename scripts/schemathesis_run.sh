@@ -263,30 +263,31 @@ echo "schemathesis: seeded contract path resources workspace_id=${CREWDAY_SCHEMA
 # JSON-serialised so non-ASCII content survives the codec
 # restriction unchanged.
 #
-# Initial scope (cd-3j25): the sweep covers a curated allowlist of
-# endpoints whose schemas have been validated against the
-# implementation. Adding more endpoints to the gate is a per-context
-# follow-up: file a Beads task per context, fix any conformance
-# divergence the gate flags, then extend the include list.
+# Default scope: the sweep covers audited per-context tags plus
+# documented per-operation exclusions for runtime invariants that
+# OpenAPI / Schemathesis cannot currently express. Adding more
+# endpoints to the gate remains a per-context follow-up: file a Beads
+# task, fix any conformance divergence the gate flags, then extend the
+# include list or document the residual exclusion inline.
 
 export SCHEMATHESIS_HOOKS="${HOOKS_MODULE}"
 
 REPORT_DIR="${SCHEMATHESIS_REPORT_DIR:-${SCRATCH}/report}"
 mkdir -p "${REPORT_DIR}"
 
-# Initial gate scope — operation-ids whose schemas have been audited
-# against the implementation. The hook in
+# Gate scope — audited tags and operation IDs whose schemas have been
+# checked against the implementation. The hook in
 # ``tests/contract/hooks.py::constrain_workspace_slug`` pins the
 # ``{slug}`` path parameter to our seeded workspace so the requests
 # resolve through the workspace membership lookup instead of 404ing
 # in the tenancy middleware.
 #
-# Extending the gate to additional operation-ids is a per-endpoint
-# follow-up: file a Beads task per context, run the gate against the
-# new operation, fix any conformance divergence the gate flags, and
-# only then add the operation-id here. A blanket "include everything"
-# would surface ~270 real schema-conformance bugs (cd-3j25 audit) and
-# turn the gate red on day one.
+# Extending the gate to additional tags or operation IDs is a
+# per-context follow-up: run the gate against the new surface, fix any
+# conformance divergence the gate flags, and only then add the include
+# here or document the residual operation-level exclusion. A blanket
+# "include everything" still selects routes whose success path depends
+# on one-time tokens, seeded IDs, event streams, or multipart fixtures.
 INCLUDE_ARGS=(
     # ``auth.me.get`` — bare-host singleton, session-cookie authed,
     # no path parameters. Picked as the v0 gate because it's the
@@ -301,12 +302,13 @@ INCLUDE_ARGS=(
     # required fields, ``minProperties: 1`` on PATCH bodies) so the
     # contract gate accepts the runtime invariants.
     #
-    # ``--include-tag assets`` (passed via ``$@``) selects every
-    # operation under the asset tag; the ``--exclude-operation-id``
-    # rules below carve out the operations whose runtime invariants
-    # are not currently expressible in OpenAPI without a more invasive
-    # surface change. Each exclusion documents the reason inline.
+    # ``--include-tag assets`` selects every operation under the asset
+    # tag; the ``--exclude-operation-id`` rules below carve out the
+    # operations whose runtime invariants are not currently expressible
+    # in OpenAPI without a more invasive surface change. Each
+    # exclusion documents the reason inline.
     # ----------------------------------------------------------------
+    --include-tag assets
     # ``assets.list`` / ``assets.list_flat`` — opaque base64url
     #   ``cursor`` query parameter cannot be expressed as an OpenAPI
     #   pattern that hypothesis-jsonschema can satisfy (the cursor is
@@ -367,23 +369,20 @@ INCLUDE_ARGS=(
     # iterations (cd-pa9p follow-up).
     --exclude-operation-id 'asset_types.create'
     # ----------------------------------------------------------------
-    # Identity tag (cd-1zw3x → cd-rpxd AC 7). The full ``--include-tag
-    # identity`` surface (108 ops) trips ~225 schema-conformance
-    # failures across five categories (problem+json content-type +
+    # Identity tag (cd-1zw3x → cd-rpxd AC 7). The full identity-tag
+    # surface still trips schema-conformance failures across categories
+    # that need narrower fixtures or schema work (problem+json content-type +
     # 4xx envelope mismatches; FastAPI ``HTTPValidationError.detail``
     # array-vs-string; undocumented 4xx codes for missing-resource
     # lookups; cross-field invariants pydantic doesn't emit;
     # genuine handler 5xx on FK / unique-constraint violations).
     #
-    # Wire the gate via the same curated-allowlist pattern the asset
-    # tag uses: include exactly the identity operation_ids whose
-    # OpenAPI schemas already match runtime semantics, and add more
+    # Wire the identity-only gate via the same curated-allowlist pattern
+    # the asset tag uses: include exactly the identity operation_ids
+    # whose OpenAPI schemas already match runtime semantics, and add more
     # only after each context's spec drift is fixed (per-op Beads
-    # follow-up). Each op below was confirmed clean by isolating it
-    # against the runner with ``--include-operation-id`` and
-    # ``--max-examples 20`` (165+ generated cases pass with zero
-    # failures across every check). See the `cd-1zw3x` audit notes
-    # for the full failure breakdown of the remaining 104 ops.
+    # follow-up). Identity operations that also belong to an audited tag
+    # such as ``authz`` may still be selected by that tag's sweep.
     #
     --include-operation-id 'auth.logout'
     --include-operation-id 'auth.passkey.login_start'
@@ -549,6 +548,83 @@ INCLUDE_ARGS=(
     # phase expects rejection because OpenAPI marks the parameter set
     # as closed (cd-wlkhl).
     --exclude-operation-id 'me.history.get'
+    # Identity tag — remaining curated exclusions for operations that
+    # still need one-time server state, seeded path resources, native
+    # push capability, personal-token scope strategies, or tenant
+    # context fixes before ``--include-tag identity`` can replace the
+    # operation-id allowlist above. A focused identity-tag smoke with
+    # ``SCHEMATHESIS_MAX_EXAMPLES=1`` still fails on these categories:
+    # user export notification tenancy, native push 501 status, personal
+    # token scope invariants, users cursor parsing, and missing seeded
+    # resources for detail / mutation routes.
+    #
+    # Email change, invite, recovery, and signup ceremonies require
+    # live one-time tokens or challenge state that the contract seed
+    # does not mint per generated example.
+    --exclude-operation-id 'auth.email.revert'
+    --exclude-operation-id 'auth.email.verify'
+    --exclude-operation-id 'auth.invite.passkey_finish'
+    --exclude-operation-id 'auth.invite.passkey_start'
+    --exclude-operation-id 'auth.invite.confirm'
+    --exclude-operation-id 'auth.invites.introspect'
+    --exclude-operation-id 'auth.invites.accept'
+    --exclude-operation-id 'auth.me.email.change_request'
+    --exclude-operation-id 'post_finish_api_v1_recover_passkey_finish_post'
+    --exclude-operation-id 'post_passkey_start_api_v1_recover_passkey_start_post'
+    --exclude-operation-id 'signup.passkey.finish'
+    --exclude-operation-id 'signup.passkey.start'
+    # Profile-adjacent bare-host operations depend on deployment
+    # capabilities or tenant context not yet provided by the contract
+    # seed. Focused route tests cover avatar clearing, export request /
+    # retrieval, and push-token registration / refresh / removal.
+    --exclude-operation-id 'auth.me.avatar.clear'
+    --exclude-operation-id 'me.export.request'
+    --exclude-operation-id 'me.export.get'
+    --exclude-operation-id 'auth.me.push_tokens.list'
+    --exclude-operation-id 'auth.me.push_tokens.register'
+    --exclude-operation-id 'auth.me.push_tokens.unregister'
+    --exclude-operation-id 'auth.me.push_tokens.refresh'
+    # Personal and workspace token mutation paths require non-empty
+    # scope sets or seeded token ids; random ids correctly exercise the
+    # missing-resource branch but cannot cover the success path.
+    --exclude-operation-id 'auth.me.tokens.list'
+    --exclude-operation-id 'auth.me.tokens.mint'
+    --exclude-operation-id 'auth.me.tokens.revoke'
+    --exclude-operation-id 'auth.me.tokens.audit'
+    --exclude-operation-id 'auth.me.tokens.revoke_post'
+    --exclude-operation-id 'auth.me.tokens.rotate'
+    --exclude-operation-id 'tokens.revoke'
+    --exclude-operation-id 'auth.tokens.revoke_post'
+    --exclude-operation-id 'auth.tokens.rotate'
+    # Detail, membership, approval, and archive/reinstate routes below
+    # require seeded employee/user/engagement/holiday/assignment ids or
+    # signed cursors. Random schema-valid ids reach documented 404 / 422
+    # branches, while focused API tests own the success-path fixtures.
+    --exclude-operation-id 'employees.detail'
+    --exclude-operation-id 'employees.leaves.list'
+    --exclude-operation-id 'employees.settings.read'
+    --exclude-operation-id 'property_work_role_assignments.delete'
+    --exclude-operation-id 'property_work_role_assignments.update'
+    --exclude-operation-id 'public_holidays.delete'
+    --exclude-operation-id 'public_holidays.read'
+    --exclude-operation-id 'user_availability_overrides.delete'
+    --exclude-operation-id 'user_availability_overrides.update'
+    --exclude-operation-id 'user_availability_overrides.approve'
+    --exclude-operation-id 'user_availability_overrides.reject'
+    --exclude-operation-id 'user_leaves.delete'
+    --exclude-operation-id 'user_leaves.approve'
+    --exclude-operation-id 'user_leaves.reject'
+    --exclude-operation-id 'user_work_roles.delete'
+    --exclude-operation-id 'user_work_roles.update'
+    --exclude-operation-id 'users.list'
+    --exclude-operation-id 'get_user_w__slug__api_v1_users__user_id__get'
+    --exclude-operation-id 'post_archive_w__slug__api_v1_users__user_id__archive_post'
+    --exclude-operation-id 'delete_grants_w__slug__api_v1_users__user_id__grants_delete'
+    --exclude-operation-id 'post_reinstate_w__slug__api_v1_users__user_id__reinstate_post'
+    --exclude-operation-id 'users.reset_passkey'
+    --exclude-operation-id 'work_engagements.read'
+    --exclude-operation-id 'work_engagements.archive'
+    --exclude-operation-id 'work_engagements.reinstate'
     # ----------------------------------------------------------------
     # Places tag (cd-oyy60). ``--include-tag places`` selects the
     # property / area / unit / share / closure surface. The router now
@@ -621,6 +697,7 @@ INCLUDE_ARGS=(
     # need either test-data seeding or tighter OpenAPI constraints before
     # the full tag can be promoted without external excludes.
     # ----------------------------------------------------------------
+    --include-tag authz
     # ``permission_groups.list`` / ``permission_rules.list`` /
     # ``role_grants.list_by_user`` — same opaque cursor issue as
     # ``assets.list``. The cursor is a signed base64url payload; random
@@ -655,6 +732,7 @@ INCLUDE_ARGS=(
     # OpenAPI constraints before the full tag can run without curated
     # carve-outs.
     # ----------------------------------------------------------------
+    --include-tag stays
     # ``stays.welcome.*`` — public guest-link reads authenticate with
     # the Bearer value as the signed guest token. The runner's global
     # Bearer is an owner API token, so these ops correctly return 410
@@ -732,22 +810,17 @@ INCLUDE_ARGS=(
     # all`` because coverage cases deliberately send invalid/missing
     # body variants; focused route tests cover those 422 validators.
     # ----------------------------------------------------------------
-    # LLM tag (cd-e5sit). The workspace operations below carry the
-    # shared problem+json response envelope and were confirmed clean by
-    # isolating them against the runner with ``--include-operation-id``.
+    # LLM tag (cd-e5sit). ``--include-tag llm`` selects the workspace
+    # LLM preference, consent, approval-mode, and usage aliases. These
+    # operations carry the shared problem+json response envelope and
+    # were confirmed clean by isolating the tag against the runner.
     # The admin LLM operations share the ``admin`` tag but require a
     # seeded provider/model/assignment graph for meaningful positive
     # examples. They stay excluded from both the workspace LLM sweep and
     # the admin-tag sweep until that seed exists; focused admin LLM route
     # tests cover the runtime invariants meanwhile.
     # ----------------------------------------------------------------
-    --include-operation-id 'workspace.llm.agent_preferences.workspace.get'
-    --include-operation-id 'workspace.llm.agent_preferences.workspace.put'
-    --include-operation-id 'workspace.llm.agent_preferences.me.get'
-    --include-operation-id 'workspace.llm.agent_preferences.me.put'
-    --include-operation-id 'workspace.llm.agent_approval_mode.me.get'
-    --include-operation-id 'workspace.llm.agent_approval_mode.me.put'
-    --include-operation-id 'workspace.llm.usage.get'
+    --include-tag llm
     --exclude-operation-id 'admin.llm.graph'
     --exclude-operation-id 'admin.llm.providers.list'
     --exclude-operation-id 'admin.llm.providers.create'

@@ -170,23 +170,23 @@ comment).
 - Breaking-change detection: `openapi-diff` between the current branch
   and `main` runs in CI; a breaking diff fails unless PR body contains
   `ALLOW-BREAKING-API`.
-- **Curated allowlist, not full schema sweep.** The gate
+- **Curated sweep, not full schema sweep.** The gate
   (`scripts/schemathesis_run.sh`, wired into CI via `make
-  schemathesis`) lists each operation_id explicitly inside
-  `INCLUDE_ARGS` rather than running the entire schema. Reasons:
-  (a) several tags still have schema drift that schemathesis
-  legitimately catches but is tracked under per-tag follow-up
-  Beads tasks, and (b) including ops one-by-one keeps the gate
-  green and CI honest as each follow-up lands. Currently covered:
-  `auth.me.get`, `auth.logout`, `auth.passkey.login_start`,
-  `auth.passkey.register_start`, `employees.list`,
-  `permissions.action_catalog`, plus the
-  asset-tag subset. The full identity surface is tracked under
-  the cd-1zw3x audit (problem+json content-type, 4xx envelope,
-  HTTPValidationError shape, undocumented status codes,
-  cross-field invariants, FK / unique-constraint 5xx); each
-  category has its own Beads task and re-enables a slice of the
-  allowlist when fixed.
+  schemathesis`) includes audited per-context tags and operation IDs
+  inside `INCLUDE_ARGS` rather than running the entire schema. Reasons:
+  (a) some operations still depend on runtime-only state, opaque
+  cursors, multipart generation, or cross-field invariants that
+  OpenAPI / Schemathesis cannot faithfully express, and (b) inline
+  exclusions keep the gate green while preserving a precise audit
+  trail. Each excluded operation ID in `INCLUDE_ARGS` carries the
+  reason and the focused-test fallback. The broad audited tags are
+  `assets`, `places`, `time`, `authz`, `stays`, `admin`, `llm`,
+  `payroll`, `expenses`, `tasks`, and `messaging`; identity-tag
+  coverage remains curated, with clean identity operation IDs included
+  directly and identity/authz overlap covered through the authz tag,
+  because the remaining identity surface includes one-time auth
+  ceremonies, signed cursors, multipart avatar upload, and seeded-FK
+  flows that need narrower fixtures before the full tag can run.
 
 ## End-to-end
 
