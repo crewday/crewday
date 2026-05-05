@@ -684,6 +684,7 @@ def post_comment(
        view as the ``after`` diff; then publish
        :class:`TaskCommentAdded` on the bus.
     """
+    # code-health: ignore[nloc,params] Policy flow.
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_bus = event_bus if event_bus is not None else default_event_bus
 

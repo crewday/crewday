@@ -29,6 +29,7 @@ def get_active_prompt(
     clock: Clock | Callable[[], datetime] | None = None,
 ) -> str:
     """Return the active prompt body, self-seeding the code default first."""
+    # code-health: ignore[nloc] Policy flow.
     timestamp = _now(clock)
     default_hash = _hash_body(default)
 

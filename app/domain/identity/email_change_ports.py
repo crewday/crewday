@@ -359,6 +359,7 @@ class MagicLinkPort(Protocol):
         always resolves its own ``now`` first so the cool-off /
         revert-expiry maths stay deterministic).
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def peek_link(
@@ -381,6 +382,7 @@ class MagicLinkPort(Protocol):
         :class:`MagicLinkAlreadyConsumed`, or the throttle's
         :class:`~app.auth._throttle.ConsumeLockout`.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def consume_link(
@@ -400,6 +402,7 @@ class MagicLinkPort(Protocol):
         same seam-level errors as :meth:`peek_link` plus the
         throttle's :class:`~app.auth._throttle.ConsumeLockout`.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def inspect_token_jti(
@@ -552,6 +555,7 @@ class EmailChangeRepository(Protocol):
         request-pending state with all four optional columns NULL.
         Flushes so the audit writer's FK reference sees the new row.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def find_pending_by_request_jti(

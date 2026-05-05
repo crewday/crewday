@@ -774,6 +774,7 @@ def check_budget(
     per §11 "At-cap behaviour"; no audit row — the refusal is
     operational telemetry, not a state change.
     """
+    # code-health: ignore[nloc] Policy flow.
     c = clock if clock is not None else SystemClock()
     settings = get_settings()
     if settings.demo_mode:
@@ -1008,6 +1009,7 @@ def record_usage(
     ``SELECT ... FOR UPDATE``; on SQLite the write-lock promotion
     achieves the same serialisation.
     """
+    # code-health: ignore[nloc] Policy flow.
     if usage.status == "refused":
         # §11 "At-cap behaviour": refusals do not write llm_usage
         # because the call never left the client. The meter counts

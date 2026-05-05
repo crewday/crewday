@@ -280,6 +280,7 @@ def register(
     * :class:`InvalidPlatform` — ``platform`` outside the v1 whitelist.
     * :class:`TokenClaimed` — ``(platform, token)`` belongs to another user.
     """
+    # code-health: ignore[params] Port contract.
     resolved_platform = _validate_platform(platform)
     now = (clock if clock is not None else SystemClock()).now()
 

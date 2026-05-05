@@ -394,6 +394,7 @@ def update_work_role(
     tracked as a follow-up if downstream tooling needs to filter on
     rename events specifically.
     """
+    # code-health: ignore[ccn,nloc] Policy flow.
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
 

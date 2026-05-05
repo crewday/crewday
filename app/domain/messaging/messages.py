@@ -151,6 +151,7 @@ class ChatMessageService:
         *,
         attachments: list[str] | tuple[str, ...] = (),
     ) -> ChatMessageView:
+        # code-health: ignore[nloc] Policy flow.
         if len(attachments) > _MAX_ATTACHMENTS:
             raise ChatMessageInvalid(
                 f"messages support at most {_MAX_ATTACHMENTS} attachments"

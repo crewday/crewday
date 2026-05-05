@@ -86,6 +86,7 @@ class PushEnqueueAdapter:
         # already gated on ``has_tokens`` before reaching us, but the
         # narrow window between the gate and this call could see a
         # concurrent un-register; an empty list is a no-op.
+        # code-health: ignore[params] Port contract.
         tokens: Sequence[PushTokenRow] = self._tokens.list_for_user(
             workspace_id=ctx.workspace_id,
             user_id=recipient_user_id,

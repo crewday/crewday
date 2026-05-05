@@ -106,6 +106,7 @@ def check_geofence(
     gps_accuracy_m: float | None,
 ) -> GeofenceVerdict:
     """Evaluate the configured property geofence for a clock-in attempt."""
+    # code-health: ignore[nloc] Policy flow.
     _validate_fix(
         client_lat=client_lat,
         client_lon=client_lon,

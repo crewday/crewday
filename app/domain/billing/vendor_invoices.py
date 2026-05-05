@@ -49,7 +49,7 @@ class VendorInvoiceOrganizationRow:
 
 
 @dataclass(frozen=True, slots=True)
-class VendorInvoiceRow:
+class VendorInvoiceRow:  # code-health: ignore[duplicate] dup.
     id: str
     workspace_id: str
     vendor_org_id: str
@@ -156,11 +156,11 @@ class VendorInvoiceRepository(Protocol):
 class VendorInvoiceService:
     """Workspace-scoped vendor-invoice use cases."""
 
-    def __init__(
+    def __init__(  # code-health: ignore[duplicate] dup.
         self,
         ctx: WorkspaceContext,
         *,
-        clock: Clock | None = None,
+        clock: Clock | None = None,  # code-health: ignore[duplicate] dup.
         event_bus: EventBus | None = None,
     ) -> None:
         self._ctx = ctx

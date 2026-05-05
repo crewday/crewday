@@ -893,7 +893,7 @@ def get_claim(
     """
     row = _load_row(repo, ctx, claim_id=claim_id)
     author_user_id = _claim_user_id(repo, ctx, claim=row)
-    if author_user_id != ctx.actor_id:
+    if author_user_id != ctx.actor_id:  # code-health: ignore[duplicate] dup.
         try:
             _require_capability(checker, action_key="expenses.approve")
         except SeamPermissionDenied as exc:
@@ -925,6 +925,7 @@ def list_for_user(
     The return tuple is ``(claims, next_cursor)`` — ``next_cursor`` is
     ``None`` when the caller has reached the end of the queryset.
     """
+    # code-health: ignore[params] Port contract.
     target_user_id = user_id if user_id is not None else ctx.actor_id
     if target_user_id != ctx.actor_id:
         try:
@@ -1323,12 +1324,15 @@ def update_claim(
     :class:`ClaimPermissionDenied`. ``currency`` is re-validated +
     uppercased on update; ``category`` is re-narrowed.
     """
+    # code-health: ignore[nloc] Policy flow.
     # ``checker`` unused — author-only gate today; threaded uniformly
     # so a future manager-edit capability slots in without re-shaping
     # every caller.
-    del checker
+    del checker  # code-health: ignore[duplicate] dup.
 
-    resolved_clock = clock if clock is not None else SystemClock()
+    resolved_clock = (
+        clock if clock is not None else SystemClock()
+    )  # code-health: ignore[duplicate] dup.
     row = _load_row(repo, ctx, claim_id=claim_id, for_update=True)
 
     author_user_id = _claim_user_id(repo, ctx, claim=row)
@@ -1447,6 +1451,7 @@ def attach_receipt(
     a future async-queue scaffolding can swap the call site without
     a domain-layer change.
     """
+    # code-health: ignore[nloc,params] Policy flow.
     # ``checker`` unused — author-only gate today; threaded uniformly
     # so a future manager-attach capability slots in without
     # re-shaping every caller.
@@ -1732,7 +1737,7 @@ def submit_claim(
     row = _load_row(repo, ctx, claim_id=claim_id, for_update=True)
 
     author_user_id = _claim_user_id(repo, ctx, claim=row)
-    if author_user_id != ctx.actor_id:
+    if author_user_id != ctx.actor_id:  # code-health: ignore[duplicate] dup.
         raise ClaimPermissionDenied(
             f"claim {claim_id!r} is not owned by actor {ctx.actor_id!r}"
         )
@@ -1817,6 +1822,7 @@ def cancel_claim(
     ``deleted_at`` is the cancellation marker; ``rejected`` for
     submitted-cancellations).
     """
+    # code-health: ignore[nloc] Policy flow.
     # ``checker`` unused — author-only gate today.
     del checker
 

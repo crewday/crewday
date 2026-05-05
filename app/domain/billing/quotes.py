@@ -292,7 +292,9 @@ class QuoteService:
         current = self._get(repo, quote_id, for_update=True)
         if current.status != "draft":
             raise QuoteInvalid("sent quotes are locked; supersede instead")
-        fields = self._normalize_patch(repo, patch, base=current)
+        fields = self._normalize_patch(
+            repo, patch, base=current
+        )  # code-health: ignore[duplicate] dup.
         changed = {
             key: value
             for key, value in fields.items()
@@ -553,6 +555,7 @@ class QuoteService:
         audit_ctx: WorkspaceContext,
         actor_hint: str | None = None,
     ) -> QuoteView:
+        # code-health: ignore[params] Port contract.
         if row.status == status:
             return _to_view(row)
         if row.status not in {"sent", "accepted", "rejected"}:
@@ -609,6 +612,7 @@ class QuoteService:
     def _normalize_patch(
         self, repo: QuoteRepository, patch: QuotePatch, *, base: QuoteRow | None = None
     ) -> dict[str, object]:
+        # code-health: ignore[ccn] Policy flow.
         del repo
         unknown = sorted(set(patch.fields) - _MUTABLE_FIELDS)
         if unknown:

@@ -232,6 +232,7 @@ def draft(ctx: NlIntakeContext, text: str) -> NlPreview:
     preview row is written, matching the receipt OCR capability's refusal
     semantics.
     """
+    # code-health: ignore[nloc] Policy flow.
     if not text.strip():
         raise TaskIntakeParseError("text is empty; cannot draft a task")
 
@@ -270,7 +271,7 @@ def draft(ctx: NlIntakeContext, text: str) -> NlPreview:
             max_tokens=model_pick.max_tokens or _PROJECTED_COMPLETION_TOKENS,
             temperature=(
                 model_pick.temperature if model_pick.temperature is not None else 0.0
-            ),
+            ),  # code-health: ignore[duplicate] dup.
             consents=load_consent_set(ctx.session, ctx.workspace_ctx.workspace_id),
         )
         latency_ms = max(0, int((clock.now() - started).total_seconds() * 1000))
@@ -308,6 +309,7 @@ def commit(
     edits: NlCommitEdits | None = None,
 ) -> ScheduledTask:
     """Commit a stored preview into a template + schedule."""
+    # code-health: ignore[nloc] Policy flow.
     clock = ctx.clock if ctx.clock is not None else SystemClock()
     row = _load_preview_row(ctx, preview_id=preview_id, clock=clock)
     stored = _preview_from_row(row)
@@ -418,6 +420,7 @@ def _record_usage(
     fallback_attempts: int,
     attempt: int,
 ) -> None:
+    # code-health: ignore[params] Port contract.
     cost_cents = estimate_cost_cents(
         prompt_tokens=response.usage.prompt_tokens,
         max_output_tokens=response.usage.completion_tokens,

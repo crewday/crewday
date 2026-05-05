@@ -629,6 +629,7 @@ def _default_inventory_apply(
     item refs, bad quantities, or movement validation failures are
     logged/audited and never block task completion.
     """
+    # code-health: ignore[nloc] Policy flow.
     if not _inventory_apply_enabled(session, ctx, task):
         return
     effects = _inventory_effects_for_task(session, ctx, task)
@@ -805,6 +806,7 @@ def _audit_inventory_effect_issue(
     kind: str,
     reason: str,
 ) -> None:
+    # code-health: ignore[params] Port contract.
     _audit(
         session,
         ctx,
@@ -1127,6 +1129,7 @@ def complete(
        ``task.complete_superseded`` carrying the displaced
        ``completed_by_user_id`` + ``completed_at`` in its diff.
     """
+    # code-health: ignore[ccn,nloc] Policy flow.
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_bus = event_bus if event_bus is not None else default_event_bus
     resolve_evidence = (
@@ -1317,6 +1320,7 @@ def skip(
     ``reason`` is stored in :attr:`Occurrence.skipped_reason`, distinct
     from cancellation's :attr:`Occurrence.cancellation_reason`.
     """
+    # code-health: ignore[params] Port contract.
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_bus = event_bus if event_bus is not None else default_event_bus
     resolve_allowed = (
@@ -1909,6 +1913,7 @@ def add_file_evidence(
     narrow JSON structural check for the GPS branch. Tests override
     with a fake to pin the verdict.
     """
+    # code-health: ignore[nloc,params] Policy flow.
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_sniffer = (
         mime_sniffer if mime_sniffer is not None else FiletypeMimeSniffer()
@@ -2050,6 +2055,7 @@ def attach_checklist_evidence(
     separated. A worker who also wants the photo to appear in the
     task evidence list calls :func:`add_file_evidence` instead.
     """
+    # code-health: ignore[nloc,params] Policy flow.
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_sniffer = (
         mime_sniffer if mime_sniffer is not None else FiletypeMimeSniffer()

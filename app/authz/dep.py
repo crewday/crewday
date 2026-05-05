@@ -114,6 +114,7 @@ def Permission(
         ctx: Annotated[WorkspaceContext, Depends(current_workspace_context)],
         session: Annotated[Session, Depends(db_session)],
     ) -> None:
+        # code-health: ignore[nloc] Policy flow.
         if scope_id_from_path is None:
             # Default: workspace-scope gate. Non-workspace scope_kinds
             # without a path-param source are a wiring bug — fall

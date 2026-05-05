@@ -297,6 +297,7 @@ class UserAvailabilityOverrideRepository(Protocol):
         ``status='pending'`` narrows to ``approved_at IS NULL``.
         ``from_date`` / ``to_date`` are inclusive bounds on ``date``.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def find_weekly_pattern(
@@ -367,6 +368,7 @@ class UserAvailabilityOverrideRepository(Protocol):
         clock-resolved insertion time, used for both ``created_at``
         and ``updated_at``.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def update_fields(
@@ -398,6 +400,7 @@ class UserAvailabilityOverrideRepository(Protocol):
         BOTH-OR-NEITHER + ``ends > starts`` invariants, and filtered
         zero-delta calls — this method is a pure SA write.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def stamp_approved(
@@ -520,6 +523,7 @@ class UserLeaveRepository(Protocol):
         ``starts_after`` filters rows with ``starts_on >= starts_after``;
         ``ends_before`` filters rows with ``ends_on <= ends_before``.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     # -- Writes ----------------------------------------------------------
@@ -545,6 +549,7 @@ class UserLeaveRepository(Protocol):
         the caller's clock-resolved insertion time — used for both
         ``created_at`` and ``updated_at``.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def update_fields(
@@ -571,6 +576,7 @@ class UserLeaveRepository(Protocol):
         ``ends_on >= starts_on`` invariant, and filtered zero-delta
         calls — this method is a pure SA write.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def stamp_approved(

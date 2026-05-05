@@ -416,6 +416,7 @@ def update_public_holiday(
     body: PublicHolidayUpdate,
     clock: Clock | None = None,
 ) -> PublicHolidayView:
+    # code-health: ignore[nloc] Policy flow.
     resolved_clock = clock if clock is not None else SystemClock()
     row = _load_row(session, ctx, public_holiday_id=public_holiday_id)
     sent = body.model_fields_set

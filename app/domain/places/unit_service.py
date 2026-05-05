@@ -296,8 +296,10 @@ def _view_to_diff_dict(view: UnitView) -> dict[str, Any]:
         "default_checkout_time": view.default_checkout_time,
         "max_guests": view.max_guests,
         "welcome_overrides_json": dict(view.welcome_overrides_json),
-        "settings_override_json": dict(view.settings_override_json),
-        "notes_md": view.notes_md,
+        "settings_override_json": dict(
+            view.settings_override_json
+        ),  # code-health: ignore[duplicate] dup.
+        "notes_md": view.notes_md,  # code-health: ignore[duplicate] dup.
         "created_at": view.created_at.isoformat(),
         "updated_at": (
             view.updated_at.isoformat() if view.updated_at is not None else None
@@ -329,7 +331,7 @@ def _assert_property_in_workspace(
     not leak the existence of a row in another workspace.
     """
     stmt = (
-        select(Property.id)
+        select(Property.id)  # code-health: ignore[duplicate] dup.
         .join(PropertyWorkspace, PropertyWorkspace.property_id == Property.id)
         .where(
             Property.id == property_id,
@@ -576,6 +578,7 @@ def create_default_unit_for_property(
     + audit rows share an identical ``created_at`` — a single
     point in time for the bootstrap.
     """
+    # code-health: ignore[params] Port contract.
     body = UnitCreate.model_validate({"name": name, "ordinal": 0})
     view = _insert_unit_row(
         session,

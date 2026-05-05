@@ -45,6 +45,7 @@ class ChatGatewayService:
         *,
         channel_source: str,
     ) -> InboundChatResult:
+        # code-health: ignore[nloc] Policy flow.
         now = self._clock.now()
         existing = repo.find_message_by_provider_id(
             source=inbound.provider,

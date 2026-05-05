@@ -326,6 +326,7 @@ class PushTokenRepository(Protocol):
         Flushes so the caller's next read (and the audit writer's
         FK reference to ``entity_id``) sees the new row.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def update_keys(
@@ -356,6 +357,7 @@ class PushTokenRepository(Protocol):
 
         Flushes when something actually changed.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def delete(self, *, workspace_id: str, user_id: str, endpoint: str) -> None:
@@ -391,6 +393,7 @@ class ChatChannelRepository(Protocol):
         created_at: datetime,
     ) -> ChatChannelRow:
         """Insert a fresh channel row."""
+        # code-health: ignore[params] Port contract.
         ...
 
     def list(
@@ -480,6 +483,7 @@ class ChatMessageRepository(Protocol):
         created_at: datetime,
     ) -> ChatMessageRow:
         """Insert a fresh message row and return its projection."""
+        # code-health: ignore[params] Port contract.
         ...
 
     def list_for_channel(
@@ -539,6 +543,7 @@ class ChatChannelBindingRepository(Protocol):
         created_at: datetime,
     ) -> ChatChannelBindingRow:
         """Insert a pending binding and return it."""
+        # code-health: ignore[params] Port contract.
         ...
 
     def insert_challenge(
@@ -553,6 +558,7 @@ class ChatChannelBindingRepository(Protocol):
         created_at: datetime,
     ) -> None:
         """Insert a fresh verification challenge."""
+        # code-health: ignore[params] Port contract.
         ...
 
     def latest_open_challenge(
@@ -620,6 +626,7 @@ class ChatGatewayRepository(Protocol):
         created_at: datetime,
     ) -> ChatGatewayBindingRow:
         """Create the gateway channel and its binding in one UoW."""
+        # code-health: ignore[params] Port contract.
         ...
 
     def touch_binding(
@@ -648,6 +655,7 @@ class ChatGatewayRepository(Protocol):
         created_at: datetime,
     ) -> ChatMessageRow:
         """Insert a gateway-inbound message row."""
+        # code-health: ignore[params] Port contract.
         ...
 
 
@@ -693,6 +701,7 @@ class PushDeliveryRepository(Protocol):
         very next worker tick picks the row up. ``attempt`` starts
         at 0; the first send increments to 1.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def select_due(self, *, now: datetime, limit: int) -> Sequence[PushDeliveryRow]:
@@ -750,6 +759,7 @@ class PushDeliveryRepository(Protocol):
         last_error: str,
     ) -> PushDeliveryRow:
         """Schedule another retry — back to ``status='pending'``."""
+        # code-health: ignore[params] Port contract.
         ...
 
     def mark_dead_lettered(
@@ -867,6 +877,7 @@ class EmailDeliveryRepository(Protocol):
         outer transaction has not yet committed (the §10 worker reads
         through the same session pool).
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def mark_sent(

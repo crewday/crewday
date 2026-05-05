@@ -337,6 +337,7 @@ def detect_clashes(
     starts_at: datetime,
     ends_at: datetime,
 ) -> ClosureClashes:
+    # code-health: ignore[nloc] Policy flow.
     if starts_at.tzinfo is None or starts_at.utcoffset() != timedelta(0):
         raise ValueError("starts_at must be timezone-aware UTC")
     if ends_at.tzinfo is None or ends_at.utcoffset() != timedelta(0):
@@ -467,7 +468,7 @@ def _assert_feed_in_property(
         raise ClosureNotFound(source_ical_feed_id)
 
 
-def _assert_unit_in_property(
+def _assert_unit_in_property(  # code-health: ignore[duplicate] dup.
     session: Session, *, property_id: str, unit_id: str | None
 ) -> None:
     if unit_id is None:

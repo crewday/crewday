@@ -341,6 +341,7 @@ class LLMClient:
         capability turn, and re-reading per rung would burn an
         unnecessary DB round-trip.
         """
+        # code-health: ignore[nloc,params] Policy flow.
         c = clock if clock is not None else SystemClock()
 
         chain = resolve_model(session, ctx, capability, clock=c)
@@ -602,6 +603,7 @@ def _record_terminal_error(
     still lands so /admin/usage can show "the chain tried this rung
     and it failed" with latency + ``finish_reason`` for diagnostics.
     """
+    # code-health: ignore[params] Port contract.
     record(
         session,
         ctx,

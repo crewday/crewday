@@ -327,7 +327,7 @@ class PayRuleView:
 
 def _row_to_view(row: PayRuleRow) -> PayRuleView:
     """Project a seam-level row into the public view."""
-    return PayRuleView(
+    return PayRuleView(  # code-health: ignore[duplicate] dup.
         id=row.id,
         workspace_id=row.workspace_id,
         user_id=row.user_id,

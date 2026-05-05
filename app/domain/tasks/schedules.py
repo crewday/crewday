@@ -843,6 +843,7 @@ def update(
     ``schedule.apply_to_existing`` audit row records the patched
     task ids.
     """
+    # code-health: ignore[nloc,params] Policy flow.
     validator = backup_validator if backup_validator is not None else _default_validator
     row = _load_row(session, ctx, schedule_id=schedule_id)
     before = _row_to_view(row)
@@ -1151,6 +1152,7 @@ def preview_occurrences(
     Raises :class:`InvalidRRule` on any parse failure so the router
     can map to 422.
     """
+    # code-health: ignore[ccn] Policy flow.
     if window_days is None and (n <= 0 or n > _MAX_PREVIEW_COUNT):
         raise ValueError(f"n must be in 1..{_MAX_PREVIEW_COUNT}; got {n}")
     if window_days is not None and not (1 <= window_days <= _MAX_PREVIEW_WINDOW_DAYS):

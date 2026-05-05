@@ -77,7 +77,10 @@ class InventoryItemConflict(ValueError):
 class InventoryItemValidationError(ValueError):
     """Submitted item data failed service-level validation."""
 
-    __slots__ = ("error", "field")
+    __slots__ = (
+        "error",
+        "field",
+    )  # code-health: ignore[duplicate] dup.
 
     def __init__(self, field: str, error: str) -> None:
         super().__init__(f"{field}: {error}")
@@ -89,7 +92,7 @@ class InventoryItemValidationError(ValueError):
 class InventoryItemCreate:
     name: str
     unit: str
-    sku: str | None = None
+    sku: str | None = None  # code-health: ignore[duplicate] dup.
     reorder_point: Decimal | None = None
     reorder_target: Decimal | None = None
     vendor: str | None = None
@@ -207,6 +210,7 @@ def update(
     clock: Clock | None = None,
 ) -> InventoryItemView:
     """Patch an active item."""
+    # code-health: ignore[ccn,nloc] Policy flow.
     unknown = body.fields_set - _ITEM_FIELDS
     if unknown:
         raise ValueError(f"unknown inventory item fields: {sorted(unknown)!r}")

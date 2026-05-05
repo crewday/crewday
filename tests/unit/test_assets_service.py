@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -261,6 +261,43 @@ def test_update_kwargs_preserve_explicit_null_clears(session: Session) -> None:
     )
 
     assert cleared.area_id is None
+
+
+def test_create_asset_legacy_kwargs_preserve_aliases_and_ports(
+    session: Session,
+) -> None:
+    ctx, property_id, _second_property_id, _area_id = _seed_workspace(session)
+    bus = EventBus()
+    events: list[AssetChanged] = []
+
+    @bus.subscribe(AssetChanged)
+    def collect(event: AssetChanged) -> None:
+        events.append(event)
+
+    asset = create_asset(
+        session,
+        ctx,
+        property_id=property_id,
+        name=None,
+        label="Laundry washer",
+        purchased_at="2026-04-01",
+        warranty_ends_at="2027-04-01",
+        metadata={"cycle": "linen"},
+        token_factory=lambda: "WASH00000001",
+        event_bus=bus,
+        clock=FrozenClock(_NOW),
+    )
+
+    assert asset.name == "Laundry washer"
+    assert asset.purchased_on == date(2026, 4, 1)
+    assert asset.warranty_expires_on == date(2027, 4, 1)
+    assert asset.settings_override_json == {"cycle": "linen"}
+    assert asset.qr_token == "WASH00000001"
+    assert events == []
+    session.commit()
+    assert [(event.asset_id, event.action) for event in events] == [
+        (asset.id, "create")
+    ]
 
 
 def test_asset_changed_event_publishes_after_commit(session: Session) -> None:

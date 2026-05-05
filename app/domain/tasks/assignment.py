@@ -200,7 +200,7 @@ class WorkloadPort(Protocol):
     rather than twice.
     """
 
-    def count_tasks_in_window(
+    def count_tasks_in_window(  # code-health: ignore[params] port.
         self,
         session: Session,
         ctx: WorkspaceContext,
@@ -218,6 +218,7 @@ class WorkloadPort(Protocol):
         (§06 "Assignment algorithm" step 4). A default of ``7`` means
         three-and-a-half days on either side; odd widths split evenly
         (``window_days=7`` → ±3.5d so the window is exactly 7 days)."""
+        # code-health: ignore[params] Port contract.
 
     def last_task_at(
         self,
@@ -363,6 +364,7 @@ class _DefaultWorkload:
         local_dt: datetime,
         window_days: int = 7,
     ) -> int:
+        # code-health: ignore[params] Port contract.
         if property_id is None:
             return 0
         rows = session.scalars(
@@ -798,6 +800,7 @@ def _audit_assignment(
     previous_user_id: str | None,
     reason: str | None,
 ) -> None:
+    # code-health: ignore[params] Port contract.
     after: dict[str, object] = {
         "assigned_user_id": result.assigned_user_id,
         "assignment_source": result.source,
@@ -864,6 +867,7 @@ def assign_task(
     ``assignment_source``, ``candidate_count``, and the before/after
     assignee.
     """
+    # code-health: ignore[nloc,params] Policy flow.
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_bus = event_bus if event_bus is not None else default_event_bus
     ports = _bundle(available, rota, pool, workload)

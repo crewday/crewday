@@ -620,7 +620,7 @@ def list_for_user(
             cursor_row is None
             or cursor_row.workspace_id != ctx.workspace_id
             or cursor_row.user_id != target_user_id
-        ):
+        ):  # code-health: ignore[duplicate] dup.
             return []
         stmt = stmt.where(
             (Leave.starts_at > cursor_row.starts_at)

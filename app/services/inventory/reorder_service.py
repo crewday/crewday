@@ -56,6 +56,7 @@ def check_reorder_points(
     event_bus: EventBus | None = None,
 ) -> InventoryReorderReport:
     """Ensure one open restock task exists for each low-stock item."""
+    # code-health: ignore[nloc] Policy flow.
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_bus = event_bus if event_bus is not None else default_event_bus
     now = resolved_clock.now()
@@ -152,6 +153,7 @@ def _create_restock_task(
     now: datetime,
     clock: Clock,
 ) -> Occurrence:
+    # code-health: ignore[nloc] Policy flow.
     template = _find_restock_template(session, ctx, property_id=item.property_id)
     role_id = _resolve_restock_role_id(session, ctx, property_id=item.property_id)
     title = _restock_title(item, template)

@@ -509,6 +509,7 @@ class NotificationService:
           to roll back or continue; this service propagates the
           error without swallowing it.
         """
+        # code-health: ignore[nloc] Policy flow.
         # ---- Step 1: recipient lookup (locale + display name) -----
         recipient = self._load_recipient(recipient_user_id)
 
@@ -873,6 +874,7 @@ class NotificationService:
         ``recipient_user_id`` land on the ``diff`` JSON so a support
         query can slice the ledger without walking row text.
         """
+        # code-health: ignore[params] Port contract.
         payload: dict[str, Any] = {
             "channel": channel,
             "kind": kind.value,

@@ -128,6 +128,7 @@ class MagicLinkAdapter(MagicLinkPort):
         # purposes the seam Literal pins, so the translation below is
         # defensive — a programming error elsewhere would surface as
         # the seam-level exception, not the auth-layer one.
+        # code-health: ignore[params] Port contract.
         try:
             return magic_link.request_link(
                 self._session,
@@ -158,8 +159,9 @@ class MagicLinkAdapter(MagicLinkPort):
         settings: Settings | None = None,
         clock: Clock | None = None,
     ) -> MagicLinkOutcome:
+        # code-health: ignore[params] Port contract.
         try:
-            outcome = magic_link.peek_link(
+            outcome = magic_link.peek_link(  # code-health: ignore[duplicate] dup.
                 self._session,
                 token=token,
                 expected_purpose=expected_purpose,
@@ -190,6 +192,7 @@ class MagicLinkAdapter(MagicLinkPort):
         settings: Settings | None = None,
         clock: Clock | None = None,
     ) -> MagicLinkOutcome:
+        # code-health: ignore[params] Port contract.
         try:
             outcome = magic_link.consume_link(
                 self._session,

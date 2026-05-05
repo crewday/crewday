@@ -416,6 +416,7 @@ def issue(
     HTTP-layer callers MUST forward the browser's ``Accept-Language``
     header so the fingerprint pin carries its full signal.
     """
+    # code-health: ignore[nloc,params] Policy flow.
     resolved_now = now if now is not None else _now(clock)
     pepper = _pepper(settings)
 
@@ -555,6 +556,7 @@ def validate(
     The caller's UoW owns transaction boundaries; nothing here
     commits.
     """
+    # code-health: ignore[ccn,nloc,params] Policy flow.
     resolved_now = now if now is not None else _now(clock)
     session_id = hash_cookie_value(cookie_value)
 

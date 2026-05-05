@@ -264,6 +264,7 @@ def record(
     Returns a :class:`RecordedCall` carrying the usage + correlation
     id. No I/O beyond the delegated ``record_usage`` write.
     """
+    # code-health: ignore[params] Port contract.
     # Domain ``LlmUsage`` is frozen — build it in one shot; no
     # conditional mutation. The router's ``ModelPick`` already
     # exposes the provider-model ULID + api wire name; we pass

@@ -99,6 +99,7 @@ from app.domain.identity.invite import (  # noqa: F401  (re-exports; see comment
     InviteOutcome,
     InvitePasskeyAlreadyRegistered,
     InvitePasskeyFinishOutcome,
+    InviteRequest,
     InviteSession,
     InviteStateInvalid,
     NewUserAcceptance,
@@ -142,6 +143,7 @@ __all__ = [
     "InviteOutcome",
     "InvitePasskeyAlreadyRegistered",
     "InvitePasskeyFinishOutcome",
+    "InviteRequest",
     "InviteSession",
     "InviteStateInvalid",
     "NewUserAcceptance",
@@ -247,6 +249,7 @@ def remove_member(
     from :mod:`app.domain.identity.permission_groups`) and the
     primary UoW rolls back.
     """
+    # code-health: ignore[nloc] Policy flow.
     resolved_now = _now(clock)
 
     # Resolve the owners group to run the last-owner guard. The

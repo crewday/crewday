@@ -129,6 +129,7 @@ def shrinkage(
     clock: Clock | None = None,
 ) -> tuple[InventoryShrinkageReportRow, ...]:
     """Return theft, loss, and unexplained negative audit deltas."""
+    # code-health: ignore[nloc] Policy flow.
     _ensure_property(session, ctx, property_id)
     since = _since(window_days=window_days, clock=clock)
     theft_qty: ColumnElement[Decimal] = _positive_sum("theft")

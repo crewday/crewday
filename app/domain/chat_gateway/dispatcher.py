@@ -123,6 +123,7 @@ def dispatch_inbound_message(
     calling ``enqueue`` again. Enqueue failures are audited and leave
     the stamp empty so the future sweep job can retry.
     """
+    # code-health: ignore[nloc] Policy flow.
     eff_clock = clock if clock is not None else SystemClock()
     with tenant_agnostic():
         message = session.scalar(

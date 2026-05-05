@@ -66,6 +66,7 @@ from app.domain.assets.assets import (
     AssetTypeUnavailable,
     AssetValidationError,
     AssetView,
+    CreateAssetRequest,
     archive_asset,
     create_asset,
     get_asset,
@@ -221,7 +222,7 @@ def build_assets_alias_router() -> APIRouter:
         session: Db,
     ) -> AssetResponse:
         try:
-            view = create_asset(session, ctx, body=body.to_domain())
+            view = create_asset(session, ctx, CreateAssetRequest(body.to_domain()))
         except (
             AssetPlacementInvalid,
             AssetQrTokenExhausted,
@@ -289,7 +290,7 @@ def build_assets_router() -> APIRouter:
         session: Db,
     ) -> AssetResponse:
         try:
-            view = create_asset(session, ctx, body=body.to_domain())
+            view = create_asset(session, ctx, CreateAssetRequest(body.to_domain()))
         except (
             AssetPlacementInvalid,
             AssetQrTokenExhausted,

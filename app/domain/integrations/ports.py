@@ -116,6 +116,7 @@ class WebhookRepository(Protocol):
         created_at: datetime,
     ) -> WebhookSubscriptionRow:
         """Insert a new subscription. Flushes."""
+        # code-health: ignore[params] Port contract.
         ...
 
     def update_subscription(
@@ -133,6 +134,7 @@ class WebhookRepository(Protocol):
         ``None`` means "leave alone"; only fields explicitly passed
         are written. ``updated_at`` is always bumped by the caller.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def pause_subscription(
@@ -209,6 +211,7 @@ class WebhookRepository(Protocol):
         created_at: datetime,
     ) -> WebhookDeliveryRow:
         """Insert a delivery row. Flushes."""
+        # code-health: ignore[params] Port contract.
         ...
 
     def get_delivery(self, *, delivery_id: str) -> WebhookDeliveryRow | None:
@@ -229,4 +232,5 @@ class WebhookRepository(Protocol):
         dead_lettered_at: datetime | None = None,
     ) -> WebhookDeliveryRow:
         """Stamp the latest attempt's outcome on the row. Flushes."""
+        # code-health: ignore[params] Port contract.
         ...

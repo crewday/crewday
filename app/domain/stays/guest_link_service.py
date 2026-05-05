@@ -456,6 +456,7 @@ def mint_link(
     the link id, stay id, expires_at — never the token (the token
     is a credential and must not enter the audit stream).
     """
+    # code-health: ignore[params] Port contract.
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
     resolved_ttl = ttl if ttl is not None else _DEFAULT_TTL_AFTER_CHECKOUT

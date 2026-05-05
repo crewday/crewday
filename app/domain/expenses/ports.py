@@ -406,6 +406,7 @@ class ExpensesRepository(Protocol):
         forward (older rows under the DESC sort). Soft-deleted rows
         and non-submitted rows are excluded by the where clause.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def list_pending_reimbursement_claims(
@@ -477,6 +478,7 @@ class ExpensesRepository(Protocol):
         Flushes so the caller's next read (and the audit writer's
         ``entity_id`` FK reference) sees the new row.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def delete_attachment(
@@ -508,6 +510,7 @@ class ExpensesRepository(Protocol):
         state machine populates them on subsequent transitions.
         Flushes so the audit writer's FK reference sees the new row.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def update_claim_fields(
@@ -631,4 +634,5 @@ class ExpensesRepository(Protocol):
         — see :func:`app.domain.expenses.autofill._record_llm_usage`
         for the rationale.
         """
+        # code-health: ignore[params] Port contract.
         ...

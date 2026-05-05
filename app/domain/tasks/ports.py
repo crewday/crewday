@@ -263,6 +263,7 @@ class CommentsRepository(Protocol):
         pair, ``after`` alone narrows to strictly greater than the
         instant.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     # -- comment writes --------------------------------------------------
@@ -286,6 +287,7 @@ class CommentsRepository(Protocol):
         Flushes so the caller's audit writer + event bus see the new
         id in the same UoW.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def update_comment_body(

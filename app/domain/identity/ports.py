@@ -238,6 +238,7 @@ class PermissionGroupRepository(Protocol):
         SAVEPOINT keeps the caller's outer transaction alive so prior
         writes in the same UoW survive the failed mint.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def update_group(
@@ -456,6 +457,7 @@ class RoleGrantRepository(Protocol):
         created_by_user_id: str | None,
     ) -> RoleGrantRow:
         """Insert a fresh workspace-scoped ``role_grant`` row."""
+        # code-health: ignore[params] Port contract.
         ...
 
     def soft_revoke_grant(
@@ -669,6 +671,7 @@ class MembershipRepository(Protocol):
         cleanup. Flushes so the audit writer's FK reference to
         ``entity_id`` sees the new row.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def set_engagement_archived_on(

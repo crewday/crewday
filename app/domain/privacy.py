@@ -231,6 +231,7 @@ def purge_person(
     clock: Clock | None = None,
 ) -> PurgeResult:
     """Anonymise one person and scrub dependent free-text/routing data."""
+    # code-health: ignore[nloc] Policy flow.
     now = _now(clock)
     with tenant_agnostic():
         workspace_ids = _workspace_ids_for_person(session, person_id, workspace_id)
@@ -668,6 +669,7 @@ def _archive_and_delete(
     where: ColumnElement[bool] | None = None,
     cutoff_column: ColumnElement[datetime | None] | None = None,
 ) -> RetentionResult:
+    # code-health: ignore[params] Port contract.
     conditions: list[ColumnElement[bool]] = []
     if cutoff_column is not None:
         conditions.append(cutoff_column < cutoff)

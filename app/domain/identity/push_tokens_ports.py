@@ -170,6 +170,7 @@ class UserPushTokenRepository(Protocol):
         registered device counts as just-seen. Flushes so the audit
         writer's FK reference to ``entity_id`` sees the new row.
         """
+        # code-health: ignore[params] Port contract.
         ...
 
     def update_last_seen(

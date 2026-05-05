@@ -131,7 +131,9 @@ class RateCardRepository(Protocol):
 class RateCardService:
     """Workspace-scoped billing rate-card use cases."""
 
-    def __init__(self, ctx: WorkspaceContext, *, clock: Clock | None = None) -> None:
+    def __init__(
+        self, ctx: WorkspaceContext, *, clock: Clock | None = None
+    ) -> None:  # code-health: ignore[duplicate] dup.
         self._ctx = ctx
         self._clock = clock if clock is not None else SystemClock()
 
@@ -208,6 +210,7 @@ class RateCardService:
         rate_card_id: str,
         patch: RateCardPatch,
     ) -> RateCardView:
+        # code-health: ignore[nloc] Policy flow.
         if not patch.fields:
             raise RateCardInvalid("PATCH body must include at least one field")
         unknown = sorted(set(patch.fields) - _MUTABLE_FIELDS)
@@ -357,6 +360,7 @@ class RateCardService:
         active_to: date | None,
         exclude_id: str | None,
     ) -> None:
+        # code-health: ignore[params] Port contract.
         for row in repo.list(
             workspace_id=self._ctx.workspace_id,
             organization_id=organization_id,

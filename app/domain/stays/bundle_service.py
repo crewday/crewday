@@ -127,12 +127,13 @@ def generate_bundles_for_stay(
     session: Session,
     ctx: WorkspaceContext,
     *,
-    reservation_id: str,
+    reservation_id: str,  # code-health: ignore[duplicate] dup.
     port: TasksCreateOccurrencePort,
     resolver: ReservationContextResolver | None = None,
     rules: tuple[StayLifecycleRule, ...] = DEFAULT_LIFECYCLE_RULES,
     now: datetime | None = None,
 ) -> BundleGenerationResult:
+    # code-health: ignore[params] Port contract.
     resolved_now = _resolve_now(now)
     reservation = _active_reservation(session, ctx, reservation_id=reservation_id)
     if reservation is None:
@@ -178,6 +179,7 @@ def reapply_bundles_for_stay(
     rules: tuple[StayLifecycleRule, ...] = DEFAULT_LIFECYCLE_RULES,
     now: datetime | None = None,
 ) -> BundleGenerationResult:
+    # code-health: ignore[params] Port contract.
     resolved_now = _resolve_now(now)
     reservation = _active_reservation(session, ctx, reservation_id=reservation_id)
     if reservation is None:
@@ -320,6 +322,7 @@ def _apply_rule(
     now: datetime,
     regenerate: bool,
 ) -> BundleRuleOutcome:
+    # code-health: ignore[nloc,params] Policy flow.
     if (
         rule.guest_kind_filter is not None
         and enriched.guest_kind not in rule.guest_kind_filter

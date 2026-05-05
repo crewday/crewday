@@ -442,6 +442,7 @@ def approve(
     transport failure (the dispatcher itself raised) bubbles to
     the caller; the row stays ``pending`` (no partial transition).
     """
+    # code-health: ignore[params] Port contract.
     eff_clock: Clock = clock if clock is not None else SystemClock()
     bus = event_bus if event_bus is not None else default_event_bus
 

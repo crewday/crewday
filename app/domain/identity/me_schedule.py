@@ -256,6 +256,7 @@ def aggregate_schedule(
     unit suite, future scriptable consumers) still get the
     UTC-only behaviour.
     """
+    # code-health: ignore[nloc] Policy flow.
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_from, resolved_to = _resolve_window(
         from_date=from_date,

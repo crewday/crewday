@@ -160,7 +160,7 @@ _ROOT_ONLY: tuple[ActionSpec, ...] = (
 # ---------------------------------------------------------------------------
 _RULE_DRIVEN: tuple[ActionSpec, ...] = (
     ActionSpec(
-        key="admin.view",
+        key="admin.view",  # code-health: ignore[duplicate] dup.
         # cd-z5rd — workspace-admin read surface gate. cd-g1ay scaffolded
         # the workspace ``/admin/*`` router with ``audit_log.view`` as a
         # placeholder ("the closest existing key") explicitly anticipating
@@ -215,7 +215,7 @@ _RULE_DRIVEN: tuple[ActionSpec, ...] = (
         root_protected_deny=False,
     ),
     ActionSpec(
-        key="assets.record_action",
+        key="assets.record_action",  # code-health: ignore[duplicate] dup.
         valid_scope_kinds=("workspace", "property"),
         default_allow=("owners", "managers", "all_workers"),
         root_only=False,

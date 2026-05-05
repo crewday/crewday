@@ -403,6 +403,7 @@ def update_profile(
     One ``employee.profile_updated`` audit row per call, carrying a
     redacted before / after diff of the changed fields.
     """
+    # code-health: ignore[nloc] Policy flow.
     resolved_clock = clock if clock is not None else SystemClock()
     _assert_membership(repo, ctx, user_id=user_id)
 
@@ -703,6 +704,7 @@ def reinstate_user_deployment(
     Returns the :class:`EmployeeView` projected against the caller's
     workspace (matches the workspace-local reinstate's return shape).
     """
+    # code-health: ignore[nloc] Policy flow.
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
 

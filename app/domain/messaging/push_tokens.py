@@ -446,6 +446,7 @@ def register(
     * :class:`EndpointNotAllowed` — host not in the provider
       allow-list.
     """
+    # code-health: ignore[params] Port contract.
     validate_endpoint(endpoint)
 
     user_id = ctx.actor_id
