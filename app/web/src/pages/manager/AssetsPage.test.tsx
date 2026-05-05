@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
@@ -10,6 +10,9 @@ import type { Asset, AssetType, Property } from "@/types/api";
 import AssetsPage from "./AssetsPage";
 import appSource from "../../App.tsx?raw";
 import { jsonResponse } from "@/test/helpers";
+
+const originalShowModal = HTMLDialogElement.prototype.showModal;
+const originalClose = HTMLDialogElement.prototype.close;
 
 const ASSET_TYPES: AssetType[] = [
   {
@@ -114,21 +117,99 @@ const ASSETS: Asset[] = [
   },
 ];
 
-function installFetch() {
+interface FetchRequest {
+  path: string;
+  method: string;
+  body: unknown;
+}
+
+interface InstallFetchOptions {
+  createStatus?: number;
+  createBody?: unknown;
+}
+
+function parseRequestBody(body: BodyInit | null | undefined): unknown {
+  if (typeof body !== "string") return body ?? null;
+  try {
+    return JSON.parse(body);
+  } catch {
+    return body;
+  }
+}
+
+function createdAsset(body: Record<string, unknown>): Asset {
+  return {
+    id: "asset_grill",
+    property_id: String(body.property_id),
+    asset_type_id:
+      typeof body.asset_type_id === "string" ? body.asset_type_id : null,
+    name: String(body.name),
+    area: body.area_id === "area_entry" ? "Entry" : null,
+    condition: body.condition === "fair" ? "fair" : "good",
+    status: body.status === "in_repair" ? "in_repair" : "active",
+    make: typeof body.make === "string" ? body.make : null,
+    model: typeof body.model === "string" ? body.model : null,
+    serial_number:
+      typeof body.serial_number === "string" ? body.serial_number : null,
+    installed_on: typeof body.installed_on === "string" ? body.installed_on : null,
+    purchased_on: typeof body.purchased_on === "string" ? body.purchased_on : null,
+    purchase_price_cents:
+      typeof body.purchase_price_cents === "number" ? body.purchase_price_cents : null,
+    purchase_currency:
+      typeof body.purchase_currency === "string" ? body.purchase_currency : null,
+    purchase_vendor:
+      typeof body.purchase_vendor === "string" ? body.purchase_vendor : null,
+    warranty_expires_on:
+      typeof body.warranty_expires_on === "string" ? body.warranty_expires_on : null,
+    expected_lifespan_years:
+      typeof body.expected_lifespan_years === "number" ? body.expected_lifespan_years : null,
+    guest_visible: body.guest_visible === true,
+    guest_instructions:
+      typeof body.guest_instructions_md === "string" ? body.guest_instructions_md : null,
+    notes: typeof body.notes_md === "string" ? body.notes_md : null,
+    qr_token: "qr_grill",
+  };
+}
+
+function installFetch(options: InstallFetchOptions = {}) {
   const original = globalThis.fetch;
-  const spy = vi.fn(async (url: string | URL | Request) => {
+  const assets = [...ASSETS];
+  const requests: FetchRequest[] = [];
+  const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const resolved = typeof url === "string" ? url : url.toString();
+    const method = (init?.method ?? "GET").toUpperCase();
     const path = new URL(resolved, "http://crewday.test").pathname;
-    if (path === "/w/acme/api/v1/assets") return jsonResponse({ data: ASSETS });
+    const body = parseRequestBody(init?.body);
+    requests.push({ path, method, body });
+    if (path === "/w/acme/api/v1/assets" && method === "GET") {
+      return jsonResponse({ data: assets });
+    }
+    if (path === "/w/acme/api/v1/assets" && method === "POST") {
+      if (options.createStatus) {
+        return jsonResponse(options.createBody, options.createStatus);
+      }
+      const asset = createdAsset(body as Record<string, unknown>);
+      assets.push(asset);
+      return jsonResponse(asset, 201);
+    }
     if (path === "/w/acme/api/v1/asset_types") {
       return jsonResponse({ data: ASSET_TYPES });
     }
     if (path === "/w/acme/api/v1/properties") return jsonResponse(PROPERTIES);
+    if (path === "/w/acme/api/v1/properties/prop_1/areas") {
+      return jsonResponse({ data: [{ id: "area_entry", name: "Entry" }] });
+    }
+    if (path === "/w/acme/api/v1/properties/prop_2/areas") {
+      return jsonResponse({ data: [{ id: "area_pool", name: "Pool" }] });
+    }
     throw new Error(`Unexpected fetch call: ${resolved}`);
   });
   (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
-  return () => {
-    (globalThis as { fetch: typeof fetch }).fetch = original;
+  return {
+    requests,
+    restore: () => {
+      (globalThis as { fetch: typeof fetch }).fetch = original;
+    },
   };
 }
 
@@ -146,6 +227,13 @@ function Harness({ initial = "/assets" }: { initial?: string }) {
 }
 
 beforeEach(() => {
+  HTMLDialogElement.prototype.showModal = vi.fn(function showModal(this: HTMLDialogElement) {
+    this.setAttribute("open", "");
+  });
+  HTMLDialogElement.prototype.close = vi.fn(function close(this: HTMLDialogElement) {
+    this.removeAttribute("open");
+    this.dispatchEvent(new Event("close"));
+  });
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("acme");
@@ -153,6 +241,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  HTMLDialogElement.prototype.showModal = originalShowModal;
+  HTMLDialogElement.prototype.close = originalClose;
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.restoreAllMocks();
@@ -166,13 +256,14 @@ describe("<AssetsPage>", () => {
   });
 
   it("renders assets from paginated API envelopes and filters from the URL", async () => {
-    const restore = installFetch();
+    const { restore } = installFetch();
     try {
       render(<Harness initial="/assets?category=security" />);
 
       expect(await screen.findByText("Front door lock")).toBeInTheDocument();
-      expect(screen.queryByText("Pool pump")).not.toBeInTheDocument();
-      expect(screen.getByText("Smart lock")).toBeInTheDocument();
+      const table = screen.getByRole("table");
+      expect(within(table).queryByRole("link", { name: /Pool pump/ })).not.toBeInTheDocument();
+      expect(within(table).getByText("Smart lock")).toBeInTheDocument();
       expect(screen.getAllByText("Villa Rosa").length).toBeGreaterThan(0);
     } finally {
       restore();
@@ -180,7 +271,7 @@ describe("<AssetsPage>", () => {
   });
 
   it("opens the QR sheet for the active filters", async () => {
-    const restore = installFetch();
+    const { restore } = installFetch();
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     try {
       render(<Harness initial="/assets?category=security&property_id=prop_1" />);
@@ -199,15 +290,149 @@ describe("<AssetsPage>", () => {
   });
 
   it("updates property filters through search params", async () => {
-    const restore = installFetch();
+    const { restore } = installFetch();
     try {
       render(<Harness />);
       await screen.findByText("Front door lock");
 
-      fireEvent.click(screen.getAllByText("Casa Azul")[0]!);
+      const casaFilter = screen
+        .getAllByText("Casa Azul")
+        .find((element) => element.parentElement?.className === "desk-filters");
+      expect(casaFilter).toBeDefined();
+      fireEvent.click(casaFilter!);
 
-      await screen.findAllByText("Pool pump");
-      expect(screen.queryByText("Front door lock")).not.toBeInTheDocument();
+      const table = screen.getByRole("table");
+      await within(table).findByRole("link", { name: /Pool pump/ });
+      expect(within(table).queryByRole("link", { name: /Front door lock/ })).not.toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
+  it("opens the new asset flow, validates required fields, and creates an asset", async () => {
+    const { requests, restore } = installFetch();
+    try {
+      render(<Harness />);
+      await screen.findByText("Front door lock");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New asset" }));
+      const dialog = screen.getByRole("dialog", { name: "New asset" });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create asset" }));
+
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+        "Enter an asset name",
+      );
+      expect(requests.some((request) => request.method === "POST")).toBe(false);
+
+      fireEvent.change(within(dialog).getByLabelText("Name"), {
+        target: { value: "Back patio grill" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Purchase price"), {
+        target: { value: "12.345" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create asset" }));
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+        "up to two decimal places",
+      );
+      expect(requests.some((request) => request.method === "POST")).toBe(false);
+
+      fireEvent.change(within(dialog).getByLabelText("Purchase price"), {
+        target: { value: "12.34" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Expected lifespan years"), {
+        target: { value: "1.5" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create asset" }));
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+        "Expected lifespan must be at least one year",
+      );
+      expect(requests.some((request) => request.method === "POST")).toBe(false);
+
+      fireEvent.change(within(dialog).getByLabelText("Expected lifespan years"), {
+        target: { value: "2" },
+      });
+      await within(dialog).findByRole("option", { name: "Entry" });
+      fireEvent.change(within(dialog).getByLabelText("Area"), {
+        target: { value: "area_entry" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Type"), {
+        target: { value: "type_pump" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Purchase price"), {
+        target: { value: "12.34" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Currency"), {
+        target: { value: "eur" },
+      });
+      fireEvent.click(within(dialog).getByLabelText("Visible to guests"));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create asset" }));
+
+      expect(await screen.findByText("Back patio grill")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name: "New asset" })).not.toBeInTheDocument();
+      });
+      const createRequest = requests.find((request) => request.method === "POST");
+      expect(createRequest?.path).toBe("/w/acme/api/v1/assets");
+      expect(createRequest?.body).toMatchObject({
+        name: "Back patio grill",
+        property_id: "prop_1",
+        area_id: "area_entry",
+        asset_type_id: "type_pump",
+        condition: "good",
+        status: "active",
+        purchase_price_cents: 1234,
+        purchase_currency: "EUR",
+        expected_lifespan_years: 2,
+        guest_visible: true,
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps the new asset dialog open with server validation errors", async () => {
+    const { restore } = installFetch({
+      createStatus: 422,
+      createBody: {
+        type: "https://crewday.dev/errors/validation",
+        title: "Validation error",
+        status: 422,
+        detail: "Request validation failed",
+        errors: [{ loc: ["body", "property_id"], msg: "Property is required" }],
+      },
+    });
+    try {
+      render(<Harness />);
+      await screen.findByText("Front door lock");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New asset" }));
+      const dialog = screen.getByRole("dialog", { name: "New asset" });
+      fireEvent.change(within(dialog).getByLabelText("Name"), {
+        target: { value: "Back patio grill" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create asset" }));
+
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+        "Property: Property is required",
+      );
+      expect(screen.getByRole("dialog", { name: "New asset" })).toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
+  it("falls back to the first property when the URL property filter is stale", async () => {
+    const { restore } = installFetch();
+    try {
+      render(<Harness initial="/assets?property_id=missing_property" />);
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "+ New asset" })).toBeEnabled(),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "+ New asset" }));
+
+      const dialog = screen.getByRole("dialog", { name: "New asset" });
+      expect(within(dialog).getByLabelText("Property")).toHaveValue("prop_1");
     } finally {
       restore();
     }
