@@ -212,11 +212,17 @@ update in your wrap-up.
   compounds into one that stays easy to change. Refactor when it
   genuinely improves things — but **confirm intent before starting**,
   so scope creep is conscious.
-- **Fix what you find.** If you hit a broken test, stale type, dead
-  import, or bit-rotted helper while working, fix it — don't route
-  around it because "I didn't write this". The one exception is a
-  dirty file you didn't touch: another agent may own it, so leave
-  it alone and flag it. Everything else is yours now.
+- **Fix every problem you find.** If you hit a broken test, stale type,
+  dead import, bit-rotted helper, spec drift, flaky test, privacy gap,
+  or any other issue while doing any work in this repo, you own making
+  sure it gets handled — even when it is unrelated to the task you
+  started. Fix it immediately when that is safe and reasonably scoped.
+  If you cannot fix it immediately, file an atomic Beads task with the
+  `/beads` skill before moving on, including repro/context, acceptance
+  criteria, a test plan, and the required paired selfreview task. The
+  one exception is a dirty file you did not touch: another agent may own
+  it, so do not edit it unless necessary for your task; file the Beads
+  task instead and mention the dirty-file constraint.
 - **Don't fear refactoring.** The codebase should get better with
   each pass, not rot. If a module is fighting you, clean it up in
   the same turn (or file a Beads task if it's out of scope). Small
