@@ -39,6 +39,7 @@ from app.adapters.db.tasks.models import Comment, Occurrence
 from app.adapters.db.workspace.models import UserWorkspace, WorkEngagement, Workspace
 from app.adapters.storage.ports import BlobNotFound, Storage
 from app.audit import write_audit
+from app.auth.session import invalidate_for_user as invalidate_sessions_for_user
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.redact import redact
@@ -282,6 +283,12 @@ def purge_person(
                     archived_at=now,
                 )
             )
+        )
+        invalidate_sessions_for_user(
+            session,
+            user_id=person_id,
+            cause="user_archived",
+            now=now,
         )
         scrubbed_occurrences = _rowcount(
             session.execute(

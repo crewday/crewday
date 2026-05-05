@@ -13,6 +13,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.base import Base
+from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.identity.models import User
 from app.adapters.db.integrations.models import WebhookDelivery, WebhookSubscription
 from app.adapters.db.llm.models import LlmUsage
@@ -32,6 +33,7 @@ from app.domain.privacy import (
     rotate_operational_logs,
 )
 from app.tenancy import tenant_agnostic
+from app.util.clock import FrozenClock
 from tests._fakes.storage import InMemoryStorage
 
 
@@ -91,6 +93,23 @@ def _membership(session: Session, user_id: str, workspace_id: str = "w1") -> Non
             source="workspace_grant",
             added_at=datetime(2026, 4, 28, tzinfo=UTC),
         )
+    )
+
+
+def _session_row(session_id: str, *, user_id: str, now: datetime) -> SessionRow:
+    return SessionRow(
+        id=session_id,
+        user_id=user_id,
+        workspace_id=None,
+        expires_at=now + timedelta(days=1),
+        absolute_expires_at=now + timedelta(days=90),
+        last_seen_at=now,
+        ua_hash="ua",
+        ip_hash="ip",
+        fingerprint_hash=None,
+        created_at=now,
+        invalidated_at=None,
+        invalidation_cause=None,
     )
 
 
@@ -214,6 +233,45 @@ def test_purge_scrubs_routing_data_and_preserves_amounts() -> None:
 
     assert result.deleted_secret_envelopes == 1
     assert result.scrubbed_payslips == 1
+
+
+def test_purge_invalidates_archived_user_sessions() -> None:
+    session = _session()
+    now = datetime(2026, 4, 28, tzinfo=UTC)
+    with tenant_agnostic():
+        _workspace(session)
+        _user(session, "u1", "u1@example.test")
+        _user(session, "u2", "u2@example.test")
+        _membership(session, "u1")
+        _membership(session, "u2")
+        session.add_all(
+            [
+                _session_row("sess1", user_id="u1", now=now),
+                _session_row("sess2", user_id="u1", now=now),
+                _session_row("sess-other", user_id="u2", now=now),
+            ]
+        )
+        session.commit()
+
+        purge_person(
+            session,
+            person_id="u1",
+            clock=FrozenClock(now),
+        )
+        session.commit()
+
+        purged_rows = session.scalars(
+            select(SessionRow).where(SessionRow.user_id == "u1")
+        ).all()
+        assert {row.id for row in purged_rows} == {"sess1", "sess2"}
+        for row in purged_rows:
+            assert row.invalidated_at == now
+            assert row.invalidation_cause == "user_archived"
+
+        other = session.get(SessionRow, "sess-other")
+        assert other is not None
+        assert other.invalidated_at is None
+        assert other.invalidation_cause is None
 
 
 def test_retention_archives_jsonl_gz_and_deletes_rows(tmp_path: Path) -> None:
