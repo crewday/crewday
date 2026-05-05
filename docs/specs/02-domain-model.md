@@ -744,7 +744,7 @@ maintained (see invariant below). User-defined groups
 | key            | text      | stable slug. System keys: `owners`, `managers`, `all_workers`, `all_clients`. User-defined keys are free-form, unique per `(scope_kind, scope_id)`. |
 | name           | text      | display name (i18n via §18 — user-defined groups have a workspace-language name; system group labels are localised)  |
 | description_md | text      | optional                                                                          |
-| group_kind     | text      | `system \| user`                                                                  |
+| group_kind     | text      | `system \| user \| derived`; `owners` is `system`, user-defined groups are `user`, and `managers` / `all_workers` / `all_clients` are `derived` |
 | is_derived     | bool      | true for `managers`, `all_workers`, `all_clients` (membership computed, `permission_group_member` unused); false for `owners` and user-defined groups |
 | created_at     | tstz      |                                                                                   |
 | updated_at     | tstz      |                                                                                   |
@@ -806,6 +806,14 @@ Explicit membership. Only populated for `owners` and
 user-defined groups (`is_derived = false`); derived groups
 (`managers`, `all_workers`, `all_clients`) compute membership
 from `role_grants` at query time.
+
+The REST members endpoint returns both explicit and derived rosters
+through the same response shape: explicit groups read
+`permission_group_member`, while derived groups project live
+`role_grants` with the matching surface role (`manager`, `worker`,
+`client`) into member rows. Direct POST/DELETE membership writes
+against derived groups fail with `error = "derived_group_protected"`;
+operators grant or revoke the source role instead.
 
 | column           | type    | notes                                            |
 |------------------|---------|--------------------------------------------------|

@@ -76,6 +76,7 @@ from app.authz.dep import Permission
 from app.authz.enforce import PermissionDenied
 from app.domain.errors import Conflict, Forbidden, NotFound, Validation
 from app.domain.identity.permission_groups import (
+    DerivedGroupProtected,
     LastOwnerGrantProtected,
     PermissionGroupMemberRef,
     PermissionGroupNotFound,
@@ -171,6 +172,7 @@ class PermissionGroupResponse(BaseModel):
     slug: str
     name: str
     system: bool
+    group_kind: Literal["system", "user", "derived"]
     capabilities: dict[str, Any]
     created_at: datetime
 
@@ -219,6 +221,7 @@ def _ref_to_response(ref: PermissionGroupRef) -> PermissionGroupResponse:
         slug=ref.slug,
         name=ref.name,
         system=ref.system,
+        group_kind=ref.group_kind,
         capabilities=dict(ref.capabilities),
         created_at=ref.created_at,
     )
@@ -250,6 +253,14 @@ def _http_for_system_protected(exc: SystemGroupProtected) -> Conflict:
     return Conflict(
         message,
         extra={"error": "system_group_protected", "message": message},
+    )
+
+
+def _http_for_derived_protected(exc: DerivedGroupProtected) -> Conflict:
+    message = str(exc)
+    return Conflict(
+        message,
+        extra={"error": "derived_group_protected", "message": message},
     )
 
 
@@ -710,6 +721,8 @@ def build_permission_groups_router() -> APIRouter:
             )
         except PermissionGroupNotFound as exc:
             raise _http_for_not_found() from exc
+        except DerivedGroupProtected as exc:
+            raise _http_for_derived_protected(exc) from exc
         _publish_member_event(ctx, PermissionGroupMemberAdded, group_id, ref.user_id)
         return _member_to_response(ref)
 
@@ -758,6 +771,8 @@ def build_permission_groups_router() -> APIRouter:
             )
         except PermissionGroupNotFound as exc:
             raise _http_for_not_found() from exc
+        except DerivedGroupProtected as exc:
+            raise _http_for_derived_protected(exc) from exc
         except (WouldOrphanOwnersGroup, LastOwnerGrantProtected) as exc:
             # Open a fresh UoW so the forensic ``member_remove_rejected``
             # row survives the primary UoW's rollback. Both refusals

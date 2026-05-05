@@ -111,6 +111,7 @@ class TestPermissionGroupRef:
             slug="family",
             name="Family",
             system=False,
+            group_kind="user",
             capabilities={"tasks.create": True},
             created_at=datetime(2026, 4, 19, tzinfo=UTC),
         )

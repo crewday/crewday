@@ -25,7 +25,12 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.adapters.db.authz.models import PermissionGroup, PermissionGroupMember
+from app.adapters.db.authz.bootstrap import seed_system_permission_groups
+from app.adapters.db.authz.models import (
+    PermissionGroup,
+    PermissionGroupMember,
+    RoleGrant,
+)
 from app.api.v1.permission_groups import build_permission_groups_router
 from app.events import (
     PermissionGroupDeleted,
@@ -88,6 +93,23 @@ class TestList:
         slugs = {row["slug"] for row in body["data"]}
         # ``bootstrap_workspace`` seeds the owners system group.
         assert "owners" in slugs
+
+    def test_list_exposes_group_kind(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        ctx, factory, ws_id = owner_ctx
+        with factory() as s:
+            seed_system_permission_groups(s, workspace_id=ws_id)
+            s.commit()
+        client = _client(ctx, factory)
+        resp = client.get("/permission_groups")
+        assert resp.status_code == 200, resp.text
+        rows = {row["slug"]: row for row in resp.json()["data"]}
+        assert rows["owners"]["group_kind"] == "system"
+        assert rows["owners"]["system"] is True
+        assert rows["managers"]["group_kind"] == "derived"
+        assert rows["managers"]["system"] is True
 
     def test_list_organization_scope_returns_empty(
         self,
@@ -164,6 +186,7 @@ class TestCreate:
         body = resp.json()
         assert body["slug"] == "family"
         assert body["system"] is False
+        assert body["group_kind"] == "user"
         assert body["capabilities"] == {"tasks.create": True}
 
     def test_unknown_capability_returns_422(
@@ -366,6 +389,77 @@ class TestReadUpdateDelete:
 
 
 class TestMembers:
+    def test_derived_group_members_list_from_role_grants(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        ctx, factory, ws_id = owner_ctx
+        with factory() as s:
+            groups = seed_system_permission_groups(s, workspace_id=ws_id)
+            managers_id = next(g.id for g in groups if g.slug == "managers")
+            s.commit()
+        client = _client(ctx, factory)
+        resp = client.get(f"/permission_groups/{managers_id}/members")
+        assert resp.status_code == 200, resp.text
+        assert [row["user_id"] for row in resp.json()["data"]] == [ctx.actor_id]
+
+    def test_derived_group_members_deduplicate_multiple_scoped_grants(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        ctx, factory, ws_id = owner_ctx
+        target = _seed_user_in_workspace(
+            factory,
+            email="worker-derived@example.com",
+            display_name="Worker",
+            workspace_id=ws_id,
+        )
+        with factory() as s:
+            groups = seed_system_permission_groups(s, workspace_id=ws_id)
+            all_workers_id = next(g.id for g in groups if g.slug == "all_workers")
+            for property_id in ("prop_1", "prop_2"):
+                s.add(
+                    RoleGrant(
+                        id=new_ulid(),
+                        workspace_id=ws_id,
+                        user_id=target,
+                        grant_role="worker",
+                        scope_property_id=property_id,
+                        created_at=datetime.now(tz=UTC),
+                        created_by_user_id=ctx.actor_id,
+                    )
+                )
+            s.commit()
+        client = _client(ctx, factory)
+        resp = client.get(f"/permission_groups/{all_workers_id}/members")
+        assert resp.status_code == 200, resp.text
+        assert [row["user_id"] for row in resp.json()["data"]] == [target]
+
+    def test_derived_group_member_writes_return_409(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        ctx, factory, ws_id = owner_ctx
+        target = _seed_user_in_workspace(
+            factory, email="derived@example.com", display_name="D", workspace_id=ws_id
+        )
+        with factory() as s:
+            groups = seed_system_permission_groups(s, workspace_id=ws_id)
+            managers_id = next(g.id for g in groups if g.slug == "managers")
+            s.commit()
+        client = _client(ctx, factory)
+        add_resp = client.post(
+            f"/permission_groups/{managers_id}/members",
+            json={"user_id": target},
+        )
+        assert add_resp.status_code == 409
+        assert add_resp.json()["error"] == "derived_group_protected"
+        remove_resp = client.delete(
+            f"/permission_groups/{managers_id}/members/{ctx.actor_id}"
+        )
+        assert remove_resp.status_code == 409
+        assert remove_resp.json()["error"] == "derived_group_protected"
+
     def test_add_then_list_members(
         self,
         owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],

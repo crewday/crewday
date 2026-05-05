@@ -238,6 +238,31 @@ class SqlAlchemyPermissionGroupRepository(PermissionGroupRepository):
         ).all()
         return [_to_member_row(row) for row in rows]
 
+    def list_derived_members(
+        self, *, workspace_id: str, group_id: str, grant_role: str
+    ) -> Sequence[PermissionGroupMemberRow]:
+        rows = self._session.scalars(
+            select(RoleGrant)
+            .where(
+                RoleGrant.workspace_id == workspace_id,
+                RoleGrant.grant_role == grant_role,
+                RoleGrant.revoked_at.is_(None),
+            )
+            .order_by(RoleGrant.created_at.asc(), RoleGrant.user_id.asc())
+        ).all()
+        members_by_user: dict[str, PermissionGroupMemberRow] = {}
+        for row in rows:
+            members_by_user.setdefault(
+                row.user_id,
+                PermissionGroupMemberRow(
+                    group_id=group_id,
+                    user_id=row.user_id,
+                    added_at=row.created_at,
+                    added_by_user_id=row.created_by_user_id,
+                ),
+            )
+        return list(members_by_user.values())
+
     def get_member(
         self, *, group_id: str, user_id: str
     ) -> PermissionGroupMemberRow | None:

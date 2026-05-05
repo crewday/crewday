@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 from app.domain.identity.permission_groups import (
+    DerivedGroupProtected,
     PermissionGroupNotFound,
     PermissionGroupSlugTaken,
     SystemGroupProtected,
@@ -90,6 +91,7 @@ class _FakeRepo(PermissionGroupRepository):
     def __init__(self) -> None:
         self._groups: dict[str, PermissionGroupRow] = {}
         self._members: dict[tuple[str, str], PermissionGroupMemberRow] = {}
+        self._derived_members: dict[str, list[PermissionGroupMemberRow]] = {}
         self._session = _FakeSession()
 
     @property
@@ -180,6 +182,11 @@ class _FakeRepo(PermissionGroupRepository):
             key=lambda m: (m.added_at, m.user_id),
         )
 
+    def list_derived_members(
+        self, *, workspace_id: str, group_id: str, grant_role: str
+    ) -> Sequence[PermissionGroupMemberRow]:
+        return self._derived_members.get(grant_role, [])
+
     def get_member(
         self, *, group_id: str, user_id: str
     ) -> PermissionGroupMemberRow | None:
@@ -231,6 +238,27 @@ def _seed_owners(repo: _FakeRepo) -> PermissionGroupRow:
         added_at=_PINNED,
         added_by_user_id=None,
     )
+    return row
+
+
+def _seed_managers(repo: _FakeRepo) -> PermissionGroupRow:
+    row = PermissionGroupRow(
+        id="01HWA00000000000000000GR02",
+        slug="managers",
+        name="Managers",
+        system=True,
+        capabilities={},
+        created_at=_PINNED,
+    )
+    repo._groups[row.id] = row
+    repo._derived_members["manager"] = [
+        PermissionGroupMemberRow(
+            group_id=row.id,
+            user_id=_ACTOR_ID,
+            added_at=_PINNED,
+            added_by_user_id=None,
+        )
+    ]
     return row
 
 
@@ -327,6 +355,32 @@ class TestDeleteGroup:
 
 
 class TestMembership:
+    def test_list_members_projects_derived_group_from_role_grants(self) -> None:
+        repo = _FakeRepo()
+        managers = _seed_managers(repo)
+        members = list_members(repo, _ctx(), group_id=managers.id)
+        assert [m.user_id for m in members] == [_ACTOR_ID]
+
+    def test_derived_group_membership_writes_rejected(self) -> None:
+        repo = _FakeRepo()
+        managers = _seed_managers(repo)
+        with pytest.raises(DerivedGroupProtected):
+            add_member(
+                repo,
+                _ctx(),
+                group_id=managers.id,
+                user_id="01HWA00000000000000000USR2",
+                clock=FrozenClock(_PINNED),
+            )
+        with pytest.raises(DerivedGroupProtected):
+            remove_member(
+                repo,
+                _ctx(),
+                group_id=managers.id,
+                user_id=_ACTOR_ID,
+                clock=FrozenClock(_PINNED),
+            )
+
     def test_add_member_fresh_inserts_through_seam(self) -> None:
         """A first-time add reaches :meth:`PermissionGroupRepository.insert_member`.
 

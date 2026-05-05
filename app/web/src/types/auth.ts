@@ -35,22 +35,19 @@ export interface RoleGrant {
   revoke_reason: string | null;
 }
 
-// Mirrors `app.api.v1.permission_groups.PermissionGroupResponse`. The
-// `group_kind` / `is_derived` projections are not in v1 — the router
-// emits a flat `system: bool` and the derived/role-grant joining is
-// deferred (cd-zkr). Re-add once the router does (paired follow-up
-// task referenced below by id in the consuming components).
+// Mirrors `app.api.v1.permission_groups.PermissionGroupResponse`.
 export interface PermissionGroup {
   id: string;
   slug: string;
   name: string;
   system: boolean;
+  group_kind: "system" | "user" | "derived";
   capabilities: Record<string, unknown>;
   created_at: string;
 }
 
-// Mirrors `PermissionGroupMemberResponse` — one row per explicit
-// (group, user) pair. v1 derived groups carry no rows.
+// Mirrors `PermissionGroupMemberResponse`. Derived groups project
+// live `role_grants` into this shape.
 export interface PermissionGroupMember {
   group_id: string;
   user_id: string;

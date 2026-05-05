@@ -172,6 +172,7 @@ describe("permissions user display", () => {
             slug: "managers",
             name: "Managers",
             system: true,
+            group_kind: "derived",
             capabilities: {},
             created_at: "2026-05-04T12:00:00Z",
           }],
@@ -205,6 +206,7 @@ describe("permissions user display", () => {
 
       expect(await screen.findByText("Alice")).toBeInTheDocument();
       expect(screen.getByText("alice@example.com")).toBeInTheDocument();
+      expect(screen.getByText(/Auto-populated from role_grants/)).toBeInTheDocument();
     } finally {
       (globalThis as { fetch: typeof fetch }).fetch = originalFetch;
     }

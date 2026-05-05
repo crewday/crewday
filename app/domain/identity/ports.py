@@ -272,6 +272,19 @@ class PermissionGroupRepository(Protocol):
         """Return every explicit member of ``group_id`` ordered by addition."""
         ...
 
+    def list_derived_members(
+        self, *, workspace_id: str, group_id: str, grant_role: str
+    ) -> Sequence[PermissionGroupMemberRow]:
+        """Return computed members for a role-grant-derived system group.
+
+        Derived groups (``managers``, ``all_workers``, ``all_clients``)
+        do not store ``permission_group_member`` rows. The adapter
+        projects live ``role_grants`` with the matching ``grant_role``
+        into the same member row shape so the HTTP members endpoint can
+        render one roster surface for both explicit and derived groups.
+        """
+        ...
+
     def get_member(
         self, *, group_id: str, user_id: str
     ) -> PermissionGroupMemberRow | None:

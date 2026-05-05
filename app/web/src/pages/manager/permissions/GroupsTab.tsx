@@ -10,11 +10,12 @@ import type {
 } from "@/types/api";
 import { useUsersIndex, useWorkspaces } from "./lib/usePermissionIndexes";
 
-// `group_kind` (system|user) collapses to the wire-level `system: bool`
-// in v1, and `is_derived` is intentionally not surfaced — the router
-// won't emit derived-group rows until the join over role_grants lands.
-// The "Auto-populated from role_grants" advisory and per-row `derived`
-// badge return when cd-c83ap promotes the field back onto the wire.
+// cd-c83ap restores the derived affordances removed in cd-5bz65 once
+// the production router started carrying `group_kind` again.
+function isDerivedGroup(group: PermissionGroup): boolean {
+  return group.group_kind === "derived";
+}
+
 export default function GroupsTab() {
   // code-health: ignore[ccn nloc] Permission group editor keeps nested role/user grant controls in one table surface.
   const wss = useWorkspaces();
@@ -48,6 +49,7 @@ export default function GroupsTab() {
 
   const groupRows = groups.data.data;
   const selectedGroup = groupRows.find((g) => g.id === selectedId);
+  const selectedIsDerived = selectedGroup ? isDerivedGroup(selectedGroup) : false;
 
   return (
     <div className="permissions__split">
@@ -75,6 +77,9 @@ export default function GroupsTab() {
                 {g.name}
                 {g.system ? (
                   <Chip tone="moss" size="sm">system</Chip>
+                ) : null}
+                {isDerivedGroup(g) ? (
+                  <Chip tone="sand" size="sm">derived</Chip>
                 ) : null}
               </div>
               <div className="permissions__group-key mono muted">{g.slug}</div>
@@ -106,6 +111,12 @@ export default function GroupsTab() {
                     <code>groups.manage_owners_membership</code> action.
                   </p>
                 ) : null}
+                {selectedIsDerived ? (
+                  <p className="muted">
+                    Auto-populated from role_grants. Membership is read-only
+                    here; grant or revoke the matching surface role instead.
+                  </p>
+                ) : null}
                 <table className="table">
                   <thead>
                     <tr>
@@ -122,7 +133,11 @@ export default function GroupsTab() {
                           <td>{u?.display_name ?? m.user_id}</td>
                           <td className="mono muted">{u?.email ?? ""}</td>
                           <td>
-                            <button className="btn btn--ghost btn--sm">Remove</button>
+                            {selectedIsDerived ? (
+                              <span className="muted">read-only</span>
+                            ) : (
+                              <button className="btn btn--ghost btn--sm">Remove</button>
+                            )}
                           </td>
                         </tr>
                       );
@@ -130,15 +145,17 @@ export default function GroupsTab() {
                     {members.data.data.length === 0 ? (
                       <tr>
                         <td colSpan={3} className="muted">
-                          No members.
+                          {selectedIsDerived ? "No matching role grants." : "No members."}
                         </td>
                       </tr>
                     ) : null}
                   </tbody>
                 </table>
-                <div className="panel__footer">
-                  <button className="btn btn--moss btn--sm">+ Add member</button>
-                </div>
+                {selectedIsDerived ? null : (
+                  <div className="panel__footer">
+                    <button className="btn btn--moss btn--sm">+ Add member</button>
+                  </div>
+                )}
               </>
             ) : (
               <div>Failed to load members.</div>

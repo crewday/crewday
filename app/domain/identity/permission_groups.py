@@ -13,7 +13,7 @@ groups (``owners``, ``managers``, ``all_workers``, ``all_clients``):
   :class:`SystemGroupProtected`; the ``slug`` column is frozen by
   design (the service never exposes a slug-change surface).
 * Membership writes (``add_member`` / ``remove_member``) are
-  allowed on every group including system ones, and both are
+  allowed on explicit groups (``owners`` plus user-defined groups), and both are
   idempotent: a duplicate add or a missing remove is a no-op that
   still emits an audit row (§02 "Audit"). ``remove_member``
   enforces the two §02 ``owners`` invariants in lock-step:
@@ -66,7 +66,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 from sqlalchemy.orm import Session
 
@@ -89,6 +89,7 @@ from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
 
 __all__ = [
+    "DerivedGroupProtected",
     "LastOwnerGrantProtected",
     "PermissionGroupMemberRef",
     "PermissionGroupNotFound",
@@ -107,6 +108,14 @@ __all__ = [
     "update_group",
     "write_member_remove_rejected_audit",
 ]
+
+GroupKind = Literal["system", "user", "derived"]
+
+_DERIVED_GROUP_GRANT_ROLES: dict[str, str] = {
+    "managers": "manager",
+    "all_workers": "worker",
+    "all_clients": "client",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +138,7 @@ class PermissionGroupRef:
     slug: str
     name: str
     system: bool
+    group_kind: GroupKind
     capabilities: dict[str, Any]
     created_at: datetime
 
@@ -162,6 +172,10 @@ class SystemGroupProtected(ValueError):
     409-equivalent: delete of any system group, or an ``update_group``
     call that tries to change ``capabilities`` / ``slug`` on one.
     """
+
+
+class DerivedGroupProtected(ValueError):
+    """Attempted to edit membership on a role-grant-derived group."""
 
 
 class UnknownCapability(ValueError):
@@ -214,6 +228,7 @@ def _row_to_ref(row: PermissionGroupRow) -> PermissionGroupRef:
         slug=row.slug,
         name=row.name,
         system=row.system,
+        group_kind=_group_kind(row),
         capabilities=dict(row.capabilities),
         created_at=row.created_at,
     )
@@ -243,6 +258,18 @@ def _validate_capabilities(capabilities: dict[str, Any]) -> None:
     for key in capabilities:
         if key not in ACTION_CATALOG:
             raise UnknownCapability(key)
+
+
+def _group_kind(row: PermissionGroupRow) -> GroupKind:
+    if row.system and row.slug in _DERIVED_GROUP_GRANT_ROLES:
+        return "derived"
+    return "system" if row.system else "user"
+
+
+def _derived_grant_role(row: PermissionGroupRow) -> str | None:
+    if not row.system:
+        return None
+    return _DERIVED_GROUP_GRANT_ROLES.get(row.slug)
 
 
 def _load_group(
@@ -460,19 +487,28 @@ def delete_group(
 def list_members(
     repo: PermissionGroupRepository, ctx: WorkspaceContext, *, group_id: str
 ) -> Sequence[PermissionGroupMemberRef]:
-    """List every explicit member of ``group_id``.
+    """List every member of ``group_id``.
 
     Raises :class:`PermissionGroupNotFound` if the group is missing
     from the caller's workspace so a bad ID can't silently return
     "no members" (§02 "permission_group_member" — membership queries
     carry their parent scope).
 
-    v1 ignores the ``revoked_at`` column (it doesn't exist on the
-    schema yet — cd-zkr proper will land it as a follow-up migration
-    per :mod:`app.adapters.db.authz.models` module docstring).
+    Explicit groups read ``permission_group_member``. Derived groups
+    (``managers``, ``all_workers``, ``all_clients``) project live
+    ``role_grants`` into the same row shape so the API and SPA keep
+    one roster surface.
     """
-    _load_group(repo, ctx, group_id=group_id)
-    rows = repo.list_members(workspace_id=ctx.workspace_id, group_id=group_id)
+    group = _load_group(repo, ctx, group_id=group_id)
+    grant_role = _derived_grant_role(group)
+    if grant_role is not None:
+        rows = repo.list_derived_members(
+            workspace_id=ctx.workspace_id,
+            group_id=group_id,
+            grant_role=grant_role,
+        )
+    else:
+        rows = repo.list_members(workspace_id=ctx.workspace_id, group_id=group_id)
     return [_member_row_to_ref(row) for row in rows]
 
 
@@ -500,7 +536,12 @@ def add_member(
     ``clock`` is optional; tests pin the audit row's ``created_at``
     via a :class:`~app.util.clock.FrozenClock`.
     """
-    _load_group(repo, ctx, group_id=group_id)
+    group = _load_group(repo, ctx, group_id=group_id)
+    if _derived_grant_role(group) is not None:
+        raise DerivedGroupProtected(
+            f"permission_group {group.slug!r} is derived from role_grants; "
+            "membership cannot be edited directly."
+        )
 
     # Idempotency check: a duplicate ``(group_id, user_id)`` INSERT
     # would trip the composite PK and raise :class:`IntegrityError`,
@@ -584,6 +625,11 @@ def remove_member(
     via a :class:`~app.util.clock.FrozenClock`.
     """
     group = _load_group(repo, ctx, group_id=group_id)
+    if _derived_grant_role(group) is not None:
+        raise DerivedGroupProtected(
+            f"permission_group {group.slug!r} is derived from role_grants; "
+            "membership cannot be edited directly."
+        )
 
     member = repo.get_member(group_id=group_id, user_id=user_id)
 

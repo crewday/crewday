@@ -137,6 +137,7 @@ export default function RulesTab() {
                         <RuleChip
                           key={r.id}
                           rule={r}
+                          group={groupsById[r.subject_id]}
                           groupLabel={groupsById[r.subject_id]?.name}
                           userLabel={users.data?.[r.subject_id]?.display_name}
                         />

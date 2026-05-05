@@ -730,7 +730,10 @@ minimum behavioural shape the implementation must satisfy:
 
 - **Groups** page: list workspace groups; for each, show members
   (or "auto-populated from grant_role=X" for derived ones),
-  allow add/remove on user-defined groups and `owners`.
+  allow add/remove on user-defined groups and `owners`. Derived
+  groups (`managers`, `all_workers`, `all_clients`) render a
+  read-only roster projected from live `role_grants`; direct
+  membership writes fail with `derived_group_protected`.
 - **Action rules** page: grouped by action; each row shows
   default + current effective rules at workspace + per-property
   override widgets. A live "who can do this?" preview resolves

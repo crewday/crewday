@@ -16458,6 +16458,15 @@
             "title": "Created At",
             "type": "string"
           },
+          "group_kind": {
+            "enum": [
+              "derived",
+              "system",
+              "user"
+            ],
+            "title": "Group Kind",
+            "type": "string"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -16478,6 +16487,7 @@
         "required": [
           "capabilities",
           "created_at",
+          "group_kind",
           "id",
           "name",
           "slug",
