@@ -78,6 +78,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from app.util.logging import reset_correlation_id, set_correlation_id
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -166,12 +167,13 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
     tenancy resolver (and anything else that runs inside) sees the id
     on ``request.state``.
 
-    The middleware is stateless across requests — every dispatch
-    recomputes the id and writes it to ``request.state``. There is no
-    ContextVar to reset; downstream code that wants the id reads it
-    off ``request.state`` (HTTP-bound) or off
+    Every dispatch recomputes the id, writes it to ``request.state``,
+    and binds the structured-logging ContextVar for the downstream
+    request scope. Downstream code that wants the id directly should
+    still read it off ``request.state`` (HTTP-bound) or off
     ``WorkspaceContext.audit_correlation_id`` (workspace-scoped
-    handlers and audit writers).
+    handlers and audit writers); the ContextVar exists so
+    :class:`app.util.logging.JsonFormatter` can stamp JSON log lines.
     """
 
     async def dispatch(
@@ -188,11 +190,15 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         # rely on it always being present when the middleware is
         # installed.
         setattr(request.state, CORRELATION_ID_STATE_ATTR, correlation_id)
-        response = await call_next(request)
-        # Stamp the spec-named echo header on the response. We use a
-        # distinct name from the inbound so a chained caller can
-        # always tell "what I sent" from "what the server resolved";
-        # set unconditionally so a downstream middleware that wrote
-        # the same name is overwritten with the canonical value.
-        response.headers[CORRELATION_ID_ECHO_HEADER] = correlation_id
-        return response
+        token = set_correlation_id(correlation_id)
+        try:
+            response = await call_next(request)
+            # Stamp the spec-named echo header on the response. We use a
+            # distinct name from the inbound so a chained caller can
+            # always tell "what I sent" from "what the server resolved";
+            # set unconditionally so a downstream middleware that wrote
+            # the same name is overwritten with the canonical value.
+            response.headers[CORRELATION_ID_ECHO_HEADER] = correlation_id
+            return response
+        finally:
+            reset_correlation_id(token)

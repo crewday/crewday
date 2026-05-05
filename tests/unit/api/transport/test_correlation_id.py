@@ -14,6 +14,8 @@ Covers the contract spec §11 "Client abstraction" pins:
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 
 from fastapi import FastAPI, HTTPException, Request
@@ -27,6 +29,7 @@ from app.api.transport.correlation_id import (
     MAX_INBOUND_LENGTH,
     CorrelationIdMiddleware,
 )
+from app.util.logging import JsonFormatter
 
 # ULID is 26 chars of Crockford base32 (0-9 + A-Z minus I, L, O, U).
 _ULID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
@@ -147,6 +150,28 @@ class TestStateBinding:
         # Even with no inbound header, the attribute exists — downstream
         # readers can rely on it always being present.
         assert resp.json()["state_id"] == resp.headers[CORRELATION_ID_ECHO_HEADER]
+
+    def test_json_logs_see_resolved_correlation_id(self) -> None:
+        app = FastAPI()
+        app.add_middleware(CorrelationIdMiddleware)
+
+        @app.get("/log")
+        def log_line() -> dict[str, object]:
+            record = logging.getLogger("test.correlation").makeRecord(
+                "test.correlation",
+                logging.INFO,
+                __file__,
+                1,
+                "inside handler",
+                (),
+                None,
+            )
+            return json.loads(JsonFormatter().format(record))
+
+        client = TestClient(app)
+        resp = client.get("/log", headers={CORRELATION_ID_HEADER: "trace-log"})
+        assert resp.status_code == 200
+        assert resp.json()["correlation_id"] == "trace-log"
 
 
 class TestPerRequestIsolation:
