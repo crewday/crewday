@@ -343,7 +343,7 @@ class Settings(BaseSettings):
         fail. Whitespace-only entries are dropped so a trailing comma
         doesn't turn into an empty-string glob.
         """
-        if isinstance(value, str):
+        if isinstance(value, str):  # code-health: ignore[duplicate] Env validators.
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
 

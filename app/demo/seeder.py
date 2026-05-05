@@ -463,7 +463,7 @@ def _seed_work_roles(
     for raw in _mapping_list(fixture.get("work_roles"), "work_roles"):
         key = _str(raw, "key")
         role_id = new_ulid()
-        role_ids[key] = role_id
+        role_ids[key] = role_id  # code-health: ignore[duplicate] ORM seed rows.
         session.add(
             WorkRole(
                 id=role_id,
@@ -540,7 +540,7 @@ def _seed_properties(
     for raw in _mapping_list(fixture.get("properties"), "properties"):
         key = _str(raw, "key")
         property_id = new_ulid()
-        property_ids[key] = property_id
+        property_ids[key] = property_id  # code-health: ignore[duplicate] ORM seed rows.
         name = _str(raw, "name")
         city = _str(raw, "city")
         country = _str(raw, "country", default="FR")

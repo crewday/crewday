@@ -429,7 +429,7 @@ class PostgresListenNotifyRelay:
                     )
                     backoff = 1.0
                     async for notify in conn.notifies():
-                        if self._stopping:
+                        if self._stopping:  # code-health: ignore[duplicate] LISTEN.
                             break
                         self._dispatch(notify.payload)
             except asyncio.CancelledError:

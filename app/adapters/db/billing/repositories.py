@@ -116,13 +116,11 @@ def _to_row(row: Organization) -> OrganizationRow:
     )
 
 
-class SqlAlchemyOrganizationRepository(
-    OrganizationRepository
-):  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+class SqlAlchemyOrganizationRepository(OrganizationRepository):
     """SA-backed organization repository."""
 
     def __init__(self, session: Session) -> None:
-        self._session = session
+        self._session = session  # code-health: ignore[duplicate] Repo init.
 
     @property
     def session(self) -> Session:

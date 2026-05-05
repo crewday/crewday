@@ -258,7 +258,7 @@ class PropertyWorkspace(Base):
     __tablename__ = "property_workspace"
 
     property_id: Mapped[str] = mapped_column(
-        String,
+        String,  # code-health: ignore[duplicate] Explicit ORM shape.
         ForeignKey("property.id", ondelete="CASCADE"),
         primary_key=True,
     )

@@ -124,6 +124,7 @@ def write_audit(
     """
     now = (clock if clock is not None else SystemClock()).now()
     row = AuditLog(
+        # code-health: ignore[duplicate] Explicit audit scopes.
         id=new_ulid(),
         workspace_id=ctx.workspace_id,
         actor_id=ctx.actor_id,

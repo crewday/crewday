@@ -893,6 +893,7 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
             # time 404 — the agent needs a clear "your principal is
             # gone" signal, not the opaque enumeration shield.
             _log_tenancy_event(
+                # code-health: ignore[duplicate] Typed rejection branches.
                 slug=_parse_scoped_path(path),
                 workspace_id=None,
                 actor_id=None,

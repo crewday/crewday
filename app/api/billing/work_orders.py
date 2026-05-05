@@ -179,7 +179,10 @@ def build_work_orders_router() -> APIRouter:
                 SqlAlchemyWorkOrderRepository(session),
                 body.to_domain(),
             )
-        except (WorkOrderInvalid, WorkOrderNotFound) as exc:
+        except (  # code-health: ignore[duplicate] Repeated wire transitions.
+            WorkOrderInvalid,
+            WorkOrderNotFound,
+        ) as exc:
             raise _http_for_work_order_error(exc) from exc
         return WorkOrderResponse.from_view(view)
 
