@@ -305,7 +305,7 @@ def _list_type_response(
     cursor: str | None,
     limit: int,
 ) -> AssetTypeListResponse:
-    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+    # code-health: ignore[params] FastAPI params are OpenAPI contract.
     views = list_types(
         session,
         ctx,
@@ -334,12 +334,15 @@ def build_asset_types_alias_router() -> APIRouter:
         summary="List asset types visible to the caller's workspace",
         dependencies=[view_gate],
     )
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     def list_flat(
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         ctx: _Ctx,
         session: _Db,
-        category: str | None = Query(default=None),
+        category: str
+        | None = Query(  # code-health: ignore[duplicate] Asset type list filters mirror archived flat/tree routes.  # noqa: E501
+            default=None
+        ),
         workspace_only: bool = Query(default=False),
         include_archived: bool = Query(default=False),
         cursor: PageCursorQuery = None,

@@ -807,7 +807,7 @@ def request_link(
        ``audit_log`` was the original repro), the router never
        reaches :meth:`deliver` and no email leaves the host.
     """
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     if purpose not in _VALID_PURPOSES:
         # Router body validation should have caught this, but the
         # domain gate means a programmatic caller (CLI, worker) can't
@@ -994,8 +994,10 @@ def peek_link(
     write an audit row — peek is read-only and audit is the
     consume's job.
     """
-    # code-health: ignore[params] Port contract.
-    if expected_purpose not in _VALID_PURPOSES:  # code-health: ignore[duplicate] dup.
+    # code-health: ignore[params] Port params are adapter API contract.
+    if (
+        expected_purpose not in _VALID_PURPOSES
+    ):  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
         raise InvalidToken(f"unknown magic-link purpose: {expected_purpose!r}")
 
     resolved_now = now if now is not None else _now(clock)
@@ -1120,7 +1122,7 @@ def consume_link(
     counter — a legitimate redemption should wipe the slate for the
     next one.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     if expected_purpose not in _VALID_PURPOSES:
         raise InvalidToken(f"unknown magic-link purpose: {expected_purpose!r}")
 
@@ -1281,7 +1283,7 @@ def write_rejected_audit(
     a pre-parse failure path where the body never reached the handler
     at all.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     pepper = _subkey(settings)
     diff: dict[str, Any] = {
         "reason": reason,

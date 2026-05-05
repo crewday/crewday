@@ -357,7 +357,7 @@ class UserAvailabilityOverrideRepository(Protocol):
         ``status='pending'`` narrows to ``approved_at IS NULL``.
         ``from_date`` / ``to_date`` are inclusive bounds on ``date``.
         """
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         ...
 
     def find_weekly_pattern(
@@ -561,7 +561,7 @@ class UserLeaveRepository(Protocol):
         ``starts_after`` filters rows with ``starts_on >= starts_after``;
         ``ends_before`` filters rows with ``ends_on <= ends_before``.
         """
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         ...
 
     # -- Writes ----------------------------------------------------------

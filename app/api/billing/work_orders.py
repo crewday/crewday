@@ -128,7 +128,7 @@ def _http_for_work_order_error(exc: Exception) -> DomainError:
 
 
 def build_work_orders_router() -> APIRouter:
-    # code-health: ignore[nloc] Router composition stays explicit.
+    # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     router = APIRouter(prefix="/work-orders", tags=["billing", "work-orders"])
 
     view_gate = Depends(Permission("work_orders.view", scope_kind="workspace"))
@@ -179,7 +179,7 @@ def build_work_orders_router() -> APIRouter:
                 SqlAlchemyWorkOrderRepository(session),
                 body.to_domain(),
             )
-        except (  # code-health: ignore[duplicate] Repeated wire transitions.
+        except (  # code-health: ignore[duplicate] Repeated wire transitions.  # noqa: E501
             WorkOrderInvalid,
             WorkOrderNotFound,
         ) as exc:
@@ -224,9 +224,9 @@ def build_work_orders_router() -> APIRouter:
             view = WorkOrderService(ctx).update(
                 SqlAlchemyWorkOrderRepository(session),
                 work_order_id,
-                # code-health: ignore[duplicate] Repeated wire shape is intentional.
+                # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
                 body.to_domain(),
-                # code-health: ignore[duplicate] Repeated wire shape is intentional.
+                # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
             )
         except (WorkOrderInvalid, WorkOrderNotFound) as exc:
             raise _http_for_work_order_error(exc) from exc

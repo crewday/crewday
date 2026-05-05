@@ -129,7 +129,7 @@ class RateCard(Base):
 
     id: Mapped[str] = mapped_column(
         String, primary_key=True
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     workspace_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("workspace.id", ondelete="CASCADE"),
@@ -183,7 +183,7 @@ class WorkOrder(Base):
 
     id: Mapped[str] = mapped_column(
         String, primary_key=True
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     workspace_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("workspace.id", ondelete="CASCADE"),

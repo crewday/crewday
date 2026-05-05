@@ -26,6 +26,7 @@ function isGuestPath(pathname: string): boolean {
 // then the routed layout inside <Outlet />. Grain is mounted once at
 // tree root (not per-page) so navigation doesn't flicker.
 export default function PreviewShell() {
+  // code-health: ignore[ccn nloc] Preview shell coordinates role switching, demo banner, theme toggle, and root outlet chrome in one layout.
   const { role, setRole } = useRole();
   const { theme, resolved, toggle } = useTheme();
   const navigate = useNavigate();

@@ -736,7 +736,7 @@ def _refuse_stay_clashes(
     ends_at: datetime,
     force: bool,
 ) -> None:
-    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+    # code-health: ignore[params] FastAPI params are OpenAPI contract.
     if force:
         return
     clashes = closure_service.detect_clashes(
@@ -973,7 +973,7 @@ def _can_read_full_roster(
 
 
 def build_properties_router() -> APIRouter:
-    # code-health: ignore[nloc] Router composition stays explicit.
+    # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     """Return a fresh :class:`APIRouter` wired for the properties roster.
 
     Mounted by the v1 app factory at
@@ -1422,7 +1422,7 @@ def build_properties_router() -> APIRouter:
         from_: Annotated[datetime | None, Query(alias="from")] = None,
         to: datetime | None = None,
     ) -> ClosureListResponse:
-        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+        # code-health: ignore[params] FastAPI params are OpenAPI contract.
         try:
             views = closure_service.list_closures(
                 session, ctx, property_id=property_id, unit_id=unit_id

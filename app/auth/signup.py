@@ -615,7 +615,7 @@ def start_signup(
     commit failure short-circuits the SMTP send, so no working token
     leaves the host without a matching nonce on disk.
     """
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     _ensure_signup_enabled(capabilities)
 
     resolved_now = now if now is not None else _now(clock)
@@ -787,7 +787,7 @@ def consume_verify(
     Returns a :class:`SignupSession` the caller uses to kick off the
     passkey ceremony.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     _ensure_signup_enabled(capabilities)
     resolved_now = now if now is not None else _now(clock)
 
@@ -927,7 +927,7 @@ def provision_workspace_and_owner_seat(
     this helper only ``session.flush()``es so subsequent reads inside
     the transaction see the new rows.
     """
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     # justification: the workspace table is workspace-scoped but we
     # are CREATING the tenancy anchor — no WorkspaceContext exists yet
     # to filter against. User / UserWorkspace / seed_* likewise sit
@@ -1099,7 +1099,7 @@ def complete_signup(
     of the rows above land. See the cd-3i5 AC #1 test for the
     atomicity guarantee.
     """
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     _ensure_signup_enabled(capabilities)
     resolved_now = now if now is not None else _now(clock)
 

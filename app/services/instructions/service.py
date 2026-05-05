@@ -571,7 +571,7 @@ def resolve_instructions(
     work_role_id: str | None = None,
 ) -> list[ResolvedInstruction]:
     """Return the deduped, ordered instruction set for a work context."""
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_area_id: str | None = None
     resolved_property_id = property_id
     if area_id is not None:
@@ -694,7 +694,7 @@ def create(
     ``TagValidationError`` (422 / "tags") rather than a wasted scope
     DB read.
     """
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     _require_edit(repo, ctx)
     normalised_tags = _normalise_tags(tags)
     scope_kind, scope_id = _resolve_scope(
@@ -796,7 +796,7 @@ def update_metadata(
     when the row is archived; :class:`ScopeValidationError` /
     :class:`TagValidationError` for shape errors.
     """
-    # code-health: ignore[ccn,nloc,params] Policy flow.
+    # code-health: ignore[ccn,nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     _require_edit(repo, ctx)
     existing = repo.get_instruction(
         workspace_id=ctx.workspace_id, instruction_id=instruction_id
@@ -899,7 +899,7 @@ def update_body(
     unknown to this workspace; :class:`ArchivedInstructionError`
     when the row is archived.
     """
-    # code-health: ignore[nloc] Policy flow.
+    # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     _require_edit(repo, ctx)
     existing = repo.get_instruction_for_update(
         workspace_id=ctx.workspace_id, instruction_id=instruction_id
@@ -1067,7 +1067,7 @@ def restore_to_revision(
     clock: Clock | None = None,
 ) -> InstructionResult:
     """Copy a historical revision body into a brand-new current revision."""
-    # code-health: ignore[nloc] Policy flow.
+    # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     _require_edit(repo, ctx)
     existing = repo.get_instruction_for_update(
         workspace_id=ctx.workspace_id, instruction_id=instruction_id

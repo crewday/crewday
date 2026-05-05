@@ -23,6 +23,7 @@ const ME_SCOPES: { key: string; hint: string; verb: string }[] = [
 ];
 
 export default function PersonalTokensPanel() {
+  // code-health: ignore[nloc] Personal token panel keeps create, reveal, revoke, and scope-pick state together for the self-service token flow.
   const qc = useQueryClient();
   const listQ = useQuery({
     queryKey: qk.meApiTokens(),

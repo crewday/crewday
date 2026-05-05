@@ -389,7 +389,7 @@ class SqlAlchemyEmailChangeRepository(EmailChangeRepository):
         new_email_lower: str,
         created_at: datetime,
     ) -> EmailChangePendingRow:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         pending = EmailChangePending(
             id=pending_id,
             user_id=user_id,
@@ -509,7 +509,7 @@ class SqlAlchemyUserPushTokenRepository(UserPushTokenRepository):
     def session(self) -> Session:
         return self._session
 
-    def list_for_user(  # code-health: ignore[duplicate] Push-token query shape.
+    def list_for_user(  # code-health: ignore[duplicate] Push-token query shape.  # noqa: E501
         self, *, user_id: str
     ) -> Sequence[UserPushTokenRow]:
         with (
@@ -529,7 +529,7 @@ class SqlAlchemyUserPushTokenRepository(UserPushTokenRepository):
         self, *, user_id: str, token_id: str
     ) -> (
         UserPushTokenRow | None
-    ):  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    ):  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
         with tenant_agnostic():  # code-health: ignore[duplicate] Push-token query.
             row = self._session.scalars(
                 select(UserPushToken).where(
@@ -581,7 +581,7 @@ class SqlAlchemyUserPushTokenRepository(UserPushTokenRepository):
         app_version: str | None,
         created_at: datetime,
     ) -> UserPushTokenRow:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         row = UserPushToken(
             id=token_id,
             user_id=user_id,

@@ -75,7 +75,7 @@ def seed_default_registry(
     we ``session.flush()`` so subsequent reads in the transaction
     see the new rows.
     """
-    # code-health: ignore[nloc] Idempotent fixture seeding keeps the trio together.
+    # code-health: ignore[nloc] Idempotent fixture seeding keeps the trio together.  # noqa: E501
     c = clock if clock is not None else SystemClock()
     now: datetime = c.now()
 

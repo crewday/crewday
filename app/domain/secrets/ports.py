@@ -134,7 +134,7 @@ class SecretEnvelopeRepository(Protocol):
 
         Flushes so a peer read in the same UoW sees the new row.
         """
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         ...
 
     def get_by_id(self, *, envelope_id: str) -> SecretEnvelopeRow | None:

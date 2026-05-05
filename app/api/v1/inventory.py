@@ -71,9 +71,9 @@ class InventoryItemCreateRequest(BaseModel):
 
     name: str = Field(min_length=1, max_length=_MAX_SHORT)
     sku: str | None = Field(default=None, max_length=_MAX_SHORT)
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     unit: str = Field(min_length=1, max_length=_MAX_SHORT)
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     reorder_point: Decimal | None = None
     reorder_target: Decimal | None = None
     vendor: str | None = Field(default=None, max_length=_MAX_SHORT)
@@ -85,9 +85,9 @@ class InventoryItemCreateRequest(BaseModel):
 
     def to_service(self) -> InventoryItemCreate:
         return InventoryItemCreate(
-            # code-health: ignore[duplicate] Repeated wire shape is intentional.
+            # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
             name=self.name,
-            # code-health: ignore[duplicate] Repeated wire shape is intentional.
+            # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
             sku=self.sku,
             unit=self.unit,
             reorder_point=self.reorder_point,
@@ -545,7 +545,7 @@ def _movement_cursor(view: InventoryMovementView) -> str:
 
 
 def build_inventory_router() -> APIRouter:
-    # code-health: ignore[nloc] Router composition stays explicit.
+    # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     api = APIRouter(tags=["inventory"])
     view_gate = Depends(Permission("scope.view", scope_kind="workspace"))
     edit_gate = Depends(Permission("scope.edit_settings", scope_kind="workspace"))

@@ -320,7 +320,7 @@ def _query_usage_rows(
     cursor: str | None,
     limit: int,
 ) -> list[LlmUsage]:
-    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+    # code-health: ignore[params] FastAPI params are OpenAPI contract.
     """Run the /admin/usage SELECT with the supplied filters.
 
     Ordered newest-first by ``(created_at, id)``. The WHERE shape is
@@ -442,7 +442,7 @@ def _not_found() -> NotFound:
 
 
 def build_admin_usage_router() -> APIRouter:
-    # code-health: ignore[nloc] Router composition stays explicit.
+    # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     """Return the router carrying the usage-aggregates admin routes."""
     router = APIRouter(tags=["admin"])
 
@@ -484,7 +484,7 @@ def build_admin_usage_router() -> APIRouter:
         cursor: Annotated[str | None, Query(max_length=64)] = None,
         limit: Annotated[int, Query(ge=1, le=_MAX_LIMIT)] = _DEFAULT_LIMIT,
     ) -> UsageListResponse:
-        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+        # code-health: ignore[params] FastAPI params are OpenAPI contract.
         """Return a paginated :class:`LlmUsage` page for the admin feed.
 
         The cd-ccu9 endpoint surfaces every column on

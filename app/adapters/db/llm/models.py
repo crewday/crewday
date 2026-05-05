@@ -240,7 +240,7 @@ class LlmAssignment(Base):
 
     id: Mapped[str] = mapped_column(
         String, primary_key=True
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     workspace_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("workspace.id", ondelete="CASCADE"),
@@ -526,7 +526,7 @@ class ApprovalRequest(Base):
     # writes target :attr:`decision_note_md` per the spec name.
     rationale_md: Mapped[str | None] = mapped_column(
         String, nullable=True
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # cd-9ghv: TTL anchor. NULL on cd-cm5-era rows.
     expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
@@ -712,7 +712,7 @@ class LlmUsage(Base):
     # display. NULL when the call carries no agent context.
     agent_label: Mapped[str | None] = mapped_column(
         String, nullable=True
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
@@ -938,12 +938,12 @@ class AgentPreference(Base):
         JSON, nullable=False, default=list, server_default="[]"
     )
     updated_by_user_id: Mapped[str | None] = (
-        mapped_column(  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+        mapped_column(  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
             String,
             ForeignKey("user.id", ondelete="SET NULL"),
-            nullable=True,  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+            nullable=True,  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
         )
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     archived_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
@@ -1031,10 +1031,10 @@ class AgentDoc(Base):
     )
     default_hash: Mapped[str] = mapped_column(
         String(16), nullable=False
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     notes: Mapped[str | None] = mapped_column(
         String, nullable=True
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
@@ -1064,10 +1064,10 @@ class AgentDocRevision(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     body_md: Mapped[str] = mapped_column(
         String, nullable=False
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     notes: Mapped[str | None] = mapped_column(
         String, nullable=True
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     created_by_user_id: Mapped[str | None] = mapped_column(
         String,

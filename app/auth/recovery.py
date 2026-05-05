@@ -837,7 +837,7 @@ def request_recovery(
     proxy the send. This keeps the magic-link module's template
     dispatch single-purpose.
     """
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     request_started_ns = time.perf_counter_ns()
     dispatch = PendingDispatch()
     resolved_now = now if now is not None else _now(clock)
@@ -1083,7 +1083,7 @@ class _CapturingMailer:
         headers: Mapping[str, str] | None = None,
         reply_to: str | None = None,
     ) -> str:
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         del to, subject, body_html, headers, reply_to
         prefix = self.base_url.rstrip("/")
         for line in body_text.splitlines():
@@ -1146,7 +1146,7 @@ def _mint_and_send_recovery_link(
     pairing. Both writes land in the caller's UoW so the burn,
     the stamp, and the nonce commit together.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     capture = _CapturingMailer(base_url=base_url)
     # The capturing mailer is a synchronous in-process intercept (no
     # SMTP, no network) — its :meth:`send` only stores the token from
@@ -1270,7 +1270,7 @@ def verify_recovery(
     Writes one ``audit.recovery.verified`` row under the caller's
     UoW.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     resolved_now = now if now is not None else _now(clock)
 
     outcome = magic_link.consume_link(
@@ -1396,7 +1396,7 @@ def complete_recovery(
     the shared state layer, at which point wiring a SQLAlchemy
     ``after_commit`` hook becomes natural.
     """
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_now = now if now is not None else _now(clock)
 
     row = _load_recovery_session(recovery_session_id, now=resolved_now)

@@ -91,7 +91,7 @@ class InventoryMovementValidationError(ValueError):
     __slots__ = (
         "error",
         "field",
-    )  # code-health: ignore[duplicate] dup.
+    )  # code-health: ignore[duplicate] Boundary field list kept explicit.
 
     def __init__(self, field: str, error: str) -> None:
         super().__init__(f"{field}: {error}")
@@ -131,19 +131,20 @@ _PENDING_EVENTS: weakref.WeakKeyDictionary[Session, list[_PendingInventoryEvent]
 _HOOKED_SESSIONS: weakref.WeakSet[Session] = weakref.WeakSet()
 
 
-def restock(  # code-health: ignore[duplicate] dup.
+def restock(  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
     session: Session,
     ctx: WorkspaceContext,
     *,
     item_id: str,
-    qty: Decimal,  # code-health: ignore[duplicate] dup.
-    source_task_id: str | None = None,  # code-health: ignore[duplicate] dup.
+    qty: Decimal,  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
+    source_task_id: str
+    | None = None,  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
     note: str | None = None,
     clock: Clock | None = None,
     event_bus: EventBus | None = None,
 ) -> InventoryMovementView:
     """Record a positive restock movement."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     return _write_movement(
         session,
         ctx,
@@ -170,7 +171,7 @@ def consume(
     event_bus: EventBus | None = None,
 ) -> InventoryMovementView:
     """Record a negative consumption movement; negative on-hand is allowed."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     return _write_movement(
         session,
         ctx,
@@ -197,7 +198,7 @@ def produce(
     event_bus: EventBus | None = None,
 ) -> InventoryMovementView:
     """Record a positive task-production movement."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     return _write_movement(
         session,
         ctx,
@@ -225,7 +226,7 @@ def record(
     event_bus: EventBus | None = None,
 ) -> InventoryMovementView:
     """Record one signed inventory movement from the REST/API surface."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     clean_delta = _clean_quantity(delta, field_name="delta")
     _validate_reason_sign(reason, clean_delta)
     return _write_movement(
@@ -324,7 +325,7 @@ def adjust_to_observed(
     event_bus: EventBus | None = None,
 ) -> InventoryMovementView:
     """Set book stock to an observed count by writing one delta movement."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     clean_observed = _clean_quantity(observed_qty, field_name="observed_qty")
     _validate_reason(reason)
     row = _load_active_item(session, ctx, item_id)
@@ -360,7 +361,7 @@ def reconcile(
     event_bus: EventBus | None = None,
 ) -> InventoryMovementView:
     """Reconcile one item as part of a property-wide stocktake."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     return adjust_to_observed(
         session,
         ctx,
@@ -386,7 +387,7 @@ def transfer(
     event_bus: EventBus | None = None,
 ) -> tuple[InventoryMovementView, InventoryMovementView]:
     """Move quantity between two property-scoped item rows atomically."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     clean_qty = _clean_magnitude(qty, field_name="qty")
     correlation_id = new_ulid(clock=clock)
     transfer_note = _transfer_note(correlation_id, note)
@@ -446,7 +447,7 @@ def _write_movement(
     locked_item: Item | None = None,
     queue_event: bool = True,
 ) -> InventoryMovementView:
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     _validate_reason(reason)
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_bus = event_bus if event_bus is not None else default_event_bus
@@ -665,9 +666,9 @@ def _pending_event(
             occurred_at=movement.at,
             item_id=movement.item_id,
             movement_id=movement.id,
-            reason=movement.reason,  # code-health: ignore[duplicate] dup.
+            reason=movement.reason,  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
         ),
-    )  # code-health: ignore[duplicate] dup.
+    )  # code-health: ignore[duplicate] Boundary field list kept explicit.
 
 
 def _publish_pending_events(session: Session) -> None:

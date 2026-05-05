@@ -19,6 +19,7 @@ interface NewTaskBody {
 }
 
 export default function NewTaskButton() {
+  // code-health: ignore[nloc] Quick-add task dialog keeps its compact form state and mutation beside the button that opens it.
   const ref = useRef<HTMLDialogElement>(null);
   const qc = useQueryClient();
   const propsQ = useQuery({

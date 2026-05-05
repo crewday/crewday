@@ -268,7 +268,7 @@ def update_basics(
     Returns the persisted projection so the caller can echo it to
     the client without a second SELECT.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     resolved_clock = clock if clock is not None else SystemClock()
 
     # 1. Authorisation. Re-resolve the owner check at write time —

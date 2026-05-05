@@ -49,7 +49,7 @@ class VendorInvoiceOrganizationRow:
 
 
 @dataclass(frozen=True, slots=True)
-class VendorInvoiceRow:  # code-health: ignore[duplicate] dup.
+class VendorInvoiceRow:  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
     id: str
     workspace_id: str
     vendor_org_id: str
@@ -156,11 +156,12 @@ class VendorInvoiceRepository(Protocol):
 class VendorInvoiceService:
     """Workspace-scoped vendor-invoice use cases."""
 
-    def __init__(  # code-health: ignore[duplicate] dup.
+    def __init__(  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
         self,
         ctx: WorkspaceContext,
         *,
-        clock: Clock | None = None,  # code-health: ignore[duplicate] dup.
+        clock: Clock
+        | None = None,  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
         event_bus: EventBus | None = None,
     ) -> None:
         self._ctx = ctx

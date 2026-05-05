@@ -408,7 +408,7 @@ _ScopeIdFilter = Annotated[
 
 
 def build_permission_groups_router() -> APIRouter:
-    # code-health: ignore[nloc] Router composition stays explicit.
+    # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     """Return a fresh :class:`APIRouter` wired for permission-group ops."""
     api = APIRouter(
         prefix="/permission_groups",

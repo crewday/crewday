@@ -26,7 +26,7 @@ class NullMailer(Mailer):
         headers: Mapping[str, str] | None = None,
         reply_to: str | None = None,
     ) -> str:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         del body_text, body_html, headers, reply_to
         message_id = f"demo:{new_ulid()}"
         _log.info(

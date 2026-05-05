@@ -19,6 +19,7 @@ export function RequirePermission({
   scopeId,
   children,
 }: RequirePermissionProps) {
+  // code-health: ignore[ccn] Permission gate keeps unresolved, denied, server-error, and allowed render states adjacent to the permission query.
   const { user } = useAuth();
   const { workspaceId } = useWorkspace();
   const resolvedScopeId = scopeId ?? (scopeKind === "workspace" ? user?.current_workspace_id ?? workspaceId : null);

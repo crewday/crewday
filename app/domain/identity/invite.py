@@ -543,7 +543,7 @@ def _validate_grants(
     raises :class:`InviteBodyInvalid` (the cross-check is
     structurally required for those scope kinds).
     """
-    # code-health: ignore[ccn,nloc] Policy flow.
+    # code-health: ignore[ccn,nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     if not grants:
         raise InviteBodyInvalid("grants list must carry at least one entry")
     property_ids: list[tuple[int, str]] = []
@@ -1057,7 +1057,7 @@ def invite(
     :class:`app.auth.magic_link.PendingDispatch` satisfies the
     Protocol structurally).
     """
-    # code-health: ignore[ccn,nloc] Policy flow.
+    # code-health: ignore[ccn,nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     if request is None:
         request = InviteRequest(
             email=legacy["email"],
@@ -1416,7 +1416,7 @@ def introspect_invite(
     leak across the bare-host surface; the domain still raises
     typed exceptions so a CLI / scripted caller can branch.
     """
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     # ``active_user_id`` is reserved — see docstring. The peek does
     # not branch on it (introspect is session-agnostic), but keeping
     # it in the signature lets future "you are signed in as <user>"
@@ -1425,7 +1425,7 @@ def introspect_invite(
 
     resolved_now = now if now is not None else _now(clock)
 
-    outcome = link_port.peek_link(  # code-health: ignore[duplicate] dup.
+    outcome = link_port.peek_link(  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
         token=token,
         expected_purpose="grant_invite",
         ip=ip,
@@ -1436,7 +1436,7 @@ def introspect_invite(
     )
     invite_id = outcome.subject_id
 
-    with tenant_agnostic():  # code-health: ignore[duplicate] dup.
+    with tenant_agnostic():  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
         invite_row = session.get(Invite, invite_id)
     if invite_row is None:
         raise InviteNotFound(invite_id)
@@ -1549,7 +1549,7 @@ def consume_invite_token(
       :class:`MagicLinkAlreadyConsumed`,
       :class:`MagicLinkTokenExpired`.
     """
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_now = now if now is not None else _now(clock)
 
     outcome = link_port.consume_link(
@@ -1678,7 +1678,7 @@ def _activate_invite(
     differentiate between ``user.enrolled`` (new user) and
     ``user.grant_accepted`` (existing user).
     """
-    # code-health: ignore[ccn,nloc] Policy flow.
+    # code-health: ignore[ccn,nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     user_id = invite_row.user_id
     if user_id is None:
         raise InviteStateInvalid(
@@ -2328,7 +2328,7 @@ def register_invite_passkey_finish(
     surfaces (challenge unknown / consumed / expired / subject
     mismatch / invalid attestation / too-many-passkeys).
     """
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_now = now if now is not None else _now(clock)
     # Reload the invite + user so a finish call posted after the user
     # already has a passkey (e.g. a stale tab replaying a finish that

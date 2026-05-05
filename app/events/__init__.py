@@ -10,7 +10,7 @@ from app.events.registry import (
     registered_events,
 )
 from app.events.types import (
-    ApiTokenCreated,  # code-health: ignore[duplicate] Public re-export surface.
+    ApiTokenCreated,  # code-health: ignore[duplicate] Public re-export surface.  # noqa: E501
     ApiTokenRevoked,
     ApiTokenRotated,
     ChatMessageSent,
@@ -69,7 +69,7 @@ from app.events.types import (
 )
 
 __all__ = [
-    "ApiTokenCreated",  # code-health: ignore[duplicate] Public __all__ export surface.
+    "ApiTokenCreated",  # code-health: ignore[duplicate] Public __all__ export surface.  # noqa: E501
     "ApiTokenRevoked",
     "ApiTokenRotated",
     "ChatMessageSent",

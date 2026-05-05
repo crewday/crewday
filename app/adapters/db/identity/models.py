@@ -23,11 +23,11 @@ to echo the address back to the user.
 See ``docs/specs/02-domain-model.md`` §"users" / §"passkey_credential"
 / §"session" / §"api_token" and ``docs/specs/03-auth-and-tokens.md``
 §"Data model".
-"""  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+"""  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
 
 from __future__ import (
     annotations,
-)  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+)  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
 
 from datetime import datetime
 from typing import Any
@@ -43,7 +43,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     event,
-    text,  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    text,  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
 )
 from sqlalchemy.orm import (
     Mapped,
@@ -225,7 +225,7 @@ class Session(Base):
 
     id: Mapped[str] = mapped_column(
         String, primary_key=True
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     user_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("user.id", ondelete="CASCADE"),
@@ -359,7 +359,7 @@ class ApiToken(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(
         UtcDateTime(), nullable=True
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
@@ -470,7 +470,7 @@ class WebAuthnChallenge(Base):
     # re-verify against the same set — a sibling client adding a
     # passkey mid-ceremony won't retroactively widen the gate.
     exclude_credentials: Mapped[list[str]] = (
-        mapped_column(  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+        mapped_column(  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
             JSON, nullable=False, default=list
         )
     )
@@ -706,7 +706,7 @@ class Invite(Base):
 
     id: Mapped[str] = mapped_column(
         String, primary_key=True
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     workspace_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("workspace.id", ondelete="CASCADE"),
@@ -928,7 +928,7 @@ class BreakGlassCode(Base):
 
     id: Mapped[str] = mapped_column(
         String, primary_key=True
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     workspace_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("workspace.id", ondelete="CASCADE"),

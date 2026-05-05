@@ -9,6 +9,7 @@ import type {
 type ApprovalRisk = ApprovalRequest["risk"];
 
 function isApprovalRisk(value: unknown): value is ApprovalRisk {
+  // code-health: ignore[ccn] Lizard over-counts this literal union guard; keeping the accepted risk strings inline is clearer than a lookup.
   return value === "low" || value === "medium" || value === "high";
 }
 

@@ -110,7 +110,7 @@ class ChatChannelBindingService:
         address: str,
         display_label: str | None = None,
     ) -> LinkStart:
-        # code-health: ignore[nloc] Policy flow.
+        # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
         self._require_self(user_id)
         if channel_kind not in CHANNEL_KINDS:
             raise ChatChannelBindingInvalid("unknown channel_kind")

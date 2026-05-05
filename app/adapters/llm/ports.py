@@ -174,7 +174,7 @@ class LLMClient(Protocol):
         """Single-shot text completion."""
         ...
 
-    def chat(  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    def chat(  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
         self,
         *,
         model_id: str,
@@ -192,7 +192,7 @@ class LLMClient(Protocol):
         calling support either ignore the argument or fall back to a
         text protocol (the agent runtime parses both).
         """
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         ...
 
     def ocr(
@@ -209,7 +209,7 @@ class LLMClient(Protocol):
         """
         ...
 
-    def stream_chat(  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    def stream_chat(  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
         self,
         *,
         model_id: str,
@@ -229,5 +229,5 @@ class LLMClient(Protocol):
         future adapter can light up streaming function calls without a
         port revision.
         """
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         ...

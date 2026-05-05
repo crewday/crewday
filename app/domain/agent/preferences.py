@@ -120,7 +120,7 @@ def save_preference(
     clock: Clock | None = None,
 ) -> AgentPreference:
     """Upsert a preference row, append a revision, and audit the diff."""
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     eff_clock = clock if clock is not None else SystemClock()
     now = eff_clock.now()
     body_md = update.body_md.strip()

@@ -385,7 +385,7 @@ class PayslipReadRepository(Protocol):
         payout_snapshot_json: dict[str, object] | None = None,
     ) -> PayslipReadRow:
         """Persist a payslip state transition and return the refreshed row."""
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         ...
 
     def settle_payslip_reimbursements(
@@ -425,7 +425,7 @@ class PayslipReadRepository(Protocol):
         the originating amount on hand for audit rows / events without
         a second read).
         """
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         ...
 
 
@@ -541,7 +541,7 @@ class PayslipComputeRepository(Protocol):
         now: datetime,
     ) -> PayslipRow:
         """Insert or update the draft payslip for ``(period, user)``."""
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         ...
 
     def list_reimbursable_claims_for_payslip(
@@ -862,7 +862,7 @@ class PayRuleRepository(Protocol):
         flush-time violation is a programming error worth a stack
         trace rather than a typed exception.
         """
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         ...
 
     def update(
@@ -891,7 +891,7 @@ class PayRuleRepository(Protocol):
         Caller has already confirmed the row exists (via :meth:`get`)
         and that the locked-period guard does not fire.
         """
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         ...
 
     def soft_delete(

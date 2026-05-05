@@ -96,7 +96,7 @@ def mint_approval_request(
     :func:`app.domain.agent.approval.expire_due` sweep, which keeps
     that worker a strict consumer of agent-driven rows.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     eff_clock: Clock = clock if clock is not None else SystemClock()
     now = eff_clock.now()
 

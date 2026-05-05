@@ -73,9 +73,9 @@ from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import PasskeyLoginLockout, Throttle
 from app.auth.keys import derive_subkey
 from app.auth.passkey import (
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     AuthenticationOptions,
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     ChallengeExpired,
     ChallengeNotFound,
     ChallengeSubjectMismatch,
@@ -829,7 +829,7 @@ def build_login_router(
         response: Response,
         session: _Db,
     ) -> LoginFinishResponse:
-        # code-health: ignore[nloc] Router composition stays explicit.
+        # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
         """Run :func:`login_finish`, stamp the session cookie on success.
 
         On failure we hash the observable identifiers for audit and

@@ -591,7 +591,7 @@ class _CapturingMailer:
         headers: object = None,
         reply_to: object = None,
     ) -> str:
-        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+        # code-health: ignore[params] FastAPI params are OpenAPI contract.
         del to, subject, body_html, headers, reply_to
         prefix = self._base_url.rstrip("/")
         for line in body_text.splitlines():
@@ -615,7 +615,7 @@ def _issue_passkey_recovery_link(
     throttle: Throttle,
     settings: Settings,
 ) -> str:
-    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+    # code-health: ignore[params] FastAPI params are OpenAPI contract.
     """Mint a ``recover_passkey`` magic link for ``user`` and return the URL.
 
     Reuses :func:`magic_link.request_link` for the token mint + nonce
@@ -723,7 +723,7 @@ def _send_passkey_reset_notice_email(
     timestamp: str,
     notice_url: str,
 ) -> None:
-    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+    # code-health: ignore[params] FastAPI params are OpenAPI contract.
     """Render + send the owner-side notification copy.
 
     Carries no consumable token — the link inside lands on
@@ -755,7 +755,7 @@ def build_users_router(
     base_url: str | None = None,
     settings: Settings | None = None,
 ) -> APIRouter:
-    # code-health: ignore[nloc] Router composition stays explicit.
+    # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     """Return a fresh :class:`APIRouter` wired to ``mailer`` + ``throttle``.
 
     Mounted by the v1 app factory at
@@ -815,6 +815,7 @@ def build_users_router(
         request: Request,
         ctx: _Ctx,
     ) -> InviteResponse:
+        # code-health: ignore[nloc] Invite endpoint keeps magic-link creation, transactional outbox ordering, and response mapping together.  # noqa: E501
         """Create or refresh a pending invite and mail the magic link.
 
         **Outbox ordering (cd-9slq).** Owns its own
@@ -1198,7 +1199,7 @@ def build_users_router(
         request: Request,
         ctx: _Ctx,
     ) -> ResetPasskeyResponse:
-        # code-health: ignore[nloc] Router composition stays explicit.
+        # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
         """Trigger an owner-initiated passkey reset for ``user_id``.
 
         Spec §03 "Owner-initiated worker passkey reset". Authority

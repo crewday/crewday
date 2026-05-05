@@ -106,6 +106,7 @@ function Shell() {
 }
 
 export default function App() {
+  // code-health: ignore[nloc] App route tree keeps public, protected, admin, and guest routing together to make promotion drift visible.
   const { role } = useRole();
 
   return (

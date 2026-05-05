@@ -108,7 +108,7 @@ def compact_thread(
     clock: Clock | None = None,
 ) -> CompactionResult:
     """Compact one thread when it exceeds the §11 trigger bounds."""
-    # code-health: ignore[nloc] Policy flow.
+    # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     eff_clock = clock if clock is not None else SystemClock()
     now = eff_clock.now()
     config = _resolve_config(session, ctx)
@@ -370,7 +370,7 @@ def _call_compactor(
     pricing: PricingTable,
     clock: Clock,
 ) -> LLMResponse:
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     started = clock.now()
     response = llm_client.chat(
         model_id=model_pick.api_model_id,

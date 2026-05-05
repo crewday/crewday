@@ -454,7 +454,7 @@ def list_open_shifts(
             cursor_row is None
             or cursor_row.workspace_id != ctx.workspace_id
             or cursor_row.ends_at is not None
-        ):  # code-health: ignore[duplicate] dup.
+        ):  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
             return []
         stmt = stmt.where(
             (Shift.starts_at > cursor_row.starts_at)
@@ -492,7 +492,7 @@ def list_shifts(
     An ``after_id`` that is not in scope (unknown / wrong workspace)
     yields the empty list per the §12 cursor-isolation contract.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     stmt = select(Shift).where(Shift.workspace_id == ctx.workspace_id)
     if user_id is not None:
         stmt = stmt.where(Shift.user_id == user_id)
@@ -565,7 +565,7 @@ def _write_geofence_audit(
     shift_id: str | None = None,
     clock: Clock | None = None,
 ) -> None:
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     entity_kind = "shift" if shift_id is not None else "geofence_setting"
     entity_id = shift_id if shift_id is not None else verdict.property_id
     if entity_id is None:
@@ -614,7 +614,7 @@ def open_shift(
     * ``starts_at`` defaults to ``clock.now()`` — the shift is
       opened right now.
     """
-    # code-health: ignore[ccn,nloc,params] Policy flow.
+    # code-health: ignore[ccn,nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     target_user_id = user_id if user_id is not None else ctx.actor_id
 
     # Re-raise any :class:`PermissionDenied` as the sibling
@@ -758,7 +758,7 @@ def close_shift(
       :class:`ShiftBoundaryInvalid`.
     * Closing someone else's shift requires ``time.edit_others``.
     """
-    # code-health: ignore[nloc] Policy flow.
+    # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     row = _load_row(session, ctx, shift_id=shift_id)
 
     if row.user_id != ctx.actor_id:
@@ -866,7 +866,7 @@ def edit_shift(
     the patch applies (either because the caller moved them both,
     or moved one against the other's stored value).
     """
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     # Always a manager op. Even when editing your own shift, this
     # entry point is the manager-surface amend — the §09 "Owner and
     # manager adjustments" path — not the worker self-serve close.

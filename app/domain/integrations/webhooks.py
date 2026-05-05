@@ -392,7 +392,7 @@ def create_subscription(
 
     Audits ``audit.webhook_subscription.created``.
     """
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
     cleaned_url = _validate_url(url)
@@ -479,10 +479,10 @@ def update_subscription(
     Audits ``audit.webhook_subscription.updated`` with a sparse diff
     listing only the fields the caller asked to change.
     """
-    # code-health: ignore[ccn,nloc,params] Policy flow.
+    # code-health: ignore[ccn,nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_clock = (
         clock if clock is not None else SystemClock()
-    )  # code-health: ignore[duplicate] dup.
+    )  # code-health: ignore[duplicate] Boundary field list kept explicit.
     now = resolved_clock.now()
 
     existing = repo.get_subscription(sub_id=sub_id)
@@ -636,7 +636,7 @@ def rotate_subscription_secret(
     :func:`create_subscription`. Existing delivery rows stay intact;
     future dispatcher attempts sign with the new secret.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
     existing = repo.get_subscription(sub_id=sub_id)
@@ -911,7 +911,7 @@ def deliver(
     a ``succeeded`` / ``dead_lettered`` / ``suppressed_demo`` row is a
     no-op (logged at INFO).
     """
-    # code-health: ignore[nloc] Policy flow.
+    # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
 
@@ -1036,7 +1036,7 @@ def _classify_response(
     clock: Clock,
 ) -> DeliveryReport:
     """Stamp the row per the §10 retry table for ``response.status_code``."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     status_code = response.status_code
     if 200 <= status_code < 300:
         # Success — clear last_error and mark succeeded.
@@ -1102,7 +1102,7 @@ def _stamp_transient(
     clock: Clock,
 ) -> DeliveryReport:
     """Mark a transient failure; bump retry or dead-letter on exhaustion."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     if attempt >= len(RETRY_SCHEDULE_SECONDS):
         # Retry budget exhausted — dead-letter with audit.
         return _terminal_dead_letter(
@@ -1157,7 +1157,7 @@ def _terminal_dead_letter(
     ``workspace_id`` when omitted; an explicit override lets callers
     that already loaded the subscription avoid a second read.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     with tenant_agnostic():
         row = repo.update_delivery_attempt(
             delivery_id=delivery.id,

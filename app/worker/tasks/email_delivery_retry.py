@@ -267,7 +267,7 @@ def _locale_from_context(context: dict[str, object]) -> str | None:
     return None
 
 
-def _write_retry_audit(  # code-health: ignore[params] Audit payload boundary.
+def _write_retry_audit(  # code-health: ignore[params] Audit payload boundary.  # noqa: E501
     session: Session,
     ctx: WorkspaceContext,
     *,

@@ -43,7 +43,7 @@ Protocol is deliberately **not** ``runtime_checkable``: structural
 compatibility is checked statically by mypy. Runtime ``isinstance``
 against this Protocol would mask typos and invite duck-typing
 shortcuts.
-"""  # code-health: ignore[duplicate] dup.
+"""  # code-health: ignore[duplicate] Boundary field list kept explicit.
 
 from __future__ import annotations
 
@@ -244,7 +244,7 @@ class PropertyWorkRoleAssignmentRepository(Protocol):
         ``user_work_role_id`` narrow the listing independently —
         passing both gives the live row (or none) for that pair.
         """
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         ...
 
     # -- Writes ----------------------------------------------------------
@@ -279,7 +279,7 @@ class PropertyWorkRoleAssignmentRepository(Protocol):
         The SA concretion rolls back the open transaction on either
         failure so the caller's UoW can keep using the session.
         """
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         ...
 
     def update_pointers(

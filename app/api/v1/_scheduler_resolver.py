@@ -280,7 +280,7 @@ def task_rows_for_window(
     narrow_to_user_id: str | None = None,
     exclude_cancelled: bool = False,
 ) -> list[Occurrence]:
-    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+    # code-health: ignore[params] FastAPI params are OpenAPI contract.
     """Return assigned occurrences whose property-local date is in window.
 
     ``exclude_cancelled`` drops ``state='cancelled'`` rows — used by

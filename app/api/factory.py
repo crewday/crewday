@@ -472,9 +472,9 @@ def _wire_services(
 
 
 def _smtp_env_config(settings: Settings) -> SmtpConfig:
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     return SmtpConfig(
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         host=settings.smtp_host,
         port=settings.smtp_port,
         from_addr=settings.smtp_from,
@@ -600,7 +600,7 @@ def _mount_auth_routers(
     throttle: Throttle,
     capabilities: Capabilities,
 ) -> None:
-    # code-health: ignore[nloc] Router composition stays explicit.
+    # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     """Mount the bare-host + workspace-scoped auth routers.
 
     Bare-host routers (signup, magic-link, recovery, invite, passkey
@@ -1576,7 +1576,7 @@ def _build_worker_lifespan(
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-        # code-health: ignore[nloc] Router composition stays explicit.
+        # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
         # Imported lazily so the factory module stays importable
         # even if the worker module fails to load (e.g. a circular
         # import during a refactor). The lazy import also keeps the
@@ -1695,7 +1695,7 @@ def _build_worker_lifespan(
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    # code-health: ignore[nloc] Router composition stays explicit.
+    # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     """Compose and return the process-wide FastAPI application.
 
     Pass ``settings`` in tests and alternate composition roots to

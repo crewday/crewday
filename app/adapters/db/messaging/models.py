@@ -533,7 +533,7 @@ class ChatChannelMember(Base):
         String,
         ForeignKey(
             "chat_channel.id", ondelete="CASCADE"
-        ),  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+        ),  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
         primary_key=True,
     )
     user_id: Mapped[str] = mapped_column(
@@ -1117,10 +1117,10 @@ Service` enqueues one row for every active token of the recipient at
     # default (no fixed length); the §10 tier-2 envelope is ~140 chars.
     body: Mapped[str] = mapped_column(
         String, nullable=False
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     # Free-form context — mirrors :class:`Notification.payload_json`.
     payload_json: Mapped[dict[str, Any]] = (
-        mapped_column(  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+        mapped_column(  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
             JSON, nullable=False, default=dict
         )
     )

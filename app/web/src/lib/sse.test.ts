@@ -72,6 +72,7 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("INVALIDATIONS — coverage", () => {
+  // code-health: ignore[nloc] Coverage test keeps the complete SSE event-kind contract visible beside the drift assertion.
   // Authoritative list mirroring spec §14 "Event kinds" + the kinds
   // the mocks dispatcher recognises. Drift from the server emitter
   // (`app/api/transport/sse.py`) is flagged in the cd-y4g5 handoff,
@@ -185,6 +186,7 @@ describe("INVALIDATIONS — coverage", () => {
 });
 
 describe("INVALIDATIONS — per-kind behaviour", () => {
+  // code-health: ignore[nloc] Per-kind invalidation assertions stay together so query-key fanout drift is reviewed in one place.
   it("tick is a no-op", () => {
     const qc = makeClient();
     const spy = vi.spyOn(qc, "invalidateQueries");

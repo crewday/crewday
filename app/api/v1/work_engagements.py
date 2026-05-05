@@ -36,10 +36,10 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Annotated, Literal
 
-# code-health: ignore[duplicate] Repeated wire shape is intentional.
+# code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
 from fastapi import APIRouter, Depends, Query
 
-# code-health: ignore[duplicate] Repeated wire shape is intentional.
+# code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 

@@ -22,6 +22,7 @@ const AutoGrowTextarea = forwardRef<HTMLTextAreaElement, AutoGrowTextareaProps>(
     { maxHeight, rows = 1, onChange, onInput, value, ...rest },
     forwarded,
   ) {
+    // code-health: ignore[params] Forward-ref textarea preserves native controlled props plus maxHeight without hiding HTML attributes behind a wrapper.
     const localRef = useRef<HTMLTextAreaElement | null>(null);
     useImperativeHandle(forwarded, () => localRef.current as HTMLTextAreaElement);
 

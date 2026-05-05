@@ -459,7 +459,7 @@ def _send_revert_link_to_old(
     we surface the bare token in the URL so a static landing page
     can post the body or a click-through can redeem directly.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     url = f"{base_url.rstrip('/')}/auth/email/revert?token={token}"
     ttl_hours = max(1, int(ttl.total_seconds() // 3600))
     subject, body = render_auth_email(
@@ -537,7 +537,7 @@ def request_change(
     production wiring always supplies a
     :class:`~app.auth.magic_link.PendingDispatch`.
     """
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_now = now if now is not None else _now(clock)
     pepper = _pepper(settings)
 
@@ -730,7 +730,7 @@ def verify_change(
     synchronous send for tests / direct callers that own the commit
     boundary themselves.
     """
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_now = now if now is not None else _now(clock)
     pepper = _pepper(settings)
 
@@ -969,7 +969,7 @@ def revert_change(
     :class:`TokenExpired`, :class:`AlreadyConsumed`,
     :class:`PendingNotFound`.
     """
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_now = now if now is not None else _now(clock)
     pepper = _pepper(settings)
 

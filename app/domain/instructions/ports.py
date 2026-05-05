@@ -304,7 +304,7 @@ class InstructionsRepository(Protocol):
         within the same UoW. Flushes so the audit writer's FK
         reference sees the new row.
         """
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         ...
 
     def insert_version(
@@ -327,7 +327,7 @@ class InstructionsRepository(Protocol):
         so the audit writer's FK reference (and the immediate
         :meth:`set_current_version` follow-up) sees the new row.
         """
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         ...
 
     def set_current_version(
@@ -367,7 +367,7 @@ class InstructionsRepository(Protocol):
         (``scope_kind = workspace`` ⇒ ``scope_id IS NULL``) is the
         service's responsibility to enforce upstream.
         """
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         ...
 
     def set_archived_at(
@@ -397,5 +397,5 @@ class InstructionsRepository(Protocol):
         added_at: datetime,
     ) -> InstructionLinkRow:
         """Insert an explicit instruction link and return its projection."""
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         ...

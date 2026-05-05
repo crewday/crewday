@@ -30,6 +30,7 @@ import { useWorkspace } from "@/context/WorkspaceContext";
 // `<WorkspaceGate>` inside the protected branch only.
 
 export function WorkspaceGate({ children }: { children?: React.ReactNode }) {
+  // code-health: ignore[nloc] Workspace gate keeps single-workspace adoption, multi-workspace chooser, and no-access empty state in one guard.
   const { user, logout } = useAuth();
   const { workspaceId, setWorkspaceId } = useWorkspace();
   // Focused on mount so keyboard users (and screen-reader users on a

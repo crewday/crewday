@@ -312,7 +312,7 @@ _ScopePropertyFilter = Annotated[
 
 
 def build_role_grants_router() -> APIRouter:
-    # code-health: ignore[nloc] Router composition stays explicit.
+    # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     """Return the top-level ``/role_grants`` router (POST + PATCH + DELETE).
 
     The list endpoint lives on :func:`build_users_role_grants_router`
@@ -414,7 +414,7 @@ def build_role_grants_router() -> APIRouter:
         ctx: _Ctx,
         session: _Db,
     ) -> RoleGrantResponse:
-        # code-health: ignore[nloc] Router composition stays explicit.
+        # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
         """Update mutable fields on an existing grant.
 
         v1 only supports re-scoping (``scope_property_id``). Mutating

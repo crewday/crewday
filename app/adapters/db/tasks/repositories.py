@@ -235,7 +235,7 @@ def _insert_occurrence(
     outcome: TasksCreateOccurrenceOutcome,
 ) -> TurnoverOccurrenceResult:
     """Insert a fresh ``occurrence`` row and return the port outcome."""
-    # code-health: ignore[params] Explicit adapter boundary.
+    # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
     scheduled_for_local = _scheduled_for_local(session, request.property_id, starts_at)
     row = Occurrence(
         id=new_ulid(),
@@ -426,7 +426,7 @@ class SqlAlchemyCommentsRepository(CommentsRepository):
         after_id: str | None,
         limit: int,
     ) -> Sequence[CommentRow]:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         stmt = select(Comment).where(
             Comment.workspace_id == workspace_id,
             Comment.occurrence_id == occurrence_id,
@@ -464,7 +464,7 @@ class SqlAlchemyCommentsRepository(CommentsRepository):
         llm_call_id: str | None,
         created_at: datetime,
     ) -> CommentRow:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         row = Comment(
             id=comment_id,
             workspace_id=workspace_id,

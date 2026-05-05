@@ -252,7 +252,7 @@ def build_admin_signup_router() -> APIRouter:
         session: _Db,
         request: Request,
     ) -> SignupSettingsResponse:
-        # code-health: ignore[nloc] Router composition stays explicit.
+        # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
         """Patch any combination of signup settings.
 
         Only the fields present in ``payload`` are written; absent

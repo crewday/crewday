@@ -385,7 +385,7 @@ class _Counters:
     tokens_purged: int = 0
 
 
-async def _process_workspace(  # code-health: ignore[params] Web-push boundary.
+async def _process_workspace(  # code-health: ignore[params] Web-push boundary.  # noqa: E501
     *,
     workspace_id: str,
     rows: list[PushDeliveryRow],
@@ -581,7 +581,7 @@ def _process_row(  # code-health: ignore[nloc] Web-push row policy flow.
     )
 
 
-def _stamp_failure(  # code-health: ignore[nloc,params] Web-push failure audit boundary.
+def _stamp_failure(  # code-health: ignore[nloc,params] Web-push failure audit boundary.  # noqa: E501
     *,
     repo: PushDeliveryRepository,
     row: PushDeliveryRow,
@@ -652,7 +652,7 @@ def _stamp_failure(  # code-health: ignore[nloc,params] Web-push failure audit b
     return "retry"
 
 
-def _purge_token_and_mark_sent(  # code-health: ignore[params] Token purge.
+def _purge_token_and_mark_sent(  # code-health: ignore[params] Web-push purge owns cleanup, audit, sent marker.  # noqa: E501
     *,
     repo: PushDeliveryRepository,
     row: PushDeliveryRow,

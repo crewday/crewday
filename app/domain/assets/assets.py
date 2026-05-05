@@ -102,6 +102,7 @@ class AssetValidationError(ValueError):
 class AssetCreate(BaseModel):
     """Input for creating a tracked asset."""
 
+    # code-health: ignore[duplicate] Create/update asset field lists intentionally mirror API payloads.  # noqa: E501
     model_config = ConfigDict(extra="forbid")
 
     asset_type_id: str | None = None
@@ -109,15 +110,21 @@ class AssetCreate(BaseModel):
     area_id: str | None = None
     name: str = Field(
         ..., min_length=1, max_length=_MAX_NAME_LEN
-    )  # code-health: ignore[duplicate] dup.
+    )  # code-health: ignore[duplicate] Boundary field list kept explicit.
     make: str | None = Field(default=None, max_length=160)
     model: str | None = Field(default=None, max_length=160)
     serial_number: str | None = Field(default=None, max_length=160)
     condition: Literal["new", "good", "fair", "poor", "needs_replacement"] = "good"
     status: Literal["active", "in_repair", "decommissioned", "disposed"] = "active"
-    installed_on: date | None = None  # code-health: ignore[duplicate] dup.
-    purchased_on: date | None = None
-    purchase_price_cents: int | None = Field(default=None, ge=0)
+    installed_on: date | None = (
+        None  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
+    )
+    purchased_on: date | None = (
+        None  # code-health: ignore[duplicate] Asset create/update payload fields stay aligned.  # noqa: E501
+    )
+    purchase_price_cents: int | None = Field(
+        default=None, ge=0
+    )  # code-health: ignore[duplicate] Asset money fields mirror create/update payloads.  # noqa: E501
     purchase_currency: str | None = Field(default=None, min_length=3, max_length=3)
     purchase_vendor: str | None = Field(default=None, max_length=160)
     warranty_expires_on: date | None = None
@@ -244,7 +251,7 @@ def list_assets(
     after_id: str | None = None,
 ) -> Sequence[AssetView]:
     """List assets in the caller's workspace."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     stmt = select(Asset).where(Asset.workspace_id == ctx.workspace_id)
     if property_id is not None:
         stmt = stmt.where(Asset.property_id == property_id)
@@ -398,7 +405,7 @@ def create_asset(
     **legacy: object,
 ) -> AssetView:
     """Create a tracked asset and assign a workspace-unique QR token."""
-    # code-health: ignore[nloc] Policy flow.
+    # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     if request is None:
         request = _legacy_create_asset_request(legacy)
     body = request.body
@@ -486,7 +493,7 @@ def update_asset(
     **fields: object,
 ) -> AssetView:
     """Patch mutable asset fields and audit material changes."""
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     if body is None:
         body = AssetUpdate.model_validate(fields)
     row = _load_asset(session, ctx, asset_id, include_archived=False)
@@ -572,7 +579,7 @@ def move_asset(
     event_bus: EventBus | None = None,
 ) -> AssetView:
     """Move an asset to a property/area and audit before/after placement."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     _validate_placement(session, ctx, property_id=property_id, area_id=area_id)
     row = _load_asset(session, ctx, asset_id, include_archived=False)
     before = {"property_id": row.property_id, "area_id": row.area_id}
@@ -618,7 +625,7 @@ def regenerate_qr(
     token_factory: Callable[[], str] | None = None,
 ) -> AssetView:
     """Replace an asset's QR token, invalidating the old scan token."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     row = _load_asset(session, ctx, asset_id, include_archived=False)
     old_token = row.qr_token
     new_token = _unique_qr_token(

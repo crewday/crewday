@@ -209,7 +209,7 @@ def _view_to_response(view: UserPushTokenView) -> PushTokenResponse:
 
 
 def build_me_push_tokens_router() -> APIRouter:
-    # code-health: ignore[nloc] Router composition stays explicit.
+    # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     """Return a fresh :class:`APIRouter` for the native push-token surface.
 
     Factory shape matches every other auth router in the package so
@@ -318,9 +318,9 @@ def build_me_push_tokens_router() -> APIRouter:
         },
     )
     def get_me_push_tokens(
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         session: _Db,
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         session_cookie_primary: Annotated[
             str | None,
             Cookie(alias=auth_session.SESSION_COOKIE_NAME),
@@ -356,7 +356,7 @@ def build_me_push_tokens_router() -> APIRouter:
     )
     def put_me_push_token(
         token_id: str,
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         body: PushTokenRefreshBody,
         session: _Db,
         session_cookie_primary: Annotated[
@@ -400,12 +400,12 @@ def build_me_push_tokens_router() -> APIRouter:
             },
         },
     )
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     def delete_me_push_token(
         token_id: str,
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         session: _Db,
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         session_cookie_primary: Annotated[
             str | None,
             Cookie(alias=auth_session.SESSION_COOKIE_NAME),

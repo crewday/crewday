@@ -273,9 +273,9 @@ def build_client_portal_router() -> APIRouter:
         cursor: PageCursorQuery = None,
     ) -> ClientPortalPropertyPage:
         try:
-            # code-health: ignore[duplicate] Repeated wire shape is intentional.
+            # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
             rows = ClientPortalService(ctx).portfolio(
-                # code-health: ignore[duplicate] Repeated wire shape is intentional.
+                # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
                 SqlAlchemyClientPortalRepository(session)
             )
         except ClientPortalForbidden as exc:

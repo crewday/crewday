@@ -119,7 +119,7 @@ def record_action(
     event_bus: EventBus | None = None,
 ) -> AssetActionView:
     """Record one service/repair/replacement/inspection/meter-read event."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     asset = _load_asset(session, ctx, asset_id, include_archived=False)
     _assert_record_access(session, ctx, property_id=asset.property_id)
     validated_kind = _validate_kind(kind)
@@ -211,7 +211,7 @@ def update_action(
     event_bus: EventBus | None = None,
 ) -> AssetActionView:
     """Patch mutable fields on a recorded asset action."""
-    # code-health: ignore[ccn,nloc,params] Policy flow.
+    # code-health: ignore[ccn,nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     row = _load_action(session, ctx, action_id)
     asset = _load_asset(session, ctx, row.asset_id, include_archived=False)
     if evidence_blob_hash is not None and storage is not None:
@@ -606,7 +606,9 @@ def _row_to_view(row: AssetAction) -> AssetActionView:
         notes_md=row.notes_md,
         meter_reading=row.meter_reading,
         evidence_blob_hash=row.evidence_blob_hash,
-        created_at=_as_utc(row.created_at),  # code-health: ignore[duplicate] dup.
+        created_at=_as_utc(
+            row.created_at
+        ),  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
         updated_at=_as_utc(row.updated_at),
         deleted_at=_as_utc(row.deleted_at) if row.deleted_at is not None else None,
     )

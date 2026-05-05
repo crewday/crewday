@@ -292,7 +292,7 @@ _ROLLING_30D: Final[timedelta] = timedelta(days=30)
 
 
 def build_admin_workspaces_router() -> APIRouter:
-    # code-health: ignore[nloc] Router composition stays explicit.
+    # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     """Return the router carrying the workspace-lifecycle admin routes.
 
     Mounted by :data:`app.api.admin.admin_router`; the router carries

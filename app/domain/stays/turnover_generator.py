@@ -378,7 +378,7 @@ def handle_reservation_upserted(
     :class:`HandleResult.skipped_reason` or :class:`RuleOutcome.
     decision`. The publisher's UoW continues unaffected.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     resolved_resolver = resolver if resolver is not None else default_resolver()
     resolved_now = now if now is not None else datetime.now(UTC)
     if resolved_now.tzinfo is None or resolved_now.utcoffset() != timedelta(0):
@@ -565,7 +565,7 @@ def _evaluate_rule(
     now: datetime,
 ) -> RuleOutcome:
     """Decide and execute the single rule against the reservation."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     if enriched.guest_kind not in rule.guest_kind_filter:
         return RuleOutcome(rule_id=rule.id, decision="skipped_guest_kind")
 

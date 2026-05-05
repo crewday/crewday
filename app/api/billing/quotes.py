@@ -225,7 +225,7 @@ def _mailer(request: Request) -> Mailer:
 
 
 def build_quotes_router() -> APIRouter:
-    # code-health: ignore[nloc] Router composition stays explicit.
+    # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     router = APIRouter(prefix="/quotes", tags=["billing", "quotes"])
 
     view_gate = Depends(Permission("scope.view", scope_kind="workspace"))

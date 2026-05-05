@@ -142,16 +142,18 @@ class SqlAlchemyUserAvailabilityOverrideRepository(UserAvailabilityOverrideRepos
         override_id: str,
         include_deleted: bool = False,
     ) -> UserAvailabilityOverrideRow | None:
-        stmt = select(UserAvailabilityOverride).where(
+        stmt = select(
+            UserAvailabilityOverride
+        ).where(
             UserAvailabilityOverride.id == override_id,
             UserAvailabilityOverride.workspace_id == workspace_id,
-        )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+        )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
         if not include_deleted:
             stmt = stmt.where(UserAvailabilityOverride.deleted_at.is_(None))
         row = self._session.scalars(stmt).one_or_none()
         return _to_override_row(row) if row is not None else None
 
-    def list(  # code-health: ignore[duplicate] Parallel availability filters.
+    def list(  # code-health: ignore[duplicate] Parallel availability filters.  # noqa: E501
         self,
         *,
         workspace_id: str,
@@ -283,7 +285,7 @@ class SqlAlchemyUserAvailabilityOverrideRepository(UserAvailabilityOverrideRepos
                 UserAvailabilityOverride.workspace_id == payload.workspace_id,
                 UserAvailabilityOverride.deleted_at.is_(None),
             )
-        ).one()  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+        ).one()  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
 
         # Caller has already filtered the deltas (zero-delta calls
         # never reach us); apply each sent field. ``clear_*`` flags
@@ -518,7 +520,7 @@ class SqlAlchemyUserLeaveRepository(UserLeaveRepository):
             changed = True
         if payload.ends_on is not None and payload.ends_on != row.ends_on:
             row.ends_on = payload.ends_on
-            changed = True  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+            changed = True  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
         if payload.category is not None and payload.category != row.category:
             row.category = payload.category
             changed = True

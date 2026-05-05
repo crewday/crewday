@@ -42,7 +42,7 @@ happy path; a drift here is a data bug, not a schema bug.
 See ``docs/specs/02-domain-model.md`` §"pay_rule", §"pay_period",
 §"payslip", and ``docs/specs/09-time-payroll-expenses.md`` §"Pay
 rules", §"Pay period", §"Payslip".
-"""  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+"""  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
 
 from __future__ import annotations
 
@@ -140,7 +140,7 @@ class Booking(Base):
         String,
         ForeignKey(
             "work_engagement.id", ondelete="RESTRICT"
-        ),  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+        ),  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
         nullable=False,
     )
     user_id: Mapped[str] = mapped_column(
@@ -175,13 +175,13 @@ class Booking(Base):
     created_by_actor_kind: Mapped[str | None] = mapped_column(String, nullable=True)
     created_by_actor_id: Mapped[str | None] = mapped_column(
         String, nullable=True
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     created_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), nullable=False
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     updated_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), nullable=False
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
@@ -327,12 +327,12 @@ class PayRule(Base):
 
     id: Mapped[str] = mapped_column(
         String, primary_key=True
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     workspace_id: Mapped[str] = mapped_column(
         String,
         ForeignKey(
             "workspace.id", ondelete="CASCADE"
-        ),  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+        ),  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
         nullable=False,
     )
     # ``RESTRICT`` — see the module docstring. A pay_rule row is a
@@ -601,7 +601,7 @@ class PayoutDestination(Base):
 
     id: Mapped[str] = mapped_column(
         String, primary_key=True
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     workspace_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("workspace.id", ondelete="CASCADE"),
@@ -620,7 +620,7 @@ class PayoutDestination(Base):
     label: Mapped[str | None] = mapped_column(String, nullable=True)
     archived_at: Mapped[datetime | None] = mapped_column(
         UtcDateTime(), nullable=True
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 

@@ -42,9 +42,11 @@ interface FakeResponse {
 }
 
 function installFetch(responses: FakeResponse[]) {
+  // code-health: ignore[nloc] Permission gate test harness keeps scripted fetch calls local to the route assertions.
   const calls: string[] = [];
   const original = globalThis.fetch;
   const spy = vi.fn(async (url: string | URL | Request) => {
+    // code-health: ignore[nloc] Lizard scores this scripted fetch closure with the surrounding permission route harness.
     const resolved = typeof url === "string" ? url : url.toString();
     calls.push(resolved);
     const next = responses.shift();

@@ -196,7 +196,7 @@ class SqlAlchemyPropertyWorkRoleAssignmentRepository(
         user_work_role_id: str | None = None,
         include_deleted: bool = False,
     ) -> Sequence[PropertyWorkRoleAssignmentRow]:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         stmt = select(PropertyWorkRoleAssignment).where(
             PropertyWorkRoleAssignment.workspace_id == workspace_id,
         )
@@ -227,7 +227,7 @@ class SqlAlchemyPropertyWorkRoleAssignmentRepository(
         property_pay_rule_id: str | None,
         now: datetime,
     ) -> PropertyWorkRoleAssignmentRow:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         row = PropertyWorkRoleAssignment(
             id=assignment_id,
             workspace_id=workspace_id,

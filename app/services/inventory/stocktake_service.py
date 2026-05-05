@@ -203,7 +203,7 @@ def save_line(
     clock: Clock | None = None,
 ) -> StocktakeLineView:
     """Create or replace the draft observed count for one item."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     stocktake = _load_open_stocktake(session, ctx, stocktake_id)
     _require_stocktake(session, ctx, property_id=stocktake.property_id)
     item = _load_active_item_for_stocktake(session, ctx, stocktake, item_id)

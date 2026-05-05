@@ -237,7 +237,7 @@ def list_types(
     after_id: str | None = None,
 ) -> Sequence[AssetTypeView]:
     """List asset types visible to the workspace."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     stmt = select(AssetType)
     if workspace_only:
         stmt = stmt.where(AssetType.workspace_id == ctx.workspace_id)
@@ -293,7 +293,7 @@ def create_type(
     clock: Clock | None = None,
 ) -> AssetTypeView:
     """Create a workspace-custom asset type and audit it."""
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     if body is None:
         resolved_key = key if key is not None else slug
         if resolved_key is None:
@@ -367,7 +367,7 @@ def update_type(
     clock: Clock | None = None,
 ) -> AssetTypeView:
     """Patch a workspace-custom asset type and audit material changes."""
-    # code-health: ignore[ccn,nloc,params] Policy flow.
+    # code-health: ignore[ccn,nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     if body is None:
         payload: dict[str, object] = {}
         for field_name, value in (

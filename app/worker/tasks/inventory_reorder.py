@@ -41,7 +41,7 @@ class InventoryReorderTickReport:
     events_emitted: int = 0
 
 
-def check_reorder_points_for_all_workspaces(  # code-health: ignore[nloc] Sweep flow.
+def check_reorder_points_for_all_workspaces(  # code-health: ignore[nloc] Worker sweep owns scan, eligibility, and enqueue.  # noqa: E501
     *,
     clock: Clock | None = None,
     event_bus: EventBus | None = None,

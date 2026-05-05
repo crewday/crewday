@@ -249,7 +249,7 @@ def remove_member(
     from :mod:`app.domain.identity.permission_groups`) and the
     primary UoW rolls back.
     """
-    # code-health: ignore[nloc] Policy flow.
+    # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_now = _now(clock)
 
     # Resolve the owners group to run the last-owner guard. The

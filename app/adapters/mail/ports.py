@@ -37,5 +37,5 @@ class Mailer(Protocol):
         Raises :class:`MailDeliveryError` if the transport refuses or
         fails the send.
         """
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         ...

@@ -125,15 +125,15 @@ from app.api.pagination import (
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.config import Settings, get_settings
 from app.domain.expenses import (
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     ApprovalEdits,
     ApprovalPermissionDenied,
     AttachmentAlreadyExists,
     BlobMimeNotAllowed,
     BlobMissing,
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     BlobTooLarge,
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     ClaimNotApprovable,
     ClaimNotEditable,
     ClaimNotFound,
@@ -674,7 +674,7 @@ def list_expense_claims_route(
     cursor: PageCursorQuery = None,
     limit: LimitQuery = DEFAULT_LIMIT,
 ) -> ExpenseClaimListResponse:
-    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+    # code-health: ignore[params] FastAPI params are OpenAPI contract.
     """Return a cursor-paginated page of claims.
 
     ``user_id`` defaults to the caller; targeting another user
@@ -743,7 +743,7 @@ def list_pending_expense_claims_route(
     cursor: PageCursorQuery = None,
     limit: LimitQuery = DEFAULT_LIMIT,
 ) -> ExpenseClaimPendingListResponse:
-    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+    # code-health: ignore[params] FastAPI params are OpenAPI contract.
     """Return submitted-but-not-decided claims, newest first.
 
     Mounted BEFORE ``GET /{claim_id}`` so FastAPI matches the literal
@@ -957,7 +957,7 @@ def attach_expense_receipt_route(
     settings: _AppSettings,
     llm: Annotated[LLMClient | None, Depends(_optional_llm)] = None,
 ) -> ExpenseAttachmentPayload:
-    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+    # code-health: ignore[params] FastAPI params are OpenAPI contract.
     """Attach a blob to a draft claim.
 
     The bytes flow through ``POST /uploads`` first; this endpoint
@@ -1374,7 +1374,7 @@ async def scan_expense_receipt_route(
     hint_currency: Annotated[str | None, Form(min_length=3, max_length=3)] = None,
     hint_vendor: Annotated[str | None, Form(min_length=1, max_length=200)] = None,
 ) -> ExpenseScanResultPayload:
-    # code-health: ignore[nloc params] Explicit API contract surface.
+    # code-health: ignore[nloc params] API fields are generated schema contract.  # noqa: E501
     """Run a receipt blob through the LLM and return parsed fields.
 
     "Preview" semantic: the route does NOT create a claim, attach a

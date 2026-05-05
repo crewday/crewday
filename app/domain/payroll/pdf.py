@@ -140,7 +140,7 @@ def render_payslip(
     clock: Clock | None = None,
 ) -> PayslipPdfRendered:
     """Render and store a payslip PDF unless an existing hash is reusable."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
 
     row = repo.get_payslip_pdf_row(
         workspace_id=ctx.workspace_id,

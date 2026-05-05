@@ -330,7 +330,7 @@ def _payslip_currency_subquery() -> ScalarSelect[str | None]:
         select(PayRule.currency)
         .join(
             PayPeriod, PayPeriod.id == Payslip.pay_period_id
-        )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+        )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
         .where(
             PayRule.workspace_id == Payslip.workspace_id,
             PayRule.user_id == Payslip.user_id,
@@ -438,7 +438,7 @@ class SqlAlchemyPayPeriodRepository(PayPeriodRepository):
         period_id: str,
         locked_at: datetime,
         locked_by: str | None,
-    ) -> PayPeriodRow:  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    ) -> PayPeriodRow:  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
         row = self._session.scalars(
             select(PayPeriod).where(
                 PayPeriod.id == period_id,
@@ -539,7 +539,7 @@ class SqlAlchemyPayPeriodRepository(PayPeriodRepository):
             )
         )
 
-    def list_unsettled_booking_ids(  # code-health: ignore[duplicate] Payroll query.
+    def list_unsettled_booking_ids(  # code-health: ignore[duplicate] Payroll query.  # noqa: E501
         self,
         *,
         workspace_id: str,
@@ -838,7 +838,7 @@ class SqlAlchemyPayslipComputeRepository(SqlAlchemyBookingPayRepository):
         components_json: dict[str, object],
         now: datetime,
     ) -> PayslipRow:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         row = self._session.scalars(
             select(Payslip).where(
                 Payslip.workspace_id == workspace_id,
@@ -885,7 +885,7 @@ class SqlAlchemyPayslipComputeRepository(SqlAlchemyBookingPayRepository):
         workspace_id: str,
         user_id: str,
         starts_at: datetime,
-        ends_at: datetime,  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+        ends_at: datetime,  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     ) -> Sequence[PayslipReimbursableClaimRow]:
         # Window predicate ``[starts_at, ends_at)`` on ``purchased_at``
         # — same convention §09 §"Approval" uses to attach a claim to
@@ -989,7 +989,7 @@ class SqlAlchemyPayslipReadRepository(PayslipReadRepository):
         paid_at: datetime | None = None,
         payout_snapshot_json: dict[str, object] | None = None,
     ) -> PayslipReadRow:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         row = self._session.scalars(
             select(Payslip).where(
                 Payslip.workspace_id == workspace_id,
@@ -1025,7 +1025,7 @@ class SqlAlchemyPayslipReadRepository(PayslipReadRepository):
         # ``mark_reimbursed`` route). Walk the rows individually rather
         # than an ORM-level UPDATE so the SA identity-map sees the new
         # column values inside the same UoW.
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         rows = (
             self._session.execute(
                 select(ExpenseClaim)
@@ -1465,7 +1465,7 @@ class SqlAlchemyPayRuleRepository(PayRuleRepository):
         created_by: str | None,
         now: datetime,
     ) -> PayRuleRow:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         row = PayRule(
             id=rule_id,
             workspace_id=workspace_id,
@@ -1505,7 +1505,7 @@ class SqlAlchemyPayRuleRepository(PayRuleRepository):
         # use the same workspace-scoped SELECT shape so the caller's
         # UoW reuses the identity-map entry rather than spawning a
         # second instance for the same primary key.
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         row = self._session.scalars(
             select(PayRule).where(
                 PayRule.id == rule_id,

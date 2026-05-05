@@ -76,9 +76,9 @@ class IssueUpdateRequest(BaseModel):
         return IssueUpdate.model_validate(payload)
 
 
-# code-health: ignore[duplicate] Repeated wire shape is intentional.
+# code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
 class IssueResponse(BaseModel):
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     id: str
     workspace_id: str
     reported_by_user_id: str

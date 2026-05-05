@@ -22,6 +22,7 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 export default function WorkspaceSwitcher() {
+  // code-health: ignore[ccn] Workspace switcher keeps tenant visibility, outside-click handling, and selected-workspace menu state together.
   const { workspaceId, setWorkspaceId } = useWorkspace();
   const meQ = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
   const [open, setOpen] = useState(false);

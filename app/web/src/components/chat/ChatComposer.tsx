@@ -21,6 +21,7 @@ export default function ChatComposer({
   ariaLabel = "Message",
   variant = "screen",
 }: ChatComposerProps) {
+  // code-health: ignore[params] Composer props mirror the controlled textarea contract plus submit and display options used by chat surfaces.
   const textRef = useRef<HTMLTextAreaElement>(null);
 
   const submit = () => {

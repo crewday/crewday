@@ -492,7 +492,7 @@ def _insert_challenge(
     now: datetime,
 ) -> None:
     """Insert one :class:`WebAuthnChallenge` row, ready for ``finish``."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     exclude_b64: list[str] = [
         bytes_to_base64url(cid) for cid in existing_credential_ids
     ]
@@ -582,7 +582,7 @@ def _insert_passkey_and_audit(
     :class:`VerifiedRegistration` does not surface them (the library
     verifies the attestation; transports are informational metadata).
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     transports = _extract_transports(credential)
 
     credential_row = PasskeyCredential(
@@ -798,7 +798,7 @@ def register_finish(
     * :class:`TooManyPasskeys` — concurrent enrolment raced us to the
       5-passkey cap.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     resolved_now = now if now is not None else _now(clock)
     rp = rp or make_relying_party()
 
@@ -979,7 +979,7 @@ def _revoke_passkey_credential(
     clock: Clock | None,
     now: datetime | None,
 ) -> str:
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     resolved_now = now if now is not None else _now(clock)
 
     # justification: passkey_credential is identity-scoped; no tenant
@@ -1153,7 +1153,7 @@ def register_start_signup(
     signup service SHOULD supply the freshly-minted ``user.id`` once
     it reserves one, for symmetry with :func:`register_start`.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     resolved_now = now if now is not None else _now(clock)
     rp = rp or make_relying_party()
 
@@ -1212,7 +1212,7 @@ def register_finish_signup(
     ``now`` without also freezing ``clock`` trips the 10-minute TTL
     against the real system clock.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     resolved_now = now if now is not None else _now(clock)
     rp = rp or make_relying_party()
 
@@ -1430,7 +1430,7 @@ def login_finish(
     transaction rolls back cleanly on a raise without leaving a
     throttle bucket half-advanced.
     """
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_now = now if now is not None else _now(clock)
     rp = rp or make_relying_party()
 

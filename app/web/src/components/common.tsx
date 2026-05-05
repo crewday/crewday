@@ -48,6 +48,7 @@ export function Checkbox({
   className = "",
   ...input
 }: CheckboxProps) {
+  // code-health: ignore[params] Checkbox props expose native input passthrough plus the design-system label, tone, size, and indeterminate controls.
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (ref.current) ref.current.indeterminate = !!indeterminate;

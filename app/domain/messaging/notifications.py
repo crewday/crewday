@@ -509,7 +509,7 @@ class NotificationService:
           to roll back or continue; this service propagates the
           error without swallowing it.
         """
-        # code-health: ignore[nloc] Policy flow.
+        # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
         # ---- Step 1: recipient lookup (locale + display name) -----
         recipient = self._load_recipient(recipient_user_id)
 
@@ -874,7 +874,7 @@ class NotificationService:
         ``recipient_user_id`` land on the ``diff`` JSON so a support
         query can slice the ledger without walking row text.
         """
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         payload: dict[str, Any] = {
             "channel": channel,
             "kind": kind.value,

@@ -213,7 +213,7 @@ class SqlAlchemyMembershipRepository(MembershipRepository):
         created_at: datetime,
         updated_at: datetime,
     ) -> WorkEngagementRow:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         row = WorkEngagement(
             id=engagement_id,
             user_id=user_id,

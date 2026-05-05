@@ -344,7 +344,7 @@ def update_area(
     ctx: WorkspaceContext,
     *,
     area_id: str,
-    body: AreaUpdate,  # code-health: ignore[duplicate] dup.
+    body: AreaUpdate,  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
     clock: Clock | None = None,
 ) -> AreaView:
     resolved_clock = clock if clock is not None else SystemClock()
@@ -592,7 +592,7 @@ def _insert_area_row(
     notes_md: str,
     now: datetime,
 ) -> AreaView:
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     row = Area(
         id=new_ulid(),
         property_id=property_id,

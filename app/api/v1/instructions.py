@@ -389,7 +389,7 @@ def resolve_instruction_scope_route(
     stay: _MaybeId = None,
     role: _MaybeId = None,
 ) -> ResolvedInstructionListResponse:
-    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+    # code-health: ignore[params] FastAPI params are OpenAPI contract.
     resolved = service.resolve_instructions(
         _repo(session),
         ctx,

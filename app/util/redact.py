@@ -636,7 +636,7 @@ def _redact(
     max_depth: int,
 ) -> object:
     """Internal recursive walker. See :func:`redact` for the public contract."""
-    # code-health: ignore[ccn,nloc] Redaction walker is branchy by payload type.
+    # code-health: ignore[ccn,nloc] Redaction walker is branchy by payload type.  # noqa: E501
     # SecretStr short-circuit: never peek at the secret value. The
     # logging filter also catches this, but callers outside logging
     # (audit writer, LLM adapter) rely on the same behaviour.
@@ -725,7 +725,7 @@ def _redact_mapping(
     max_depth: int,
 ) -> dict[object, object]:
     """Walk a ``dict``, applying key rules + recursing into values."""
-    # code-health: ignore[ccn] Redaction mapping policy is an ordered branch table.
+    # code-health: ignore[ccn] Redaction mapping policy is an ordered branch table.  # noqa: E501
     # Image / binary multimodal block carve-out. OpenAI / OpenRouter
     # vision requests arrive as ``{"type": "image_url",
     # "image_url": {"url": "data:..."}}`` — the ``url`` is a base64

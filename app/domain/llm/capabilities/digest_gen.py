@@ -112,7 +112,7 @@ def compose(
     structured_payload: Mapping[str, object],
 ) -> DigestProse:
     """Compose digest prose from authoritative structured data."""
-    # code-health: ignore[nloc] Policy flow.
+    # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
 
     clock = ctx.clock if ctx.clock is not None else SystemClock()
     locale = _recipient_locale(ctx.session, recipient_user_id)
@@ -285,7 +285,7 @@ def _record_usage(
     fallback_attempts: int,
     attempt: int,
 ) -> None:
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     cost_cents = estimate_cost_cents(
         prompt_tokens=response.usage.prompt_tokens,
         max_output_tokens=response.usage.completion_tokens,

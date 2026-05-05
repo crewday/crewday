@@ -1,4 +1,4 @@
-"""Meta WhatsApp inbound adapter."""  # code-health: ignore[duplicate] Provider gateway.
+"""Meta WhatsApp inbound adapter."""  # code-health: ignore[duplicate] Provider gateway.  # noqa: E501
 
 from __future__ import annotations
 

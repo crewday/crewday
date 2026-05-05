@@ -635,7 +635,7 @@ def build_me_schedule_router() -> APIRouter:
         to: _ToFilter = None,
         approved: _ApprovedFilter = None,
     ) -> UserAvailabilityOverrideListResponse:
-        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+        # code-health: ignore[params] FastAPI params are OpenAPI contract.
         """Cursor-paginated listing keyed to ``ctx.actor_id``.
 
         Per spec §12 "Self-service shortcuts": ``self-only list of

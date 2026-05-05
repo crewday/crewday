@@ -380,7 +380,7 @@ def build_invite_router(
     throttle: Throttle,
     settings: Settings | None = None,
 ) -> APIRouter:
-    # code-health: ignore[nloc] Router composition stays explicit.
+    # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     """Return a fresh :class:`APIRouter` wired to ``throttle``.
 
     Mounted by the v1 app factory at ``/api/v1/invite``. Tests
@@ -412,9 +412,9 @@ def build_invite_router(
         ] = None,
     ) -> AcceptResponse:
         """First leg of accept; branches on new-user vs existing-user."""
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         active_user_id = _resolve_active_user_id(
-            # code-health: ignore[duplicate] Repeated wire shape is intentional.
+            # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
             session,
             cookie_value=crewday_session,
             ua=request.headers.get("user-agent", ""),
@@ -443,9 +443,9 @@ def build_invite_router(
         except _TokenDomainError as exc:
             raise _http_for_token(exc) from exc
         except _InviteDomainError as exc:
-            # code-health: ignore[duplicate] Repeated wire shape is intentional.
+            # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
             raise _http_for_invite(exc) from exc
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
 
         if isinstance(outcome, membership.NewUserAcceptance):
             return AcceptResponse(

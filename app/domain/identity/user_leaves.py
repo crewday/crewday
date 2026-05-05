@@ -686,7 +686,7 @@ def update_leave(
     skips the audit write — matches the convention from
     :mod:`app.domain.identity.user_work_roles`.
     """
-    # code-health: ignore[ccn,nloc] Policy flow.
+    # code-health: ignore[ccn,nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
     row = _load_row(repo, ctx, leave_id=leave_id)

@@ -235,7 +235,7 @@ def generate_task_occurrences(
     expand_checklist: ChecklistExpansionHook | None = None,
     assign: AssignmentHook | None = None,
     event_bus: EventBus | None = None,
-) -> GenerationReport:  # code-health: ignore[ccn,nloc,params] Policy flow.
+) -> GenerationReport:  # code-health: ignore[ccn,nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     """Run one hourly generation tick for the caller's workspace.
 
     ``now`` pins the horizon's upper bound; if omitted it is taken

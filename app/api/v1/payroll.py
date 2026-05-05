@@ -690,7 +690,7 @@ def _reject_duplicate_query_param(request: Request, name: str) -> None:
 
 
 def build_payroll_router() -> APIRouter:
-    # code-health: ignore[nloc] Router composition stays explicit.
+    # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     """Return a fresh :class:`APIRouter` wired for the payroll surface."""
     api = APIRouter(tags=["payroll"], responses=IDENTITY_PROBLEM_RESPONSES)
 
@@ -1133,9 +1133,9 @@ def build_payroll_router() -> APIRouter:
         ctx: _Ctx,
         session: _Db,
         payslip_id: _PayslipIdPath,
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     ) -> PayslipResponse:
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         row = SqlAlchemyPayslipReadRepository(session).get_payslip(
             workspace_id=ctx.workspace_id,
             payslip_id=payslip_id,
@@ -1294,7 +1294,7 @@ def build_payroll_router() -> APIRouter:
         session: _Db,
         payslip_id: _PayslipIdPath,
     ) -> PayslipResponse:
-        # code-health: ignore[nloc] Router composition stays explicit.
+        # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
         payslip_repo = SqlAlchemyPayslipReadRepository(session)
         row = payslip_repo.get_payslip(
             workspace_id=ctx.workspace_id,
@@ -1472,7 +1472,7 @@ def build_payroll_router() -> APIRouter:
             ),
         ] = "approved",
     ) -> StreamingResponse:
-        # code-health: ignore[nloc params] Explicit API contract surface.
+        # code-health: ignore[nloc params] API fields are generated schema contract.  # noqa: E501
         repo = SqlAlchemyPayrollExportRepository(session)
         try:
             if kind == "timesheets":

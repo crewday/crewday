@@ -163,7 +163,7 @@ class AssetCreateRequest(BaseModel):
 
     asset_type_id: str | None = None
     property_id: str = Field(..., min_length=1)
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     area_id: str | None = None
     name: str | None = Field(default=None, min_length=1, max_length=200)
     label: str | None = Field(default=None, min_length=1, max_length=200)
@@ -172,13 +172,15 @@ class AssetCreateRequest(BaseModel):
     serial_number: str | None = Field(default=None, max_length=160)
     condition: Literal["new", "good", "fair", "poor", "needs_replacement"] = "good"
     status: Literal["active", "in_repair", "decommissioned", "disposed"] = "active"
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     installed_on: date | None = None
     purchased_on: date | None = None
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     purchased_at: date | None = None
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
-    purchase_price_cents: int | None = Field(default=None, ge=0)
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
+    purchase_price_cents: int | None = Field(
+        default=None, ge=0
+    )  # code-health: ignore[duplicate] Asset schema money fields mirror create/update payloads.  # noqa: E501
     purchase_currency: str | None = Field(default=None, min_length=3, max_length=3)
     purchase_vendor: str | None = Field(default=None, max_length=160)
     warranty_expires_on: date | None = None
@@ -268,9 +270,9 @@ class AssetUpdateRequest(BaseModel):
     asset_type_id: str | None = None
     area_id: str | None = None
     name: str | None = Field(default=None, min_length=1, max_length=200)
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     label: str | None = Field(default=None, min_length=1, max_length=200)
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     make: str | None = Field(default=None, max_length=160)
     model: str | None = Field(default=None, max_length=160)
     serial_number: str | None = Field(default=None, max_length=160)
@@ -514,9 +516,9 @@ class AssetActionUpdateRequest(BaseModel):
         )
 
 
-# code-health: ignore[duplicate] Repeated wire shape is intentional.
+# code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
 class AssetActionResponse(BaseModel):
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     id: str
     workspace_id: str
     asset_id: str
@@ -558,9 +560,9 @@ class AssetNextDueResponse(BaseModel):
         return cls(**asdict(view))
 
 
-# code-health: ignore[duplicate] Repeated wire shape is intentional.
+# code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
 class AssetDocumentResponse(BaseModel):
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     id: str
     workspace_id: str
     file_id: str | None

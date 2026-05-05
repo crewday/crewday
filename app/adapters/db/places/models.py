@@ -21,12 +21,14 @@ docstring for the tenancy contract on ``unit`` / ``area`` /
 See ``docs/specs/02-domain-model.md`` §"property_workspace",
 ``docs/specs/04-properties-and-stays.md`` §"Property" / §"Unit" /
 §"Area".
-"""  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+"""  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+from typing import (
+    Any,
+)  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
 
 from sqlalchemy import (
     JSON,
@@ -37,7 +39,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
-    text,  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    text,  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
 )
 from sqlalchemy.orm import (
     Mapped,
@@ -218,14 +220,14 @@ class Property(Base):
     # Internal staff-visible notes (§04 "Property" — property_notes_md).
     property_notes_md: Mapped[str] = mapped_column(
         String, nullable=False, default=""
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # Mutation timestamp — bumped on every domain-service update.
     # Nullable for the cd-8u5 migration's cheap backfill path; the
     # service always writes it on insert + update.
     updated_at: Mapped[datetime | None] = mapped_column(
         UtcDateTime(), nullable=True
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     # Soft-delete marker; live rows carry ``NULL``. The service's
     # default list excludes non-null rows.
     deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
@@ -445,7 +447,7 @@ class Area(Base):
 
     id: Mapped[str] = mapped_column(
         String, primary_key=True
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     property_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("property.id", ondelete="CASCADE"),
@@ -545,7 +547,7 @@ class PropertyClosure(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), nullable=False
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
@@ -652,7 +654,7 @@ class PropertyWorkRoleAssignment(Base):
         String,
         ForeignKey(
             "user_work_role.id", ondelete="CASCADE"
-        ),  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+        ),  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
         nullable=False,
     )
     property_id: Mapped[str] = mapped_column(
@@ -672,10 +674,10 @@ class PropertyWorkRoleAssignment(Base):
         String,
         ForeignKey("pay_rule.id", ondelete="SET NULL"),
         nullable=True,
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     created_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), nullable=False
-    )  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+    )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # Soft-delete tombstone; live rows carry NULL. The partial UNIQUE
     # below excludes tombstoned rows so a re-pin after an archive

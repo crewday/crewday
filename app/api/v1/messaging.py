@@ -431,7 +431,7 @@ def build_messaging_router(
     monotonic: _MonotonicFn | None = None,
     event_bus: EventBus | None = None,
 ) -> APIRouter:
-    # code-health: ignore[nloc] Router composition stays explicit.
+    # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     """Build the messaging router with an injectable monotonic clock.
 
     ``monotonic`` defaults to :func:`time.monotonic`. Tests inject a

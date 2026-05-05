@@ -210,7 +210,7 @@ def run_staff_chat_turn(
     wall_clock_timeout_s: int = 60,
 ) -> TurnOutcome:
     """Run one worker chat assistant turn with the staff-only catalog."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
 
     return run_turn(
         ctx,

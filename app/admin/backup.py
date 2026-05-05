@@ -138,7 +138,7 @@ def backup(
     keep_monthly: int = 12,
 ) -> BackupResult:
     """Create a ``.tar.zst`` deployment backup and prune old archives."""
-    # code-health: ignore[nloc] Host-CLI backup transaction is easier to audit inline.
+    # code-health: ignore[nloc] Host-CLI backup transaction is easier to audit inline.  # noqa: E501
 
     out_dir.mkdir(parents=True, exist_ok=True)
     created_at = datetime.now(tz=UTC).replace(microsecond=0)

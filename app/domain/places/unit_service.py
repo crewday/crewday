@@ -298,8 +298,8 @@ def _view_to_diff_dict(view: UnitView) -> dict[str, Any]:
         "welcome_overrides_json": dict(view.welcome_overrides_json),
         "settings_override_json": dict(
             view.settings_override_json
-        ),  # code-health: ignore[duplicate] dup.
-        "notes_md": view.notes_md,  # code-health: ignore[duplicate] dup.
+        ),  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
+        "notes_md": view.notes_md,  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
         "created_at": view.created_at.isoformat(),
         "updated_at": (
             view.updated_at.isoformat() if view.updated_at is not None else None
@@ -331,7 +331,9 @@ def _assert_property_in_workspace(
     not leak the existence of a row in another workspace.
     """
     stmt = (
-        select(Property.id)  # code-health: ignore[duplicate] dup.
+        select(
+            Property.id
+        )  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
         .join(PropertyWorkspace, PropertyWorkspace.property_id == Property.id)
         .where(
             Property.id == property_id,
@@ -578,7 +580,7 @@ def create_default_unit_for_property(
     + audit rows share an identical ``created_at`` — a single
     point in time for the bootstrap.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     body = UnitCreate.model_validate({"name": name, "ordinal": 0})
     view = _insert_unit_row(
         session,

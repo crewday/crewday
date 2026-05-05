@@ -282,7 +282,7 @@ def register_feed(
        to investigate.
     5. Write one ``ical_feed.register`` audit row with host-only URL.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
     try:
@@ -365,7 +365,7 @@ def update_feed(
     :class:`ValueError` (422) — there's no such thing as a no-op
     update, and silently succeeding would be an audit surprise.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     if body.url is None and body.provider_override is None:
         raise ValueError("update_feed requires at least one of url / provider_override")
 

@@ -49,7 +49,7 @@ def request_ownership_verification(
     clock: Clock | None = None,
 ) -> magic_link.PendingDispatch:
     """Mail a workspace-ownership verification link to the current owner."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     _require_owner(session, ctx)
     with tenant_agnostic():
         user = session.get(User, ctx.actor_id)
@@ -91,7 +91,7 @@ def consume_ownership_verification(
     clock: Clock | None = None,
 ) -> str:
     """Consume the verification link and promote the workspace."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     _require_owner(session, ctx)
     resolved_clock = clock if clock is not None else SystemClock()
     preview = magic_link.peek_link(

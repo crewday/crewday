@@ -692,7 +692,7 @@ def create_override(
     auto-approves (the §06 hybrid model: adding hours doesn't need
     sign-off).
     """
-    # code-health: ignore[nloc] Policy flow.
+    # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
     target_user_id = body.user_id if body.user_id is not None else ctx.actor_id
@@ -829,7 +829,7 @@ def update_override(
     skips the audit write — matches the convention from
     :mod:`app.domain.identity.user_leaves`.
     """
-    # code-health: ignore[ccn,nloc] Policy flow.
+    # code-health: ignore[ccn,nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
     row = _load_row(repo, ctx, override_id=override_id)

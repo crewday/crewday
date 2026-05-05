@@ -306,7 +306,7 @@ def _mint_link(
     ttl: timedelta,
     clock: Clock | None = None,
 ) -> PendingMagicLink:
-    # code-health: ignore[params] Magic-link port requires explicit token fields.
+    # code-health: ignore[params] Magic-link port requires explicit token fields.  # noqa: E501
     pending = request_link(
         session,
         email=email_lower,
@@ -409,7 +409,7 @@ def invite_user(
     clock: Clock | None = None,
 ) -> AdminInviteResult:
     """Create or refresh a pending invite and return its magic link URL."""
-    # code-health: ignore[nloc] Host-CLI invite bootstrap keeps DB writes sequential.
+    # code-health: ignore[nloc] Host-CLI invite bootstrap keeps DB writes sequential.  # noqa: E501
     _require_not_demo(settings)
     _require_root_key(settings)
     if role not in _VALID_INVITE_ROLES:

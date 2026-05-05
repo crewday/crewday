@@ -330,9 +330,9 @@ def build_admin_audit_router() -> APIRouter:
         _ctx: Annotated[DeploymentContext, Depends(current_deployment_admin_principal)],
         session: _Db,
         actor_id: Annotated[str | None, Query(max_length=64)] = None,
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         action: Annotated[str | None, Query(max_length=128)] = None,
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         entity_kind: Annotated[str | None, Query(max_length=64)] = None,
         entity_id: Annotated[str | None, Query(max_length=64)] = None,
         since: Annotated[

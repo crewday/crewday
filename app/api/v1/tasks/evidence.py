@@ -255,9 +255,9 @@ def _file_kind(kind: str) -> FileEvidenceKind:
 
 def _raise_file_evidence_error(exc: Exception, *, declared_type: str) -> NoReturn:
     if isinstance(exc, CompletionTaskNotFound):
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         raise _task_not_found() from exc
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     if isinstance(exc, EvidenceContentTypeNotAllowed):
         raise _http(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,

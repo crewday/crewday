@@ -323,10 +323,10 @@ def record_extraction_success(
     event_bus: EventBus | None = None,
 ) -> FileExtractionRecord:
     """Persist a successful extraction and fire ``asset_document.extracted``."""
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_clock = (
         clock if clock is not None else SystemClock()
-    )  # code-health: ignore[duplicate] dup.
+    )  # code-health: ignore[duplicate] Boundary field list kept explicit.
     resolved_bus = event_bus if event_bus is not None else default_event_bus
     now = resolved_clock.now()
     _update_extraction_row(
@@ -341,7 +341,7 @@ def record_extraction_success(
             "token_count": token_count,
             "has_secret_marker": has_secret_marker,
             "last_error": None,
-            "extracted_at": now,  # code-health: ignore[duplicate] dup.
+            "extracted_at": now,  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
             "updated_at": now,
         },
     )
@@ -400,7 +400,7 @@ def record_extraction_failure(
     tick is on the way; ``terminal=True`` says the manager must
     explicitly retry.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     row = _load_extraction_row(session, ctx, document_id)
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_bus = event_bus if event_bus is not None else default_event_bus
@@ -520,7 +520,7 @@ def record_extraction_empty(
     event_bus: EventBus | None = None,
 ) -> FileExtractionRecord:
     """Terminal-flip ``empty`` (rung returned no readable text)."""
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_bus = event_bus if event_bus is not None else default_event_bus
     now = resolved_clock.now()

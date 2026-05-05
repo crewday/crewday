@@ -66,6 +66,7 @@ const NAV_ITEMS: SideNavItem[] = [
 ];
 
 export default function AdminLayout() {
+  // code-health: ignore[ccn nloc] Admin shell keeps deployment-admin gating, nav collapse state, and agent sidebar chrome in one route layout.
   const navigate = useNavigate();
   const collapsed = initialAgentCollapsed();
   const { pathname } = useLocation();

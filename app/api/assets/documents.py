@@ -402,7 +402,7 @@ def build_asset_documents_subrouter() -> APIRouter:
         notes_md: Annotated[str | None, Form(max_length=20_000)] = None,
         file: Annotated[UploadFile | None, File()] = None,
     ) -> AssetDocumentResponse:
-        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+        # code-health: ignore[params] FastAPI params are OpenAPI contract.
         if file is None:
             raise Validation(extra={"error": "asset_document_file_required"})
         try:

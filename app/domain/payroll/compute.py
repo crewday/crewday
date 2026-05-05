@@ -273,7 +273,7 @@ def _build_components_json(
     holiday_minutes: int,
     rule_ids: Sequence[str],
 ) -> dict[str, object]:
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     return {
         "schema_version": 1,
         "currency": currency,
@@ -315,7 +315,7 @@ def compute_payslip(
     user_id: str,
 ) -> PayslipComputation:
     """Compute one user's draft payslip from booking-derived payroll data."""
-    # code-health: ignore[ccn,nloc] Policy flow.
+    # code-health: ignore[ccn,nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
 
     bookings = repo.list_pay_bearing_bookings(
         workspace_id=ctx.workspace_id,
@@ -586,7 +586,7 @@ def payslip_recompute(
     clock: Clock | None = None,
 ) -> Sequence[PayslipRow]:
     """Recompute every draft payslip for a pay period idempotently."""
-    # code-health: ignore[nloc] Policy flow.
+    # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
 
     period = repo.get_period(workspace_id=ctx.workspace_id, period_id=period_id)
     if period is None:

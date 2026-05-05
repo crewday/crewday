@@ -128,7 +128,7 @@ class MagicLinkAdapter(MagicLinkPort):
         # purposes the seam Literal pins, so the translation below is
         # defensive — a programming error elsewhere would surface as
         # the seam-level exception, not the auth-layer one.
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         try:
             return magic_link.request_link(
                 self._session,
@@ -159,9 +159,9 @@ class MagicLinkAdapter(MagicLinkPort):
         settings: Settings | None = None,
         clock: Clock | None = None,
     ) -> MagicLinkOutcome:
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         try:
-            outcome = magic_link.peek_link(  # code-health: ignore[duplicate] dup.
+            outcome = magic_link.peek_link(  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
                 self._session,
                 token=token,
                 expected_purpose=expected_purpose,
@@ -192,7 +192,7 @@ class MagicLinkAdapter(MagicLinkPort):
         settings: Settings | None = None,
         clock: Clock | None = None,
     ) -> MagicLinkOutcome:
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         try:
             outcome = magic_link.consume_link(
                 self._session,

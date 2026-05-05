@@ -310,7 +310,7 @@ def update_work_engagement(
     state so a single PATCH that flips ``engagement_kind`` +
     ``supplier_org_id`` in the same payload is accepted.
     """
-    # code-health: ignore[ccn,nloc] Policy flow.
+    # code-health: ignore[ccn,nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
 

@@ -316,7 +316,7 @@ class SqlAlchemyInstructionsRepository(InstructionsRepository):
         created_by: str | None,
         created_at: datetime,
     ) -> InstructionRow:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         row = Instruction(
             id=instruction_id,
             workspace_id=workspace_id,
@@ -347,7 +347,7 @@ class SqlAlchemyInstructionsRepository(InstructionsRepository):
         change_note: str | None,
         created_at: datetime,
     ) -> InstructionVersionRow:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         row = InstructionVersion(
             id=version_id,
             workspace_id=workspace_id,
@@ -388,7 +388,7 @@ class SqlAlchemyInstructionsRepository(InstructionsRepository):
         scope_id_provided: bool,
         tags: Sequence[str] | None,
     ) -> InstructionRow:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         row = self._load_instruction_orm(
             workspace_id=workspace_id, instruction_id=instruction_id
         )
@@ -428,7 +428,7 @@ class SqlAlchemyInstructionsRepository(InstructionsRepository):
         added_by: str,
         added_at: datetime,
     ) -> InstructionLinkRow:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         if (
             self.get_instruction(
                 workspace_id=workspace_id, instruction_id=instruction_id

@@ -401,6 +401,7 @@ interface ApiTokenPayload {
 }
 
 function invalidate(qc: QueryClient, queryKey: readonly unknown[]): void {
+  // code-health: ignore[nloc params] Lizard misattributes the SSE invalidation table below to this tiny query invalidation wrapper.
   // `refetchType: "active"` keeps idle queries cheap (§14 "SSE-driven
   // invalidation"). Explicit here so the intent is visible at every
   // call site rather than relying on the v5 default.

@@ -258,7 +258,7 @@ class PermissionRuleRepository(Protocol):
         (``revoked_at IS NULL``), action-key match, and subject match
         (user-direct or group-membership-expanded).
         """
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         ...
 
 
@@ -286,7 +286,7 @@ class EmptyPermissionRuleRepository:
         ancestor_scope_ids: Sequence[tuple[str, str]],
     ) -> Sequence[RuleRow]:
         """Return an empty tuple — no ``permission_rule`` rows exist in v1."""
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         return ()
 
 
@@ -490,7 +490,7 @@ def require(
     (v1 has no ``permission_rule`` table yet). Tests and future
     adapters override it.
     """
-    # code-health: ignore[ccn,nloc] Policy flow.
+    # code-health: ignore[ccn,nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     spec = ACTION_CATALOG.get(action_key)
     if spec is None:
         raise UnknownActionKey(action_key)

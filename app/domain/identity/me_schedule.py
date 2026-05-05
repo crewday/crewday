@@ -256,7 +256,7 @@ def aggregate_schedule(
     unit suite, future scriptable consumers) still get the
     UTC-only behaviour.
     """
-    # code-health: ignore[nloc] Policy flow.
+    # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_from, resolved_to = _resolve_window(
         from_date=from_date,

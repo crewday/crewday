@@ -30,6 +30,7 @@ import { __resetApiProvidersForTests } from "@/lib/api";
 // ── Helpers ───────────────────────────────────────────────────────
 
 function bytes(...vals: number[]): ArrayBuffer {
+  // code-health: ignore[nloc] Lizard misattributes the scripted recovery-enrol fetch harness to this tiny byte helper.
   return new Uint8Array(vals).buffer;
 }
 

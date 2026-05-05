@@ -303,9 +303,9 @@ def read_route(webhook_id: str, ctx: _Ctx, session: _Db) -> WebhookResponse:
         None,
     )
     if view is None:
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         raise _error(LookupError(webhook_id))
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     summaries = _delivery_summaries(
         session,
         workspace_id=ctx.workspace_id,
@@ -430,9 +430,9 @@ def rotate_secret_route(
             envelope=envelope,
             sub_id=webhook_id,
         )
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     except (LookupError, ValueError) as exc:
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         raise _error(exc) from exc
     _publish_webhooks_changed(ctx)
     summaries = _delivery_summaries(

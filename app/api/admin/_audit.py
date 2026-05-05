@@ -57,7 +57,7 @@ def audit_admin(
     action: str,
     diff: dict[str, Any] | list[Any] | None = None,
 ) -> None:
-    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+    # code-health: ignore[params] FastAPI params are OpenAPI contract.
     """Append one deployment-scoped audit row inside the caller's UoW.
 
     Resolves the audit row's actor identity + correlation id off

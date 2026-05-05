@@ -294,7 +294,7 @@ class QuoteService:
             raise QuoteInvalid("sent quotes are locked; supersede instead")
         fields = self._normalize_patch(
             repo, patch, base=current
-        )  # code-health: ignore[duplicate] dup.
+        )  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
         changed = {
             key: value
             for key, value in fields.items()
@@ -555,7 +555,7 @@ class QuoteService:
         audit_ctx: WorkspaceContext,
         actor_hint: str | None = None,
     ) -> QuoteView:
-        # code-health: ignore[params] Port contract.
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         if row.status == status:
             return _to_view(row)
         if row.status not in {"sent", "accepted", "rejected"}:
@@ -612,7 +612,7 @@ class QuoteService:
     def _normalize_patch(
         self, repo: QuoteRepository, patch: QuotePatch, *, base: QuoteRow | None = None
     ) -> dict[str, object]:
-        # code-health: ignore[ccn] Policy flow.
+        # code-health: ignore[ccn] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
         del repo
         unknown = sorted(set(patch.fields) - _MUTABLE_FIELDS)
         if unknown:

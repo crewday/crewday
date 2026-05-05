@@ -241,7 +241,7 @@ def build_permission_rules_router() -> APIRouter:
         scope_id: _ScopeIdFilter = None,
         action_key: _ActionKeyFilter = None,
     ) -> PermissionRuleListResponse:
-        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+        # code-health: ignore[params] FastAPI params are OpenAPI contract.
         """Return an empty page until the ``permission_rule`` table lands.
 
         The cursor scaffolding stays so a subsequent SQL adapter only

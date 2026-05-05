@@ -263,9 +263,9 @@ def _http_for_start(exc: Exception) -> DomainError:
     return auth_rate_limited("rate_limited")
 
 
-# code-health: ignore[duplicate] Repeated wire shape is intentional.
+# code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
 def _http_for_verify(exc: Exception) -> DomainError:
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     if isinstance(exc, signup.SignupDisabled):
         return auth_not_found("not_found")
     if isinstance(exc, signup.SignupAttemptMissing):
@@ -584,7 +584,7 @@ def build_signup_router(
         body: SignupStartBody,
         request: Request,
     ) -> SignupStartResponse:
-        # code-health: ignore[nloc] Router composition stays explicit.
+        # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
         """Kick off the signup flow — abuse gates + domain service.
 
         Gate order (cheap checks before expensive ones, every gate

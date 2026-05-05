@@ -448,7 +448,7 @@ def detect_overdue(  # code-health: ignore[nloc] Overdue policy flow.
 # ---------------------------------------------------------------------------
 
 
-def _write_overdue_tick_audit(  # code-health: ignore[params] Audit payload boundary.
+def _write_overdue_tick_audit(  # code-health: ignore[params] Audit payload boundary.  # noqa: E501
     session: Session,
     ctx: WorkspaceContext,
     *,

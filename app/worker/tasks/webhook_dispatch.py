@@ -286,7 +286,7 @@ def _dispatch_one(delivery_id: str, *, clock: Clock) -> DeliveryReport:
         )
 
 
-def _notify_managers_auto_paused(  # code-health: ignore[nloc] Fanout flow.
+def _notify_managers_auto_paused(  # code-health: ignore[nloc] Webhook fanout owns query and enqueue loop.  # noqa: E501
     session: Session,
     *,
     subscription: WebhookSubscriptionRow,

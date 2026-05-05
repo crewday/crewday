@@ -40,7 +40,7 @@ from app.util.clock import Clock
 __all__ = ["run_receipt_ocr"]
 
 
-def run_receipt_ocr(  # code-health: ignore[params] Worker adapter boundary.
+def run_receipt_ocr(  # code-health: ignore[params] Worker adapter boundary.  # noqa: E501
     repo: ExpensesRepository,
     ctx: WorkspaceContext,
     *,

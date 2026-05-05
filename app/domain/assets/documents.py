@@ -113,7 +113,7 @@ def attach_document(
     event_bus: EventBus | None = None,
 ) -> AssetDocumentView:
     """Attach an already-stored blob to an asset."""
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     asset = _load_asset(session, ctx, asset_id, include_archived=False)
     if storage is not None and not storage.exists(blob_hash):
         raise AssetDocumentValidationError("blob_hash", "not_found")

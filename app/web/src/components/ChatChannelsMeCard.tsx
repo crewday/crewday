@@ -23,6 +23,7 @@ function fmt(iso: string | null): string {
 }
 
 export default function ChatChannelsMeCard({ me }: { me: Me }) {
+  // code-health: ignore[nloc] Profile chat-channel card keeps link, verify, unlink, and current binding state in one user-facing panel.
   const qc = useQueryClient();
   const myUserId = me.user_id;
 

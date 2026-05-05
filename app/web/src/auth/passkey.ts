@@ -315,6 +315,7 @@ function isPublicKeyCredential(value: unknown): value is PublicKeyCredential {
  * `passkey-register.ts` can reuse the table without copy-pasting it.
  */
 export function mapNavigatorError(err: unknown): Error {
+  // code-health: ignore[ccn] WebAuthn DOMException mapping intentionally enumerates each browser failure name to preserve typed UI errors.
   if (err instanceof DOMException) {
     // `NotAllowedError` covers both user-cancel and authenticator
     // refusal — they're indistinguishable per the WebAuthn spec.

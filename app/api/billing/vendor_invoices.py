@@ -278,7 +278,7 @@ def _ensure_client_upload_scope(
 
 
 def build_vendor_invoices_router() -> APIRouter:
-    # code-health: ignore[nloc] Router composition stays explicit.
+    # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     router = APIRouter(
         prefix="/vendor-invoices",
         tags=["billing", "vendor-invoices"],
@@ -372,7 +372,7 @@ def build_vendor_invoices_router() -> APIRouter:
         _: _PdfContentLengthGuard,
         file: Annotated[UploadFile | None, File()] = None,
     ) -> VendorInvoiceResponse:
-        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+        # code-health: ignore[params] FastAPI params are OpenAPI contract.
         if file is None:
             raise Validation(extra={"error": "vendor_invoice_pdf_required"})
         try:
@@ -458,7 +458,7 @@ def build_vendor_invoices_router() -> APIRouter:
         _: _ProofContentLengthGuard,
         file: Annotated[UploadFile | None, File()] = None,
     ) -> VendorInvoiceResponse:
-        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+        # code-health: ignore[params] FastAPI params are OpenAPI contract.
         _ensure_client_upload_scope(ctx, session, invoice_id)
         if file is None:
             raise Validation(extra={"error": "vendor_invoice_proof_required"})

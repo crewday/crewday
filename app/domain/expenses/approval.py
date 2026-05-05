@@ -257,7 +257,7 @@ class ApprovalEdits(BaseModel):
 
     vendor: str | None = Field(
         default=None, min_length=1, max_length=_MAX_VENDOR_LEN
-    )  # code-health: ignore[duplicate] dup.
+    )  # code-health: ignore[duplicate] Boundary field list kept explicit.
     purchased_at: datetime | None = None
     currency: str | None = Field(
         default=None,
@@ -536,7 +536,7 @@ def approve_claim(
     ``for_update=True`` so two concurrent approvers cannot both flip
     the state and double-publish the event.
     """
-    # code-health: ignore[nloc] Policy flow.
+    # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
 
@@ -905,7 +905,7 @@ def list_pending(
     ``state='submitted'`` filter. ``limit`` is clamped to ``[1, 500]``
     matching the worker-side service.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     _require_approval(checker)
 
     bounded_limit = max(1, min(limit, 500))

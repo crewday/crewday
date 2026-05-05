@@ -151,7 +151,7 @@ class ChatMessageService:
         *,
         attachments: list[str] | tuple[str, ...] = (),
     ) -> ChatMessageView:
-        # code-health: ignore[nloc] Policy flow.
+        # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
         if len(attachments) > _MAX_ATTACHMENTS:
             raise ChatMessageInvalid(
                 f"messages support at most {_MAX_ATTACHMENTS} attachments"

@@ -328,7 +328,7 @@ def build_me_avatar_router() -> APIRouter:
             Cookie(alias=DEV_SESSION_COOKIE_NAME),
         ] = None,
     ) -> AvatarResponse:
-        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+        # code-health: ignore[params] FastAPI params are OpenAPI contract.
         """Store ``image`` as the caller's avatar, replacing any prior blob.
 
         Size-gate first (Content-Length + streaming), then content-type
@@ -417,9 +417,9 @@ def build_me_avatar_router() -> APIRouter:
             "x-agent-confirm": True,
         },
     )
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     def delete_me_avatar(
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         request: Request,
         session: _Db,
         session_cookie_primary: Annotated[

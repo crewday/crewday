@@ -111,7 +111,7 @@ class SweepResult:
     processed_ids: tuple[str, ...]
 
 
-def sweep_undispatched_messages(  # code-health: ignore[nloc] Sweep flow.
+def sweep_undispatched_messages(  # code-health: ignore[nloc] Worker sweep owns scan, eligibility, and enqueue.  # noqa: E501
     *,
     event_bus: EventBus | None = None,
     clock: Clock | None = None,

@@ -105,7 +105,7 @@ def _asset_list_response(
     cursor: str | None,
     limit: int,
 ) -> AssetListResponse:
-    # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+    # code-health: ignore[params] FastAPI params are OpenAPI contract.
     views = list_assets(
         session,
         ctx,
@@ -180,9 +180,9 @@ def build_assets_alias_router() -> APIRouter:
         summary="List tracked assets",
         dependencies=[view_gate],
     )
-    # code-health: ignore[duplicate] Repeated wire shape is intentional.
+    # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     def list_flat(
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         ctx: Ctx,
         session: Db,
         property_id: str | None = Query(default=None),
@@ -236,7 +236,7 @@ def build_assets_alias_router() -> APIRouter:
 
 
 def build_assets_router() -> APIRouter:
-    # code-health: ignore[nloc] Router composition stays explicit.
+    # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     api = APIRouter(tags=["assets"], responses=ASSET_ERROR_RESPONSES)
 
     view_gate = Depends(Permission("scope.view", scope_kind="workspace"))

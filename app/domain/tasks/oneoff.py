@@ -660,7 +660,7 @@ def create_oneoff(
     function never commits — the caller's Unit-of-Work owns
     transaction boundaries.
     """
-    # code-health: ignore[ccn,nloc,params] Policy flow.
+    # code-health: ignore[ccn,nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
     if now.tzinfo is None:
@@ -1117,7 +1117,7 @@ def update_task(
     Permission gating is the router's job; the service defends
     against cross-tenant reads via the loader below.
     """
-    # code-health: ignore[ccn,nloc] Policy flow.
+    # code-health: ignore[ccn,nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
     if now.tzinfo is None:

@@ -438,7 +438,7 @@ class TaskChecklistItemPayload(BaseModel):
         checked_at: datetime | None,
         evidence_blob_hash: str | None,
     ) -> TaskChecklistItemPayload:
-        # code-health: ignore[params] Preserves FastAPI/OpenAPI params.
+        # code-health: ignore[params] FastAPI params are OpenAPI contract.
         """Single Pydantic-construction site for the two ``from_*`` paths."""
         completed_at = _aware_utc(checked_at)
         return cls(

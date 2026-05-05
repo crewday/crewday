@@ -330,7 +330,7 @@ class PollOutcome:
 # ---------------------------------------------------------------------------
 
 
-def fetch_ical_body(  # code-health: ignore[nloc,params] SSRF fetch policy boundary.
+def fetch_ical_body(  # code-health: ignore[nloc,params] SSRF fetch policy boundary.  # noqa: E501
     url: str,
     *,
     last_etag: str | None,
@@ -488,7 +488,7 @@ def fetch_ical_body(  # code-health: ignore[nloc,params] SSRF fetch policy bound
     )
 
 
-def _fetch_conditional(  # code-health: ignore[params] Fetch adapter boundary.
+def _fetch_conditional(  # code-health: ignore[params] Fetch adapter boundary.  # noqa: E501
     fetcher: Fetcher,
     *,
     parsed: SplitResult,
@@ -556,7 +556,7 @@ def _fetch_conditional(  # code-health: ignore[params] Fetch adapter boundary.
     )
 
 
-def _stdlib_conditional_fetch(  # code-health: ignore[nloc,params] Fetch adapter.
+def _stdlib_conditional_fetch(  # code-health: ignore[nloc,params] Fetch adapter.  # noqa: E501
     *,
     parsed: SplitResult,
     resolved_ip: str,
@@ -1238,7 +1238,7 @@ class _ApplyCounts:
     closures_created: int = 0
 
 
-def _apply_events(  # code-health: ignore[params] Parsed-event apply boundary.
+def _apply_events(  # code-health: ignore[params] Parsed-event apply boundary.  # noqa: E501
     session: Session,
     ctx: WorkspaceContext,
     *,
@@ -1431,7 +1431,7 @@ def _is_blocked_summary(summary: str | None) -> bool:
     return False
 
 
-def _upsert_reservation(  # code-health: ignore[nloc] Reservation upsert policy flow.
+def _upsert_reservation(  # code-health: ignore[nloc] Reservation upsert policy flow.  # noqa: E501
     session: Session,
     ctx: WorkspaceContext,
     *,
@@ -1549,7 +1549,7 @@ def _upsert_reservation(  # code-health: ignore[nloc] Reservation upsert policy 
     return "updated"
 
 
-def _upsert_closure(  # code-health: ignore[nloc,params] Closure upsert policy flow.
+def _upsert_closure(  # code-health: ignore[nloc,params] Closure upsert policy flow.  # noqa: E501
     session: Session,
     ctx: WorkspaceContext,
     *,
@@ -1607,7 +1607,7 @@ def _upsert_closure(  # code-health: ignore[nloc,params] Closure upsert policy f
                         reason="ical_unavailable",
                         source_ical_feed_id=feed.id,
                     )
-                )  # code-health: ignore[duplicate] Event shape.
+                )  # code-health: ignore[duplicate] iCal event fields kept explicit.  # noqa: E501
                 return "created"
             row.source_external_uid = ev.uid
             row.source_last_seen_at = resolved_now
@@ -1726,7 +1726,7 @@ def _guess_guest_name(summary: str | None, description: str | None) -> str | Non
 # ---------------------------------------------------------------------------
 
 
-def _record_feed_error(  # code-health: ignore[params] Feed error audit boundary.
+def _record_feed_error(  # code-health: ignore[params] Feed error audit boundary.  # noqa: E501
     session: Session,
     ctx: WorkspaceContext,
     *,

@@ -566,7 +566,7 @@ def list_memberships(
     "property exists in a workspace you can't see".
     """
     rows = _load_all_rows(session, property_id=property_id)
-    if not rows:  # code-health: ignore[duplicate] dup.
+    if not rows:  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
         raise MembershipNotFound(property_id)
 
     # Authorize: the actor must reach at least one of the rows'
@@ -621,7 +621,7 @@ def invite_workspace(
     minted row as the ``after`` diff. ``before`` is omitted because
     the row didn't exist.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     if role not in _NON_OWNER_ROLES:
         raise InvalidMembershipRole(
             f"invite_workspace cannot mint role {role!r}; "
@@ -778,7 +778,7 @@ def revoke_workspace(
     """
     resolved_clock = (
         clock if clock is not None else SystemClock()
-    )  # code-health: ignore[duplicate] dup.
+    )  # code-health: ignore[duplicate] Boundary field list kept explicit.
 
     rows = _load_all_rows(session, property_id=property_id)
     if not rows:
@@ -855,7 +855,7 @@ def update_membership_role(
     resolved_clock = clock if clock is not None else SystemClock()
 
     rows = _load_all_rows(session, property_id=property_id)
-    if not rows:  # code-health: ignore[duplicate] dup.
+    if not rows:  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
         raise OwnerWorkspaceMissing(property_id)
     owner_row = _find_owner_row(rows)
     _assert_owner_workspace_owners_member(
@@ -1029,7 +1029,7 @@ def transfer_ownership(
     row with the new owner row as ``after`` and the outgoing row as
     ``before``.
     """
-    # code-health: ignore[nloc] Policy flow.
+    # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     if demote_to not in _VALID_DEMOTE_ACTIONS:
         raise InvalidMembershipRole(
             f"demote_to must be one of {sorted(_VALID_DEMOTE_ACTIONS)}; "

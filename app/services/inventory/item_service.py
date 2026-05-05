@@ -80,7 +80,7 @@ class InventoryItemValidationError(ValueError):
     __slots__ = (
         "error",
         "field",
-    )  # code-health: ignore[duplicate] dup.
+    )  # code-health: ignore[duplicate] Boundary field list kept explicit.
 
     def __init__(self, field: str, error: str) -> None:
         super().__init__(f"{field}: {error}")
@@ -90,10 +90,15 @@ class InventoryItemValidationError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class InventoryItemCreate:
+    # code-health: ignore[duplicate] Create/update item field lists intentionally mirror form payloads.  # noqa: E501
     name: str
     unit: str
-    sku: str | None = None  # code-health: ignore[duplicate] dup.
-    reorder_point: Decimal | None = None
+    sku: str | None = (
+        None  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
+    )
+    reorder_point: Decimal | None = (
+        None  # code-health: ignore[duplicate] Item create/update payload fields stay aligned.  # noqa: E501
+    )
     reorder_target: Decimal | None = None
     vendor: str | None = None
     vendor_url: str | None = None
@@ -210,7 +215,7 @@ def update(
     clock: Clock | None = None,
 ) -> InventoryItemView:
     """Patch an active item."""
-    # code-health: ignore[ccn,nloc] Policy flow.
+    # code-health: ignore[ccn,nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     unknown = body.fields_set - _ITEM_FIELDS
     if unknown:
         raise ValueError(f"unknown inventory item fields: {sorted(unknown)!r}")

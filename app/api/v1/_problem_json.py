@@ -36,9 +36,9 @@ __all__ = [
 _PROBLEM_JSON_SCHEMA: Final[dict[str, Any]] = {
     "type": "object",
     "properties": {
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         "type": {"type": "string"},
-        # code-health: ignore[duplicate] Repeated wire shape is intentional.
+        # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         "title": {"type": "string"},
         "status": {"type": "integer"},
         "detail": {"type": "string"},

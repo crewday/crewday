@@ -120,7 +120,7 @@ class SqlAlchemyOrganizationRepository(OrganizationRepository):
     """SA-backed organization repository."""
 
     def __init__(self, session: Session) -> None:
-        self._session = session  # code-health: ignore[duplicate] Repo init.
+        self._session = session  # code-health: ignore[duplicate] Billing repos share session init shape.  # noqa: E501
 
     @property
     def session(self) -> Session:
@@ -146,7 +146,7 @@ class SqlAlchemyOrganizationRepository(OrganizationRepository):
         notes_md: str | None,
         created_at: datetime,
     ) -> OrganizationRow:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         row = Organization(
             id=organization_id,
             workspace_id=workspace_id,
@@ -159,7 +159,7 @@ class SqlAlchemyOrganizationRepository(OrganizationRepository):
             contact_phone=contact_phone,
             notes_md=notes_md,
             created_at=created_at,
-            archived_at=None,  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+            archived_at=None,  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
         )
         try:
             with self._session.begin_nested():
@@ -319,7 +319,7 @@ class SqlAlchemyOrganizationRepository(OrganizationRepository):
 
 class SqlAlchemyClientPortalRepository(
     ClientPortalRepository
-):  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+):  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     """SA-backed read repository for the client portal."""
 
     def __init__(self, session: Session) -> None:
@@ -725,7 +725,7 @@ class SqlAlchemyRateCardRepository(RateCardRepository):
         active_from: date,
         active_to: date | None,
     ) -> RateCardRow:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         row = RateCard(
             id=rate_card_id,
             workspace_id=workspace_id,
@@ -734,7 +734,7 @@ class SqlAlchemyRateCardRepository(RateCardRepository):
             currency=currency,
             rates_json=dict(rates),
             active_from=active_from,
-            active_to=active_to,  # code-health: ignore[duplicate] ORM row map.
+            active_to=active_to,  # code-health: ignore[duplicate] Billing row fields kept explicit.  # noqa: E501
         )
         try:
             with self._session.begin_nested():
@@ -808,7 +808,7 @@ class SqlAlchemyRateCardRepository(RateCardRepository):
 
 class SqlAlchemyWorkOrderRepository(
     WorkOrderRepository
-):  # code-health: ignore[duplicate] Explicit ORM/wire shape.
+):  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     """SA-backed work-order repository."""
 
     def __init__(self, session: Session) -> None:
@@ -875,7 +875,7 @@ class SqlAlchemyWorkOrderRepository(
         ends_at: datetime | None,
         rate_card_id: str | None,
     ) -> WorkOrderRow:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         row = WorkOrder(
             id=work_order_id,
             workspace_id=workspace_id,
@@ -992,7 +992,7 @@ class SqlAlchemyWorkOrderRepository(
         accrued_cents: int,
         created_at: datetime,
     ) -> ShiftAccrualRow | None:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         row = WorkOrderShiftAccrual(
             id=accrual_id,
             workspace_id=workspace_id,
@@ -1077,7 +1077,7 @@ class SqlAlchemyQuoteRepository(QuoteRepository):
         status: str,
         superseded_by_quote_id: str | None = None,
     ) -> QuoteRow:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         row = Quote(
             id=quote_id,
             workspace_id=workspace_id,
@@ -1204,7 +1204,7 @@ class SqlAlchemyVendorInvoiceRepository(VendorInvoiceRepository):
         status: str,
         notes_md: str | None,
     ) -> VendorInvoiceRow:
-        # code-health: ignore[params] Explicit adapter boundary.
+        # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         row = VendorInvoice(
             id=invoice_id,
             workspace_id=workspace_id,

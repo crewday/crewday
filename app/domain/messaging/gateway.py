@@ -45,7 +45,7 @@ class ChatGatewayService:
         *,
         channel_source: str,
     ) -> InboundChatResult:
-        # code-health: ignore[nloc] Policy flow.
+        # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
         now = self._clock.now()
         existing = repo.find_message_by_provider_id(
             source=inbound.provider,

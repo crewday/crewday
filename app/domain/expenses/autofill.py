@@ -481,7 +481,7 @@ def extract_from_bytes(
     caller can record the real token counts on the failure-mode
     usage row instead of zeroing them out.
     """
-    # code-health: ignore[nloc] Policy flow.
+    # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_settings = settings if settings is not None else get_settings()
     resolved_clock = clock if clock is not None else SystemClock()
 
@@ -799,7 +799,7 @@ def _record_llm_usage(
     touching the ledger; the §11 router follow-up will swap this
     helper for ``record_usage`` once the cap surface is live.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     usage_id = new_ulid()
     # ``cost_cents=0`` until the deployment-scope ``llm_provider_model``
     # registry lands and the pricing table is seeded — see
@@ -859,7 +859,7 @@ def run_extraction(
       the model id, token counts, latency, and the list of
       autofilled field names.
     """
-    # code-health: ignore[nloc,params] Policy flow.
+    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_settings = settings if settings is not None else get_settings()
 

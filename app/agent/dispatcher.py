@@ -344,7 +344,7 @@ def _split_inputs(
     the leftover-input dict; non-object bodies are passed as the raw
     ``body`` argument advertised in the tool schema.
     """
-    # code-health: ignore[ccn] OpenAPI path/query/body split is a branch table.
+    # code-health: ignore[ccn] OpenAPI path/query/body split is a branch table.  # noqa: E501
     parameters = entry.operation.get("parameters")
     if not isinstance(parameters, list):
         parameters = []

@@ -325,7 +325,7 @@ def list_property_work_role_assignments(
     independently — the spec §12 "Users / work roles / settings"
     surface accepts both filters on the same call.
     """
-    # code-health: ignore[params] Port contract.
+    # code-health: ignore[params] Port params are adapter API contract.
     rows = repo.list(
         workspace_id=ctx.workspace_id,
         limit=limit,
@@ -375,7 +375,7 @@ def create_property_work_role_assignment(
     :class:`~app.domain.places.ports.AssignmentIntegrityError` and map
     to a non-duplicate invariant message → 422.
     """
-    # code-health: ignore[nloc] Policy flow.
+    # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
 

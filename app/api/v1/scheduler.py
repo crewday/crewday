@@ -301,7 +301,7 @@ def _build_payload(
     window: _SchedulerWindow,
     filters: _SchedulerFilters,
 ) -> SchedulerCalendarResponse:
-    # code-health: ignore[nloc] Router composition stays explicit.
+    # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     workspace_properties = list_workspace_properties(session, ctx)
     properties_by_id = {prop.id: prop for prop in workspace_properties}
     property_timezones = {prop.id: prop.timezone for prop in workspace_properties}
