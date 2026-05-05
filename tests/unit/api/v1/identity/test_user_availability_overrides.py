@@ -225,6 +225,27 @@ class TestHybridApprovalMatrix:
         assert body["approval_required"] is True
         assert body["approved_at"] is None
 
+    def test_response_times_drop_fractional_seconds(
+        self,
+        worker_ctx: tuple[WorkspaceContext, sessionmaker[Session], str, str],
+    ) -> None:
+        ctx, factory, _ws_id, _worker_id = worker_ctx
+        client = _client(ctx, factory)
+
+        resp = client.post(
+            "/user_availability_overrides",
+            json={
+                "date": "2026-05-04",
+                "available": True,
+                "starts_local": "10:42:24.686338",
+                "ends_local": "12:42:24.686338",
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["starts_local"] == "10:42:24"
+        assert body["ends_local"] == "12:42:24"
+
     def test_worker_working_extends_hours_auto_approves(
         self,
         worker_ctx: tuple[WorkspaceContext, sessionmaker[Session], str, str],

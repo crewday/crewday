@@ -46,7 +46,7 @@ from datetime import date, datetime, time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 from sqlalchemy.orm import Session
 
 from app.adapters.db.identity.repositories import (
@@ -84,6 +84,7 @@ from app.api.v1.user_availability_overrides import (
     _ApprovedFilter,
     _FromFilter,
     _ToFilter,
+    format_local_time,
 )
 from app.api.v1.user_availability_overrides import (
     _approved_to_status as _override_approved_to_status,
@@ -234,6 +235,10 @@ class MeWeeklySlotResponse(BaseModel):
     weekday: int
     starts_local: time | None
     ends_local: time | None
+
+    @field_serializer("starts_local", "ends_local", when_used="json")
+    def _serialize_local_time(self, value: time | None) -> time | None:
+        return format_local_time(value)
 
 
 class MeBookingResponse(BaseModel):

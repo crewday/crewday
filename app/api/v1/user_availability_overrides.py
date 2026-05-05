@@ -48,7 +48,7 @@ from datetime import date, datetime, time
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Response, status
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 from sqlalchemy.orm import Session
 
 from app.adapters.db.availability.repositories import (
@@ -103,6 +103,13 @@ _Db = Annotated[Session, Depends(db_session)]
 
 _MAX_ID_LEN = 64
 _MAX_REASON_LEN = 20_000
+
+
+def format_local_time(value: time | None) -> time | None:
+    """Return local-only API times at second precision."""
+    if value is None:
+        return None
+    return value.replace(microsecond=0)
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +213,10 @@ class UserAvailabilityOverrideResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None
+
+    @field_serializer("starts_local", "ends_local", when_used="json")
+    def _serialize_local_time(self, value: time | None) -> time | None:
+        return format_local_time(value)
 
 
 class UserAvailabilityOverrideListResponse(BaseModel):

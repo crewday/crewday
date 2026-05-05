@@ -406,8 +406,8 @@ class TestMeSchedule:
             workspace_id=ws_id,
             user_id=worker_id,
             weekday=0,
-            starts_local=time(9, 0),
-            ends_local=time(17, 0),
+            starts_local=time(9, 0, 0, 686338),
+            ends_local=time(17, 0, 0, 686338),
         )
         approved_leave_id = _seed_leave(
             factory,
@@ -476,6 +476,8 @@ class TestMeSchedule:
         # Weekly pattern carries the seeded slot.
         assert len(body["weekly_availability"]) == 1
         assert body["weekly_availability"][0]["weekday"] == 0
+        assert body["weekly_availability"][0]["starts_local"] == "09:00:00"
+        assert body["weekly_availability"][0]["ends_local"] == "17:00:00"
         # Approved + pending merged into a single ``leaves`` list.
         leave_ids = sorted(lv["id"] for lv in body["leaves"])
         assert leave_ids == sorted([approved_leave_id, pending_leave_id])
@@ -540,8 +542,8 @@ class TestMeSchedule:
             on_date=date(2026, 5, 6),
             available=True,
             approved=True,
-            starts_local=time(8, 0),
-            ends_local=time(18, 0),
+            starts_local=time(8, 0, 0, 686338),
+            ends_local=time(18, 0, 0, 686338),
         )
         prop_id = _seed_property(factory, workspace_id=ws_id)
         _seed_occurrence(
@@ -641,6 +643,11 @@ class TestMeSchedule:
         assert leave_ids == sorted([approved_leave_id, pending_leave_id])
         override_ids = sorted(ov["id"] for ov in body["overrides"])
         assert override_ids == sorted([approved_override_id, pending_override_id])
+        approved_override = next(
+            ov for ov in body["overrides"] if ov["id"] == approved_override_id
+        )
+        assert approved_override["starts_local"] == "08:00:00"
+        assert approved_override["ends_local"] == "18:00:00"
         # Each row exposes its own approval state.
         approved_leave = next(
             lv for lv in body["leaves"] if lv["id"] == approved_leave_id
