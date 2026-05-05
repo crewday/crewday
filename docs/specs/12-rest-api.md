@@ -2144,7 +2144,7 @@ GET    /expenses                   # ?user_id=…&mine=true|false&state=…&curs
                                    #   used by the SPA worker surface.
                                    # user_id=<other> -> requires expenses.approve.
                                    # mine=true + user_id together -> 422 mine_user_id_conflict.
-GET    /expenses/pending_reimbursement   # ?user_id=me|<id>|<omit>; approved-but-not-reimbursed totals grouped by claim currency (§09).
+GET    /expenses/pending_reimbursement   # ?user_id=me|<id>|<omit>; approved-but-not-reimbursed totals grouped by claim currency today (§09).
                                          #   user_id=me  -> caller's own pool (no cap).
                                          #   user_id=<id> or omitted -> workspace-wide; requires expenses.approve.
                                          #   When user_id is omitted the response carries a per-user `by_user` breakdown.

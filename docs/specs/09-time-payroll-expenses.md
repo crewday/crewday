@@ -1146,7 +1146,7 @@ reproducible for audit.
   approved-but-not-yet-reimbursed claims grouped by `owed_currency`
   plus a "due on YYYY-MM-DD" stamp from the next open pay period
   that will roll them up. Driven by
-  `GET /expense_claims/pending_reimbursement?user_id=me`.
+  `GET /expenses/pending_reimbursement?user_id=me`.
 - **Payslip PDF (§ "PDF" above).** The existing "Expense
   reimbursements" line itemises each included claim as
   `{original_amount} {claim.currency} → {owed_amount} {owed_currency}

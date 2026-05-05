@@ -193,7 +193,7 @@ Route: `/my/expenses`.
 - [ ] Draft save, submit, and submit failure states are visible.
 - [ ] Offline expense draft/receipt queue survives navigation/reload where specified.
 - [ ] Recent expenses list shows draft, pending, approved, rejected, reimbursed, and empty states.
-- [ ] Owed-to-you/pending reimbursement panel matches the canonical endpoint once route drift is resolved.
+- [ ] Owed-to-you/pending reimbursement panel reads `GET /expenses/pending_reimbursement?user_id=me` and matches the pending totals.
 - [ ] Worker cannot see another worker's expenses via direct URL or altered identifiers.
 
 ## Employee Chat, Issues, Assets, And History
