@@ -320,6 +320,15 @@ member of `owners` (see §02 "Bootstrap"); subsequent admins can
 be added to `owners` without giving them `manager`, and vice
 versa.
 
+Property-scoped role grants, including invite-time grants with
+`scope_kind='property'`, require the property to be actively linked
+to the grant workspace. The cross-check joins through
+`property_workspace` and accepts only rows where
+`property.deleted_at IS NULL` and `property_workspace.status =
+'active'`; sibling-workspace properties, unknown ids, soft-deleted
+properties, and pre-acceptance `invited` links are all rejected as
+invalid property scope.
+
 ### Deployment scope
 
 `scope_kind = 'deployment'` is the process-level scope. There is

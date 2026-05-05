@@ -448,6 +448,12 @@ Primary key `(property_id, workspace_id)`. On soft-delete of a
 property the junction rows remain (history is preserved); on
 workspace delete the rows are hard-dropped.
 
+Property-scoped grants and invite-time property-grant validation may
+anchor only on a live, accepted link: `property.deleted_at IS NULL`
+and `property_workspace.status = 'active'`. Historical junction rows
+for soft-deleted properties and pre-acceptance `invited` rows do not
+confer property scope.
+
 **Creation path.** The `owner_workspace` row is seeded at
 `property.create` time in the creating workspace. Every other row
 — `managed_workspace` or `observer_workspace` — is materialised

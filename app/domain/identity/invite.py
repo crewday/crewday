@@ -92,7 +92,7 @@ from app.adapters.db.identity.models import (
     User,
     canonicalise_email,
 )
-from app.adapters.db.places.models import PropertyWorkspace
+from app.adapters.db.places.repositories import active_property_workspace_ids_stmt
 from app.adapters.db.workspace.models import (
     UserWorkRole,
     WorkEngagement,
@@ -514,8 +514,8 @@ def _validate_grants(
     * ``property`` — ``scope_id`` MUST equal ``workspace_id`` (the
       grant lives in *this* workspace, narrowed to a property);
       ``scope_property_id`` MUST be present and the property MUST be
-      linked to the caller's workspace via :class:`PropertyWorkspace`
-      (same cross-check as
+      actively linked to the caller's workspace via a live
+      :class:`PropertyWorkspace` / property pair (same cross-check as
       :func:`app.domain.identity.role_grants._assert_scope_property_in_workspace`).
       ``binding_org_id`` is rejected at property scope — the
       role_grant CHECK forbids ``binding_org_id`` whenever
@@ -651,9 +651,9 @@ def _validate_grants(
             wanted = {pid for _idx, pid in property_ids}
             known = set(
                 session.scalars(
-                    select(PropertyWorkspace.property_id).where(
-                        PropertyWorkspace.workspace_id == workspace_id,
-                        PropertyWorkspace.property_id.in_(wanted),
+                    active_property_workspace_ids_stmt(
+                        workspace_id=workspace_id,
+                        property_ids=wanted,
                     )
                 ).all()
             )

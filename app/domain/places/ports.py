@@ -179,12 +179,13 @@ class PropertyWorkRoleAssignmentRepository(Protocol):
         ...
 
     def property_in_workspace(self, *, workspace_id: str, property_id: str) -> bool:
-        """Return ``True`` iff a live ``property_workspace`` row links the workspace.
+        """Return ``True`` iff a live property link exists for the workspace.
 
         Drives :func:`_assert_property_in_workspace`. A workspace
         cannot pin a role to a property it does not operate (§02
         "property_work_role_assignment" invariant 2). "Live" means
-        ``status = 'active'`` (§02 "property_workspace.status") —
+        the property has not been soft-deleted and the junction row
+        has ``status = 'active'`` (§02 "property_workspace.status") —
         ``invited`` rows still pending the recipient workspace's
         accept step do not count.
         """

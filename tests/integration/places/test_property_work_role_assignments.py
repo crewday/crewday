@@ -126,7 +126,11 @@ def _ctx_for(workspace_id: str, workspace_slug: str, actor_id: str) -> Workspace
 
 
 def _seed_property(
-    session: Session, *, workspace_id: str, name: str = "Villa Sud"
+    session: Session,
+    *,
+    workspace_id: str,
+    name: str = "Villa Sud",
+    deleted_at: datetime | None = None,
 ) -> str:
     """Seed a ``property`` row + ``property_workspace`` junction."""
     prop = Property(
@@ -148,7 +152,7 @@ def _seed_property(
         property_notes_md="",
         created_at=_PINNED,
         updated_at=_PINNED,
-        deleted_at=None,
+        deleted_at=deleted_at,
     )
     session.add(prop)
     session.add(
@@ -343,6 +347,30 @@ class TestCreate:
                 body=PropertyWorkRoleAssignmentCreate(
                     user_work_role_id=uwr_id,
                     property_id=orphan.id,
+                ),
+                clock=FrozenClock(_PINNED),
+            )
+        assert "not linked" in str(exc_info.value)
+
+    def test_soft_deleted_property_blocks_create(
+        self, env: tuple[Session, WorkspaceContext, str, str]
+    ) -> None:
+        """A historical junction for a deleted property cannot anchor work."""
+        session, ctx, _prop_id, uwr_id = env
+        deleted_prop_id = _seed_property(
+            session,
+            workspace_id=ctx.workspace_id,
+            name="Deleted Villa",
+            deleted_at=_PINNED,
+        )
+
+        with pytest.raises(PropertyWorkRoleAssignmentInvariantViolated) as exc_info:
+            create_property_work_role_assignment(
+                _repo(session),
+                ctx,
+                body=PropertyWorkRoleAssignmentCreate(
+                    user_work_role_id=uwr_id,
+                    property_id=deleted_prop_id,
                 ),
                 clock=FrozenClock(_PINNED),
             )

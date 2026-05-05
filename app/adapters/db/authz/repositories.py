@@ -35,7 +35,7 @@ from app.adapters.db.authz.models import (
     RoleGrant,
 )
 from app.adapters.db.identity.models import User
-from app.adapters.db.places.models import PropertyWorkspace
+from app.adapters.db.places.repositories import active_property_workspace_ids_stmt
 from app.domain.identity.ports import (
     PermissionGroupMemberRow,
     PermissionGroupRepository,
@@ -402,10 +402,9 @@ class SqlAlchemyRoleGrantRepository(RoleGrantRepository):
 
     def is_property_in_workspace(self, *, workspace_id: str, property_id: str) -> bool:
         stmt = select(
-            exists().where(
-                PropertyWorkspace.property_id == property_id,
-                PropertyWorkspace.workspace_id == workspace_id,
-            )
+            active_property_workspace_ids_stmt(
+                workspace_id=workspace_id, property_ids=(property_id,)
+            ).exists()
         )
         return bool(self._session.scalar(stmt))
 

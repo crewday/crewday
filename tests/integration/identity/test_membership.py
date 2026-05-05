@@ -223,6 +223,8 @@ def _seed_property(
     *,
     workspace_id: str,
     label: str,
+    deleted_at: datetime | None = None,
+    property_workspace_status: str = "active",
 ) -> Property:
     """Insert a :class:`Property` + :class:`PropertyWorkspace` junction.
 
@@ -244,7 +246,7 @@ def _seed_property(
         property_notes_md="",
         created_at=_PINNED,
         updated_at=_PINNED,
-        deleted_at=None,
+        deleted_at=deleted_at,
     )
     session.add(prop)
     session.flush()
@@ -255,7 +257,7 @@ def _seed_property(
         membership_role="owner_workspace",
         share_guest_identity=False,
         auto_shift_from_occurrence=False,
-        status="active",
+        status=property_workspace_status,
         created_at=_PINNED,
     )
     session.add(junction)
@@ -682,6 +684,80 @@ class TestInviteScopeVariants:
                 workspace_name=ctx.workspace_slug,
                 link_port=MagicLinkAdapter(session),
             )
+        assert "scope_property_id" in str(exc.value)
+
+    def test_property_scope_soft_deleted_property_rejected(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        session, ctx, mailer, throttle = env
+        prop = _seed_property(
+            session,
+            workspace_id=ctx.workspace_id,
+            label="Deleted Villa",
+            deleted_at=_PINNED,
+        )
+
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership.invite(
+                session,
+                ctx,
+                email="deleted-prop@example.com",
+                display_name="Deleted",
+                grants=[
+                    {
+                        "scope_kind": "property",
+                        "scope_id": ctx.workspace_id,
+                        "scope_property_id": prop.id,
+                        "grant_role": "worker",
+                    }
+                ],
+                mailer=mailer,
+                throttle=throttle,
+                base_url=_BASE_URL,
+                settings=_TEST_SETTINGS,
+                inviter_display_name="Owner",
+                workspace_name=ctx.workspace_slug,
+                link_port=MagicLinkAdapter(session),
+            )
+
+        assert "scope_property_id" in str(exc.value)
+
+    def test_property_scope_invited_property_workspace_rejected(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        session, ctx, mailer, throttle = env
+        prop = _seed_property(
+            session,
+            workspace_id=ctx.workspace_id,
+            label="Invited Villa",
+            property_workspace_status="invited",
+        )
+
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership.invite(
+                session,
+                ctx,
+                email="invited-prop@example.com",
+                display_name="Invited",
+                grants=[
+                    {
+                        "scope_kind": "property",
+                        "scope_id": ctx.workspace_id,
+                        "scope_property_id": prop.id,
+                        "grant_role": "worker",
+                    }
+                ],
+                mailer=mailer,
+                throttle=throttle,
+                base_url=_BASE_URL,
+                settings=_TEST_SETTINGS,
+                inviter_display_name="Owner",
+                workspace_name=ctx.workspace_slug,
+                link_port=MagicLinkAdapter(session),
+            )
+
         assert "scope_property_id" in str(exc.value)
 
     def test_organization_scope_happy_path_persists_binding_org_id(

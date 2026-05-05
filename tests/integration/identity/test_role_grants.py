@@ -224,7 +224,12 @@ def _materialise_user_workspace(
 
 
 def _add_property_to_workspace(
-    session: Session, *, workspace_id: str, clock: FrozenClock
+    session: Session,
+    *,
+    workspace_id: str,
+    clock: FrozenClock,
+    property_deleted_at: datetime | None = None,
+    property_workspace_status: str = "active",
 ) -> str:
     """Insert a property linked to ``workspace_id`` via ``property_workspace``.
 
@@ -245,6 +250,7 @@ def _add_property_to_workspace(
                 timezone="Europe/Paris",
                 tags_json=[],
                 created_at=clock.now(),
+                deleted_at=property_deleted_at,
             )
         )
         session.flush()
@@ -254,6 +260,7 @@ def _add_property_to_workspace(
             workspace_id=workspace_id,
             label="Test property",
             membership_role="owner_workspace",
+            status=property_workspace_status,
             created_at=clock.now(),
         )
     )
@@ -548,6 +555,52 @@ class TestPropertyScope:
                 user_id=target,
                 grant_role="worker",
                 scope_property_id=foreign_property,
+                clock=clock,
+            )
+
+    def test_soft_deleted_property_rejected(
+        self, env: tuple[Session, WorkspaceContext]
+    ) -> None:
+        session, ctx = env
+        clock = FrozenClock(_PINNED)
+        property_id = _add_property_to_workspace(
+            session,
+            workspace_id=ctx.workspace_id,
+            clock=clock,
+            property_deleted_at=clock.now(),
+        )
+        target = _add_second_user(session, suffix="prop-deleted", clock=clock)
+
+        with pytest.raises(CrossWorkspaceProperty):
+            grant(
+                _rg_repo(session),
+                ctx,
+                user_id=target,
+                grant_role="worker",
+                scope_property_id=property_id,
+                clock=clock,
+            )
+
+    def test_invited_property_workspace_rejected(
+        self, env: tuple[Session, WorkspaceContext]
+    ) -> None:
+        session, ctx = env
+        clock = FrozenClock(_PINNED)
+        property_id = _add_property_to_workspace(
+            session,
+            workspace_id=ctx.workspace_id,
+            clock=clock,
+            property_workspace_status="invited",
+        )
+        target = _add_second_user(session, suffix="prop-invited", clock=clock)
+
+        with pytest.raises(CrossWorkspaceProperty):
+            grant(
+                _rg_repo(session),
+                ctx,
+                user_id=target,
+                grant_role="worker",
+                scope_property_id=property_id,
                 clock=clock,
             )
 

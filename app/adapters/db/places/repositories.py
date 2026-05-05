@@ -27,14 +27,15 @@ writer's FK reference to ``entity_id``) sees the new row.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.adapters.db.places.models import (
+    Property,
     PropertyWorkRoleAssignment,
     PropertyWorkspace,
 )
@@ -48,7 +49,29 @@ from app.domain.places.ports import (
 
 __all__ = [
     "SqlAlchemyPropertyWorkRoleAssignmentRepository",
+    "active_property_workspace_ids_stmt",
 ]
+
+
+def active_property_workspace_ids_stmt(
+    *, workspace_id: str, property_ids: Collection[str]
+) -> Select[tuple[str]]:
+    """Select live property ids actively linked to ``workspace_id``.
+
+    "Live" means the junction has been accepted
+    (``property_workspace.status = 'active'``) and the underlying
+    property has not been soft-deleted.
+    """
+    return (
+        select(PropertyWorkspace.property_id)
+        .join(Property, Property.id == PropertyWorkspace.property_id)
+        .where(
+            PropertyWorkspace.workspace_id == workspace_id,
+            PropertyWorkspace.property_id.in_(property_ids),
+            PropertyWorkspace.status == "active",
+            Property.deleted_at.is_(None),
+        )
+    )
 
 
 def _to_row(row: PropertyWorkRoleAssignment) -> PropertyWorkRoleAssignmentRow:
@@ -141,12 +164,12 @@ class SqlAlchemyPropertyWorkRoleAssignmentRepository(
         # pre-acceptance (§02 "property_workspace.status") and the
         # workspace has not yet taken operational control of the
         # property, so pinning a role to it would violate §02
-        # "property_work_role_assignment" invariant 2.
+        # "property_work_role_assignment" invariant 2. Soft-deleted
+        # properties are also rejected even if their historical
+        # junction row remains.
         row = self._session.scalar(
-            select(PropertyWorkspace).where(
-                PropertyWorkspace.property_id == property_id,
-                PropertyWorkspace.workspace_id == workspace_id,
-                PropertyWorkspace.status == "active",
+            active_property_workspace_ids_stmt(
+                workspace_id=workspace_id, property_ids=(property_id,)
             )
         )
         return row is not None
