@@ -10,6 +10,7 @@ export interface PageHeaderOverflowItem {
   icon?: ReactNode;
   onSelect: () => void;
   destructive?: boolean;
+  disabledReason?: string;
 }
 
 interface Props {
@@ -135,17 +136,27 @@ function OverflowMenu({ items }: { items: PageHeaderOverflowItem[] }) {
               <button
                 type="button"
                 role="menuitem"
+                disabled={Boolean(it.disabledReason)}
+                aria-disabled={it.disabledReason ? true : undefined}
+                title={it.disabledReason}
                 className={
                   "overflow-menu__item" +
-                  (it.destructive ? " overflow-menu__item--destructive" : "")
+                  (it.destructive ? " overflow-menu__item--destructive" : "") +
+                  (it.disabledReason ? " overflow-menu__item--disabled" : "")
                 }
                 onClick={() => {
+                  if (it.disabledReason) return;
                   close();
                   it.onSelect();
                 }}
               >
                 {it.icon ? <span className="overflow-menu__icon" aria-hidden="true">{it.icon}</span> : null}
-                <span className="overflow-menu__label">{it.label}</span>
+                <span className="overflow-menu__label">
+                  <span>{it.label}</span>
+                  {it.disabledReason ? (
+                    <span className="overflow-menu__reason">{it.disabledReason}</span>
+                  ) : null}
+                </span>
               </button>
             </li>
           ))}

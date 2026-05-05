@@ -246,7 +246,7 @@ Routes: `/properties`, `/property/:pid`, `/property/:pid/closures`.
 - [ ] Closure list shows date ranges, reason, effect on schedule, and affected tasks/bookings.
 - [ ] Closure create rejects invalid ranges and overlapping conflicts where specified.
 - [ ] Closure delete/cancel requires confirmation and updates schedules via SSE.
-- [ ] Property detail tabs/actions are either functional or explicitly disabled. Known follow-up: `cd-54y3w`.
+- [ ] Property detail tabs/actions are either functional or explicitly disabled. Covered by `app/web/src/pages/manager/PropertyDetailPage.test.tsx`.
 
 ## Manager People, Roles, Permissions, And Leave
 
@@ -512,7 +512,6 @@ The `site/` implementation is absent in this worktree; these checks are derived 
 
 - `cd-noi8g`: Resolve expense pending reimbursement route naming drift.
 - `cd-sfiod`: Clarify site demo chat intent copy against shipped chat model.
-- `cd-54y3w`: Make property detail visible actions real or explicitly disabled.
 - `cd-da4fo`: Audit manager pages for visible no-op overflow actions.
 
 ## Completion Tracking Convention

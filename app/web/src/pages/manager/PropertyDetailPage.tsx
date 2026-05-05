@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
@@ -70,39 +70,83 @@ export default function PropertyDetailPage() {
     <DeskPage
       title={property.name}
       sub={property.city + " · " + property.timezone}
-      actions={<button className="btn btn--moss">Edit property</button>}
-      overflow={[{ label: "New task", onSelect: () => undefined }]}
+      actions={
+        <span className="page-action-disabled">
+          <button
+            type="button"
+            className="btn btn--moss"
+            disabled
+            aria-describedby="edit-property-disabled-reason"
+          >
+            Edit property
+          </button>
+          <span id="edit-property-disabled-reason" className="page-action-disabled__reason">
+            Editing is not implemented yet.
+          </span>
+        </span>
+      }
+      overflow={[
+        {
+          label: "New task",
+          onSelect: () => undefined,
+          disabledReason: "Create tasks from Tasks or Today until property-scoped quick add ships.",
+        },
+      ]}
     >
-      <nav className="tabs tabs--h">
-        <a
+      <nav className="tabs tabs--h" aria-label="Property sections">
+        <button
+          type="button"
           className={"tab-link" + (activeTab === "overview" ? " tab-link--active" : "")}
+          aria-current={activeTab === "overview" ? "page" : undefined}
           onClick={() => setActiveTab("overview")}
         >
           Overview
-        </a>
-        <a className="tab-link">Areas</a>
-        <a className="tab-link">Stays</a>
-        <a
+        </button>
+        <button
+          type="button"
+          className="tab-link tab-link--disabled"
+          disabled
+          aria-describedby="property-areas-disabled-reason"
+        >
+          Areas
+        </button>
+        <Link className="tab-link" to={"/stays?property_id=" + encodeURIComponent(property.id)}>
+          Stays
+        </Link>
+        <button
+          type="button"
           className={"tab-link" + (activeTab === "assets" ? " tab-link--active" : "")}
+          aria-current={activeTab === "assets" ? "page" : undefined}
           onClick={() => setActiveTab("assets")}
         >
           Assets
-        </a>
-        <a className="tab-link">Instructions</a>
-        <a className="tab-link">Closures</a>
-        <a
+        </button>
+        <Link className="tab-link" to={"/instructions?property_id=" + encodeURIComponent(property.id)}>
+          Instructions
+        </Link>
+        <Link className="tab-link" to={"/property/" + property.id + "/closures"}>
+          Closures
+        </Link>
+        <button
+          type="button"
           className={"tab-link" + (activeTab === "sharing" ? " tab-link--active" : "")}
+          aria-current={activeTab === "sharing" ? "page" : undefined}
           onClick={() => setActiveTab("sharing")}
         >
           Sharing &amp; client
-        </a>
-        <a
+        </button>
+        <button
+          type="button"
           className={"tab-link" + (activeTab === "settings" ? " tab-link--active" : "")}
+          aria-current={activeTab === "settings" ? "page" : undefined}
           onClick={() => setActiveTab("settings")}
         >
           Settings
-        </a>
+        </button>
       </nav>
+      <p id="property-areas-disabled-reason" className="tabs__note">
+        Area editing for property detail is not implemented yet.
+      </p>
 
       {activeTab === "overview" && (
         <OverviewPanel detail={detail} employees={empsQ.data} />

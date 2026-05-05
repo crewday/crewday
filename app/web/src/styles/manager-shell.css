@@ -405,9 +405,38 @@
   outline: none;
 }
 .overflow-menu__item--destructive { color: var(--rust); }
+.overflow-menu__item--disabled,
+.overflow-menu__item:disabled {
+  color: var(--ink-4);
+  cursor: not-allowed;
+}
+.overflow-menu__item--disabled:hover,
+.overflow-menu__item--disabled:focus-visible {
+  background: transparent;
+}
 .overflow-menu__icon {
   display: inline-flex; align-items: center; justify-content: center;
   width: 20px; height: 20px; color: currentColor;
 }
-.overflow-menu__label { flex: 1; }
-
+.overflow-menu__label {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.overflow-menu__reason {
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.25;
+}
+.page-action-disabled {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.page-action-disabled__reason {
+  max-width: 150px;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.2;
+}
