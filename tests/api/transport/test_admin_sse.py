@@ -260,6 +260,59 @@ class TestAdminSSEFanOut:
 
         assert published[0]["payload"]["correlation_id"] == "fallback_corr"
 
+    def test_publish_admin_event_rebinds_after_bus_reset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        admin_sse._bus_bound = False
+        admin_sse._bus_bound_to = None
+        admin_sse._bus_bound_generation = None
+        event_bus = EventBus()
+        published: list[dict[str, object]] = []
+        monkeypatch.setattr(admin_sse, "default_event_bus", event_bus)
+        monkeypatch.setattr(
+            admin_sse.default_admin_fanout,
+            "publish",
+            lambda **kwargs: published.append(kwargs),
+        )
+        request = MagicMock()
+        request.headers = {}
+        request.state = SimpleNamespace(**{CORRELATION_ID_STATE_ATTR: "corr_admin"})
+        ctx = DeploymentContext(
+            principal="session_1",
+            user_id="admin_1",
+            actor_kind="user",
+            deployment_scopes=frozenset({"deployment:admin"}),
+        )
+        try:
+            admin_sse.publish_admin_event(
+                kind="admin.settings.updated",
+                ctx=ctx,
+                request=request,
+            )
+            assert [event["kind"] for event in published] == ["admin.settings.updated"]
+            event_bus._reset_for_tests()
+            published.clear()
+
+            admin_sse.publish_admin_event(
+                kind="admin.settings.updated",
+                ctx=ctx,
+                request=request,
+            )
+            admin_sse.publish_admin_event(
+                kind="admin.settings.updated",
+                ctx=ctx,
+                request=request,
+            )
+        finally:
+            admin_sse._bus_bound = False
+            admin_sse._bus_bound_to = None
+            admin_sse._bus_bound_generation = None
+
+        assert [event["kind"] for event in published] == [
+            "admin.settings.updated",
+            "admin.settings.updated",
+        ]
+
 
 class TestAdminEventsRoute:
     def test_non_admin_gets_invisible_404(

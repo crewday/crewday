@@ -241,18 +241,32 @@ def _default_admin_invalidates(kind: str) -> list[list[str]]:
 
 default_admin_fanout = AdminSSEFanOut()
 _bus_bound = False
+_bus_bound_to: EventBus | None = None
+_bus_bound_generation: int | None = None
 _bus_bind_lock = threading.Lock()
 
 
 def _ensure_bus_binding() -> None:
-    global _bus_bound
-    if _bus_bound:
+    global _bus_bound, _bus_bound_generation, _bus_bound_to
+    generation = default_event_bus.subscription_generation
+    if (
+        _bus_bound
+        and _bus_bound_to is default_event_bus
+        and _bus_bound_generation == generation
+    ):
         return
     with _bus_bind_lock:
-        if _bus_bound:
+        generation = default_event_bus.subscription_generation
+        if (
+            _bus_bound
+            and _bus_bound_to is default_event_bus
+            and _bus_bound_generation == generation
+        ):
             return
         default_admin_fanout.bind_to_bus(default_event_bus)
         _bus_bound = True
+        _bus_bound_to = default_event_bus
+        _bus_bound_generation = generation
 
 
 def publish_admin_event(

@@ -60,6 +60,7 @@ class EventBus:
         # in-process mode (the default for tests + SQLite deploys).
         # Set via :meth:`set_relay` from the application factory.
         self._relay: EventRelay | None = None
+        self._subscription_generation = 0
 
     def subscribe(self, event_type: type[E]) -> Callable[[Handler[E]], Handler[E]]:
         """Register a handler for ``event_type``.
@@ -178,6 +179,11 @@ class EventBus:
         """
         return self._relay
 
+    @property
+    def subscription_generation(self) -> int:
+        """Return a token that changes when test resets clear subscribers."""
+        return self._subscription_generation
+
     def _reset_for_tests(self) -> None:
         """Drop every subscription and detach any relay.
 
@@ -187,6 +193,7 @@ class EventBus:
         """
         with self._lock:
             self._subscribers.clear()
+            self._subscription_generation += 1
         self._relay = None
 
 
