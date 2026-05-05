@@ -91,6 +91,12 @@ function Shell() {
   return <EmployeeLayout />;
 }
 
+function ClientPortalGuard() {
+  const { role } = useRole();
+  if (role !== "client") return <Navigate to="/" replace />;
+  return <ClientLayout />;
+}
+
 export default function App() {
   const { role } = useRole();
 
@@ -186,7 +192,7 @@ export default function App() {
           <Route path="/admin/signups" element={<AdminSignupsPage />} />
         </Route>
 
-        <Route element={<ClientLayout />}>
+        <Route element={<ClientPortalGuard />}>
           <Route path="/portfolio" element={<ClientPortfolioPage />} />
           <Route path="/billable_hours" element={<ClientBillableHoursPage />} />
           <Route path="/quotes" element={<ClientQuotesPage />} />

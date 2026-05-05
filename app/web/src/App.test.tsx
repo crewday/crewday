@@ -15,6 +15,8 @@ import { installFetch, jsonResponse } from "@/test/helpers";
 import App from "./App";
 
 const mockRenders = vi.hoisted(() => ({
+  clientLayout: vi.fn(),
+  clientPortfolioPage: vi.fn(),
   employeeLayout: vi.fn(),
   managerLayout: vi.fn(),
   chatPage: vi.fn(),
@@ -64,6 +66,22 @@ vi.mock("@/layouts/ManagerLayout", async () => {
   };
 });
 
+vi.mock("@/layouts/ClientLayout", async () => {
+  const { Outlet: RouterOutlet } = await vi.importActual<typeof import("react-router-dom")>(
+    "react-router-dom",
+  );
+  return {
+    default: function MockClientLayout(): ReactElement {
+      mockRenders.clientLayout();
+      return (
+        <div data-testid="client-layout">
+          <RouterOutlet />
+        </div>
+      );
+    },
+  };
+});
+
 vi.mock("@/pages/employee/ChatPage", () => ({
   default: function MockChatPage(): ReactElement {
     mockRenders.chatPage();
@@ -78,11 +96,39 @@ vi.mock("@/pages/manager/DashboardPage", () => ({
   },
 }));
 
-function authMeFor(role: "employee" | "manager"): AuthMe {
+vi.mock("@/pages/client/PortfolioPage", () => ({
+  default: function MockClientPortfolioPage(): ReactElement {
+    mockRenders.clientPortfolioPage();
+    return <main data-testid="client-portfolio">Client portfolio</main>;
+  },
+}));
+
+type AppRole = "employee" | "manager" | "client";
+type WorkspaceGrantRole = "manager" | "worker" | "client";
+const clientPortalRoutes = [
+  "/portfolio",
+  "/billable_hours",
+  "/quotes",
+  "/invoices",
+] as const;
+
+function authMeFor(
+  role: AppRole,
+  grantRole: WorkspaceGrantRole = role === "employee" ? "worker" : role,
+): AuthMe {
   return {
-    user_id: role === "manager" ? "usr_manager" : "usr_worker",
-    display_name: role === "manager" ? "Manager User" : "Worker User",
-    email: role === "manager" ? "manager@example.com" : "worker@example.com",
+    user_id:
+      role === "manager" ? "usr_manager"
+      : role === "client" ? "usr_client"
+      : "usr_worker",
+    display_name:
+      role === "manager" ? "Manager User"
+      : role === "client" ? "Client User"
+      : "Worker User",
+    email:
+      role === "manager" ? "manager@example.com"
+      : role === "client" ? "client@example.com"
+      : "worker@example.com",
     available_workspaces: [
       {
         workspace: {
@@ -93,8 +139,8 @@ function authMeFor(role: "employee" | "manager"): AuthMe {
           default_country: "US",
           default_locale: "en",
         },
-        grant_role: role === "manager" ? "manager" : "worker",
-        binding_org_id: null,
+        grant_role: grantRole,
+        binding_org_id: grantRole === "client" ? "org_client" : null,
         source: "workspace_grant",
       },
     ],
@@ -123,10 +169,10 @@ function LocationProbe(): ReactElement {
   return <span data-testid="location">{location.pathname}</span>;
 }
 
-function renderAppAt(path: string, role: "employee" | "manager"): void {
+function renderAppAt(path: string, role: AppRole, grantRole?: WorkspaceGrantRole): void {
   vi.spyOn(preferences, "readRoleCookie").mockReturnValue(role);
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("ws_1");
-  setAuthenticated(authMeFor(role));
+  setAuthenticated(authMeFor(role, grantRole));
 
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -185,5 +231,62 @@ describe("App /chat role routing", () => {
     expect(mockRenders.employeeLayout).toHaveBeenCalled();
     expect(mockRenders.chatPage).toHaveBeenCalled();
     expect(mockRenders.managerLayout).not.toHaveBeenCalled();
+  });
+});
+
+describe("App client portal role routing", () => {
+  it.each(clientPortalRoutes)(
+    "redirects manager direct navigation away from the client portal shell at %s",
+    async (path) => {
+      installPermissionAllowFetch();
+      renderAppAt(path, "manager");
+
+      await waitFor(() => {
+        expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
+      });
+
+      expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
+      expect(mockRenders.managerLayout).toHaveBeenCalled();
+      expect(mockRenders.clientLayout).not.toHaveBeenCalled();
+      expect(mockRenders.clientPortfolioPage).not.toHaveBeenCalled();
+    },
+  );
+
+  it("redirects a stale client persona when the active workspace grant is manager", async () => {
+    installPermissionAllowFetch();
+    renderAppAt("/portfolio", "client", "manager");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
+    });
+
+    expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
+    expect(mockRenders.managerLayout).toHaveBeenCalled();
+    expect(mockRenders.clientLayout).not.toHaveBeenCalled();
+    expect(mockRenders.clientPortfolioPage).not.toHaveBeenCalled();
+  });
+
+  it("renders the client portal shell for client sessions", async () => {
+    renderAppAt("/portfolio", "client");
+
+    expect(await screen.findByTestId("client-portfolio")).toBeInTheDocument();
+    expect(screen.getByTestId("location")).toHaveTextContent("/portfolio");
+    expect(mockRenders.clientLayout).toHaveBeenCalled();
+    expect(mockRenders.clientPortfolioPage).toHaveBeenCalled();
+    expect(mockRenders.managerLayout).not.toHaveBeenCalled();
+  });
+
+  it("keeps mixed-role users in the visible manager persona until they switch explicitly", async () => {
+    installPermissionAllowFetch();
+    renderAppAt("/portfolio", "manager", "client");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
+    });
+
+    expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
+    expect(mockRenders.managerLayout).toHaveBeenCalled();
+    expect(mockRenders.clientLayout).not.toHaveBeenCalled();
+    expect(mockRenders.clientPortfolioPage).not.toHaveBeenCalled();
   });
 });

@@ -6,6 +6,7 @@ import ManagerLayout from "@/layouts/ManagerLayout";
 import AdminLayout from "@/layouts/AdminLayout";
 import PublicLayout from "@/layouts/PublicLayout";
 import { useRole } from "@/context/RoleContext";
+import { useWorkspace } from "@/context/WorkspaceContext";
 
 import TodayPage from "@/pages/employee/TodayPage";
 import SchedulePage from "@/pages/employee/SchedulePage";
@@ -75,7 +76,13 @@ import ClientBillableHoursPage from "@/pages/client/BillableHoursPage";
 import ClientQuotesPage from "@/pages/client/QuotesPage";
 import ClientInvoicesPage from "@/pages/client/InvoicesPage";
 
-import { RequireAuth, RequirePermission, WorkspaceGate } from "@/auth";
+import {
+  RequireAuth,
+  RequirePermission,
+  WorkspaceGate,
+  useAuth,
+  type AuthMe,
+} from "@/auth";
 
 const STYLEGUIDE_ENABLED =
   import.meta.env.DEV ||
@@ -103,6 +110,36 @@ function Shell() {
   if (role === "manager") return <ManagerLayout />;
   if (role === "client") return <ClientLayout />;
   return <EmployeeLayout />;
+}
+
+function activeWorkspaceGrantRole(
+  user: AuthMe | null,
+  workspaceId: string | null,
+): string | null {
+  const activeId = workspaceId ?? user?.current_workspace_id ?? null;
+  if (!user || !activeId) return null;
+  const workspace = user.available_workspaces.find(
+    (w) => w.workspace.id === activeId || w.workspace_id === activeId,
+  );
+  return workspace?.grant_role ?? null;
+}
+
+function landingForGrantRole(grantRole: string | null): string {
+  if (grantRole === "worker") return "/today";
+  if (grantRole === "client") return "/portfolio";
+  return "/dashboard";
+}
+
+function ClientPortalGuard() {
+  const { role } = useRole();
+  const { user } = useAuth();
+  const { workspaceId } = useWorkspace();
+  if (role !== "client") return <Navigate to="/" replace />;
+  const grantRole = activeWorkspaceGrantRole(user, workspaceId);
+  if (grantRole !== "client") {
+    return <Navigate to={landingForGrantRole(grantRole)} replace />;
+  }
+  return <ClientLayout />;
 }
 
 export default function App() {
@@ -337,7 +374,7 @@ export default function App() {
               </Route>
             </Route>
 
-            <Route element={<ClientLayout />}>
+            <Route element={<ClientPortalGuard />}>
               <Route path="/portfolio" element={<ClientPortfolioPage />} />
               <Route path="/billable_hours" element={<ClientBillableHoursPage />} />
               <Route path="/quotes" element={<ClientQuotesPage />} />
