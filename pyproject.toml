@@ -175,6 +175,7 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
+    "pytest-testmon",
     "pytest-xdist",
     "schemathesis",
     "playwright",
