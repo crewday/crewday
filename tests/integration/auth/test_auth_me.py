@@ -55,8 +55,8 @@ from app.adapters.db.authz.models import (
 from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.identity.models import User
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
-from app.api.errors import add_exception_handlers
 from app.api.deps import db_session as db_session_dep
+from app.api.errors import add_exception_handlers
 from app.api.v1.auth import me as me_module
 from app.auth import session as auth_session
 from app.auth.session import SESSION_COOKIE_NAME, issue
