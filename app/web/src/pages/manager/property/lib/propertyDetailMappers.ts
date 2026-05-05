@@ -8,17 +8,25 @@ import type {
   TaskPriority,
   TaskStatus,
 } from "@/types/api";
+import type { PropertyAddress, PropertyRecord } from "../types";
 
 export interface PropertyDetailRow {
   id: string;
   name: string;
   kind: Property["kind"];
-  address_json: Record<string, unknown>;
+  address: string | null;
+  address_json?: Record<string, unknown>;
   country: string;
   locale: string | null;
+  default_currency?: string | null;
   timezone: string;
+  lat?: number | null;
+  lon?: number | null;
   client_org_id: string | null;
   owner_user_id: string | null;
+  tags_json?: string[];
+  welcome_defaults_json?: Record<string, unknown>;
+  property_notes_md?: string | null;
 }
 
 export interface TaskRow {
@@ -205,11 +213,11 @@ export function mapOrganization(row: OrganizationRow): Organization {
 }
 
 export function fallbackProperty(row: PropertyDetailRow): Property {
-  const city = typeof row.address_json.city === "string" ? row.address_json.city : "";
+  const addressJson = normalizeAddress(row);
   return {
     id: row.id,
     name: row.name,
-    city,
+    city: addressJson.city,
     timezone: row.timezone,
     color: "moss",
     kind: row.kind,
@@ -220,5 +228,44 @@ export function fallbackProperty(row: PropertyDetailRow): Property {
     settings_override: {},
     client_org_id: row.client_org_id,
     owner_user_id: row.owner_user_id,
+  };
+}
+
+function stringField(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+export function normalizeAddress(row: PropertyDetailRow): PropertyAddress {
+  const addressJson = row.address_json ?? {};
+  const country = stringField(addressJson.country) || row.country;
+  return {
+    ...addressJson,
+    line1: stringField(addressJson.line1),
+    line2: stringField(addressJson.line2),
+    city: stringField(addressJson.city),
+    state_province: stringField(addressJson.state_province),
+    postal_code: stringField(addressJson.postal_code),
+    country,
+  };
+}
+
+export function normalizePropertyRecord(row: PropertyDetailRow): PropertyRecord {
+  return {
+    id: row.id,
+    name: row.name,
+    kind: row.kind,
+    address: row.address ?? "",
+    address_json: normalizeAddress(row),
+    country: row.country,
+    locale: row.locale,
+    default_currency: row.default_currency ?? null,
+    timezone: row.timezone,
+    lat: row.lat ?? null,
+    lon: row.lon ?? null,
+    client_org_id: row.client_org_id,
+    owner_user_id: row.owner_user_id,
+    tags_json: row.tags_json ?? [],
+    welcome_defaults_json: row.welcome_defaults_json ?? {},
+    property_notes_md: row.property_notes_md ?? "",
   };
 }

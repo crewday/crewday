@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -14,18 +14,26 @@ import type {
   SettingDefinition,
   WorkspaceSettings,
 } from "@/types/api";
+import AreasPanel from "./property/AreasPanel";
 import AssetsPanel from "./property/AssetsPanel";
 import OverviewPanel from "./property/OverviewPanel";
+import PropertyEditDialog, {
+  buildPropertyPatchBody,
+  type PropertyEditDraft,
+} from "./property/PropertyEditDialog";
 import SettingsOverridePanel from "./property/SettingsOverridePanel";
 import SharingPanel from "./property/SharingPanel";
 import { fetchPropertyDetail } from "./property/propertyDetailApi";
-import type { PropertyTab } from "./property/types";
+import type { PropertyRecord, PropertyTab } from "./property/types";
 
 export default function PropertyDetailPage() {
   // code-health: ignore[nloc] Property detail route is a declarative shell around extracted detail sections.
   const { pid = "" } = useParams<{ pid: string }>();
   const [activeTab, setActiveTab] = useState<PropertyTab>("overview");
+  const [editingProperty, setEditingProperty] = useState(false);
+  const [propertySaveError, setPropertySaveError] = useState<string | null>(null);
   const { workspaceId } = useWorkspace();
+  const queryClient = useQueryClient();
 
   const meQ = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<AuthMe>("/api/v1/auth/me") });
   const detailQ = useQuery({
@@ -56,6 +64,28 @@ export default function PropertyDetailPage() {
     queryFn: () => fetchJson<SettingDefinition[]>("/api/v1/settings/catalog"),
     enabled: activeTab === "settings",
   });
+  const saveProperty = useMutation({
+    mutationFn: (draft: PropertyEditDraft) => {
+      const record = detailQ.data?.property_record;
+      if (!record) throw new Error("Property is not loaded.");
+      return fetchJson<PropertyRecord>("/api/v1/properties/" + pid, {
+        method: "PATCH",
+        body: buildPropertyPatchBody(record, draft),
+      });
+    },
+    onSuccess: async () => {
+      setPropertySaveError(null);
+      setEditingProperty(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.property(pid) }),
+        queryClient.invalidateQueries({ queryKey: qk.properties() }),
+        queryClient.invalidateQueries({ queryKey: qk.propertyAreas(pid) }),
+      ]);
+    },
+    onError: (err) => {
+      setPropertySaveError(err instanceof Error ? err.message : "Property could not be saved.");
+    },
+  });
   if (detailQ.isPending || empsQ.isPending) {
     return <DeskPage title="Property"><Loading /></DeskPage>;
   }
@@ -71,19 +101,16 @@ export default function PropertyDetailPage() {
       title={property.name}
       sub={property.city + " · " + property.timezone}
       actions={
-        <span className="page-action-disabled">
-          <button
-            type="button"
-            className="btn btn--moss"
-            disabled
-            aria-describedby="edit-property-disabled-reason"
-          >
-            Edit property
-          </button>
-          <span id="edit-property-disabled-reason" className="page-action-disabled__reason">
-            Editing is not implemented yet.
-          </span>
-        </span>
+        <button
+          type="button"
+          className="btn btn--moss"
+          onClick={() => {
+            setPropertySaveError(null);
+            setEditingProperty(true);
+          }}
+        >
+          Edit property
+        </button>
       }
       overflow={[
         {
@@ -104,9 +131,9 @@ export default function PropertyDetailPage() {
         </button>
         <button
           type="button"
-          className="tab-link tab-link--disabled"
-          disabled
-          aria-describedby="property-areas-disabled-reason"
+          className={"tab-link" + (activeTab === "areas" ? " tab-link--active" : "")}
+          aria-current={activeTab === "areas" ? "page" : undefined}
+          onClick={() => setActiveTab("areas")}
         >
           Areas
         </button>
@@ -144,12 +171,13 @@ export default function PropertyDetailPage() {
           Settings
         </button>
       </nav>
-      <p id="property-areas-disabled-reason" className="tabs__note">
-        Area editing for property detail is not implemented yet.
-      </p>
 
       {activeTab === "overview" && (
         <OverviewPanel detail={detail} employees={empsQ.data} />
+      )}
+
+      {activeTab === "areas" && (
+        <AreasPanel propertyId={property.id} />
       )}
 
       {activeTab === "settings" && (
@@ -185,6 +213,17 @@ export default function PropertyDetailPage() {
         title={"Agent preferences — " + property.name}
         subtitle="Sits between workspace and user preferences when the agent discusses this property. Soft guidance only — hard rules belong in the settings cascade above."
       />
+
+      {editingProperty && (
+        <PropertyEditDialog
+          open={editingProperty}
+          property={detail.property_record}
+          saving={saveProperty.isPending}
+          error={propertySaveError}
+          onSubmit={(draft) => saveProperty.mutate(draft)}
+          onClose={() => setEditingProperty(false)}
+        />
+      )}
     </DeskPage>
   );
 }

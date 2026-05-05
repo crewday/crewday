@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
@@ -9,13 +9,132 @@ import * as preferences from "@/lib/preferences";
 import { jsonResponse } from "@/test/helpers";
 import PropertyDetailPage from "./PropertyDetailPage";
 
-function installFetch() {
-  const calls: { url: string; method: string }[] = [];
+interface RequestRecord {
+  url: string;
+  method: string;
+  body: unknown;
+}
+
+interface TestArea {
+  id: string;
+  property_id: string;
+  unit_id: string | null;
+  name: string;
+  kind: "indoor_room" | "outdoor" | "service";
+  order_hint: number;
+  parent_area_id: string | null;
+  notes_md: string;
+  created_at: string;
+  updated_at: string | null;
+  deleted_at: string | null;
+}
+
+interface TestProperty {
+  id: string;
+  name: string;
+  kind: "residence" | "vacation" | "str" | "mixed";
+  address: string;
+  address_json: {
+    line1: string;
+    line2: string;
+    city: string;
+    state_province: string;
+    postal_code: string;
+    country: string;
+  };
+  timezone: string;
+  country: string;
+  locale: string | null;
+  default_currency: string | null;
+  lat: number | null;
+  lon: number | null;
+  client_org_id: string | null;
+  owner_user_id: string | null;
+  tags_json: string[];
+  welcome_defaults_json: Record<string, unknown>;
+  property_notes_md: string;
+  settings_override: Record<string, unknown>;
+  created_at: string;
+  updated_at: string | null;
+  deleted_at: string | null;
+}
+
+interface InstallFetchOptions {
+  failAreaPost?: boolean;
+  failAreasList?: boolean;
+  failPropertyPatch?: boolean;
+}
+
+function parseBody(init?: RequestInit): unknown {
+  if (typeof init?.body !== "string") return null;
+  return JSON.parse(init.body);
+}
+
+function installFetch(options: InstallFetchOptions = {}) {
+  let property: TestProperty = {
+    id: "prop_1",
+    name: "Villa Rosa",
+    kind: "str",
+    address: "Rua das Flores 12, Porto, PT",
+    address_json: {
+      line1: "Rua das Flores 12",
+      line2: "",
+      city: "Porto",
+      state_province: "",
+      postal_code: "4000",
+      country: "PT",
+    },
+    timezone: "Europe/Lisbon",
+    country: "PT",
+    locale: "pt-PT",
+    default_currency: "EUR",
+    lat: null,
+    lon: null,
+    client_org_id: "org_1",
+    owner_user_id: null,
+    tags_json: [],
+    welcome_defaults_json: {},
+    property_notes_md: "Gate code changes each spring.",
+    settings_override: {},
+    created_at: "2026-04-29T00:00:00Z",
+    updated_at: null,
+    deleted_at: null,
+  };
+  let areas: TestArea[] = [
+    {
+      id: "area_1",
+      property_id: "prop_1",
+      unit_id: null,
+      name: "Kitchen",
+      kind: "indoor_room",
+      order_hint: 1,
+      parent_area_id: null,
+      notes_md: "",
+      created_at: "2026-04-29T00:00:00Z",
+      updated_at: null,
+      deleted_at: null,
+    },
+    {
+      id: "area_2",
+      property_id: "prop_1",
+      unit_id: null,
+      name: "Terrace",
+      kind: "outdoor",
+      order_hint: 2,
+      parent_area_id: null,
+      notes_md: "",
+      created_at: "2026-04-29T00:00:00Z",
+      updated_at: null,
+      deleted_at: null,
+    },
+  ];
+  const calls: RequestRecord[] = [];
   const original = globalThis.fetch;
   const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const resolved = typeof url === "string" ? url : url.toString();
     const method = init?.method ?? "GET";
-    calls.push({ url: resolved, method });
+    const body = parseBody(init);
+    calls.push({ url: resolved, method, body });
     if (resolved === "/api/v1/auth/me") {
       return jsonResponse({
         user_id: "usr_1",
@@ -40,38 +159,84 @@ function installFetch() {
     if (resolved === "/w/acme/api/v1/properties") {
       return jsonResponse([
         {
-          id: "prop_1",
-          name: "Villa Rosa",
-          city: "Porto",
-          timezone: "Europe/Lisbon",
+          id: property.id,
+          name: property.name,
+          city: property.address_json.city,
+          timezone: property.timezone,
           color: "moss",
-          kind: "str",
-          areas: ["Kitchen", "Terrace"],
+          kind: property.kind,
+          areas: areas.map((area) => area.name),
           evidence_policy: "inherit",
-          country: "PT",
-          locale: "pt-PT",
+          country: property.country,
+          locale: property.locale,
           settings_override: {},
-          client_org_id: "org_1",
-          owner_user_id: null,
+          client_org_id: property.client_org_id,
+          owner_user_id: property.owner_user_id,
         },
       ]);
     }
     if (resolved === "/w/acme/api/v1/properties/prop_1") {
-      return jsonResponse({
-        id: "prop_1",
-        name: "Villa Rosa",
-        kind: "str",
-        address: {
-          city: "Porto",
-          country: "PT",
-        },
-        timezone: "Europe/Lisbon",
-        country: "PT",
-        locale: "pt-PT",
-        client_org_id: "org_1",
-        owner_user_id: null,
-        settings_override: {},
-      });
+      if (method === "PATCH") {
+        if (options.failPropertyPatch) {
+          return jsonResponse({ detail: "You do not have permission to edit this property." }, 403);
+        }
+        const patch = body as Partial<typeof property>;
+        property = {
+          ...property,
+          ...patch,
+          address_json: {
+            ...property.address_json,
+            ...(patch.address_json ?? {}),
+          },
+          updated_at: "2026-05-05T10:00:00Z",
+        };
+      }
+      return jsonResponse(property);
+    }
+    if (resolved === "/w/acme/api/v1/properties/prop_1/areas") {
+      if (method === "GET" && options.failAreasList) {
+        return jsonResponse({ detail: "You do not have permission to view areas." }, 403);
+      }
+      if (method === "POST") {
+        if (options.failAreaPost) {
+          return jsonResponse({ detail: "name must be a non-blank string" }, 422);
+        }
+        const draft = body as Omit<TestArea, "id" | "property_id" | "created_at" | "updated_at" | "deleted_at">;
+        const next: TestArea = {
+          id: "area_" + String(areas.length + 1),
+          property_id: "prop_1",
+          unit_id: draft.unit_id,
+          name: draft.name,
+          kind: draft.kind,
+          order_hint: draft.order_hint,
+          parent_area_id: draft.parent_area_id,
+          notes_md: draft.notes_md,
+          created_at: "2026-05-05T10:00:00Z",
+          updated_at: null,
+          deleted_at: null,
+        };
+        areas = [...areas, next];
+        return jsonResponse(next, 201);
+      }
+      return jsonResponse({ data: areas, next_cursor: null, has_more: false });
+    }
+    if (resolved.startsWith("/w/acme/api/v1/areas/")) {
+      const areaId = resolved.split("/").at(-1) ?? "";
+      const existing = areas.find((area) => area.id === areaId);
+      if (!existing) throw new Error(`Unexpected area id: ${areaId}`);
+      if (method === "PATCH") {
+        const draft = body as Partial<TestArea>;
+        areas = areas.map((area) =>
+          area.id === areaId
+            ? { ...area, ...draft, updated_at: "2026-05-05T10:00:00Z" }
+            : area,
+        );
+        return jsonResponse(areas.find((area) => area.id === areaId));
+      }
+      if (method === "DELETE") {
+        areas = areas.filter((area) => area.id !== areaId);
+        return jsonResponse(null, 204);
+      }
     }
     if (resolved === "/w/acme/api/v1/tasks?property_id=prop_1&limit=100") {
       return jsonResponse({
@@ -260,26 +425,162 @@ afterEach(() => {
 });
 
 describe("<PropertyDetailPage>", () => {
-  it("marks unimplemented property detail actions as disabled with visible reasons", async () => {
+  it("edits supported property fields through the property API", async () => {
     const fake = installFetch();
     try {
       render(<Harness />);
 
       expect(await screen.findByRole("heading", { name: "Villa Rosa" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Edit property" })).toBeDisabled();
-      expect(screen.getByText("Editing is not implemented yet.")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Areas" })).toBeDisabled();
-      expect(screen.getByText("Area editing for property detail is not implemented yet.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Edit property" })).toBeEnabled();
+      expect(screen.queryByText("Editing is not implemented yet.")).not.toBeInTheDocument();
+      expect(screen.queryByText("Area editing for property detail is not implemented yet.")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Edit property" }));
+      const dialog = await screen.findByRole("dialog", { name: "Edit property" });
+      fireEvent.change(within(dialog).getByLabelText("Name"), {
+        target: { value: "Villa Aurora" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("City"), {
+        target: { value: "Braga" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Timezone"), {
+        target: { value: "Europe/Madrid" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save property" }));
+
+      expect(await screen.findByRole("heading", { name: "Villa Aurora" })).toBeInTheDocument();
+      expect(screen.getByText("Braga · Europe/Madrid")).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "More actions" }));
       expect(screen.getByRole("menuitem", { name: /New task/ })).toBeDisabled();
       expect(screen.getByText("Create tasks from Tasks or Today until property-scoped quick add ships.")).toBeInTheDocument();
-      expect(fake.calls).toContainEqual({
-        url: "/w/acme/api/v1/properties/prop_1",
-        method: "GET",
+      const patch = fake.calls.find((call) =>
+        call.url === "/w/acme/api/v1/properties/prop_1" && call.method === "PATCH"
+      );
+      expect(patch?.body).toMatchObject({
+        name: "Villa Aurora",
+        timezone: "Europe/Madrid",
+        country: "PT",
+        client_org_id: "org_1",
+        address_json: {
+          city: "Braga",
+          country: "PT",
+        },
       });
     } finally {
       fake.restore();
+    }
+  });
+
+  it("creates, updates, and deletes areas from the property areas tab", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Tasks for this property")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Areas" }));
+      expect(await screen.findByText("Kitchen")).toBeInTheDocument();
+      expect(screen.getByText("Terrace")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "New area" }));
+      fireEvent.change(screen.getByLabelText("Name"), {
+        target: { value: "Pool" },
+      });
+      fireEvent.change(screen.getByLabelText("Kind"), {
+        target: { value: "outdoor" },
+      });
+      fireEvent.change(screen.getByLabelText("Order"), {
+        target: { value: "3" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save area" }));
+      expect(await screen.findByText("Pool")).toBeInTheDocument();
+
+      const poolRow = screen.getByText("Pool").closest("tr");
+      expect(poolRow).not.toBeNull();
+      fireEvent.click(within(poolRow as HTMLTableRowElement).getByRole("button", { name: "Edit" }));
+      fireEvent.change(screen.getByLabelText("Name"), {
+        target: { value: "Pool deck" },
+      });
+      fireEvent.change(screen.getByLabelText("Notes"), {
+        target: { value: "Check loungers after checkout." },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save area" }));
+      expect(await screen.findByText("Pool deck")).toBeInTheDocument();
+      expect(screen.getByText("Check loungers after checkout.")).toBeInTheDocument();
+
+      const deckRow = screen.getByText("Pool deck").closest("tr");
+      expect(deckRow).not.toBeNull();
+      fireEvent.click(within(deckRow as HTMLTableRowElement).getByRole("button", { name: "Edit" }));
+      fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+      expect(screen.getByRole("alert")).toHaveTextContent("Delete Pool deck? This cannot be undone.");
+      expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/areas/area_3" && call.method === "DELETE")).toBe(false);
+      fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
+      await waitFor(() => {
+        expect(screen.queryByText("Pool deck")).not.toBeInTheDocument();
+      });
+
+      expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/properties/prop_1/areas" && call.method === "POST")).toBe(true);
+      expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/areas/area_3" && call.method === "PATCH")).toBe(true);
+      expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/areas/area_3" && call.method === "DELETE")).toBe(true);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("keeps the property editor open and shows server permission errors", async () => {
+    const fake = installFetch({ failPropertyPatch: true });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByRole("heading", { name: "Villa Rosa" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Edit property" }));
+      const dialog = await screen.findByRole("dialog", { name: "Edit property" });
+      fireEvent.change(within(dialog).getByLabelText("Name"), {
+        target: { value: "Villa Aurora" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save property" }));
+
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+        "You do not have permission to edit this property.",
+      );
+      expect(screen.getByRole("dialog", { name: "Edit property" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Villa Rosa" })).toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("shows area load and validation errors in the areas workflow", async () => {
+    const loadFailure = installFetch({ failAreasList: true });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Tasks for this property")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Areas" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("You do not have permission to view areas.");
+    } finally {
+      loadFailure.restore();
+    }
+
+    cleanup();
+    const saveFailure = installFetch({ failAreaPost: true });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Tasks for this property")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Areas" }));
+      expect(await screen.findByText("Kitchen")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "New area" }));
+      fireEvent.change(screen.getByLabelText("Name"), {
+        target: { value: "Pool" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save area" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("name must be a non-blank string");
+      expect(screen.getByRole("button", { name: "Save area" })).toBeInTheDocument();
+      expect(screen.queryByText("Pool")).not.toBeInTheDocument();
+    } finally {
+      saveFailure.restore();
     }
   });
 

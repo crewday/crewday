@@ -13,6 +13,7 @@ import {
   mapOrganization,
   mapReservation,
   mapTask,
+  normalizePropertyRecord,
   type MembershipRow,
   type OrganizationRow,
   type PropertyDetailRow,
@@ -72,6 +73,7 @@ export async function fetchPropertyDetail(
   );
 
   const property = properties.find((p) => p.id === pid) ?? fallbackProperty(propertyRow);
+  const propertyRecord = normalizePropertyRecord(propertyRow);
   const membershipRows = memberships.data.map(mapMembership);
   const namesByMembershipId = new Map(memberships.data.map((m) => [m.workspace_id, m.label]));
   const workspaceIdBySlug = Object.fromEntries(
@@ -92,6 +94,7 @@ export async function fetchPropertyDetail(
 
   return {
     property,
+    property_record: propertyRecord,
     property_tasks: tasks.data.map(mapTask),
     stays: reservations.data.map(mapReservation),
     inventory: [],
