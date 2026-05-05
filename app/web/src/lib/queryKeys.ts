@@ -146,6 +146,7 @@ export const qk = {
   agentManagerActions: () => [...ws(), "agent", "manager", "actions"] as const,
   agentTaskChat: (tid: string) => [...ws(), "agent", "task", tid, "log"] as const,
   agentApprovalMode: () => [...ws(), "me", "agent_approval_mode"] as const,
+  payPeriods: () => [...ws(), "pay-periods"] as const,
   // §14 "Agent turn indicator" — whether a turn is currently in
   // flight for the given scope. Cache value is `true`/`false`. The
   // SSE dispatcher flips it on the §11 `agent.turn.{started,finished}`

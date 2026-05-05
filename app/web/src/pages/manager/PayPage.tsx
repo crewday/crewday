@@ -1,5 +1,6 @@
-import { useQueries, useQuery } from "@tanstack/react-query";
-import { fetchJson, openApiDownload } from "@/lib/api";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRef, useState, type FormEvent } from "react";
+import { ApiError, fetchJson, openApiDownload } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
 import DeskPage from "@/components/DeskPage";
@@ -32,6 +33,18 @@ interface PayrollPayslipPayload {
 
 interface PayrollPayslipListPayload {
   data: PayrollPayslipPayload[];
+}
+
+interface PayPeriodPayload {
+  id: string;
+  starts_at: string;
+  ends_at: string;
+  state: "open" | "locked" | "paid" | string;
+  locked_at: string | null;
+}
+
+interface PayPeriodListPayload {
+  data: PayPeriodPayload[];
 }
 
 interface WorkEngagementPayload {
@@ -115,12 +128,47 @@ function mapPayPayload(payload: PayrollPayslipListPayload): PayPayload {
   };
 }
 
+function periodLabel(period: PayPeriodPayload): string {
+  const starts = new Date(period.starts_at);
+  const ends = new Date(period.ends_at);
+  if (Number.isNaN(starts.getTime()) || Number.isNaN(ends.getTime())) return "Open period";
+  const displayEnd = new Date(ends.getTime() - 1);
+  return `${starts.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  })} to ${displayEnd.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  })}`;
+}
+
+function blockerMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.detail ?? error.title ?? error.message;
+  }
+  if (error instanceof Error) return error.message;
+  return "The period could not be closed. Review unsettled bookings, approvals, and pay rules.";
+}
+
 export default function PayPage() {
   // code-health: ignore[ccn nloc] Pay route coordinates payslip and reimbursement query data while preserving existing table layout.
+  const queryClient = useQueryClient();
+  const closeDialogRef = useRef<HTMLDialogElement>(null);
+  const [closeTarget, setCloseTarget] = useState<PayPeriodPayload | null>(null);
+  const [closeBlocker, setCloseBlocker] = useState<string | null>(null);
   const payQ = useQuery({
     queryKey: qk.payslips(),
     queryFn: () =>
       fetchJson<PayrollPayslipListPayload>("/api/v1/payroll/payslips").then(mapPayPayload),
+  });
+  const periodsQueryKey = qk.payPeriods();
+  const periodsQ = useQuery({
+    queryKey: periodsQueryKey,
+    queryFn: () => fetchJson<PayPeriodListPayload>("/api/v1/payroll/pay-periods"),
   });
   const employeesQ = useQuery({
     queryKey: qk.employees(),
@@ -150,9 +198,57 @@ export default function PayPage() {
       };
     }),
   });
+  const openPeriods = periodsQ.data?.data.filter((period) => period.state === "open") ?? [];
+  const openPeriod = openPeriods.length === 1 ? openPeriods[0] : null;
+  const closeMutation = useMutation({
+    mutationFn: (periodId: string) =>
+      fetchJson<PayPeriodPayload>(`/api/v1/payroll/pay-periods/${periodId}/lock`, {
+        method: "POST",
+      }),
+    onSuccess: async (lockedPeriod) => {
+      setCloseBlocker(null);
+      closeDialogRef.current?.close();
+      setCloseTarget(null);
+      queryClient.setQueryData<PayPeriodListPayload>(periodsQueryKey, (existing) =>
+        existing
+          ? {
+              data: existing.data.map((period) =>
+                period.id === lockedPeriod.id ? lockedPeriod : period,
+              ),
+            }
+          : existing,
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.payslips() }),
+        queryClient.invalidateQueries({ queryKey: periodsQueryKey }),
+        queryClient.invalidateQueries({ queryKey: qk.expensesPendingReimbursement("all") }),
+      ]);
+    },
+    onError: (error) => {
+      setCloseBlocker(blockerMessage(error));
+    },
+  });
+
+  const closeDisabledReason = (() => {
+    if (periodsQ.isPending) return "Payroll periods are still loading.";
+    if (periodsQ.isError) return "Payroll periods could not be loaded.";
+    if (openPeriods.length === 0) return "No open payroll period is available.";
+    if (openPeriods.length > 1) return "Multiple open payroll periods need review before closing.";
+    return undefined;
+  })();
+  const openCloseDialog = () => {
+    if (!openPeriod) return;
+    setCloseTarget(openPeriod);
+    setCloseBlocker(null);
+    closeDialogRef.current?.showModal();
+  };
+  const submitClose = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (closeTarget) closeMutation.mutate(closeTarget.id);
+  };
 
   const sub = "Periods, payslips, pay rules. Gross only — taxes and social contributions are out of scope.";
-  const actions = (
+  const actions = closeDisabledReason ? (
     <span className="page-action-disabled">
       <button
         type="button"
@@ -163,9 +259,18 @@ export default function PayPage() {
         Close period
       </button>
       <span id="pay-close-period-disabled-reason" className="page-action-disabled__reason">
-        Period close is not implemented yet.
+        {closeDisabledReason}
       </span>
     </span>
+  ) : (
+    <button
+      type="button"
+      className="btn btn--moss"
+      onClick={openCloseDialog}
+      disabled={closeMutation.isPending}
+    >
+      {closeMutation.isPending ? "Closing..." : "Close period"}
+    </button>
   );
   const overflow = [
     {
@@ -217,9 +322,54 @@ export default function PayPage() {
       : pendingTotals
           .map((t) => formatMoney(t.amount_cents, t.currency))
           .join(" + ");
+  const closeSucceeded = closeMutation.isSuccess && !openPeriod;
 
   return (
     <DeskPage title="Pay" sub={sub} actions={actions} overflow={exportOverflow}>
+      <dialog
+        className="modal"
+        ref={closeDialogRef}
+        aria-label="Close pay period"
+        onClose={() => {
+          if (!closeMutation.isPending) {
+            setCloseTarget(null);
+            setCloseBlocker(null);
+          }
+        }}
+      >
+        <form className="modal__body" onSubmit={submitClose}>
+          <h3 className="modal__title">Close pay period</h3>
+          <p className="modal__sub">
+            {closeTarget
+              ? `Lock ${periodLabel(closeTarget)} and compute draft payslips. The server will block this if bookings, approvals, or pay rules still need attention.`
+              : "No open payroll period is selected."}
+          </p>
+          {closeBlocker && (
+            <p role="alert" className="form-error">
+              {closeBlocker}
+            </p>
+          )}
+          <div className="modal__actions">
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => closeDialogRef.current?.close()}
+              disabled={closeMutation.isPending}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn btn--moss" disabled={!closeTarget || closeMutation.isPending}>
+              {closeMutation.isPending ? "Closing..." : "Close period"}
+            </button>
+          </div>
+        </form>
+      </dialog>
+      {closeSucceeded && (
+        <p role="status" className="muted">
+          Period locked. Pay data refreshed.
+        </p>
+      )}
+
       <section className="grid grid--stats">
         <StatCard label="Current period" value="April 2026" sub="open · closes 30 Apr" />
         <StatCard label="Drafts" value={current.length} sub="payslips pending issue" />
@@ -268,22 +418,13 @@ export default function PayPage() {
                   <td className="mono"><strong>{formatMoney(p.net_cents, p.currency)}</strong></td>
                   <td><Chip tone={STATUS_TONE[p.status]} size="sm">{p.status}</Chip></td>
                   <td>
-                    <span className="page-action-disabled page-action-disabled--inline">
-                      <button
-                        type="button"
-                        className="btn btn--sm btn--ghost"
-                        disabled
-                        aria-describedby={`payslip-preview-disabled-reason-${p.id}`}
-                      >
-                        Preview PDF
-                      </button>
-                      <span
-                        id={`payslip-preview-disabled-reason-${p.id}`}
-                        className="page-action-disabled__reason"
-                      >
-                        Payslip PDF preview is not implemented yet.
-                      </span>
-                    </span>
+                    <button
+                      type="button"
+                      className="btn btn--sm btn--ghost"
+                      onClick={() => openApiDownload(`/api/v1/payroll/payslips/${p.id}/pdf`)}
+                    >
+                      Preview PDF
+                    </button>
                   </td>
                 </tr>
               );
