@@ -470,8 +470,13 @@ class TestHappyPathBooking:
     ) -> None:
         ws = _bootstrap_workspace(session)
         prop = _bootstrap_property(session)
+        unit_id = _bootstrap_unit(session, property_id=prop, name="Villa Sud")
         feed_id = _bootstrap_feed(
-            session, workspace_id=ws, property_id=prop, envelope=envelope
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            unit_id=unit_id,
+            envelope=envelope,
         )
         starts = datetime(2026, 5, 1, 14, 0, tzinfo=UTC)
         ends = datetime(2026, 5, 4, 11, 0, tzinfo=UTC)
@@ -503,6 +508,7 @@ class TestHappyPathBooking:
         assert len(rows) == 1
         assert rows[0].external_uid == "abc-123"
         assert rows[0].ical_feed_id == feed_id
+        assert rows[0].unit_id == unit_id
         assert rows[0].status == "scheduled"
         assert rows[0].source == "ical"
 

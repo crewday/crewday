@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, NamedTuple
 
 from fastapi import (
     APIRouter,
@@ -27,7 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.places.models import Property
+from app.adapters.db.places.models import Property, PropertyWorkspace, Unit
 from app.adapters.db.secrets.repositories import SqlAlchemySecretEnvelopeRepository
 from app.adapters.db.session import bind_active_session
 from app.adapters.db.stays.models import IcalFeed, Reservation, StayBundle
@@ -52,9 +52,12 @@ from app.api.pagination import (
     paginate,
 )
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES, PROBLEM_JSON_CONTENT
+from app.audit import write_audit
 from app.authz.dep import Permission
 from app.config import Settings, get_settings
 from app.domain.errors import (
+    Conflict,
+    Forbidden,
     Gone,
     NotFound,
     ServiceUnavailable,
@@ -80,6 +83,7 @@ from app.domain.stays.guest_link_service import (
 )
 from app.domain.stays.ical_service import (
     IcalFeedCreate,
+    IcalFeedDuplicate,
     IcalFeedNotFound,
     IcalFeedUpdate,
     IcalFeedView,
@@ -93,10 +97,13 @@ from app.domain.stays.ical_service import (
     resolve_allow_self_signed,
     update_feed,
 )
+from app.events.bus import bus as default_event_bus
+from app.events.types import ReservationUpserted
 from app.ports.tasks_create_occurrence import TasksCreateOccurrencePort
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.tenancy.current import reset_current, set_current
 from app.util.clock import Clock, SystemClock
+from app.util.ulid import new_ulid
 from app.worker.tasks.poll_ical import PolledFeedResult, poll_ical
 
 router: APIRouter
@@ -110,6 +117,7 @@ __all__ = [
     "IcalFeedUpdateRequest",
     "IcalPollOnceResponse",
     "IcalProbeResponse",
+    "ManualStayCreateRequest",
     "ReservationListResponse",
     "ReservationResponse",
     "StayBundleListResponse",
@@ -247,6 +255,14 @@ _IcalFetcherDep = Annotated[Fetcher | None, Depends(get_ical_fetcher)]
 _IcalResolverDep = Annotated[Resolver | None, Depends(get_ical_resolver)]
 
 
+class _PropertyAccess(NamedTuple):
+    membership_role: str
+    share_guest_identity: bool
+
+
+_WRITABLE_PROPERTY_ROLES = frozenset({"owner_workspace", "managed_workspace"})
+
+
 # ---------------------------------------------------------------------------
 # Wire shapes
 # ---------------------------------------------------------------------------
@@ -267,6 +283,20 @@ class IcalFeedUpdateRequest(BaseModel):
 
     url: str | None = Field(default=None, min_length=10, max_length=2048)
     provider_override: IcalProvider | None = None
+
+
+class ManualStayCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    property_id: str = Field(..., min_length=1, max_length=64)
+    unit_id: str = Field(..., min_length=1, max_length=64)
+    check_in_at: datetime
+    check_out_at: datetime
+    guest_name: str | None = Field(default=None, max_length=256)
+    guest_count: int = Field(..., ge=1, le=99)
+    guest_kind: Literal["guest"] = "guest"
+    status: Literal["tentative", "confirmed"] = "confirmed"
+    source: Literal["manual"] = "manual"
 
 
 class IcalFeedResponse(BaseModel):
@@ -321,6 +351,7 @@ class ReservationResponse(BaseModel):
     id: str
     workspace_id: str
     property_id: str
+    unit_id: str | None
     ical_feed_id: str | None
     external_uid: str
     check_in: datetime
@@ -533,6 +564,15 @@ def build_stays_router() -> APIRouter:
         clock: _ClockDep,
     ) -> IcalFeedResponse:
         # code-health: ignore[params] FastAPI params are OpenAPI contract.
+        if body.unit_id is None:
+            _ensure_property_writable(session, ctx, property_id=body.property_id)
+        else:
+            _resolve_unit_access(
+                session,
+                ctx,
+                property_id=body.property_id,
+                unit_id=body.unit_id,
+            )
         # §04 SSRF carve-out (cd-t2qtg) — resolve the per-feed
         # ``ical.allow_self_signed`` cascade BEFORE the registration
         # probe so a workspace / property that has opted in can
@@ -555,6 +595,14 @@ def build_stays_router() -> APIRouter:
                 envelope=envelope,
                 clock=clock,
             )
+        except IcalFeedDuplicate as exc:
+            raise Conflict(
+                "iCal feed already exists",
+                extra={
+                    "error": "ical_feed_duplicate",
+                    "message": "iCal feed already exists",
+                },
+            ) from exc
         except IcalUrlInvalid as exc:
             raise _http_for_ical_url(exc) from exc
         return _ical_feed_response(view)
@@ -773,6 +821,78 @@ def build_stays_router() -> APIRouter:
             report_results=report.per_feed_results,
             polled_at=report.tick_started_at,
         )
+
+    @api.post(
+        "",
+        status_code=status.HTTP_201_CREATED,
+        response_model=ReservationResponse,
+        operation_id="stays.create",
+        dependencies=[manage_gate],
+    )
+    def create_stay(
+        body: ManualStayCreateRequest,
+        ctx: _Ctx,
+        session: _Db,
+        clock: _ClockDep,
+    ) -> ReservationResponse:
+        if body.check_out_at <= body.check_in_at:
+            raise Validation(
+                "check_out_at must be after check_in_at",
+                extra={
+                    "error": "stay_invalid_dates",
+                    "message": "check_out_at must be after check_in_at",
+                },
+            )
+        access = _resolve_unit_access(
+            session,
+            ctx,
+            property_id=body.property_id,
+            unit_id=body.unit_id,
+        )
+
+        now = clock.now()
+        reservation_id = new_ulid()
+        can_store_guest_name = (
+            access.membership_role == "owner_workspace" or access.share_guest_identity
+        )
+        guest_name = (
+            body.guest_name.strip()
+            if can_store_guest_name and body.guest_name is not None
+            else None
+        )
+        if guest_name == "":
+            guest_name = None
+        row = Reservation(
+            id=reservation_id,
+            workspace_id=ctx.workspace_id,
+            property_id=body.property_id,
+            unit_id=body.unit_id,
+            ical_feed_id=None,
+            external_uid=f"manual-{reservation_id}",
+            check_in=_aware_utc(body.check_in_at),
+            check_out=_aware_utc(body.check_out_at),
+            guest_name=guest_name,
+            guest_count=body.guest_count,
+            status=_manual_status_to_storage(body.status),
+            source="manual",
+            raw_summary=None,
+            raw_description=None,
+            guest_link_id=None,
+            created_at=now,
+        )
+        session.add(row)
+        session.flush()
+        write_audit(
+            session,
+            ctx,
+            entity_kind="reservation",
+            entity_id=row.id,
+            action="create",
+            diff={"after": _reservation_audit_dict(row)},
+            clock=clock,
+        )
+        _publish_manual_reservation_created(session, ctx, row=row, now=now)
+        return _reservation_response(row)
 
     @api.get(
         "/reservations",
@@ -1111,11 +1231,128 @@ def _poll_once_response(
     )
 
 
+def _manual_status_to_storage(status_value: Literal["tentative", "confirmed"]) -> str:
+    return status_value
+
+
+def _ensure_property_writable(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    property_id: str,
+) -> _PropertyAccess:
+    row = session.execute(
+        select(
+            PropertyWorkspace.membership_role,
+            PropertyWorkspace.share_guest_identity,
+        )
+        .join(Property, Property.id == PropertyWorkspace.property_id)
+        .where(
+            Property.id == property_id,
+            Property.deleted_at.is_(None),
+            PropertyWorkspace.workspace_id == ctx.workspace_id,
+            PropertyWorkspace.status == "active",
+        )
+    ).one_or_none()
+    if row is None:
+        raise _not_found("property_not_found")
+    access = _PropertyAccess(
+        membership_role=row.membership_role,
+        share_guest_identity=row.share_guest_identity,
+    )
+    _ensure_property_access_writable(access)
+    return access
+
+
+def _resolve_unit_access(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    property_id: str,
+    unit_id: str,
+) -> _PropertyAccess:
+    row = session.execute(
+        select(
+            PropertyWorkspace.membership_role,
+            PropertyWorkspace.share_guest_identity,
+        )
+        .select_from(Unit)
+        .join(Property, Property.id == Unit.property_id)
+        .join(PropertyWorkspace, PropertyWorkspace.property_id == Property.id)
+        .where(
+            Unit.id == unit_id,
+            Unit.property_id == property_id,
+            Unit.deleted_at.is_(None),
+            Property.deleted_at.is_(None),
+            PropertyWorkspace.workspace_id == ctx.workspace_id,
+            PropertyWorkspace.status == "active",
+        )
+    ).one_or_none()
+    if row is None:
+        raise _not_found("unit_not_found")
+    access = _PropertyAccess(
+        membership_role=row.membership_role,
+        share_guest_identity=row.share_guest_identity,
+    )
+    _ensure_property_access_writable(access)
+    return access
+
+
+def _ensure_property_access_writable(access: _PropertyAccess) -> None:
+    if access.membership_role not in _WRITABLE_PROPERTY_ROLES:
+        raise Forbidden(
+            "Property share is read-only",
+            extra={
+                "error": "property_read_only",
+                "message": "Property share is read-only",
+            },
+        )
+
+
+def _publish_manual_reservation_created(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    row: Reservation,
+    now: datetime,
+) -> None:
+    token = set_current(ctx)
+    try:
+        with bind_active_session(session):
+            default_event_bus.publish(
+                ReservationUpserted(
+                    workspace_id=ctx.workspace_id,
+                    actor_id=ctx.actor_id,
+                    correlation_id=ctx.audit_correlation_id,
+                    occurred_at=now,
+                    reservation_id=row.id,
+                    feed_id=None,
+                    change_kind="created",
+                )
+            )
+    finally:
+        reset_current(token)
+
+
+def _reservation_audit_dict(row: Reservation) -> dict[str, object]:
+    return {
+        "id": row.id,
+        "property_id": row.property_id,
+        "unit_id": row.unit_id,
+        "check_in": _aware_utc(row.check_in).isoformat(),
+        "check_out": _aware_utc(row.check_out).isoformat(),
+        "guest_count": row.guest_count,
+        "status": row.status,
+        "source": row.source,
+    }
+
+
 def _reservation_response(row: Reservation) -> ReservationResponse:
     return ReservationResponse(
         id=row.id,
         workspace_id=row.workspace_id,
         property_id=row.property_id,
+        unit_id=row.unit_id,
         ical_feed_id=row.ical_feed_id,
         external_uid=row.external_uid,
         check_in=_aware_utc(row.check_in),

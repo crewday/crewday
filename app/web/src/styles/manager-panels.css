@@ -54,6 +54,50 @@
 
 .link { color: var(--moss); font-weight: 500; font-size: 13px; }
 .link--muted { color: var(--ink-3); }
+
+.stays-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.stays-form-grid__wide {
+  grid-column: 1 / -1;
+}
+
+.stays-form-note,
+.form-notice {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--ink-2);
+  background: var(--paper-2);
+}
+
+.stays-form-note--warn {
+  border-color: var(--sand);
+  background: var(--sand-soft);
+}
+
+.form-notice--success {
+  border-color: var(--moss);
+  background: var(--moss-soft);
+  color: var(--ink);
+}
+
+.form-notice--error {
+  border-color: var(--rust);
+  background: var(--rust-soft);
+  color: var(--ink);
+}
+
+@media (max-width: 640px) {
+  .stays-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
 .table .link {
   display: inline-flex;
   align-items: center;

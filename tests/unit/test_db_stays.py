@@ -139,6 +139,7 @@ class TestReservationModel:
             created_at=_PINNED,
         )
         assert res.ical_feed_id is None
+        assert res.unit_id is None
         assert res.guest_name is None
         assert res.guest_count is None
         assert res.raw_summary is None
@@ -151,6 +152,7 @@ class TestReservationModel:
             id="01HWA00000000000000000RESB",
             workspace_id="01HWA00000000000000000WSPA",
             property_id="01HWA00000000000000000PRPA",
+            unit_id="01HWA00000000000000000UNIT",
             ical_feed_id="01HWA00000000000000000FEDA",
             external_uid="HMABC124",
             check_in=_PINNED,
@@ -163,6 +165,7 @@ class TestReservationModel:
             raw_description="Arrives 4pm",
             created_at=_PINNED,
         )
+        assert res.unit_id == "01HWA00000000000000000UNIT"
         assert res.ical_feed_id == "01HWA00000000000000000FEDA"
         assert res.guest_name == "Ada Lovelace"
         assert res.guest_count == 2
@@ -181,7 +184,16 @@ class TestReservationModel:
         ]
         assert len(checks) == 1
         sql = str(checks[0].sqltext)
-        for status in ("scheduled", "checked_in", "completed", "cancelled"):
+        for status in (
+            "scheduled",
+            "checked_in",
+            "completed",
+            "tentative",
+            "confirmed",
+            "in_house",
+            "checked_out",
+            "cancelled",
+        ):
             assert status in sql, f"{status} missing from CHECK constraint"
 
     def test_source_check_present(self) -> None:
@@ -224,10 +236,15 @@ class TestReservationModel:
         indexes = [i for i in Reservation.__table_args__ if isinstance(i, Index)]
         names = [i.name for i in indexes]
         assert "ix_reservation_property_check_in" in names
+        assert "ix_reservation_unit_check_in" in names
         target = next(
             i for i in indexes if i.name == "ix_reservation_property_check_in"
         )
         assert [c.name for c in target.columns] == ["property_id", "check_in"]
+        unit_target = next(
+            i for i in indexes if i.name == "ix_reservation_unit_check_in"
+        )
+        assert [c.name for c in unit_target.columns] == ["unit_id", "check_in"]
 
 
 class TestStayBundleModel:

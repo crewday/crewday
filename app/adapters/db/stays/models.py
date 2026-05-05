@@ -5,7 +5,7 @@ reservation → turnover-bundle chain that drives property turnover.
 cd-ewd7 extends ``ical_feed`` to the full §04 shape (``unit_id``,
 ``poll_cadence``, ``last_error``, and the widened ``provider``
 enum including ``gcal``). Richer ``reservation`` columns
-(``nightly_rate_cents``, ``guest_kind``, ``unit_id``) and the
+(``nightly_rate_cents``, ``guest_kind``) and the
 ``stay_bundle_state`` enum still land with later domain-layer
 follow-ups without breaking this migration's public write contract.
 
@@ -77,14 +77,18 @@ _PROVIDER_VALUES: tuple[str, ...] = (
     "custom",
 )
 
-# Allowed ``reservation.status`` values — the v1 lifecycle. The
-# fuller §04 machine (``tentative | confirmed | in_house |
-# checked_out | cancelled``) maps onto this simpler set at the
-# domain boundary and lands with cd-1ai.
+# Allowed ``reservation.status`` values. The legacy v1 lifecycle
+# (``scheduled | checked_in | completed | cancelled``) remains valid
+# for existing iCal rows; the §04/UI lifecycle lands alongside it for
+# manual stay creation.
 _STATUS_VALUES: tuple[str, ...] = (
     "scheduled",
     "checked_in",
     "completed",
+    "tentative",
+    "confirmed",
+    "in_house",
+    "checked_out",
     "cancelled",
 )
 
@@ -250,6 +254,11 @@ class Reservation(Base):
         ForeignKey("property.id", ondelete="CASCADE"),
         nullable=False,
     )
+    unit_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("unit.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     # Nullable + ``SET NULL``: a reservation outlives its feed if the
     # feed is deleted (agency swap, manual recapture). The domain
     # layer's re-ingest path doesn't depend on the feed surviving.
@@ -307,6 +316,7 @@ class Reservation(Base):
         ),
         # Per-acceptance: "reservations for this property in time order".
         Index("ix_reservation_property_check_in", "property_id", "check_in"),
+        Index("ix_reservation_unit_check_in", "unit_id", "check_in"),
     )
 
 

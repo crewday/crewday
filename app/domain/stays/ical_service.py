@@ -70,7 +70,11 @@ from app.adapters.ical.ports import (
     IcalValidator,
     ProviderDetector,
 )
-from app.adapters.storage.ports import EnvelopeEncryptor, EnvelopeOwner
+from app.adapters.storage.ports import (
+    EnvelopeDecryptError,
+    EnvelopeEncryptor,
+    EnvelopeOwner,
+)
 from app.audit import write_audit
 from app.domain.settings.cascade import SettingScopeChain, resolve_most_specific
 from app.tenancy import WorkspaceContext
@@ -79,6 +83,7 @@ from app.util.ulid import new_ulid
 
 __all__ = [
     "IcalFeedCreate",
+    "IcalFeedDuplicate",
     "IcalFeedNotFound",
     "IcalFeedUpdate",
     "IcalFeedView",
@@ -137,6 +142,10 @@ class IcalFeedNotFound(LookupError):
     to workspace B; we don't distinguish "wrong workspace" from
     "really missing".
     """
+
+
+class IcalFeedDuplicate(ValueError):
+    """A matching feed URL is already registered for this property/unit."""
 
 
 class IcalUrlInvalid(ValueError):
@@ -289,6 +298,13 @@ def register_feed(
         validation = validator.validate(body.url)
     except IcalValidationError as exc:
         raise IcalUrlInvalid(exc.code, str(exc)) from exc
+    _raise_for_duplicate_feed(
+        session,
+        ctx,
+        body=body,
+        canonical_url=validation.url,
+        envelope=envelope,
+    )
 
     # Provider override wins when present; fall through to auto-
     # detection only when the override is absent. Skipping the detect
@@ -671,6 +687,36 @@ def _load_row(session: Session, ctx: WorkspaceContext, *, feed_id: str) -> IcalF
     if row is None:
         raise IcalFeedNotFound(feed_id)
     return row
+
+
+def _raise_for_duplicate_feed(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    body: IcalFeedCreate,
+    canonical_url: str,
+    envelope: EnvelopeEncryptor,
+) -> None:
+    stmt = select(IcalFeed).where(
+        IcalFeed.workspace_id == ctx.workspace_id,
+        IcalFeed.property_id == body.property_id,
+    )
+    if body.unit_id is None:
+        stmt = stmt.where(IcalFeed.unit_id.is_(None))
+    else:
+        stmt = stmt.where(IcalFeed.unit_id == body.unit_id)
+
+    for row in session.scalars(stmt):
+        try:
+            existing_url = envelope.decrypt(
+                row.url.encode("latin-1"),
+                purpose=_URL_PURPOSE,
+                expected_owner=_owner_for_feed(row.id),
+            ).decode("utf-8")
+        except EnvelopeDecryptError, UnicodeDecodeError:
+            continue
+        if existing_url == canonical_url:
+            raise IcalFeedDuplicate(canonical_url)
 
 
 def _ciphertext_to_str(ciphertext: bytes) -> str:

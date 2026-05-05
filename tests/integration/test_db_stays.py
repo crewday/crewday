@@ -229,6 +229,7 @@ class TestMigrationShape:
             "id",
             "workspace_id",
             "property_id",
+            "unit_id",
             "ical_feed_id",
             "external_uid",
             "check_in",
@@ -245,6 +246,7 @@ class TestMigrationShape:
         assert set(cols) == expected
         for nullable in (
             "ical_feed_id",
+            "unit_id",
             "guest_name",
             "guest_count",
             "raw_summary",
@@ -266,12 +268,20 @@ class TestMigrationShape:
         # ical_feed SET NULL so a reservation outlives the feed's deletion.
         assert fks[("ical_feed_id",)]["referred_table"] == "ical_feed"
         assert fks[("ical_feed_id",)]["options"].get("ondelete") == "SET NULL"
+        # unit SET NULL so a reservation outlives unit churn.
+        assert fks[("unit_id",)]["referred_table"] == "unit"
+        assert fks[("unit_id",)]["options"].get("ondelete") == "SET NULL"
 
     def test_reservation_property_check_in_index(self, engine: Engine) -> None:
         indexes = {ix["name"]: ix for ix in inspect(engine).get_indexes("reservation")}
         assert "ix_reservation_property_check_in" in indexes
         assert indexes["ix_reservation_property_check_in"]["column_names"] == [
             "property_id",
+            "check_in",
+        ]
+        assert "ix_reservation_unit_check_in" in indexes
+        assert indexes["ix_reservation_unit_check_in"]["column_names"] == [
+            "unit_id",
             "check_in",
         ]
 
@@ -448,7 +458,7 @@ class TestCheckConstraints:
                     external_uid="uid-bogus-status",
                     check_in=_CHECK_IN,
                     check_out=_CHECK_OUT,
-                    status="checked_out",
+                    status="bogus",
                     source="ical",
                     created_at=_PINNED,
                 )

@@ -215,8 +215,14 @@ def _seed_workspace(
     )
 
 
-def _seed_property(session: Session, *, workspace_id: str) -> str:
-    from app.adapters.db.places.models import Property
+def _seed_property(
+    session: Session,
+    *,
+    workspace_id: str,
+    membership_role: str = "owner_workspace",
+    share_guest_identity: bool = True,
+) -> str:
+    from app.adapters.db.places.models import Property, PropertyWorkspace
 
     property_id = new_ulid()
     session.add(
@@ -242,8 +248,47 @@ def _seed_property(session: Session, *, workspace_id: str) -> str:
             deleted_at=None,
         )
     )
+    session.add(
+        PropertyWorkspace(
+            property_id=property_id,
+            workspace_id=workspace_id,
+            label="Villa Sud",
+            membership_role=membership_role,
+            share_guest_identity=share_guest_identity,
+            status="active",
+            created_at=_PINNED,
+        )
+    )
     session.flush()
     return property_id
+
+
+def _seed_unit(session: Session, *, property_id: str, name: str = "Suite 1") -> str:
+    from app.adapters.db.places.models import Unit
+
+    unit_id = new_ulid()
+    session.add(
+        Unit(
+            id=unit_id,
+            property_id=property_id,
+            name=name,
+            ordinal=0,
+            default_checkin_time=None,
+            default_checkout_time=None,
+            max_guests=4,
+            welcome_overrides_json={},
+            settings_override_json={},
+            notes_md="",
+            label=name,
+            type="apartment",
+            capacity=4,
+            created_at=_PINNED,
+            updated_at=_PINNED,
+            deleted_at=None,
+        )
+    )
+    session.flush()
+    return unit_id
 
 
 def _seed_reservation(
@@ -251,6 +296,7 @@ def _seed_reservation(
     *,
     workspace_id: str,
     property_id: str,
+    unit_id: str | None = None,
     check_in: datetime,
     check_out: datetime,
     status: str = "scheduled",
@@ -262,6 +308,7 @@ def _seed_reservation(
             id=reservation_id,
             workspace_id=workspace_id,
             property_id=property_id,
+            unit_id=unit_id,
             ical_feed_id=None,
             external_uid=f"manual-{reservation_id}",
             check_in=check_in,
@@ -395,6 +442,7 @@ def test_ical_feed_crud_disable_delete_and_manual_poll(
     with factory() as session:
         ctx, workspace_id, _actor_id = _seed_workspace(session, slug="ical")
         property_id = _seed_property(session, workspace_id=workspace_id)
+        unit_id = _seed_unit(session, property_id=property_id)
         session.commit()
     client = _build_client(
         factory=factory,
@@ -404,15 +452,43 @@ def test_ical_feed_crud_disable_delete_and_manual_poll(
         settings=settings,
     )
 
+    wrong_unit = client.post(
+        "/stays/ical-feeds",
+        json={
+            "property_id": property_id,
+            "unit_id": new_ulid(),
+            "url": "https://airbnb.example/wrong.ics",
+        },
+    )
+    assert wrong_unit.status_code == 404
+    assert wrong_unit.json()["error"] == "unit_not_found"
+    assert validator.calls == []
+
     created = client.post(
         "/stays/ical-feeds",
-        json={"property_id": property_id, "url": "https://airbnb.example/feed.ics"},
+        json={
+            "property_id": property_id,
+            "unit_id": unit_id,
+            "url": "https://airbnb.example/feed.ics",
+        },
     )
     assert created.status_code == 201
     body = created.json()
     assert body["provider"] == "airbnb"
+    assert body["unit_id"] == unit_id
     assert body["url_preview"] == "https://airbnb.example"
     assert "feed.ics" not in body["url_preview"]
+
+    duplicate = client.post(
+        "/stays/ical-feeds",
+        json={
+            "property_id": property_id,
+            "unit_id": unit_id,
+            "url": "https://airbnb.example/feed.ics",
+        },
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["error"] == "ical_feed_duplicate"
 
     listed = client.get("/stays/ical-feeds", params={"property_id": property_id})
     assert listed.status_code == 200
@@ -512,6 +588,182 @@ def test_reservation_listing_filters_and_cursor_pagination(
     )
     assert future.status_code == 200
     assert {row["id"] for row in future.json()["data"]} == {second}
+
+
+def test_manual_stay_create_persists_unit_and_allows_overlap(
+    factory: sessionmaker[Session],
+    validator: FakeValidator,
+    envelope: FakeEnvelope,
+    settings: Settings,
+) -> None:
+    with factory() as session:
+        ctx, workspace_id, _actor_id = _seed_workspace(session, slug="manual-create")
+        property_id = _seed_property(session, workspace_id=workspace_id)
+        unit_id = _seed_unit(session, property_id=property_id)
+        _seed_reservation(
+            session,
+            workspace_id=workspace_id,
+            property_id=property_id,
+            unit_id=unit_id,
+            check_in=_PINNED + timedelta(days=2),
+            check_out=_PINNED + timedelta(days=5),
+        )
+        session.commit()
+    client = _build_client(
+        factory=factory,
+        ctx=ctx,
+        validator=validator,
+        envelope=envelope,
+        settings=settings,
+    )
+
+    created = client.post(
+        "/stays",
+        json={
+            "property_id": property_id,
+            "unit_id": unit_id,
+            "check_in_at": (_PINNED + timedelta(days=3)).isoformat(),
+            "check_out_at": (_PINNED + timedelta(days=6)).isoformat(),
+            "guest_name": " Grace Hopper ",
+            "guest_count": 2,
+            "guest_kind": "guest",
+            "status": "confirmed",
+            "source": "manual",
+        },
+    )
+
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["property_id"] == property_id
+    assert body["unit_id"] == unit_id
+    assert body["guest_name"] == "Grace Hopper"
+    assert body["guest_count"] == 2
+    assert body["status"] == "confirmed"
+    assert body["source"] == "manual"
+    assert body["external_uid"] == f"manual-{body['id']}"
+
+    listed = client.get("/stays/reservations", params={"property_id": property_id})
+    assert listed.status_code == 200
+    rows = listed.json()["data"]
+    assert [row["unit_id"] for row in rows] == [unit_id, unit_id]
+
+    with factory() as session:
+        row = session.get(Reservation, body["id"])
+        assert row is not None
+        assert row.unit_id == unit_id
+        assert row.guest_name == "Grace Hopper"
+
+
+def test_manual_stay_create_rejects_invalid_dates_and_unit_scope(
+    factory: sessionmaker[Session],
+    validator: FakeValidator,
+    envelope: FakeEnvelope,
+    settings: Settings,
+) -> None:
+    with factory() as session:
+        ctx, workspace_id, _actor_id = _seed_workspace(session, slug="manual-invalid")
+        property_id = _seed_property(session, workspace_id=workspace_id)
+        unit_id = _seed_unit(session, property_id=property_id)
+        other_property_id = _seed_property(session, workspace_id=workspace_id)
+        session.commit()
+    client = _build_client(
+        factory=factory,
+        ctx=ctx,
+        validator=validator,
+        envelope=envelope,
+        settings=settings,
+    )
+    valid_body = {
+        "property_id": property_id,
+        "unit_id": unit_id,
+        "check_in_at": (_PINNED + timedelta(days=3)).isoformat(),
+        "check_out_at": (_PINNED + timedelta(days=6)).isoformat(),
+        "guest_name": None,
+        "guest_count": 1,
+        "guest_kind": "guest",
+        "status": "confirmed",
+        "source": "manual",
+    }
+
+    invalid_dates = client.post(
+        "/stays",
+        json={
+            **valid_body,
+            "check_out_at": valid_body["check_in_at"],
+        },
+    )
+    assert invalid_dates.status_code == 422
+    assert invalid_dates.json()["error"] == "stay_invalid_dates"
+
+    wrong_property = client.post(
+        "/stays",
+        json={**valid_body, "property_id": other_property_id},
+    )
+    assert wrong_property.status_code == 404
+    assert wrong_property.json()["error"] == "unit_not_found"
+
+
+def test_manual_stay_create_enforces_share_privacy_and_read_only_property_role(
+    factory: sessionmaker[Session],
+    validator: FakeValidator,
+    envelope: FakeEnvelope,
+    settings: Settings,
+) -> None:
+    with factory() as session:
+        ctx, workspace_id, _actor_id = _seed_workspace(session, slug="manual-share")
+        property_id = _seed_property(
+            session,
+            workspace_id=workspace_id,
+            membership_role="managed_workspace",
+            share_guest_identity=False,
+        )
+        unit_id = _seed_unit(session, property_id=property_id)
+        observer_property_id = _seed_property(
+            session,
+            workspace_id=workspace_id,
+            membership_role="observer_workspace",
+            share_guest_identity=True,
+        )
+        observer_unit_id = _seed_unit(session, property_id=observer_property_id)
+        session.commit()
+    client = _build_client(
+        factory=factory,
+        ctx=ctx,
+        validator=validator,
+        envelope=envelope,
+        settings=settings,
+    )
+    body = {
+        "property_id": property_id,
+        "unit_id": unit_id,
+        "check_in_at": (_PINNED + timedelta(days=3)).isoformat(),
+        "check_out_at": (_PINNED + timedelta(days=6)).isoformat(),
+        "guest_name": "Hidden Person",
+        "guest_count": 1,
+        "guest_kind": "guest",
+        "status": "confirmed",
+        "source": "manual",
+    }
+
+    created = client.post("/stays", json=body)
+
+    assert created.status_code == 201, created.text
+    assert created.json()["guest_name"] is None
+    with factory() as session:
+        row = session.get(Reservation, created.json()["id"])
+        assert row is not None
+        assert row.guest_name is None
+
+    read_only = client.post(
+        "/stays",
+        json={
+            **body,
+            "property_id": observer_property_id,
+            "unit_id": observer_unit_id,
+        },
+    )
+    assert read_only.status_code == 403
+    assert read_only.json()["error"] == "property_read_only"
 
 
 def test_stay_bundle_list_get_and_regenerate_is_idempotent(

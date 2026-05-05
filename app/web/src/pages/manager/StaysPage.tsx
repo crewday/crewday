@@ -1,20 +1,31 @@
-import { useQuery } from "@tanstack/react-query";
-import type { ReactElement } from "react";
-import { fetchJson } from "@/lib/api";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type FormEvent, type ReactElement, useRef, useState } from "react";
+import { ApiError, fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import { Chip, Loading } from "@/components/common";
+import { useWorkspace } from "@/context/WorkspaceContext";
 import type {
   Employee,
   Leave,
+  PropertyWorkspace,
   Property,
   PropertyClosure,
   Stay,
 } from "@/types/api";
+import type { AuthMe } from "@/auth/types";
+
+type IcalProvider = "airbnb" | "vrbo" | "booking" | "gcal" | "generic";
+type StaySource = Stay["source"];
+type StayStatus = Stay["status"];
+
+interface PageStay extends Stay {
+  unit_id: string | null;
+}
 
 interface StaysPayload {
-  stays: Stay[];
+  stays: PageStay[];
   closures: PropertyClosure[];
   leaves: Leave[];
 }
@@ -22,12 +33,41 @@ interface StaysPayload {
 interface ReservationPayload {
   id: string;
   property_id: string;
+  unit_id?: string | null;
   check_in: string;
   check_out: string;
   guest_name: string | null;
   guest_count: number | null;
   status: string;
   source: string;
+}
+
+interface UnitPayload {
+  id: string;
+  property_id: string;
+  name: string;
+}
+
+interface MembershipPayload {
+  property_id: string;
+  workspace_id: string;
+  label: string;
+  membership_role: PropertyWorkspace["membership_role"];
+  share_guest_identity: boolean;
+  created_at: string;
+}
+
+interface IcalFeedPayload {
+  id: string;
+  property_id: string;
+  unit_id: string | null;
+  provider: string;
+  provider_override: string | null;
+  url_preview: string;
+  enabled: boolean;
+  poll_cadence: string;
+  last_polled_at: string | null;
+  last_error: string | null;
 }
 
 interface LeaveListPayload {
@@ -49,6 +89,44 @@ const STAY_TONE: Record<Stay["status"], "sky" | "moss" | "ghost" | "rust" | "san
 };
 
 const DOW = ["M", "T", "W", "T", "F", "S", "S"];
+
+const PROVIDERS: { value: IcalProvider; label: string }[] = [
+  { value: "airbnb", label: "Airbnb" },
+  { value: "vrbo", label: "VRBO" },
+  { value: "booking", label: "Booking.com" },
+  { value: "gcal", label: "Google Calendar" },
+  { value: "generic", label: "Generic ICS" },
+];
+
+const manualNoticeId = "manual-stay-form-notice";
+const manualPrivacyId = "manual-stay-privacy-note";
+const manualOverlapId = "manual-stay-overlap-note";
+const manualUnitErrorId = "manual-stay-unit-error";
+const icalNoticeId = "ical-feed-form-notice";
+const icalDuplicateId = "ical-feed-duplicate-note";
+const icalUnitErrorId = "ical-feed-unit-error";
+
+interface ManualStayForm {
+  propertyId: string;
+  unitId: string;
+  guestName: string;
+  guestCount: string;
+  checkIn: string;
+  checkOut: string;
+  status: StayStatus;
+}
+
+interface IcalForm {
+  propertyId: string;
+  unitId: string;
+  provider: IcalProvider;
+  url: string;
+}
+
+interface FormNotice {
+  tone: "success" | "error";
+  text: string;
+}
 
 function fmtAbbrevDate(iso: string): string {
   // code-health: ignore[ccn nloc] Tiny date formatter is a lizard TS parser artifact.
@@ -83,10 +161,11 @@ function dateOnly(iso: string): string {
   return iso.slice(0, 10);
 }
 
-function mapReservation(row: ReservationPayload): Stay {
+function mapReservation(row: ReservationPayload): PageStay {
   return {
     id: row.id,
     property_id: row.property_id,
+    unit_id: row.unit_id ?? null,
     guest_name: row.guest_name ?? "Guest",
     source: mapSource(row.source),
     check_in: dateOnly(row.check_in),
@@ -115,6 +194,19 @@ function mapLeave(row: LeaveListPayload): Leave {
   };
 }
 
+function mapMembership(row: MembershipPayload): PropertyWorkspace {
+  return {
+    property_id: row.property_id,
+    workspace_id: row.workspace_id,
+    membership_role: row.membership_role,
+    share_guest_identity: row.share_guest_identity,
+    invite_id: null,
+    added_at: row.created_at,
+    added_by_user_id: null,
+    added_via: "system",
+  };
+}
+
 async function fetchStaysPayload(): Promise<StaysPayload> {
   const [reservations, leaves] = await Promise.all([
     fetchJson<ListEnvelope<ReservationPayload>>("/api/v1/stays/reservations?limit=500"),
@@ -127,8 +219,164 @@ async function fetchStaysPayload(): Promise<StaysPayload> {
   };
 }
 
+async function fetchPropertyUnits(propertyId: string): Promise<UnitPayload[]> {
+  const rows = await fetchJson<ListEnvelope<UnitPayload>>(
+    "/api/v1/properties/" + encodeURIComponent(propertyId) + "/units?limit=100",
+  );
+  return rows.data;
+}
+
+async function fetchPropertyMemberships(propertyId: string): Promise<PropertyWorkspace[]> {
+  const rows = await fetchJson<ListEnvelope<MembershipPayload>>(
+    "/api/v1/properties/" + encodeURIComponent(propertyId) + "/share",
+  );
+  return rows.data.map(mapMembership);
+}
+
+async function fetchIcalFeeds(): Promise<IcalFeedPayload[]> {
+  return fetchJson<IcalFeedPayload[]>("/api/v1/stays/ical-feeds");
+}
+
+function initialManualForm(properties: Property[], units: UnitPayload[]): ManualStayForm {
+  const propertyId = properties[0]?.id ?? "";
+  const propertyUnits = units.filter((unit) => unit.property_id === propertyId);
+  return {
+    propertyId,
+    unitId: propertyUnits[0]?.id ?? "",
+    guestName: "",
+    guestCount: "1",
+    checkIn: "",
+    checkOut: "",
+    status: "confirmed",
+  };
+}
+
+function initialIcalForm(properties: Property[], units: UnitPayload[]): IcalForm {
+  const propertyId = properties[0]?.id ?? "";
+  const propertyUnits = units.filter((unit) => unit.property_id === propertyId);
+  return {
+    propertyId,
+    unitId: propertyUnits[0]?.id ?? "",
+    provider: "airbnb",
+    url: "",
+  };
+}
+
+function providerLabel(provider: string): string {
+  return PROVIDERS.find((entry) => entry.value === provider)?.label ?? provider;
+}
+
+function overlapWarning(
+  form: ManualStayForm,
+  stays: PageStay[],
+  guestNameForStay: (stay: PageStay) => string,
+): string | null {
+  if (!form.propertyId || !form.checkIn || !form.checkOut) return null;
+  const checkIn = Date.parse(form.checkIn);
+  const checkOut = Date.parse(form.checkOut);
+  if (!Number.isFinite(checkIn) || !Number.isFinite(checkOut) || checkIn >= checkOut) return null;
+  const overlap = stays.find((stay) => {
+    if (stay.property_id !== form.propertyId || stay.status === "cancelled") return false;
+    if (stay.unit_id && stay.unit_id !== form.unitId) return false;
+    return Date.parse(stay.check_in) < checkOut && checkIn < Date.parse(stay.check_out);
+  });
+  if (!overlap) return null;
+  const arrival = fmtAbbrevDate(overlap.check_in);
+  const departure = fmtAbbrevDate(overlap.check_out);
+  return `Overlaps ${guestNameForStay(overlap)} from ${arrival} to ${departure}. The server may still allow the stay and mark the conflict.`;
+}
+
+function validateManualForm(form: ManualStayForm, canShareGuestName: boolean): string | null {
+  if (!form.propertyId) return "Pick a property.";
+  if (!form.unitId) return "Pick a unit before creating a stay.";
+  if (!form.checkIn || !form.checkOut) return "Enter check-in and check-out dates.";
+  if (form.checkIn >= form.checkOut) return "Check-out must be after check-in.";
+  const guestCount = Number.parseInt(form.guestCount, 10);
+  if (!Number.isFinite(guestCount) || guestCount < 1) return "Guest count must be at least 1.";
+  if (canShareGuestName && !form.guestName.trim()) return "Guest name is required for this property.";
+  return null;
+}
+
+function validateIcalForm(form: IcalForm): string | null {
+  if (!form.propertyId) return "Pick a property.";
+  if (!form.unitId) return "Map this feed to a unit.";
+  try {
+    const url = new URL(form.url);
+    if (url.protocol !== "https:") return "Enter a valid https:// iCal feed URL.";
+  } catch {
+    return "Enter a valid https:// iCal feed URL.";
+  }
+  return null;
+}
+
+function problemMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof ApiError)) return fallback;
+  const detail = error.detail ?? error.title ?? error.message;
+  const lowerDetail = detail.toLowerCase();
+  const problem = error.problem;
+  const rawError = typeof problem?.error === "string" ? problem.error : "";
+  const fieldErrors = error.fieldErrors.map((fieldError) => fieldError.msg).filter(Boolean).join(" ");
+  const combined = `${rawError} ${lowerDetail} ${fieldErrors}`.toLowerCase();
+
+  if (combined.includes("duplicate") || combined.includes("already exists")) {
+    return "This iCal feed already exists for the selected property or unit.";
+  }
+  if (combined.includes("overlap") || rawError === "stay_overlap") {
+    return "This stay overlaps another stay for the selected unit. Review the dates or save once the server allows the conflict.";
+  }
+  if (combined.includes("ical_url_malformed") || combined.includes("malformed")) {
+    return "The iCal URL is malformed. Paste the full provider export URL.";
+  }
+  if (combined.includes("ical_url_private_address")) {
+    return "That iCal URL resolves to a private address and was blocked.";
+  }
+  if (combined.includes("ical_url_insecure_scheme")) {
+    return "iCal feeds must use https:// URLs.";
+  }
+  if (combined.includes("ical_url_unreachable") || combined.includes("ical_url_timeout")) {
+    return "The server could not reach that iCal feed. Check the provider export URL and try again.";
+  }
+  if (fieldErrors) return fieldErrors;
+  return detail || fallback;
+}
+
+function originPreview(rawUrl: string): string | null {
+  try {
+    return new URL(rawUrl).origin;
+  } catch {
+    return null;
+  }
+}
+
+function duplicateFeedNotice(form: IcalForm, feeds: IcalFeedPayload[]): string | null {
+  const preview = originPreview(form.url);
+  if (!preview) return null;
+  const duplicate = feeds.find((feed) => {
+    return (
+      feed.property_id === form.propertyId &&
+      feed.unit_id === form.unitId &&
+      feed.url_preview === preview
+    );
+  });
+  return duplicate ? "A feed from this host is already mapped to that unit." : null;
+}
+
+function describedBy(...ids: Array<string | false | null | undefined>): string | undefined {
+  const liveIds = ids.filter(Boolean);
+  return liveIds.length > 0 ? liveIds.join(" ") : undefined;
+}
+
 export default function StaysPage() {
   // code-health: ignore[nloc] Stays page is declarative reservation/closure composition over promoted route data.
+  const { workspaceId } = useWorkspace();
+  const queryClient = useQueryClient();
+  const manualDialogRef = useRef<HTMLDialogElement | null>(null);
+  const icalDialogRef = useRef<HTMLDialogElement | null>(null);
+  const [manualForm, setManualForm] = useState<ManualStayForm | null>(null);
+  const [icalForm, setIcalForm] = useState<IcalForm | null>(null);
+  const [manualNotice, setManualNotice] = useState<FormNotice | null>(null);
+  const [icalNotice, setIcalNotice] = useState<FormNotice | null>(null);
+
   const dataQ = useQuery({
     queryKey: qk.stays(),
     queryFn: fetchStaysPayload,
@@ -141,50 +389,454 @@ export default function StaysPage() {
     queryKey: qk.employees(),
     queryFn: () => fetchJson<Employee[]>("/api/v1/employees"),
   });
-  if (dataQ.isPending || propsQ.isPending || empsQ.isPending) {
+  const meQ = useQuery({
+    queryKey: qk.authMe(),
+    queryFn: () => fetchJson<AuthMe>("/api/v1/auth/me"),
+  });
+  const wsQ = useQuery({
+    queryKey: qk.meWorkspaces(),
+    queryFn: () => fetchJson<{ workspace_id: string; slug: string; name: string }[]>("/api/v1/me/workspaces"),
+  });
+  const feedsQ = useQuery({
+    queryKey: qk.icalFeeds(),
+    queryFn: fetchIcalFeeds,
+  });
+  const propertyIds = propsQ.data?.map((property) => property.id) ?? [];
+  const unitQs = useQueries({
+    queries: propertyIds.map((propertyId) => ({
+      queryKey: qk.propertyUnits(propertyId),
+      queryFn: () => fetchPropertyUnits(propertyId),
+    })),
+  });
+  const membershipQs = useQueries({
+    queries: propertyIds.map((propertyId) => ({
+      queryKey: qk.propertyWorkspaces(propertyId),
+      queryFn: () => fetchPropertyMemberships(propertyId),
+    })),
+  });
+  const metadataPending = propsQ.isPending || (
+    propsQ.data
+      ? unitQs.some((query) => query.isPending) || membershipQs.some((query) => query.isPending)
+      : false
+  );
+
+  const createStay = useMutation({
+    mutationFn: (body: {
+      property_id: string;
+      unit_id: string;
+      check_in_at: string;
+      check_out_at: string;
+      guest_name: string | null;
+      guest_count: number;
+      guest_kind: "guest";
+      status: StayStatus;
+      source: StaySource;
+    }) => fetchJson<ReservationPayload>("/api/v1/stays", { method: "POST", body }),
+    onSuccess: (reservation) => {
+      queryClient.setQueryData<StaysPayload>(qk.stays(), (current) => {
+        if (!current) return current;
+        return { ...current, stays: [mapReservation(reservation), ...current.stays] };
+      });
+      void queryClient.invalidateQueries({ queryKey: qk.stays() });
+      setManualNotice({ tone: "success", text: "Stay created and added to the list." });
+      manualDialogRef.current?.close();
+    },
+    onError: (error) => {
+      setManualNotice({
+        tone: "error",
+        text: problemMessage(error, "The stay could not be created. Check the fields and try again."),
+      });
+    },
+  });
+
+  const createIcalFeed = useMutation({
+    mutationFn: (body: {
+      property_id: string;
+      unit_id: string;
+      url: string;
+      provider_override: IcalProvider;
+    }) => fetchJson<IcalFeedPayload>("/api/v1/stays/ical-feeds", { method: "POST", body }),
+    onSuccess: (feed) => {
+      queryClient.setQueryData<IcalFeedPayload[]>(qk.icalFeeds(), (current) => {
+        return current ? [feed, ...current] : [feed];
+      });
+      void queryClient.invalidateQueries({ queryKey: qk.icalFeeds() });
+      setIcalNotice({
+        tone: "success",
+        text: feed.enabled
+          ? `Feed added. ${providerLabel(feed.provider)} parsed successfully and is enabled.`
+          : `Feed added but not enabled yet. Last check: ${feed.last_error ?? "provider did not return a parseable calendar"}.`,
+      });
+    },
+    onError: (error) => {
+      setIcalNotice({
+        tone: "error",
+        text: problemMessage(error, "The iCal feed could not be added. Check the setup and try again."),
+      });
+    },
+  });
+
+  if (
+    dataQ.isPending ||
+    propsQ.isPending ||
+    empsQ.isPending ||
+    meQ.isPending ||
+    wsQ.isPending ||
+    feedsQ.isPending ||
+    metadataPending
+  ) {
     return <DeskPage title="Stays"><Loading /></DeskPage>;
   }
-  if (!dataQ.data || !propsQ.data || !empsQ.data) {
+  if (
+    !dataQ.data ||
+    !propsQ.data ||
+    !empsQ.data ||
+    !meQ.data ||
+    !wsQ.data ||
+    !feedsQ.data ||
+    unitQs.some((query) => !query.data) ||
+    membershipQs.some((query) => !query.data)
+  ) {
     return <DeskPage title="Stays">Failed to load.</DeskPage>;
   }
 
   const { stays, closures, leaves } = dataQ.data;
   const properties = propsQ.data;
+  const units = unitQs.flatMap((query) => query.data ?? []);
+  const memberships = membershipQs.flatMap((query) => query.data ?? []);
   const propsById = new Map(properties.map((p) => [p.id, p]));
+  const unitsByProperty = new Map<string, UnitPayload[]>();
+  for (const unit of units) {
+    const existing = unitsByProperty.get(unit.property_id) ?? [];
+    existing.push(unit);
+    unitsByProperty.set(unit.property_id, existing);
+  }
   const empsById = new Map(empsQ.data.map((e) => [e.id, e]));
+  const activeWorkspaceId = meQ.data.current_workspace_id
+    ?? (workspaceId ? wsQ.data.find((workspace) => workspace.slug === workspaceId)?.workspace_id : null)
+    ?? null;
   const today = new Date();
   const todayDay = today.getDate();
 
   const days: number[] = [];
   for (let d = 1; d <= 30; d += 1) days.push(d);
 
+  function canSeeGuestIdentity(propertyId: string): boolean {
+    const membership = memberships.find((entry) => {
+      return entry.property_id === propertyId && entry.workspace_id === activeWorkspaceId;
+    });
+    return Boolean(
+      membership && (
+        membership.membership_role === "owner_workspace" ||
+        membership.share_guest_identity
+      ),
+    );
+  }
+  function guestNameForStay(stay: PageStay): string {
+    return canSeeGuestIdentity(stay.property_id) ? stay.guest_name : "Hidden guest";
+  }
+  const canShareManualGuestName = manualForm ? canSeeGuestIdentity(manualForm.propertyId) : false;
+  const manualOverlap = manualForm ? overlapWarning(manualForm, stays, guestNameForStay) : null;
+  const selectedManualUnits = manualForm ? unitsByProperty.get(manualForm.propertyId) ?? [] : [];
+  const selectedIcalUnits = icalForm ? unitsByProperty.get(icalForm.propertyId) ?? [] : [];
+  const icalDuplicate = icalForm ? duplicateFeedNotice(icalForm, feedsQ.data) : null;
+
+  function openManualDialog(): void {
+    const next = initialManualForm(properties, units);
+    setManualForm(next);
+    setManualNotice(null);
+    createStay.reset();
+    manualDialogRef.current?.showModal();
+  }
+
+  function openIcalDialog(): void {
+    const next = initialIcalForm(properties, units);
+    setIcalForm(next);
+    setIcalNotice(null);
+    createIcalFeed.reset();
+    icalDialogRef.current?.showModal();
+  }
+
+  function updateManualProperty(propertyId: string): void {
+    const propertyUnits = unitsByProperty.get(propertyId) ?? [];
+    setManualForm((current) => current ? { ...current, propertyId, unitId: propertyUnits[0]?.id ?? "" } : current);
+  }
+
+  function updateIcalProperty(propertyId: string): void {
+    const propertyUnits = unitsByProperty.get(propertyId) ?? [];
+    setIcalForm((current) => current ? { ...current, propertyId, unitId: propertyUnits[0]?.id ?? "" } : current);
+  }
+
+  function submitManualStay(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    if (!manualForm) return;
+    const validation = validateManualForm(manualForm, canShareManualGuestName);
+    if (validation) {
+      setManualNotice({ tone: "error", text: validation });
+      return;
+    }
+    const guestName = canShareManualGuestName ? manualForm.guestName.trim() : "";
+    createStay.mutate({
+      property_id: manualForm.propertyId,
+      unit_id: manualForm.unitId,
+      check_in_at: `${manualForm.checkIn}T16:00:00Z`,
+      check_out_at: `${manualForm.checkOut}T10:00:00Z`,
+      guest_name: guestName || null,
+      guest_count: Number.parseInt(manualForm.guestCount, 10),
+      guest_kind: "guest",
+      status: manualForm.status,
+      source: "manual",
+    });
+  }
+
+  function submitIcalFeed(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    if (!icalForm) return;
+    const validation = validateIcalForm(icalForm);
+    if (validation) {
+      setIcalNotice({ tone: "error", text: validation });
+      return;
+    }
+    createIcalFeed.mutate({
+      property_id: icalForm.propertyId,
+      unit_id: icalForm.unitId,
+      url: icalForm.url.trim(),
+      provider_override: icalForm.provider,
+    });
+  }
+
   return (
     <DeskPage
       title="Stays"
       sub="Imported from Airbnb, VRBO, and direct bookings. Four layers: stays, turnover bundles, closures, employee leave."
       actions={
-        <span className="page-action-disabled">
-          <button
-            type="button"
-            className="btn btn--moss"
-            disabled
-            aria-describedby="stays-import-ical-disabled-reason"
-          >
-            Import iCal
-          </button>
-          <span id="stays-import-ical-disabled-reason" className="page-action-disabled__reason">
-            iCal import setup is not implemented yet.
-          </span>
-        </span>
+        <button type="button" className="btn btn--moss" onClick={openIcalDialog}>
+          Import iCal
+        </button>
       }
       overflow={[
         {
           label: "Add stay",
-          onSelect: () => undefined,
-          disabledReason: "Manual stay creation is not implemented yet.",
+          onSelect: openManualDialog,
         },
       ]}
     >
+      <dialog className="modal modal--sheet" ref={manualDialogRef} aria-label="Add stay">
+        {manualForm ? (
+          <form
+            className="modal__body form"
+            onSubmit={submitManualStay}
+            aria-describedby={describedBy(
+              !canShareManualGuestName && manualPrivacyId,
+              selectedManualUnits.length === 0 && manualUnitErrorId,
+              manualOverlap && manualOverlapId,
+              manualNotice && manualNoticeId,
+            )}
+            noValidate
+          >
+            <h3 className="modal__title">Add stay</h3>
+            <p className="modal__sub">
+              Manual stays save to the reservation API and use the selected unit for conflict checks.
+            </p>
+
+            <div className="stays-form-grid">
+              <label className="field">
+                <span>Property</span>
+                <select
+                  value={manualForm.propertyId}
+                  onChange={(event) => updateManualProperty(event.target.value)}
+                >
+                  {properties.map((property) => (
+                    <option key={property.id} value={property.id}>{property.name}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field">
+                <span>Unit</span>
+                <select
+                  value={manualForm.unitId}
+                  onChange={(event) => setManualForm({ ...manualForm, unitId: event.target.value })}
+                  aria-invalid={selectedManualUnits.length === 0}
+                  aria-describedby={selectedManualUnits.length === 0 ? manualUnitErrorId : undefined}
+                >
+                  {selectedManualUnits.map((unit) => (
+                    <option key={unit.id} value={unit.id}>{unit.name}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field">
+                <span>Check-in</span>
+                <input
+                  type="date"
+                  value={manualForm.checkIn}
+                  onChange={(event) => setManualForm({ ...manualForm, checkIn: event.target.value })}
+                />
+              </label>
+
+              <label className="field">
+                <span>Check-out</span>
+                <input
+                  type="date"
+                  value={manualForm.checkOut}
+                  onChange={(event) => setManualForm({ ...manualForm, checkOut: event.target.value })}
+                />
+              </label>
+
+              <label className="field">
+                <span>Guest name</span>
+                <input
+                  type="text"
+                  value={canShareManualGuestName ? manualForm.guestName : ""}
+                  disabled={!canShareManualGuestName}
+                  placeholder={canShareManualGuestName ? "Ada Guest" : "Hidden by sharing settings"}
+                  aria-describedby={!canShareManualGuestName ? manualPrivacyId : undefined}
+                  onChange={(event) => setManualForm({ ...manualForm, guestName: event.target.value })}
+                />
+              </label>
+
+              <label className="field">
+                <span>Guests</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={manualForm.guestCount}
+                  onChange={(event) => setManualForm({ ...manualForm, guestCount: event.target.value })}
+                />
+              </label>
+
+              <label className="field">
+                <span>Status</span>
+                <select
+                  value={manualForm.status}
+                  onChange={(event) => setManualForm({ ...manualForm, status: event.target.value as StayStatus })}
+                >
+                  <option value="tentative">Tentative</option>
+                  <option value="confirmed">Confirmed</option>
+                </select>
+              </label>
+            </div>
+
+            {!canShareManualGuestName ? (
+              <p id={manualPrivacyId} className="stays-form-note">
+                Guest identity is hidden for this shared property. This stay will be saved without a guest name.
+              </p>
+            ) : null}
+            {selectedManualUnits.length === 0 ? (
+              <p id={manualUnitErrorId} className="form-error" role="alert">No units are available for this property.</p>
+            ) : null}
+            {manualOverlap ? <p id={manualOverlapId} className="stays-form-note stays-form-note--warn">{manualOverlap}</p> : null}
+            {manualNotice ? (
+              <p id={manualNoticeId} className={`form-notice form-notice--${manualNotice.tone}`} role="alert">
+                {manualNotice.text}
+              </p>
+            ) : null}
+
+            <div className="modal__actions">
+              <button type="button" className="btn btn--ghost" onClick={() => manualDialogRef.current?.close()}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn--moss" disabled={createStay.isPending}>
+                {createStay.isPending ? "Creating..." : "Create stay"}
+              </button>
+            </div>
+          </form>
+        ) : null}
+      </dialog>
+
+      <dialog className="modal modal--sheet" ref={icalDialogRef} aria-label="Import iCal">
+        {icalForm ? (
+          <form
+            className="modal__body form"
+            onSubmit={submitIcalFeed}
+            aria-describedby={describedBy(
+              selectedIcalUnits.length === 0 && icalUnitErrorId,
+              icalDuplicate && icalDuplicateId,
+              icalNotice && icalNoticeId,
+            )}
+            noValidate
+          >
+            <h3 className="modal__title">Import iCal</h3>
+            <p className="modal__sub">
+              Add a provider export URL, map it to a unit, and crew.day will probe it before enabling the feed.
+            </p>
+
+            <div className="stays-form-grid">
+              <label className="field">
+                <span>Property</span>
+                <select
+                  value={icalForm.propertyId}
+                  onChange={(event) => updateIcalProperty(event.target.value)}
+                >
+                  {properties.map((property) => (
+                    <option key={property.id} value={property.id}>{property.name}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field">
+                <span>Unit</span>
+                <select
+                  value={icalForm.unitId}
+                  onChange={(event) => setIcalForm({ ...icalForm, unitId: event.target.value })}
+                  aria-invalid={selectedIcalUnits.length === 0}
+                  aria-describedby={selectedIcalUnits.length === 0 ? icalUnitErrorId : undefined}
+                >
+                  {selectedIcalUnits.map((unit) => (
+                    <option key={unit.id} value={unit.id}>{unit.name}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field">
+                <span>Provider</span>
+                <select
+                  value={icalForm.provider}
+                  onChange={(event) => setIcalForm({ ...icalForm, provider: event.target.value as IcalProvider })}
+                >
+                  {PROVIDERS.map((provider) => (
+                    <option key={provider.value} value={provider.value}>{provider.label}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field stays-form-grid__wide">
+                <span>Feed URL</span>
+                <input
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://calendar.provider.example/export.ics"
+                  value={icalForm.url}
+                  aria-invalid={icalNotice?.tone === "error"}
+                  aria-describedby={describedBy(icalDuplicate && icalDuplicateId, icalNotice && icalNoticeId)}
+                  onChange={(event) => setIcalForm({ ...icalForm, url: event.target.value })}
+                />
+              </label>
+            </div>
+
+            {selectedIcalUnits.length === 0 ? (
+              <p id={icalUnitErrorId} className="form-error" role="alert">No units are available for this property.</p>
+            ) : null}
+            {icalDuplicate ? <p id={icalDuplicateId} className="stays-form-note stays-form-note--warn">{icalDuplicate}</p> : null}
+            {icalNotice ? (
+              <p id={icalNoticeId} className={`form-notice form-notice--${icalNotice.tone}`} role="alert">
+                {icalNotice.text}
+              </p>
+            ) : null}
+
+            <div className="modal__actions">
+              <button type="button" className="btn btn--ghost" onClick={() => icalDialogRef.current?.close()}>
+                Close
+              </button>
+              <button type="submit" className="btn btn--moss" disabled={createIcalFeed.isPending}>
+                {createIcalFeed.isPending ? "Testing..." : "Add feed"}
+              </button>
+            </div>
+          </form>
+        ) : null}
+      </dialog>
+
       <div className="panel">
         <table className="table table--roomy">
           <thead>
@@ -203,7 +855,7 @@ export default function StaysPage() {
               const p = propsById.get(s.property_id);
               return (
                 <tr key={s.id}>
-                  <td><strong>{s.guest_name}</strong></td>
+                  <td><strong>{guestNameForStay(s)}</strong></td>
                   <td>{p && <Chip tone={p.color} size="sm">{p.name}</Chip>}</td>
                   <td><Chip tone="ghost" size="sm">{s.source}</Chip></td>
                   <td className="mono">{fmtAbbrevDate(s.check_in)}</td>
@@ -275,9 +927,9 @@ export default function StaysPage() {
                         <span
                           key={s.id + "-bar"}
                           className={"cal-bar cal-bar--" + p.color}
-                          title={s.guest_name + " (" + s.source + ")"}
+                          title={guestNameForStay(s) + " (" + s.source + ")"}
                         >
-                          {d === ci ? s.guest_name.split(" ")[0] : ""}
+                          {d === ci ? guestNameForStay(s).split(" ")[0] : ""}
                         </span>,
                       );
                     }
@@ -286,7 +938,7 @@ export default function StaysPage() {
                         <span
                           key={s.id + "-turn"}
                           className="cal-bar cal-bar--turnover"
-                          title={"Turnover — " + s.guest_name}
+                          title={"Turnover — " + guestNameForStay(s)}
                         />,
                       );
                     }

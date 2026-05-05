@@ -1581,6 +1581,7 @@ def _create_reservation(
         id=new_ulid(),
         workspace_id=work.ctx.workspace_id,
         property_id=feed.property_id,
+        unit_id=feed.unit_id,
         ical_feed_id=feed.id,
         external_uid=ev.uid,
         check_in=ev.starts_at,
