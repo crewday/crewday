@@ -51,9 +51,10 @@ tokens", and the auditor makes that visible).
 (``category='*'``) also suppresses — a workspace admin toggling
 "silence all emails" for a user does not need to list every kind.
 Required categories (magic link, payslip issued, expense decision,
-issue reported, agent approval pending per §10) are handled by
+issue reported, approval-needed workflows per §10) are handled by
 their sending services choosing **not** to call this service for
-those flows — the spec explicitly documents that mapping. See
+direct-mail flows, or by this service ignoring opt-outs for required
+notification kinds. The spec explicitly documents that mapping. See
 ``docs/specs/10-messaging-notifications.md`` §"Email" →
 §"``email_opt_out``".
 

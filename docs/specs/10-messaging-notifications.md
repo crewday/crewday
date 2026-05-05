@@ -165,24 +165,25 @@ worker tick reads the existing `digest_record` for the same
 rollups are reserved (column accepts the value, no worker emits it
 in v1).
 
-#### §10.4 Future kinds (spec-only, not yet emitted)
+#### §10.4 De-scoped legacy labels
 
-The §10 prose has carried these labels since early drafts; none are
-emitted in code today and the `NotificationKind` enum deliberately
-does not list them. They land via additive enum-widening migrations
-when each feature ships, with a §10.1 row added in the same change.
-Umbrella tracking: **cd-vtm12**.
+There are no spec-only `NotificationKind` reservations. A label belongs
+in §10.1 only when a concrete code path emits it through
+`NotificationService.notify()`, with the enum value, DB CHECK, templates,
+and tests shipped in the same change. Earlier drafts carried future rows
+for these labels; cd-vtm12 de-scoped them so §10 no longer advertises
+unwired enum drift:
 
-| label (spec)                    | proposed kind value             | recipient                                                                  | required? | tracking |
-|---------------------------------|---------------------------------|----------------------------------------------------------------------------|-----------|----------|
-| iCal feed error                 | `ical_feed_error`               | owners and managers                                                        | yes       | cd-vtm12 |
-| availability override pending   | (use existing `approval_needed`)| owners and managers                                                        | yes       | rolled into `approval_needed` (cd-0loc5) |
-| pre-arrival task unassigned     | `pre_arrival_task_unassigned`   | owners and managers                                                        | yes       | cd-vtm12 |
-| task primary unavailable        | `task_primary_unavailable`      | owners and managers                                                        | yes       | cd-vtm12 |
-| holiday schedule impact         | `holiday_schedule_impact`       | affected users                                                             | opt-out   | cd-vtm12 |
-| invoice reminder                | `invoice_reminder`              | client user (biller's client grant) or billing workspace's owners/managers | opt-out (per `invoice_reminders.enabled` cascade setting, §22) | cd-vtm12 |
-| invoice reminder exhausted      | `invoice_reminder_exhausted`    | owners and managers of the billing workspace                               | yes       | cd-vtm12 |
-| property_workspace invite       | `property_workspace_invite`     | owners of the recipient workspace (if addressed) or the invite link's opener | yes     | cd-vtm12 |
+| legacy label                    | current owner / outcome |
+|---------------------------------|-------------------------|
+| iCal feed error                 | §04 polling records `ical_feed.last_error`; add a routed notification only if the polling worker later defines a manager alert workflow. |
+| availability override pending   | availability approvals use the existing `approval_needed` / `approval_decided` kinds. |
+| pre-arrival task unassigned     | §06 keeps this as daily-digest + webhook surfacing for `task.unassigned_pre_arrival`; add a routed notification only if that alert becomes inbox/email fanout. |
+| task primary unavailable        | §06 emits the `task.primary_unavailable` event; add a routed notification only if managers need a separate inbox/email item beyond event, digest, and webhook surfaces. |
+| holiday schedule impact         | public-holiday CRUD and scheduling effects do not currently fan out via `NotificationService`; add a kind only with a concrete affected-user notification workflow. |
+| invoice reminder                | §22 payment reminders ride the existing agent-message delivery chain; they do not reserve a distinct notification kind. |
+| invoice reminder exhausted      | §22 reminder exhaustion is a webhook + owner/manager digest item until a routed notification workflow ships. |
+| property-workspace invite       | §22 invite lifecycle remains owned by the property-workspace invite flow; add a routed notification only with concrete recipient resolution and templates. |
 
 The "agent approval pending" / "agent approval decided" labels from
 earlier drafts are subsumed by `approval_needed` / `approval_decided`

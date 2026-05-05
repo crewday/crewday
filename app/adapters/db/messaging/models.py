@@ -847,13 +847,14 @@ class EmailOptOut(Base):
     One row per ``(workspace_id, user_id, category)`` triple — the
     §10 delivery worker consults this table before emitting any
     opt-outable email. ``category`` lines up with the ``template_key``
-    family on :class:`EmailDelivery`; the taxonomy is maintained in
-    §10 (e.g. ``task_reminder``, ``daily_digest``,
-    ``holiday_schedule_impact``, ``invoice_reminder``). Required
-    categories (magic link, payslip issued, expense decision, issue
-    reported, agent approval pending) are never suppressed even if a
-    row exists — the row is kept for audit but ignored for those
-    templates at the domain layer.
+    family on :class:`EmailDelivery`; the routed notification taxonomy
+    is maintained in §10.1 (e.g. ``task_assigned``, ``daily_digest``).
+    Direct-mail and non-notification template families may also use
+    categories here, but de-scoped legacy labels are not reserved
+    notification kinds. Required categories (magic link, payslip issued,
+    expense decision, issue reported, approval needed) are never
+    suppressed even if a row exists — the row is kept for audit but
+    ignored for those templates at the domain layer.
 
     ``source`` pins how the row was created so audit can trace the
     opt-out back to the action: ``unsubscribe_link`` (signed footer

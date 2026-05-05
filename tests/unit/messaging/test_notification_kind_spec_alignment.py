@@ -40,6 +40,7 @@ _SPEC_PATH = (
 # Anchor on the §10.1 heading and stop at the next ``####`` so a future
 # §10.2 row carrying a backtick token cannot be misread as an enum kind.
 _SECTION_HEADING = "#### §10.1 Routed via NotificationService"
+_LEGACY_SECTION_HEADING = "#### §10.4 De-scoped legacy labels"
 _NEXT_SECTION_PREFIX = "#### "
 
 # Capture the leading backtick-quoted token in each table row. The §10.1
@@ -56,6 +57,17 @@ def _read_spec_section() -> str:
         f"§10.1 heading not found in {_SPEC_PATH} — did the heading "
         f"text change? Expected {_SECTION_HEADING!r}."
     )
+    after_heading = text.find("\n", start) + 1
+    end = text.find(_NEXT_SECTION_PREFIX, after_heading)
+    if end == -1:
+        end = len(text)
+    return text[after_heading:end]
+
+
+def _read_section(heading: str) -> str:
+    text = _SPEC_PATH.read_text(encoding="utf-8")
+    start = text.find(heading)
+    assert start != -1, f"heading not found in {_SPEC_PATH}: {heading!r}."
     after_heading = text.find("\n", start) + 1
     end = text.find(_NEXT_SECTION_PREFIX, after_heading)
     if end == -1:
@@ -96,3 +108,9 @@ def test_spec_section_is_non_empty() -> None:
         "table format. Check that the first column is still "
         "``| `<kind>` |``."
     )
+
+
+def test_legacy_section_does_not_reserve_future_kinds() -> None:
+    section = _read_section(_LEGACY_SECTION_HEADING)
+    assert "proposed kind value" not in section
+    assert _ROW_RE.findall(section) == []
