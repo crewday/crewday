@@ -41,6 +41,7 @@ from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.identity.models import User
 from app.api.deps import db_session as db_session_dep
+from app.api.errors import add_exception_handlers
 from app.api.v1.auth import logout as logout_module
 from app.api.v1.auth import me as me_module
 from app.auth import session as auth_session
@@ -98,6 +99,7 @@ def client(
     monkeypatch.setattr("app.auth.session.get_settings", lambda: settings)
 
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(logout_module.build_logout_router(), prefix="/api/v1")
     app.include_router(me_module.build_me_router(), prefix="/api/v1")
 
@@ -293,7 +295,14 @@ class TestLogoutHappyPath:
         # Re-present the original cookie value on a fresh request.
         client.cookies.set(SESSION_COOKIE_NAME, cookie_value)
         follow_up = client.get("/api/v1/auth/me")
-        assert follow_up.status_code == 401
+        assert follow_up.status_code == 401, follow_up.text
+        assert follow_up.headers["content-type"].startswith("application/problem+json")
+        body = follow_up.json()
+        assert body["type"] == "https://crewday.dev/errors/unauthorized"
+        assert body["status"] == 401
+        assert body["title"] == "Unauthorized"
+        assert body["instance"] == "/api/v1/auth/me"
+        assert body["error"] == "session_invalid"
 
     def test_one_audit_row_with_cause_logout(
         self,
