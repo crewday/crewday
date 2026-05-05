@@ -41,7 +41,7 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.adapters.db.session as _session_mod
-from app.adapters.db.places.models import Property
+from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.session import UnitOfWorkImpl, get_active_session
 from app.adapters.db.stays.models import IcalFeed, Reservation, StayBundle
 from app.adapters.db.tasks.models import Occurrence
@@ -185,7 +185,7 @@ def _bootstrap_workspace(session: Session, *, slug: str) -> tuple[str, str]:
     return workspace.id, user.id
 
 
-def _bootstrap_property(session: Session) -> str:
+def _bootstrap_property(session: Session, *, workspace_id: str) -> str:
     pid = new_ulid()
     with tenant_agnostic():
         session.add(
@@ -209,6 +209,17 @@ def _bootstrap_property(session: Session) -> str:
                 created_at=_PINNED,
                 updated_at=_PINNED,
                 deleted_at=None,
+            )
+        )
+        session.add(
+            PropertyWorkspace(
+                property_id=pid,
+                workspace_id=workspace_id,
+                label="Villa Sud",
+                membership_role="owner_workspace",
+                share_guest_identity=True,
+                status="active",
+                created_at=_PINNED,
             )
         )
         session.flush()
@@ -431,7 +442,7 @@ class TestPollOnceManualIngest:
     ) -> tuple[WorkspaceContext, str, str]:
         with factory() as session:
             workspace_id, owner_user_id = _bootstrap_workspace(session, slug=slug)
-            property_id = _bootstrap_property(session)
+            property_id = _bootstrap_property(session, workspace_id=workspace_id)
             _bootstrap_next_stay(
                 session,
                 workspace_id=workspace_id,

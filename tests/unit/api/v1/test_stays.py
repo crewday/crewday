@@ -443,6 +443,18 @@ def test_ical_feed_crud_disable_delete_and_manual_poll(
         ctx, workspace_id, _actor_id = _seed_workspace(session, slug="ical")
         property_id = _seed_property(session, workspace_id=workspace_id)
         unit_id = _seed_unit(session, property_id=property_id)
+        _other_ctx, other_workspace_id, _other_actor_id = _seed_workspace(
+            session, slug="ical-other"
+        )
+        other_workspace_property_id = _seed_property(
+            session, workspace_id=other_workspace_id
+        )
+        read_only_property_id = _seed_property(
+            session,
+            workspace_id=workspace_id,
+            membership_role="observer_workspace",
+            share_guest_identity=True,
+        )
         session.commit()
     client = _build_client(
         factory=factory,
@@ -462,6 +474,28 @@ def test_ical_feed_crud_disable_delete_and_manual_poll(
     )
     assert wrong_unit.status_code == 404
     assert wrong_unit.json()["error"] == "unit_not_found"
+    assert validator.calls == []
+
+    wrong_property = client.post(
+        "/stays/ical-feeds",
+        json={
+            "property_id": other_workspace_property_id,
+            "url": "https://airbnb.example/wrong-property.ics",
+        },
+    )
+    assert wrong_property.status_code == 404
+    assert wrong_property.json()["error"] == "property_not_found"
+    assert validator.calls == []
+
+    read_only_property = client.post(
+        "/stays/ical-feeds",
+        json={
+            "property_id": read_only_property_id,
+            "url": "https://airbnb.example/read-only.ics",
+        },
+    )
+    assert read_only_property.status_code == 403
+    assert read_only_property.json()["error"] == "property_read_only"
     assert validator.calls == []
 
     created = client.post(
