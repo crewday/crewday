@@ -57,7 +57,7 @@ const REPLAY_CONTROLLER_KEY = "__crewdayOfflineQueueReplay";
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 let drainPromise: Promise<DrainOfflineQueueResult> | null = null;
-let retryTimer: ReturnType<typeof window.setTimeout> | null = null;
+let retryTimer: number | null = null;
 const pendingCounts = new Map<string, number>();
 const countSubscribers = new Set<{ workspaceSlug: string | null; listener: CountSubscriber }>();
 const replaySubscribers = new Set<ReplaySubscriber>();

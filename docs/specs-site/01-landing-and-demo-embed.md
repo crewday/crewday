@@ -97,12 +97,12 @@ predict — what the slug will be.
 | Villa owner | "Manage incoming Airbnb stays" | `/stays` |
 | Villa owner | "Chat with the agent about my property" | `/chat` |
 | Rental manager | "Schedule staff across properties" | `/schedule` |
-| Rental manager | "Track work orders" | `/work-orders` |
-| Rental manager | "See payroll at a glance" | `/payroll` |
-| Rental manager | "Invite a new client" | `/clients` |
+| Rental manager | "Track today's operations" | `/dashboard` |
+| Rental manager | "See payroll at a glance" | `/pay` |
+| Rental manager | "Invite a new client" | `/organizations` |
 | Housekeeper | "See today's tasks" | `/today` |
 | Housekeeper | "Complete a task with photo" | `/today?focus=next-task` |
-| Housekeeper | "Log hours" | `/me/hours` |
+| Housekeeper | "Review my hours" | `/schedule` |
 | Housekeeper | "Chat with the manager" | `/chat` |
 
 The intent list is data, not code. It lives in

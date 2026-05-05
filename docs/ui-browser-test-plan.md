@@ -507,7 +507,6 @@ The `site/` implementation is absent in this worktree; these checks are derived 
 
 ## Known Follow-Up Beads
 
-- `cd-ln5dp`: Align site demo intent routes with app route contract.
 - `cd-noi8g`: Resolve expense pending reimbursement route naming drift.
 - `cd-sfiod`: Clarify site demo chat intent copy against shipped chat model.
 - `cd-54y3w`: Make property detail visible actions real or explicitly disabled.

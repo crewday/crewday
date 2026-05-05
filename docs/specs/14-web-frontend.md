@@ -202,6 +202,13 @@ surface as a section of the `/schedule` day drawer (below), so
 a worker never has to cross-reference two calendars to answer
 "what am I doing, and will I be paid for it".
 
+The marketing-site demo picker (§site-01) emits only canonical
+workspace-relative paths from this route contract. It does not define
+demo-only SPA aliases: manager payroll starts at `/pay`, manager
+operations/client onboarding start at `/dashboard` and
+`/organizations`, and worker hours start at `/schedule` because
+bookings are the time record (§09).
+
 ### Worker-only (under /w/<slug>/)
 
 ```
