@@ -152,8 +152,28 @@ export default function PayPage() {
   });
 
   const sub = "Periods, payslips, pay rules. Gross only — taxes and social contributions are out of scope.";
-  const actions = <button className="btn btn--moss">Close period</button>;
-  const overflow = [{ label: "Export CSV", onSelect: () => undefined }];
+  const actions = (
+    <span className="page-action-disabled">
+      <button
+        type="button"
+        className="btn btn--moss"
+        disabled
+        aria-describedby="pay-close-period-disabled-reason"
+      >
+        Close period
+      </button>
+      <span id="pay-close-period-disabled-reason" className="page-action-disabled__reason">
+        Period close is not implemented yet.
+      </span>
+    </span>
+  );
+  const overflow = [
+    {
+      label: "Export CSV",
+      onSelect: () => undefined,
+      disabledReason: "Payroll export is not implemented yet.",
+    },
+  ];
 
   if (payQ.isPending || employeesQ.isPending) {
     return <DeskPage title="Pay" sub={sub} actions={actions} overflow={overflow}><Loading /></DeskPage>;
@@ -235,7 +255,24 @@ export default function PayPage() {
                   <td className="mono">{formatMoney(p.reimbursements_cents, p.currency)}</td>
                   <td className="mono"><strong>{formatMoney(p.net_cents, p.currency)}</strong></td>
                   <td><Chip tone={STATUS_TONE[p.status]} size="sm">{p.status}</Chip></td>
-                  <td><button className="btn btn--sm btn--ghost">Preview PDF</button></td>
+                  <td>
+                    <span className="page-action-disabled page-action-disabled--inline">
+                      <button
+                        type="button"
+                        className="btn btn--sm btn--ghost"
+                        disabled
+                        aria-describedby={`payslip-preview-disabled-reason-${p.id}`}
+                      >
+                        Preview PDF
+                      </button>
+                      <span
+                        id={`payslip-preview-disabled-reason-${p.id}`}
+                        className="page-action-disabled__reason"
+                      >
+                        Payslip PDF preview is not implemented yet.
+                      </span>
+                    </span>
+                  </td>
                 </tr>
               );
             })}

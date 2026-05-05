@@ -433,10 +433,24 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 .page-action-disabled__reason {
   max-width: 150px;
   color: var(--ink-3);
   font-size: 12px;
   line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.page-topbar__trailing .page-action-disabled {
+  justify-content: flex-end;
+}
+.page-topbar__trailing .page-action-disabled__reason {
+  max-width: clamp(96px, 18vw, 150px);
+}
+@media (max-width: 719px) {
+  .page-topbar__trailing .page-action-disabled__reason {
+    max-width: 84px;
+    font-size: 11px;
+  }
 }

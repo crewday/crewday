@@ -4,6 +4,7 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { useDecideMutation } from "@/lib/useDecideMutation";
 import DeskPage from "@/components/DeskPage";
+import NewTaskButton from "@/components/NewTaskModal";
 import { Avatar, Chip, Loading, Panel, StatCard } from "@/components/common";
 import { fmtTime } from "@/lib/dates";
 import {
@@ -54,11 +55,12 @@ export default function DashboardPage() {
     <DeskPage
       title="Dashboard"
       sub={`Good morning, ${firstName} · ${todayLong} · ${properties.length} properties · 5 staff · ${totalToday} tasks today`}
-      actions={<button className="btn btn--moss">+ New task</button>}
+      actions={<NewTaskButton />}
       overflow={[
         {
           label: "Broadcast message",
           onSelect: () => undefined,
+          disabledReason: "Broadcast messaging is not implemented yet.",
         },
       ]}
     >

@@ -54,7 +54,13 @@ export default function AuditPage() {
   });
 
   const sub = "Append-only. Every mutation by a user (on the manager/worker/client surface), an agent, or the system. Actions taken by a member of the owners permission group carry a governance badge.";
-  const overflow = [{ label: "Export JSONL", onSelect: () => undefined }];
+  const overflow = [
+    {
+      label: "Export JSONL",
+      onSelect: () => undefined,
+      disabledReason: "Audit export is not implemented in the browser yet.",
+    },
+  ];
 
   if (q.isPending) return <DeskPage title="Audit log" sub={sub} overflow={overflow}><Loading /></DeskPage>;
   if (!q.data) return <DeskPage title="Audit log" sub={sub} overflow={overflow}>Failed to load.</DeskPage>;

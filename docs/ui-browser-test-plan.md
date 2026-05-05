@@ -512,7 +512,12 @@ The `site/` implementation is absent in this worktree; these checks are derived 
 
 - `cd-noi8g`: Resolve expense pending reimbursement route naming drift.
 - `cd-sfiod`: Clarify site demo chat intent copy against shipped chat model.
-- `cd-da4fo`: Audit manager pages for visible no-op overflow actions.
+- `cd-lv141`: Implement manager browser export actions.
+- `cd-043gk`: Implement inventory item creation UI.
+- `cd-z23ji`: Implement stay create and iCal import workflows.
+- `cd-ijbm9`: Implement pay period close and payslip preview UI.
+- `cd-xh0uv`: Implement manager expense claim field editing.
+- `cd-tfv6t`: Implement employee role editing action.
 
 ## Completion Tracking Convention
 

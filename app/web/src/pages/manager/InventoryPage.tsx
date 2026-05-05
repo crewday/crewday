@@ -220,8 +220,28 @@ export default function InventoryPage() {
 
   const sub =
     "Per-property stock. Items at or below par trigger a procurement task. Click a row to see full history and adjust.";
-  const actions = <button className="btn btn--moss">+ New item</button>;
-  const overflow = [{ label: "Export CSV", onSelect: () => undefined }];
+  const actions = (
+    <span className="page-action-disabled">
+      <button
+        type="button"
+        className="btn btn--moss"
+        disabled
+        aria-describedby="inventory-new-item-disabled-reason"
+      >
+        + New item
+      </button>
+      <span id="inventory-new-item-disabled-reason" className="page-action-disabled__reason">
+        Item creation is not implemented yet.
+      </span>
+    </span>
+  );
+  const overflow = [
+    {
+      label: "Export CSV",
+      onSelect: () => undefined,
+      disabledReason: "Inventory export is not implemented yet.",
+    },
+  ];
 
   if (propsQ.isPending || (propsQ.data !== undefined && invQ.isPending)) {
     return (

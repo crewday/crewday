@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
@@ -100,6 +100,12 @@ beforeEach(() => {
   __resetQueryKeyGetterForTests();
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("acme");
   window.location.hash = "";
+  HTMLDialogElement.prototype.showModal = vi.fn(function showModal(this: HTMLDialogElement) {
+    this.setAttribute("open", "");
+  });
+  HTMLDialogElement.prototype.close = vi.fn(function close(this: HTMLDialogElement) {
+    this.removeAttribute("open");
+  });
 });
 
 afterEach(() => {
@@ -162,6 +168,23 @@ describe("<EmployeeDetailPage>", () => {
       await waitFor(() => {
         expect(screen.getByRole("link", { name: "Payslips" })).toHaveAttribute("aria-current", "page");
       });
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("marks unimplemented employee actions as unavailable", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Maya Santos")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Edit roles" })).toBeDisabled();
+      expect(screen.getByText("Role editing is not implemented yet.")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+      expect(screen.getByRole("menuitem", { name: /Message/ })).toBeDisabled();
+      expect(screen.getByText("Direct manager-to-worker messaging is not part of v1.")).toBeInTheDocument();
     } finally {
       fake.restore();
     }

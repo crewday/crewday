@@ -174,8 +174,28 @@ export default function EmployeeDetailPage() {
     <DeskPage
       title={subject.name}
       sub={subject.roles.join(" · ") + " · " + subject.phone}
-      actions={<button className="btn btn--ghost">Edit roles</button>}
-      overflow={[{ label: "Message", onSelect: () => undefined }]}
+      actions={
+        <span className="page-action-disabled">
+          <button
+            type="button"
+            className="btn btn--ghost"
+            disabled
+            aria-describedby="employee-edit-roles-disabled-reason"
+          >
+            Edit roles
+          </button>
+          <span id="employee-edit-roles-disabled-reason" className="page-action-disabled__reason">
+            Role editing is not implemented yet.
+          </span>
+        </span>
+      }
+      overflow={[
+        {
+          label: "Message",
+          onSelect: () => undefined,
+          disabledReason: "Direct manager-to-worker messaging is not part of v1.",
+        },
+      ]}
     >
       <nav className="tabs tabs--h">
         {EMPLOYEE_TABS.map((tab) => (

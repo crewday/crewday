@@ -162,8 +162,28 @@ export default function StaysPage() {
     <DeskPage
       title="Stays"
       sub="Imported from Airbnb, VRBO, and direct bookings. Four layers: stays, turnover bundles, closures, employee leave."
-      actions={<button className="btn btn--moss">Import iCal</button>}
-      overflow={[{ label: "Add stay", onSelect: () => undefined }]}
+      actions={
+        <span className="page-action-disabled">
+          <button
+            type="button"
+            className="btn btn--moss"
+            disabled
+            aria-describedby="stays-import-ical-disabled-reason"
+          >
+            Import iCal
+          </button>
+          <span id="stays-import-ical-disabled-reason" className="page-action-disabled__reason">
+            iCal import setup is not implemented yet.
+          </span>
+        </span>
+      }
+      overflow={[
+        {
+          label: "Add stay",
+          onSelect: () => undefined,
+          disabledReason: "Manual stay creation is not implemented yet.",
+        },
+      ]}
     >
       <div className="panel">
         <table className="table table--roomy">

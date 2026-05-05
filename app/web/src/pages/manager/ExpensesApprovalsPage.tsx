@@ -62,7 +62,13 @@ export default function ExpensesApprovalsPage() {
   });
 
   const sub = "Review submitted claims. LLM autofill flags low-confidence fields; approving snaps the exchange rate and attaches to the current open pay period.";
-  const overflow = [{ label: "Export CSV", onSelect: () => undefined }];
+  const overflow = [
+    {
+      label: "Export CSV",
+      onSelect: () => undefined,
+      disabledReason: "Expense export is not implemented in the browser yet.",
+    },
+  ];
 
   if (expensesQ.isPending) {
     return <DeskPage title="Expense approvals" sub={sub} overflow={overflow}><Loading /></DeskPage>;
@@ -168,7 +174,22 @@ export default function ExpensesApprovalsPage() {
                   >
                     Reject with reason
                   </button>
-                  <button className="btn btn--ghost" type="button">Edit fields</button>
+                  <span className="page-action-disabled page-action-disabled--inline">
+                    <button
+                      className="btn btn--ghost"
+                      type="button"
+                      disabled
+                      aria-describedby={`expense-edit-fields-disabled-reason-${x.id}`}
+                    >
+                      Edit fields
+                    </button>
+                    <span
+                      id={`expense-edit-fields-disabled-reason-${x.id}`}
+                      className="page-action-disabled__reason"
+                    >
+                      Manager field editing is not implemented yet.
+                    </span>
+                  </span>
                 </div>
               </li>
             );

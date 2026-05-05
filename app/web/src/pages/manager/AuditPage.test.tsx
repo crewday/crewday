@@ -145,6 +145,12 @@ beforeEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("acme");
+  HTMLDialogElement.prototype.showModal = vi.fn(function showModal(this: HTMLDialogElement) {
+    this.setAttribute("open", "");
+  });
+  HTMLDialogElement.prototype.close = vi.fn(function close(this: HTMLDialogElement) {
+    this.removeAttribute("open");
+  });
 });
 
 afterEach(() => {
@@ -208,6 +214,21 @@ describe("<AuditPage>", () => {
 
       expect(await screen.findByText("audit.second_page")).toBeInTheDocument();
       expect(fake.calls.some((call) => call.includes("cursor=cursor_2"))).toBe(true);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("marks audit export as unavailable instead of exposing a no-op", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("asset.updated")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+
+      expect(screen.getByRole("menuitem", { name: /Export JSONL/ })).toBeDisabled();
+      expect(screen.getByText("Audit export is not implemented in the browser yet.")).toBeInTheDocument();
     } finally {
       fake.restore();
     }

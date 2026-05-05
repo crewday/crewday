@@ -193,6 +193,23 @@ describe("<InventoryPage>", () => {
     }
   });
 
+  it("marks create and export inventory actions as unavailable", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Paper towels")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New item" })).toBeDisabled();
+      expect(screen.getByText("Item creation is not implemented yet.")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+      expect(screen.getByRole("menuitem", { name: /Export CSV/ })).toBeDisabled();
+      expect(screen.getByText("Inventory export is not implemented yet.")).toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("posts adjustment and reorder-rule payloads from the drawer", async () => {
     const fake = installFetch();
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
