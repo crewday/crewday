@@ -20,6 +20,7 @@ from app.adapters.db.messaging.models import Notification, PushToken
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.messaging import build_messaging_router
 from app.tenancy import WorkspaceContext
 from app.util.ulid import new_ulid
@@ -118,6 +119,7 @@ def _build_app(
 ) -> FastAPI:
     app = FastAPI()
     app.include_router(build_messaging_router())
+    add_exception_handlers(app)
 
     def _override_ctx() -> WorkspaceContext:
         return ctx
@@ -213,6 +215,12 @@ def test_notifications_list_get_patch_and_bulk_mark_read(
 
     hidden = client.get(f"/notifications/{other}")
     assert hidden.status_code == 404
+    assert hidden.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    assert hidden.json()["error"] == "notification_not_found"
+
+    hidden_patch = client.patch(f"/notifications/{other}", json={"read": True})
+    assert hidden_patch.status_code == 404
+    assert hidden_patch.json()["error"] == "notification_not_found"
 
     patched = client.patch(f"/notifications/{mine}", json={"read": True})
     assert patched.status_code == 200
@@ -253,7 +261,8 @@ def test_push_tokens_list_delete_and_native_post_unavailable(
         json={"platform": "ios", "token": "native-token"},
     )
     assert unavailable.status_code == 501
-    assert unavailable.json()["detail"]["error"] == "push_unavailable"
+    assert unavailable.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    assert unavailable.json()["error"] == "push_unavailable"
 
     assert client.delete(f"/notifications/push/tokens/{other}").status_code == 204
     assert client.delete(f"/notifications/push/tokens/{mine}").status_code == 204
