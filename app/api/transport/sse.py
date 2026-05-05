@@ -387,16 +387,7 @@ class SSEFanOut:
             state.next_id += 1
             event_id = state.next_id
 
-            # Stamp the invalidation contract into the payload so
-            # the SPA doesn't have to carry a name→query-keys map
-            # (§14). Callers that want to override the computed
-            # default can pre-set ``invalidates`` on their payload
-            # before publishing; we respect it if present.
-            # Workspace-scoped query keys all start with the
-            # workspace slug, but the server does not know the slug
-            # here (the event carries ``workspace_id``), so the
-            # invalidation entries are kind names the client maps.
-            payload.setdefault("invalidates", _default_invalidates(kind))
+            payload.pop("invalidates", None)
             # Always stamp ``kind`` + ``workspace_id`` so a client
             # multiplexing over the stream doesn't have to re-derive
             # them from the ``event:`` / URL path (§14 "SSE-driven
@@ -653,103 +644,6 @@ def _format_sse_frame(*, event_id: str, kind: str, payload: dict[str, Any]) -> b
     return (f"id: {event_id}\nevent: {kind}\ndata: {body}\n\n").encode()
 
 
-# Default TanStack Query invalidation map. Keyed by event kind; each
-# value is a list of cache-key prefixes the SPA should invalidate. The
-# SPA joins them with the active workspace slug
-# (``['w', slug, ...prefix]``) — see §14 "Workspace-scoped query
-# keys". Kept co-located with the SSE transport because it is the
-# canonical consumer; a separate ``invalidations.py`` module would
-# only add one more file to cross-reference.
-#
-# An event not listed here forwards an empty ``invalidates`` array;
-# the SPA then falls back to whatever ad-hoc handler it has
-# registered for the kind (agent.* events, for example, drive chat
-# state directly rather than invalidating a query).
-#
-# TODO(transport): once the map grows past a screenful (likely when
-# the agent.* and llm.* kinds land with the agent runtime), move this
-# to a data file (e.g. ``app/api/transport/invalidations.py`` or a
-# JSON under ``docs/specs/``) so the SPA can import the same source
-# rather than tracking a parallel map. For now every entry is one
-# line so the overhead of another module is not worth the round-trip.
-_INVALIDATIONS: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
-    "task.created": (("tasks",),),
-    "task.assigned": (("tasks",),),
-    "task.updated": (("tasks",),),
-    "task.completed": (("tasks",),),
-    "task.occurrence.started": (("tasks",), ("shifts",), ("my-schedule",)),
-    "task.occurrence.completed": (("tasks",), ("shifts",), ("my-schedule",)),
-    "task.overdue": (("tasks",),),
-    # cd-wyq5: template rewrites invalidate the catalog list. Deletes
-    # additionally drop ``schedules`` because a deleted template prunes
-    # previously-derived occurrences from the worker schedule view.
-    "task_template.upserted": (("task_templates",),),
-    "task_template.deleted": (("task_templates",), ("schedules",)),
-    # cd-93wp: every write to ``user_leave`` / ``user_availability_override``
-    # flips the worker's ``/schedule`` cell tone (sand "pending" → moss
-    # "approved" / rust "rejected") and refreshes the leaves +
-    # me/availability_overrides lists. Mirrors the umbrella
-    # ``approval.decided`` handler so the SPA picks up the same
-    # invalidations on self-create + manager-edit edges that don't go
-    # through the approval bus.
-    "user_leave.upserted": (("my-schedule",), ("leaves",)),
-    "user_availability_override.upserted": (
-        ("my-schedule",),
-        ("me", "availability_overrides"),
-    ),
-    "stay.upcoming": (("stays",),),
-    "property.closure.created": (
-        ("stays",),
-        ("scheduler-calendar",),
-        ("my-schedule",),
-    ),
-    "property.closure.updated": (
-        ("stays",),
-        ("scheduler-calendar",),
-        ("my-schedule",),
-    ),
-    "expense.approved": (("expenses",),),
-    "expense.cancelled": (("expenses",),),
-    "expense.created": (("expenses",),),
-    "expense.submitted": (("expenses",),),
-    "shift.ended": (("shifts",), ("my-schedule",)),
-    "time.shift.changed": (("shifts",), ("my-schedule",)),
-    "time.shift.geofence_warning": (("shifts",), ("my-schedule",)),
-    "work_order.completed": (("work_orders",), ("booking_billings", "client-portal")),
-    "issue.reported": (("issues",),),
-    "instruction.created": (("instructions",),),
-    "instruction.updated": (("instructions",),),
-    "instruction.archived": (("instructions",),),
-    "instruction.published": (("instructions",),),
-    "asset.changed": (("assets",),),
-    "asset_action.performed": (("assets",),),
-    # The document-library list and the asset-detail panel both render
-    # ``file_extraction`` state — invalidate ``documents`` for the manager
-    # library page and ``assets`` for the per-asset detail tab. Mirrors
-    # the dual-key pattern used by ``shift.ended``.
-    "asset_document.extracted": (("documents",), ("assets",)),
-    "asset_document.extraction_failed": (("documents",), ("assets",)),
-    "asset_document.extraction_retried": (("documents",), ("assets",)),
-    "chat.message.sent": (("chat", "channels"),),
-    "chat.message.received": (("chat", "channels"),),
-    "chat_channel_binding.created": (("chat", "channels"),),
-    "chat_channel_binding.verified": (("chat", "channels"),),
-    "chat_channel_binding.revoked": (("chat", "channels"),),
-    # Bell-menu unread count + the notification list. Both query keys
-    # are per-recipient; the event is user-scoped so only the
-    # addressee's tabs receive it — the invalidation fires against
-    # their own cache entry and does not waste work on sibling tabs
-    # in other browsers logged into the same workspace.
-    "notification.created": (("notifications", "unread"), ("notifications",)),
-    "agent.settings.changed": (
-        ("agent_preferences", "me"),
-        ("me", "agent_approval_mode"),
-    ),
-    "property.workspace.changed": (("properties",),),
-    "workspace.changed": ((),),
-}
-
-
 def _roles_for_event(
     event: Event,
     *,
@@ -762,17 +656,6 @@ def _roles_for_event(
     if channel_kind == "staff":
         return ("manager", "worker")
     return ("manager",)
-
-
-def _default_invalidates(kind: str) -> list[list[str]]:
-    """Return the JSON-friendly invalidations array for ``kind``.
-
-    Shape: ``[[segment, …], …]`` — one list of segments per cache
-    entry to invalidate. Empty list when the kind has no default
-    mapping; the SPA then handles the event by name.
-    """
-    entries = _INVALIDATIONS.get(kind, ())
-    return [list(prefix) for prefix in entries]
 
 
 # ---------------------------------------------------------------------------

@@ -29,7 +29,6 @@ from app.api.transport import sse as sse_mod
 from app.api.transport.sse import (
     MAX_CLIENT_QUEUE,
     SSEFanOut,
-    _default_invalidates,
     _parse_last_event_id,
     _ParsedLastEventId,
     _stream_events,
@@ -276,35 +275,6 @@ class TestParseLastEventId:
         )
 
 
-# ---------------------------------------------------------------------------
-# _default_invalidates
-# ---------------------------------------------------------------------------
-
-
-class TestDefaultInvalidates:
-    def test_known_kind(self) -> None:
-        assert _default_invalidates("task.created") == [["tasks"]]
-        assert _default_invalidates("shift.ended") == [["shifts"], ["my-schedule"]]
-        assert _default_invalidates("work_order.completed") == [
-            ["work_orders"],
-            ["booking_billings", "client-portal"],
-        ]
-        assert _default_invalidates("asset.changed") == [["assets"]]
-        assert _default_invalidates("chat.message.sent") == [["chat", "channels"]]
-        assert _default_invalidates("agent.settings.changed") == [
-            ["agent_preferences", "me"],
-            ["me", "agent_approval_mode"],
-        ]
-
-    def test_unknown_kind_empty(self) -> None:
-        assert _default_invalidates("agent.turn.started") == []
-
-
-# ---------------------------------------------------------------------------
-# SSEFanOut unit tests (pure, no HTTP)
-# ---------------------------------------------------------------------------
-
-
 class TestFanOutDirect:
     async def test_publish_to_two_matching_subscribers_delivers_both(
         self, fresh_fanout: SSEFanOut
@@ -320,7 +290,7 @@ class TestFanOutDirect:
             kind="task.created",
             roles=ALL_ROLES,
             user_scope=None,
-            payload={"task_id": "t_1"},
+            payload={"task_id": "t_1", "invalidates": [["tasks"]]},
         )
         frame_a = await asyncio.wait_for(sub_a.queue.get(), 0.5)
         frame_b = await asyncio.wait_for(sub_b.queue.get(), 0.5)
@@ -336,7 +306,7 @@ class TestFanOutDirect:
         data = json.loads(parsed["data"])
         assert data["task_id"] == "t_1"
         assert data["kind"] == "task.created"
-        assert data["invalidates"] == [["tasks"]]
+        assert "invalidates" not in data
 
     async def test_role_filter_rejects_disallowed_role(
         self, fresh_fanout: SSEFanOut
@@ -968,14 +938,14 @@ class TestTaskEventWireShape:
         isolate_bus: None,
     ) -> None:
         """task.updated → ``{kind, workspace_id, task_id, changed_fields,
-        invalidates, actor_id, correlation_id, occurred_at}`` — never a
+        actor_id, correlation_id, occurred_at}`` — never a
         rendered ``task`` object.
 
         The frame envelope (``actor_id`` + ``correlation_id`` +
         ``occurred_at``) is added by the base :class:`Event` model_dump;
-        the SSE transport stamps ``kind``, ``workspace_id``, and
-        ``invalidates`` on top. The point of this test is what is
-        **not** there — no ``task`` field.
+        the SSE transport stamps ``kind`` and ``workspace_id`` on top.
+        The point of this test is what is **not** there — no ``task``
+        field and no server-side invalidation map.
         """
         from app.events.bus import EventBus
 
@@ -1002,9 +972,7 @@ class TestTaskEventWireShape:
         assert data["workspace_id"] == self._WS
         assert data["task_id"] == self._TASK
         assert data["changed_fields"] == ["title", "scheduled_for_local"]
-        # The transport stamps the default invalidation map for the
-        # kind; ``task.updated`` invalidates the workspace tasks list.
-        assert data["invalidates"] == [["tasks"]]
+        assert "invalidates" not in data
         # Crucially: no rendered ``Task`` field on the wire. The SPA
         # treats the event as a pure invalidation signal.
         assert "task" not in data

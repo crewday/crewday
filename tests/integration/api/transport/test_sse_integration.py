@@ -122,7 +122,7 @@ async def test_task_created_reaches_subscribed_client(
     assert payload["task_id"] == "01HX00000000000000000TSK000"
     assert payload["workspace_id"] == "01HX00000000000000000WS0000"
     assert payload["kind"] == "task.created"
-    assert payload["invalidates"] == [["tasks"]]
+    assert "invalidates" not in payload
     await gen.aclose()
 
 

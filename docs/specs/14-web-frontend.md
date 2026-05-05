@@ -704,6 +704,10 @@ the platform must guarantee*.
   `['scheduler-calendar']` shortcut would silently miss the
   workspace-scoped cache, since TanStack v5 prefix-matching starts
   at index 0 (cd-z1vj).
+- cd-fcnll chose Option B: SSE frames do not carry a server-side
+  `invalidates` field; `app/web/src/lib/sse.ts` remains the single
+  source of truth so invalidations always use workspace-scoped query
+  keys.
 - **Optimistic mutations.** `onMutate` snapshots cache; `onError`
   rolls back; `onSettled` invalidates. On concurrent writes (§06
   last-write-wins) the UI surfaces a "Completed by <name>" toast —

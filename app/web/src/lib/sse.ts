@@ -15,11 +15,11 @@
 //   header on reconnect.
 //
 // Server authority: `app/api/transport/sse.py` is the canonical
-// emitter. Its `_INVALIDATIONS` map only covers the kinds the backend
-// currently publishes; this client ships a superset keyed on the full
-// spec §"Event kinds" list so new backend emitters don't need a web
-// deploy to land. Kinds the server never emits just never run —
-// there's no harm in listing them.
+// emitter. Cache invalidation is client-owned so every invalidation can
+// use the active workspace-scoped `qk.*` prefix. This client ships a
+// superset keyed on the full spec §"Event kinds" list so new backend
+// emitters don't need a web deploy to land. Kinds the server never
+// emits just never run — there's no harm in listing them.
 //
 // Server emits (today): task.created, task.assigned, task.completed,
 // task.overdue, stay.upcoming, reservation.upserted,

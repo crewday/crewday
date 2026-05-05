@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.places.models import PropertyWorkspace, Unit
 from app.adapters.db.stays.models import Reservation
-from app.api.transport.sse import _default_invalidates
 from app.api.v1.places import build_properties_router
 from app.events import bus
 from app.events.types import PropertyWorkspaceChanged
@@ -334,10 +333,3 @@ def test_share_with_unknown_workspace_id_returns_not_found(
 
     assert response.status_code == 404, response.text
     assert response.json()["detail"]["error"] == "property_workspace_not_found"
-
-
-def test_property_closure_events_carry_sse_invalidations() -> None:
-    expected = [["stays"], ["scheduler-calendar"], ["my-schedule"]]
-
-    assert _default_invalidates("property.closure.created") == expected
-    assert _default_invalidates("property.closure.updated") == expected
