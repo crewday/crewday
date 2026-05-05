@@ -21,14 +21,13 @@
 #      ``scripts/`` on sys.path instead of the repo root and the
 #      ``from app.…`` imports miss.
 #
-#   2. Host-side (requires ``uv sync`` or ``pip install -e .`` so
-#      sqlalchemy / click are importable):
+#   2. Host-side. Uses local Python when deps are present; if imports
+#      are missing, falls back to the running dev-stack container:
 #
 #        CREWDAY_DEV_AUTH=1 ./scripts/dev-login.sh me@dev.local dev
 #
-# For Playwright browser tests on the loopback app, use
-# ``python -m scripts.dev_login ... --output playwright`` inside the
-# compose stack. It prints a cookie object for
+# For Playwright browser tests on the loopback app, pass
+# ``--output playwright`` to this wrapper. It prints a cookie object for
 # ``context.addCookies([cookie])`` using the dev-only
 # ``crewday_session`` alias with ``secure: false``. Do not add the
 # ``__Host-`` cookie directly through Playwright's cookie jar: the
@@ -94,8 +93,33 @@ else
   exit 127
 fi
 
-exec "$PY" -m scripts.dev_login \
+err_file="$(mktemp)"
+trap 'rm -f "$err_file"' EXIT
+
+if "$PY" -m scripts.dev_login \
   --email "$1" \
   --workspace "$2" \
   --output curl \
-  "${@:3}"
+  "${@:3}" 2>"$err_file"; then
+  exit 0
+fi
+
+status=$?
+if ! grep -Eq "ModuleNotFoundError: No module named|ImportError: No module named" "$err_file"; then
+  cat "$err_file" >&2
+  exit "$status"
+fi
+
+if ! command -v docker >/dev/null 2>&1; then
+  cat "$err_file" >&2
+  echo "error: dev-login host Python is missing dependencies and docker is not on PATH for container fallback" >&2
+  exit "$status"
+fi
+
+echo "dev-login: host Python is missing app dependencies; falling back to the app-api container" >&2
+docker compose -f mocks/docker-compose.yml exec -T app-api \
+  python -m scripts.dev_login \
+    --email "$1" \
+    --workspace "$2" \
+    --output curl \
+    "${@:3}"

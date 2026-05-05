@@ -19,13 +19,16 @@ exists only because of this loopback constraint.
 
 ## One-step recipe
 
-1. Mint the cookie inside the dev compose stack:
+1. Mint the cookie with the host wrapper:
 
    ```bash
-   docker compose -f mocks/docker-compose.yml exec app-api \
-     python -m scripts.dev_login --email me@dev.local \
-       --workspace smoke --output playwright
+   CREWDAY_DEV_AUTH=1 ./scripts/dev-login.sh me@dev.local smoke \
+     --output playwright
    ```
+
+   The wrapper uses host Python when the local environment is synced.
+   If imports are missing, it falls back to the running `app-api`
+   container, which already has the dev-auth gates configured.
 
 2. Paste the JSON object straight into Playwright:
 
@@ -70,10 +73,8 @@ curl -b "__Host-crewday_session=eyJ..." \
   http://127.0.0.1:8100/w/smoke/api/v1/...
 ```
 
-Or use the host-side wrapper (requires `uv sync` or
-`pip install -e .` first so SQLAlchemy/click are importable). Its
-default `--output curl` prints a `-b '__Host-…'` flag to stdout,
-ready for shell capture:
+Or use the host-side wrapper. Its default `--output curl` prints a
+`-b '__Host-…'` flag to stdout, ready for shell capture:
 
 ```bash
 cookie="$(CREWDAY_DEV_AUTH=1 ./scripts/dev-login.sh me@dev.local dev)"

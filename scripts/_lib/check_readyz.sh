@@ -42,7 +42,7 @@ _readyz_remedy_for() {
       printf 'docker compose -f mocks/docker-compose.yml restart app-api app-db\n'
       ;;
     no_heartbeat|heartbeat_stale)
-      printf 'docker compose -f mocks/docker-compose.yml restart app-worker\n'
+      printf 'docker compose -f mocks/docker-compose.yml restart app-api\n'
       ;;
     root_key_missing)
       printf 'set CREWDAY_ROOT_KEY in mocks/.env then docker compose -f mocks/docker-compose.yml up -d app-api\n'
