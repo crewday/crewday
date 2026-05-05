@@ -8,8 +8,16 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.adapters.db.authz.models import (
+    PermissionGroup,
+    PermissionGroupMember,
+    RoleGrant,
+)
+from app.adapters.db.messaging.repositories import SqlAlchemyEmailDeliveryRepository
+from app.adapters.mail.null import NullMailer
 from app.api.deps import current_workspace_context, db_session
 from app.domain.errors import DomainError, Forbidden, Internal, NotFound
 from app.domain.errors import Validation as DomainValidation
@@ -25,6 +33,11 @@ from app.domain.issues import (
     list_issues,
     update_issue,
 )
+from app.domain.issues.notifications import (
+    notify_issue_reported,
+    notify_issue_resolved,
+)
+from app.domain.messaging.notifications import NotificationService
 from app.tenancy import WorkspaceContext
 
 router = APIRouter(tags=["issues"])
@@ -125,6 +138,39 @@ def _domain_error_for_issue_error(exc: Exception) -> DomainError:
     return Internal(extra={"error": "internal"})
 
 
+def _issue_notification_sink(
+    session: Session,
+    ctx: WorkspaceContext,
+) -> NotificationService:
+    return NotificationService(
+        session=session,
+        ctx=ctx,
+        mailer=NullMailer(),
+        email_deliveries=SqlAlchemyEmailDeliveryRepository(session),
+    )
+
+
+def _list_issue_manager_user_ids(
+    session: Session, ctx: WorkspaceContext
+) -> tuple[str, ...]:
+    owner_ids = session.scalars(
+        select(PermissionGroupMember.user_id)
+        .join(PermissionGroup, PermissionGroup.id == PermissionGroupMember.group_id)
+        .where(PermissionGroup.workspace_id == ctx.workspace_id)
+        .where(PermissionGroupMember.workspace_id == ctx.workspace_id)
+        .where(PermissionGroup.slug == "owners")
+    ).all()
+    manager_ids = session.scalars(
+        select(RoleGrant.user_id).where(
+            RoleGrant.workspace_id == ctx.workspace_id,
+            RoleGrant.scope_kind == "workspace",
+            RoleGrant.grant_role == "manager",
+            RoleGrant.revoked_at.is_(None),
+        )
+    ).all()
+    return tuple(sorted(set(owner_ids).union(manager_ids)))
+
+
 @router.get(
     "",
     response_model=IssueListResponse,
@@ -162,6 +208,11 @@ def create_route(
         view = create_issue(session, ctx, body=body.to_domain())
     except (IssueAccessDenied, IssueValidationError) as exc:
         raise _domain_error_for_issue_error(exc) from exc
+    notify_issue_reported(
+        issue=view,
+        recipient_user_ids=_list_issue_manager_user_ids(session, ctx),
+        sink=_issue_notification_sink(session, ctx),
+    )
     return IssueResponse.from_view(view)
 
 
@@ -178,9 +229,15 @@ def update_route(
     session: _Db,
 ) -> IssueResponse:
     try:
+        before = get_issue(session, ctx, issue_id)
         view = update_issue(session, ctx, issue_id, body=body.to_domain())
     except (IssueAccessDenied, IssueNotFound, IssueValidationError) as exc:
         raise _domain_error_for_issue_error(exc) from exc
+    if before.state not in {"resolved", "wont_fix"} and view.state in {
+        "resolved",
+        "wont_fix",
+    }:
+        notify_issue_resolved(issue=view, sink=_issue_notification_sink(session, ctx))
     return IssueResponse.from_view(view)
 
 

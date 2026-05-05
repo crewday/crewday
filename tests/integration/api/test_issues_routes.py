@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 
+import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -16,6 +17,7 @@ from app.api.deps import current_workspace_context, db_session
 from app.api.errors import _handle_domain_error
 from app.api.v1.issues import router as issues_router
 from app.domain.errors import DomainError
+from app.domain.messaging.notifications import NotificationKind
 from app.tenancy.context import ActorGrantRole, WorkspaceContext
 from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user, bootstrap_workspace
@@ -148,6 +150,31 @@ def _seed_workspace(
     return manager_ctx, worker_ctx, visible, hidden
 
 
+class RecordingNotificationSink:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, NotificationKind, dict[str, object]]] = []
+
+    def notify(
+        self,
+        *,
+        recipient_user_id: str,
+        kind: NotificationKind,
+        payload: Mapping[str, object],
+    ) -> str:
+        self.calls.append((recipient_user_id, kind, dict(payload)))
+        return f"notification-{len(self.calls)}"
+
+
+@pytest.fixture
+def notification_sink(monkeypatch: pytest.MonkeyPatch) -> RecordingNotificationSink:
+    sink = RecordingNotificationSink()
+    monkeypatch.setattr(
+        "app.api.v1.issues._issue_notification_sink",
+        lambda session, ctx: sink,
+    )
+    return sink
+
+
 def test_worker_creates_issue_and_manager_lists_open_issue(db_session: Session) -> None:
     manager_ctx, worker_ctx, visible, _hidden = _seed_workspace(db_session)
     worker_client = _client(db_session, worker_ctx)
@@ -175,6 +202,52 @@ def test_worker_creates_issue_and_manager_lists_open_issue(db_session: Session) 
 
     assert listed.status_code == 200
     assert [row["id"] for row in listed.json()["data"]] == [body["id"]]
+
+
+def test_create_issue_notifies_owner_managers(
+    db_session: Session,
+    notification_sink: RecordingNotificationSink,
+) -> None:
+    manager_ctx, worker_ctx, visible, _hidden = _seed_workspace(db_session)
+    manager = bootstrap_user(
+        db_session,
+        email=f"issue-manager-{new_ulid()}@example.com",
+        display_name="Issue Manager",
+    )
+    db_session.add(
+        RoleGrant(
+            id=new_ulid(),
+            workspace_id=manager_ctx.workspace_id,
+            user_id=manager.id,
+            grant_role="manager",
+            scope_kind="workspace",
+            created_at=_NOW,
+            created_by_user_id=manager_ctx.actor_id,
+        )
+    )
+    db_session.flush()
+    worker_client = _client(db_session, worker_ctx)
+
+    created = worker_client.post(
+        "/issues",
+        json={
+            "title": "Pool gate loose",
+            "severity": "urgent",
+            "category": "safety",
+            "property_id": visible,
+        },
+    )
+
+    assert created.status_code == 201
+    assert {
+        (recipient_id, kind) for recipient_id, kind, _payload in notification_sink.calls
+    } == {
+        (manager_ctx.actor_id, NotificationKind.ISSUE_REPORTED),
+        (manager.id, NotificationKind.ISSUE_REPORTED),
+    }
+    for _recipient_id, _kind, payload in notification_sink.calls:
+        assert payload["issue_id"] == created.json()["id"]
+        assert payload["title"] == "Pool gate loose"
 
 
 def test_worker_lists_only_own_issues(db_session: Session) -> None:
@@ -224,6 +297,64 @@ def test_worker_cannot_create_issue_for_hidden_property(db_session: Session) -> 
     body = response.json()
     assert body["error"] == "not_visible"
     assert body["field"] == "property_id"
+
+
+def test_rejected_issue_create_does_not_notify(
+    db_session: Session,
+    notification_sink: RecordingNotificationSink,
+) -> None:
+    _manager_ctx, worker_ctx, _visible, hidden = _seed_workspace(db_session)
+    client = _client(db_session, worker_ctx)
+
+    response = client.post(
+        "/issues",
+        json={
+            "title": "Hidden problem",
+            "category": "other",
+            "property_id": hidden,
+        },
+    )
+
+    assert response.status_code == 422
+    assert notification_sink.calls == []
+
+
+@pytest.mark.parametrize("terminal_state", ["resolved", "wont_fix"])
+def test_resolving_issue_notifies_reporter_once(
+    db_session: Session,
+    notification_sink: RecordingNotificationSink,
+    terminal_state: str,
+) -> None:
+    manager_ctx, worker_ctx, visible, _hidden = _seed_workspace(db_session)
+    worker_client = _client(db_session, worker_ctx)
+    manager_client = _client(db_session, manager_ctx)
+    created = worker_client.post(
+        "/issues",
+        json={
+            "title": "Pool gate loose",
+            "severity": "urgent",
+            "category": "safety",
+            "property_id": visible,
+        },
+    )
+    issue_id = created.json()["id"]
+    notification_sink.calls.clear()
+
+    resolved = manager_client.patch(
+        f"/issues/{issue_id}",
+        json={"state": terminal_state, "resolution_note": "Latch replaced"},
+    )
+    repeated = manager_client.patch(
+        f"/issues/{issue_id}", json={"state": terminal_state}
+    )
+
+    assert resolved.status_code == 200
+    assert repeated.status_code == 200
+    assert [
+        (recipient_id, kind) for recipient_id, kind, _payload in notification_sink.calls
+    ] == [(worker_ctx.actor_id, NotificationKind.ISSUE_RESOLVED)]
+    assert notification_sink.calls[0][2]["issue_id"] == issue_id
+    assert notification_sink.calls[0][2]["state"] == terminal_state
 
 
 def test_invalid_severity_and_category_are_422(db_session: Session) -> None:

@@ -1,0 +1,9 @@
+Hi {{ recipient_display_name | default("there") }},
+
+Your issue was marked {{ state }}: **{{ title }}**.
+
+{% if resolution_note is defined and resolution_note -%}
+Resolution note: {{ resolution_note }}
+{% endif -%}
+
+Open crew.day to see the details.
