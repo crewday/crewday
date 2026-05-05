@@ -54,6 +54,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints
 from pydantic.json_schema import SkipJsonSchema
 from sqlalchemy.orm import Session
 
+from app.adapters.db.messaging.repositories import SqlAlchemyEmailDeliveryRepository
 from app.adapters.db.payroll.repositories import (
     SqlAlchemyPayPeriodRepository,
     SqlAlchemyPayrollExportRepository,
@@ -62,6 +63,7 @@ from app.adapters.db.payroll.repositories import (
     SqlAlchemyPayslipPdfRepository,
     SqlAlchemyPayslipReadRepository,
 )
+from app.adapters.mail.null import NullMailer
 from app.adapters.storage.ports import BlobNotFound, Storage
 from app.api.deps import current_workspace_context, db_session, get_storage
 from app.api.pagination import (
@@ -84,6 +86,7 @@ from app.domain.errors import (
     NotFound,
     Validation,
 )
+from app.domain.messaging.notifications import NotificationService
 from app.domain.payroll.compute import (
     PayslipComputeConflict,
     PayslipInvariantViolated,
@@ -98,6 +101,7 @@ from app.domain.payroll.exports import (
     export_timesheets_csv,
     stream_csv_with_audit,
 )
+from app.domain.payroll.notifications import notify_payslip_issued
 from app.domain.payroll.pdf import (
     PayslipPdfNotFound,
     PayslipPdfRendered,
@@ -167,6 +171,18 @@ def _json_enum(values: Iterable[str]) -> list[JsonValue]:
     enum_values: list[JsonValue] = []
     enum_values.extend(values)
     return enum_values
+
+
+def _payroll_notification_sink(
+    session: Session,
+    ctx: WorkspaceContext,
+) -> NotificationService:
+    return NotificationService(
+        session=session,
+        ctx=ctx,
+        mailer=NullMailer(),
+        email_deliveries=SqlAlchemyEmailDeliveryRepository(session),
+    )
 
 
 _CURRENCY_ENUM = _json_enum(sorted(ISO_4217_ALLOWLIST))
@@ -1292,6 +1308,10 @@ def build_payroll_router() -> APIRouter:
             action="payslip.issued",
             diff={"before": {"status": row.status}, "after": {"status": "issued"}},
             clock=clock,
+        )
+        notify_payslip_issued(
+            payslip=updated,
+            sink=_payroll_notification_sink(session, ctx),
         )
         return _payslip_to_response(updated)
 

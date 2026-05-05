@@ -327,6 +327,23 @@ class TestFanoutEndToEnd:
                 },
                 "Complete turnover task?",
             ),
+            (
+                NotificationKind.PAYSLIP_ISSUED,
+                {
+                    "payslip_id": "payslip-1",
+                    "pay_period_id": "period-1",
+                    "user_id": "user-1",
+                    "currency": "EUR",
+                    "gross_cents": 120000,
+                    "expense_reimbursements_cents": 2500,
+                    "net_cents": 98000,
+                    "status": "issued",
+                    "issued_at": "2026-04-24T12:00:00+00:00",
+                    "paid_at": None,
+                    "created_at": "2026-04-24T12:00:00+00:00",
+                },
+                "Payslip issued",
+            ),
         ],
     )
     def test_required_kinds_persist_row_and_fire_sse_with_required_context(

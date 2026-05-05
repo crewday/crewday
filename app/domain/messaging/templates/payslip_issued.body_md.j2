@@ -1,0 +1,7 @@
+Hi {{ recipient_display_name | default("there") }},
+
+Your payslip is ready.
+
+Net: {{ currency }} {{ "%.2f"|format(net_cents / 100) }}
+
+Open crew.day to view or download it.

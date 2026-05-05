@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.expenses.models import ExpenseClaim
+from app.adapters.db.messaging.models import Notification
 from app.adapters.db.payroll.models import Booking, PayPeriod, PayRule, Payslip
 from app.adapters.db.workspace.models import WorkEngagement
 from app.api.deps import current_workspace_context
@@ -542,6 +543,16 @@ def test_payslip_state_routes_issue_pay_and_void(
     assert issue.json()["issued_at"] is not None
     assert issue_replay.status_code == 200, issue_replay.text
     assert issue_replay.json()["status"] == "issued"
+    with session_factory() as session, tenant_agnostic():
+        notifications = session.scalars(
+            select(Notification).where(
+                Notification.workspace_id == seeded.workspace_id,
+                Notification.kind == "payslip_issued",
+            )
+        ).all()
+    assert [
+        (n.recipient_user_id, n.payload_json["payslip_id"]) for n in notifications
+    ] == [(seeded.worker_id, paid_slip_id)]
     assert paid.status_code == 200, paid.text
     assert paid.json()["status"] == "paid"
     assert paid.json()["paid_at"] is not None
