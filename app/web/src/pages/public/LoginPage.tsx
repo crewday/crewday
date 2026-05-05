@@ -29,15 +29,11 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { KeyRound } from "lucide-react";
 import {
-  PasskeyCancelledError,
-  PasskeyTimeoutError,
-  PasskeyTransientError,
-  PasskeyUnsupportedError,
   sanitizeNext,
   useAuth,
 } from "@/auth";
-import { ApiError } from "@/lib/api";
 import type { AuthMe } from "@/auth";
+import { messageForLoginError } from "./publicAuthMappers";
 
 // Landing pages for each grant-role bucket. Mirrors `RoleHome` in
 // `App.tsx` (and §14 "Role selector") so the redirect after login
@@ -134,7 +130,7 @@ export default function LoginPage() {
       // the form in `pending` so the button stays disabled through the
       // commit that mounts `<Navigate>`.
     } catch (err) {
-      setForm({ kind: "error", ...messageFor(err) });
+      setForm({ kind: "error", ...messageForLoginError(err) });
     } finally {
       // Drop the guard whether the ceremony resolved or threw. On
       // success `<Navigate>` unmounts us before the next render, so
@@ -197,103 +193,4 @@ export default function LoginPage() {
       </main>
     </div>
   );
-}
-
-// ── Internals ─────────────────────────────────────────────────────
-
-interface ResolvedMessage {
-  message: string;
-  tone: "info" | "danger";
-}
-
-/**
- * Translate an error from the passkey ceremony / API into a short
- * user-facing message. Branches on the typed error classes so we
- * don't leak implementation-level strings (`NotAllowedError`,
- * `AbortError`, …) into the UI.
- *
- * Tone signals intent to the CSS: `info` renders with the card's
- * muted palette (cancelled prompt — no harm done), `danger` with the
- * rust accent (the ceremony actually failed).
- */
-function messageFor(err: unknown): ResolvedMessage {
-  if (err instanceof PasskeyCancelledError) {
-    return {
-      message: "Passkey prompt closed. Click “Use passkey” to try again.",
-      tone: "info",
-    };
-  }
-  if (err instanceof PasskeyTimeoutError) {
-    return {
-      message:
-        "Your authenticator didn't respond in time. Click “Use passkey” to try again.",
-      tone: "info",
-    };
-  }
-  if (err instanceof PasskeyTransientError) {
-    return {
-      message:
-        "Couldn't reach your authenticator. Wait a moment and try again.",
-      tone: "danger",
-    };
-  }
-  if (err instanceof PasskeyUnsupportedError) {
-    if (err.kind === "invalid_state") {
-      return {
-        message:
-          "This passkey is already registered or in an unexpected state. Try another device, or use the recovery link below.",
-        tone: "danger",
-      };
-    }
-    if (err.kind === "constraint") {
-      return {
-        message:
-          "Your authenticator can't satisfy the passkey requirements for this workspace. Try another device, or use the recovery link below.",
-        tone: "danger",
-      };
-    }
-    if (err.kind === "security") {
-      return {
-        message:
-          "This page can't run a passkey ceremony from an insecure context. Open crew.day over HTTPS and try again.",
-        tone: "danger",
-      };
-    }
-    // `platform_unsupported` and any future kind fall back to the
-    // generic copy. The recovery affordance is the same: switch
-    // device or enrol a fresh one.
-    return {
-      message:
-        "This browser or device can't use a passkey here. Try another device, or use the recovery link below.",
-      tone: "danger",
-    };
-  }
-  if (err instanceof ApiError) {
-    if (err.status === 429) {
-      return {
-        message: "Too many sign-in attempts. Wait a minute and try again.",
-        tone: "danger",
-      };
-    }
-    if (err.status === 401 || err.status === 403) {
-      return {
-        message:
-          "That passkey isn't registered for this workspace. Use recovery below to enrol a fresh device.",
-        tone: "danger",
-      };
-    }
-    // Server sent a problem+json body — prefer its `detail` / `title`
-    // over a generic fallback.
-    const surface = err.detail ?? err.title ?? err.message;
-    return {
-      message: surface && surface.trim()
-        ? surface
-        : "We couldn't sign you in. Try again in a moment.",
-      tone: "danger",
-    };
-  }
-  return {
-    message: "We couldn't sign you in. Try again in a moment.",
-    tone: "danger",
-  };
 }

@@ -29,6 +29,21 @@ interface GuestPayload {
   guest_name: string | null;
 }
 
+interface GuestSections {
+  wifi: ReturnType<typeof wifiDetails>;
+  access: string[];
+  houseRules: string[];
+  trash: string[];
+  emergency: string[];
+}
+
+const ACCESS_FIELDS = [
+  ["Front door code", "door_code"],
+  ["Gate code", "gate_code"],
+  ["Lockbox", "lockbox"],
+  ["Parking", "parking"],
+] as const;
+
 function fmtDay(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleDateString("en-GB", {
@@ -88,21 +103,22 @@ function wifiDetails(welcome: Record<string, unknown>) {
 }
 
 function accessLines(welcome: Record<string, unknown>): string[] {
+  const labeled = labeledAccessLines(welcome);
+  if (labeled.length > 0) return labeled;
+  return lines(freeformAccessText(welcome));
+}
+
+function labeledAccessLines(welcome: Record<string, unknown>): string[] {
   const access = objectValue(welcome.access);
-  const pairs: [string, unknown][] = [
-    ["Front door code", access?.door_code ?? welcome.door_code],
-    ["Gate code", access?.gate_code ?? welcome.gate_code],
-    ["Lockbox", access?.lockbox ?? welcome.lockbox],
-    ["Parking", access?.parking ?? welcome.parking],
-  ];
-  const out = pairs.flatMap(([label, value]) => {
+  return ACCESS_FIELDS.flatMap(([label, key]) => {
+    const value = access?.[key] ?? welcome[key];
     const text = stringValue(value);
     return text ? [`${label}: ${text}`] : [];
   });
-  const freeform =
-    stringValue(welcome.access) ??
-    welcomeText(welcome, ["access_info", "access_notes"]);
-  return out.length > 0 ? out : lines(freeform);
+}
+
+function freeformAccessText(welcome: Record<string, unknown>): string | null {
+  return stringValue(welcome.access) ?? welcomeText(welcome, ["access_info", "access_notes"]);
 }
 
 function emergencyLines(welcome: Record<string, unknown>): string[] {
@@ -133,165 +149,234 @@ export default function GuestPage() {
   });
 
   if (token.length === 0) {
-    return (
-      <div className="surface surface--guest">
-        <main className="guest">
-          <p className="muted">This guest link is no longer valid.</p>
-        </main>
-      </div>
-    );
+    return <GuestInvalidView />;
   }
   if (q.isPending) {
-    return (
-      <div className="surface surface--guest">
-        <main className="guest">
-          <Loading />
-        </main>
-      </div>
-    );
+    return <GuestLoadingView />;
   }
   if (q.isError || !q.data) {
-    return (
-      <div className="surface surface--guest">
-        <main className="guest">
-          <p className="muted">This guest link is no longer valid.</p>
-        </main>
-      </div>
-    );
+    return <GuestInvalidView />;
   }
 
-  const payload = q.data;
-  const wifi = wifiDetails(payload.welcome);
-  const access = accessLines(payload.welcome);
-  const houseRules = lines(
-    welcomeText(payload.welcome, ["house_rules_md", "house_rules"]),
-  );
-  const trash = lines(
-    welcomeText(payload.welcome, ["trash_schedule_md", "trash_schedule"]),
-  );
-  const emergency = emergencyLines(payload.welcome);
+  return <GuestContent payload={q.data} sections={sectionsFor(q.data.welcome)} />;
+}
 
+function GuestInvalidView() {
   return (
     <div className="surface surface--guest">
       <main className="guest">
-        <header className="guest__hero">
-          <span className="guest__eyebrow">Welcome to</span>
-          <h1 className="guest__name">{payload.unit_name ?? payload.property_name}</h1>
-          <p className="guest__stay">
-            {fmtDay(payload.check_in_at)} → {fmtDay(payload.check_out_at)} ·{" "}
-            {payload.guest_name ? `Guest: ${payload.guest_name}` : "Guest stay"}
-          </p>
-        </header>
-
-        <section className="guest__grid">
-          <article className="guest-card">
-            <h2 className="guest-card__title">Wifi</h2>
-            <dl className="guest-card__kv">
-              <dt>Network</dt>
-              <dd className="mono">{wifi.ssid ?? "Ask your host"}</dd>
-              <dt>Password</dt>
-              <dd className="mono">{wifi.password ?? "Ask your host"}</dd>
-            </dl>
-          </article>
-
-          <article className="guest-card">
-            <h2 className="guest-card__title">Access</h2>
-            {access.length === 0 ? (
-              <p>Access details will be shared by your host.</p>
-            ) : (
-              access.map((line) => <p key={line}>{line}</p>)
-            )}
-          </article>
-
-          <article className="guest-card">
-            <h2 className="guest-card__title">House rules</h2>
-            <ul className="guest-card__list">
-              {houseRules.length === 0 ? (
-                <li>No house rules have been added yet.</li>
-              ) : (
-                houseRules.map((rule) => <li key={rule}>{rule}</li>)
-              )}
-            </ul>
-          </article>
-
-          {payload.assets.length > 0 && (
-            <article className="guest-card guest-card--wide">
-              <h2 className="guest-card__title">Equipment</h2>
-              <div className="guest-equipment">
-                {payload.assets.map((asset) => (
-                  <div key={asset.id} className="guest-asset-card">
-                    <div className="guest-asset-card__name">{asset.name}</div>
-                    {asset.cover_photo_url && (
-                      <div className="guest-asset-card__meta">
-                        Photo guide available
-                      </div>
-                    )}
-                    {asset.guest_instructions_md && (
-                      <div className="guest-asset-card__instructions">
-                        {asset.guest_instructions_md}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </article>
-          )}
-
-          <article className="guest-card">
-            <h2 className="guest-card__title">Trash &amp; recycling</h2>
-            {trash.length === 0 ? (
-              <p>Trash and recycling instructions have not been added yet.</p>
-            ) : (
-              trash.map((line) => <p key={line}>{line}</p>)
-            )}
-          </article>
-
-          <article className="guest-card guest-card--wide">
-            <h2 className="guest-card__title">Before you leave</h2>
-            <p className="muted">
-              A short checklist — nothing scary, just what we always ask.
-            </p>
-            <ul className="guest-checklist">
-              {payload.checklist.length === 0 ? (
-                <li className="muted">(No check-out notes for this stay.)</li>
-              ) : (
-                payload.checklist.map((item) => (
-                  <li key={item.id}>
-                    <span className="checklist__box" aria-hidden="true"></span>
-                    <span>{item.label}</span>
-                  </li>
-                ))
-              )}
-            </ul>
-          </article>
-
-          <article className="guest-card">
-            <h2 className="guest-card__title">Emergency contacts</h2>
-            <ul className="guest-card__list">
-              {emergency.length === 0 ? (
-                <li>Contact your host for urgent help.</li>
-              ) : (
-                emergency.map((line) => <li key={line}>{line}</li>)
-              )}
-            </ul>
-          </article>
-        </section>
-
-        <footer className="guest__footer">
-          <a
-            className="btn btn--ghost"
-            href={`mailto:hello@example.com?subject=Issue at ${
-              payload.unit_name ?? payload.property_name
-            }`}
-          >
-            Report an issue
-          </a>
-          <span className="muted">
-            Link expires {fmtDayMonth(payload.check_out_at)} · no login, no
-            cookies.
-          </span>
-        </footer>
+        <p className="muted">This guest link is no longer valid.</p>
       </main>
     </div>
+  );
+}
+
+function GuestLoadingView() {
+  return (
+    <div className="surface surface--guest">
+      <main className="guest">
+        <Loading />
+      </main>
+    </div>
+  );
+}
+
+function sectionsFor(welcome: Record<string, unknown>): GuestSections {
+  return {
+    wifi: wifiDetails(welcome),
+    access: accessLines(welcome),
+    houseRules: lines(
+      welcomeText(welcome, ["house_rules_md", "house_rules"]),
+    ),
+    trash: lines(
+      welcomeText(welcome, ["trash_schedule_md", "trash_schedule"]),
+    ),
+    emergency: emergencyLines(welcome),
+  };
+}
+
+function GuestContent({
+  payload,
+  sections,
+}: {
+  payload: GuestPayload;
+  sections: GuestSections;
+}) {
+  return (
+    <div className="surface surface--guest">
+      <main className="guest">
+        <GuestHero payload={payload} />
+        <section className="guest__grid">
+          <WifiCard wifi={sections.wifi} />
+          <AccessCard access={sections.access} />
+          <ListCard title="House rules" empty="No house rules have been added yet." items={sections.houseRules} />
+          <EquipmentCard assets={payload.assets} />
+          <TextCard
+            title="Trash & recycling"
+            empty="Trash and recycling instructions have not been added yet."
+            items={sections.trash}
+          />
+          <ChecklistCard checklist={payload.checklist} />
+          <ListCard
+            title="Emergency contacts"
+            empty="Contact your host for urgent help."
+            items={sections.emergency}
+          />
+        </section>
+        <GuestFooter payload={payload} />
+      </main>
+    </div>
+  );
+}
+
+function GuestHero({ payload }: { payload: GuestPayload }) {
+  return (
+    <header className="guest__hero">
+      <span className="guest__eyebrow">Welcome to</span>
+      <h1 className="guest__name">{payload.unit_name ?? payload.property_name}</h1>
+      <p className="guest__stay">
+        {fmtDay(payload.check_in_at)} → {fmtDay(payload.check_out_at)} ·{" "}
+        {payload.guest_name ? `Guest: ${payload.guest_name}` : "Guest stay"}
+      </p>
+    </header>
+  );
+}
+
+function WifiCard({ wifi }: { wifi: GuestSections["wifi"] }) {
+  return (
+    <article className="guest-card">
+      <h2 className="guest-card__title">Wifi</h2>
+      <dl className="guest-card__kv">
+        <dt>Network</dt>
+        <dd className="mono">{wifi.ssid ?? "Ask your host"}</dd>
+        <dt>Password</dt>
+        <dd className="mono">{wifi.password ?? "Ask your host"}</dd>
+      </dl>
+    </article>
+  );
+}
+
+function AccessCard({ access }: { access: string[] }) {
+  return (
+    <article className="guest-card">
+      <h2 className="guest-card__title">Access</h2>
+      {access.length === 0 ? (
+        <p>Access details will be shared by your host.</p>
+      ) : (
+        access.map((line) => <p key={line}>{line}</p>)
+      )}
+    </article>
+  );
+}
+
+function ListCard({
+  title,
+  empty,
+  items,
+}: {
+  title: string;
+  empty: string;
+  items: string[];
+}) {
+  return (
+    <article className="guest-card">
+      <h2 className="guest-card__title">{title}</h2>
+      <ul className="guest-card__list">
+        {items.length === 0 ? (
+          <li>{empty}</li>
+        ) : (
+          items.map((item) => <li key={item}>{item}</li>)
+        )}
+      </ul>
+    </article>
+  );
+}
+
+function TextCard({
+  title,
+  empty,
+  items,
+}: {
+  title: string;
+  empty: string;
+  items: string[];
+}) {
+  return (
+    <article className="guest-card">
+      <h2 className="guest-card__title">{title}</h2>
+      {items.length === 0 ? (
+        <p>{empty}</p>
+      ) : (
+        items.map((line) => <p key={line}>{line}</p>)
+      )}
+    </article>
+  );
+}
+
+function EquipmentCard({ assets }: { assets: GuestAsset[] }) {
+  if (assets.length === 0) return null;
+  return (
+    <article className="guest-card guest-card--wide">
+      <h2 className="guest-card__title">Equipment</h2>
+      <div className="guest-equipment">
+        {assets.map((asset) => (
+          <div key={asset.id} className="guest-asset-card">
+            <div className="guest-asset-card__name">{asset.name}</div>
+            {asset.cover_photo_url && (
+              <div className="guest-asset-card__meta">
+                Photo guide available
+              </div>
+            )}
+            {asset.guest_instructions_md && (
+              <div className="guest-asset-card__instructions">
+                {asset.guest_instructions_md}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function ChecklistCard({ checklist }: { checklist: ChecklistItem[] }) {
+  return (
+    <article className="guest-card guest-card--wide">
+      <h2 className="guest-card__title">Before you leave</h2>
+      <p className="muted">
+        A short checklist — nothing scary, just what we always ask.
+      </p>
+      <ul className="guest-checklist">
+        {checklist.length === 0 ? (
+          <li className="muted">(No check-out notes for this stay.)</li>
+        ) : (
+          checklist.map((item) => (
+            <li key={item.id}>
+              <span className="checklist__box" aria-hidden="true"></span>
+              <span>{item.label}</span>
+            </li>
+          ))
+        )}
+      </ul>
+    </article>
+  );
+}
+
+function GuestFooter({ payload }: { payload: GuestPayload }) {
+  return (
+    <footer className="guest__footer">
+      <a
+        className="btn btn--ghost"
+        href={`mailto:hello@example.com?subject=Issue at ${
+          payload.unit_name ?? payload.property_name
+        }`}
+      >
+        Report an issue
+      </a>
+      <span className="muted">
+        Link expires {fmtDayMonth(payload.check_out_at)} · no login, no
+        cookies.
+      </span>
+    </footer>
   );
 }

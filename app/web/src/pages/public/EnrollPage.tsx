@@ -25,19 +25,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Link, useLocation, useNavigate } from "react-router-dom";
 import { KeyRound } from "lucide-react";
-import { ApiError } from "@/lib/api";
-import {
-  PasskeyCancelledError,
-  PasskeyTimeoutError,
-  PasskeyTransientError,
-  PasskeyUnsupportedError,
-} from "@/auth/passkey";
 import {
   runRecoveryEnrollCeremony,
   verifyRecoveryToken,
 } from "@/auth/passkey-register";
 import { useAuth } from "@/auth";
 import type { AuthMe } from "@/auth";
+import {
+  messageForRecoveryEnrollError,
+  messageForRecoveryVerifyError,
+} from "./publicAuthMappers";
 
 // Same landing map LoginPage uses — one source of truth would be nicer,
 // but extracting it means a two-file diff every time a new grant-role
@@ -108,7 +105,7 @@ export default function EnrollPage() {
         const result = await verifyRecoveryToken(token);
         setVerify({ kind: "ready", sessionId: result.recovery_session_id });
       } catch (err) {
-        setVerify({ kind: "error", ...verifyMessageFor(err) });
+        setVerify({ kind: "error", ...messageForRecoveryVerifyError(err) });
       }
     })();
   }, [token]);
@@ -123,7 +120,7 @@ export default function EnrollPage() {
       await refresh();
       setEnroll({ kind: "done" });
     } catch (err) {
-      setEnroll({ kind: "error", ...enrollMessageFor(err) });
+      setEnroll({ kind: "error", ...messageForRecoveryEnrollError(err) });
     } finally {
       inflightRef.current = false;
     }
@@ -175,15 +172,6 @@ export default function EnrollPage() {
 }
 
 // ── Subcomponents ─────────────────────────────────────────────────
-
-function VerifyingView() {
-  return (
-    <div role="status" aria-live="polite">
-      <h1 className="login__headline">Checking your link…</h1>
-      <p className="login__sub">One moment — we're confirming the recovery token.</p>
-    </div>
-  );
-}
 
 function ReadyView({
   enroll,
@@ -247,106 +235,11 @@ function EnrollErrorView({
   );
 }
 
-// ── Internals ─────────────────────────────────────────────────────
-
-interface VerifyMessage {
-  message: string;
-  canRetry: boolean;
-}
-
-function verifyMessageFor(err: unknown): VerifyMessage {
-  if (err instanceof ApiError) {
-    if (err.status === 410 || err.status === 400 || err.status === 409 || err.status === 404) {
-      return {
-        message:
-          "This recovery link is expired, already used, or invalid. Request a new one below.",
-        canRetry: true,
-      };
-    }
-    if (err.status === 429) {
-      return {
-        message: "Too many recovery attempts from this network. Wait a minute, then try again.",
-        canRetry: true,
-      };
-    }
-  }
-  return {
-    message: "We couldn't verify the recovery link. Try again in a moment.",
-    canRetry: true,
-  };
-}
-
-interface EnrollMessage {
-  message: string;
-  tone: "info" | "danger";
-}
-
-function enrollMessageFor(err: unknown): EnrollMessage {
-  if (err instanceof PasskeyCancelledError) {
-    return {
-      message: "Passkey prompt closed. Click “Register passkey” to try again.",
-      tone: "info",
-    };
-  }
-  if (err instanceof PasskeyTimeoutError) {
-    return {
-      message:
-        "Your authenticator didn't respond in time. Click “Register passkey” to try again.",
-      tone: "info",
-    };
-  }
-  if (err instanceof PasskeyTransientError) {
-    return {
-      message:
-        "Couldn't reach your authenticator. Wait a moment and try again — the link stays valid for 10 minutes.",
-      tone: "danger",
-    };
-  }
-  if (err instanceof PasskeyUnsupportedError) {
-    if (err.kind === "invalid_state") {
-      return {
-        message:
-          "This device already has a passkey for your account. Try another device — the link stays valid for 10 minutes.",
-        tone: "danger",
-      };
-    }
-    if (err.kind === "constraint") {
-      return {
-        message:
-          "Your authenticator can't satisfy the passkey requirements for this workspace. Try another device — the link stays valid for 10 minutes.",
-        tone: "danger",
-      };
-    }
-    if (err.kind === "security") {
-      return {
-        message:
-          "This page can't run a passkey ceremony from an insecure context. Open crew.day over HTTPS and try again.",
-        tone: "danger",
-      };
-    }
-    return {
-      message:
-        "This browser or device can't register a passkey here. Try another device — the link stays valid for 10 minutes.",
-      tone: "danger",
-    };
-  }
-  if (err instanceof ApiError) {
-    if (err.status === 429) {
-      return {
-        message: "Too many register attempts. Wait a minute and try again.",
-        tone: "danger",
-      };
-    }
-    if (err.status === 404) {
-      return {
-        message:
-          "Your recovery session has expired. Request a fresh link from the sign-in page.",
-        tone: "danger",
-      };
-    }
-  }
-  return {
-    message: "We couldn't finish registering your passkey. Try again in a moment.",
-    tone: "danger",
-  };
+function VerifyingView() {
+  return (
+    <div role="status" aria-live="polite">
+      <h1 className="login__headline">Checking your link…</h1>
+      <p className="login__sub">One moment — we're confirming the recovery token.</p>
+    </div>
+  );
 }
