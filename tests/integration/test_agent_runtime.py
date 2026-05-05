@@ -39,9 +39,10 @@ from app.adapters.db.llm.models import (
     LlmProvider,
     LlmProviderModel,
 )
-from app.adapters.db.messaging.models import ChatChannel
+from app.adapters.db.messaging.models import ChatChannel, Notification
 from app.adapters.db.workspace.models import Workspace
 from app.adapters.llm.ports import LLMResponse, LLMUsage, Tool
+from app.adapters.mail.null import NullMailer
 from app.auth import tokens as tokens_module
 from app.domain.agent.runtime import (
     DelegatedToken,
@@ -50,6 +51,8 @@ from app.domain.agent.runtime import (
     ToolResult,
     run_turn,
 )
+from app.domain.messaging.notifications import NotificationKind, NotificationService
+from app.events import NotificationCreated
 from app.events.bus import EventBus
 from app.tenancy import WorkspaceContext, registry, tenant_agnostic
 from app.tenancy.current import reset_current, set_current
@@ -76,6 +79,9 @@ def _ensure_registered() -> None:
         "agent_token",
         "chat_channel",
         "chat_message",
+        "notification",
+        "email_opt_out",
+        "push_token",
     ):
         registry.register(table)
 
@@ -416,3 +422,151 @@ def test_manager_turn_writes_audit_with_real_delegated_token(
     assert token_row.kind == "delegated"
     assert token_row.delegate_for_user_id == user.id
     assert token_row.label == "manager-chat-agent"
+
+
+def test_agent_message_fallback_notifies_target_user_with_inbox_and_sse(
+    db_session: Session,
+) -> None:
+    workspace, user = _seed_workspace_and_user(db_session)
+    ctx = WorkspaceContext(
+        workspace_id=workspace.id,
+        workspace_slug=workspace.slug,
+        actor_id=user.id,
+        actor_kind="user",
+        actor_grant_role="manager",
+        actor_was_owner_member=True,
+        audit_correlation_id=new_ulid(),
+    )
+    set_current(ctx)
+    _seed_llm_assignment(db_session, workspace_id=workspace.id)
+    _seed_budget_ledger(db_session, workspace_id=workspace.id)
+    channel_id = _seed_channel(db_session, workspace_id=workspace.id)
+
+    bus = EventBus()
+    clock = FrozenClock(_PINNED)
+    captured: list[NotificationCreated] = []
+    bus.subscribe(NotificationCreated)(captured.append)
+    service = NotificationService(
+        session=db_session,
+        ctx=ctx,
+        mailer=NullMailer(),
+        clock=clock,
+        bus=bus,
+    )
+    llm = _ScriptedLLM(
+        replies=[
+            LLMResponse(
+                text="I found the invoice and attached it to the stay.",
+                usage=LLMUsage(prompt_tokens=20, completion_tokens=11, total_tokens=31),
+                model_id="fake/integration-model",
+                finish_reason="stop",
+            ),
+        ]
+    )
+
+    outcome = run_turn(
+        ctx,
+        session=db_session,
+        scope="manager",
+        thread_id=channel_id,
+        user_message="Did the invoice arrive?",
+        trigger="event",
+        llm_client=llm,
+        tool_dispatcher=_CountingDispatcher(),
+        token_factory=RealDelegatedTokenFactory(session=db_session),
+        agent_label="manager-chat-agent",
+        capability="chat.manager",
+        event_bus=bus,
+        clock=clock,
+        agent_message_notification_sink=service,
+        agent_message_delivery_is_fallback=True,
+    )
+
+    assert outcome.outcome == "replied"
+    row = db_session.execute(
+        select(Notification).where(
+            Notification.workspace_id == workspace.id,
+            Notification.recipient_user_id == user.id,
+            Notification.kind == NotificationKind.AGENT_MESSAGE.value,
+        )
+    ).scalar_one()
+    assert row.subject == "crew.day — I found the invoice and attached it to the stay."
+    assert "I found the invoice and attached it to the stay." in row.body_md
+    assert f"/w/{workspace.slug}/chat#{outcome.chat_message_id}" in row.body_md
+    assert row.payload_json == {
+        "preview": "I found the invoice and attached it to the stay.",
+        "message_body": "I found the invoice and attached it to the stay.",
+        "deep_link": f"/w/{workspace.slug}/chat#{outcome.chat_message_id}",
+        "workspace_slug": workspace.slug,
+        "chat_thread_ref": channel_id,
+        "message_id": outcome.chat_message_id,
+    }
+    assert [event.notification_id for event in captured] == [row.id]
+    assert captured[0].kind == NotificationKind.AGENT_MESSAGE.value
+    assert captured[0].actor_user_id == user.id
+
+
+def test_live_agent_reply_with_sink_does_not_create_agent_message_notification(
+    db_session: Session,
+) -> None:
+    workspace, user = _seed_workspace_and_user(db_session)
+    ctx = WorkspaceContext(
+        workspace_id=workspace.id,
+        workspace_slug=workspace.slug,
+        actor_id=user.id,
+        actor_kind="user",
+        actor_grant_role="manager",
+        actor_was_owner_member=True,
+        audit_correlation_id=new_ulid(),
+    )
+    set_current(ctx)
+    _seed_llm_assignment(db_session, workspace_id=workspace.id)
+    _seed_budget_ledger(db_session, workspace_id=workspace.id)
+    channel_id = _seed_channel(db_session, workspace_id=workspace.id)
+    bus = EventBus()
+    service = NotificationService(
+        session=db_session,
+        ctx=ctx,
+        mailer=NullMailer(),
+        clock=FrozenClock(_PINNED),
+        bus=bus,
+    )
+
+    outcome = run_turn(
+        ctx,
+        session=db_session,
+        scope="manager",
+        thread_id=channel_id,
+        user_message="Ping",
+        trigger="event",
+        llm_client=_ScriptedLLM(
+            replies=[
+                LLMResponse(
+                    text="Pong",
+                    usage=LLMUsage(
+                        prompt_tokens=20,
+                        completion_tokens=2,
+                        total_tokens=22,
+                    ),
+                    model_id="fake/integration-model",
+                    finish_reason="stop",
+                ),
+            ]
+        ),
+        tool_dispatcher=_CountingDispatcher(),
+        token_factory=RealDelegatedTokenFactory(session=db_session),
+        agent_label="manager-chat-agent",
+        capability="chat.manager",
+        event_bus=bus,
+        clock=FrozenClock(_PINNED),
+        agent_message_notification_sink=service,
+    )
+
+    assert outcome.outcome == "replied"
+    notification = db_session.scalars(
+        select(Notification).where(
+            Notification.workspace_id == workspace.id,
+            Notification.kind == NotificationKind.AGENT_MESSAGE.value,
+        )
+    ).one_or_none()
+    assert notification is None

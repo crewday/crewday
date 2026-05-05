@@ -11,8 +11,10 @@ from typing import Any, Literal, Protocol
 from app.domain.messaging.notifications import NotificationKind
 
 __all__ = [
+    "AgentMessageNotificationSink",
     "ApprovalNotificationSink",
     "approval_notification_view_from_row",
+    "notify_agent_message_fallback",
     "notify_approval_decided",
     "notify_approval_needed",
 ]
@@ -21,6 +23,16 @@ _log = logging.getLogger(__name__)
 
 
 class ApprovalNotificationSink(Protocol):
+    def notify(
+        self,
+        *,
+        recipient_user_id: str,
+        kind: NotificationKind,
+        payload: Mapping[str, object],
+    ) -> str: ...
+
+
+class AgentMessageNotificationSink(Protocol):
     def notify(
         self,
         *,
@@ -173,6 +185,33 @@ def notify_approval_decided(
     )
 
 
+def notify_agent_message_fallback(
+    *,
+    recipient_user_id: str,
+    message_body: str,
+    workspace_slug: str,
+    chat_thread_ref: str | None,
+    message_id: str | None,
+    sink: AgentMessageNotificationSink,
+) -> None:
+    _notify(
+        sink,
+        recipient_user_id=recipient_user_id,
+        kind=NotificationKind.AGENT_MESSAGE,
+        payload={
+            "preview": _preview(message_body),
+            "message_body": message_body,
+            "deep_link": _agent_message_deep_link(
+                workspace_slug=workspace_slug,
+                message_id=message_id,
+            ),
+            "workspace_slug": workspace_slug,
+            "chat_thread_ref": chat_thread_ref,
+            "message_id": message_id,
+        },
+    )
+
+
 def _approval_payload(approval: ApprovalNotificationView) -> dict[str, object | None]:
     return {
         "approval_request_id": approval.id,
@@ -191,8 +230,22 @@ def _approval_payload(approval: ApprovalNotificationView) -> dict[str, object | 
     }
 
 
+def _preview(message_body: str) -> str:
+    compact = " ".join(message_body.split())
+    if len(compact) <= 140:
+        return compact or "new message"
+    return compact[:137].rstrip() + "..."
+
+
+def _agent_message_deep_link(*, workspace_slug: str, message_id: str | None) -> str:
+    target = f"/w/{workspace_slug}/chat"
+    if message_id:
+        return f"{target}#{message_id}"
+    return target
+
+
 def _notify(
-    sink: ApprovalNotificationSink,
+    sink: ApprovalNotificationSink | AgentMessageNotificationSink,
     *,
     recipient_user_id: str,
     kind: NotificationKind,
@@ -206,9 +259,9 @@ def _notify(
         )
     except Exception:
         _log.exception(
-            "approval notification fanout failed",
+            "notification fanout failed",
             extra={
-                "event": "approvals.notification.failed",
+                "event": "notification.failed",
                 "kind": kind.value,
                 "recipient_user_id": recipient_user_id,
             },

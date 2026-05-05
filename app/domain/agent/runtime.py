@@ -134,8 +134,10 @@ from app.adapters.llm.ports import LLMClient, LLMResponse, Tool
 from app.audit import write_audit
 from app.domain.agent.compaction import search_chat_archive
 from app.domain.agent.notifications import (
+    AgentMessageNotificationSink,
     ApprovalNotificationSink,
     approval_notification_view_from_row,
+    notify_agent_message_fallback,
     notify_approval_needed,
 )
 from app.domain.agent.preferences import (
@@ -522,6 +524,9 @@ def run_turn(
     include_user_message: bool = True,
     approval_notification_sink: ApprovalNotificationSink | None = None,
     approval_recipient_user_ids: Sequence[str] = (),
+    agent_message_notification_sink: AgentMessageNotificationSink | None = None,
+    agent_message_recipient_user_id: str | None = None,
+    agent_message_delivery_is_fallback: bool = False,
 ) -> TurnOutcome:
     """Run one agent turn end-to-end.
 
@@ -770,6 +775,9 @@ def run_turn(
                     event_bus=bus,
                     correlation_id=correlation_id,
                     clock=eff_clock,
+                    agent_message_notification_sink=agent_message_notification_sink,
+                    agent_message_recipient_user_id=agent_message_recipient_user_id,
+                    agent_message_delivery_is_fallback=agent_message_delivery_is_fallback,
                 )
                 ended_at = eff_clock.now()  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
                 bus.publish(  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
@@ -948,6 +956,9 @@ def run_turn(
             event_bus=bus,
             correlation_id=correlation_id,
             clock=eff_clock,
+            agent_message_notification_sink=agent_message_notification_sink,
+            agent_message_recipient_user_id=agent_message_recipient_user_id,
+            agent_message_delivery_is_fallback=agent_message_delivery_is_fallback,
         )
         ended_at = eff_clock.now()
         bus.publish(
@@ -1513,6 +1524,9 @@ def _write_chat_reply(
     event_bus: EventBus,
     correlation_id: str,
     clock: Clock,
+    agent_message_notification_sink: AgentMessageNotificationSink | None = None,
+    agent_message_recipient_user_id: str | None = None,
+    agent_message_delivery_is_fallback: bool = False,
 ) -> str | None:
     """Persist the agent's reply and return the row id.
 
@@ -1528,7 +1542,21 @@ def _write_chat_reply(
     delegating user the same way every other write is.
     """
     # code-health: ignore[params] Port params are adapter API contract.
+    should_notify_fallback = (
+        agent_message_delivery_is_fallback
+        and agent_message_notification_sink is not None
+    )
     if thread_id is None:
+        if should_notify_fallback:
+            assert agent_message_notification_sink is not None
+            notify_agent_message_fallback(
+                recipient_user_id=agent_message_recipient_user_id or ctx.actor_id,
+                message_body=body_md,
+                workspace_slug=ctx.workspace_slug,
+                chat_thread_ref=None,
+                message_id=None,
+                sink=agent_message_notification_sink,
+            )
         return None
     row_id = new_ulid(clock=clock)
     row = ChatMessage(
@@ -1561,6 +1589,16 @@ def _write_chat_reply(
             ),
         )
     )
+    if should_notify_fallback:
+        assert agent_message_notification_sink is not None
+        notify_agent_message_fallback(
+            recipient_user_id=agent_message_recipient_user_id or ctx.actor_id,
+            message_body=body_md,
+            workspace_slug=ctx.workspace_slug,
+            chat_thread_ref=thread_id,
+            message_id=row_id,
+            sink=agent_message_notification_sink,
+        )
     return row_id
 
 

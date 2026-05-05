@@ -358,6 +358,18 @@ class TestFanoutEndToEnd:
                 },
                 "Ada Guest",
             ),
+            (
+                NotificationKind.AGENT_MESSAGE,
+                {
+                    "preview": "The agent has an update",
+                    "message_body": "The agent has an update for you.",
+                    "deep_link": "/w/fanout/chat#msg-1",
+                    "workspace_slug": "fanout",
+                    "chat_thread_ref": "thread-1",
+                    "message_id": "msg-1",
+                },
+                "The agent has an update",
+            ),
         ],
     )
     def test_required_kinds_persist_row_and_fire_sse_with_required_context(
