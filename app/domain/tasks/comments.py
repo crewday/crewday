@@ -119,6 +119,7 @@ from typing import Any, Final, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.audit import write_audit
+from app.domain.tasks.notifications import TaskNotificationSink, notify_comment_mentions
 from app.domain.tasks.ports import (
     CommentModerationAuthorizer,
     CommentRow,
@@ -659,6 +660,7 @@ def post_comment(
     internal_caller: bool = False,
     clock: Clock | None = None,
     event_bus: EventBus | None = None,
+    notifications: TaskNotificationSink | None = None,
 ) -> CommentView:
     """Append a new comment to ``occurrence_id`` and return the fresh view.
 
@@ -776,6 +778,19 @@ def post_comment(
             mentioned_user_ids=list(mentioned_user_ids),
         )
     )
+    if mentioned_user_ids:
+        notify_comment_mentions(
+            repo.session,
+            ctx,
+            task_id=occurrence_id,
+            task_title=occurrence.title or "Task",
+            comment_id=row.id,
+            comment_body_md=payload.body_md,
+            mentioned_user_ids=mentioned_user_ids,
+            clock=resolved_clock,
+            bus=resolved_bus,
+            sink=notifications,
+        )
     return view
 
 
@@ -786,6 +801,8 @@ def edit_comment(
     body_md: str,
     *,
     clock: Clock | None = None,
+    event_bus: EventBus | None = None,
+    notifications: TaskNotificationSink | None = None,
 ) -> CommentView:
     """Rewrite ``body_md`` on ``comment_id`` within the author grace window.
 
@@ -806,8 +823,9 @@ def edit_comment(
     reconstruct the edit.
     """
     resolved_clock = clock if clock is not None else SystemClock()
+    resolved_bus = event_bus if event_bus is not None else default_event_bus
 
-    row, _occurrence = _load_comment(repo, ctx, comment_id)
+    row, occurrence = _load_comment(repo, ctx, comment_id)
 
     if row.kind != "user":
         raise CommentNotEditable(
@@ -864,6 +882,22 @@ def edit_comment(
         },
         clock=resolved_clock,
     )
+    newly_mentioned = set(after_view.mentioned_user_ids) - set(
+        before_view.mentioned_user_ids
+    )
+    if newly_mentioned:
+        notify_comment_mentions(
+            repo.session,
+            ctx,
+            task_id=after_view.occurrence_id,
+            task_title=occurrence.title or "Task",
+            comment_id=after_view.id,
+            comment_body_md=after_view.body_md,
+            mentioned_user_ids=newly_mentioned,
+            clock=resolved_clock,
+            bus=resolved_bus,
+            sink=notifications,
+        )
     return after_view
 
 

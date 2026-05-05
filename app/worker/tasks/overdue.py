@@ -70,6 +70,7 @@ from app.domain.settings.cascade import (
     resolve_most_specific,
     task_scope_chain,
 )
+from app.domain.tasks.notifications import TaskNotificationSink, notify_task_overdue
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import TaskOverdue
@@ -273,6 +274,7 @@ def detect_overdue(  # code-health: ignore[nloc] Overdue policy flow.
     clock: Clock | None = None,
     grace_minutes: int | None = None,
     event_bus: EventBus | None = None,
+    notifications: TaskNotificationSink | None = None,
 ) -> OverdueReport:
     """Run one sweeper tick for the caller's workspace.
 
@@ -415,6 +417,16 @@ def detect_overdue(  # code-health: ignore[nloc] Overdue policy flow.
                 overdue_since=resolved_now,
                 slipped_minutes=slipped_minutes,
             )
+        )
+        notify_task_overdue(
+            session,
+            ctx,
+            task=task,
+            overdue_since=resolved_now,
+            slipped_minutes=slipped_minutes,
+            clock=resolved_clock,
+            bus=resolved_bus,
+            sink=notifications,
         )
 
     tick_ended_at = resolved_clock.now()

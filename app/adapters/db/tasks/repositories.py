@@ -306,6 +306,7 @@ def _to_occurrence_scope_row(row: Occurrence) -> OccurrenceCommentScopeRow:
         id=row.id,
         workspace_id=row.workspace_id,
         property_id=row.property_id,
+        title=row.title,
         is_personal=row.is_personal,
         created_by_user_id=row.created_by_user_id,
     )

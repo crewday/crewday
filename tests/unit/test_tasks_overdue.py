@@ -49,7 +49,13 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
+from app.adapters.db.authz.models import (
+    PermissionGroup,
+    PermissionGroupMember,
+    RoleGrant,
+)
 from app.adapters.db.base import Base
+from app.adapters.db.messaging.models import Notification
 from app.adapters.db.places.models import Property
 from app.adapters.db.session import make_engine
 from app.adapters.db.tasks.models import Occurrence
@@ -64,7 +70,7 @@ from app.domain.tasks.completion import (
 )
 from app.domain.tasks.oneoff import TaskView
 from app.events.bus import EventBus
-from app.events.types import TaskOverdue
+from app.events.types import NotificationCreated, TaskOverdue
 from app.tenancy.context import WorkspaceContext
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
@@ -260,6 +266,8 @@ def _bootstrap_occurrence(
     ends_at: datetime | None = None,
     starts_at: datetime | None = None,
     assignee_user_id: str | None = None,
+    is_personal: bool = False,
+    created_by_user_id: str | None = None,
 ) -> str:
     """Insert one ``occurrence`` row with deterministic defaults.
 
@@ -295,8 +303,8 @@ def _bootstrap_occurrence(
             expected_role_id=None,
             linked_instruction_ids=[],
             inventory_consumption_json={},
-            is_personal=False,
-            created_by_user_id=None,
+            is_personal=is_personal,
+            created_by_user_id=created_by_user_id,
             created_at=_PINNED,
         )
     )
@@ -387,6 +395,162 @@ class TestFlipsPendingPastEndsAtPlusGrace:
         assert event.overdue_since == _PINNED
         # 30 minutes between ``ends_at`` and ``now`` ⇒ 30 floored minutes.
         assert event.slipped_minutes == 30
+
+    def test_overdue_fans_out_to_assignee(
+        self, session: Session, bus: EventBus, clock: FrozenClock
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        worker = _bootstrap_user(session)
+        oid = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            state="pending",
+            ends_at=_PINNED - timedelta(minutes=30),
+            assignee_user_id=worker,
+        )
+        captured: list[NotificationCreated] = []
+        bus.subscribe(NotificationCreated)(captured.append)
+
+        detect_overdue(
+            _ctx(ws), session=session, clock=clock, event_bus=bus, grace_minutes=15
+        )
+
+        row = session.scalar(
+            select(Notification).where(
+                Notification.workspace_id == ws,
+                Notification.recipient_user_id == worker,
+                Notification.kind == "task_overdue",
+            )
+        )
+        assert row is not None
+        assert row.payload_json["task_id"] == oid
+        assert [event.kind for event in captured] == ["task_overdue"]
+
+    def test_overdue_fans_out_to_assignee_owner_and_manager_once(
+        self, session: Session, bus: EventBus, clock: FrozenClock
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        worker = _bootstrap_user(session)
+        owner = _bootstrap_user(session)
+        manager = _bootstrap_user(session)
+        group = PermissionGroup(
+            id=new_ulid(),
+            workspace_id=ws,
+            slug="owners",
+            name="Owners",
+            system=True,
+            capabilities_json={},
+            created_at=_PINNED,
+        )
+        session.add(group)
+        session.add(
+            PermissionGroupMember(
+                group_id=group.id,
+                user_id=owner,
+                workspace_id=ws,
+                added_at=_PINNED,
+                added_by_user_id=None,
+            )
+        )
+        session.add(
+            RoleGrant(
+                id=new_ulid(),
+                workspace_id=ws,
+                user_id=manager,
+                grant_role="manager",
+                scope_kind="workspace",
+                scope_property_id=None,
+                binding_org_id=None,
+                created_at=_PINNED,
+                created_by_user_id=None,
+            )
+        )
+        _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            state="pending",
+            ends_at=_PINNED - timedelta(minutes=30),
+            assignee_user_id=worker,
+        )
+
+        detect_overdue(
+            _ctx(ws), session=session, clock=clock, event_bus=bus, grace_minutes=15
+        )
+
+        rows = session.scalars(
+            select(Notification).where(
+                Notification.workspace_id == ws,
+                Notification.kind == "task_overdue",
+            )
+        ).all()
+        assert {row.recipient_user_id for row in rows} == {worker, owner, manager}
+
+    def test_personal_overdue_does_not_notify_managers(
+        self, session: Session, bus: EventBus, clock: FrozenClock
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        creator = _bootstrap_user(session)
+        owner = _bootstrap_user(session)
+        manager = _bootstrap_user(session)
+        group = PermissionGroup(
+            id=new_ulid(),
+            workspace_id=ws,
+            slug="owners",
+            name="Owners",
+            system=True,
+            capabilities_json={},
+            created_at=_PINNED,
+        )
+        session.add(group)
+        session.add(
+            PermissionGroupMember(
+                group_id=group.id,
+                user_id=owner,
+                workspace_id=ws,
+                added_at=_PINNED,
+                added_by_user_id=None,
+            )
+        )
+        session.add(
+            RoleGrant(
+                id=new_ulid(),
+                workspace_id=ws,
+                user_id=manager,
+                grant_role="manager",
+                scope_kind="workspace",
+                scope_property_id=None,
+                binding_org_id=None,
+                created_at=_PINNED,
+                created_by_user_id=None,
+            )
+        )
+        _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            state="pending",
+            ends_at=_PINNED - timedelta(minutes=30),
+            assignee_user_id=creator,
+            is_personal=True,
+            created_by_user_id=creator,
+        )
+
+        detect_overdue(
+            _ctx(ws), session=session, clock=clock, event_bus=bus, grace_minutes=15
+        )
+
+        rows = session.scalars(
+            select(Notification).where(
+                Notification.workspace_id == ws,
+                Notification.kind == "task_overdue",
+            )
+        ).all()
+        assert {row.recipient_user_id for row in rows} == {creator, owner}
 
 
 class TestDoesNotFlipInsideGraceWindow:

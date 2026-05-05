@@ -95,6 +95,7 @@ class OccurrenceCommentScopeRow:
     id: str
     workspace_id: str
     property_id: str | None
+    title: str | None
     is_personal: bool
     created_by_user_id: str | None
 

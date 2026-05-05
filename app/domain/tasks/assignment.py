@@ -100,6 +100,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.tasks.models import Occurrence, Schedule
 from app.audit import write_audit
+from app.domain.tasks.notifications import TaskNotificationSink, notify_task_assigned
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import (
@@ -278,6 +279,18 @@ class TaskAlreadyAssigned(ValueError):
     :func:`assign_task` (auto or override) when no previous assignee
     exists.
     """
+
+
+class _SilentTaskNotifications:
+    def notify(
+        self,
+        *,
+        recipient_user_id: str,
+        kind: object,
+        payload: object,
+    ) -> str:
+        _ = recipient_user_id, kind, payload
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -842,6 +855,7 @@ def assign_task(
     rota: RotaPort | None = None,
     pool: CandidatePoolPort | None = None,
     workload: WorkloadPort | None = None,
+    notifications: TaskNotificationSink | None = None,
 ) -> AssignmentResult:
     """Assign (or reassign auto-style) a task to the best candidate.
 
@@ -912,6 +926,16 @@ def assign_task(
                 task_id=task.id,
                 assigned_to=override_user_id,
             )
+        if previous_user_id != override_user_id:
+            notify_task_assigned(
+                session,
+                ctx,
+                task=task,
+                recipient_user_id=override_user_id,
+                clock=resolved_clock,
+                bus=resolved_bus,
+                sink=notifications,
+            )
         return result
 
     local_dt = _parse_local(task)
@@ -949,6 +973,16 @@ def assign_task(
             task_id=task.id,
             assigned_to=chosen,
         )
+        if previous_user_id != chosen:
+            notify_task_assigned(
+                session,
+                ctx,
+                task=task,
+                recipient_user_id=chosen,
+                clock=resolved_clock,
+                bus=resolved_bus,
+                sink=notifications,
+            )
         return result
 
     # --- Step 2-4: candidate pool + tiebreakers. -------------------
@@ -987,6 +1021,16 @@ def assign_task(
             task_id=task.id,
             assigned_to=pool_pick,
         )
+        if previous_user_id != pool_pick:
+            notify_task_assigned(
+                session,
+                ctx,
+                task=task,
+                recipient_user_id=pool_pick,
+                clock=resolved_clock,
+                bus=resolved_bus,
+                sink=notifications,
+            )
         return result
 
     # --- Step 5: zero candidates. ----------------------------------
@@ -1043,6 +1087,7 @@ def reassign_task(
     *,
     clock: Clock | None = None,
     event_bus: EventBus | None = None,
+    notifications: TaskNotificationSink | None = None,
 ) -> AssignmentResult:
     """Move a task from its current assignee to ``new_user_id``.
 
@@ -1105,6 +1150,15 @@ def reassign_task(
         task_id=task.id,
         previous_user_id=previous_user_id,
         new_user_id=new_user_id,
+    )
+    notify_task_assigned(
+        session,
+        ctx,
+        task=task,
+        recipient_user_id=new_user_id,
+        clock=resolved_clock,
+        bus=resolved_bus,
+        sink=notifications,
     )
     return result
 
@@ -1190,9 +1244,9 @@ def build_assignment_hook(
     The one-off service (:mod:`app.domain.tasks.oneoff`) owns its
     own ``task.created`` + ``task.assigned`` event fanout; wiring
     :func:`assign_task` in directly would double-emit. The hook
-    therefore calls the algorithm with a **private, no-op event
-    bus** — the row still receives its ``assignee_user_id`` update
-    and an audit row (``task.assigned`` carrying
+    therefore calls the algorithm with private, no-op event and
+    notification sinks — the row still receives its
+    ``assignee_user_id`` update and an audit row (``task.assigned`` carrying
     ``assignment_source``) lands, but the caller retains control
     of the outward-facing event stream.
 
@@ -1202,6 +1256,7 @@ def build_assignment_hook(
     signature.
     """
     silent_bus = EventBus()
+    silent_notifications = _SilentTaskNotifications()
 
     def _hook(
         session: Session,
@@ -1214,6 +1269,7 @@ def build_assignment_hook(
             task_id,
             clock=clock,
             event_bus=silent_bus,
+            notifications=silent_notifications,
             available=available,
             rota=rota,
             pool=pool,

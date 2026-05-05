@@ -18,12 +18,13 @@ shape ``write_audit`` performs).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 
+from app.domain.messaging.notifications import NotificationKind
 from app.domain.tasks.comments import (
     CommentAttachmentInvalid,
     CommentCreate,
@@ -91,6 +92,21 @@ class _FakeSession:
         self.added.append(instance)
 
 
+class _FakeNotifications:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, NotificationKind, dict[str, object]]] = []
+
+    def notify(
+        self,
+        *,
+        recipient_user_id: str,
+        kind: NotificationKind,
+        payload: Mapping[str, object],
+    ) -> str:
+        self.calls.append((recipient_user_id, kind, dict(payload)))
+        return f"notif-{len(self.calls)}"
+
+
 class _FakeRepo(CommentsRepository):
     """In-memory :class:`CommentsRepository` stub.
 
@@ -137,6 +153,7 @@ class _FakeRepo(CommentsRepository):
             id=occurrence_id,
             workspace_id=workspace_id,
             property_id=property_id,
+            title="Pool clean",
             is_personal=is_personal,
             created_by_user_id=created_by_user_id,
         )
@@ -388,6 +405,7 @@ class TestPostCommentSeam:
         repo.add_occurrence()
         repo.add_member(user_id=_MAYA_ID, display_name="Maya")
         clock = FrozenClock(_PINNED)
+        notifications = _FakeNotifications()
 
         view = post_comment(
             repo,
@@ -396,9 +414,23 @@ class TestPostCommentSeam:
             CommentCreate(body_md="Hey @maya, filter replaced."),
             clock=clock,
             event_bus=EventBus(),
+            notifications=notifications,
         )
 
         assert view.mentioned_user_ids == (_MAYA_ID,)
+        assert notifications.calls == [
+            (
+                _MAYA_ID,
+                NotificationKind.COMMENT_MENTION,
+                {
+                    "task_id": _OCC_ID,
+                    "task_title": "Pool clean",
+                    "comment_id": view.id,
+                    "comment_body_md": "Hey @maya, filter replaced.",
+                    "actor_user_id": _AUTHOR_ID,
+                },
+            )
+        ]
 
     def test_mention_of_non_member_raises_invalid(self) -> None:
         repo = _FakeRepo()
@@ -494,6 +526,37 @@ class TestEditCommentSeam:
         assert len(repo.updated) == 1
         # Two audit rows now: create + edit.
         assert len(repo.session.added) == 2
+
+    def test_edit_only_notifies_new_mentions(self) -> None:
+        repo = _FakeRepo()
+        repo.add_member(user_id=_MAYA_ID, display_name="Maya")
+        repo.add_member(user_id=_OWNER_ID, display_name="Owner")
+        clock = FrozenClock(_PINNED)
+        comment_id = self._seed_comment(repo, clock)
+        first = edit_comment(
+            repo,
+            _ctx(),
+            comment_id,
+            "cc @maya",
+            clock=clock,
+            event_bus=EventBus(),
+            notifications=_FakeNotifications(),
+        )
+        notifications = _FakeNotifications()
+
+        updated = edit_comment(
+            repo,
+            _ctx(),
+            first.id,
+            "cc @maya and @owner",
+            clock=clock,
+            event_bus=EventBus(),
+            notifications=notifications,
+        )
+
+        assert updated.mentioned_user_ids == (_MAYA_ID, _OWNER_ID)
+        assert [call[0] for call in notifications.calls] == [_OWNER_ID]
+        assert notifications.calls[0][1] is NotificationKind.COMMENT_MENTION
 
 
 class TestDeleteCommentSeam:

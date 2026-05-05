@@ -51,6 +51,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.base import Base
+from app.adapters.db.messaging.models import Notification
 from app.adapters.db.places.models import Property
 from app.adapters.db.session import make_engine
 from app.adapters.db.tasks.models import Occurrence, Schedule, TaskTemplate
@@ -68,6 +69,7 @@ from app.domain.tasks.assignment import (
 )
 from app.events.bus import EventBus
 from app.events.types import (
+    NotificationCreated,
     TaskAssigned,
     TaskPrimaryUnavailable,
     TaskReassigned,
@@ -399,6 +401,41 @@ class TestOverride:
         assert len(assigned) == 1 and assigned[0].assigned_to == u1
         assert reassigned == []
         assert unassigned == []
+
+    def test_first_assignment_fans_out_notification(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        u1 = _bootstrap_user(session)
+        occ = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            schedule_id=None,
+            property_id=prop,
+        )
+        captured: list[NotificationCreated] = []
+        bus.subscribe(NotificationCreated)(captured.append)
+
+        assign_task(
+            session,
+            _ctx(ws),
+            occ,
+            override_user_id=u1,
+            clock=clock,
+            event_bus=bus,
+        )
+
+        row = session.scalar(
+            select(Notification).where(
+                Notification.workspace_id == ws,
+                Notification.recipient_user_id == u1,
+                Notification.kind == "task_assigned",
+            )
+        )
+        assert row is not None
+        assert "Pool clean" in row.subject
+        assert [event.kind for event in captured] == ["task_assigned"]
 
     def test_override_over_previous_fires_reassigned(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -1002,6 +1039,45 @@ class TestReassign:
         assert reassigned[0].previous_user_id == u1
         assert reassigned[0].new_user_id == u2
 
+    def test_reassign_fans_out_to_final_assignee(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        u1 = _bootstrap_user(session)
+        u2 = _bootstrap_user(session)
+        occ = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            schedule_id=None,
+            property_id=prop,
+            assignee_user_id=u1,
+        )
+        captured: list[NotificationCreated] = []
+        bus.subscribe(NotificationCreated)(captured.append)
+
+        reassign_task(session, _ctx(ws), occ, u2, clock=clock, event_bus=bus)
+
+        row = session.scalar(
+            select(Notification).where(
+                Notification.workspace_id == ws,
+                Notification.recipient_user_id == u2,
+                Notification.kind == "task_assigned",
+            )
+        )
+        assert row is not None
+        assert (
+            session.scalar(
+                select(Notification).where(
+                    Notification.workspace_id == ws,
+                    Notification.recipient_user_id == u1,
+                    Notification.kind == "task_assigned",
+                )
+            )
+            is None
+        )
+        assert [event.kind for event in captured] == ["task_assigned"]
+
     def test_requires_current_assignee(
         self, session: Session, clock: FrozenClock, bus: EventBus
     ) -> None:
@@ -1199,6 +1275,16 @@ class TestAssignmentHook:
         # Audit still lands so the algorithm's decision is observable.
         audit = session.scalars(select(AuditLog).where(AuditLog.entity_id == occ)).one()
         assert audit.diff["after"]["assignment_source"] == "primary"
+        assert (
+            session.scalar(
+                select(Notification).where(
+                    Notification.workspace_id == ws,
+                    Notification.recipient_user_id == primary,
+                    Notification.kind == "task_assigned",
+                )
+            )
+            is None
+        )
 
     def test_returns_none_when_unassigned(
         self, session: Session, clock: FrozenClock, bus: EventBus

@@ -176,6 +176,73 @@ def fanout_env(
 
 
 class TestFanoutEndToEnd:
+    @pytest.mark.parametrize(
+        ("kind", "payload", "expected_subject"),
+        [
+            (
+                NotificationKind.TASK_ASSIGNED,
+                {"task_title": "Turnover villa 3"},
+                "Turnover villa 3",
+            ),
+            (
+                NotificationKind.TASK_OVERDUE,
+                {
+                    "task_title": "Turnover villa 3",
+                    "overdue_since": "2026-04-24T12:00:00+00:00",
+                    "slipped_minutes": 30,
+                },
+                "Turnover villa 3",
+            ),
+            (
+                NotificationKind.COMMENT_MENTION,
+                {
+                    "task_id": "task-1",
+                    "task_title": "Turnover villa 3",
+                    "comment_id": "comment-1",
+                    "comment_body_md": "Can you check this?",
+                    "actor_user_id": "actor-1",
+                },
+                "Turnover villa 3",
+            ),
+        ],
+    )
+    def test_task_kinds_persist_row_and_fire_sse_with_required_context(
+        self,
+        db_session: Session,
+        fanout_env: tuple[WorkspaceContext, str, FrozenClock],
+        kind: NotificationKind,
+        payload: dict[str, object],
+        expected_subject: str,
+    ) -> None:
+        ctx, recipient_id, clock = fanout_env
+        isolated_bus = EventBus()
+        captured: list[NotificationCreated] = []
+        isolated_bus.subscribe(NotificationCreated)(captured.append)
+        service = NotificationService(
+            session=db_session,
+            ctx=ctx,
+            mailer=InMemoryMailer(),
+            clock=clock,
+            bus=isolated_bus,
+        )
+
+        notification_id = service.notify(
+            recipient_user_id=recipient_id,
+            kind=kind,
+            payload=payload,
+        )
+        db_session.commit()
+
+        row = db_session.execute(
+            select(Notification).where(Notification.id == notification_id)
+        ).scalar_one()
+        assert row.kind == kind.value
+        assert expected_subject in row.subject
+        assert row.payload_json == payload
+        assert [event.kind for event in captured] == [kind.value]
+        assert captured[0].notification_id == notification_id
+        assert captured[0].actor_user_id == recipient_id
+
     def test_notify_persists_row_and_fires_sse_subscriber(
         self,
         db_session: Session,

@@ -45,6 +45,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.base import Base
+from app.adapters.db.messaging.models import Notification
 from app.adapters.db.places.models import Property
 from app.adapters.db.session import make_engine
 from app.adapters.db.tasks.models import (
@@ -74,7 +75,7 @@ from app.domain.tasks.comments import (
     post_comment,
 )
 from app.events.bus import EventBus
-from app.events.types import TaskCommentAdded
+from app.events.types import NotificationCreated, TaskCommentAdded
 from app.tenancy.context import ActorGrantRole, ActorKind, WorkspaceContext
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
@@ -369,6 +370,43 @@ class TestPostCommentUser:
 
         assert view.mentioned_user_ids == (maya,)
         assert "@maya" in view.body_md  # textual form preserved
+
+    def test_mention_fans_out_notification(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        author = _bootstrap_user(session, workspace_id=ws, display_name="Author")
+        maya = _bootstrap_user(session, workspace_id=ws, display_name="Maya")
+        occ = _bootstrap_occurrence(
+            session, workspace_id=ws, property_id=prop, assignee_user_id=author
+        )
+        captured: list[NotificationCreated] = []
+        bus.subscribe(NotificationCreated)(captured.append)
+
+        view = post_comment(
+            SqlAlchemyCommentsRepository(session),
+            _ctx(ws, role="worker", owner=False, actor_id=author),
+            occ,
+            CommentCreate(body_md="Hey @maya, filter replaced."),
+            clock=clock,
+            event_bus=bus,
+        )
+
+        row = session.scalar(
+            select(Notification).where(
+                Notification.workspace_id == ws,
+                Notification.recipient_user_id == maya,
+                Notification.kind == "comment_mention",
+            )
+        )
+        assert row is not None
+        assert "Pool clean" in row.subject
+        assert row.payload_json["task_id"] == occ
+        assert row.payload_json["comment_id"] == view.id
+        assert row.payload_json["comment_body_md"] == "Hey @maya, filter replaced."
+        assert [event.kind for event in captured] == ["comment_mention"]
+        assert captured[0].actor_user_id == maya
 
     def test_mention_of_non_member_rejected_422(
         self, session: Session, clock: FrozenClock, bus: EventBus

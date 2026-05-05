@@ -1,0 +1,7 @@
+Hi {{ recipient_display_name | default("there") }},
+
+**{{ task_title }}** is overdue.
+
+It slipped {{ slipped_minutes }} minute{% if slipped_minutes != 1 %}s{% endif %} past its scheduled end.
+
+Open it in crew.day to update the task.
