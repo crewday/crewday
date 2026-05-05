@@ -17,13 +17,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import Mock
 
-from sqlalchemy import CheckConstraint, Index, String
+from sqlalchemy import CheckConstraint, Index, String, UniqueConstraint
 
 from app.adapters.db.identity.models import (
     ApiToken,
     ApiTokenRequestLog,
+    Invite,
     PasskeyCredential,
     Session,
+    SignupAttempt,
     User,
     WebAuthnChallenge,
     _user_before_insert,
@@ -306,4 +308,57 @@ class TestWebAuthnChallengeModel:
         assert "ck_webauthn_challenge_subject" in check_names
         assert "ck_webauthn_challenge_ck_webauthn_challenge_subject" not in (
             check_names
+        )
+
+
+class TestIdentityConstraintNames:
+    """Identity models resolve convention-backed constraints once."""
+
+    def test_check_constraints_resolve_to_single_prefix(self) -> None:
+        checks_by_table = {
+            table.name: {
+                constraint.name
+                for constraint in table.constraints
+                if isinstance(constraint, CheckConstraint)
+            }
+            for table in (
+                User.__table__,
+                ApiToken.__table__,
+                Invite.__table__,
+            )
+        }
+
+        assert "ck_user_agent_approval_mode" in checks_by_table["user"]
+        assert "ck_user_user_agent_approval_mode" not in checks_by_table["user"]
+        assert "ck_api_token_kind" in checks_by_table["api_token"]
+        assert "ck_api_token_ck_api_token_kind" not in checks_by_table["api_token"]
+        assert "ck_api_token_kind_shape" in checks_by_table["api_token"]
+        assert (
+            "ck_api_token_ck_api_token_kind_shape" not in checks_by_table["api_token"]
+        )
+        assert "ck_invite_state" in checks_by_table["invite"]
+        assert "ck_invite_ck_invite_state" not in checks_by_table["invite"]
+
+    def test_custom_unique_constraints_keep_single_prefix_names(self) -> None:
+        uniques_by_table = {
+            table.name: {
+                constraint.name
+                for constraint in table.constraints
+                if isinstance(constraint, UniqueConstraint)
+            }
+            for table in (
+                SignupAttempt.__table__,
+                Invite.__table__,
+            )
+        }
+
+        assert "uq_signup_attempt_email_slug" in uniques_by_table["signup_attempt"]
+        assert (
+            "uq_signup_attempt_uq_signup_attempt_email_slug"
+            not in (uniques_by_table["signup_attempt"])
+        )
+        assert "uq_invite_workspace_email_state" in uniques_by_table["invite"]
+        assert (
+            "uq_invite_uq_invite_workspace_email_state"
+            not in uniques_by_table["invite"]
         )

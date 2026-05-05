@@ -49,6 +49,7 @@ from sqlalchemy.orm import (
     Mapped,
     mapped_column,
 )  # code-health: ignore[duplicate] Explicit import prelude.
+from sqlalchemy.schema import conv
 
 from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
@@ -134,7 +135,7 @@ class User(Base):
     __table_args__ = (
         CheckConstraint(
             "agent_approval_mode IN ('bypass', 'auto', 'strict')",
-            name="user_agent_approval_mode",
+            name="agent_approval_mode",
         ),
     )
 
@@ -365,7 +366,7 @@ class ApiToken(Base):
     __table_args__ = (
         CheckConstraint(
             "kind IN ('scoped', 'delegated', 'personal')",
-            name="ck_api_token_kind",
+            name="kind",
         ),
         CheckConstraint(
             "("
@@ -378,7 +379,7 @@ class ApiToken(Base):
             "(kind = 'personal' AND subject_user_id IS NOT NULL "
             "AND delegate_for_user_id IS NULL AND workspace_id IS NULL)"
             ")",
-            name="ck_api_token_kind_shape",
+            name="kind_shape",
         ),
         Index("ix_api_token_user", "user_id"),
         Index("ix_api_token_workspace", "workspace_id"),
@@ -614,7 +615,7 @@ class SignupAttempt(Base):
         UniqueConstraint(
             "email_lower",
             "desired_slug",
-            name="uq_signup_attempt_email_slug",
+            name=conv("uq_signup_attempt_email_slug"),
         ),
         Index("ix_signup_attempt_expires", "expires_at"),
         Index("ix_signup_attempt_email_hash", "email_hash"),
@@ -762,7 +763,7 @@ class Invite(Base):
     __table_args__ = (
         CheckConstraint(
             "state IN ('pending', 'accepted', 'expired', 'revoked')",
-            name="ck_invite_state",
+            name="state",
         ),
         # One live invite per ``(workspace, email_lower)`` — a second
         # call for the same pair reuses / refreshes the existing row
@@ -772,7 +773,7 @@ class Invite(Base):
             "workspace_id",
             "pending_email_lower",
             "state",
-            name="uq_invite_workspace_email_state",
+            name=conv("uq_invite_workspace_email_state"),
         ),
         Index("ix_invite_workspace", "workspace_id"),
         Index("ix_invite_email_lower", "pending_email_lower"),
