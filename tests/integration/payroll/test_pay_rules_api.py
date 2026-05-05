@@ -39,6 +39,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import JSONResponse
@@ -47,9 +48,9 @@ from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.payroll.models import PayPeriod, PayRule, Payslip
 from app.api.deps import current_workspace_context
 from app.api.deps import db_session as _db_session_dep
-from app.api.errors import _handle_domain_error
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, _handle_domain_error
 from app.api.v1.payroll import build_payroll_router
-from app.domain.errors import DomainError
+from app.domain.errors import CANONICAL_TYPE_BASE, DomainError
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.ulid import new_ulid
 from tests.factories.identity import (
@@ -180,6 +181,31 @@ def _create_body(**overrides: Any) -> dict[str, Any]:
     return body
 
 
+def _assert_problem_error(
+    response: Response,
+    *,
+    status_code: int,
+    type_name: str,
+    title: str,
+    error: str,
+    detail: str | None,
+) -> dict[str, Any]:
+    assert response.status_code == status_code, response.text
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    body = response.json()
+    assert isinstance(body, dict)
+    assert body["type"] == f"{CANONICAL_TYPE_BASE}{type_name}"
+    assert body["title"] == title
+    assert body["status"] == status_code
+    assert body["instance"] == response.request.url.path
+    assert body["error"] == error
+    if detail is None:
+        assert "detail" not in body
+    else:
+        assert body["detail"] == detail
+    return body
+
+
 def _seed_paid_period_with_payslip(
     session_factory: sessionmaker[Session],
     *,
@@ -283,8 +309,17 @@ class TestCreate:
             f"/api/v1/payroll/users/{user_id}/pay-rules",
             json=_create_body(currency="ZZZ"),
         )
-        assert r.status_code == 422, r.text
-        assert r.json()["detail"]["error"] == "pay_rule_invariant"
+        _assert_problem_error(
+            r,
+            status_code=422,
+            type_name="validation",
+            title="Validation error",
+            error="pay_rule_invariant",
+            detail=(
+                "currency 'ZZZ' is not a valid ISO-4217 code "
+                "in the deployment allow-list"
+            ),
+        )
 
     def test_currency_lowercase_normalises(
         self, client: TestClient, seeded: tuple[WorkspaceContext, str]
@@ -305,8 +340,14 @@ class TestCreate:
             f"/api/v1/payroll/users/{user_id}/pay-rules",
             json=_create_body(weekend_multiplier="6.0"),
         )
-        assert r.status_code == 422, r.text
-        assert r.json()["detail"]["error"] == "pay_rule_invariant"
+        _assert_problem_error(
+            r,
+            status_code=422,
+            type_name="validation",
+            title="Validation error",
+            error="pay_rule_invariant",
+            detail="weekend_multiplier must be in [1, 5]; got 6.0",
+        )
 
     def test_bad_window_422(
         self, client: TestClient, seeded: tuple[WorkspaceContext, str]
@@ -483,8 +524,14 @@ class TestGet:
 
     def test_unknown_id_404(self, client: TestClient) -> None:
         r = client.get("/api/v1/payroll/pay-rules/01HZNONEXISTENTPAYRULEID00")
-        assert r.status_code == 404, r.text
-        assert r.json()["detail"]["error"] == "pay_rule_not_found"
+        _assert_problem_error(
+            r,
+            status_code=404,
+            type_name="not_found",
+            title="Not found",
+            error="pay_rule_not_found",
+            detail=None,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -556,8 +603,17 @@ class TestUpdate:
             f"/api/v1/payroll/pay-rules/{created['id']}",
             json=_create_body(base_cents_per_hour=2500),
         )
-        assert r.status_code == 409, r.text
-        assert r.json()["detail"]["error"] == "pay_rule_locked"
+        _assert_problem_error(
+            r,
+            status_code=409,
+            type_name="conflict",
+            title="Conflict",
+            error="pay_rule_locked",
+            detail=(
+                "pay rule is consumed by a paid payslip; author a successor "
+                "row with a later effective_from instead"
+            ),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -618,5 +674,14 @@ class TestDelete:
         )
 
         r = client.delete(f"/api/v1/payroll/pay-rules/{created['id']}")
-        assert r.status_code == 409, r.text
-        assert r.json()["detail"]["error"] == "pay_rule_locked"
+        _assert_problem_error(
+            r,
+            status_code=409,
+            type_name="conflict",
+            title="Conflict",
+            error="pay_rule_locked",
+            detail=(
+                "pay rule is consumed by a paid payslip; author a successor "
+                "row with a later effective_from instead"
+            ),
+        )
