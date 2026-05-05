@@ -60,12 +60,28 @@ class BookingResponse(BaseModel):
     adjustment_reason: str | None
 
 
-_UserFilter = Annotated[str | None, Query(alias="user_id")]
-_PropertyFilter = Annotated[str | None, Query(alias="property_id")]
-_FromFilter = Annotated[datetime | None, Query(alias="from")]
-_ToFilter = Annotated[datetime | None, Query(alias="to")]
-_StatusFilter = Annotated[str | None, Query(alias="status")]
-_PendingAmendFilter = Annotated[bool | None, Query(alias="pending_amend")]
+_STRING_QUERY_SCHEMA = {"anyOf": [{"type": "string"}]}
+_DATETIME_QUERY_SCHEMA = {"anyOf": [{"type": "string", "format": "date-time"}]}
+_BOOLEAN_QUERY_SCHEMA = {"anyOf": [{"type": "boolean"}]}
+
+_UserFilter = Annotated[
+    str | None, Query(alias="user_id", json_schema_extra=_STRING_QUERY_SCHEMA)
+]
+_PropertyFilter = Annotated[
+    str | None, Query(alias="property_id", json_schema_extra=_STRING_QUERY_SCHEMA)
+]
+_FromFilter = Annotated[
+    datetime | None, Query(alias="from", json_schema_extra=_DATETIME_QUERY_SCHEMA)
+]
+_ToFilter = Annotated[
+    datetime | None, Query(alias="to", json_schema_extra=_DATETIME_QUERY_SCHEMA)
+]
+_StatusFilter = Annotated[
+    str | None, Query(alias="status", json_schema_extra=_STRING_QUERY_SCHEMA)
+]
+_PendingAmendFilter = Annotated[
+    bool | None, Query(alias="pending_amend", json_schema_extra=_BOOLEAN_QUERY_SCHEMA)
+]
 
 
 def _permission_denied(action_key: str) -> Forbidden:

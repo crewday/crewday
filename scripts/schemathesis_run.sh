@@ -785,6 +785,13 @@ INCLUDE_ARGS=(
     # ``assets.list``. Cursor is a signed payload; random schema-valid
     # strings correctly 422 as ``invalid_cursor``.
     --exclude-operation-id 'payroll.pay_rules.list'
+    # ``bookings.list`` — optional query params are now documented as
+    # omission-only rather than nullable (so ``pending_amend=null`` is
+    # no longer schema-valid), but the route also enforces
+    # ``from <= to``. OpenAPI cannot express that cross-query datetime
+    # invariant, so generated inverted windows correctly return 422
+    # ``invalid_field`` and stay out of the broad sweep.
+    --exclude-operation-id 'bookings.list'
     # ``payroll.pay_rules.create`` / ``payroll.pay_rules.update`` —
     # ``effective_to`` must be strictly greater than ``effective_from``.
     # JSON Schema cannot express that cross-field datetime invariant,
@@ -853,6 +860,7 @@ INCLUDE_ARGS=(
     --exclude-operation-id 'list_schedules'
     --exclude-operation-id 'list_task_templates'
     --exclude-operation-id 'list_task_comments'
+    --exclude-operation-id 'list_task_evidence'
     # Creation paths below require real workspace-local parent ids
     # (templates / roles / areas) or body invariants that are validated
     # by the domain layer but not fully representable in JSON Schema.

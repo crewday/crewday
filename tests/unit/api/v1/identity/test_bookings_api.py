@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -381,6 +382,36 @@ def test_backwards_window_returns_422(
 
     assert resp.status_code == 422, resp.text
     assert resp.json()["error"] == "invalid_field"
+
+
+def test_openapi_query_filters_are_optional_not_nullable() -> None:
+    app = FastAPI()
+    app.include_router(build_bookings_router())
+    params = {
+        param["name"]: param
+        for param in app.openapi()["paths"]["/bookings"]["get"]["parameters"]
+    }
+
+    assert set(params) == {
+        "user_id",
+        "property_id",
+        "from",
+        "to",
+        "status",
+        "pending_amend",
+    }
+    assert params["pending_amend"]["schema"]["anyOf"] == [{"type": "boolean"}]
+    assert params["from"]["schema"]["anyOf"] == [
+        {"type": "string", "format": "date-time"}
+    ]
+    assert params["to"]["schema"]["anyOf"] == [
+        {"type": "string", "format": "date-time"}
+    ]
+    for param in params.values():
+        assert param["in"] == "query"
+        assert param["required"] is False
+        schema = param["schema"]
+        assert {"type": "null"} not in schema["anyOf"]
 
 
 def _seed_other_worker(
