@@ -1,7 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
+import { useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { qk } from "@/lib/queryKeys";
-import { openApiDownload } from "@/lib/api";
-import { fetchAllExpenseClaims } from "@/lib/expenses";
+import { fetchJson, openApiDownload } from "@/lib/api";
+import {
+  fetchAllExpenseClaims,
+  mapExpenseClaimPayload,
+  type ExpenseClaimPayload,
+} from "@/lib/expenses";
 import { useDecideMutation } from "@/lib/useDecideMutation";
 import { formatMoney } from "@/lib/money";
 import { fmtDateTime } from "@/lib/dates";
@@ -9,9 +14,50 @@ import DeskPage from "@/components/DeskPage";
 import { Camera } from "lucide-react";
 import { Chip, Loading, StatCard } from "@/components/common";
 import { EXPENSE_STATUS_TONE } from "@/lib/tones";
-import type { Expense, ExpenseStatus } from "@/types/api";
+import type { Expense, ExpenseCategory, ExpenseStatus } from "@/types/api";
 
 type Decision = "approve" | "reject" | "reimburse";
+type ApprovalEditBody = Partial<Pick<Expense, "total_amount_cents" | "currency" | "category">>;
+
+type ExpenseCorrectionButtonProps = {
+  expense: Expense;
+  onApproved: (expense: Expense) => void;
+};
+
+const EXPENSE_CATEGORIES: ExpenseCategory[] = [
+  "supplies",
+  "fuel",
+  "food",
+  "transport",
+  "maintenance",
+  "other",
+];
+
+function amountInputValue(cents: number): string {
+  return (cents / 100).toFixed(2);
+}
+
+function parseAmountCents(value: string): number | null {
+  const trimmed = value.trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(trimmed)) return null;
+  const [whole, decimal = ""] = trimmed.split(".");
+  const cents = Number(whole) * 100 + Number(decimal.padEnd(2, "0"));
+  if (!Number.isSafeInteger(cents) || cents <= 0) return null;
+  return cents;
+}
+
+function normalizedCurrency(value: string): string | null {
+  const normalized = value.trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(normalized) ? normalized : null;
+}
+
+function isExpenseCategory(value: string): value is ExpenseCategory {
+  return EXPENSE_CATEGORIES.includes(value as ExpenseCategory);
+}
+
+function expenseCategoryLabel(value: ExpenseCategory): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
 
 function sumCents(xs: Expense[]): number {
   return xs.reduce((acc, x) => acc + x.total_amount_cents, 0);
@@ -45,6 +91,206 @@ function expensesExportPath(expenses: Expense[]): string | null {
   return `/api/v1/payroll/exports/expense-ledger.csv?${params.toString()}`;
 }
 
+function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButtonProps) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const qc = useQueryClient();
+  const [amount, setAmount] = useState(amountInputValue(expense.total_amount_cents));
+  const [currency, setCurrency] = useState(expense.currency);
+  const [category, setCategory] = useState(
+    isExpenseCategory(expense.category) ? expense.category : "other",
+  );
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const reset = () => {
+    setAmount(amountInputValue(expense.total_amount_cents));
+    setCurrency(expense.currency);
+    setCategory(isExpenseCategory(expense.category) ? expense.category : "other");
+    setFormError(null);
+  };
+
+  const approveWithEdits = useMutation({
+    mutationFn: async (body: ApprovalEditBody) => {
+      const payload = await fetchJson<ExpenseClaimPayload>(
+        `/api/v1/expenses/${expense.id}/approve`,
+        {
+          method: "POST",
+          body,
+        },
+      );
+      return mapExpenseClaimPayload(payload);
+    },
+    onSuccess: (updated) => {
+      qc.setQueryData<Expense[]>(qk.expenses("all"), (prev) =>
+        prev?.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      qc.invalidateQueries({ queryKey: qk.expenses("all") });
+      qc.invalidateQueries({ queryKey: qk.dashboard() });
+      onApproved(updated);
+      dialogRef.current?.close();
+    },
+    onError: (error) => {
+      setFormError(error instanceof Error ? error.message : "Could not approve the correction.");
+    },
+  });
+
+  const amountCents = parseAmountCents(amount);
+  const cleanCurrency = normalizedCurrency(currency);
+  const cleanCategory = isExpenseCategory(category) ? category : null;
+  const amountError =
+    amount.trim() === "" || amountCents !== null
+      ? null
+      : "Enter a positive amount with no more than two decimal places.";
+  const currencyError =
+    currency.trim() === "" || cleanCurrency !== null
+      ? null
+      : "Enter a three-letter ISO currency code.";
+  const categoryError = cleanCategory === null ? "Choose a supported expense category." : null;
+  const validationError = amountError ?? currencyError ?? categoryError;
+  const body: ApprovalEditBody = {};
+  if (amountCents !== null && amountCents !== expense.total_amount_cents) {
+    body.total_amount_cents = amountCents;
+  }
+  if (cleanCurrency !== null && cleanCurrency !== expense.currency) {
+    body.currency = cleanCurrency;
+  }
+  if (cleanCategory !== null && cleanCategory !== expense.category) {
+    body.category = cleanCategory;
+  }
+  const hasEdits = Object.keys(body).length > 0;
+
+  return (
+    <>
+      <button
+        className="btn btn--ghost"
+        type="button"
+        onClick={() => dialogRef.current?.showModal()}
+      >
+        Correct and approve
+      </button>
+
+      <dialog
+        className="modal"
+        ref={dialogRef}
+        onClose={reset}
+        aria-label={`Correct ${expense.vendor}`}
+      >
+        <form
+          className="modal__body"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setFormError(null);
+            if (validationError !== null) {
+              setFormError(validationError);
+              return;
+            }
+            if (!hasEdits) {
+              setFormError(
+                "Change the amount, currency, or category before approving with corrections.",
+              );
+              return;
+            }
+            approveWithEdits.mutate(body);
+          }}
+        >
+          <h3 className="modal__title">Correct and approve</h3>
+          <p className="modal__sub">
+            This approves the claim with corrected values. The submitted claim is not
+            rewritten; the approval audit row records the before and after values.
+          </p>
+
+          <label className="field">
+            <span>Amount</span>
+            <input
+              inputMode="decimal"
+              required
+              value={amount}
+              aria-invalid={amountError !== null}
+              aria-describedby={
+                amountError !== null
+                  ? `expense-correction-amount-error-${expense.id}`
+                  : undefined
+              }
+              onChange={(event) => setAmount(event.target.value)}
+            />
+          </label>
+          {amountError !== null && (
+            <p id={`expense-correction-amount-error-${expense.id}`} className="form-field-error">
+              {amountError}
+            </p>
+          )}
+
+          <label className="field">
+            <span>Currency</span>
+            <input
+              maxLength={3}
+              required
+              value={currency}
+              aria-invalid={currencyError !== null}
+              aria-describedby={
+                currencyError !== null
+                  ? `expense-correction-currency-error-${expense.id}`
+                  : undefined
+              }
+              onChange={(event) => setCurrency(event.target.value)}
+            />
+          </label>
+          {currencyError !== null && (
+            <p id={`expense-correction-currency-error-${expense.id}`} className="form-field-error">
+              {currencyError}
+            </p>
+          )}
+
+          <label className="field">
+            <span>Category</span>
+            <select
+              value={category}
+              aria-invalid={categoryError !== null}
+              aria-describedby={
+                categoryError !== null
+                  ? `expense-correction-category-error-${expense.id}`
+                  : undefined
+              }
+              onChange={(event) => setCategory(event.target.value as ExpenseCategory)}
+            >
+              {EXPENSE_CATEGORIES.map((value) => (
+                <option key={value} value={value}>{expenseCategoryLabel(value)}</option>
+              ))}
+            </select>
+          </label>
+          {categoryError !== null && (
+            <p id={`expense-correction-category-error-${expense.id}`} className="form-field-error">
+              {categoryError}
+            </p>
+          )}
+
+          {formError !== null && (
+            <p className="login__notice login__notice--danger" role="alert">
+              {formError}
+            </p>
+          )}
+
+          <div className="modal__actions">
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => dialogRef.current?.close()}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn--moss"
+              disabled={approveWithEdits.isPending || validationError !== null || !hasEdits}
+            >
+              {approveWithEdits.isPending ? "Approving..." : "Approve corrected claim"}
+            </button>
+          </div>
+        </form>
+      </dialog>
+    </>
+  );
+}
+
 /**
  * Manager-side expense approvals desk.
  *
@@ -69,6 +315,7 @@ function expensesExportPath(expenses: Expense[]): string | null {
  * would make the chip lie.
  */
 export default function ExpensesApprovalsPage() {
+  const [decisionNotice, setDecisionNotice] = useState<string | null>(null);
   const expensesQ = useQuery({
     queryKey: qk.expenses("all"),
     queryFn: () => fetchAllExpenseClaims(),
@@ -143,6 +390,11 @@ export default function ExpensesApprovalsPage() {
           <h2>Pending · {pending.length}</h2>
           <span className="muted">Primary queue — work top to bottom.</span>
         </header>
+        {decisionNotice !== null && (
+          <p className="login__notice" role="status">
+            {decisionNotice}
+          </p>
+        )}
 
         <ul className="approval-list approval-list--wide">
           {pending.length === 0 && (
@@ -207,22 +459,15 @@ export default function ExpensesApprovalsPage() {
                   >
                     Reject with reason
                   </button>
-                  <span className="page-action-disabled page-action-disabled--inline">
-                    <button
-                      className="btn btn--ghost"
-                      type="button"
-                      disabled
-                      aria-describedby={`expense-edit-fields-disabled-reason-${x.id}`}
-                    >
-                      Edit fields
-                    </button>
-                    <span
-                      id={`expense-edit-fields-disabled-reason-${x.id}`}
-                      className="page-action-disabled__reason"
-                    >
-                      Manager field editing is not implemented yet.
-                    </span>
-                  </span>
+                  <ExpenseCorrectionButton
+                    expense={x}
+                    onApproved={(updated) => {
+                      setDecisionNotice(
+                        `Approved corrected claim for ${updated.vendor}. `
+                          + "The approval audit log records the before and after values.",
+                      );
+                    }}
+                  />
                 </div>
               </li>
             );

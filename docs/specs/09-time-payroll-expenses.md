@@ -1076,7 +1076,12 @@ table landing; FK promotion is deferred until that migration.
 
 ### Approval (owner or manager)
 
-- Review claim, edit any field, approve or reject with reason.
+- Review claim, then approve as-is, approve with inline corrections, or
+  reject with reason. The manager approval UI v1 exposes corrections
+  for amount, currency, and category only. Manager corrections are not a
+  standalone edit route in v1: submitted-claim field changes happen only
+  in the `POST /expenses/{id}/approve` body so the audit row records the
+  before/after claim in the same decision transaction.
 - Approving snaps the exchange rate against the workspace default
   currency. Source of truth is the `exchange_rate` table (§02),
   populated daily by the `refresh_exchange_rates` worker job and

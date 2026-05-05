@@ -2150,7 +2150,16 @@ GET    /expenses/pending_reimbursement   # ?user_id=me|<id>|<omit>; approved-but
                                          #   When user_id is omitted the response carries a per-user `by_user` breakdown.
 POST   /expenses                   # JSON ExpenseClaimCreate; no receipt bytes
 POST   /expenses/{id}/submit
-POST   /expenses/{id}/approve      # snaps owed_* fields; see §09 "Amount owed to the employee"
+POST   /expenses/{id}/approve      # optional JSON body with inline ApprovalEdits
+                                   #   {vendor?, purchased_at?, currency?,
+                                   #    total_amount_cents?, category?,
+                                   #    property_id?, note_md?}; snaps
+                                   #   owed_* fields; there is no standalone
+                                   #   manager edit route for submitted claims.
+                                   #   The manager approval UI v1 exposes
+                                   #   amount/currency/category corrections.
+                                   #   See §09 "Approval" and "Amount owed to
+                                   #   the employee".
 POST   /expenses/{id}/reject
 POST   /expenses/scan              # multipart/form-data; receipt image in → ExpenseScanResult out (cd-65ib)
 POST   /expenses/{id}/attachments  # JSON; register a previously uploaded receipt blob
