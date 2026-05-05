@@ -9,12 +9,8 @@ NOTE — constraint rename (2026-05-01): the
 named ``ck_llm_prompt_template_revision_llm_prompt_template_revision_version``
 (68 chars) which exceeds Postgres' 63-byte identifier limit. The
 constraint name was shortened to ``ck_llm_prompt_template_revision_version_min``
-in-place. Pre-prod (no live DB at this revision yet), so editing the
-migration file in place is acceptable. **If you have a dev DB already
-upgraded to ``c4e6a8b0d2f4`` from before this rename**, reset that DB
-(per AGENTS.md "Dev verification helpers") so the new constraint name
-matches the model — ``alembic upgrade head`` is a no-op against an
-already-applied revision and will not rename in place.
+in-place for fresh databases. Existing databases that had already
+applied this revision are repaired by the follow-up cd-8mafx migration.
 """
 
 from __future__ import annotations
