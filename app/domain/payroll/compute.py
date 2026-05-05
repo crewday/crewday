@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 
@@ -93,6 +92,155 @@ class _BookingSource:
             "holiday_minutes": self.holiday_minutes,
             "gross_cents": self.gross_cents,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class _SegmentPay:
+    regular_minutes: int
+    overtime_minutes: int
+    night_minutes: int
+    weekend_minutes: int
+    holiday_minutes: int
+    base_cents: int
+    overtime_cents: int
+    night_cents: int
+    weekend_cents: int
+    holiday_cents: int
+    holiday_multiplier: Decimal | None
+
+    @property
+    def gross_cents(self) -> int:
+        return (
+            self.base_cents
+            + self.overtime_cents
+            + self.night_cents
+            + self.weekend_cents
+            + self.holiday_cents
+        )
+
+
+@dataclass(slots=True)
+class _BookingSourceTotals:
+    booking_id: str
+    work_engagement_id: str
+    rule_id: str
+    minutes: int = 0
+    regular_minutes: int = 0
+    overtime_minutes: int = 0
+    night_minutes: int = 0
+    weekend_minutes: int = 0
+    holiday_minutes: int = 0
+    gross_cents: int = 0
+
+    def add_segment(self, segment: _Segment, pay: _SegmentPay) -> None:
+        self.minutes += segment.minutes
+        self.regular_minutes += pay.regular_minutes
+        self.overtime_minutes += pay.overtime_minutes
+        self.night_minutes += pay.night_minutes
+        self.weekend_minutes += pay.weekend_minutes
+        self.holiday_minutes += pay.holiday_minutes
+        self.gross_cents += pay.gross_cents
+
+    def to_source(self) -> _BookingSource:
+        return _BookingSource(
+            booking_id=self.booking_id,
+            work_engagement_id=self.work_engagement_id,
+            rule_id=self.rule_id,
+            minutes=self.minutes,
+            regular_minutes=self.regular_minutes,
+            overtime_minutes=self.overtime_minutes,
+            night_minutes=self.night_minutes,
+            weekend_minutes=self.weekend_minutes,
+            holiday_minutes=self.holiday_minutes,
+            gross_cents=self.gross_cents,
+        )
+
+
+@dataclass(slots=True)
+class _PayslipAggregation:
+    weekly_minutes: dict[tuple[int, int], int] = field(default_factory=dict)
+    gross_breakdown: dict[str, int] = field(default_factory=dict)
+    sources_by_booking: dict[str, _BookingSourceTotals] = field(default_factory=dict)
+    currencies: set[str] = field(default_factory=set)
+    rule_ids: set[str] = field(default_factory=set)
+    total_minutes: int = 0
+    regular_minutes: int = 0
+    overtime_minutes: int = 0
+    night_minutes: int = 0
+    weekend_minutes: int = 0
+    holiday_minutes: int = 0
+
+    @property
+    def gross_cents(self) -> int:
+        return sum(self.gross_breakdown.values())
+
+    def add_booking(
+        self,
+        *,
+        booking: BookingPayRow,
+        period: PayPeriodRow,
+        rule: PayRuleRow,
+        holidays: Mapping[tuple[date, str | None], Decimal],
+        paid_minutes: int,
+    ) -> None:
+        self.currencies.add(rule.currency)
+        self.rule_ids.add(rule.id)
+        source = self._source_for(booking=booking, rule=rule)
+        if paid_minutes <= 0:
+            return
+        for segment in _iter_booking_segments(
+            booking=booking,
+            period=period,
+            rule=rule,
+        ):
+            pay = _segment_pay(
+                segment=segment,
+                holidays=holidays,
+                weekly_minutes=self.weekly_minutes,
+            )
+            self._add_segment(segment=segment, pay=pay, source=source)
+
+    def sources(self) -> list[_BookingSource]:
+        return [source.to_source() for source in self.sources_by_booking.values()]
+
+    def _source_for(
+        self,
+        *,
+        booking: BookingPayRow,
+        rule: PayRuleRow,
+    ) -> _BookingSourceTotals:
+        source = self.sources_by_booking.get(booking.id)
+        if source is None:
+            source = _BookingSourceTotals(
+                booking_id=booking.id,
+                work_engagement_id=booking.work_engagement_id,
+                rule_id=rule.id,
+            )
+            self.sources_by_booking[booking.id] = source
+        return source
+
+    def _add_segment(
+        self,
+        *,
+        segment: _Segment,
+        pay: _SegmentPay,
+        source: _BookingSourceTotals,
+    ) -> None:
+        _add_segment_components(self.gross_breakdown, segment=segment, pay=pay)
+        self.total_minutes += segment.minutes
+        self.regular_minutes += pay.regular_minutes
+        self.overtime_minutes += pay.overtime_minutes
+        self.night_minutes += pay.night_minutes
+        self.weekend_minutes += pay.weekend_minutes
+        self.holiday_minutes += pay.holiday_minutes
+        source.add_segment(segment, pay)
+
+
+@dataclass(frozen=True, slots=True)
+class _ReimbursementAggregation:
+    folded: list[PayslipReimbursableClaimRow]
+    skipped: list[PayslipReimbursableClaimRow]
+    expense_reimbursements_cents: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,7 +390,115 @@ def _add_component(
     cents: int,
 ) -> None:
     if cents:
-        components[key] += cents
+        components[key] = components.get(key, 0) + cents
+
+
+def _regular_overtime_split(
+    segment: _Segment,
+    weekly_minutes: dict[tuple[int, int], int],
+) -> tuple[int, int]:
+    week = _week_key(segment.start)
+    before_week = weekly_minutes.get(week, 0)
+    regular_left = max(0, DEFAULT_WEEKLY_OVERTIME_THRESHOLD_MINUTES - before_week)
+    regular_minutes = min(segment.minutes, regular_left)
+    weekly_minutes[week] = before_week + segment.minutes
+    return regular_minutes, segment.minutes - regular_minutes
+
+
+def _segment_pay(
+    *,
+    segment: _Segment,
+    holidays: Mapping[tuple[date, str | None], Decimal],
+    weekly_minutes: dict[tuple[int, int], int],
+) -> _SegmentPay:
+    regular_minutes, overtime_minutes = _regular_overtime_split(
+        segment,
+        weekly_minutes,
+    )
+    night_minutes = segment.minutes if _is_night(segment.start) else 0
+    weekend_minutes = segment.minutes if segment.start.weekday() >= 5 else 0
+    holiday = _holiday_multiplier(
+        holidays,
+        segment.start.date(),
+        segment.property_country,
+    )
+    holiday_minutes = segment.minutes if holiday is not None else 0
+    return _SegmentPay(
+        regular_minutes=regular_minutes,
+        overtime_minutes=overtime_minutes,
+        night_minutes=night_minutes,
+        weekend_minutes=weekend_minutes,
+        holiday_minutes=holiday_minutes,
+        base_cents=_cents_for_minutes(
+            cents_per_hour=segment.rule.base_cents_per_hour,
+            minutes=segment.minutes,
+            multiplier=_ONE,
+        ),
+        overtime_cents=_premium_cents(
+            segment=segment,
+            minutes=overtime_minutes,
+            multiplier=segment.rule.overtime_multiplier,
+        ),
+        night_cents=_premium_cents(
+            segment=segment,
+            minutes=night_minutes,
+            multiplier=segment.rule.night_multiplier,
+        ),
+        weekend_cents=_premium_cents(
+            segment=segment,
+            minutes=weekend_minutes,
+            multiplier=segment.rule.weekend_multiplier,
+        ),
+        holiday_cents=_premium_cents(
+            segment=segment,
+            minutes=holiday_minutes,
+            multiplier=holiday if holiday is not None else _ONE,
+        ),
+        holiday_multiplier=holiday,
+    )
+
+
+def _premium_cents(
+    *,
+    segment: _Segment,
+    minutes: int,
+    multiplier: Decimal,
+) -> int:
+    return _cents_for_minutes(
+        cents_per_hour=segment.rule.base_cents_per_hour,
+        minutes=minutes,
+        multiplier=_premium_multiplier(multiplier),
+    )
+
+
+def _add_segment_components(
+    gross_breakdown: dict[str, int],
+    *,
+    segment: _Segment,
+    pay: _SegmentPay,
+) -> None:
+    _add_component(gross_breakdown, key="base_pay", cents=pay.base_cents)
+    _add_component(
+        gross_breakdown,
+        key=_component_key("overtime", segment.rule.overtime_multiplier),
+        cents=pay.overtime_cents,
+    )
+    _add_component(
+        gross_breakdown,
+        key=_component_key("night", segment.rule.night_multiplier),
+        cents=pay.night_cents,
+    )
+    _add_component(
+        gross_breakdown,
+        key=_component_key("weekend", segment.rule.weekend_multiplier),
+        cents=pay.weekend_cents,
+    )
+    if pay.holiday_multiplier is not None:
+        _add_component(
+            gross_breakdown,
+            key=_component_key("holiday", pay.holiday_multiplier),
+            cents=pay.holiday_cents,
+        )
 
 
 def _reimbursement_to_json(claim: PayslipReimbursableClaimRow) -> dict[str, object]:
@@ -273,7 +529,7 @@ def _build_components_json(
     holiday_minutes: int,
     rule_ids: Sequence[str],
 ) -> dict[str, object]:
-    # code-health: ignore[params] Port params are adapter API contract.
+    # code-health: ignore[params] Persisted component schema keeps line fields explicit.
     return {
         "schema_version": 1,
         "currency": currency,
@@ -307,6 +563,105 @@ def _build_components_json(
     }
 
 
+def _fold_reimbursements(
+    claims: Sequence[PayslipReimbursableClaimRow],
+    *,
+    payslip_currency: str,
+) -> _ReimbursementAggregation:
+    # Spec §09 §"Currency mismatch": cross-currency claims are not a
+    # payroll-blocking error. v1 cannot fold them into the single-currency
+    # net, so they stay visible for manual reimbursement handling.
+    folded: list[PayslipReimbursableClaimRow] = []
+    skipped: list[PayslipReimbursableClaimRow] = []
+    for claim in claims:
+        if claim.currency == payslip_currency:
+            folded.append(claim)
+        else:
+            skipped.append(claim)
+    return _ReimbursementAggregation(
+        folded=folded,
+        skipped=skipped,
+        expense_reimbursements_cents=sum(claim.amount_cents for claim in folded),
+    )
+
+
+def _computed_payslip(
+    *,
+    aggregation: _PayslipAggregation,
+    ctx: WorkspaceContext,
+    period: PayPeriodRow,
+    user_id: str,
+    currency: str,
+    reimbursements: _ReimbursementAggregation,
+) -> PayslipComputation:
+    deductions_cents: dict[str, int] = {}
+    gross_cents = aggregation.gross_cents
+    net_cents = (
+        gross_cents
+        - sum(deductions_cents.values())
+        + reimbursements.expense_reimbursements_cents
+    )
+    return PayslipComputation(
+        workspace_id=ctx.workspace_id,
+        pay_period_id=period.id,
+        user_id=user_id,
+        currency=currency,
+        shift_hours_decimal=_hours(aggregation.total_minutes),
+        overtime_hours_decimal=_hours(aggregation.overtime_minutes),
+        gross_cents=gross_cents,
+        deductions_cents=deductions_cents,
+        expense_reimbursements_cents=reimbursements.expense_reimbursements_cents,
+        net_cents=net_cents,
+        components_json=_build_components_json(
+            currency=currency,
+            gross_breakdown=aggregation.gross_breakdown,
+            deductions_cents=deductions_cents,
+            reimbursements=reimbursements.folded,
+            reimbursements_skipped=reimbursements.skipped,
+            sources=aggregation.sources(),
+            total_minutes=aggregation.total_minutes,
+            regular_minutes=aggregation.regular_minutes,
+            overtime_minutes=aggregation.overtime_minutes,
+            night_minutes=aggregation.night_minutes,
+            weekend_minutes=aggregation.weekend_minutes,
+            holiday_minutes=aggregation.holiday_minutes,
+            rule_ids=sorted(aggregation.rule_ids),
+        ),
+    )
+
+
+def _aggregate_bookings(
+    *,
+    repo: PayslipComputeRepository,
+    ctx: WorkspaceContext,
+    period: PayPeriodRow,
+    bookings: Sequence[BookingPayRow],
+    holidays: Mapping[tuple[date, str | None], Decimal],
+) -> _PayslipAggregation:
+    aggregation = _PayslipAggregation()
+    for booking in bookings:
+        entry = derive_booking_pay_entry(booking)
+        if entry.unsettled:
+            continue
+        rule = repo.get_effective_pay_rule(
+            workspace_id=ctx.workspace_id,
+            user_id=booking.user_id,
+            at=booking.scheduled_start,
+        )
+        if rule is None:
+            raise PayslipInvariantViolated(
+                f"missing active pay rule for booking {booking.id}"
+            )
+        aggregation.add_booking(
+            booking=booking,
+            period=period,
+            rule=rule,
+            holidays=holidays,
+            paid_minutes=entry.minutes,
+        )
+    return aggregation
+
+
 def compute_payslip(
     repo: PayslipComputeRepository,
     ctx: WorkspaceContext,
@@ -315,8 +670,6 @@ def compute_payslip(
     user_id: str,
 ) -> PayslipComputation:
     """Compute one user's draft payslip from booking-derived payroll data."""
-    # code-health: ignore[ccn,nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
-
     bookings = repo.list_pay_bearing_bookings(
         workspace_id=ctx.workspace_id,
         starts_at=period.starts_at,
@@ -335,174 +688,22 @@ def compute_payslip(
         countries=countries,
     )
 
-    weekly_minutes: dict[tuple[int, int], int] = defaultdict(int)
-    gross_breakdown: dict[str, int] = defaultdict(int)
-    source_totals: dict[str, dict[str, int | str]] = {}
-    source_gross: dict[str, int] = defaultdict(int)
-    currencies: set[str] = set()
-    rule_ids: set[str] = set()
-    total_minutes = 0
-    regular_minutes = 0
-    overtime_minutes = 0
-    night_minutes = 0
-    weekend_minutes = 0
-    holiday_minutes = 0
-
-    for booking in bookings:
-        entry = derive_booking_pay_entry(booking)
-        if entry.unsettled:
-            continue
-        rule = repo.get_effective_pay_rule(
-            workspace_id=ctx.workspace_id,
-            user_id=booking.user_id,
-            at=booking.scheduled_start,
-        )
-        if rule is None:
-            raise PayslipInvariantViolated(
-                f"missing active pay rule for booking {booking.id}"
-            )
-        currencies.add(rule.currency)
-        rule_ids.add(rule.id)
-
-        source = source_totals.setdefault(
-            booking.id,
-            {
-                "booking_id": booking.id,
-                "work_engagement_id": booking.work_engagement_id,
-                "rule_id": rule.id,
-                "minutes": 0,
-                "regular_minutes": 0,
-                "overtime_minutes": 0,
-                "night_minutes": 0,
-                "weekend_minutes": 0,
-                "holiday_minutes": 0,
-            },
-        )
-        if entry.minutes <= 0:
-            continue
-        for segment in _iter_booking_segments(
-            booking=booking,
-            period=period,
-            rule=rule,
-        ):
-            week = _week_key(segment.start)
-            before_week = weekly_minutes[week]
-            regular_left = max(
-                0,
-                DEFAULT_WEEKLY_OVERTIME_THRESHOLD_MINUTES - before_week,
-            )
-            segment_regular = min(segment.minutes, regular_left)
-            segment_overtime = segment.minutes - segment_regular
-            weekly_minutes[week] += segment.minutes
-
-            segment_base = _cents_for_minutes(
-                cents_per_hour=segment.rule.base_cents_per_hour,
-                minutes=segment.minutes,
-                multiplier=_ONE,
-            )
-            segment_overtime_cents = _cents_for_minutes(
-                cents_per_hour=segment.rule.base_cents_per_hour,
-                minutes=segment_overtime,
-                multiplier=_premium_multiplier(segment.rule.overtime_multiplier),
-            )
-            segment_night_cents = 0
-            segment_weekend_cents = 0
-            segment_holiday_cents = 0
-
-            is_night = _is_night(segment.start)
-            if is_night:
-                segment_night_cents = _cents_for_minutes(
-                    cents_per_hour=segment.rule.base_cents_per_hour,
-                    minutes=segment.minutes,
-                    multiplier=_premium_multiplier(segment.rule.night_multiplier),
-                )
-
-            is_weekend = segment.start.weekday() >= 5
-            if is_weekend:
-                segment_weekend_cents = _cents_for_minutes(
-                    cents_per_hour=segment.rule.base_cents_per_hour,
-                    minutes=segment.minutes,
-                    multiplier=_premium_multiplier(segment.rule.weekend_multiplier),
-                )
-
-            holiday = _holiday_multiplier(
-                holidays,
-                segment.start.date(),
-                segment.property_country,
-            )
-            if holiday is not None:
-                segment_holiday_cents = _cents_for_minutes(
-                    cents_per_hour=segment.rule.base_cents_per_hour,
-                    minutes=segment.minutes,
-                    multiplier=_premium_multiplier(holiday),
-                )
-
-            segment_gross = (
-                segment_base
-                + segment_overtime_cents
-                + segment_night_cents
-                + segment_weekend_cents
-                + segment_holiday_cents
-            )
-
-            _add_component(gross_breakdown, key="base_pay", cents=segment_base)
-            _add_component(
-                gross_breakdown,
-                key=_component_key("overtime", segment.rule.overtime_multiplier),
-                cents=segment_overtime_cents,
-            )
-            _add_component(
-                gross_breakdown,
-                key=_component_key("night", segment.rule.night_multiplier),
-                cents=segment_night_cents,
-            )
-            _add_component(
-                gross_breakdown,
-                key=_component_key("weekend", segment.rule.weekend_multiplier),
-                cents=segment_weekend_cents,
-            )
-            if holiday is not None:
-                _add_component(
-                    gross_breakdown,
-                    key=_component_key("holiday", holiday),
-                    cents=segment_holiday_cents,
-                )
-
-            total_minutes += segment.minutes
-            regular_minutes += segment_regular
-            overtime_minutes += segment_overtime
-            if is_night:
-                night_minutes += segment.minutes
-            if is_weekend:
-                weekend_minutes += segment.minutes
-            if holiday is not None:
-                holiday_minutes += segment.minutes
-
-            source["minutes"] = int(source["minutes"]) + segment.minutes
-            source["regular_minutes"] = int(source["regular_minutes"]) + segment_regular
-            source["overtime_minutes"] = (
-                int(source["overtime_minutes"]) + segment_overtime
-            )
-            if is_night:
-                source["night_minutes"] = int(source["night_minutes"]) + segment.minutes
-            if is_weekend:
-                source["weekend_minutes"] = (
-                    int(source["weekend_minutes"]) + segment.minutes
-                )
-            if holiday is not None:
-                source["holiday_minutes"] = (
-                    int(source["holiday_minutes"]) + segment.minutes
-                )
-            source_gross[booking.id] += segment_gross
-
-    if not currencies:
+    aggregation = _aggregate_bookings(
+        repo=repo,
+        ctx=ctx,
+        period=period,
+        bookings=bookings,
+        holidays=holidays,
+    )
+    if not aggregation.currencies:
         raise PayslipInvariantViolated(f"no pay-bearing bookings for user {user_id}")
-    if len(currencies) > 1:
+    if len(aggregation.currencies) > 1:
         raise PayslipInvariantViolated(
-            f"mixed currencies for user {user_id}: {', '.join(sorted(currencies))}"
+            f"mixed currencies for user {user_id}: "
+            f"{', '.join(sorted(aggregation.currencies))}"
         )
 
-    payslip_currency = next(iter(currencies))
+    payslip_currency = next(iter(aggregation.currencies))
     reimbursable = repo.list_reimbursable_claims_for_payslip(
         workspace_id=ctx.workspace_id,
         user_id=user_id,
@@ -510,71 +711,17 @@ def compute_payslip(
         starts_at=period.starts_at,
         ends_at=period.ends_at,
     )
-    # Spec §09 §"Currency mismatch": a claim in currency X attached to
-    # a destination in currency Y is **not** a mismatch — expenses are
-    # fully multi-currency. v1 has no ``owed_amount_cents`` populated
-    # yet (payout_destination is deferred), so a cross-currency claim
-    # cannot be auto-folded into the single-currency payslip ``net``;
-    # we skip it here and leave it for the manual ``mark_reimbursed``
-    # path rather than wedging the whole payroll. The skipped set is
-    # echoed into ``components_json["reimbursements_skipped"]`` so the
-    # PDF / API can render a "settled out of band" hint.
-    folded: list[PayslipReimbursableClaimRow] = []
-    skipped: list[PayslipReimbursableClaimRow] = []
-    for claim in reimbursable:
-        if claim.currency == payslip_currency:
-            folded.append(claim)
-        else:
-            skipped.append(claim)
-    expense_reimbursements_cents = sum(claim.amount_cents for claim in folded)
-
-    deductions_cents: dict[str, int] = {}
-    gross_cents = sum(gross_breakdown.values())
-    net_cents = (
-        gross_cents - sum(deductions_cents.values()) + expense_reimbursements_cents
+    reimbursements = _fold_reimbursements(
+        reimbursable,
+        payslip_currency=payslip_currency,
     )
-    sources = [
-        _BookingSource(
-            booking_id=str(source["booking_id"]),
-            work_engagement_id=str(source["work_engagement_id"]),
-            rule_id=str(source["rule_id"]),
-            minutes=int(source["minutes"]),
-            regular_minutes=int(source["regular_minutes"]),
-            overtime_minutes=int(source["overtime_minutes"]),
-            night_minutes=int(source["night_minutes"]),
-            weekend_minutes=int(source["weekend_minutes"]),
-            holiday_minutes=int(source["holiday_minutes"]),
-            gross_cents=source_gross[str(source["booking_id"])],
-        )
-        for source in source_totals.values()
-    ]
-
-    return PayslipComputation(
-        workspace_id=ctx.workspace_id,
-        pay_period_id=period.id,
+    return _computed_payslip(
+        aggregation=aggregation,
+        ctx=ctx,
+        period=period,
         user_id=user_id,
         currency=payslip_currency,
-        shift_hours_decimal=_hours(total_minutes),
-        overtime_hours_decimal=_hours(overtime_minutes),
-        gross_cents=gross_cents,
-        deductions_cents=deductions_cents,
-        expense_reimbursements_cents=expense_reimbursements_cents,
-        net_cents=net_cents,
-        components_json=_build_components_json(
-            currency=payslip_currency,
-            gross_breakdown=gross_breakdown,
-            deductions_cents=deductions_cents,
-            reimbursements=folded,
-            reimbursements_skipped=skipped,
-            sources=sources,
-            total_minutes=total_minutes,
-            regular_minutes=regular_minutes,
-            overtime_minutes=overtime_minutes,
-            night_minutes=night_minutes,
-            weekend_minutes=weekend_minutes,
-            holiday_minutes=holiday_minutes,
-            rule_ids=sorted(rule_ids),
-        ),
+        reimbursements=reimbursements,
     )
 
 
@@ -587,7 +734,7 @@ def payslip_recompute(
     clock: Clock | None = None,
 ) -> Sequence[PayslipRow]:
     """Recompute every draft payslip for a pay period idempotently."""
-    # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
+    # code-health: ignore[nloc] Recompute keeps period validation, entry refresh, payslip upserts, and events in one ordered transaction.  # noqa: E501
 
     period = repo.get_period(workspace_id=ctx.workspace_id, period_id=period_id)
     if period is None:
