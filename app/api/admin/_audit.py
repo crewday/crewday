@@ -25,10 +25,10 @@ from fastapi import Request
 from sqlalchemy.orm import Session
 
 from app.api.transport import admin_sse
+from app.api.transport.correlation_id import request_correlation_id
 from app.audit import write_deployment_audit
 from app.authz.deployment_owners import is_deployment_owner
 from app.tenancy import DeploymentContext
-from app.util.ulid import new_ulid
 
 __all__ = ["audit_admin"]
 
@@ -76,22 +76,20 @@ def audit_admin(
       governance signal.
     * ``actor_was_owner_member`` — read from ``deployment_owner`` so
       root-only mutations carry the governance signal.
-    * ``correlation_id`` — the ambient ``X-Request-Id`` (the
-      :class:`RequestIdMiddleware` already minted one when the
-      request arrived; if it is missing for any reason, the writer
-      falls back to a fresh ULID so the column's NOT NULL contract
-      holds).
+    * ``correlation_id`` — the ambient
+      ``request.state.correlation_id`` resolved by
+      :class:`~app.api.transport.correlation_id.CorrelationIdMiddleware`.
+      If the state value is absent in an isolated test composition,
+      the transport helper safely falls back to a sanitized
+      ``X-Correlation-Id`` or a fresh ULID so the column's NOT NULL
+      contract holds.
 
     The writer never commits; the caller's UoW
     (:class:`UnitOfWorkImpl`) owns the transaction boundary so a
     handler that raises after the audit write rolls the row back
     with the rest of the failure path.
     """
-    correlation_id = (
-        request.headers.get("X-Request-Id")
-        or request.headers.get("X-Correlation-Id")
-        or new_ulid()
-    )
+    correlation_id = request_correlation_id(request)
     write_deployment_audit(
         session,
         actor_id=ctx.user_id,

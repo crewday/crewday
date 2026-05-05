@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from starlette.responses import StreamingResponse
 
 from app.api.admin.deps import current_deployment_admin_principal
+from app.api.transport.correlation_id import request_correlation_id
 from app.api.transport.sse import (
     HEARTBEAT_INTERVAL_S,
     MAX_CLIENT_QUEUE,
@@ -38,7 +39,6 @@ from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import DeploymentAdminSSEEvent
 from app.tenancy import DeploymentContext
-from app.util.ulid import new_ulid
 
 __all__ = [
     "AdminSSEFanOut",
@@ -264,11 +264,7 @@ def publish_admin_event(
     user_scope: str | None = None,
 ) -> None:
     """Publish one JSON-safe deployment-scope SSE event."""
-    correlation_id = (
-        request.headers.get("X-Request-Id")
-        or request.headers.get("X-Correlation-Id")
-        or new_ulid()
-    )
+    correlation_id = request_correlation_id(request)
     occurred_at = datetime.now(UTC)
     body = dict(payload or {})
     body.setdefault("actor_id", ctx.user_id)

@@ -86,6 +86,7 @@ __all__ = [
     "CORRELATION_ID_STATE_ATTR",
     "MAX_INBOUND_LENGTH",
     "CorrelationIdMiddleware",
+    "request_correlation_id",
 ]
 
 
@@ -140,6 +141,21 @@ def _coerce_inbound(value: str | None) -> str | None:
     if not candidate.isascii() or not candidate.isprintable():
         return None
     return candidate
+
+
+def request_correlation_id(request: Request) -> str:
+    """Return the resolved audit correlation id for ``request``.
+
+    Production requests should already carry the canonical value on
+    ``request.state.correlation_id``. The header fallback keeps isolated
+    route tests and deliberately minimal ASGI compositions safe without
+    reintroducing per-call-site header parsing.
+    """
+    state_value = getattr(request.state, CORRELATION_ID_STATE_ATTR, None)
+    if isinstance(state_value, str) and state_value.strip():
+        return state_value
+    inbound = _coerce_inbound(request.headers.get(CORRELATION_ID_HEADER))
+    return inbound if inbound is not None else new_ulid()
 
 
 class CorrelationIdMiddleware(BaseHTTPMiddleware):

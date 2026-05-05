@@ -6,6 +6,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.transport import admin_sse
 from app.api.transport.admin_sse import AdminSSEFanOut, _stream_admin_events
+from app.api.transport.correlation_id import CORRELATION_ID_STATE_ATTR
 from app.api.transport.sse import _ParsedLastEventId
 from app.auth.session import SESSION_COOKIE_NAME
 from app.config import Settings
@@ -197,7 +199,8 @@ class TestAdminSSEFanOut:
             lambda **kwargs: published.append(kwargs),
         )
         request = MagicMock()
-        request.headers = {"X-Request-Id": "corr_admin"}
+        request.headers = {"X-Correlation-Id": "fallback_corr"}
+        request.state = SimpleNamespace(**{CORRELATION_ID_STATE_ATTR: "corr_admin"})
         ctx = DeploymentContext(
             principal="session_1",
             user_id="admin_1",
@@ -224,6 +227,38 @@ class TestAdminSSEFanOut:
         assert relayed.actor_id == "admin_1"
         assert relayed.correlation_id == "corr_admin"
         assert relayed.occurred_at.tzinfo is UTC
+
+    def test_publish_admin_event_falls_back_to_correlation_header(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        admin_sse._bus_bound = False
+        event_bus = EventBus()
+        published: list[dict[str, object]] = []
+        monkeypatch.setattr(admin_sse, "default_event_bus", event_bus)
+        monkeypatch.setattr(
+            admin_sse.default_admin_fanout,
+            "publish",
+            lambda **kwargs: published.append(kwargs),
+        )
+        request = MagicMock()
+        request.headers = {"X-Correlation-Id": "fallback_corr"}
+        request.state = SimpleNamespace()
+        ctx = DeploymentContext(
+            principal="session_1",
+            user_id="admin_1",
+            actor_kind="user",
+            deployment_scopes=frozenset({"deployment:admin"}),
+        )
+        try:
+            admin_sse.publish_admin_event(
+                kind="admin.settings.updated",
+                ctx=ctx,
+                request=request,
+            )
+        finally:
+            admin_sse._bus_bound = False
+
+        assert published[0]["payload"]["correlation_id"] == "fallback_corr"
 
 
 class TestAdminEventsRoute:

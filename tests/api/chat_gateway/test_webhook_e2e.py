@@ -26,6 +26,8 @@ from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.workspace.models import Workspace
 from app.api.chat_gateway import ChatGatewayProviderConfig, build_chat_gateway_router
 from app.api.deps import db_session
+from app.api.errors import add_exception_handlers
+from app.api.transport.correlation_id import CorrelationIdMiddleware
 from app.events.bus import EventBus
 from app.events.types import ChatMessageReceived
 from app.util.ulid import new_ulid
@@ -86,8 +88,10 @@ def _build_app(
     workspace_id: str,
     secret: str,
     event_bus: EventBus,
+    correlation_middleware: bool = False,
 ) -> FastAPI:
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(
         build_chat_gateway_router(
             providers=[
@@ -108,6 +112,8 @@ def _build_app(
             yield s
 
     app.dependency_overrides[db_session] = _override_db
+    if correlation_middleware:
+        app.add_middleware(CorrelationIdMiddleware)
     return app
 
 
@@ -219,3 +225,79 @@ def test_twilio_webhook_auto_creates_channel_binding_message_and_is_idempotent(
             "chat_gateway.message.received" in s.scalars(select(AuditLog.action)).all()
         )
     assert [event.message_id for event in events] == [first.json()["message_id"]]
+
+
+def test_webhook_audit_uses_state_correlation_id_over_request_id(
+    factory: sessionmaker[Session],
+) -> None:
+    with factory() as s:
+        workspace_id = _workspace(s)
+        s.commit()
+    client = TestClient(
+        _build_app(
+            factory,
+            workspace_id=workspace_id,
+            secret="twilio-secret",
+            event_bus=EventBus(),
+            correlation_middleware=True,
+        ),
+        raise_server_exceptions=False,
+    )
+    raw = _twilio_body("SMbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+    signature = _twilio_signature(
+        raw,
+        secret="twilio-secret",
+        url="http://testserver/webhooks/chat/twilio",
+    )
+
+    resp = client.post(
+        "/webhooks/chat/twilio",
+        content=raw,
+        headers={
+            "X-Twilio-Signature": signature,
+            "X-Correlation-Id": "state-correlation",
+            "X-Request-Id": "raw-request-id",
+        },
+    )
+
+    assert resp.status_code == 200
+    with factory() as s:
+        rows = s.scalars(select(AuditLog)).all()
+    assert {row.correlation_id for row in rows} == {"state-correlation"}
+
+
+def test_webhook_audit_falls_back_to_correlation_header_without_state(
+    factory: sessionmaker[Session],
+) -> None:
+    with factory() as s:
+        workspace_id = _workspace(s)
+        s.commit()
+    client = TestClient(
+        _build_app(
+            factory,
+            workspace_id=workspace_id,
+            secret="twilio-secret",
+            event_bus=EventBus(),
+        ),
+        raise_server_exceptions=False,
+    )
+    raw = _twilio_body("SMcccccccccccccccccccccccccccccccc")
+    signature = _twilio_signature(
+        raw,
+        secret="twilio-secret",
+        url="http://testserver/webhooks/chat/twilio",
+    )
+
+    resp = client.post(
+        "/webhooks/chat/twilio",
+        content=raw,
+        headers={
+            "X-Twilio-Signature": signature,
+            "X-Correlation-Id": "fallback-correlation",
+        },
+    )
+
+    assert resp.status_code == 200
+    with factory() as s:
+        rows = s.scalars(select(AuditLog)).all()
+    assert {row.correlation_id for row in rows} == {"fallback-correlation"}

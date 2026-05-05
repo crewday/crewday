@@ -13,13 +13,13 @@ from sqlalchemy.orm import Session
 from app.adapters.chat_gateway import UnsupportedProvider, get_adapter
 from app.adapters.db.messaging.repositories import SqlAlchemyChatGatewayRepository
 from app.api.deps import db_session
+from app.api.transport.correlation_id import request_correlation_id
 from app.config import Settings, get_settings
 from app.domain.errors import BadRequest, NotFound, Unauthorized
 from app.domain.messaging.gateway import ChatGatewayService
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.tenancy import WorkspaceContext
-from app.util.ulid import new_ulid
 
 __all__ = [
     "ChatGatewayProviderConfig",
@@ -107,7 +107,7 @@ def build_chat_gateway_router(
             actor_kind="system",
             actor_grant_role="manager",
             actor_was_owner_member=False,
-            audit_correlation_id=request.headers.get("X-Request-Id", new_ulid()),
+            audit_correlation_id=request_correlation_id(request),
             principal_kind="system",
         )
         result = ChatGatewayService(ctx, event_bus=bus).receive(

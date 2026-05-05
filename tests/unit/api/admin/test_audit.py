@@ -21,15 +21,19 @@ from datetime import datetime, timedelta
 import anyio
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Scope
 
 from app.adapters.db.audit.models import AuditLog
+from app.api.admin import _audit as admin_audit_shim
+from app.api.admin._audit import audit_admin
 from app.api.admin.audit import NDJSON_MEDIA_TYPE
+from app.api.transport.correlation_id import CORRELATION_ID_STATE_ATTR
 from app.auth.session import SESSION_COOKIE_NAME
 from app.config import Settings
-from app.tenancy import tenant_agnostic
+from app.tenancy import DEPLOYMENT_SCOPE_CATALOG, DeploymentContext, tenant_agnostic
 from app.util.ulid import new_ulid
 from tests.unit.api.admin._helpers import (
     PINNED,
@@ -169,6 +173,103 @@ def _seed_audit(
         )
         s.commit()
     return audit_id
+
+
+def _request(
+    *,
+    correlation_id: str | None = None,
+    headers: list[tuple[bytes, bytes]] | None = None,
+) -> Request:
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/admin/api/v1/settings/signup_enabled",
+            "headers": headers or [],
+            "query_string": b"",
+            "client": ("127.0.0.1", 123),
+            "server": ("testserver", 443),
+            "scheme": "https",
+        }
+    )
+    if correlation_id is not None:
+        setattr(request.state, CORRELATION_ID_STATE_ATTR, correlation_id)
+    return request
+
+
+def _deployment_ctx(user_id: str) -> DeploymentContext:
+    return DeploymentContext(
+        principal="session:admin",
+        user_id=user_id,
+        actor_kind="user",
+        deployment_scopes=DEPLOYMENT_SCOPE_CATALOG,
+    )
+
+
+class TestAuditAdminCorrelation:
+    def test_state_correlation_id_wins_over_inbound_headers(
+        self,
+        session_factory: sessionmaker[Session],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            admin_audit_shim.admin_sse,
+            "publish_admin_event",
+            lambda **_kwargs: None,
+        )
+        with session_factory() as s, tenant_agnostic():
+            user_id = seed_user(s, email="state@example.com", display_name="State")
+            audit_admin(
+                s,
+                ctx=_deployment_ctx(user_id),
+                request=_request(
+                    correlation_id="state-correlation",
+                    headers=[
+                        (b"x-request-id", b"raw-request-id"),
+                        (b"x-correlation-id", b"raw-correlation-id"),
+                    ],
+                ),
+                entity_kind="deployment_setting",
+                entity_id="signup_enabled",
+                action="deployment_setting.updated",
+            )
+            row = s.scalar(
+                select(AuditLog).where(AuditLog.action == "deployment_setting.updated")
+            )
+
+        assert row is not None
+        assert row.correlation_id == "state-correlation"
+
+    def test_missing_state_falls_back_to_correlation_header(
+        self,
+        session_factory: sessionmaker[Session],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            admin_audit_shim.admin_sse,
+            "publish_admin_event",
+            lambda **_kwargs: None,
+        )
+        with session_factory() as s, tenant_agnostic():
+            user_id = seed_user(
+                s, email="fallback@example.com", display_name="Fallback"
+            )
+            audit_admin(
+                s,
+                ctx=_deployment_ctx(user_id),
+                request=_request(
+                    headers=[(b"x-correlation-id", b"fallback-correlation")]
+                ),
+                entity_kind="deployment_setting",
+                entity_id="signup_enabled",
+                action="deployment_setting.updated",
+            )
+            row = s.scalar(
+                select(AuditLog).where(AuditLog.action == "deployment_setting.updated")
+            )
+
+        assert row is not None
+        assert row.correlation_id == "fallback-correlation"
 
 
 class TestListAudit:
