@@ -41,13 +41,10 @@ hits before they can do real work:
 5. **Authenticated SPA navigation + task completion.** The worker
    navigates to ``/today``, the role home for an owner-less worker,
    and the WorkspaceGate auto-adopts their single workspace. With
-   the protected tree mounted, the test posts to
-   ``/tasks/<id>/complete`` through Playwright's ``page.request``
-   client — same browser context as the SPA, same UA + Accept-
-   Language fingerprint the passkey login stamped onto the session
-   row, same ``crewday_csrf`` cookie the CSRF middleware enforces.
-   The state goes ``pending → completed`` and the assertion reads
-   back via ``GET /tasks/<id>``.
+   the protected tree mounted, the test opens ``/task/<id>`` and
+   clicks the SPA's ``Mark done`` button. The state goes
+   ``pending → completed`` and the assertion reads back via
+   ``GET /tasks/<id>``.
 
 Chromium-only because the WebAuthn virtual authenticator is
 exposed through Chrome DevTools Protocol; WebKit auto-skips with
@@ -261,11 +258,7 @@ def test_owner_invites_worker_and_worker_completes_first_task(
         # ``RoleHome`` component) and exercises the full chain we
         # care about: passkey-issued cookie reaches FastAPI →
         # /auth/me probe succeeds → WorkspaceGate auto-adopts the
-        # worker's only workspace → the protected tree mounts. The
-        # We assert the worker's authenticated arrival and complete
-        # the task through the same JSON API the SPA's "Mark done"
-        # button targets (cd-hnh9j removed the double-prefix
-        # workaround the earlier revision compensated for).
+        # worker's only workspace → the protected tree mounts.
         invitee_page.goto(
             f"{base_url.rstrip('/')}/today",
             wait_until="domcontentloaded",
@@ -284,15 +277,12 @@ def test_owner_invites_worker_and_worker_completes_first_task(
             timeout=15_000
         )
 
-        # Drive completion through the worker's freshly-minted
-        # session — same opaque session value the SPA's
-        # ``credentials: "same-origin"`` fetch would carry. We use
-        # Playwright's request fixture rather than httpx because
-        # the passkey login stamped a fingerprint on the session row
-        # (UA + Accept-Language hash, see app/auth/session.py): an
-        # httpx call with its own UA would mismatch the stored
-        # fingerprint and 401 with ``session_invalid``. Routing
-        # through the same browser context preserves both headers.
+        # Probe through Playwright's request fixture rather than
+        # httpx because the passkey login stamped a fingerprint on
+        # the session row (UA + Accept-Language hash, see
+        # app/auth/session.py): an httpx call with its own UA would
+        # mismatch the stored fingerprint and 401 with
+        # ``session_invalid``.
         worker_me_resp = invitee_page.request.get(f"{base_url.rstrip('/')}/api/v1/me")
         assert worker_me_resp.status == 200, (
             f"worker /me probe failed: {worker_me_resp.status} "
@@ -306,29 +296,35 @@ def test_owner_invites_worker_and_worker_completes_first_task(
             f"worker /me workspace mismatch: got {worker_me!r}, "
             f"expected workspace_id={workspace_id!r}"
         )
-        # The CSRF middleware (app/auth/csrf.py) refuses non-GET
-        # requests that lack a matching ``X-CSRF`` header. The SPA
-        # reads ``crewday_csrf`` from its cookie jar and echoes it
-        # on every mutating fetch; we mirror that exact dance here.
-        csrf_token = _read_csrf_cookie(invitee_page)
-        complete_resp_obj = invitee_page.request.post(
+        invitee_page.goto(
+            f"{base_url.rstrip('/')}/task/{task_id}",
+            wait_until="domcontentloaded",
+        )
+        expect(invitee_page).to_have_url(
+            f"{base_url.rstrip('/')}/task/{task_id}", timeout=15_000
+        )
+        mark_done = invitee_page.get_by_role("button", name="Mark done")
+        expect(mark_done).to_be_visible(timeout=15_000)
+        complete_url = (
             f"{base_url.rstrip('/')}/w/{workspace_slug}"
-            f"/api/v1/tasks/{task_id}/complete",
-            data={"note_md": "Done via GA journey 2 e2e"},
-            headers={CSRF_HEADER_NAME: csrf_token},
+            f"/api/v1/tasks/{task_id}/complete"
         )
-        assert complete_resp_obj.status == 200, (
-            f"complete failed: {complete_resp_obj.status} "
-            f"body={complete_resp_obj.text()[:300]!r}"
+        with invitee_page.expect_response(
+            lambda response: response.request.method == "POST"
+            and response.url == complete_url
+        ) as complete_response_info:
+            mark_done.click()
+        complete_resp = complete_response_info.value
+        assert complete_resp.status == 200, (
+            f"complete failed: {complete_resp.status} "
+            f"body={complete_resp.text()[:300]!r}"
         )
-        complete_resp = complete_resp_obj.json()
-        assert complete_resp["task_id"] == task_id
-        assert complete_resp["state"] == "completed"
+        complete_body = complete_resp.json()
+        assert complete_body["task_id"] == task_id
+        assert complete_body["state"] == "completed"
 
         # Verify the row reads back at the steady-state — same
-        # endpoint the SPA's task-detail GET would hit if the
-        # frontend route gap were fixed (see comment above on
-        # ``/today`` navigation).
+        # endpoint the SPA's task-detail GET hits.
         completed_row = _poll_task_state_via_page(
             invitee_page,
             base_url=base_url,
@@ -522,26 +518,6 @@ def _post_json(
         raise AssertionError(f"{url} returned non-object JSON: {payload!r}")
     return payload
 
-
-def _read_csrf_cookie(page: Page) -> str:
-    """Return the ``crewday_csrf`` cookie value from the page jar.
-
-    The CSRF middleware sets this cookie on every response; the SPA
-    echoes it back as the ``X-CSRF`` header on mutating requests.
-    The test mirrors the exact contract — see :mod:`app.auth.csrf`
-    for the double-submit rationale.
-    """
-    cookies = page.context.cookies()
-    for cookie in cookies:
-        if cookie["name"] == CSRF_COOKIE_NAME:
-            value = cookie["value"]
-            if isinstance(value, str) and value:
-                return value
-    raise AssertionError(
-        f"no {CSRF_COOKIE_NAME!r} cookie present in jar; cookies={cookies!r}"
-    )
-
-
 def _poll_task_state_via_page(
     page: Page,
     *,
@@ -578,16 +554,16 @@ def _poll_task_state_via_page(
 
 
 def _scheduled_iso_local() -> str:
-    """Return a property-local ISO-8601 timestamp two hours from now.
+    """Return a property-local ISO-8601 timestamp thirty minutes from now.
 
     The property created above lives in ``UTC`` so naive local time
-    equals UTC. Two hours of slack avoids the ad-hoc creator's
-    "scheduled in the past" guard while staying well inside today's
-    operational window.
+    equals UTC. Thirty minutes of slack avoids the ad-hoc creator's
+    "scheduled in the past" guard while keeping the task inside the
+    one-hour pending boundary a worker may complete.
     """
     from datetime import UTC, datetime, timedelta
 
-    return (datetime.now(UTC) + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S")
+    return (datetime.now(UTC) + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def _expect_str(payload: dict[str, Any], key: str) -> str:
