@@ -66,3 +66,4 @@ tests/e2e/_diff/*
 !tests/e2e/_diff/.gitkeep
 tests/e2e/_artifacts/
 test-results/
+dogfood-output/

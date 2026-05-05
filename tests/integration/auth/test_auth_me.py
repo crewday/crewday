@@ -40,6 +40,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from pydantic import SecretStr
 from sqlalchemy import Engine, delete, or_, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -54,6 +55,7 @@ from app.adapters.db.authz.models import (
 from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.identity.models import User
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
+from app.api.errors import add_exception_handlers
 from app.api.deps import db_session as db_session_dep
 from app.api.v1.auth import me as me_module
 from app.auth import session as auth_session
@@ -152,6 +154,7 @@ def client(
         s.commit()
 
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(me_module.build_me_router(), prefix="/api/v1")
 
     def _session() -> Iterator[Session]:
@@ -365,6 +368,15 @@ def _assert_shape(
         )
 
 
+def _assert_unauthorized_error(response: Response, *, error: str) -> None:
+    assert response.status_code == 401, response.text
+    assert response.headers["content-type"].startswith("application/problem+json")
+    body = response.json()
+    assert body["status"] == 401
+    assert body["title"] == "Unauthorized"
+    assert body["error"] == error
+
+
 class TestAuthMeHappyPath:
     """Valid cookie → 200 + full schema match against the TS contract."""
 
@@ -539,16 +551,14 @@ class TestAuthMeUnauthorized:
 
     def test_no_cookie_returns_401_session_required(self, client: TestClient) -> None:
         r = client.get("/api/v1/auth/me")
-        assert r.status_code == 401, r.text
-        assert r.json()["detail"]["error"] == "session_required"
+        _assert_unauthorized_error(r, error="session_required")
 
     def test_unknown_cookie_returns_401_session_invalid(
         self, client: TestClient
     ) -> None:
         client.cookies.set(SESSION_COOKIE_NAME, "not-a-real-session-token")
         r = client.get("/api/v1/auth/me")
-        assert r.status_code == 401, r.text
-        assert r.json()["detail"]["error"] == "session_invalid"
+        _assert_unauthorized_error(r, error="session_invalid")
 
     def test_expired_cookie_returns_401_session_invalid(
         self,
@@ -582,8 +592,7 @@ class TestAuthMeUnauthorized:
 
         client.cookies.set(SESSION_COOKIE_NAME, cookie)
         r = client.get("/api/v1/auth/me")
-        assert r.status_code == 401, r.text
-        assert r.json()["detail"]["error"] == "session_invalid"
+        _assert_unauthorized_error(r, error="session_invalid")
 
     def test_invalidated_cookie_returns_401_session_invalid(
         self,
@@ -614,5 +623,4 @@ class TestAuthMeUnauthorized:
 
         client.cookies.set(SESSION_COOKIE_NAME, cookie)
         r = client.get("/api/v1/auth/me")
-        assert r.status_code == 401, r.text
-        assert r.json()["detail"]["error"] == "session_invalid"
+        _assert_unauthorized_error(r, error="session_invalid")
