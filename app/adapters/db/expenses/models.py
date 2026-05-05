@@ -353,6 +353,14 @@ class ExpenseClaim(Base):
         ForeignKey("payout_destination.id", ondelete="RESTRICT"),
         nullable=True,
     )
+    # Explicit pay-period attachment for reimbursement rollup. Set on
+    # approval per §09: normally the period containing ``purchased_at``,
+    # falling forward to the next open period when that period is locked.
+    pay_period_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("pay_period.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     # cd-9guk reimbursement snapshot — populated when the manager
     # marks the claim ``reimbursed``. NULL while the claim is still
     # ``draft`` / ``submitted`` / ``approved`` / ``rejected``. The
@@ -432,6 +440,11 @@ class ExpenseClaim(Base):
             "workspace_id",
             "work_engagement_id",
             "submitted_at",
+        ),
+        Index(
+            "ix_expense_claim_workspace_pay_period",
+            "workspace_id",
+            "pay_period_id",
         ),
     )
 

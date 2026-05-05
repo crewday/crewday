@@ -325,6 +325,44 @@ def _jurisdiction_from_components(value: object) -> str | None:
     return jurisdiction if isinstance(jurisdiction, str) else None
 
 
+def _reimbursement_claim_ids(value: object) -> set[str]:
+    if not isinstance(value, dict):
+        return set()
+    items = value.get("reimbursements")
+    if not isinstance(items, list):
+        return set()
+    claim_ids: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        claim_id = item.get("claim_id")
+        if isinstance(claim_id, str):
+            claim_ids.add(claim_id)
+    return claim_ids
+
+
+def _remove_reimbursement_components(
+    components: dict[str, object], stale_claim_ids: set[str]
+) -> tuple[dict[str, object], int]:
+    reimbursements = components.get("reimbursements")
+    if not isinstance(reimbursements, list):
+        return components, 0
+    kept: list[object] = []
+    removed_cents = 0
+    for item in reimbursements:
+        if not isinstance(item, dict) or item.get("claim_id") not in stale_claim_ids:
+            kept.append(item)
+            continue
+        amount_cents = item.get("amount_cents")
+        if isinstance(amount_cents, int) and not isinstance(amount_cents, bool):
+            removed_cents += amount_cents
+    if removed_cents == 0:
+        return components, 0
+    updated = dict(components)
+    updated["reimbursements"] = kept
+    return updated, removed_cents
+
+
 def _payslip_currency_subquery() -> ScalarSelect[str | None]:
     return (
         select(PayRule.currency)
@@ -884,6 +922,7 @@ class SqlAlchemyPayslipComputeRepository(SqlAlchemyBookingPayRepository):
         *,
         workspace_id: str,
         user_id: str,
+        pay_period_id: str,
         starts_at: datetime,
         ends_at: datetime,  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
     ) -> Sequence[PayslipReimbursableClaimRow]:
@@ -908,10 +947,20 @@ class SqlAlchemyPayslipComputeRepository(SqlAlchemyBookingPayRepository):
                     WorkEngagement.user_id == user_id,
                     ExpenseClaim.state == "approved",
                     ExpenseClaim.deleted_at.is_(None),
-                    ExpenseClaim.purchased_at >= starts_at,
-                    ExpenseClaim.purchased_at < ends_at,
+                    or_(
+                        ExpenseClaim.pay_period_id == pay_period_id,
+                        and_(
+                            ExpenseClaim.pay_period_id.is_(None),
+                            ExpenseClaim.purchased_at >= starts_at,
+                            ExpenseClaim.purchased_at < ends_at,
+                        ),
+                    ),
                 )
-                .order_by(ExpenseClaim.purchased_at.asc(), ExpenseClaim.id.asc())
+                .order_by(
+                    ExpenseClaim.pay_period_id.asc(),
+                    ExpenseClaim.purchased_at.asc(),
+                    ExpenseClaim.id.asc(),
+                )
             )
             .scalars()
             .all()
@@ -1004,11 +1053,53 @@ class SqlAlchemyPayslipReadRepository(PayslipReadRepository):
         self._session.flush()
         return _payslip_read_to_row(row, currency=None)
 
+    def reconcile_reimbursements_before_paid(
+        self,
+        *,
+        workspace_id: str,
+        payslip_id: str,
+    ) -> PayslipReadRow:
+        row = self._session.scalars(
+            select(Payslip).where(
+                Payslip.workspace_id == workspace_id,
+                Payslip.id == payslip_id,
+            )
+        ).one()
+        claim_ids = _reimbursement_claim_ids(row.components_json)
+        if not claim_ids:
+            return _payslip_read_to_row(row, currency=None)
+        stale_claim_ids = set(
+            self._session.scalars(
+                select(ExpenseClaim.id).where(
+                    ExpenseClaim.workspace_id == workspace_id,
+                    ExpenseClaim.id.in_(sorted(claim_ids)),
+                    or_(
+                        ExpenseClaim.state != "approved",
+                        ExpenseClaim.deleted_at.is_not(None),
+                    ),
+                )
+            ).all()
+        )
+        if not stale_claim_ids:
+            return _payslip_read_to_row(row, currency=None)
+        components_json, removed_cents = _remove_reimbursement_components(
+            dict(row.components_json),
+            stale_claim_ids,
+        )
+        if removed_cents:
+            row.components_json = components_json
+            row.expense_reimbursements_cents -= removed_cents
+            row.net_cents -= removed_cents
+            self._session.flush()
+        return _payslip_read_to_row(row, currency=None)
+
     def settle_payslip_reimbursements(
         self,
         *,
         workspace_id: str,
         user_id: str,
+        claim_ids: Set[str],
+        pay_period_id: str,
         starts_at: datetime,
         ends_at: datetime,
         currency: str,
@@ -1026,6 +1117,8 @@ class SqlAlchemyPayslipReadRepository(PayslipReadRepository):
         # than an ORM-level UPDATE so the SA identity-map sees the new
         # column values inside the same UoW.
         # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
+        if not claim_ids:
+            return ()
         rows = (
             self._session.execute(
                 select(ExpenseClaim)
@@ -1038,12 +1131,19 @@ class SqlAlchemyPayslipReadRepository(PayslipReadRepository):
                 )
                 .where(
                     ExpenseClaim.workspace_id == workspace_id,
+                    ExpenseClaim.id.in_(sorted(claim_ids)),
                     WorkEngagement.user_id == user_id,
                     ExpenseClaim.state == "approved",
                     ExpenseClaim.deleted_at.is_(None),
                     ExpenseClaim.currency == currency,
-                    ExpenseClaim.purchased_at >= starts_at,
-                    ExpenseClaim.purchased_at < ends_at,
+                    or_(
+                        ExpenseClaim.pay_period_id == pay_period_id,
+                        and_(
+                            ExpenseClaim.pay_period_id.is_(None),
+                            ExpenseClaim.purchased_at >= starts_at,
+                            ExpenseClaim.purchased_at < ends_at,
+                        ),
+                    ),
                 )
                 .order_by(ExpenseClaim.purchased_at.asc(), ExpenseClaim.id.asc())
             )

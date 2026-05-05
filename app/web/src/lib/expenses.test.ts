@@ -38,6 +38,7 @@ function payload(overrides: Partial<ExpenseClaimPayload> = {}): ExpenseClaimPayl
     decided_by: null,
     decided_at: null,
     decision_note_md: null,
+    pay_period_id: null,
     created_at: "2026-04-20T10:05:00Z",
     deleted_at: null,
     attachments: [],

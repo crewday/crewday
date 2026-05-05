@@ -499,6 +499,12 @@ def _validated_edit_fields(edits: ApprovalEdits, *, now: datetime) -> dict[str, 
     return diff
 
 
+def _append_decision_note(existing: str | None, note: str) -> str:
+    if existing is None or not existing.strip():
+        return note
+    return f"{existing.rstrip()}\n\n{note}"
+
+
 def approve_claim(
     repo: ExpensesRepository,
     checker: CapabilityChecker,
@@ -564,11 +570,26 @@ def approve_claim(
                 fields=edit_fields,
             )
 
+    period_resolution = repo.resolve_reimbursement_pay_period(
+        workspace_id=ctx.workspace_id,
+        purchased_at=row.purchased_at,
+    )
+    decision_note_md = row.decision_note_md
+    if period_resolution is not None and period_resolution.fallback_note_md is not None:
+        decision_note_md = _append_decision_note(
+            decision_note_md,
+            period_resolution.fallback_note_md,
+        )
+
     row = repo.mark_claim_approved(
         workspace_id=ctx.workspace_id,
         claim_id=row.id,
         decided_by=ctx.actor_id,
         decided_at=now,
+        pay_period_id=(
+            period_resolution.pay_period_id if period_resolution is not None else None
+        ),
+        decision_note_md=decision_note_md,
     )
     after = _row_to_view(repo, row)
 

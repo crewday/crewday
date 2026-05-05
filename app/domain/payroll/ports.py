@@ -388,11 +388,22 @@ class PayslipReadRepository(Protocol):
         # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         ...
 
+    def reconcile_reimbursements_before_paid(
+        self,
+        *,
+        workspace_id: str,
+        payslip_id: str,
+    ) -> PayslipReadRow:
+        """Remove already-reimbursed folded claims from an unpaid payslip."""
+        ...
+
     def settle_payslip_reimbursements(
         self,
         *,
         workspace_id: str,
         user_id: str,
+        claim_ids: Set[str],
+        pay_period_id: str,
         starts_at: datetime,
         ends_at: datetime,
         currency: str,
@@ -410,10 +421,12 @@ class PayslipReadRepository(Protocol):
 
         Selection criteria match
         :meth:`PayslipComputeRepository.list_reimbursable_claims_for_payslip`
-        — every approved-not-yet-reimbursed claim for ``user_id`` whose
-        ``purchased_at`` falls inside ``[starts_at, ends_at)`` **and**
-        whose ``currency`` matches the payslip's currency. Cross-
-        currency claims are left for the manual
+        — every approved-not-yet-reimbursed claim still present in the
+        payslip's reimbursement components, attached to ``pay_period_id``
+        (plus legacy rows whose ``pay_period_id`` is NULL and whose
+        ``purchased_at`` falls inside ``[starts_at, ends_at)``), and whose
+        ``currency`` matches the payslip's currency. Cross-currency claims
+        are left for the manual
         :meth:`ExpensesRepository.mark_claim_reimbursed` route — they
         were never folded into the payslip's ``net_cents`` and must
         not be auto-flipped here. The ``reimbursed_via`` is fixed to
@@ -549,16 +562,18 @@ class PayslipComputeRepository(Protocol):
         *,
         workspace_id: str,
         user_id: str,
+        pay_period_id: str,
         starts_at: datetime,
         ends_at: datetime,
     ) -> Sequence[PayslipReimbursableClaimRow]:
         """Return approved-not-yet-reimbursed claims attached to the period.
 
-        The set is "every approved claim for ``user_id`` whose
-        ``purchased_at`` falls inside ``[starts_at, ends_at)`` and whose
-        ``state == 'approved'``" — those are the rows the compute folds
-        into ``net_cents`` and renders in
-        ``components_json["reimbursements"]``. Claims that have already
+        The set is "every approved claim for ``user_id`` attached to
+        ``pay_period_id`` and whose ``state == 'approved'``" — those
+        are the rows the compute folds into ``net_cents`` and renders in
+        ``components_json["reimbursements"]``. Legacy rows with a NULL
+        ``pay_period_id`` fall back to the old ``purchased_at`` window
+        predicate. Claims that have already
         flipped to ``reimbursed`` (out-of-band settlement) and
         soft-deleted rows are excluded by the read.
 

@@ -551,6 +551,7 @@ class ExpenseClaimView:
     decided_by: str | None
     decided_at: datetime | None
     decision_note_md: str | None
+    pay_period_id: str | None
     created_at: datetime
     deleted_at: datetime | None
     attachments: tuple[ExpenseAttachmentView, ...]
@@ -667,6 +668,7 @@ def _row_to_view(
         decided_by=claim_row.decided_by,
         decided_at=claim_row.decided_at,
         decision_note_md=claim_row.decision_note_md,
+        pay_period_id=claim_row.pay_period_id,
         created_at=claim_row.created_at,
         deleted_at=claim_row.deleted_at,
         attachments=tuple(_attachment_row_to_view(r) for r in attachment_rows),
@@ -701,6 +703,7 @@ def _view_to_diff_dict(view: ExpenseClaimView) -> dict[str, Any]:
             view.decided_at.isoformat() if view.decided_at is not None else None
         ),
         "decision_note_md": view.decision_note_md,
+        "pay_period_id": view.pay_period_id,
         "created_at": view.created_at.isoformat(),
         "deleted_at": (
             view.deleted_at.isoformat() if view.deleted_at is not None else None

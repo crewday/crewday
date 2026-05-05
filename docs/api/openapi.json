@@ -8498,6 +8498,17 @@
             "title": "Note Md",
             "type": "string"
           },
+          "pay_period_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pay Period Id"
+          },
           "property_id": {
             "anyOf": [
               {
@@ -8558,6 +8569,7 @@
           "deleted_at",
           "id",
           "note_md",
+          "pay_period_id",
           "property_id",
           "purchased_at",
           "state",

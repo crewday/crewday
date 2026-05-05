@@ -161,6 +161,7 @@ class FakeRepo:
         *,
         workspace_id: str,
         user_id: str,
+        pay_period_id: str,
         starts_at: datetime,
         ends_at: datetime,
     ) -> Sequence[PayslipReimbursableClaimRow]:

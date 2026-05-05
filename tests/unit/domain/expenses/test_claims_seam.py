@@ -54,6 +54,7 @@ from app.domain.expenses import (
 from app.domain.expenses.ports import (
     ExpenseAttachmentRow,
     ExpenseClaimRow,
+    ExpensePayPeriodResolution,
     PendingClaimsCursor,
     SeamPermissionDenied,
     WorkEngagementRow,
@@ -110,6 +111,7 @@ class _FakeRepo:
     user_names: dict[str, str] = field(default_factory=dict)
     audit_session: _FakeAuditSession = field(default_factory=_FakeAuditSession)
     llm_usage_rows: list[dict[str, Any]] = field(default_factory=list)
+    pay_period_resolution: ExpensePayPeriodResolution | None = None
 
     @property
     def session(self) -> Any:
@@ -340,6 +342,7 @@ class _FakeRepo:
             reimbursed_at=None,
             reimbursed_via=None,
             reimbursed_by=None,
+            pay_period_id=None,
             llm_autofill_json=None,
             autofill_confidence_overall=None,
             created_at=created_at,
@@ -380,6 +383,8 @@ class _FakeRepo:
         claim_id: str,
         decided_by: str,
         decided_at: datetime,
+        pay_period_id: str | None = None,
+        decision_note_md: str | None = None,
     ) -> ExpenseClaimRow:
         row = self.claims[claim_id]
         new_row = replace(
@@ -387,9 +392,19 @@ class _FakeRepo:
             state="approved",
             decided_by=decided_by,
             decided_at=decided_at,
+            pay_period_id=pay_period_id,
+            decision_note_md=decision_note_md,
         )
         self.claims[claim_id] = new_row
         return new_row
+
+    def resolve_reimbursement_pay_period(
+        self,
+        *,
+        workspace_id: str,
+        purchased_at: datetime,
+    ) -> ExpensePayPeriodResolution | None:
+        return self.pay_period_resolution
 
     def mark_claim_rejected(
         self,

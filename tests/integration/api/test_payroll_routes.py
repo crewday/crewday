@@ -576,6 +576,7 @@ def test_mark_paid_settles_approved_claims_for_period_window(
     purchased_at = datetime(2026, 5, 10, 12, 0, tzinfo=UTC)
     claim_in_id = new_ulid()
     claim_out_id = new_ulid()
+    claim_late_id = new_ulid()
     with session_factory() as session, tenant_agnostic():
         engagement_id = session.scalar(
             select(WorkEngagement.id).where(
@@ -651,6 +652,27 @@ def test_mark_paid_settles_approved_claims_for_period_window(
                 created_at=_NOW,
             )
         )
+        # Same-period claim approved after this payslip was issued —
+        # it is not in the payslip components and must not be settled by
+        # this mark-paid call.
+        session.add(
+            ExpenseClaim(
+                id=claim_late_id,
+                workspace_id=seeded.workspace_id,
+                work_engagement_id=engagement_id,
+                vendor="tolls",
+                purchased_at=purchased_at,
+                currency="USD",
+                total_amount_cents=700,
+                category="transport",
+                state="approved",
+                submitted_at=_NOW,
+                decided_at=_NOW,
+                decided_by=seeded.manager_id,
+                pay_period_id=seeded.worker_period_id,
+                created_at=_NOW,
+            )
+        )
         session.commit()
         slip_id = slip.id
 
@@ -683,6 +705,11 @@ def test_mark_paid_settles_approved_claims_for_period_window(
         assert untouched is not None
         assert untouched.state == "approved"
         assert untouched.reimbursed_at is None
+
+        late = session.get(ExpenseClaim, claim_late_id)
+        assert late is not None
+        assert late.state == "approved"
+        assert late.reimbursed_at is None
 
         snapshot = session.get(Payslip, slip_id)
         assert snapshot is not None

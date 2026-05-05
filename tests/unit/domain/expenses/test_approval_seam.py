@@ -17,7 +17,7 @@ from app.domain.expenses import (
     mark_reimbursed,
     reject_claim,
 )
-from app.domain.expenses.ports import ExpenseClaimRow
+from app.domain.expenses.ports import ExpenseClaimRow, ExpensePayPeriodResolution
 from app.util.clock import FrozenClock
 from tests.unit.domain.expenses.test_claims_seam import (
     _ENG_ID,
@@ -51,6 +51,7 @@ def _submitted_claim(*, claim_id: str = "claim_1") -> ExpenseClaimRow:
         reimbursed_at=None,
         reimbursed_via=None,
         reimbursed_by=None,
+        pay_period_id=None,
         llm_autofill_json=None,
         autofill_confidence_overall=None,
         created_at=_PURCHASED,
@@ -85,6 +86,26 @@ def test_approve_claim_uses_checker_and_repository_write_methods() -> None:
     assert view.currency == "USD"
     assert repo.claims["claim_1"].decided_by == _ctx().actor_id
     assert repo.audit_session.added
+
+
+def test_approve_claim_attaches_fallback_pay_period_note() -> None:
+    repo = _repo_with_claim()
+    repo.pay_period_resolution = ExpensePayPeriodResolution(
+        pay_period_id="period_next",
+        fallback_note_md="Moved because locked.",
+    )
+
+    view = approve_claim(
+        repo,
+        _FakeChecker(allowed_keys={"expenses.approve"}),
+        _ctx(grant_role="manager"),
+        claim_id="claim_1",
+        clock=FrozenClock(_PINNED),
+    )
+
+    assert view.state == "approved"
+    assert view.pay_period_id == "period_next"
+    assert view.decision_note_md == "Moved because locked."
 
 
 def test_approve_claim_translates_seam_permission_denial() -> None:

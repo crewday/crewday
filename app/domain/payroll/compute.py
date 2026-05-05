@@ -506,6 +506,7 @@ def compute_payslip(
     reimbursable = repo.list_reimbursable_claims_for_payslip(
         workspace_id=ctx.workspace_id,
         user_id=user_id,
+        pay_period_id=period.id,
         starts_at=period.starts_at,
         ends_at=period.ends_at,
     )

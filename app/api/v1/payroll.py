@@ -424,6 +424,19 @@ def _reimbursements_from_components(
     return out
 
 
+def _reimbursement_claim_ids(components: dict[str, object]) -> frozenset[str]:
+    raw = components.get("reimbursements")
+    if not isinstance(raw, list):
+        return frozenset()
+    return frozenset(
+        claim_id
+        for item in raw
+        if isinstance(item, dict)
+        for claim_id in (item.get("claim_id"),)
+        if isinstance(claim_id, str)
+    )
+
+
 def _payslip_to_response(row: PayslipReadRow) -> PayslipResponse:
     reimbursements = _reimbursements_from_components(
         row.components_json, currency=row.currency
@@ -1321,6 +1334,10 @@ def build_payroll_router() -> APIRouter:
 
         clock = SystemClock()
         now = clock.now()
+        row = payslip_repo.reconcile_reimbursements_before_paid(
+            workspace_id=ctx.workspace_id,
+            payslip_id=payslip_id,
+        )
         updated = payslip_repo.set_payslip_state(
             workspace_id=ctx.workspace_id,
             payslip_id=payslip_id,
@@ -1348,6 +1365,8 @@ def build_payroll_router() -> APIRouter:
         settled = payslip_repo.settle_payslip_reimbursements(
             workspace_id=ctx.workspace_id,
             user_id=row.user_id,
+            claim_ids=_reimbursement_claim_ids(row.components_json),
+            pay_period_id=row.pay_period_id,
             starts_at=period.starts_at,
             ends_at=period.ends_at,
             currency=row.currency,

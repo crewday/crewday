@@ -49,6 +49,7 @@ from app.adapters.db.expenses.repositories import (
 )
 from app.adapters.db.identity.models import User
 from app.adapters.db.llm.models import LlmUsage
+from app.adapters.db.payroll.models import PayPeriod
 from app.adapters.db.places.models import Property
 from app.adapters.db.workspace.models import WorkEngagement, Workspace
 from app.domain.expenses.ports import PendingClaimsCursor
@@ -234,6 +235,29 @@ def _seed_claim(
         )
     )
     repo.session.flush()
+
+
+def _seed_period(
+    session: Session,
+    *,
+    period_id: str,
+    starts_at: datetime,
+    ends_at: datetime,
+    state: str,
+) -> None:
+    session.add(
+        PayPeriod(
+            id=period_id,
+            workspace_id=_WORKSPACE_ID,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            state=state,
+            locked_at=_PINNED if state == "locked" else None,
+            locked_by=_USER_ID if state == "locked" else None,
+            created_at=_PINNED,
+        )
+    )
+    session.flush()
 
 
 def _seed_property(session: Session, *, property_id: str) -> str:
@@ -512,10 +536,65 @@ class TestStateTransitions:
             claim_id="C1",
             decided_by=_USER_ID,
             decided_at=_PINNED,
+            pay_period_id=None,
+            decision_note_md=None,
         )
         assert row.state == "approved"
         assert row.decided_by == _USER_ID
         assert row.decided_at is not None
+
+    def test_resolve_reimbursement_pay_period_falls_forward_from_locked_period(
+        self, session: Session, repo: SqlAlchemyExpensesRepository
+    ) -> None:
+        _bootstrap(session)
+        _seed_period(
+            session,
+            period_id="P_LOCKED",
+            starts_at=datetime(2026, 4, 1, tzinfo=UTC),
+            ends_at=datetime(2026, 5, 1, tzinfo=UTC),
+            state="locked",
+        )
+        _seed_period(
+            session,
+            period_id="P_OPEN",
+            starts_at=datetime(2026, 5, 1, tzinfo=UTC),
+            ends_at=datetime(2026, 6, 1, tzinfo=UTC),
+            state="open",
+        )
+
+        resolved = repo.resolve_reimbursement_pay_period(
+            workspace_id=_WORKSPACE_ID,
+            purchased_at=datetime(2026, 4, 15, tzinfo=UTC),
+        )
+
+        assert resolved is not None
+        assert resolved.pay_period_id == "P_OPEN"
+        assert resolved.fallback_note_md is not None
+
+    def test_mark_approved_records_pay_period_id(
+        self, session: Session, repo: SqlAlchemyExpensesRepository
+    ) -> None:
+        _bootstrap(session)
+        _seed_period(
+            session,
+            period_id="P_OPEN",
+            starts_at=datetime(2026, 4, 1, tzinfo=UTC),
+            ends_at=datetime(2026, 5, 1, tzinfo=UTC),
+            state="open",
+        )
+        _seed_claim(repo, claim_id="C1", state="submitted", submitted_at=_PINNED)
+
+        row = repo.mark_claim_approved(
+            workspace_id=_WORKSPACE_ID,
+            claim_id="C1",
+            decided_by=_USER_ID,
+            decided_at=_PINNED,
+            pay_period_id="P_OPEN",
+            decision_note_md=None,
+        )
+
+        assert row.state == "approved"
+        assert row.pay_period_id == "P_OPEN"
 
     def test_mark_rejected_stamps_decision_note(
         self, session: Session, repo: SqlAlchemyExpensesRepository

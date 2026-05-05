@@ -67,6 +67,7 @@ export interface Expense {
   decided_by: string | null;
   decided_at: string | null;
   decision_note_md: string | null;
+  pay_period_id: string | null;
   created_at: string;
   /** ISO-8601 UTC; non-null for soft-deleted (cancelled-from-draft)
    *  rows. The list endpoint already filters these out, so the field

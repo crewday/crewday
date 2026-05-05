@@ -42,6 +42,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.expenses.models import ExpenseAttachment, ExpenseClaim
 from app.adapters.db.identity.models import User
 from app.adapters.db.llm.models import LlmUsage as LlmUsageRow
+from app.adapters.db.payroll.models import PayPeriod
 from app.adapters.db.workspace.models import WorkEngagement
 from app.authz import (
     InvalidScope,
@@ -54,6 +55,7 @@ from app.domain.expenses.ports import (
     CapabilityChecker,
     ExpenseAttachmentRow,
     ExpenseClaimRow,
+    ExpensePayPeriodResolution,
     ExpensesRepository,
     LlmUsageStatus,
     PendingClaimsCursor,
@@ -183,6 +185,7 @@ def _to_claim_row(row: ExpenseClaim) -> ExpenseClaimRow:
         reimbursed_at=_ensure_utc_optional(row.reimbursed_at),
         reimbursed_via=row.reimbursed_via,
         reimbursed_by=row.reimbursed_by,
+        pay_period_id=row.pay_period_id,
         llm_autofill_json=payload,
         autofill_confidence_overall=row.autofill_confidence_overall,
         created_at=_ensure_utc(row.created_at),
@@ -210,6 +213,7 @@ _ALLOWED_UPDATE_FIELDS: frozenset[str] = frozenset(
         "work_engagement_id",
         "llm_autofill_json",
         "autofill_confidence_overall",
+        "pay_period_id",
     }
 )
 
@@ -605,13 +609,64 @@ class SqlAlchemyExpensesRepository(ExpensesRepository):
         claim_id: str,
         decided_by: str,
         decided_at: datetime,
+        pay_period_id: str | None,
+        decision_note_md: str | None,
     ) -> ExpenseClaimRow:
         row = self._load_claim(workspace_id=workspace_id, claim_id=claim_id)
         row.state = "approved"
         row.decided_by = decided_by
         row.decided_at = decided_at
+        row.pay_period_id = pay_period_id
+        if decision_note_md is not None:
+            row.decision_note_md = decision_note_md
         self._session.flush()
         return _to_claim_row(row)
+
+    def resolve_reimbursement_pay_period(
+        self,
+        *,
+        workspace_id: str,
+        purchased_at: datetime,
+    ) -> ExpensePayPeriodResolution | None:
+        containing = self._session.scalars(
+            select(PayPeriod)
+            .where(
+                PayPeriod.workspace_id == workspace_id,
+                PayPeriod.starts_at <= purchased_at,
+                PayPeriod.ends_at > purchased_at,
+            )
+            .order_by(PayPeriod.starts_at.asc(), PayPeriod.id.asc())
+            .limit(1)
+        ).one_or_none()
+        if containing is not None and containing.state == "open":
+            return ExpensePayPeriodResolution(
+                pay_period_id=containing.id,
+                fallback_note_md=None,
+            )
+
+        lower_bound = containing.ends_at if containing is not None else purchased_at
+        next_open = self._session.scalars(
+            select(PayPeriod)
+            .where(
+                PayPeriod.workspace_id == workspace_id,
+                PayPeriod.state == "open",
+                PayPeriod.starts_at >= lower_bound,
+            )
+            .order_by(PayPeriod.starts_at.asc(), PayPeriod.id.asc())
+            .limit(1)
+        ).one_or_none()
+        if next_open is None:
+            return None
+        note = None
+        if containing is not None and containing.state in {"locked", "paid"}:
+            note = (
+                "Reimbursement moved to the next open pay period because the "
+                "purchase period is already locked."
+            )
+        return ExpensePayPeriodResolution(
+            pay_period_id=next_open.id,
+            fallback_note_md=note,
+        )
 
     def mark_claim_rejected(
         self,

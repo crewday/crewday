@@ -80,6 +80,7 @@ class TestExpenseClaimModel:
         assert claim.decided_at is None
         assert claim.decision_note_md is None
         assert claim.reimbursement_destination_id is None
+        assert claim.pay_period_id is None
         assert claim.reimbursed_at is None
         assert claim.reimbursed_via is None
         assert claim.reimbursed_by is None
@@ -110,6 +111,7 @@ class TestExpenseClaimModel:
             decided_at=_DECIDED_AT,
             decision_note_md="OK per policy.",
             reimbursement_destination_id="01HWA00000000000000000PDSB",
+            pay_period_id="01HWA00000000000000000PERA",
             created_at=_PINNED,
         )
         assert claim.submitted_at == _PINNED
@@ -122,6 +124,7 @@ class TestExpenseClaimModel:
         assert claim.decided_at == _DECIDED_AT
         assert claim.decision_note_md == "OK per policy."
         assert claim.reimbursement_destination_id == "01HWA00000000000000000PDSB"
+        assert claim.pay_period_id == "01HWA00000000000000000PERA"
 
     def test_llm_autofill_json_roundtrip(self) -> None:
         """JSON payload round-trips through ``Mapped[Any]``."""
@@ -292,6 +295,18 @@ class TestExpenseClaimModel:
             "work_engagement_id",
             "submitted_at",
         ]
+
+    def test_workspace_pay_period_index_present(self) -> None:
+        indexes = [i for i in ExpenseClaim.__table_args__ if isinstance(i, Index)]
+        target = next(
+            (i for i in indexes if i.name == "ix_expense_claim_workspace_pay_period"),
+            None,
+        )
+        assert target is not None, "workspace-pay-period index missing"
+        assert [c.name for c in target.columns] == ["workspace_id", "pay_period_id"]
+
+    def test_pay_period_id_nullable(self) -> None:
+        assert ExpenseClaim.__table__.c.pay_period_id.nullable is True
 
     def test_reimbursed_construction_with_snapshot(self) -> None:
         """A reimbursed claim carries the cd-9guk settlement snapshot."""

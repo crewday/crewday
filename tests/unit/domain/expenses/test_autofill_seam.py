@@ -31,6 +31,7 @@ from app.domain.expenses.autofill import (
 from app.domain.expenses.ports import (
     ExpenseAttachmentRow,
     ExpenseClaimRow,
+    ExpensePayPeriodResolution,
     LlmUsageStatus,
     PendingClaimsCursor,
     WorkEngagementRow,
@@ -261,8 +262,18 @@ class _FakeRepo:
         claim_id: str,
         decided_by: str,
         decided_at: datetime,
+        pay_period_id: str | None,
+        decision_note_md: str | None,
     ) -> ExpenseClaimRow:
         raise NotImplementedError("autofill should not approve claims")
+
+    def resolve_reimbursement_pay_period(
+        self,
+        *,
+        workspace_id: str,
+        purchased_at: datetime,
+    ) -> ExpensePayPeriodResolution | None:
+        return None
 
     def mark_claim_rejected(
         self,
@@ -427,6 +438,7 @@ def _claim(*, llm_autofill_json: Mapping[str, Any] | None = None) -> ExpenseClai
         reimbursed_at=None,
         reimbursed_via=None,
         reimbursed_by=None,
+        pay_period_id=None,
         llm_autofill_json=llm_autofill_json,
         autofill_confidence_overall=None,
         created_at=_PINNED,

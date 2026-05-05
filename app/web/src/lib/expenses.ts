@@ -60,6 +60,7 @@ export interface ExpenseClaimPayload {
   decided_by: string | null;
   decided_at: string | null;
   decision_note_md: string | null;
+  pay_period_id: string | null;
   /** ISO-8601 UTC. */
   created_at: string;
   /** ISO-8601 UTC; non-null when the row is soft-deleted. */
@@ -108,6 +109,7 @@ export function mapExpenseClaimPayload(payload: ExpenseClaimPayload): Expense {
     decided_by: payload.decided_by,
     decided_at: payload.decided_at,
     decision_note_md: payload.decision_note_md,
+    pay_period_id: payload.pay_period_id,
     created_at: payload.created_at,
     deleted_at: payload.deleted_at,
     attachments: payload.attachments.map((a) => ({

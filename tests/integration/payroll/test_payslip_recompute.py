@@ -9,8 +9,12 @@ import pytest
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.adapters.db.expenses.models import ExpenseClaim
 from app.adapters.db.payroll.models import Booking, PayPeriod, PayRule, Payslip
-from app.adapters.db.payroll.repositories import SqlAlchemyPayslipComputeRepository
+from app.adapters.db.payroll.repositories import (
+    SqlAlchemyPayslipComputeRepository,
+    SqlAlchemyPayslipReadRepository,
+)
 from app.adapters.db.workspace.models import WorkEngagement
 from app.domain.payroll.compute import PayslipComputeConflict, payslip_recompute
 from app.events import EventBus
@@ -258,6 +262,91 @@ def test_recompute_refuses_locked_period_with_paid_payslip(
         assert persisted.status == "paid"
         assert persisted.paid_at is not None
         assert persisted.gross_cents == 100
+
+
+def test_reconcile_before_paid_removes_out_of_band_reimbursed_claim(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session, tenant_agnostic():
+        workspace_id, user_id, period_id = _seed(session)
+        engagement_id = session.scalar(
+            select(WorkEngagement.id).where(
+                WorkEngagement.workspace_id == workspace_id,
+                WorkEngagement.user_id == user_id,
+            )
+        )
+        assert engagement_id is not None
+        claim_id = new_ulid()
+        session.add(
+            ExpenseClaim(
+                id=claim_id,
+                workspace_id=workspace_id,
+                work_engagement_id=engagement_id,
+                vendor="Fuel",
+                purchased_at=datetime(2026, 5, 5, tzinfo=UTC),
+                currency="USD",
+                total_amount_cents=1200,
+                category="fuel",
+                note_md="",
+                state="reimbursed",
+                submitted_at=_NOW,
+                decided_by="manager",
+                decided_at=_NOW,
+                reimbursed_at=_NOW,
+                reimbursed_via="cash",
+                reimbursed_by="manager",
+                pay_period_id=period_id,
+                created_at=_NOW,
+            )
+        )
+        slip = Payslip(
+            id=new_ulid(),
+            workspace_id=workspace_id,
+            pay_period_id=period_id,
+            user_id=user_id,
+            shift_hours_decimal=Decimal("4.00"),
+            overtime_hours_decimal=Decimal("0"),
+            gross_cents=4000,
+            deductions_cents={},
+            expense_reimbursements_cents=1200,
+            net_cents=5200,
+            components_json={
+                "schema_version": 1,
+                "currency": "USD",
+                "gross_breakdown": [{"key": "base_pay", "cents": 4000}],
+                "deductions": [],
+                "reimbursements": [
+                    {
+                        "claim_id": claim_id,
+                        "work_engagement_id": engagement_id,
+                        "purchased_at": "2026-05-05T00:00:00+00:00",
+                        "decided_at": _NOW.isoformat(),
+                        "description": "Fuel",
+                        "currency": "USD",
+                        "amount_cents": 1200,
+                    }
+                ],
+                "reimbursements_skipped": [],
+                "statutory": [],
+                "metadata": {},
+            },
+            status="issued",
+            issued_at=_NOW,
+            created_at=_NOW,
+        )
+        session.add(slip)
+        session.flush()
+
+        row = SqlAlchemyPayslipReadRepository(
+            session
+        ).reconcile_reimbursements_before_paid(
+            workspace_id=workspace_id,
+            payslip_id=slip.id,
+        )
+
+        assert row.expense_reimbursements_cents == 0
+        assert row.net_cents == 4000
+        assert row.components_json["reimbursements"] == []
 
 
 def test_recompute_refuses_paid_period(

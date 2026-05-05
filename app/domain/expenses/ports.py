@@ -73,6 +73,7 @@ __all__ = [
     "CapabilityChecker",
     "ExpenseAttachmentRow",
     "ExpenseClaimRow",
+    "ExpensePayPeriodResolution",
     "ExpensesRepository",
     "LlmUsageStatus",
     "PendingClaimsCursor",
@@ -176,6 +177,7 @@ class ExpenseClaimRow:
     reimbursed_at: datetime | None
     reimbursed_via: str | None
     reimbursed_by: str | None
+    pay_period_id: str | None
     llm_autofill_json: Mapping[str, Any] | None
     autofill_confidence_overall: Decimal | None
     created_at: datetime
@@ -197,6 +199,14 @@ class WorkEngagementRow:
     id: str
     workspace_id: str
     user_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExpensePayPeriodResolution:
+    """Pay-period attachment selected for an approved expense claim."""
+
+    pay_period_id: str
+    fallback_note_md: str | None
 
 
 # ``status`` enum on the LlmUsage row — keeps the seam contract narrow.
@@ -549,8 +559,24 @@ class ExpensesRepository(Protocol):
         claim_id: str,
         decided_by: str,
         decided_at: datetime,
+        pay_period_id: str | None,
+        decision_note_md: str | None,
     ) -> ExpenseClaimRow:
         """Stamp ``state='approved'`` + ``decided_by`` + ``decided_at``."""
+        ...
+
+    def resolve_reimbursement_pay_period(
+        self,
+        *,
+        workspace_id: str,
+        purchased_at: datetime,
+    ) -> ExpensePayPeriodResolution | None:
+        """Return the period an approved claim should reimburse through.
+
+        The containing open period wins. If the containing period is
+        already locked, return the next open period and a worker-visible
+        fallback note. ``None`` means no open period exists yet.
+        """
         ...
 
     def mark_claim_rejected(

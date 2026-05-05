@@ -328,6 +328,7 @@ class ExpenseClaimPayload(BaseModel):
     decided_by: str | None
     decided_at: datetime | None
     decision_note_md: str | None
+    pay_period_id: str | None
     created_at: datetime
     deleted_at: datetime | None
     attachments: list[ExpenseAttachmentPayload]
@@ -351,6 +352,7 @@ class ExpenseClaimPayload(BaseModel):
             decided_by=view.decided_by,
             decided_at=view.decided_at,
             decision_note_md=view.decision_note_md,
+            pay_period_id=view.pay_period_id,
             created_at=view.created_at,
             deleted_at=view.deleted_at,
             attachments=[
