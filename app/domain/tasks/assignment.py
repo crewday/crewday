@@ -568,6 +568,26 @@ class _PortBundle:
     workload: WorkloadPort
 
 
+@dataclass(frozen=True, slots=True)
+class _AssignRuntime:
+    session: Session
+    ctx: WorkspaceContext
+    clock: Clock
+    bus: EventBus
+    notifications: TaskNotificationSink | None
+    ports: _PortBundle
+
+
+@dataclass(frozen=True, slots=True)
+class _AssignmentDecision:
+    assigned_user_id: str | None
+    source: AssignmentSource
+    candidate_count: int
+    backup_index: int | None = None
+    unassigned_reason: str | None = None
+    step1_attempted: bool = False
+
+
 def _bundle(
     available: AvailabilityPort | None,
     rota: RotaPort | None,
@@ -903,208 +923,209 @@ def assign_task(
     ``assignment_source``, ``candidate_count``, and the before/after
     assignee.
     """
-    # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
+    # code-health: ignore[params] Public assignment API keeps injectable algorithm ports explicit.  # noqa: E501
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_bus = event_bus if event_bus is not None else default_event_bus
-    ports = _bundle(available, rota, pool, workload)
+    runtime = _AssignRuntime(
+        session=session,
+        ctx=ctx,
+        clock=resolved_clock,
+        bus=resolved_bus,
+        notifications=notifications,
+        ports=_bundle(available, rota, pool, workload),
+    )
 
     task = _load_task(session, ctx, task_id)
     previous_user_id = task.assignee_user_id
 
-    # --- Manual override path. -------------------------------------
     if override_user_id is not None:
-        task.assignee_user_id = override_user_id
-        session.flush()
-        result = AssignmentResult(
-            task_id=task.id,
-            assigned_user_id=override_user_id,
-            source="manual",
-            candidate_count=0,
+        return _finalize_assignment(
+            runtime,
+            task,
+            _manual_assignment_decision(override_user_id),
+            previous_user_id,
         )
-        _audit_assignment(
-            session,
-            ctx,
-            resolved_clock,
-            task=task,
-            result=result,
-            action="task.assigned",
-            previous_user_id=previous_user_id,
-            reason=None,
-        )
-        if previous_user_id is not None and previous_user_id != override_user_id:
-            _publish_reassigned(
-                resolved_bus,
-                ctx,
-                resolved_clock,
-                task_id=task.id,
-                previous_user_id=previous_user_id,
-                new_user_id=override_user_id,
-            )
-        else:
-            _publish_assigned(
-                resolved_bus,
-                ctx,
-                resolved_clock,
-                task_id=task.id,
-                assigned_to=override_user_id,
-            )
-        if previous_user_id != override_user_id:
-            notify_task_assigned(
-                TaskNotificationRuntime(
-                    session,
-                    ctx,
-                    resolved_clock,
-                    resolved_bus,
-                    notifications,
-                ),
-                task=task,
-                recipient_user_id=override_user_id,
-            )
-        return result
 
+    decision = _automatic_assignment_decision(runtime, task)
+    return _finalize_assignment(runtime, task, decision, previous_user_id)
+
+
+def _manual_assignment_decision(override_user_id: str) -> _AssignmentDecision:
+    return _AssignmentDecision(
+        assigned_user_id=override_user_id,
+        source="manual",
+        candidate_count=0,
+    )
+
+
+def _automatic_assignment_decision(
+    runtime: _AssignRuntime,
+    task: Occurrence,
+) -> _AssignmentDecision:
     local_dt = _parse_local(task)
 
-    # --- Step 1: primary + ordered backups. ------------------------
     chosen, source, backup_index, tried = _pick_from_primary_and_backups(
-        session, ctx, task=task, local_dt=local_dt, ports=ports
+        runtime.session,
+        runtime.ctx,
+        task=task,
+        local_dt=local_dt,
+        ports=runtime.ports,
     )
     step1_attempted = bool(tried)
 
     if chosen is not None:
-        task.assignee_user_id = chosen
-        session.flush()
-        result = AssignmentResult(
-            task_id=task.id,
+        return _AssignmentDecision(
             assigned_user_id=chosen,
             source=source,
             candidate_count=0,
             backup_index=backup_index,
         )
-        _audit_assignment(
-            session,
-            ctx,
-            resolved_clock,
-            task=task,
-            result=result,
-            action="task.assigned",
-            previous_user_id=previous_user_id,
-            reason=None,
-        )
-        _publish_assigned(
-            resolved_bus,
-            ctx,
-            resolved_clock,
-            task_id=task.id,
-            assigned_to=chosen,
-        )
-        if previous_user_id != chosen:
-            notify_task_assigned(
-                TaskNotificationRuntime(
-                    session,
-                    ctx,
-                    resolved_clock,
-                    resolved_bus,
-                    notifications,
-                ),
-                task=task,
-                recipient_user_id=chosen,
-            )
-        return result
 
-    # --- Step 2-4: candidate pool + tiebreakers. -------------------
     pool_pick, candidate_count = _pick_from_pool(
-        session,
-        ctx,
+        runtime.session,
+        runtime.ctx,
         task=task,
         local_dt=local_dt,
         exclude=tried,
-        ports=ports,
+        ports=runtime.ports,
     )
 
     if pool_pick is not None:
-        task.assignee_user_id = pool_pick
-        session.flush()
-        result = AssignmentResult(
-            task_id=task.id,
+        return _AssignmentDecision(
             assigned_user_id=pool_pick,
             source="candidate_pool",
             candidate_count=candidate_count,
         )
+
+    reason = (
+        "primary_and_backups_unavailable" if step1_attempted else "candidate_pool_empty"
+    )
+    return _AssignmentDecision(
+        assigned_user_id=None,
+        source="unassigned",
+        candidate_count=candidate_count,
+        unassigned_reason=reason,
+        step1_attempted=step1_attempted,
+    )
+
+
+def _finalize_assignment(
+    runtime: _AssignRuntime,
+    task: Occurrence,
+    decision: _AssignmentDecision,
+    previous_user_id: str | None,
+) -> AssignmentResult:
+    result = AssignmentResult(
+        task_id=task.id,
+        assigned_user_id=decision.assigned_user_id,
+        source=decision.source,
+        candidate_count=decision.candidate_count,
+        backup_index=decision.backup_index,
+    )
+
+    if decision.assigned_user_id is not None:
+        task.assignee_user_id = decision.assigned_user_id
+        runtime.session.flush()
         _audit_assignment(
-            session,
-            ctx,
-            resolved_clock,
+            runtime.session,
+            runtime.ctx,
+            runtime.clock,
             task=task,
             result=result,
             action="task.assigned",
             previous_user_id=previous_user_id,
             reason=None,
         )
-        _publish_assigned(
-            resolved_bus,
-            ctx,
-            resolved_clock,
-            task_id=task.id,
-            assigned_to=pool_pick,
-        )
-        if previous_user_id != pool_pick:
-            notify_task_assigned(
-                TaskNotificationRuntime(
-                    session,
-                    ctx,
-                    resolved_clock,
-                    resolved_bus,
-                    notifications,
-                ),
-                task=task,
-                recipient_user_id=pool_pick,
-            )
+        _publish_assignment_success(runtime, task, result, previous_user_id)
         return result
 
-    # --- Step 5: zero candidates. ----------------------------------
-    # ``task.assignee_user_id`` stays ``NULL``. If the task already
-    # had an assignee, clear it — an auto-assign run that finds no
-    # candidate should not silently keep a stale holder.
     if previous_user_id is not None:
         task.assignee_user_id = None
-        session.flush()
+        runtime.session.flush()
 
-    result = AssignmentResult(
-        task_id=task.id,
-        assigned_user_id=None,
-        source="unassigned",
-        candidate_count=candidate_count,
-    )
-    reason = (
-        "primary_and_backups_unavailable" if step1_attempted else "candidate_pool_empty"
-    )
     _audit_assignment(
-        session,
-        ctx,
-        resolved_clock,
+        runtime.session,
+        runtime.ctx,
+        runtime.clock,
         task=task,
         result=result,
         action="task.unassigned",
         previous_user_id=previous_user_id,
-        reason=reason,
+        reason=decision.unassigned_reason,
     )
-    if step1_attempted:
-        _publish_primary_unavailable(
-            resolved_bus,
-            ctx,
-            resolved_clock,
+    _publish_assignment_failure(runtime, task, decision)
+    return result
+
+
+def _publish_assignment_success(
+    runtime: _AssignRuntime,
+    task: Occurrence,
+    result: AssignmentResult,
+    previous_user_id: str | None,
+) -> None:
+    assigned_user_id = result.assigned_user_id
+    if assigned_user_id is None:
+        return
+    if (
+        result.source == "manual"
+        and previous_user_id is not None
+        and previous_user_id != assigned_user_id
+    ):
+        _publish_reassigned(
+            runtime.bus,
+            runtime.ctx,
+            runtime.clock,
             task_id=task.id,
-            candidate_count=candidate_count,
+            previous_user_id=previous_user_id,
+            new_user_id=assigned_user_id,
+        )
+    else:
+        _publish_assigned(
+            runtime.bus,
+            runtime.ctx,
+            runtime.clock,
+            task_id=task.id,
+            assigned_to=assigned_user_id,
+        )
+
+    if previous_user_id != assigned_user_id:
+        notify_task_assigned(
+            TaskNotificationRuntime(
+                runtime.session,
+                runtime.ctx,
+                runtime.clock,
+                runtime.bus,
+                runtime.notifications,
+            ),
+            task=task,
+            recipient_user_id=assigned_user_id,
+        )
+
+
+def _publish_assignment_failure(
+    runtime: _AssignRuntime,
+    task: Occurrence,
+    decision: _AssignmentDecision,
+) -> None:
+    reason = decision.unassigned_reason
+    if reason is None:
+        return
+    if decision.step1_attempted:
+        _publish_primary_unavailable(
+            runtime.bus,
+            runtime.ctx,
+            runtime.clock,
+            task_id=task.id,
+            candidate_count=decision.candidate_count,
         )
     else:
         _publish_unassigned(
-            resolved_bus,
-            ctx,
-            resolved_clock,
+            runtime.bus,
+            runtime.ctx,
+            runtime.clock,
             task_id=task.id,
             reason=reason,
         )
-    return result
 
 
 def reassign_task(
