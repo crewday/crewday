@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import type { ReactElement } from "react";
@@ -22,7 +22,7 @@ import TodayPage from "./TodayPage";
 
 interface FakeResponse {
   status?: number;
-  body: unknown;
+  body: unknown | Promise<unknown>;
 }
 
 interface FetchCall {
@@ -51,11 +51,12 @@ function installFetch(scripted: Record<string, FakeResponse[]>): {
     if (!next) throw new Error(`No more responses for: ${resolved}`);
     const status = next.status ?? 200;
     const ok = status >= 200 && status < 300;
+    const body = await next.body;
     return {
       ok,
       status,
       statusText: ok ? "OK" : "Error",
-      text: async () => JSON.stringify(next.body),
+      text: async () => JSON.stringify(body),
     } as unknown as Response;
   });
   (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
@@ -133,6 +134,22 @@ function property(): unknown {
   };
 }
 
+function area(id: string, name: string): unknown {
+  return {
+    id,
+    property_id: "p1",
+    unit_id: null,
+    name,
+    kind: "indoor_room",
+    order_hint: 0,
+    parent_area_id: null,
+    notes_md: "",
+    created_at: "2026-04-28T00:00:00Z",
+    updated_at: null,
+    deleted_at: null,
+  };
+}
+
 function task(id: string, overrides: Record<string, unknown> = {}): unknown {
   return {
     id,
@@ -159,9 +176,42 @@ function taskPage(tasks: unknown[]): unknown {
   return { data: tasks, next_cursor: null, has_more: false };
 }
 
+function areaPage(areas: unknown[]): unknown {
+  return { data: areas, next_cursor: null, has_more: false };
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+function installDialogPolyfill(): void {
+  if (!HTMLDialogElement.prototype.showModal) {
+    Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+      configurable: true,
+      value: function showModal(this: HTMLDialogElement) {
+        this.setAttribute("open", "");
+      },
+    });
+  }
+  if (!HTMLDialogElement.prototype.close) {
+    Object.defineProperty(HTMLDialogElement.prototype, "close", {
+      configurable: true,
+      value: function close(this: HTMLDialogElement) {
+        this.removeAttribute("open");
+        this.dispatchEvent(new Event("close"));
+      },
+    });
+  }
+}
+
 let restoreIndexedDb: (() => void) | null = null;
 
 beforeEach(async () => {
+  installDialogPolyfill();
   restoreIndexedDb = installFakeIndexedDb();
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
@@ -408,6 +458,193 @@ describe("TodayPage", () => {
       expect(env.calls.some((call) => call.url.endsWith("/api/v1/tasks/t1/complete"))).toBe(false);
       expect(screen.getByText("Check boiler")).toBeInTheDocument();
       expect(screen.getByText("Completed today")).toBeInTheDocument();
+    } finally {
+      env.restore();
+    }
+  });
+
+  it("creates a visible personal quick-add task and ignores duplicate submits while pending", async () => {
+    const createResponse = deferred<unknown>();
+    const env = installFetch({
+      "/api/v1/me": [{ body: me() }],
+      "/api/v1/properties": [{ body: [property()] }],
+      "/api/v1/tasks": [
+        { body: taskPage([]) },
+        {
+          status: 201,
+          body: createResponse.promise,
+        },
+        {
+          body: taskPage([
+            task("quick", {
+              title: "QA smoke personal task",
+              property_id: null,
+              is_personal: true,
+              scheduled_for_utc: "2026-04-28T11:00:00Z",
+            }),
+          ]),
+        },
+      ],
+    });
+
+    try {
+      render(<Harness />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "+ New task" }));
+      const dialog = screen.getByRole("dialog");
+      fireEvent.change(within(dialog).getByLabelText("Title"), {
+        target: { value: "QA smoke personal task" },
+      });
+      await waitFor(() => {
+        expect(within(dialog).getByRole("button", { name: "Add task" })).not.toBeDisabled();
+      });
+      const add = within(dialog).getByRole("button", { name: "Add task" });
+
+      fireEvent.click(add);
+      fireEvent.click(add);
+
+      await waitFor(() => {
+        const postCalls = env.calls.filter(
+          (call) => call.url.endsWith("/api/v1/tasks") && call.init.method === "POST",
+        );
+        expect(postCalls).toHaveLength(1);
+        expect(within(dialog).getByRole("button", { name: "Adding…" })).toBeDisabled();
+      });
+
+      const postCall = env.calls.find(
+        (call) => call.url.endsWith("/api/v1/tasks") && call.init.method === "POST",
+      );
+      expect(JSON.parse(postCall!.init.body as string)).toMatchObject({
+        title: "QA smoke personal task",
+        scheduled_for_local: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T09:00:00$/),
+        assigned_user_id: "u1",
+        is_personal: true,
+      });
+
+      createResponse.resolve(
+        task("quick", {
+          title: "QA smoke personal task",
+          property_id: null,
+          is_personal: true,
+          scheduled_for_utc: "2026-04-28T11:00:00Z",
+        }),
+      );
+
+      expect(await screen.findByText("QA smoke personal task")).toBeInTheDocument();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    } finally {
+      env.restore();
+    }
+  });
+
+  it("uses real area ids when creating a property-scoped quick-add task", async () => {
+    const env = installFetch({
+      "/api/v1/me": [{ body: me() }],
+      "/api/v1/properties": [{ body: [property()] }],
+      "/api/v1/properties/p1/areas": [{ body: areaPage([area("area_kitchen", "Kitchen")]) }],
+      "/api/v1/tasks": [
+        { body: taskPage([]) },
+        {
+          status: 201,
+          body: task("quick", {
+            title: "Property area task",
+            property_id: "p1",
+            area_id: "area_kitchen",
+            is_personal: true,
+            scheduled_for_utc: "2026-04-28T11:00:00Z",
+          }),
+        },
+        {
+          body: taskPage([
+            task("quick", {
+              title: "Property area task",
+              property_id: "p1",
+              area_id: "area_kitchen",
+              is_personal: true,
+              scheduled_for_utc: "2026-04-28T11:00:00Z",
+            }),
+          ]),
+        },
+      ],
+    });
+
+    try {
+      render(<Harness />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "+ New task" }));
+      const dialog = screen.getByRole("dialog");
+      fireEvent.change(within(dialog).getByLabelText("Title"), {
+        target: { value: "Property area task" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Property"), {
+        target: { value: "p1" },
+      });
+      fireEvent.change(await within(dialog).findByLabelText("Area (optional)"), {
+        target: { value: "area_kitchen" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Add task" }));
+
+      await waitFor(() => {
+        const postCall = env.calls.find(
+          (call) => call.url.endsWith("/api/v1/tasks") && call.init.method === "POST",
+        );
+        expect(postCall).toBeDefined();
+        expect(JSON.parse(postCall!.init.body as string)).toMatchObject({
+          title: "Property area task",
+          property_id: "p1",
+          area_id: "area_kitchen",
+          assigned_user_id: "u1",
+          is_personal: true,
+        });
+      });
+      expect(await screen.findByText("Property area task")).toBeInTheDocument();
+    } finally {
+      env.restore();
+    }
+  });
+
+  it("keeps the quick-add dialog open with server validation copy when creation is rejected", async () => {
+    const env = installFetch({
+      "/api/v1/me": [{ body: me() }],
+      "/api/v1/properties": [{ body: [property()] }],
+      "/api/v1/tasks": [
+        { body: taskPage([]) },
+        {
+          status: 422,
+          body: {
+            type: "https://crewday.dev/errors/validation",
+            title: "Validation error",
+            status: 422,
+            detail: "Request validation failed",
+            errors: [
+              {
+                loc: ["body", "scheduled_for_local"],
+                msg: "Field required",
+                type: "missing",
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    try {
+      render(<Harness />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "+ New task" }));
+      const dialog = screen.getByRole("dialog");
+      fireEvent.change(within(dialog).getByLabelText("Title"), {
+        target: { value: "QA smoke personal task" },
+      });
+      await waitFor(() => {
+        expect(within(dialog).getByRole("button", { name: "Add task" })).not.toBeDisabled();
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Add task" }));
+
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+        "Could not add task. Due date: Field required",
+      );
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
     } finally {
       env.restore();
     }

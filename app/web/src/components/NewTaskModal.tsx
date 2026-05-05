@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchJson } from "@/lib/api";
+import { ApiError, fetchJson } from "@/lib/api";
+import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
-import type { Property, Task } from "@/types/api";
+import type { Me, Property, Task } from "@/types/api";
 import { Checkbox } from "@/components/common";
 
 // §06 quick-add. Clicking the button opens a <dialog> (same pattern as
@@ -12,10 +13,16 @@ import { Checkbox } from "@/components/common";
 
 interface NewTaskBody {
   title: string;
-  scheduled_start: string;
+  scheduled_for_local: string;
   property_id?: string;
-  area?: string;
+  area_id?: string;
+  assigned_user_id?: string;
   is_personal: boolean;
+}
+
+interface Area {
+  id: string;
+  name: string;
 }
 
 export default function NewTaskButton() {
@@ -26,20 +33,38 @@ export default function NewTaskButton() {
     queryKey: qk.properties(),
     queryFn: () => fetchJson<Property[]>("/api/v1/properties"),
   });
-
-  const todayIso = new Date().toISOString().slice(0, 10);
-  const [title, setTitle] = useState("");
-  const [due, setDue] = useState(todayIso);
+  const meQ = useQuery({
+    queryKey: qk.me(),
+    queryFn: () => fetchJson<Me>("/api/v1/me"),
+  });
   const [propertyId, setPropertyId] = useState("");
-  const [area, setArea] = useState("");
+  const areasQ = useQuery({
+    queryKey: qk.propertyAreas(propertyId),
+    queryFn: () =>
+      fetchJson<ListEnvelope<Area>>("/api/v1/properties/" + propertyId + "/areas").then(unwrapList),
+    enabled: Boolean(propertyId),
+  });
+
+  const systemTodayIso = new Date().toISOString().slice(0, 10);
+  const defaultDue = meQ.data?.today ?? systemTodayIso;
+  const [title, setTitle] = useState("");
+  const [due, setDue] = useState(defaultDue);
+  const [areaId, setAreaId] = useState("");
   const [personal, setPersonal] = useState(true);
+  const [formError, setFormError] = useState<string | null>(null);
+  const submitLocked = useRef(false);
+
+  useEffect(() => {
+    setDue((current) => (current === systemTodayIso ? defaultDue : current));
+  }, [defaultDue, systemTodayIso]);
 
   const reset = () => {
     setTitle("");
-    setDue(todayIso);
+    setDue(defaultDue);
     setPropertyId("");
-    setArea("");
+    setAreaId("");
     setPersonal(true);
+    setFormError(null);
   };
 
   const create = useMutation({
@@ -52,7 +77,15 @@ export default function NewTaskButton() {
       ref.current?.close();
       reset();
     },
+    onError: (error) => {
+      setFormError(taskCreateErrorMessage(error));
+    },
+    onSettled: () => {
+      submitLocked.current = false;
+    },
   });
+
+  const currentUserId = meQ.data?.user_id ?? "";
 
   return (
     <>
@@ -64,19 +97,37 @@ export default function NewTaskButton() {
         + New task
       </button>
 
-      <dialog className="modal" ref={ref} onClose={reset}>
+      <dialog
+        className="modal"
+        ref={ref}
+        onCancel={(e) => {
+          if (submitLocked.current || create.isPending) e.preventDefault();
+        }}
+        onClose={reset}
+      >
         <form
           className="modal__body"
           onSubmit={(e) => {
             e.preventDefault();
+            if (submitLocked.current || create.isPending) return;
             const trimmed = title.trim();
             if (!trimmed) return;
-            const scheduled = new Date(due + "T09:00:00");
+            if (!due) {
+              setFormError("Choose a due date before adding the task.");
+              return;
+            }
+            if (personal && !currentUserId) {
+              setFormError("Your profile is still loading. Wait a moment and try again.");
+              return;
+            }
+            submitLocked.current = true;
+            setFormError(null);
             create.mutate({
               title: trimmed,
-              scheduled_start: scheduled.toISOString(),
+              scheduled_for_local: due + "T09:00:00",
               property_id: propertyId || undefined,
-              area: area.trim() || undefined,
+              area_id: areaId || undefined,
+              assigned_user_id: personal ? currentUserId : undefined,
               is_personal: personal,
             });
           }}
@@ -94,7 +145,10 @@ export default function NewTaskButton() {
               autoFocus
               required
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                setFormError(null);
+              }}
               placeholder="e.g. Call back Maria about the stay"
             />
           </label>
@@ -103,8 +157,12 @@ export default function NewTaskButton() {
             <span>Due</span>
             <input
               type="date"
+              required
               value={due}
-              onChange={(e) => setDue(e.target.value)}
+              onChange={(e) => {
+                setDue(e.target.value);
+                setFormError(null);
+              }}
             />
           </label>
 
@@ -112,7 +170,11 @@ export default function NewTaskButton() {
             <span>Property</span>
             <select
               value={propertyId}
-              onChange={(e) => setPropertyId(e.target.value)}
+              onChange={(e) => {
+                setPropertyId(e.target.value);
+                setAreaId("");
+                setFormError(null);
+              }}
             >
               <option value="">No property</option>
               {(propsQ.data ?? []).map((p) => (
@@ -121,27 +183,40 @@ export default function NewTaskButton() {
             </select>
           </label>
 
-          {propertyId && (
+          {propertyId && (areasQ.data ?? []).length > 0 && (
             <label className="field">
               <span>Area (optional)</span>
-              <input
-                value={area}
-                onChange={(e) => setArea(e.target.value)}
-                placeholder="e.g. Kitchen"
-              />
+              <select
+                value={areaId}
+                onChange={(e) => {
+                  setAreaId(e.target.value);
+                  setFormError(null);
+                }}
+              >
+                <option value="">No area</option>
+                {(areasQ.data ?? []).map((area) => (
+                  <option key={area.id} value={area.id}>{area.name}</option>
+                ))}
+              </select>
             </label>
           )}
 
           <Checkbox
             checked={personal}
-            onChange={(e) => setPersonal(e.target.checked)}
+            onChange={(e) => {
+              setPersonal(e.target.checked);
+              setFormError(null);
+            }}
             label="Keep this personal (only I can see it)"
           />
+
+          {formError && <p className="form-error" role="alert">{formError}</p>}
 
           <div className="modal__actions">
             <button
               type="button"
               className="btn btn--ghost"
+              disabled={create.isPending}
               onClick={() => ref.current?.close()}
             >
               Cancel
@@ -158,4 +233,38 @@ export default function NewTaskButton() {
       </dialog>
     </>
   );
+}
+
+function taskCreateErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    const fieldMessages = error.fieldErrors
+      .map((fieldError) => {
+        const label = fieldErrorLabel(fieldError.loc);
+        const message = fieldError.msg?.trim();
+        if (!message) return null;
+        return label ? `${label}: ${message}` : message;
+      })
+      .filter((message): message is string => Boolean(message));
+    if (fieldMessages.length > 0) {
+      return "Could not add task. " + fieldMessages.join(" ");
+    }
+    return (
+      error.detail ??
+      error.title ??
+      error.message ??
+      "Could not add task. Check the fields and try again."
+    );
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return "Could not add task. Check the fields and try again.";
+}
+
+function fieldErrorLabel(loc: readonly (string | number)[] | undefined): string | null {
+  const field = loc?.at(-1);
+  if (field === "title") return "Title";
+  if (field === "scheduled_for_local") return "Due date";
+  if (field === "assigned_user_id") return "Assignee";
+  if (field === "property_id") return "Property";
+  if (field === "area_id") return "Area";
+  return null;
 }
