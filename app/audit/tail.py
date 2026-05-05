@@ -48,6 +48,7 @@ def audit_tail_chunks[RowT](
     must be ordered oldest-first so the cursor can advance to the final
     row after each poll without skipping rows that share a timestamp.
     """
+    # code-health: ignore[params] Streaming tail needs explicit injected callbacks.
     initial_rows = fetch_initial()
     yielded = False
     cursor: AuditTailCursor | None = None

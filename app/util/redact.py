@@ -33,13 +33,14 @@ Behaviour overview
    avoids redacting integer counters and enum labels whose key
    names happen to contain a sensitive word.
 
-2. **Free-text rules** (all scopes): every string leaf walked by the
-   redactor is run through a small regex pipeline that redacts
+2. **Free-text rules** (all scopes): string leaves walked by the
+   redactor are run through a small regex pipeline that redacts
    emails, E.164 phone numbers, IBANs (validated via mod-97), PANs
    (validated via Luhn), Bearer tokens, JWTs, and long
    hex/base64url credential blobs. Each match is replaced with a
    tagged ``"<redacted:<reason>>"`` placeholder so downstream logs
-   stay debuggable.
+   stay debuggable. The only shape-based pass-throughs are documented
+   below: already-minimised hashes and ULIDs under identifier keys.
 
 3. **Consent pass-through** (``scope="llm"`` only): if the caller
    passes a :class:`ConsentSet` that lists a field name, the
@@ -80,7 +81,14 @@ Behaviour overview
    forensic lookup still works after the plaintext is purged;
    redacting the hashes would defeat the point.
 
-7. **Purity**: the function returns a deep copy; the input is never
+7. **Identifier pass-through** (all scopes): ULID-shaped strings
+   under ``id`` / ``*_id`` keys skip the free-text regex sweep.
+   Audit rows and operator logs need stable row identifiers for
+   forensic lookup; a ULID can contain phone-like digit runs by
+   chance, but it is not itself PII. Sensitive-key rules still win
+   before this pass-through, so ``session_id`` remains redacted.
+
+8. **Purity**: the function returns a deep copy; the input is never
    mutated. Identical input always yields identical output.
 
 The spec names ``structlog`` for the log pipeline; we satisfy the
@@ -318,6 +326,21 @@ def _key_is_sensitive(key: object) -> bool:
         return False
     normalised = key.lower().replace("-", "_")
     return _SENSITIVE_KEY_RE.search(normalised) is not None
+
+
+_IDENTIFIER_KEY_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|_)id$")
+_ULID_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
+
+
+def _key_is_identifier(key: object) -> bool:
+    if not isinstance(key, str):
+        return False
+    normalised = key.lower().replace("-", "_")
+    return _IDENTIFIER_KEY_RE.search(normalised) is not None
+
+
+def _looks_like_ulid(value: str) -> bool:
+    return _ULID_RE.fullmatch(value) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -613,6 +636,7 @@ def _redact(
     max_depth: int,
 ) -> object:
     """Internal recursive walker. See :func:`redact` for the public contract."""
+    # code-health: ignore[ccn,nloc] Redaction walker is branchy by payload type.
     # SecretStr short-circuit: never peek at the secret value. The
     # logging filter also catches this, but callers outside logging
     # (audit writer, LLM adapter) rely on the same behaviour.
@@ -701,6 +725,7 @@ def _redact_mapping(
     max_depth: int,
 ) -> dict[object, object]:
     """Walk a ``dict``, applying key rules + recursing into values."""
+    # code-health: ignore[ccn] Redaction mapping policy is an ordered branch table.
     # Image / binary multimodal block carve-out. OpenAI / OpenRouter
     # vision requests arrive as ``{"type": "image_url",
     # "image_url": {"url": "data:..."}}`` — the ``url`` is a base64
@@ -753,6 +778,10 @@ def _redact_mapping(
         if _key_is_sensitive(key):
             # Sensitive-key rule wins over consent; spec is explicit.
             redacted[key] = _TAG_SENSITIVE_KEY
+            continue
+
+        if _key_is_identifier(key) and isinstance(raw, str) and _looks_like_ulid(raw):
+            redacted[key] = raw
             continue
 
         # Consent pass-through (``scope="llm"`` only): the field name

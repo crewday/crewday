@@ -345,6 +345,7 @@ def _upsert_slot(
     purge_after: datetime | None,
     notes: str,
 ) -> None:
+    # code-health: ignore[params] Root-key slot schema is explicit rotation state.
     slot = session.scalars(
         select(RootKeySlot).where(RootKeySlot.key_fp == key_fp)
     ).first()

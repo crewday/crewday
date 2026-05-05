@@ -466,7 +466,7 @@ def estimate_cost_cents(
                 _UNKNOWN_MODEL_DEDUP.add(dedup_key)
         if seen:
             _log.debug(
-                "llm.pricing.unknown_model",
+                "LLM pricing model is unknown",
                 extra={
                     "event": "llm.pricing.unknown_model",
                     "api_model_id": api_model_id,
@@ -476,7 +476,7 @@ def estimate_cost_cents(
             )
         else:
             _log.warning(
-                "llm.pricing.unknown_model",
+                "LLM pricing model is unknown",
                 extra={
                     "event": "llm.pricing.unknown_model",
                     "api_model_id": api_model_id,
@@ -800,7 +800,7 @@ def check_budget(
         # the operator surface can flag the workspace for a manual
         # seed step.
         _log.warning(
-            "llm.budget.ledger_missing",
+            "LLM budget ledger is missing",
             extra={
                 "event": "llm.budget.ledger_missing",
                 "workspace_id": ctx.workspace_id,

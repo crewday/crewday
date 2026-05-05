@@ -164,6 +164,7 @@ def _tool_input_schema(
     workspace_slug: str,
     components: Mapping[str, Any],
 ) -> dict[str, object]:
+    # code-health: ignore[ccn,nloc] OpenAPI parameter/body merge matrix.
     properties: dict[str, object] = {}
     required: list[str] = []
     advertised_path_params: set[str] = set()
@@ -343,6 +344,7 @@ def _split_inputs(
     the leftover-input dict; non-object bodies are passed as the raw
     ``body`` argument advertised in the tool schema.
     """
+    # code-health: ignore[ccn] OpenAPI path/query/body split is a branch table.
     parameters = entry.operation.get("parameters")
     if not isinstance(parameters, list):
         parameters = []

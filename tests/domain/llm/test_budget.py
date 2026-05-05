@@ -333,7 +333,10 @@ class TestEstimateCostCents:
                 workspace_id="ws-test",
             )
         assert cost == 0
-        assert any(r.message == "llm.pricing.unknown_model" for r in caplog.records), (
+        assert any(
+            getattr(r, "event", None) == "llm.pricing.unknown_model"
+            for r in caplog.records
+        ), (
             "expected WARNING for unknown model; got "
             f"{[r.message for r in caplog.records]}"
         )
@@ -354,7 +357,10 @@ class TestEstimateCostCents:
         assert cost == 0
         # Free-tier short-circuit: no WARNING (the demo seeds these
         # deliberately; a warning per call would drown the operator).
-        assert not any(r.message == "llm.pricing.unknown_model" for r in caplog.records)
+        assert not any(
+            getattr(r, "event", None) == "llm.pricing.unknown_model"
+            for r in caplog.records
+        )
 
     def test_free_tier_logs_debug_for_observability(
         self,
@@ -416,12 +422,14 @@ class TestEstimateCostCents:
         warnings = [
             r
             for r in caplog.records
-            if r.message == "llm.pricing.unknown_model" and r.levelno == logging.WARNING
+            if getattr(r, "event", None) == "llm.pricing.unknown_model"
+            and r.levelno == logging.WARNING
         ]
         debugs = [
             r
             for r in caplog.records
-            if r.message == "llm.pricing.unknown_model" and r.levelno == logging.DEBUG
+            if getattr(r, "event", None) == "llm.pricing.unknown_model"
+            and r.levelno == logging.DEBUG
         ]
         assert len(warnings) == 1, (
             f"expected exactly one WARNING across two calls; got {len(warnings)}"
@@ -465,7 +473,8 @@ class TestEstimateCostCents:
         warnings = [
             r
             for r in caplog.records
-            if r.message == "llm.pricing.unknown_model" and r.levelno == logging.WARNING
+            if getattr(r, "event", None) == "llm.pricing.unknown_model"
+            and r.levelno == logging.WARNING
         ]
         # Three distinct pairs → three WARNINGs.
         assert len(warnings) == 3
@@ -633,7 +642,8 @@ class TestCheckBudget:
                     clock=clock,
                 )
             assert any(
-                r.message == "llm.budget.ledger_missing" for r in caplog.records
+                getattr(r, "event", None) == "llm.budget.ledger_missing"
+                for r in caplog.records
             ), (
                 "expected ledger_missing WARNING; got "
                 f"{[r.message for r in caplog.records]}"
@@ -1037,7 +1047,9 @@ class TestRecordUsage:
                     clock=clock,
                 )
             warnings = [
-                r for r in caplog.records if r.message == "llm.budget.ledger_missing"
+                r
+                for r in caplog.records
+                if getattr(r, "event", None) == "llm.budget.ledger_missing"
             ]
             infos = [r for r in caplog.records if r.message == "llm.budget_exceeded"]
             # Exactly one of each for this refusal — the WARNING

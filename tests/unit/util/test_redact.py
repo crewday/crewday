@@ -402,6 +402,11 @@ class TestKeyBasedRedaction:
         out = redact({"user_id": "u1", "count": 7}, scope="log")
         assert out == {"user_id": "u1", "count": 7}
 
+    def test_ulid_identifier_value_preserved(self) -> None:
+        ulid = "01KQV7TBTYFV3QDY37387141PB"
+        out = redact({"property_id": ulid}, scope="log")
+        assert out == {"property_id": ulid}
+
     @pytest.mark.parametrize(
         "key",
         [

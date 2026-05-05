@@ -514,6 +514,7 @@ async def safe_fetch(
     is out of scope for the current bring-up but trivial to layer
     on top.
     """
+    # code-health: ignore[params] Public fetch API exposes guard knobs explicitly.
     parsed = httpx.URL(url)
     assert_allowed_scheme(parsed.scheme, allowed=allowed_schemes)
 
@@ -610,6 +611,7 @@ async def _stream_with_cap(
     64 KiB chunks and tear down the connection the moment cumulative
     bytes exceed ``max_body_bytes``.
     """
+    # code-health: ignore[params] Streaming request mirrors httpx request fields.
     chunks: list[bytes] = []
     total = 0
     chunk_size = 64 * 1024

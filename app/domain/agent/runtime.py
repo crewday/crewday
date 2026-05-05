@@ -1365,7 +1365,7 @@ def _resolve_tool_call(response: LLMResponse) -> ToolCall | None:
             # carve-out for parallel dispatch lifts this branch.
             dropped_names = [c.name for c in native_calls[1:]]
             _log.warning(
-                "agent.runtime.native_tool_calls_dropped_extras",
+                "agent runtime dropped extra native tool calls",
                 extra={
                     "event": "agent.runtime.native_tool_calls_dropped_extras",
                     "count": len(native_calls),

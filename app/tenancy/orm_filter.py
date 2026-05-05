@@ -180,6 +180,7 @@ def install_tenant_filter(target: type[Session] | sessionmaker[Session]) -> None
 
 
 def _do_orm_execute(orm_execute_state: ORMExecuteState) -> None:
+    # code-health: ignore[ccn] Tenant filter dispatch is explicit SQLAlchemy policy.
     stmt = orm_execute_state.statement
     if not isinstance(stmt, Select | CompoundSelect | Update | Delete):
         return
@@ -842,6 +843,7 @@ def _walk_from(
     pre-joined FROM element, even though :func:`_iter_select_from_sources`
     returns already-unjoined sources today.
     """
+    # code-health: ignore[ccn] SQLAlchemy FROM traversal is branchy by type.
     if isinstance(node, Table):
         if registry.is_scoped(node.name) and id(node) not in seen:
             spec = registry.get_scope_through_join(node.name)

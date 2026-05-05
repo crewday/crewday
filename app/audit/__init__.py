@@ -122,6 +122,7 @@ def write_audit(
     For deployment-scope writes (admin mutations whose subject is
     the deployment itself), use :func:`write_deployment_audit`.
     """
+    # code-health: ignore[params] Audit writer contract matches audit_log columns.
     now = (clock if clock is not None else SystemClock()).now()
     row = AuditLog(
         # code-health: ignore[duplicate] Explicit audit scopes.
@@ -190,6 +191,7 @@ def write_deployment_audit(
     so call sites carry the scope as one immutable value rather
     than as a fan of named kwargs.
     """
+    # code-health: ignore[params] Deployment audit rows spell out actor context.
     now = (clock if clock is not None else SystemClock()).now()
     row = AuditLog(
         id=new_ulid(),

@@ -386,6 +386,7 @@ def resolve_actor(
     Other exceptions bubble; the :class:`InvalidToken` /
     :class:`SessionInvalid` / ... tree is caught narrowly.
     """
+    # code-health: ignore[nloc] Spec-pinned auth precedence.
     auth_header = request.headers.get("Authorization")
     if auth_header is not None and auth_header.lower().startswith(_BEARER_PREFIX):
         token_value = auth_header[len(_BEARER_PREFIX) :].strip()
@@ -753,6 +754,7 @@ def _log_tenancy_event(
     ``skip_path`` to separate bare-host traffic from scoped traffic,
     successful resolutions from 404s.
     """
+    # code-health: ignore[params] Log event fields are deliberately flat.
     _log.info(
         "tenancy.context",
         extra={
@@ -843,6 +845,7 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
+        # code-health: ignore[ccn,nloc] Tenancy middleware policy flow.
         path = request.url.path
         # Prefer the value the outer
         # :class:`~app.api.transport.correlation_id.CorrelationIdMiddleware`

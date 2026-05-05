@@ -306,6 +306,7 @@ def _mint_link(
     ttl: timedelta,
     clock: Clock | None = None,
 ) -> PendingMagicLink:
+    # code-health: ignore[params] Magic-link port requires explicit token fields.
     pending = request_link(
         session,
         email=email_lower,
@@ -408,6 +409,7 @@ def invite_user(
     clock: Clock | None = None,
 ) -> AdminInviteResult:
     """Create or refresh a pending invite and return its magic link URL."""
+    # code-health: ignore[nloc] Host-CLI invite bootstrap keeps DB writes sequential.
     _require_not_demo(settings)
     _require_root_key(settings)
     if role not in _VALID_INVITE_ROLES:
@@ -540,6 +542,7 @@ def workspace_bootstrap(
     clock: Clock | None = None,
 ) -> WorkspaceBootstrapResult:
     """Create a workspace, seed its owner, and mint the owner's link."""
+    # code-health: ignore[nloc,params] First-owner spec transaction.
     _require_not_demo(settings)
     _require_root_key(settings)
     now = _now(clock)

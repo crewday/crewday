@@ -1397,6 +1397,7 @@ def test_runtime_drops_extra_native_tool_calls_with_warning(
     assert dispatcher.captured[0].call.input == {"property_id": "p1"}
     # The drop is loud so an operator notices.
     assert any(
-        "native_tool_calls_dropped_extras" in record.getMessage()
+        getattr(record, "event", None)
+        == "agent.runtime.native_tool_calls_dropped_extras"
         for record in caplog.records
     )
