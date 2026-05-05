@@ -22,7 +22,7 @@ Covers each acceptance criterion on the Beads ticket:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import timedelta
 
 import pytest
@@ -40,6 +40,7 @@ from app.domain.agent.runtime import (
     ToolResult,
     run_turn,
 )
+from app.domain.messaging.notifications import NotificationKind
 from app.events.bus import EventBus
 from app.events.types import (
     AgentActionPending,
@@ -66,6 +67,21 @@ from tests.domain.agent.conftest import (
 
 _CAPABILITY = "chat.manager"
 _AGENT_LABEL = "manager-chat-agent"
+
+
+class RecordingNotificationSink:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, NotificationKind, dict[str, object]]] = []
+
+    def notify(
+        self,
+        *,
+        recipient_user_id: str,
+        kind: NotificationKind,
+        payload: Mapping[str, object],
+    ) -> str:
+        self.calls.append((recipient_user_id, kind, dict(payload)))
+        return f"notification-{len(self.calls)}"
 
 
 def _bind(ctx) -> None:  # type: ignore[no-untyped-def]
@@ -572,6 +588,7 @@ def test_gated_write_tool_creates_approval_request_and_pauses(
             )
         }
     )
+    notification_sink = RecordingNotificationSink()
     outcome = run_turn(
         ctx,
         session=db_session,
@@ -586,6 +603,8 @@ def test_gated_write_tool_creates_approval_request_and_pauses(
         capability=_CAPABILITY,
         event_bus=bus,
         clock=clock,
+        approval_notification_sink=notification_sink,
+        approval_recipient_user_ids=("owner-1", "manager-1"),
     )
 
     assert outcome.outcome == "action"
@@ -624,6 +643,16 @@ def test_gated_write_tool_creates_approval_request_and_pauses(
     assert approval.resolved_user_mode is None
     assert approval.decision_note_md is None
     assert approval.result_json is None
+    assert [
+        (recipient_id, kind) for recipient_id, kind, _payload in notification_sink.calls
+    ] == [
+        ("owner-1", NotificationKind.APPROVAL_NEEDED),
+        ("manager-1", NotificationKind.APPROVAL_NEEDED),
+    ]
+    for _recipient_id, _kind, payload in notification_sink.calls:
+        assert payload["approval_request_id"] == outcome.approval_request_id
+        assert payload["status"] == "pending"
+        assert payload["card_summary"] == "Issue payroll for we_001?"
 
     # Inline-card SSE event for the delegating user, then the turn
     # lifecycle finished(action) event.

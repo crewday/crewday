@@ -1,0 +1,12 @@
+Hi {{ recipient_display_name | default("there") }},
+
+An approval is waiting: **{{ card_summary | default(tool_name, true) }}**.
+
+{% if card_risk is defined and card_risk -%}
+Risk: {{ card_risk }}
+{% endif -%}
+{% if expires_at is defined and expires_at -%}
+Expires: {{ expires_at }}
+{% endif %}
+
+Open crew.day to review the request.

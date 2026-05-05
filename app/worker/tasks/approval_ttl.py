@@ -52,10 +52,21 @@ from __future__ import annotations
 import logging
 from typing import Final
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.adapters.db.llm.models import ApprovalRequest
+from app.adapters.db.messaging.repositories import SqlAlchemyEmailDeliveryRepository
 from app.adapters.db.session import make_uow
+from app.adapters.db.workspace.models import Workspace
+from app.adapters.mail.null import NullMailer
 from app.domain.agent.approval import ExpireDueReport, expire_due
+from app.domain.agent.notifications import (
+    approval_notification_view_from_row,
+    notify_approval_decided,
+)
+from app.domain.messaging.notifications import NotificationService
+from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 
 __all__ = [
@@ -99,6 +110,7 @@ def sweep_expired_approvals(*, clock: Clock | None = None) -> ExpireDueReport:
         # at the seam rather than widening the helper to the Protocol.
         assert isinstance(session, Session)
         report = expire_due(session=session, now=now, clock=resolved_clock)
+        _notify_expired_approvals(session, report)
         # ``expire_due`` mutates rows + publishes events but does not
         # commit; the UoW's ``__exit__`` does so on a clean return.
         # An empty sweep is the no-op path — no rows touched, no
@@ -119,3 +131,44 @@ def sweep_expired_approvals(*, clock: Clock | None = None) -> ExpireDueReport:
     )
 
     return report
+
+
+def _notify_expired_approvals(session: Session, report: ExpireDueReport) -> None:
+    if not report.expired_ids:
+        return
+    with tenant_agnostic():
+        rows = session.scalars(
+            select(ApprovalRequest).where(ApprovalRequest.id.in_(report.expired_ids))
+        ).all()
+    for row in rows:
+        recipient_user_id = row.for_user_id or row.requester_actor_id
+        if recipient_user_id is None:
+            continue
+        ctx = _system_context_for_approval(session, row)
+        notify_approval_decided(
+            approval=approval_notification_view_from_row(row),
+            sink=NotificationService(
+                session=session,
+                ctx=ctx,
+                mailer=NullMailer(),
+                email_deliveries=SqlAlchemyEmailDeliveryRepository(session),
+            ),
+        )
+
+
+def _system_context_for_approval(
+    session: Session, row: ApprovalRequest
+) -> WorkspaceContext:
+    with tenant_agnostic():
+        workspace = session.get(Workspace, row.workspace_id)
+    workspace_slug = workspace.slug if workspace is not None else row.workspace_id
+    return WorkspaceContext(
+        workspace_id=row.workspace_id,
+        workspace_slug=workspace_slug,
+        actor_id="system",
+        actor_kind="system",
+        actor_grant_role="worker",
+        actor_was_owner_member=False,
+        audit_correlation_id=row.id,
+        principal_kind="system",
+    )

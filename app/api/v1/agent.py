@@ -19,14 +19,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.identity.models import User
+from app.adapters.db.messaging.audiences import list_owner_manager_user_ids
 from app.adapters.db.messaging.models import ChatChannel, ChatMessage
+from app.adapters.db.messaging.repositories import SqlAlchemyEmailDeliveryRepository
 from app.adapters.llm.ports import LLMClient
+from app.adapters.mail.null import NullMailer
 from app.agent.dispatcher import make_default_dispatcher
 from app.agent.tokens import DelegatedTokenFactory
 from app.api.deps import current_workspace_context, db_session, get_llm
 from app.audit import write_audit
 from app.domain.agent.runtime import run_turn
 from app.domain.errors import Forbidden
+from app.domain.messaging.notifications import NotificationService
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import AgentMessageAppended, AgentMessagePayload
@@ -63,6 +67,18 @@ _SCOPE_CAPABILITY: dict[AgentScope, str] = {
     "employee": "chat.employee",
     "manager": "chat.manager",
 }
+
+
+def _approval_notification_sink(
+    session: Session,
+    ctx: WorkspaceContext,
+) -> NotificationService:
+    return NotificationService(
+        session=session,
+        ctx=ctx,
+        mailer=NullMailer(),
+        email_deliveries=SqlAlchemyEmailDeliveryRepository(session),
+    )
 
 
 class AgentMessageRequest(BaseModel):
@@ -232,6 +248,11 @@ def build_agent_router(
                 event_bus=bus,
                 clock=eff_clock,
                 include_user_message=False,
+                approval_notification_sink=_approval_notification_sink(session, ctx),
+                approval_recipient_user_ids=list_owner_manager_user_ids(
+                    session,
+                    workspace_id=ctx.workspace_id,
+                ),
             )
         finally:
             try:

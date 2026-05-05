@@ -47,6 +47,7 @@ from sqlalchemy.orm import Session, sessionmaker
 import app.adapters.db.session as _session_mod
 from app.adapters.db.identity.models import User, canonicalise_email
 from app.adapters.db.llm.models import ApprovalRequest
+from app.adapters.db.messaging.models import Notification
 from app.adapters.db.ops.models import WorkerHeartbeat
 from app.adapters.db.workspace.models import Workspace
 from app.tenancy.orm_filter import install_tenant_filter
@@ -236,6 +237,20 @@ def _read_heartbeat(engine: Engine) -> WorkerHeartbeat | None:
         ).first()
 
 
+def _read_notifications(engine: Engine, *, workspace_id: str) -> list[Notification]:
+    from app.tenancy import tenant_agnostic
+
+    factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+    with factory() as session, tenant_agnostic():
+        return list(
+            session.scalars(
+                select(Notification)
+                .where(Notification.workspace_id == workspace_id)
+                .order_by(Notification.created_at, Notification.id)
+            ).all()
+        )
+
+
 # ---------------------------------------------------------------------------
 # Registration shape
 # ---------------------------------------------------------------------------
@@ -371,6 +386,12 @@ class TestSweepJobEndToEnd:
         assert row.decision_note_md == "auto-expired"
         assert row.decided_by is None
         assert row.decided_at is not None
+        notifications = _read_notifications(engine, workspace_id=workspace_id)
+        assert [(n.recipient_user_id, n.kind) for n in notifications] == [
+            (requester_id, "approval_decided")
+        ]
+        assert notifications[0].payload_json["approval_request_id"] == row_id
+        assert notifications[0].payload_json["status"] == "timed_out"
 
         # 2. Heartbeat row written under the TTL job's worker_name
         #    with the injected-clock timestamp.

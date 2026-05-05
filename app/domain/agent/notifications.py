@@ -1,0 +1,215 @@
+"""Approval notification fanout helpers."""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Literal, Protocol
+
+from app.domain.messaging.notifications import NotificationKind
+
+__all__ = [
+    "ApprovalNotificationSink",
+    "approval_notification_view_from_row",
+    "notify_approval_decided",
+    "notify_approval_needed",
+]
+
+_log = logging.getLogger(__name__)
+
+
+class ApprovalNotificationSink(Protocol):
+    def notify(
+        self,
+        *,
+        recipient_user_id: str,
+        kind: NotificationKind,
+        payload: Mapping[str, object],
+    ) -> str: ...
+
+
+class ApprovalNotificationView(Protocol):
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def requester_actor_id(self) -> str | None: ...
+
+    @property
+    def for_user_id(self) -> str | None: ...
+
+    @property
+    def status(self) -> Literal["pending", "approved", "rejected", "timed_out"]: ...
+
+    @property
+    def decided_by(self) -> str | None: ...
+
+    @property
+    def decided_at(self) -> datetime | None: ...
+
+    @property
+    def decision_note_md(self) -> str | None: ...
+
+    @property
+    def expires_at(self) -> datetime | None: ...
+
+    @property
+    def created_at(self) -> datetime: ...
+
+    @property
+    def action_json(self) -> Mapping[str, Any]: ...
+
+
+class ApprovalNotificationRow(Protocol):
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def requester_actor_id(self) -> str | None: ...
+
+    @property
+    def for_user_id(self) -> str | None: ...
+
+    @property
+    def status(self) -> str: ...
+
+    @property
+    def decided_by(self) -> str | None: ...
+
+    @property
+    def decided_at(self) -> datetime | None: ...
+
+    @property
+    def decision_note_md(self) -> str | None: ...
+
+    @property
+    def rationale_md(self) -> str | None: ...
+
+    @property
+    def expires_at(self) -> datetime | None: ...
+
+    @property
+    def created_at(self) -> datetime: ...
+
+    @property
+    def action_json(self) -> Mapping[str, Any]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalNotificationSnapshot:
+    id: str
+    requester_actor_id: str | None
+    for_user_id: str | None
+    status: Literal["pending", "approved", "rejected", "timed_out"]
+    decided_by: str | None
+    decided_at: datetime | None
+    decision_note_md: str | None
+    expires_at: datetime | None
+    created_at: datetime
+    action_json: Mapping[str, Any]
+
+
+def approval_notification_view_from_row(
+    row: ApprovalNotificationRow,
+) -> ApprovalNotificationSnapshot:
+    status: Literal["pending", "approved", "rejected", "timed_out"]
+    if row.status == "pending":
+        status = "pending"
+    elif row.status == "approved":
+        status = "approved"
+    elif row.status == "rejected":
+        status = "rejected"
+    elif row.status == "timed_out":
+        status = "timed_out"
+    else:
+        raise ValueError(
+            f"approval row {row.id!r} carries unknown status {row.status!r}"
+        )
+    return ApprovalNotificationSnapshot(
+        id=row.id,
+        requester_actor_id=row.requester_actor_id,
+        for_user_id=row.for_user_id,
+        status=status,
+        decided_by=row.decided_by,
+        decided_at=row.decided_at,
+        decision_note_md=row.decision_note_md or row.rationale_md,
+        expires_at=row.expires_at,
+        created_at=row.created_at,
+        action_json=dict(row.action_json),
+    )
+
+
+def notify_approval_needed(
+    *,
+    approval: ApprovalNotificationView,
+    recipient_user_ids: Sequence[str],
+    sink: ApprovalNotificationSink,
+) -> None:
+    payload = _approval_payload(approval)
+    for user_id in recipient_user_ids:
+        _notify(
+            sink,
+            recipient_user_id=user_id,
+            kind=NotificationKind.APPROVAL_NEEDED,
+            payload=payload,
+        )
+
+
+def notify_approval_decided(
+    *,
+    approval: ApprovalNotificationView,
+    sink: ApprovalNotificationSink,
+) -> None:
+    recipient_user_id = approval.for_user_id or approval.requester_actor_id
+    if recipient_user_id is None:
+        return
+    _notify(
+        sink,
+        recipient_user_id=recipient_user_id,
+        kind=NotificationKind.APPROVAL_DECIDED,
+        payload=_approval_payload(approval),
+    )
+
+
+def _approval_payload(approval: ApprovalNotificationView) -> dict[str, object | None]:
+    return {
+        "approval_request_id": approval.id,
+        "requester_actor_id": approval.requester_actor_id,
+        "for_user_id": approval.for_user_id,
+        "status": approval.status,
+        "decided_by": approval.decided_by,
+        "decided_at": approval.decided_at.isoformat() if approval.decided_at else None,
+        "decision_note_md": approval.decision_note_md,
+        "expires_at": approval.expires_at.isoformat() if approval.expires_at else None,
+        "created_at": approval.created_at.isoformat(),
+        "tool_name": approval.action_json.get("tool_name"),
+        "card_summary": approval.action_json.get("card_summary"),
+        "card_risk": approval.action_json.get("card_risk"),
+        "pre_approval_source": approval.action_json.get("pre_approval_source"),
+    }
+
+
+def _notify(
+    sink: ApprovalNotificationSink,
+    *,
+    recipient_user_id: str,
+    kind: NotificationKind,
+    payload: Mapping[str, object],
+) -> None:
+    try:
+        sink.notify(
+            recipient_user_id=recipient_user_id,
+            kind=kind,
+            payload=payload,
+        )
+    except Exception:
+        _log.exception(
+            "approval notification fanout failed",
+            extra={
+                "event": "approvals.notification.failed",
+                "kind": kind.value,
+                "recipient_user_id": recipient_user_id,
+            },
+        )

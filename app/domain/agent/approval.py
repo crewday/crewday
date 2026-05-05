@@ -56,6 +56,10 @@ from app.adapters.db.llm.models import (
     ApprovalRequest,
 )
 from app.audit import write_audit
+from app.domain.agent.notifications import (
+    ApprovalNotificationSink,
+    notify_approval_decided,
+)
 from app.domain.agent.runtime import (
     DelegatedToken,
     ToolCall,
@@ -409,6 +413,7 @@ def approve(
     decision_note_md: str | None = None,
     clock: Clock | None = None,
     event_bus: EventBus | None = None,
+    notification_sink: ApprovalNotificationSink | None = None,
 ) -> ApprovalView:
     """Flip ``pending → approved`` and replay the recorded tool call.
 
@@ -501,7 +506,10 @@ def approve(
         )
     )
 
-    return ApprovalView.from_row(row)
+    view = ApprovalView.from_row(row)
+    if notification_sink is not None:
+        notify_approval_decided(approval=view, sink=notification_sink)
+    return view
 
 
 def deny(
@@ -512,6 +520,7 @@ def deny(
     decision_note_md: str | None = None,
     clock: Clock | None = None,
     event_bus: EventBus | None = None,
+    notification_sink: ApprovalNotificationSink | None = None,
 ) -> ApprovalView:
     """Flip ``pending → rejected``; the tool call is never dispatched.
 
@@ -565,7 +574,10 @@ def deny(
         )
     )
 
-    return ApprovalView.from_row(row)
+    view = ApprovalView.from_row(row)
+    if notification_sink is not None:
+        notify_approval_decided(approval=view, sink=notification_sink)
+    return view
 
 
 @dataclass(frozen=True, slots=True)

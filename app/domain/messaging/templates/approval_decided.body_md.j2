@@ -1,0 +1,9 @@
+Hi {{ recipient_display_name | default("there") }},
+
+Your approval request was marked {{ status }}: **{{ card_summary | default(tool_name, true) }}**.
+
+{% if decision_note_md is defined and decision_note_md -%}
+Decision note: {{ decision_note_md }}
+{% endif %}
+
+Open crew.day to see the details.

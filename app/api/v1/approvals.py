@@ -64,6 +64,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.adapters.db.identity.models import ApiToken
+from app.adapters.db.messaging.repositories import SqlAlchemyEmailDeliveryRepository
+from app.adapters.mail.null import NullMailer
 from app.api.deps import current_workspace_context, db_session
 from app.audit import write_audit
 from app.authz.dep import Permission
@@ -88,6 +90,7 @@ from app.domain.agent.approval import (
 )
 from app.domain.agent.runtime import DelegatedToken, ToolDispatcher
 from app.domain.errors import Forbidden, ServiceUnavailable
+from app.domain.messaging.notifications import NotificationService
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.tenancy.middleware import ACTOR_STATE_ATTR, ActorIdentity
 from app.util.clock import SystemClock
@@ -483,6 +486,18 @@ def _build_replay(
     )
 
 
+def _approval_notification_sink(
+    session: Session,
+    ctx: WorkspaceContext,
+) -> NotificationService:
+    return NotificationService(
+        session=session,
+        ctx=ctx,
+        mailer=NullMailer(),
+        email_deliveries=SqlAlchemyEmailDeliveryRepository(session),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
@@ -602,6 +617,7 @@ def approve_approval(
         approval_request_id=approval_request_id,
         replay=replay,
         decision_note_md=note,
+        notification_sink=_approval_notification_sink(db, ctx),
     )
     return ApprovalPayload.from_view(view)
 
@@ -626,6 +642,7 @@ def _deny_handler(
         session=db,
         approval_request_id=approval_request_id,
         decision_note_md=note,
+        notification_sink=_approval_notification_sink(db, ctx),
     )
     return ApprovalPayload.from_view(view)
 

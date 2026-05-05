@@ -16,8 +16,15 @@ from starlette.responses import JSONResponse, Response
 
 from app.adapters.db.identity.models import User
 from app.adapters.db.llm.models import ApprovalRequest
+from app.adapters.db.messaging.audiences import list_owner_manager_user_ids
+from app.adapters.db.messaging.repositories import SqlAlchemyEmailDeliveryRepository
 from app.adapters.db.session import make_uow
 from app.adapters.llm.ports import Tool
+from app.adapters.mail.null import NullMailer
+from app.domain.agent.notifications import (
+    approval_notification_view_from_row,
+    notify_approval_needed,
+)
 from app.domain.agent.runtime import (
     DelegatedToken,
     GateDecision,
@@ -25,6 +32,7 @@ from app.domain.agent.runtime import (
     ToolDispatcher,
     ToolResult,
 )
+from app.domain.messaging.notifications import NotificationService
 from app.domain.tasks.completion import (
     InvalidStateTransition,
     PermissionDenied,
@@ -167,6 +175,7 @@ def _write_pending_approval(
     expires_at = created_at + timedelta(days=7)
     approval_id = new_ulid(clock=clock)
     with make_uow() as session:
+        assert isinstance(session, Session)
         row = ApprovalRequest(
             id=approval_id,
             workspace_id=ctx.workspace_id,
@@ -196,6 +205,20 @@ def _write_pending_approval(
         # workspace_id; the tenant filter only protects reads.
         with tenant_agnostic():
             session.add(row)
+            session.flush()
+        notify_approval_needed(
+            approval=approval_notification_view_from_row(row),
+            recipient_user_ids=list_owner_manager_user_ids(
+                session,
+                workspace_id=ctx.workspace_id,
+            ),
+            sink=NotificationService(
+                session=session,
+                ctx=ctx,
+                mailer=NullMailer(),
+                email_deliveries=SqlAlchemyEmailDeliveryRepository(session),
+            ),
+        )
     return approval_id, expires_at
 
 

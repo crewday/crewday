@@ -57,6 +57,7 @@ from app.domain.agent.runtime import (
     ToolResult,
 )
 from app.domain.errors import Validation
+from app.domain.messaging.notifications import NotificationKind
 from app.events.bus import EventBus
 from app.events.types import ApprovalDecided
 from app.tenancy import tenant_agnostic
@@ -132,6 +133,21 @@ class _RecordingDispatcher:
 @dataclass(slots=True)
 class _CapturedDecided:
     events: list[ApprovalDecided] = field(default_factory=list)
+
+
+class RecordingNotificationSink:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, NotificationKind, dict[str, object]]] = []
+
+    def notify(
+        self,
+        *,
+        recipient_user_id: str,
+        kind: NotificationKind,
+        payload: Mapping[str, object],
+    ) -> str:
+        self.calls.append((recipient_user_id, kind, dict(payload)))
+        return f"notification-{len(self.calls)}"
 
 
 @pytest.fixture
@@ -257,6 +273,7 @@ def test_approve_happy_path_replays_persists_result_audits_emits(
         },
     )
     replay = _make_replay(dispatcher)
+    notification_sink = RecordingNotificationSink()
 
     view = approve(
         ctx,
@@ -266,6 +283,7 @@ def test_approve_happy_path_replays_persists_result_audits_emits(
         decision_note_md="ship it",
         clock=clock,
         event_bus=bus,
+        notification_sink=notification_sink,
     )
     db_session.flush()
 
@@ -320,6 +338,11 @@ def test_approve_happy_path_replays_persists_result_audits_emits(
     assert decided.approval_request_id == pending.id
     assert decided.decision == "approved"
     assert decided.for_user_id == delegating_user
+    assert [
+        (recipient_id, kind) for recipient_id, kind, _payload in notification_sink.calls
+    ] == [(delegating_user, NotificationKind.APPROVAL_DECIDED)]
+    assert notification_sink.calls[0][2]["approval_request_id"] == pending.id
+    assert notification_sink.calls[0][2]["status"] == "approved"
 
 
 def test_approve_idempotent_via_409_on_second_attempt(
@@ -498,6 +521,7 @@ def test_deny_flips_to_rejected_audits_emits_no_dispatch(
         for_user_id=delegating_user,
         clock=clock,
     )
+    notification_sink = RecordingNotificationSink()
 
     view = deny(
         ctx,
@@ -506,6 +530,7 @@ def test_deny_flips_to_rejected_audits_emits_no_dispatch(
         decision_note_md="too risky",
         clock=clock,
         event_bus=bus,
+        notification_sink=notification_sink,
     )
     db_session.flush()
 
@@ -533,6 +558,10 @@ def test_deny_flips_to_rejected_audits_emits_no_dispatch(
 
     assert [e.decision for e in captured_decided.events] == ["rejected"]
     assert captured_decided.events[0].for_user_id == delegating_user
+    assert [
+        (recipient_id, kind) for recipient_id, kind, _payload in notification_sink.calls
+    ] == [(delegating_user, NotificationKind.APPROVAL_DECIDED)]
+    assert notification_sink.calls[0][2]["status"] == "rejected"
 
 
 def test_deny_already_approved_raises_not_pending(

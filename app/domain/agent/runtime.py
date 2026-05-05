@@ -133,6 +133,11 @@ from app.adapters.llm.ports import ChatMessage as LlmChatMessage
 from app.adapters.llm.ports import LLMClient, LLMResponse, Tool
 from app.audit import write_audit
 from app.domain.agent.compaction import search_chat_archive
+from app.domain.agent.notifications import (
+    ApprovalNotificationSink,
+    approval_notification_view_from_row,
+    notify_approval_needed,
+)
 from app.domain.agent.preferences import (
     PreferenceBundle,
     blocked_action_result_body,
@@ -515,6 +520,8 @@ def run_turn(
     wall_clock_timeout_s: int = DEFAULT_WALL_CLOCK_TIMEOUT_S,
     history_cap: int = DEFAULT_HISTORY_CAP,
     include_user_message: bool = True,
+    approval_notification_sink: ApprovalNotificationSink | None = None,
+    approval_recipient_user_ids: Sequence[str] = (),
 ) -> TurnOutcome:
     """Run one agent turn end-to-end.
 
@@ -851,6 +858,14 @@ def run_turn(
                     resolved_user_mode=None,
                     clock=eff_clock,
                 )
+                if approval_notification_sink is not None:
+                    row = session.get(ApprovalRequest, approval_id)
+                    if row is not None:
+                        notify_approval_needed(
+                            approval=approval_notification_view_from_row(row),
+                            recipient_user_ids=approval_recipient_user_ids,
+                            sink=approval_notification_sink,
+                        )
                 ended_at = eff_clock.now()
                 # Publish the inline approval-card SSE event to the
                 # delegating user's tabs. ``AgentActionPending`` is
