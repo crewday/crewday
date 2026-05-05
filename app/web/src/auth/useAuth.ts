@@ -154,12 +154,14 @@ export function useAuth(): UseAuthApi {
  * and the `/auth/me` probe is cheap. We still guard with a `ref` so
  * the probe doesn't fire twice when nothing has changed.
  */
-export function useAuthBootstrap(): void {
+export function useAuthBootstrap(enabled = true): void {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const probedRef = useRef(false);
 
   useEffect(() => {
+    if (!enabled) return;
+
     // Token getter — `api.ts` reads this on every fetch.
     registerAuthTokenGetter(() => getAuthState().token);
 
@@ -198,7 +200,7 @@ export function useAuthBootstrap(): void {
       // tear-down. Clearing here would leave `api.ts` with a stale
       // `null` token-getter for any in-flight request.
     };
-  }, [navigate, queryClient]);
+  }, [enabled, navigate, queryClient]);
 }
 
 // ── Test seam ─────────────────────────────────────────────────────
