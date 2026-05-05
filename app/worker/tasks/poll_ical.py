@@ -312,6 +312,69 @@ class _PolledBody:
     retry_after_seconds: int | None
 
 
+@dataclass(frozen=True, slots=True)
+class _FeedWorkContext:
+    session: Session
+    ctx: WorkspaceContext
+    event_bus: EventBus
+    clock: Clock
+    resolved_now: datetime
+
+
+@dataclass(slots=True)
+class _PollCounters:
+    feeds_polled: int = 0
+    feeds_not_modified: int = 0
+    feeds_rate_limited: int = 0
+    feeds_errored: int = 0
+    feeds_skipped: int = 0
+    reservations_created: int = 0
+    reservations_updated: int = 0
+    reservations_cancelled: int = 0
+    closures_created: int = 0
+
+    def add(self, result: PolledFeedResult) -> None:
+        if result.status == PollOutcome.POLLED:
+            self.feeds_polled += 1
+        elif result.status == PollOutcome.NOT_MODIFIED:
+            self.feeds_not_modified += 1
+        elif result.status == PollOutcome.RATE_LIMITED:
+            self.feeds_rate_limited += 1
+        elif result.status == PollOutcome.ERROR:
+            self.feeds_errored += 1
+        elif result.status in {
+            PollOutcome.SKIPPED_DISABLED,
+            PollOutcome.SKIPPED_NOT_DUE,
+        }:
+            self.feeds_skipped += 1
+        self.reservations_created += result.reservations_created
+        self.reservations_updated += result.reservations_updated
+        self.reservations_cancelled += result.reservations_cancelled
+        self.closures_created += result.closures_created
+
+    def to_audit(
+        self,
+        *,
+        feeds_walked: int,
+        tick_started_at: datetime,
+        tick_ended_at: datetime,
+    ) -> PollTickAudit:
+        return PollTickAudit(
+            feeds_walked=feeds_walked,
+            feeds_polled=self.feeds_polled,
+            feeds_not_modified=self.feeds_not_modified,
+            feeds_rate_limited=self.feeds_rate_limited,
+            feeds_errored=self.feeds_errored,
+            feeds_skipped=self.feeds_skipped,
+            reservations_created=self.reservations_created,
+            reservations_updated=self.reservations_updated,
+            reservations_cancelled=self.reservations_cancelled,
+            closures_created=self.closures_created,
+            tick_started_at=tick_started_at,
+            tick_ended_at=tick_ended_at,
+        )
+
+
 class PollOutcome:
     """Closed enum for :class:`PolledFeedResult.status`. Class to keep
     the constants grouped (and the type-checker enforcing exhaustive
@@ -732,7 +795,7 @@ def poll_ical(
     feed_ids: frozenset[str] | None = None,
     force: bool = False,
     allow_self_signed_resolver: Callable[[IcalFeed], bool] | None = None,
-) -> PollReport:  # code-health: ignore[ccn,nloc,params] iCal polling policy flow.
+) -> PollReport:  # code-health: ignore[params] Public worker API boundary.
     """Run one poll tick for the caller's workspace.
 
     Walks every enabled :class:`IcalFeed` whose cadence is up,
@@ -785,8 +848,50 @@ def poll_ical(
         raise ValueError("now must be a timezone-aware datetime in UTC")
     resolved_bus = event_bus if event_bus is not None else default_event_bus
 
-    tick_started_at = resolved_now
+    work = _FeedWorkContext(
+        session=session,
+        ctx=ctx,
+        event_bus=resolved_bus,
+        clock=resolved_clock,
+        resolved_now=resolved_now,
+    )
+    feeds = _load_feeds(session, ctx, feed_ids=feed_ids)
+    last_fetch_monotonic: dict[str, float] = {}
+    per_feed_results: list[PolledFeedResult] = []
+    counters = _PollCounters()
 
+    for feed in feeds:
+        result = _poll_feed_slot(
+            work,
+            feed=feed,
+            envelope=envelope,
+            last_fetch_monotonic=last_fetch_monotonic,
+            rate_limit_seconds=rate_limit_seconds,
+            force=force,
+            fetcher=fetcher,
+            resolver=resolver,
+            poll_timeout_seconds=poll_timeout_seconds,
+            max_body_bytes=max_body_bytes,
+            allow_private_addresses=allow_private_addresses,
+            allow_self_signed_resolver=allow_self_signed_resolver,
+        )
+        per_feed_results.append(result)
+        counters.add(result)
+
+    tick_ended_at = resolved_clock.now()
+    audit = counters.to_audit(
+        feeds_walked=len(feeds),
+        tick_started_at=resolved_now,
+        tick_ended_at=tick_ended_at,
+    )
+    _write_poll_tick_audit(session, ctx, audit=audit, clock=resolved_clock)
+
+    return _build_poll_report(audit, per_feed_results=tuple(per_feed_results))
+
+
+def _load_feeds(
+    session: Session, ctx: WorkspaceContext, *, feed_ids: frozenset[str] | None
+) -> list[IcalFeed]:
     stmt = (
         select(IcalFeed)
         .where(IcalFeed.workspace_id == ctx.workspace_id)
@@ -794,138 +899,132 @@ def poll_ical(
     )
     if feed_ids is not None:
         stmt = stmt.where(IcalFeed.id.in_(feed_ids))
-    feeds = list(session.scalars(stmt).all())
+    return list(session.scalars(stmt).all())
 
-    # Per-host last-fetched monotonic instant inside this tick. Spec
-    # §04 says "Rate-limit per host"; we enforce a soft minimum gap
-    # between consecutive HTTPS GETs against the same host within
-    # one tick. The monotonic clock keeps the gap robust against
-    # wall-clock skew (NTP step in the middle of a tick).
-    last_fetch_monotonic: dict[str, float] = {}
 
-    per_feed_results: list[PolledFeedResult] = []
-    feeds_polled = 0
-    feeds_not_modified = 0
-    feeds_rate_limited = 0
-    feeds_errored = 0
-    feeds_skipped = 0
-    reservations_created_total = 0
-    reservations_updated_total = 0
-    reservations_cancelled_total = 0
-    closures_created_total = 0
+def _poll_feed_slot(  # code-health: ignore[params] Tick-loop policy boundary.
+    work: _FeedWorkContext,
+    *,
+    feed: IcalFeed,
+    envelope: EnvelopeEncryptor,
+    last_fetch_monotonic: dict[str, float],
+    rate_limit_seconds: float,
+    force: bool,
+    fetcher: Fetcher | None,
+    resolver: Resolver | None,
+    poll_timeout_seconds: float,
+    max_body_bytes: int,
+    allow_private_addresses: bool,
+    allow_self_signed_resolver: Callable[[IcalFeed], bool] | None,
+) -> PolledFeedResult:
+    skipped = _feed_skip_result(feed, resolved_now=work.resolved_now, force=force)
+    if skipped is not None:
+        return skipped
 
-    for feed in feeds:
-        if not feed.enabled:
-            per_feed_results.append(
-                _skipped_result(feed.id, PollOutcome.SKIPPED_DISABLED)
-            )
-            feeds_skipped += 1
-            continue
-        if not force:
-            next_due = _next_due(feed)
-            if next_due is not None and next_due > resolved_now:
-                per_feed_results.append(
-                    _skipped_result(feed.id, PollOutcome.SKIPPED_NOT_DUE)
-                )
-                feeds_skipped += 1
-                continue
+    url = _decrypt_feed_url(work, feed=feed, envelope=envelope)
+    if url is None:
+        return _error_result(feed.id, "ical_url_malformed")
 
-        # Per-host rate-limit guard — applies inside one tick. The
-        # check happens before decrypting the URL so a flood of
-        # feeds against the same host short-circuits without the
-        # envelope cost.
-        try:
-            url = ical_service.get_plaintext_url(
-                session, ctx, feed_id=feed.id, envelope=envelope
-            )
-        except Exception as exc:
-            # Decrypt failure is the operator's problem (key rotation,
-            # ciphertext corruption); record + continue.
-            feeds_errored += 1
-            _record_feed_error(
-                session,
-                ctx,
-                feed=feed,
-                code="ical_url_malformed",
-                message=str(exc),
-                clock=resolved_clock,
-                resolved_now=resolved_now,
-            )
-            per_feed_results.append(_error_result(feed.id, "ical_url_malformed"))
-            continue
-
-        host = (urlsplit(url).hostname or "").lower()
-        if host:
-            now_monotonic = time.monotonic()
-            previous = last_fetch_monotonic.get(host)
-            if previous is not None and (now_monotonic - previous) < rate_limit_seconds:
-                feeds_rate_limited += 1
-                per_feed_results.append(
-                    PolledFeedResult(
-                        feed_id=feed.id,
-                        status=PollOutcome.RATE_LIMITED,
-                        error_code="rate_limited",
-                        reservations_created=0,
-                        reservations_updated=0,
-                        reservations_cancelled=0,
-                        closures_created=0,
-                    )
-                )
-                continue
-            last_fetch_monotonic[host] = now_monotonic
-
-        feed_allow_self_signed = (
-            allow_self_signed_resolver(feed)
-            if allow_self_signed_resolver is not None
-            else False
-        )
-        outcome = _poll_one_feed(
-            session,
-            ctx,
-            feed=feed,
-            url=url,
-            fetcher=fetcher,
-            resolver=resolver,
-            event_bus=resolved_bus,
-            clock=resolved_clock,
-            resolved_now=resolved_now,
-            poll_timeout_seconds=poll_timeout_seconds,
-            max_body_bytes=max_body_bytes,
-            allow_private_addresses=allow_private_addresses,
-            allow_self_signed=feed_allow_self_signed,
-        )
-        per_feed_results.append(outcome)
-        if outcome.status == PollOutcome.POLLED:
-            feeds_polled += 1
-        elif outcome.status == PollOutcome.NOT_MODIFIED:
-            feeds_not_modified += 1
-        elif outcome.status == PollOutcome.RATE_LIMITED:
-            feeds_rate_limited += 1
-        elif outcome.status == PollOutcome.ERROR:
-            feeds_errored += 1
-        reservations_created_total += outcome.reservations_created
-        reservations_updated_total += outcome.reservations_updated
-        reservations_cancelled_total += outcome.reservations_cancelled
-        closures_created_total += outcome.closures_created
-
-    tick_ended_at = resolved_clock.now()
-
-    audit = PollTickAudit(
-        feeds_walked=len(feeds),
-        feeds_polled=feeds_polled,
-        feeds_not_modified=feeds_not_modified,
-        feeds_rate_limited=feeds_rate_limited,
-        feeds_errored=feeds_errored,
-        feeds_skipped=feeds_skipped,
-        reservations_created=reservations_created_total,
-        reservations_updated=reservations_updated_total,
-        reservations_cancelled=reservations_cancelled_total,
-        closures_created=closures_created_total,
-        tick_started_at=tick_started_at,
-        tick_ended_at=tick_ended_at,
+    rate_limited = _in_tick_rate_limit_result(
+        feed_id=feed.id,
+        url=url,
+        last_fetch_monotonic=last_fetch_monotonic,
+        rate_limit_seconds=rate_limit_seconds,
     )
-    _write_poll_tick_audit(session, ctx, audit=audit, clock=resolved_clock)
+    if rate_limited is not None:
+        return rate_limited
 
+    allow_self_signed = _resolve_feed_self_signed(
+        work,
+        feed=feed,
+        allow_self_signed_resolver=allow_self_signed_resolver,
+    )
+    if isinstance(allow_self_signed, PolledFeedResult):
+        return allow_self_signed
+    return _poll_one_feed(
+        work,
+        feed=feed,
+        url=url,
+        fetcher=fetcher,
+        resolver=resolver,
+        poll_timeout_seconds=poll_timeout_seconds,
+        max_body_bytes=max_body_bytes,
+        allow_private_addresses=allow_private_addresses,
+        allow_self_signed=allow_self_signed,
+    )
+
+
+def _resolve_feed_self_signed(
+    work: _FeedWorkContext,
+    *,
+    feed: IcalFeed,
+    allow_self_signed_resolver: Callable[[IcalFeed], bool] | None,
+) -> bool | PolledFeedResult:
+    if allow_self_signed_resolver is None:
+        return False
+    try:
+        return allow_self_signed_resolver(feed)
+    except Exception as exc:
+        _record_feed_error(
+            work,
+            feed=feed,
+            code="ical_url_unreachable",
+            message=f"allow_self_signed_resolver failed: {type(exc).__name__}: {exc}",
+        )
+        return _error_result(feed.id, "ical_url_unreachable")
+
+
+def _feed_skip_result(
+    feed: IcalFeed, *, resolved_now: datetime, force: bool
+) -> PolledFeedResult | None:
+    if not feed.enabled:
+        return _skipped_result(feed.id, PollOutcome.SKIPPED_DISABLED)
+    if force:
+        return None
+    next_due = _next_due(feed)
+    if next_due is not None and next_due > resolved_now:
+        return _skipped_result(feed.id, PollOutcome.SKIPPED_NOT_DUE)
+    return None
+
+
+def _decrypt_feed_url(
+    work: _FeedWorkContext, *, feed: IcalFeed, envelope: EnvelopeEncryptor
+) -> str | None:
+    try:
+        return ical_service.get_plaintext_url(
+            work.session, work.ctx, feed_id=feed.id, envelope=envelope
+        )
+    except Exception as exc:
+        _record_feed_error(
+            work,
+            feed=feed,
+            code="ical_url_malformed",
+            message=str(exc),
+        )
+        return None
+
+
+def _in_tick_rate_limit_result(
+    *,
+    feed_id: str,
+    url: str,
+    last_fetch_monotonic: dict[str, float],
+    rate_limit_seconds: float,
+) -> PolledFeedResult | None:
+    host = (urlsplit(url).hostname or "").lower()
+    if not host:
+        return None
+    now_monotonic = time.monotonic()
+    previous = last_fetch_monotonic.get(host)
+    if previous is not None and (now_monotonic - previous) < rate_limit_seconds:
+        return _rate_limited_result(feed_id)
+    last_fetch_monotonic[host] = now_monotonic
+    return None
+
+
+def _build_poll_report(
+    audit: PollTickAudit, *, per_feed_results: tuple[PolledFeedResult, ...]
+) -> PollReport:
     return PollReport(
         feeds_walked=audit.feeds_walked,
         feeds_polled=audit.feeds_polled,
@@ -939,7 +1038,7 @@ def poll_ical(
         closures_created=audit.closures_created,
         tick_started_at=audit.tick_started_at,
         tick_ended_at=audit.tick_ended_at,
-        per_feed_results=tuple(per_feed_results),
+        per_feed_results=per_feed_results,
     )
 
 
@@ -949,30 +1048,54 @@ def poll_ical(
 
 
 def _poll_one_feed(
-    session: Session,
-    ctx: WorkspaceContext,
+    work: _FeedWorkContext,
     *,
     feed: IcalFeed,
     url: str,
     fetcher: Fetcher | None,
     resolver: Resolver | None,
-    event_bus: EventBus,
-    clock: Clock,
-    resolved_now: datetime,
     poll_timeout_seconds: float,
     max_body_bytes: int,
     allow_private_addresses: bool,
     allow_self_signed: bool,
-) -> PolledFeedResult:  # code-health: ignore[nloc,params] Per-feed polling policy flow.
+) -> PolledFeedResult:  # code-health: ignore[params] Per-feed fetch policy boundary.
     """Fetch + parse + upsert one feed.
 
     Catches every per-feed failure into ``ical_feed.last_error`` and
     returns an :class:`PolledFeedResult`; never raises (the loop in
     :func:`poll_ical` would poison the rest of the tick).
     """
+    fetched = _fetch_feed_body(
+        work,
+        feed=feed,
+        url=url,
+        fetcher=fetcher,
+        resolver=resolver,
+        poll_timeout_seconds=poll_timeout_seconds,
+        max_body_bytes=max_body_bytes,
+        allow_private_addresses=allow_private_addresses,
+        allow_self_signed=allow_self_signed,
+    )
+    if isinstance(fetched, PolledFeedResult):
+        return fetched
+    return _handle_polled_body(work, feed=feed, polled=fetched)
+
+
+def _fetch_feed_body(  # code-health: ignore[params] Security fetch call boundary.
+    work: _FeedWorkContext,
+    *,
+    feed: IcalFeed,
+    url: str,
+    fetcher: Fetcher | None,
+    resolver: Resolver | None,
+    poll_timeout_seconds: float,
+    max_body_bytes: int,
+    allow_private_addresses: bool,
+    allow_self_signed: bool,
+) -> _PolledBody | PolledFeedResult:
     deadline = time.monotonic() + poll_timeout_seconds
     try:
-        polled = fetch_ical_body(
+        return fetch_ical_body(
             url,
             last_etag=feed.last_etag,
             deadline=deadline,
@@ -983,121 +1106,115 @@ def _poll_one_feed(
             allow_self_signed=allow_self_signed,
         )
     except IcalValidationError as exc:
-        _record_feed_error(
-            session,
-            ctx,
-            feed=feed,
-            code=exc.code,
-            message=str(exc),
-            clock=clock,
-            resolved_now=resolved_now,
-        )
+        _record_feed_error(work, feed=feed, code=exc.code, message=str(exc))
         return _error_result(feed.id, exc.code)
     except Exception as exc:
-        # Defensive: an unexpected exception (e.g. socket bug, OS
-        # signal mid-fetch) is captured into ``last_error`` so the
-        # operator UI can surface it. The loop continues; the
-        # exception class name lands as the message body.
         _record_feed_error(
-            session,
-            ctx,
+            work,
             feed=feed,
             code="ical_url_unreachable",
             message=f"{type(exc).__name__}: {exc}",
-            clock=clock,
-            resolved_now=resolved_now,
         )
         return _error_result(feed.id, "ical_url_unreachable")
 
+
+def _handle_polled_body(
+    work: _FeedWorkContext, *, feed: IcalFeed, polled: _PolledBody
+) -> PolledFeedResult:
     if polled.status == 304:
-        feed.last_polled_at = resolved_now
-        feed.last_error = None
-        if polled.etag is not None:
-            feed.last_etag = polled.etag
-        session.flush()
-        return _zero_count_result(feed.id, PollOutcome.NOT_MODIFIED)
+        return _handle_not_modified(work, feed=feed, polled=polled)
 
     if polled.status == 429:
-        # Honor ``Retry-After`` by pushing ``last_polled_at`` *forward*
-        # so :func:`_next_due` (which adds the default cadence) returns
-        # roughly ``resolved_now + retry_after``. When the upstream
-        # asks for a longer wait than the cadence (e.g. Airbnb says
-        # "back off 1 h"), this skips the feed for the next several
-        # ticks rather than blasting it again 15 min later. When
-        # Retry-After is shorter than the cadence (or absent), we
-        # simply stamp ``resolved_now`` and the feed waits one full
-        # cadence — never less, since the cadence is the spec floor.
-        retry_after = polled.retry_after_seconds
-        if retry_after is not None and retry_after > _DEFAULT_CADENCE_SECONDS:
-            feed.last_polled_at = resolved_now + timedelta(
-                seconds=retry_after - _DEFAULT_CADENCE_SECONDS
-            )
-        else:
-            feed.last_polled_at = resolved_now
-        feed.last_error = "rate_limited"
-        session.flush()
-        _log.info(
-            "iCal feed polling rate limited",
-            extra={
-                "event": "worker.poll_ical.rate_limited",
-                "feed_id": feed.id,
-                "retry_after_seconds": polled.retry_after_seconds,
-            },
-        )
-        return PolledFeedResult(
-            feed_id=feed.id,
-            status=PollOutcome.RATE_LIMITED,
-            error_code="rate_limited",
-            reservations_created=0,
-            reservations_updated=0,
-            reservations_cancelled=0,
-            closures_created=0,
-        )
+        return _handle_upstream_rate_limited(work, feed=feed, polled=polled)
 
     body = polled.body
     if body is None:
-        # Unreachable in practice — fetch_ical_body returns None body
-        # only on 304/429, both handled above. Belt-and-braces guard
-        # so a future status the helper grows isn't silently dropped.
         _record_feed_error(
-            session,
-            ctx,
+            work,
             feed=feed,
             code="ical_url_unreachable",
             message=f"unexpected None body on status {polled.status}",
-            clock=clock,
-            resolved_now=resolved_now,
         )
         return _error_result(feed.id, "ical_url_unreachable")
 
-    try:
-        events = _parse_calendar(body)
-    except _IcalParseError as exc:
-        _record_feed_error(
-            session,
-            ctx,
-            feed=feed,
-            code="ical_parse_error",
-            message=str(exc),
-            clock=clock,
-            resolved_now=resolved_now,
-        )
-        return _error_result(feed.id, "ical_parse_error")
+    events = _parse_feed_events(work, feed=feed, body=body)
+    if isinstance(events, PolledFeedResult):
+        return events
+    return _apply_polled_events(work, feed=feed, polled=polled, events=events)
 
-    counts = _apply_events(
-        session,
-        ctx,
-        feed=feed,
-        events=events,
-        event_bus=event_bus,
-        clock=clock,
-        resolved_now=resolved_now,
-    )
-    feed.last_polled_at = resolved_now
+
+def _handle_not_modified(
+    work: _FeedWorkContext, *, feed: IcalFeed, polled: _PolledBody
+) -> PolledFeedResult:
+    feed.last_polled_at = work.resolved_now
     feed.last_error = None
     if polled.etag is not None:
         feed.last_etag = polled.etag
-    session.flush()
+    work.session.flush()
+    return _zero_count_result(feed.id, PollOutcome.NOT_MODIFIED)
+
+
+def _handle_upstream_rate_limited(
+    work: _FeedWorkContext, *, feed: IcalFeed, polled: _PolledBody
+) -> PolledFeedResult:
+    feed.last_polled_at = _rate_limited_last_polled_at(
+        work.resolved_now, retry_after_seconds=polled.retry_after_seconds
+    )
+    feed.last_error = "rate_limited"
+    work.session.flush()
+    _log.info(
+        "iCal feed polling rate limited",
+        extra={
+            "event": "worker.poll_ical.rate_limited",
+            "feed_id": feed.id,
+            "retry_after_seconds": polled.retry_after_seconds,
+        },
+    )
+    return _rate_limited_result(feed.id)
+
+
+def _rate_limited_last_polled_at(
+    resolved_now: datetime, *, retry_after_seconds: int | None
+) -> datetime:
+    if retry_after_seconds is None or retry_after_seconds <= _DEFAULT_CADENCE_SECONDS:
+        return resolved_now
+    return resolved_now + timedelta(
+        seconds=retry_after_seconds - _DEFAULT_CADENCE_SECONDS
+    )
+
+
+def _parse_feed_events(
+    work: _FeedWorkContext, *, feed: IcalFeed, body: bytes
+) -> list[_ParsedVEvent] | PolledFeedResult:
+    try:
+        return _parse_calendar(body)
+    except _IcalParseError as exc:
+        _record_feed_error(
+            work,
+            feed=feed,
+            code="ical_parse_error",
+            message=str(exc),
+        )
+        return _error_result(feed.id, "ical_parse_error")
+
+
+def _apply_polled_events(
+    work: _FeedWorkContext,
+    *,
+    feed: IcalFeed,
+    polled: _PolledBody,
+    events: list[_ParsedVEvent],
+) -> PolledFeedResult:
+    counts = _apply_events(
+        work,
+        feed=feed,
+        events=events,
+    )
+    feed.last_polled_at = work.resolved_now
+    feed.last_error = None
+    if polled.etag is not None:
+        feed.last_etag = polled.etag
+    work.session.flush()
 
     _log.info(
         "iCal feed polling tick summary",
@@ -1238,15 +1355,11 @@ class _ApplyCounts:
     closures_created: int = 0
 
 
-def _apply_events(  # code-health: ignore[params] Parsed-event apply boundary.  # noqa: E501
-    session: Session,
-    ctx: WorkspaceContext,
+def _apply_events(
+    work: _FeedWorkContext,
     *,
     feed: IcalFeed,
     events: list[_ParsedVEvent],
-    event_bus: EventBus,
-    clock: Clock,
-    resolved_now: datetime,
 ) -> _ApplyCounts:
     """Upsert each parsed VEVENT and emit events.
 
@@ -1271,13 +1384,9 @@ def _apply_events(  # code-health: ignore[params] Parsed-event apply boundary.  
     for ev in events:
         if _is_blocked_summary(ev.summary):
             closure_change = _upsert_closure(
-                session,
-                ctx,
+                work,
                 feed=feed,
                 ev=ev,
-                event_bus=event_bus,
-                clock=clock,
-                resolved_now=resolved_now,
             )
             if closure_change == "created":
                 counts.closures_created += 1
@@ -1287,12 +1396,9 @@ def _apply_events(  # code-health: ignore[params] Parsed-event apply boundary.  
         # up on a row the in-band cancel already handled.
         booked_uids_seen.add(ev.uid)
         change_kind = _upsert_reservation(
-            session,
-            ctx,
+            work,
             feed=feed,
             ev=ev,
-            event_bus=event_bus,
-            resolved_now=resolved_now,
         )
         if change_kind == "created":
             counts.reservations_created += 1
@@ -1301,24 +1407,18 @@ def _apply_events(  # code-health: ignore[params] Parsed-event apply boundary.  
         elif change_kind == "cancelled":
             counts.reservations_cancelled += 1
     counts.reservations_cancelled += _cancel_disappeared_reservations(
-        session,
-        ctx,
+        work,
         feed=feed,
         seen_uids=booked_uids_seen,
-        event_bus=event_bus,
-        resolved_now=resolved_now,
     )
     return counts
 
 
 def _cancel_disappeared_reservations(
-    session: Session,
-    ctx: WorkspaceContext,
+    work: _FeedWorkContext,
     *,
     feed: IcalFeed,
     seen_uids: set[str],
-    event_bus: EventBus,
-    resolved_now: datetime,
 ) -> int:
     """Flip-to-cancelled any open Reservation whose UID is gone upstream.
 
@@ -1347,9 +1447,9 @@ def _cancel_disappeared_reservations(
         # NOTE: this also keeps a brand-new feed from cancelling
         # nothing on its first tick (no rows yet) cheaply.
         return 0
-    candidates = session.scalars(
+    candidates = work.session.scalars(
         select(Reservation)
-        .where(Reservation.workspace_id == ctx.workspace_id)
+        .where(Reservation.workspace_id == work.ctx.workspace_id)
         .where(Reservation.ical_feed_id == feed.id)
         .where(Reservation.source == "ical")
         .where(Reservation.status == "scheduled")
@@ -1358,17 +1458,12 @@ def _cancel_disappeared_reservations(
     cancelled = 0
     for row in candidates:
         row.status = "cancelled"
-        session.flush()
-        event_bus.publish(
-            ReservationUpserted(
-                workspace_id=ctx.workspace_id,
-                actor_id=ctx.actor_id,
-                correlation_id=ctx.audit_correlation_id,
-                occurred_at=resolved_now,
-                reservation_id=row.id,
-                feed_id=feed.id,
-                change_kind="cancelled",
-            )
+        work.session.flush()
+        _publish_reservation_upserted(
+            work,
+            feed_id=feed.id,
+            reservation_id=row.id,
+            change_kind="cancelled",
         )
         cancelled += 1
     return cancelled
@@ -1431,133 +1526,149 @@ def _is_blocked_summary(summary: str | None) -> bool:
     return False
 
 
-def _upsert_reservation(  # code-health: ignore[nloc] Reservation upsert policy flow.  # noqa: E501
-    session: Session,
-    ctx: WorkspaceContext,
+def _upsert_reservation(
+    work: _FeedWorkContext,
     *,
     feed: IcalFeed,
     ev: _ParsedVEvent,
-    event_bus: EventBus,
-    resolved_now: datetime,
 ) -> ReservationChangeKind | None:
     """Upsert one Reservation; return ``"created" | "updated" | "cancelled"``.
 
     Returns ``None`` when the row was already in the target shape
     (no-op re-poll) — the caller does not count or emit.
     """
-    existing = session.scalars(
+    existing = _find_reservation_for_event(work, feed=feed, ev=ev)
+
+    if ev.cancelled:
+        return _cancel_reservation(work, feed=feed, existing=existing)
+
+    if existing is None:
+        return _create_reservation(work, feed=feed, ev=ev)
+    return _update_reservation(work, feed=feed, ev=ev, existing=existing)
+
+
+def _find_reservation_for_event(
+    work: _FeedWorkContext, *, feed: IcalFeed, ev: _ParsedVEvent
+) -> Reservation | None:
+    return work.session.scalars(
         select(Reservation)
-        .where(Reservation.workspace_id == ctx.workspace_id)
+        .where(Reservation.workspace_id == work.ctx.workspace_id)
         .where(Reservation.ical_feed_id == feed.id)
         .where(Reservation.external_uid == ev.uid)
     ).one_or_none()
 
-    if ev.cancelled:
-        if existing is None:
-            # A cancellation for a UID we never ingested is a no-op:
-            # there's no row to mark cancelled and creating one would
-            # land a phantom "this booking was cancelled" record
-            # nobody asked for.
-            return None
-        if existing.status == "cancelled":
-            return None
-        existing.status = "cancelled"
-        session.flush()
-        event_bus.publish(
-            ReservationUpserted(
-                workspace_id=ctx.workspace_id,
-                actor_id=ctx.actor_id,
-                correlation_id=ctx.audit_correlation_id,
-                occurred_at=resolved_now,
-                reservation_id=existing.id,
-                feed_id=feed.id,
-                change_kind="cancelled",
-            )
-        )
-        return "cancelled"
 
-    if existing is None:
-        row = Reservation(
-            id=new_ulid(),
-            workspace_id=ctx.workspace_id,
-            property_id=feed.property_id,
-            ical_feed_id=feed.id,
-            external_uid=ev.uid,
-            check_in=ev.starts_at,
-            check_out=ev.ends_at,
-            guest_name=_guess_guest_name(ev.summary, ev.description),
-            guest_count=None,
-            status="scheduled",
-            source="ical",
-            raw_summary=ev.summary,
-            raw_description=ev.description,
-            created_at=resolved_now,
-        )
-        session.add(row)
-        session.flush()
-        event_bus.publish(
-            ReservationUpserted(
-                workspace_id=ctx.workspace_id,
-                actor_id=ctx.actor_id,
-                correlation_id=ctx.audit_correlation_id,
-                occurred_at=resolved_now,
-                reservation_id=row.id,
-                feed_id=feed.id,
-                change_kind="created",
-            )
-        )
-        return "created"
-
-    # Existing row — diff and update only the fields that moved. A
-    # no-op re-poll skips the event publish.
-    new_check_in = ev.starts_at
-    new_check_out = ev.ends_at
-    new_guest_name = _guess_guest_name(ev.summary, ev.description)
-    existing_check_in = _ensure_utc(existing.check_in)
-    existing_check_out = _ensure_utc(existing.check_out)
-    if (
-        existing_check_in == new_check_in
-        and existing_check_out == new_check_out
-        and existing.raw_summary == ev.summary
-        and existing.raw_description == ev.description
-        and existing.guest_name == new_guest_name
-        and existing.status == "scheduled"
-    ):
+def _cancel_reservation(
+    work: _FeedWorkContext, *, feed: IcalFeed, existing: Reservation | None
+) -> Literal["cancelled"] | None:
+    if existing is None or existing.status == "cancelled":
         return None
-    existing.check_in = new_check_in
-    existing.check_out = new_check_out
+    existing.status = "cancelled"
+    work.session.flush()
+    _publish_reservation_upserted(
+        work,
+        feed_id=feed.id,
+        reservation_id=existing.id,
+        change_kind="cancelled",
+    )
+    return "cancelled"
+
+
+def _create_reservation(
+    work: _FeedWorkContext, *, feed: IcalFeed, ev: _ParsedVEvent
+) -> Literal["created"]:
+    row = Reservation(
+        id=new_ulid(),
+        workspace_id=work.ctx.workspace_id,
+        property_id=feed.property_id,
+        ical_feed_id=feed.id,
+        external_uid=ev.uid,
+        check_in=ev.starts_at,
+        check_out=ev.ends_at,
+        guest_name=_guess_guest_name(ev.summary, ev.description),
+        guest_count=None,
+        status="scheduled",
+        source="ical",
+        raw_summary=ev.summary,
+        raw_description=ev.description,
+        created_at=work.resolved_now,
+    )
+    work.session.add(row)
+    work.session.flush()
+    _publish_reservation_upserted(
+        work,
+        feed_id=feed.id,
+        reservation_id=row.id,
+        change_kind="created",
+    )
+    return "created"
+
+
+def _update_reservation(
+    work: _FeedWorkContext,
+    *,
+    feed: IcalFeed,
+    ev: _ParsedVEvent,
+    existing: Reservation,
+) -> Literal["updated"] | None:
+    new_guest_name = _guess_guest_name(ev.summary, ev.description)
+    if _reservation_matches_event(existing, ev=ev, guest_name=new_guest_name):
+        return None
+    existing.check_in = ev.starts_at
+    existing.check_out = ev.ends_at
     existing.raw_summary = ev.summary
     existing.raw_description = ev.description
     existing.guest_name = new_guest_name
     if existing.status == "cancelled":
-        # Upstream uncancelled — return to scheduled. Other terminal
-        # states (``checked_in``, ``completed``) are workspace-side
-        # facts the poller must not overwrite.
         existing.status = "scheduled"
-    session.flush()
-    event_bus.publish(
-        ReservationUpserted(
-            workspace_id=ctx.workspace_id,
-            actor_id=ctx.actor_id,
-            correlation_id=ctx.audit_correlation_id,
-            occurred_at=resolved_now,
-            reservation_id=existing.id,
-            feed_id=feed.id,
-            change_kind="updated",
-        )
+    work.session.flush()
+    _publish_reservation_upserted(
+        work,
+        feed_id=feed.id,
+        reservation_id=existing.id,
+        change_kind="updated",
     )
     return "updated"
 
 
-def _upsert_closure(  # code-health: ignore[nloc,params] Closure upsert policy flow.  # noqa: E501
-    session: Session,
-    ctx: WorkspaceContext,
+def _reservation_matches_event(
+    existing: Reservation, *, ev: _ParsedVEvent, guest_name: str | None
+) -> bool:
+    return (
+        _ensure_utc(existing.check_in) == ev.starts_at
+        and _ensure_utc(existing.check_out) == ev.ends_at
+        and existing.raw_summary == ev.summary
+        and existing.raw_description == ev.description
+        and existing.guest_name == guest_name
+        and existing.status == "scheduled"
+    )
+
+
+def _publish_reservation_upserted(
+    work: _FeedWorkContext,
+    *,
+    feed_id: str,
+    reservation_id: str,
+    change_kind: ReservationChangeKind,
+) -> None:
+    work.event_bus.publish(
+        ReservationUpserted(
+            workspace_id=work.ctx.workspace_id,
+            actor_id=work.ctx.actor_id,
+            correlation_id=work.ctx.audit_correlation_id,
+            occurred_at=work.resolved_now,
+            reservation_id=reservation_id,
+            feed_id=feed_id,
+            change_kind=change_kind,
+        )
+    )
+
+
+def _upsert_closure(
+    work: _FeedWorkContext,
     *,
     feed: IcalFeed,
     ev: _ParsedVEvent,
-    event_bus: EventBus,
-    clock: Clock,
-    resolved_now: datetime,
 ) -> Literal["created", "updated"] | None:
     """Insert or update an iCal-sourced :class:`PropertyClosure`.
 
@@ -1567,84 +1678,84 @@ def _upsert_closure(  # code-health: ignore[nloc,params] Closure upsert policy f
     poll observes the UID absent and a later poll sees it again, the
     upstream has reasserted the block and the row is reopened.
     """
-    row = session.scalars(
+    row = _find_closure_for_event(work, feed=feed, ev=ev)
+
+    if row is not None:
+        return _update_existing_closure(work, feed=feed, ev=ev, row=row)
+    return _create_closure(work, feed=feed, ev=ev)
+
+
+def _find_closure_for_event(
+    work: _FeedWorkContext, *, feed: IcalFeed, ev: _ParsedVEvent
+) -> PropertyClosure | None:
+    row = work.session.scalars(
         select(PropertyClosure)
         .where(PropertyClosure.property_id == feed.property_id)
         .where(PropertyClosure.source_ical_feed_id == feed.id)
         .where(PropertyClosure.source_external_uid == ev.uid)
     ).first()
-    if row is None:
-        row = session.scalars(
-            select(PropertyClosure)
-            .where(PropertyClosure.property_id == feed.property_id)
-            .where(PropertyClosure.source_ical_feed_id == feed.id)
-            .where(PropertyClosure.source_external_uid.is_(None))
-            .where(PropertyClosure.starts_at == ev.starts_at)
-            .where(PropertyClosure.ends_at == ev.ends_at)
-        ).first()
-
     if row is not None:
-        if row.deleted_at is not None:
-            if _deleted_closure_reasserted(row, previous_poll_at=feed.last_polled_at):
-                row.unit_id = feed.unit_id
-                row.starts_at = ev.starts_at
-                row.ends_at = ev.ends_at
-                row.reason = "ical_unavailable"
-                row.source_external_uid = ev.uid
-                row.source_last_seen_at = resolved_now
-                row.deleted_at = None
-                session.flush()
-                event_bus.publish(
-                    PropertyClosureCreated(
-                        workspace_id=ctx.workspace_id,
-                        actor_id=ctx.actor_id,
-                        correlation_id=ctx.audit_correlation_id,
-                        occurred_at=resolved_now,
-                        closure_id=row.id,
-                        property_id=feed.property_id,
-                        starts_at=ev.starts_at,
-                        ends_at=ev.ends_at,
-                        reason="ical_unavailable",
-                        source_ical_feed_id=feed.id,
-                    )
-                )  # code-health: ignore[duplicate] iCal event fields kept explicit.  # noqa: E501
-                return "created"
-            row.source_external_uid = ev.uid
-            row.source_last_seen_at = resolved_now
-            session.flush()
-            return None
+        return row
+    return work.session.scalars(
+        select(PropertyClosure)
+        .where(PropertyClosure.property_id == feed.property_id)
+        .where(PropertyClosure.source_ical_feed_id == feed.id)
+        .where(PropertyClosure.source_external_uid.is_(None))
+        .where(PropertyClosure.starts_at == ev.starts_at)
+        .where(PropertyClosure.ends_at == ev.ends_at)
+    ).first()
 
-        changed = (
-            _ensure_utc(row.starts_at) != ev.starts_at
-            or _ensure_utc(row.ends_at) != ev.ends_at
-            or row.reason != "ical_unavailable"
-            or row.unit_id != feed.unit_id
-        )
-        row.unit_id = feed.unit_id
-        row.starts_at = ev.starts_at
-        row.ends_at = ev.ends_at
-        row.reason = "ical_unavailable"
-        row.source_external_uid = ev.uid
-        row.source_last_seen_at = resolved_now
-        session.flush()
-        if changed:
-            event_bus.publish(
-                PropertyClosureUpdated(
-                    workspace_id=ctx.workspace_id,
-                    actor_id=ctx.actor_id,
-                    correlation_id=ctx.audit_correlation_id,
-                    occurred_at=resolved_now,
-                    closure_id=row.id,
-                    property_id=feed.property_id,
-                    starts_at=ev.starts_at,
-                    ends_at=ev.ends_at,
-                    reason="ical_unavailable",
-                    source_ical_feed_id=feed.id,
-                )
-            )
-            return "updated"
+
+def _update_existing_closure(
+    work: _FeedWorkContext,
+    *,
+    feed: IcalFeed,
+    ev: _ParsedVEvent,
+    row: PropertyClosure,
+) -> Literal["created", "updated"] | None:
+    if row.deleted_at is not None:
+        return _update_deleted_closure(work, feed=feed, ev=ev, row=row)
+    return _update_active_closure(work, feed=feed, ev=ev, row=row)
+
+
+def _update_deleted_closure(
+    work: _FeedWorkContext,
+    *,
+    feed: IcalFeed,
+    ev: _ParsedVEvent,
+    row: PropertyClosure,
+) -> Literal["created"] | None:
+    if _deleted_closure_reasserted(row, previous_poll_at=feed.last_polled_at):
+        _apply_closure_event_fields(work, feed=feed, ev=ev, row=row)
+        row.deleted_at = None
+        work.session.flush()
+        _publish_closure_created(work, feed=feed, ev=ev, closure_id=row.id)
+        return "created"
+    row.source_external_uid = ev.uid
+    row.source_last_seen_at = work.resolved_now
+    work.session.flush()
+    return None
+
+
+def _update_active_closure(
+    work: _FeedWorkContext,
+    *,
+    feed: IcalFeed,
+    ev: _ParsedVEvent,
+    row: PropertyClosure,
+) -> Literal["updated"] | None:
+    changed = _closure_fields_changed(row, feed=feed, ev=ev)
+    _apply_closure_event_fields(work, feed=feed, ev=ev, row=row)
+    work.session.flush()
+    if not changed:
         return None
+    _publish_closure_updated(work, feed=feed, ev=ev, closure_id=row.id)
+    return "updated"
 
+
+def _create_closure(
+    work: _FeedWorkContext, *, feed: IcalFeed, ev: _ParsedVEvent
+) -> Literal["created"]:
     row = PropertyClosure(
         id=new_ulid(),
         property_id=feed.property_id,
@@ -1654,19 +1765,56 @@ def _upsert_closure(  # code-health: ignore[nloc,params] Closure upsert policy f
         reason="ical_unavailable",
         source_ical_feed_id=feed.id,
         source_external_uid=ev.uid,
-        source_last_seen_at=resolved_now,
+        source_last_seen_at=work.resolved_now,
         created_by_user_id=None,
-        created_at=resolved_now,
+        created_at=work.resolved_now,
     )
-    session.add(row)
-    session.flush()
-    event_bus.publish(
+    work.session.add(row)
+    work.session.flush()
+    _publish_closure_created(work, feed=feed, ev=ev, closure_id=row.id)
+    return "created"
+
+
+def _closure_fields_changed(
+    row: PropertyClosure, *, feed: IcalFeed, ev: _ParsedVEvent
+) -> bool:
+    return (
+        _ensure_utc(row.starts_at) != ev.starts_at
+        or _ensure_utc(row.ends_at) != ev.ends_at
+        or row.reason != "ical_unavailable"
+        or row.unit_id != feed.unit_id
+    )
+
+
+def _apply_closure_event_fields(
+    work: _FeedWorkContext,
+    *,
+    feed: IcalFeed,
+    ev: _ParsedVEvent,
+    row: PropertyClosure,
+) -> None:
+    row.unit_id = feed.unit_id
+    row.starts_at = ev.starts_at
+    row.ends_at = ev.ends_at
+    row.reason = "ical_unavailable"
+    row.source_external_uid = ev.uid
+    row.source_last_seen_at = work.resolved_now
+
+
+def _publish_closure_created(
+    work: _FeedWorkContext,
+    *,
+    feed: IcalFeed,
+    ev: _ParsedVEvent,
+    closure_id: str,
+) -> None:
+    work.event_bus.publish(
         PropertyClosureCreated(
-            workspace_id=ctx.workspace_id,
-            actor_id=ctx.actor_id,
-            correlation_id=ctx.audit_correlation_id,
-            occurred_at=resolved_now,
-            closure_id=row.id,
+            workspace_id=work.ctx.workspace_id,
+            actor_id=work.ctx.actor_id,
+            correlation_id=work.ctx.audit_correlation_id,
+            occurred_at=work.resolved_now,
+            closure_id=closure_id,
             property_id=feed.property_id,
             starts_at=ev.starts_at,
             ends_at=ev.ends_at,
@@ -1674,7 +1822,29 @@ def _upsert_closure(  # code-health: ignore[nloc,params] Closure upsert policy f
             source_ical_feed_id=feed.id,
         )
     )
-    return "created"
+
+
+def _publish_closure_updated(
+    work: _FeedWorkContext,
+    *,
+    feed: IcalFeed,
+    ev: _ParsedVEvent,
+    closure_id: str,
+) -> None:
+    work.event_bus.publish(
+        PropertyClosureUpdated(
+            workspace_id=work.ctx.workspace_id,
+            actor_id=work.ctx.actor_id,
+            correlation_id=work.ctx.audit_correlation_id,
+            occurred_at=work.resolved_now,
+            closure_id=closure_id,
+            property_id=feed.property_id,
+            starts_at=ev.starts_at,
+            ends_at=ev.ends_at,
+            reason="ical_unavailable",
+            source_ical_feed_id=feed.id,
+        )
+    )
 
 
 def _deleted_closure_reasserted(
@@ -1726,15 +1896,12 @@ def _guess_guest_name(summary: str | None, description: str | None) -> str | Non
 # ---------------------------------------------------------------------------
 
 
-def _record_feed_error(  # code-health: ignore[params] Feed error audit boundary.  # noqa: E501
-    session: Session,
-    ctx: WorkspaceContext,
+def _record_feed_error(
+    work: _FeedWorkContext,
     *,
     feed: IcalFeed,
     code: str,
     message: str,
-    clock: Clock,
-    resolved_now: datetime,
 ) -> None:
     """Stamp ``last_error`` + ``last_polled_at`` and audit the failure.
 
@@ -1743,12 +1910,12 @@ def _record_feed_error(  # code-health: ignore[params] Feed error audit boundary
     rather than the workspace so operators can grep one feed's
     failure history.
     """
-    feed.last_polled_at = resolved_now
+    feed.last_polled_at = work.resolved_now
     feed.last_error = code
-    session.flush()
+    work.session.flush()
     write_audit(
-        session,
-        ctx,
+        work.session,
+        work.ctx,
         entity_kind="ical_feed",
         entity_id=feed.id,
         action="poll_failed",
@@ -1759,9 +1926,9 @@ def _record_feed_error(  # code-health: ignore[params] Feed error audit boundary
             # a TLS error class) but never the URL itself — the
             # caller is responsible for not leaking the secret.
             "error_message": _redact_message(message),
-            "polled_at": resolved_now.isoformat(),
+            "polled_at": work.resolved_now.isoformat(),
         },
-        clock=clock,
+        clock=work.clock,
     )
 
 
@@ -1805,6 +1972,18 @@ def _error_result(feed_id: str, code: str) -> PolledFeedResult:
         feed_id=feed_id,
         status=PollOutcome.ERROR,
         error_code=code,
+        reservations_created=0,
+        reservations_updated=0,
+        reservations_cancelled=0,
+        closures_created=0,
+    )
+
+
+def _rate_limited_result(feed_id: str) -> PolledFeedResult:
+    return PolledFeedResult(
+        feed_id=feed_id,
+        status=PollOutcome.RATE_LIMITED,
+        error_code="rate_limited",
         reservations_created=0,
         reservations_updated=0,
         reservations_cancelled=0,
