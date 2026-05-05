@@ -289,6 +289,16 @@ describe("runPasskeyLoginCeremony — error mapping", () => {
     expect(err).toBeInstanceOf(PasskeyTransientError);
   });
 
+  it("maps NotReadableError → PasskeyTransientError", async () => {
+    const err = await mapDomException(new DOMException("authenticator unavailable", "NotReadableError"));
+    expect(err).toBeInstanceOf(PasskeyTransientError);
+  });
+
+  it("maps OperationError → PasskeyTransientError", async () => {
+    const err = await mapDomException(new DOMException("authenticator operation failed", "OperationError"));
+    expect(err).toBeInstanceOf(PasskeyTransientError);
+  });
+
   it("maps SecurityError → PasskeyUnsupportedError(kind='security')", async () => {
     const err = await mapDomException(new DOMException("insecure context", "SecurityError"));
     expect(err).toBeInstanceOf(PasskeyUnsupportedError);

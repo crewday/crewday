@@ -95,11 +95,12 @@ export class PasskeyTimeoutError extends Error {
 }
 
 /**
- * Thrown for transient platform-level failures: `UnknownError`
- * (the authenticator stack hit an internal error) and
- * `NetworkError` (the user agent failed to talk to a roaming
- * authenticator over its transport). The LoginPage should hint at
- * retry-with-backoff — these are usually self-healing.
+ * Thrown for transient platform-level failures: `UnknownError`,
+ * `NotReadableError`, or `OperationError` (the authenticator stack
+ * hit an internal error) and `NetworkError` (the user agent failed
+ * to talk to a roaming authenticator over its transport). The
+ * LoginPage should hint at retry-with-backoff — these are usually
+ * self-healing.
  */
 export class PasskeyTransientError extends Error {
   constructor(message: string, cause?: unknown) {
@@ -325,7 +326,12 @@ export function mapNavigatorError(err: unknown): Error {
     if (err.name === "TimeoutError") {
       return new PasskeyTimeoutError(err);
     }
-    if (err.name === "UnknownError" || err.name === "NetworkError") {
+    if (
+      err.name === "UnknownError"
+      || err.name === "NetworkError"
+      || err.name === "NotReadableError"
+      || err.name === "OperationError"
+    ) {
       return new PasskeyTransientError(err.message || err.name, err);
     }
     if (err.name === "SecurityError") {
