@@ -37,6 +37,7 @@ from collections.abc import Iterator
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from pydantic import SecretStr
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -45,6 +46,7 @@ from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.identity.models import User, UserPushToken
 from app.api.deps import db_session as db_session_dep
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.auth import me_push_tokens as me_push_tokens_module
 from app.auth.session import SESSION_COOKIE_NAME, issue
 from app.config import Settings
@@ -168,6 +170,7 @@ def _build_client(
     monkeypatch.setattr("app.api.v1.auth.me_push_tokens.get_settings", lambda: settings)
 
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(
         me_push_tokens_module.build_me_push_tokens_router(),
         prefix="/api/v1",
@@ -248,6 +251,17 @@ def _issue_session(
         )
         s.commit()
         return result.cookie_value
+
+
+def _assert_problem_json_error(
+    response: Response,
+    *,
+    status_code: int,
+    error: str,
+) -> None:
+    assert response.status_code == status_code, response.text
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    assert response.json()["error"] == error
 
 
 # ---------------------------------------------------------------------------
@@ -373,7 +387,15 @@ class TestPostMePushToken:
             json={"platform": "android", "token": "fcm-handle"},
         )
         assert r.status_code == 501
-        assert r.json()["detail"]["error"] == "push_unavailable"
+        assert r.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+        assert r.json() == {
+            "type": "https://crewday.dev/errors/not_implemented",
+            "title": "Not implemented",
+            "status": 501,
+            "instance": "/api/v1/me/push-tokens",
+            "detail": "native push delivery is not enabled on this deployment",
+            "error": "push_unavailable",
+        }
 
     def test_get_and_delete_live_when_gate_off(
         self,
@@ -454,8 +476,7 @@ class TestPostMePushToken:
             "/api/v1/me/push-tokens",
             json={"platform": "android", "token": "shared-handle"},
         )
-        assert r2.status_code == 409
-        assert r2.json()["detail"]["error"] == "token_claimed"
+        _assert_problem_json_error(r2, status_code=409, error="token_claimed")
 
     def test_register_unknown_platform_is_422(
         self,
@@ -546,8 +567,11 @@ class TestSelfOnly:
             f"/api/v1/me/push-tokens/{token_id}",
             json={},
         )
-        assert r_put.status_code == 404
-        assert r_put.json()["detail"]["error"] == "push_token_not_found"
+        _assert_problem_json_error(
+            r_put,
+            status_code=404,
+            error="push_token_not_found",
+        )
 
     def test_delete_cross_user_target_is_silent_204(
         self,
@@ -605,20 +629,17 @@ class TestAuth:
             "/api/v1/me/push-tokens",
             json={"platform": "android", "token": "h"},
         )
-        assert r.status_code == 401
-        assert r.json()["detail"]["error"] == "session_required"
+        _assert_problem_json_error(r, status_code=401, error="session_required")
 
     def test_get_without_cookie_is_401(self, client_on: TestClient) -> None:
         client_on.cookies.clear()
         r = client_on.get("/api/v1/me/push-tokens")
-        assert r.status_code == 401
-        assert r.json()["detail"]["error"] == "session_required"
+        _assert_problem_json_error(r, status_code=401, error="session_required")
 
     def test_delete_without_cookie_is_401(self, client_on: TestClient) -> None:
         client_on.cookies.clear()
         r = client_on.delete("/api/v1/me/push-tokens/01HWA00000000000000000NOPE")
-        assert r.status_code == 401
-        assert r.json()["detail"]["error"] == "session_required"
+        _assert_problem_json_error(r, status_code=401, error="session_required")
 
     def test_put_without_cookie_is_401(self, client_on: TestClient) -> None:
         client_on.cookies.clear()
@@ -626,5 +647,4 @@ class TestAuth:
             "/api/v1/me/push-tokens/01HWA00000000000000000NOPE",
             json={},
         )
-        assert r.status_code == 401
-        assert r.json()["detail"]["error"] == "session_required"
+        _assert_problem_json_error(r, status_code=401, error="session_required")
