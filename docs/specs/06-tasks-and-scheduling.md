@@ -206,7 +206,7 @@ triggered — is one `occurrence` row. The schema:
 | title                        | text      | copied from template; editable                |
 | description_md               | text      |                                               |
 | priority                     | enum      |                                               |
-| state                        | enum      | `scheduled | pending | in_progress | completed | skipped | cancelled | overdue` |
+| state                        | enum      | `scheduled | pending | in_progress | completed | skipped | approved | cancelled | overdue` |
 | overdue_since                | tstz?     | set when worker flips `state=overdue`; cleared on manual state change |
 | scheduled_for_local          | tstz      | local at property tz, plus UTC mirror         |
 | scheduled_for_utc            | tstz      |                                               |
@@ -256,7 +256,7 @@ refresh.
           └──► overdue (auto, after due_by_utc)
 ```
 
-The canonical enum lives in §02 (`task_state`, 7 values including
+The canonical enum lives in §02 (`task_state`, 8 values including
 `pending`).
 
 - `scheduled` → `pending` happens at `scheduled_for_utc - 1h` (or

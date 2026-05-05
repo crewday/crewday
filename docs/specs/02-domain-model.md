@@ -1835,7 +1835,7 @@ Defined once per document where the enum lives; summarized here.
 - `permission_rule.effect`: `allow | deny`
 - `property_workspace.membership_role`: `owner_workspace | managed_workspace | observer_workspace`
 - `user_workspace.source`: `workspace_grant | property_grant | org_grant | work_engagement`
-- `task_state`: `scheduled | pending | in_progress | completed | skipped | cancelled | overdue`
+- `task_state`: `scheduled | pending | in_progress | completed | skipped | approved | cancelled | overdue`
 - `stay_status`: `tentative | confirmed | in_house | checked_out | cancelled`
 - `stay_source`: `manual | airbnb | vrbo | booking | google_calendar | ical`
 - `pay_rule_kind`: `hourly | monthly_salary | per_task | piecework`

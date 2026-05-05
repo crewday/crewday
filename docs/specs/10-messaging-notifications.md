@@ -463,10 +463,11 @@ user.*               created, updated, archived, reinstated
 role_grant.*         granted, revoked, updated
 work_engagement.*    created, updated, archived, reinstated,
                      engagement_kind_changed
-task.*               created, assigned, updated, started, completed,
-                     complete_superseded, skipped, cancelled, overdue,
-                     unassigned_pre_arrival, primary_unavailable
-task_comment.*       created
+task.*               created, updated, assigned, reassigned, unassigned,
+                     primary_unavailable, completed, occurrence.started,
+                     occurrence.completed, approval_requested, approved,
+                     rejected, changes_requested, evidence_added, skipped,
+                     cancelled, comment_added, overdue
 stay.*               created, updated, upcoming, in_house, checked_out,
                      cancelled, conflict
 stay_lifecycle_rule.* created, updated, deleted
