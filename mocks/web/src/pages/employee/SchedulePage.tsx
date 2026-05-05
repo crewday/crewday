@@ -981,7 +981,7 @@ function DayDrawer({
         body,
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["my-schedule"] });
+      qc.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
       qc.invalidateQueries({ queryKey: qk.bookings() });
     },
   });
@@ -993,7 +993,7 @@ function DayDrawer({
         body: { reason },
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["my-schedule"] });
+      qc.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
       qc.invalidateQueries({ queryKey: qk.bookings() });
     },
   });
@@ -1414,9 +1414,8 @@ function InfiniteScheduleBody({
   const q = useInfiniteQuery({
     // Single key for the whole infinite stream so React Query keeps
     // accumulated pages across re-renders. Mutations elsewhere
-    // invalidate `["my-schedule", ...]` by prefix and pick this one
-    // up too.
-    queryKey: ["my-schedule", "infinite", initialMondayIso] as const,
+    // invalidate via `qk.mySchedulePrefix()` and pick this one up too.
+    queryKey: qk.mySchedulePages(initialMondayIso),
     initialPageParam: initialMondayIso,
     queryFn: ({ pageParam }) => {
       const fromIso = pageParam;
@@ -2135,7 +2134,7 @@ function BookingProposeDialog({
         body,
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["my-schedule"] });
+      qc.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
       qc.invalidateQueries({ queryKey: qk.bookings() });
       onClose();
     },

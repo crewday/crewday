@@ -58,6 +58,46 @@ describe("mocks SSE dispatcher — task_template lifecycle (cd-wyq5)", () => {
   });
 });
 
+describe("mocks SSE dispatcher — schedule invalidation prefixes", () => {
+  it("invalidates my-schedule through the query-key helper", () => {
+    for (const type of [
+      "user_leave.upserted",
+      "user_availability_override.upserted",
+      "booking.created",
+    ] as const) {
+      const qc = makeClient();
+      const spy = vi.spyOn(qc, "invalidateQueries");
+      dispatch(qc, {
+        type,
+        data: JSON.stringify({ id: "row_1" }),
+      });
+      const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+      expect(called).toEqual(expect.arrayContaining([qk.mySchedulePrefix()]));
+    }
+  });
+
+  it("invalidates scheduler-calendar through the query-key helper", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    dispatch(qc, {
+      type: "schedule_ruleset.upserted",
+      data: JSON.stringify({ ruleset_id: "rs_1" }),
+    });
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([qk.schedulerCalendarPrefix()]),
+    );
+  });
+
+  it("keeps infinite schedule pages under the helper prefix", () => {
+    expect(qk.mySchedulePages("2026-04-20")).toEqual([
+      ...qk.mySchedulePrefix(),
+      "infinite",
+      "2026-04-20",
+    ]);
+  });
+});
+
 describe("mocks SSE dispatcher — API token lifecycle", () => {
   it("created invalidates the token list", () => {
     const qc = makeClient();

@@ -217,16 +217,16 @@ export function dispatch(client: QueryClient, evt: TypedEvent): void {
       // §14 cd-93wp — worker self-create or manager edit of a
       // previously-decided leave row. `approval.decided` misses both
       // branches; refresh the worker schedule + the leaves list.
-      // Schedule keys are `["my-schedule", from, to]`, so invalidate by
-      // root prefix to catch every mounted window.
-      client.invalidateQueries({ queryKey: ["my-schedule"] });
+      // Schedule pages share `qk.mySchedulePrefix()`, so invalidate by
+      // prefix to catch every mounted window.
+      client.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
       client.invalidateQueries({ queryKey: qk.leaves() });
       return;
     case "user_availability_override.upserted":
       // §14 cd-93wp — same fan-out story as user_leave.upserted but
       // for availability overrides; the override list lives under
       // `qk.meOverrides()`.
-      client.invalidateQueries({ queryKey: ["my-schedule"] });
+      client.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
       client.invalidateQueries({ queryKey: qk.meOverrides() });
       return;
     case "expense.approved":
@@ -248,7 +248,7 @@ export function dispatch(client: QueryClient, evt: TypedEvent): void {
     case "schedule_ruleset.upserted":
     case "schedule_ruleset.deleted":
       client.invalidateQueries({ queryKey: qk.scheduleRulesets() });
-      client.invalidateQueries({ queryKey: ["scheduler-calendar"] });
+      client.invalidateQueries({ queryKey: qk.schedulerCalendarPrefix() });
       return;
     case "booking.created":
     case "booking.amended":
@@ -258,9 +258,9 @@ export function dispatch(client: QueryClient, evt: TypedEvent): void {
     case "booking.cancelled":
     case "booking.reassigned":
       // §09 booking lifecycle. `/schedule` keys include a window
-      // (`["my-schedule", from, to]`), so invalidate by the root
-      // prefix to catch every currently-mounted window.
-      client.invalidateQueries({ queryKey: ["my-schedule"] });
+      // (`qk.mySchedulePages(...)`), so invalidate by the prefix to
+      // catch every currently-mounted window.
+      client.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
       client.invalidateQueries({ queryKey: qk.bookings() });
       client.invalidateQueries({ queryKey: qk.dashboard() });
       return;

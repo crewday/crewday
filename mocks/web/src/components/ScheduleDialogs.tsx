@@ -30,7 +30,7 @@ function invalidateScheduleQueries(
   qc: ReturnType<typeof useQueryClient>,
   empId: string | null,
 ): void {
-  qc.invalidateQueries({ queryKey: ["my-schedule"] });
+  qc.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
   qc.invalidateQueries({ queryKey: qk.meOverrides() });
   qc.invalidateQueries({ queryKey: qk.me() });
   if (empId) qc.invalidateQueries({ queryKey: qk.employeeLeaves(empId) });
