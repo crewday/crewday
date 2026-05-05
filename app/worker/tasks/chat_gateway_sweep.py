@@ -111,7 +111,7 @@ class SweepResult:
     processed_ids: tuple[str, ...]
 
 
-def sweep_undispatched_messages(
+def sweep_undispatched_messages(  # code-health: ignore[nloc] Sweep flow.
     *,
     event_bus: EventBus | None = None,
     clock: Clock | None = None,

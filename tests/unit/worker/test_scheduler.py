@@ -172,6 +172,22 @@ class TestRegisterJobs:
         assert len(ids) == len(expected_ids)
         assert len(sched.get_jobs()) == len(expected_ids)
 
+    def test_heartbeat_next_run_time_matches_previous_registration(self) -> None:
+        """Heartbeat keeps the explicit paused first-run registration."""
+
+        async def _run() -> None:
+            sched = create_scheduler()
+            register_jobs(sched)
+            sched.start(paused=True)
+            try:
+                job = sched.get_job(HEARTBEAT_JOB_ID)
+                assert job is not None
+                assert job.next_run_time is None
+            finally:
+                stop(sched)
+
+        asyncio.run(_run())
+
 
 # ---------------------------------------------------------------------------
 # Overdue sweeper job (cd-hurw)

@@ -56,6 +56,7 @@ import contextlib
 import inspect
 import logging
 from collections.abc import Awaitable, Callable, Coroutine
+from dataclasses import dataclass
 from typing import Any
 
 from apscheduler.jobstores.base import JobLookupError
@@ -449,6 +450,19 @@ EXTRACT_DOCUMENT_INTERVAL_SECONDS: int = 30
 #   only as a ``RuntimeWarning`` — the heartbeat upsert would still
 #   succeed and ``/readyz`` would stay green while the work vanished).
 JobBody = Callable[[], None] | Callable[[], Awaitable[None]]
+type JobTrigger = CronTrigger | IntervalTrigger
+JobBodyFactory = Callable[[Clock, Settings | None], JobBody]
+
+
+@dataclass(frozen=True, slots=True)
+class JobSpec:
+    id: str
+    body_factory: JobBodyFactory
+    trigger_factory: Callable[[], JobTrigger]
+    misfire_grace_time: int
+    demo_only: bool = False
+    skip_in_demo: bool = False
+    pause_on_register: bool = False
 
 
 def create_scheduler(*, clock: Clock | None = None) -> AsyncIOScheduler:
@@ -528,19 +542,12 @@ def wrap_job(
     deliberately NOT caught — the process shutdown path needs those
     to propagate so the scheduler can run its own cleanup.
     """
-    import asyncio  # local import — asyncio is only needed when called
     import time as _time
 
     is_coroutine = inspect.iscoroutinefunction(func)
     job_label = sanitize_label(job_id)
 
     async def _runner() -> None:
-        # Bind a fresh request_id per tick so structured-log records
-        # the body emits get correlated end-to-end (the §16
-        # "Observability / Logs" key contract). Worker ticks are the
-        # subprocess-equivalent of an HTTP request — they need the
-        # same id discipline so an operator scraping the JSON stream
-        # can isolate one tick's lines from another's.
         request_id_token = set_request_id(new_request_id())
         start = _time.perf_counter()
         _log.info(
@@ -548,36 +555,7 @@ def wrap_job(
             extra={"event": "worker.tick.start", "job_id": job_id},
         )
         try:
-            # Killswitch (cd-8euz). A previous burst of failures has
-            # tipped this job's ``worker_heartbeat`` row into the
-            # ``dead`` state and an operator has not yet cleared it
-            # via ``crewday admin worker reset-job``. Skip the body,
-            # do not advance the heartbeat (so ``/readyz`` still
-            # surfaces the staleness), and bump the
-            # ``status="dead"`` counter so dashboards can distinguish
-            # the killswitch-skip from a legitimate ok / error tick.
-            #
-            # The killswitch read opens its own UoW; a transient DB
-            # outage here must NOT escape the wrapper (the original
-            # cd-7c0p contract was that ``wrap_job`` swallows every
-            # ``Exception`` so the broker stays alive). On a read
-            # failure we fail-open — log and run the body — because
-            # fail-closed would skip every tick on a momentary
-            # connectivity blip and the staleness window already
-            # escalates a persistent outage via ``/readyz``.
-            killswitch_dead = False
-            if heartbeat:
-                try:
-                    killswitch_dead = await asyncio.to_thread(_is_dead, job_id)
-                except Exception:
-                    _log.exception(
-                        "worker killswitch read failed; running body",
-                        extra={
-                            "event": "worker.job.killswitch_read_error",
-                            "job_id": job_id,
-                        },
-                    )
-            if killswitch_dead:
+            if await _job_is_dead(job_id, heartbeat=heartbeat):
                 WORKER_JOBS_TOTAL.labels(job=job_label, status="dead").inc()
                 _log.warning(
                     "worker tick skipped: job is dead",
@@ -585,85 +563,110 @@ def wrap_job(
                 )
                 return
 
-            ok = False
-            try:
-                if is_coroutine:
-                    # ``func`` is ``async def`` — invoke and await on
-                    # the event loop. ``asyncio.to_thread`` would call
-                    # the coroutine function, hand back an un-awaited
-                    # coroutine object, and silently skip the body.
-                    result = func()
-                    if inspect.isawaitable(result):
-                        await result
-                else:
-                    # Sync body — offload to the default executor so a
-                    # blocking DB op does not pin the event loop.
-                    await asyncio.to_thread(func)
-                ok = True
-            except Exception:
-                # The job body's own logging (if any) fires first;
-                # this backstop guarantees a record even if the body
-                # swallowed.
-                _log.exception(
-                    "worker tick failed",
-                    extra={"event": "worker.tick.error", "job_id": job_id},
-                )
-
-            if ok and heartbeat:
-                try:
-                    await asyncio.to_thread(_write_heartbeat, job_id, clock)
-                except Exception:
-                    # A heartbeat write failure is itself a signal —
-                    # log and move on. The next successful tick will
-                    # try again; if every tick fails the heartbeat
-                    # goes stale and ``/readyz`` catches it.
-                    _log.exception(
-                        "worker heartbeat write failed",
-                        extra={
-                            "event": "worker.heartbeat.error",
-                            "job_id": job_id,
-                        },
-                    )
-                    ok = False
-            elif not ok and heartbeat:
-                try:
-                    await asyncio.to_thread(_record_failure, job_id, clock)
-                except Exception:
-                    # The failure-state writer raising would mask the
-                    # original tick failure if we let it propagate.
-                    # Log and move on — the next failing tick retries
-                    # the increment, and a persistent DB outage
-                    # surfaces via ``/readyz`` going red anyway.
-                    _log.exception(
-                        "worker failure-state write failed",
-                        extra={
-                            "event": "worker.job.state_error",
-                            "job_id": job_id,
-                        },
-                    )
+            ok = await _run_job_body(func, is_coroutine=is_coroutine, job_id=job_id)
+            ok = await _record_tick_state(
+                ok,
+                heartbeat=heartbeat,
+                job_id=job_id,
+                clock=clock,
+            )
 
             duration = _time.perf_counter() - start
-            WORKER_JOB_DURATION_SECONDS.labels(job=job_label).observe(duration)
-            WORKER_JOBS_TOTAL.labels(
-                job=job_label,
-                status="ok" if ok else "error",
-            ).inc()
-
-            _log.info(
-                "worker tick finished",
-                extra={
-                    "event": "worker.tick.end",
-                    "job_id": job_id,
-                    "ok": ok,
-                },
+            _record_tick_metrics(
+                job_id=job_id,
+                job_label=job_label,
+                ok=ok,
+                duration=duration,
             )
         finally:
-            # Always restore — even if the heartbeat / metric path
-            # raised — so the request id ContextVar does not leak
-            # into the next tick scheduled on the same task.
             reset_request_id(request_id_token)
 
     return _runner
+
+
+async def _job_is_dead(job_id: str, *, heartbeat: bool) -> bool:
+    import asyncio
+
+    if not heartbeat:
+        return False
+    try:
+        return await asyncio.to_thread(_is_dead, job_id)
+    except Exception:
+        _log.exception(
+            "worker killswitch read failed; running body",
+            extra={"event": "worker.job.killswitch_read_error", "job_id": job_id},
+        )
+        return False
+
+
+async def _run_job_body(
+    func: JobBody,
+    *,
+    is_coroutine: bool,
+    job_id: str,
+) -> bool:
+    import asyncio
+
+    try:
+        if is_coroutine:
+            result = func()
+            if inspect.isawaitable(result):
+                await result
+        else:
+            await asyncio.to_thread(func)
+        return True
+    except Exception:
+        _log.exception(
+            "worker tick failed",
+            extra={"event": "worker.tick.error", "job_id": job_id},
+        )
+        return False
+
+
+async def _record_tick_state(
+    ok: bool,
+    *,
+    heartbeat: bool,
+    job_id: str,
+    clock: Clock,
+) -> bool:
+    import asyncio
+
+    if not heartbeat:
+        return ok
+    if ok:
+        try:
+            await asyncio.to_thread(_write_heartbeat, job_id, clock)
+            return True
+        except Exception:
+            _log.exception(
+                "worker heartbeat write failed",
+                extra={"event": "worker.heartbeat.error", "job_id": job_id},
+            )
+            return False
+    try:
+        await asyncio.to_thread(_record_failure, job_id, clock)
+    except Exception:
+        _log.exception(
+            "worker failure-state write failed",
+            extra={"event": "worker.job.state_error", "job_id": job_id},
+        )
+    return False
+
+
+def _record_tick_metrics(
+    *,
+    job_id: str,
+    job_label: str,
+    ok: bool,
+    duration: float,
+) -> None:
+    WORKER_JOB_DURATION_SECONDS.labels(job=job_label).observe(duration)
+    WORKER_JOBS_TOTAL.labels(job=job_label, status="ok" if ok else "error").inc()
+    _log.info(
+        "worker tick finished",
+        extra={"event": "worker.tick.end", "job_id": job_id, "ok": ok},
+    )
 
 
 def _write_heartbeat(job_id: str, clock: Clock) -> None:
@@ -704,6 +707,218 @@ def _record_failure(job_id: str, clock: Clock) -> job_state.FailureOutcome:
     return job_state.record_failure(job_id=job_id, clock=clock)
 
 
+def _clock_body(factory: Callable[[Clock], JobBody]) -> JobBodyFactory:
+    return lambda clock, _settings: factory(clock)
+
+
+def _settings_body(factory: Callable[[Settings, Clock], JobBody]) -> JobBodyFactory:
+    def _factory(clock: Clock, settings: Settings | None) -> JobBody:
+        if settings is None:
+            raise ValueError("settings are required for this worker job")
+        return factory(settings, clock)
+
+    return _factory
+
+
+def _static_body(func: JobBody) -> JobBodyFactory:
+    return lambda _clock, _settings: func
+
+
+def _interval(seconds: int) -> Callable[[], IntervalTrigger]:
+    return lambda: IntervalTrigger(seconds=seconds)
+
+
+def _cron(**kwargs: int) -> Callable[[], CronTrigger]:
+    return lambda: CronTrigger(**kwargs)
+
+
+def _job_specs() -> tuple[
+    JobSpec, ...
+]:  # code-health: ignore[nloc] Declarative scheduler job table.
+    return (
+        JobSpec(
+            HEARTBEAT_JOB_ID,
+            _static_body(_heartbeat_only_body),
+            _interval(HEARTBEAT_JOB_INTERVAL_SECONDS),
+            HEARTBEAT_JOB_INTERVAL_SECONDS,
+            pause_on_register=True,
+        ),
+        JobSpec(
+            GENERATOR_JOB_ID,
+            _clock_body(_make_generator_fanout_body),
+            _cron(minute=0),
+            600,
+        ),
+        JobSpec(
+            IDEMPOTENCY_SWEEP_JOB_ID,
+            _clock_body(_make_idempotency_sweep_body),
+            _cron(hour=3, minute=0),
+            3600,
+        ),
+        JobSpec(
+            RETENTION_ROTATION_JOB_ID,
+            _clock_body(_make_retention_rotation_body),
+            _cron(hour=3, minute=30),
+            3600,
+        ),
+        JobSpec(
+            LLM_BUDGET_REFRESH_JOB_ID,
+            _clock_body(_make_llm_budget_refresh_body),
+            _interval(LLM_BUDGET_REFRESH_INTERVAL_SECONDS),
+            90,
+        ),
+        JobSpec(
+            OVERDUE_DETECT_JOB_ID,
+            _clock_body(_make_overdue_fanout_body),
+            _interval(OVERDUE_DETECT_INTERVAL_SECONDS),
+            OVERDUE_DETECT_INTERVAL_SECONDS,
+        ),
+        JobSpec(
+            POLL_ICAL_JOB_ID,
+            _clock_body(_make_poll_ical_fanout_body),
+            _interval(POLL_ICAL_INTERVAL_SECONDS),
+            POLL_ICAL_MISFIRE_GRACE_SECONDS,
+            skip_in_demo=True,
+        ),
+        JobSpec(
+            USER_WORKSPACE_REFRESH_JOB_ID,
+            _clock_body(_make_user_workspace_refresh_body),
+            _interval(USER_WORKSPACE_REFRESH_INTERVAL_SECONDS),
+            USER_WORKSPACE_REFRESH_INTERVAL_SECONDS,
+        ),
+        JobSpec(
+            APPROVAL_TTL_JOB_ID,
+            _clock_body(_make_approval_ttl_body),
+            _interval(APPROVAL_TTL_INTERVAL_SECONDS),
+            APPROVAL_TTL_INTERVAL_SECONDS,
+        ),
+        JobSpec(
+            INVITE_TTL_JOB_ID,
+            _clock_body(_make_invite_ttl_body),
+            _interval(INVITE_TTL_INTERVAL_SECONDS),
+            INVITE_TTL_INTERVAL_SECONDS,
+        ),
+        JobSpec(
+            SIGNUP_GC_JOB_ID,
+            _clock_body(_make_signup_gc_body),
+            _interval(SIGNUP_GC_INTERVAL_SECONDS),
+            SIGNUP_GC_INTERVAL_SECONDS,
+        ),
+        JobSpec(
+            WEBHOOK_DISPATCH_JOB_ID,
+            _clock_body(_make_webhook_dispatch_body),
+            _interval(WEBHOOK_DISPATCH_INTERVAL_SECONDS),
+            WEBHOOK_DISPATCH_INTERVAL_SECONDS,
+            skip_in_demo=True,
+        ),
+        JobSpec(
+            CHAT_GATEWAY_SWEEP_JOB_ID,
+            _clock_body(_make_chat_gateway_sweep_body),
+            _interval(CHAT_GATEWAY_SWEEP_INTERVAL_SECONDS),
+            CHAT_GATEWAY_SWEEP_INTERVAL_SECONDS,
+        ),
+        JobSpec(
+            EXTRACT_DOCUMENT_JOB_ID,
+            _clock_body(_make_extract_document_body),
+            _interval(EXTRACT_DOCUMENT_INTERVAL_SECONDS),
+            EXTRACT_DOCUMENT_INTERVAL_SECONDS,
+        ),
+        JobSpec(
+            INVENTORY_REORDER_JOB_ID,
+            _clock_body(_make_inventory_reorder_body),
+            _cron(minute=0),
+            600,
+        ),
+        JobSpec(
+            DAILY_DIGEST_JOB_ID,
+            _clock_body(_make_daily_digest_fanout_body),
+            _cron(minute=0),
+            DAILY_DIGEST_MISFIRE_GRACE_SECONDS,
+            skip_in_demo=True,
+        ),
+        JobSpec(
+            WEB_PUSH_DISPATCH_JOB_ID,
+            _clock_body(_make_web_push_dispatch_body),
+            _interval(WEB_PUSH_DISPATCH_INTERVAL_SECONDS),
+            WEB_PUSH_DISPATCH_INTERVAL_SECONDS,
+            skip_in_demo=True,
+        ),
+        JobSpec(
+            EMAIL_DELIVERY_RETRY_JOB_ID,
+            _clock_body(_make_email_delivery_retry_body),
+            _interval(EMAIL_DELIVERY_RETRY_INTERVAL_SECONDS),
+            EMAIL_DELIVERY_RETRY_INTERVAL_SECONDS,
+            skip_in_demo=True,
+        ),
+        JobSpec(
+            AGENT_COMPACTION_JOB_ID,
+            _clock_body(_make_agent_compaction_body),
+            _interval(AGENT_COMPACTION_INTERVAL_SECONDS),
+            AGENT_COMPACTION_INTERVAL_SECONDS,
+            skip_in_demo=True,
+        ),
+        JobSpec(
+            DEMO_GC_JOB_ID,
+            _settings_body(_make_demo_gc_body),
+            _interval(DEMO_GC_INTERVAL_SECONDS),
+            DEMO_GC_INTERVAL_SECONDS,
+            demo_only=True,
+        ),
+        JobSpec(
+            DEMO_USAGE_ROLLUP_JOB_ID,
+            _clock_body(_make_demo_usage_rollup_body),
+            _interval(DEMO_USAGE_ROLLUP_INTERVAL_SECONDS),
+            90,
+            demo_only=True,
+        ),
+    )
+
+
+def _enabled_specs(
+    specs: tuple[JobSpec, ...], *, demo_mode: bool
+) -> tuple[JobSpec, ...]:
+    return tuple(
+        spec
+        for spec in specs
+        if (not spec.demo_only or demo_mode) and not (demo_mode and spec.skip_in_demo)
+    )
+
+
+def _remove_registered_jobs(
+    scheduler: AsyncIOScheduler, specs: tuple[JobSpec, ...]
+) -> None:
+    for spec in specs:
+        with contextlib.suppress(JobLookupError):
+            scheduler.remove_job(spec.id)
+
+
+def _add_registered_job(
+    scheduler: AsyncIOScheduler,
+    spec: JobSpec,
+    *,
+    clock: Clock,
+    settings: Settings | None,
+) -> None:
+    add_job_kwargs: dict[str, Any] = {}
+    if spec.pause_on_register:
+        add_job_kwargs["next_run_time"] = None
+    scheduler.add_job(
+        wrap_job(
+            spec.body_factory(clock, settings),
+            job_id=spec.id,
+            clock=clock,
+        ),
+        trigger=spec.trigger_factory(),
+        id=spec.id,
+        name=spec.id,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=spec.misfire_grace_time,
+        **add_job_kwargs,
+    )
+
+
 def register_jobs(
     scheduler: AsyncIOScheduler,
     *,
@@ -712,595 +927,23 @@ def register_jobs(
 ) -> None:
     """Register the standard job set on ``scheduler``.
 
-    Downstream tasks (cd-j9l7, cd-yqm4, the per-workspace occurrence
-    generator fan-out) extend this function by adding one call to
-    :meth:`scheduler.add_job` per job, each wrapped in
-    :func:`wrap_job`. Keeping the registration in one function lets
-    the lifespan hook and the ``__main__`` entrypoint share the same
-    job set without copying the body.
-
-    Idempotent — re-invoking ``register_jobs`` on the same scheduler
-    (test fixtures, supervised restart, module reload) removes any
-    existing job with the same id before the re-add. Note that
-    APScheduler's ``replace_existing=True`` only deduplicates when
-    the scheduler is actually running (started jobs live in the
-    jobstore); on a not-yet-started scheduler the pending-jobs
-    buffer is append-only, so an explicit :meth:`remove_job` is
-    required. We do both so a started and a pending scheduler
-    behave the same.
+    Job ids, trigger cadences, misfire grace, and demo-mode gating live
+    in :func:`_job_specs`; this function owns only the mechanics: resolve
+    the clock, clear stale pending jobs, and add enabled specs. The
+    explicit remove-before-add keeps registration idempotent for both
+    started schedulers and APScheduler's not-yet-started pending buffer.
     """
     resolved_clock = clock if clock is not None else _clock_for(scheduler)
     demo_mode = settings.demo_mode if settings is not None else False
+    specs = _job_specs()
 
-    # Drop any pre-existing entries for the ids we're about to add
-    # so the registration is idempotent regardless of scheduler
-    # state (see docstring). :class:`JobLookupError` is the expected
-    # path when the id is not present (first register_jobs call);
-    # we suppress it narrowly rather than swallowing ``Exception``
-    # so a genuinely broken jobstore still surfaces.
-    for pending_id in (
-        HEARTBEAT_JOB_ID,
-        GENERATOR_JOB_ID,
-        IDEMPOTENCY_SWEEP_JOB_ID,
-        LLM_BUDGET_REFRESH_JOB_ID,
-        OVERDUE_DETECT_JOB_ID,
-        POLL_ICAL_JOB_ID,
-        USER_WORKSPACE_REFRESH_JOB_ID,
-        APPROVAL_TTL_JOB_ID,
-        INVITE_TTL_JOB_ID,
-        SIGNUP_GC_JOB_ID,
-        WEBHOOK_DISPATCH_JOB_ID,
-        CHAT_GATEWAY_SWEEP_JOB_ID,
-        EXTRACT_DOCUMENT_JOB_ID,
-        INVENTORY_REORDER_JOB_ID,
-        DAILY_DIGEST_JOB_ID,
-        EMAIL_DELIVERY_RETRY_JOB_ID,
-        RETENTION_ROTATION_JOB_ID,
-        WEB_PUSH_DISPATCH_JOB_ID,
-        AGENT_COMPACTION_JOB_ID,
-        DEMO_GC_JOB_ID,
-        DEMO_USAGE_ROLLUP_JOB_ID,
-    ):
-        with contextlib.suppress(JobLookupError):
-            scheduler.remove_job(pending_id)
-
-    # --- Always-on heartbeat ---
-    # The simplest-possible job: write the heartbeat row and return.
-    # ``/readyz`` reads ``MAX(heartbeat_at)`` across the whole table
-    # so every wrapped job contributes to readiness, but this job
-    # exists so the worker has SOMETHING to bump even when no
-    # domain-level tick fires (e.g. during the window between the
-    # scheduler starting and the hourly generator's first run).
-    scheduler.add_job(
-        wrap_job(_heartbeat_only_body, job_id=HEARTBEAT_JOB_ID, clock=resolved_clock),
-        trigger=IntervalTrigger(seconds=HEARTBEAT_JOB_INTERVAL_SECONDS),
-        id=HEARTBEAT_JOB_ID,
-        name=HEARTBEAT_JOB_ID,
-        replace_existing=True,
-        # Fire immediately on scheduler start so ``/readyz`` flips
-        # green within the first tick window rather than waiting the
-        # full interval — important for container restart smoke tests
-        # and for the integration suite in this change.
-        next_run_time=None,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=HEARTBEAT_JOB_INTERVAL_SECONDS,
-    )
-
-    # --- Hourly occurrence generator fan-out (cd-dcl2) ---
-    # Single-workspace callable in ``app/worker/tasks/generator.py``;
-    # the per-tick fan-out across workspaces is built by
-    # :func:`_make_generator_fanout_body`. Cron-anchored at the top
-    # of every hour for the same operator-dashboard reasons cited in
-    # the idempotency-sweep block (cron cadence is stable across
-    # container restarts; an interval trigger would re-anchor on
-    # every ``scheduler.start()``).
-    scheduler.add_job(
-        wrap_job(
-            _make_generator_fanout_body(resolved_clock),
-            job_id=GENERATOR_JOB_ID,
+    _remove_registered_jobs(scheduler, specs)
+    for spec in _enabled_specs(specs, demo_mode=demo_mode):
+        _add_registered_job(
+            scheduler,
+            spec,
             clock=resolved_clock,
-        ),
-        trigger=CronTrigger(minute=0),
-        id=GENERATOR_JOB_ID,
-        name=GENERATOR_JOB_ID,
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        # Tolerate a scheduler restart that misses the top-of-hour
-        # firing by up to 10 min — running the tick late is strictly
-        # better than skipping it, because the generator's own
-        # idempotency (partial unique on ``(schedule_id,
-        # scheduled_for_local)``) makes a late run safe.
-        misfire_grace_time=600,
-    )
-
-    # --- Daily ``idempotency_key`` TTL sweep (cd-j9l7) ---
-    # Spec §12 "Idempotency" pins the cache TTL at 24 h. Without a
-    # periodic sweep the table grows unbounded — every retry adds a
-    # row and nothing deletes them. We schedule a CRON trigger at
-    # 03:00 UTC rather than an ``IntervalTrigger(hours=24)`` for two
-    # reasons:
-    #   1. Cron-based cadence is stable across container restarts; an
-    #      interval trigger re-anchors on each ``scheduler.start()``
-    #      so a deployment that restarts at noon would end up sweeping
-    #      at noon every day — harmless, but harder to reason about
-    #      from an operator dashboard that expects a fixed slot.
-    #   2. 03:00 UTC lands in the lowest-traffic window for the
-    #      North-Atlantic / European user base §16 assumes; the bulk
-    #      ``DELETE ... WHERE created_at < cutoff`` takes a brief row
-    #      lock on the backing index, so running it at the quiet hour
-    #      keeps the p99 of a concurrent ``POST`` retry low.
-    # ``misfire_grace_time=3600`` covers a scheduler restart around
-    # 03:00 — running the sweep up to an hour late is strictly better
-    # than skipping the day entirely. The callable is itself
-    # idempotent (``DELETE`` where ``created_at < cutoff`` over rows
-    # all older than the cutoff reaches zero after one run) so a
-    # duplicate run is free.
-    scheduler.add_job(
-        wrap_job(
-            _make_idempotency_sweep_body(resolved_clock),
-            job_id=IDEMPOTENCY_SWEEP_JOB_ID,
-            clock=resolved_clock,
-        ),
-        trigger=CronTrigger(hour=3, minute=0),
-        id=IDEMPOTENCY_SWEEP_JOB_ID,
-        name=IDEMPOTENCY_SWEEP_JOB_ID,
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=3600,
-    )
-
-    # --- Daily operational-log retention rotation (cd-vrfg) ---
-    scheduler.add_job(
-        wrap_job(
-            _make_retention_rotation_body(resolved_clock),
-            job_id=RETENTION_ROTATION_JOB_ID,
-            clock=resolved_clock,
-        ),
-        trigger=CronTrigger(hour=3, minute=30),
-        id=RETENTION_ROTATION_JOB_ID,
-        name=RETENTION_ROTATION_JOB_ID,
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=3600,
-    )
-
-    # --- 60 s LLM budget aggregate refresh (cd-ca1k) ---
-    # Spec §11 "Workspace usage budget" §"Meter" pins a 60 s cadence.
-    # The fan-out body iterates every workspace, builds a system-actor
-    # :class:`~app.tenancy.WorkspaceContext`, and calls
-    # :func:`~app.domain.llm.budget.refresh_aggregate`. The per-workspace
-    # call is idempotent (it rewrites ``spent_cents`` from the last 30
-    # days of ``llm_usage``), so a misfire that runs late or a coalesced
-    # tick is strictly safe.
-    #
-    # ``misfire_grace_time=90`` — one tick late is tolerated (idempotent
-    # rewrite) but a two-tick-late run is a signal the scheduler is
-    # stuck and a skip is preferable to a stacked catch-up.
-    # ``coalesce=True`` + ``max_instances=1`` keep a slow refresh from
-    # stacking ticks on an overloaded DB.
-    scheduler.add_job(
-        wrap_job(
-            _make_llm_budget_refresh_body(resolved_clock),
-            job_id=LLM_BUDGET_REFRESH_JOB_ID,
-            clock=resolved_clock,
-        ),
-        trigger=IntervalTrigger(seconds=LLM_BUDGET_REFRESH_INTERVAL_SECONDS),
-        id=LLM_BUDGET_REFRESH_JOB_ID,
-        name=LLM_BUDGET_REFRESH_JOB_ID,
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=90,
-    )
-
-    # --- 5 min soft-overdue sweeper fan-out (cd-hurw) ---
-    # Single-workspace callable in ``app/worker/tasks/overdue.py``;
-    # the per-tick fan-out across workspaces is built by
-    # :func:`_make_overdue_fanout_body`. Interval-anchored at 5 min;
-    # the cadence matches the spec default and the
-    # ``tasks.overdue_tick_seconds`` workspace setting (whose
-    # per-tenant override is the cd-settings-cascade follow-up — the
-    # scheduler wires the deployment-wide default for now). The
-    # detect_overdue body is itself idempotent (the load query
-    # excludes ``state='overdue'`` rows and the per-row UPDATE
-    # re-asserts the source-state predicate so a manual transition
-    # between ticks is preserved), so a misfire that runs late or a
-    # coalesced tick is strictly safe.
-    scheduler.add_job(
-        wrap_job(
-            _make_overdue_fanout_body(resolved_clock),
-            job_id=OVERDUE_DETECT_JOB_ID,
-            clock=resolved_clock,
-        ),
-        trigger=IntervalTrigger(seconds=OVERDUE_DETECT_INTERVAL_SECONDS),
-        id=OVERDUE_DETECT_JOB_ID,
-        name=OVERDUE_DETECT_JOB_ID,
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        # ``misfire_grace_time = OVERDUE_DETECT_INTERVAL_SECONDS`` —
-        # one tick late is fine (the body is idempotent), two-ticks
-        # late is a signal the scheduler is stuck and a skip is
-        # preferable to a stacked catch-up that hammers the DB on an
-        # already-strained host.
-        misfire_grace_time=OVERDUE_DETECT_INTERVAL_SECONDS,
-    )
-
-    # --- 15 min iCal poller fan-out (cd-d48) ---
-    # Single-workspace callable in ``app/worker/tasks/poll_ical.py``;
-    # the per-tick fan-out across workspaces is built by
-    # :func:`_make_poll_ical_fanout_body`. Interval-anchored at 15 min;
-    # the cadence matches the spec §04 default ``*/15 * * * *`` and
-    # the per-feed cadence guard inside :func:`poll_ical` filters
-    # feeds whose ``last_polled_at`` has not yet aged past the
-    # window — so a tick on a workspace whose feeds have all been
-    # polled inside the last 15 min is a near-no-op.
-    #
-    # ``misfire_grace_time = POLL_ICAL_MISFIRE_GRACE_SECONDS`` (10 min):
-    # a scheduler restart that misses the firing instant by up to
-    # 10 min still gets to run the catch-up tick (the body is
-    # idempotent — unchanged feeds are 304 short-circuits, Blocked
-    # / cancelled VEVENTs upsert in-place). Past 10 min a skip is
-    # preferable to a stacked catch-up that hammers upstream iCal
-    # endpoints + the per-host rate-limit on a fleet returning from
-    # a long pause.
-    if not demo_mode:
-        scheduler.add_job(
-            wrap_job(
-                _make_poll_ical_fanout_body(resolved_clock),
-                job_id=POLL_ICAL_JOB_ID,
-                clock=resolved_clock,
-            ),
-            trigger=IntervalTrigger(seconds=POLL_ICAL_INTERVAL_SECONDS),
-            id=POLL_ICAL_JOB_ID,
-            name=POLL_ICAL_JOB_ID,
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=POLL_ICAL_MISFIRE_GRACE_SECONDS,
-        )
-
-    # --- 5 min user_workspace derive-refresh (cd-yqm4) ---
-    # The reconciler in
-    # :mod:`app.domain.identity.user_workspace_refresh` is the
-    # canonical writer for the derived junction (§02
-    # "user_workspace"). Domain services (signup, grant, invite,
-    # remove_member) write the upstream rows; this tick brings
-    # ``user_workspace`` in line.
-    #
-    # ``misfire_grace_time = USER_WORKSPACE_REFRESH_INTERVAL_SECONDS``
-    # — one tick late is fine (the reconciler is idempotent: it
-    # rewrites the same set), but two-ticks-late is a signal the
-    # scheduler is stuck and a skip is preferable to a stacked
-    # catch-up. ``coalesce=True`` + ``max_instances=1`` keep a slow
-    # reconcile from stacking ticks on an overloaded DB.
-    scheduler.add_job(
-        wrap_job(
-            _make_user_workspace_refresh_body(resolved_clock),
-            job_id=USER_WORKSPACE_REFRESH_JOB_ID,
-            clock=resolved_clock,
-        ),
-        trigger=IntervalTrigger(seconds=USER_WORKSPACE_REFRESH_INTERVAL_SECONDS),
-        id=USER_WORKSPACE_REFRESH_JOB_ID,
-        name=USER_WORKSPACE_REFRESH_JOB_ID,
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=USER_WORKSPACE_REFRESH_INTERVAL_SECONDS,
-    )
-
-    # --- 15 min approval-request TTL sweep (cd-9ghv) ---
-    # The sweep callable in
-    # :mod:`app.worker.tasks.approval_ttl.sweep_expired_approvals`
-    # flips every ``approval_request`` row past its ``expires_at``
-    # from ``status='pending'`` to ``status='timed_out'`` and emits
-    # one :class:`~app.events.types.ApprovalDecided` per row. The
-    # sweep is deployment-scope (NOT per-workspace) — see the module
-    # docstring for the cross-tenant rationale.
-    #
-    # ``misfire_grace_time = APPROVAL_TTL_INTERVAL_SECONDS`` — one
-    # tick late is fine (the sweep is idempotent: rows in terminal
-    # state fall out of the predicate), two-ticks-late is a signal
-    # the scheduler is stuck and a skip is preferable to a stacked
-    # catch-up that hammers the DB on a fleet returning from a long
-    # pause. ``coalesce=True`` + ``max_instances=1`` keep a slow
-    # sweep from stacking ticks on an overloaded DB.
-    scheduler.add_job(
-        wrap_job(
-            _make_approval_ttl_body(resolved_clock),
-            job_id=APPROVAL_TTL_JOB_ID,
-            clock=resolved_clock,
-        ),
-        trigger=IntervalTrigger(seconds=APPROVAL_TTL_INTERVAL_SECONDS),
-        id=APPROVAL_TTL_JOB_ID,
-        name=APPROVAL_TTL_JOB_ID,
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=APPROVAL_TTL_INTERVAL_SECONDS,
-    )
-
-    # --- 15 min invite TTL expiry sweep (cd-za45) ---
-    # The sweep callable in
-    # :mod:`app.worker.tasks.invite_ttl.sweep_expired_invites`
-    # flips every ``invite`` row past its ``expires_at`` from
-    # ``state='pending'`` to ``state='expired'`` and emits one
-    # :class:`~app.events.types.InviteExpired` per row. The sweep is
-    # deployment-scope (NOT per-workspace) — see the module docstring
-    # for the cross-tenant rationale. Mirrors the sibling
-    # :data:`APPROVAL_TTL_JOB_ID` registration shape.
-    #
-    # ``misfire_grace_time = INVITE_TTL_INTERVAL_SECONDS`` — one tick
-    # late is fine (the sweep is idempotent: rows in terminal state
-    # fall out of the predicate), two-ticks-late is a signal the
-    # scheduler is stuck and a skip is preferable to a stacked
-    # catch-up. ``coalesce=True`` + ``max_instances=1`` keep a slow
-    # sweep from stacking ticks on an overloaded DB.
-    scheduler.add_job(
-        wrap_job(
-            _make_invite_ttl_body(resolved_clock),
-            job_id=INVITE_TTL_JOB_ID,
-            clock=resolved_clock,
-        ),
-        trigger=IntervalTrigger(seconds=INVITE_TTL_INTERVAL_SECONDS),
-        id=INVITE_TTL_JOB_ID,
-        name=INVITE_TTL_JOB_ID,
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=INVITE_TTL_INTERVAL_SECONDS,
-    )
-
-    # --- Hourly self-serve signup GC (cd-hnk40) ---
-    # The callable in :mod:`app.auth.signup.prune_stale_signups`
-    # deletes orphaned self-serve workspaces older than one hour with
-    # no membership rows and no completed signup attempt. The body is
-    # idempotent: once the orphan set is gone, a repeat tick returns
-    # an empty deleted-id list.
-    #
-    # ``misfire_grace_time = SIGNUP_GC_INTERVAL_SECONDS`` — one tick
-    # late is fine (the cutoff only gets older), two-ticks-late is a
-    # stuck-scheduler signal and a skip is preferable to stacked
-    # catch-up. ``coalesce=True`` + ``max_instances=1`` keep a slow
-    # cleanup from stacking on an overloaded DB.
-    scheduler.add_job(
-        wrap_job(
-            _make_signup_gc_body(resolved_clock),
-            job_id=SIGNUP_GC_JOB_ID,
-            clock=resolved_clock,
-        ),
-        trigger=IntervalTrigger(seconds=SIGNUP_GC_INTERVAL_SECONDS),
-        id=SIGNUP_GC_JOB_ID,
-        name=SIGNUP_GC_JOB_ID,
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=SIGNUP_GC_INTERVAL_SECONDS,
-    )
-
-    # --- 30 s outbound webhook dispatcher tick (cd-q885) ---
-    # The tick callable in
-    # :mod:`app.worker.tasks.webhook_dispatch.dispatch_due_webhooks`
-    # walks every ``webhook_delivery`` row whose ``status='pending'``
-    # and ``next_attempt_at <= now`` and fires one HTTP POST attempt.
-    # The §10 retry schedule is ``[0s, 30s, 5m, 1h, 6h, 24h]`` so the
-    # tick fires every 30 s — small enough to honour the smallest
-    # non-zero retry slot without a long lag, large enough that an
-    # idle fleet doesn't burn CPU on every wakeup.
-    #
-    # ``misfire_grace_time = WEBHOOK_DISPATCH_INTERVAL_SECONDS`` —
-    # one tick late is fine (the dispatcher is idempotent on rows in
-    # terminal state and re-attempts pending rows that were due);
-    # two-ticks-late is a signal the scheduler is stuck and a skip
-    # is preferable to a stacked catch-up. ``coalesce=True`` +
-    # ``max_instances=1`` keep a slow dispatcher run from stacking
-    # ticks on a long upstream timeout.
-    if not demo_mode:
-        scheduler.add_job(
-            wrap_job(
-                _make_webhook_dispatch_body(resolved_clock),
-                job_id=WEBHOOK_DISPATCH_JOB_ID,
-                clock=resolved_clock,
-            ),
-            trigger=IntervalTrigger(seconds=WEBHOOK_DISPATCH_INTERVAL_SECONDS),
-            id=WEBHOOK_DISPATCH_JOB_ID,
-            name=WEBHOOK_DISPATCH_JOB_ID,
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=WEBHOOK_DISPATCH_INTERVAL_SECONDS,
-        )
-
-    # --- 30 s chat-gateway dispatch safety-net sweep (cd-0gaa) ---
-    # The tick callable in
-    # :mod:`app.worker.tasks.chat_gateway_sweep.sweep_undispatched_messages`
-    # walks every ``chat_message`` row whose channel kind is
-    # ``chat_gateway``, whose ``dispatched_to_agent_at`` is still
-    # ``NULL``, and whose ``created_at`` is older than 30 s, then
-    # re-publishes ``chat.message.received`` so the in-process
-    # dispatcher catches up. The dispatcher's CAS on
-    # ``dispatched_to_agent_at`` keeps the re-publish idempotent.
-    #
-    # ``misfire_grace_time = CHAT_GATEWAY_SWEEP_INTERVAL_SECONDS`` —
-    # one tick late is fine (the body is idempotent: rows still
-    # carrying ``dispatched_to_agent_at IS NULL`` are simply
-    # re-fired, and rows the dispatcher caught up first fall out of
-    # the predicate); two-ticks-late is a signal the scheduler is
-    # stuck and a skip is preferable to a stacked catch-up that
-    # hammers the bus on a fleet returning from a long pause.
-    # ``coalesce=True`` + ``max_instances=1`` keep a slow sweep from
-    # stacking ticks on an overloaded DB.
-    scheduler.add_job(
-        wrap_job(
-            _make_chat_gateway_sweep_body(resolved_clock),
-            job_id=CHAT_GATEWAY_SWEEP_JOB_ID,
-            clock=resolved_clock,
-        ),
-        trigger=IntervalTrigger(seconds=CHAT_GATEWAY_SWEEP_INTERVAL_SECONDS),
-        id=CHAT_GATEWAY_SWEEP_JOB_ID,
-        name=CHAT_GATEWAY_SWEEP_JOB_ID,
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=CHAT_GATEWAY_SWEEP_INTERVAL_SECONDS,
-    )
-
-    # --- 30 s document text-extraction worker (cd-mo9e) ---
-    # The tick callable in
-    # :mod:`app.worker.tasks.extract_document.extract_pending_documents`
-    # walks every ``file_extraction`` row in ``status='pending'``,
-    # opens a fresh UoW per row, and runs the v1 passthrough rung
-    # (text/* -> ``succeeded`` | ``empty``; everything else ->
-    # ``unsupported``). The PDF / DOCX / OCR rungs are §21 follow-ups.
-    #
-    # ``misfire_grace_time = EXTRACT_DOCUMENT_INTERVAL_SECONDS`` —
-    # one tick late is fine (the body is idempotent: rows in terminal
-    # state fall out of the predicate, and the per-row
-    # ``start_extraction`` flip handles concurrent ticks via the
-    # ``pending`` -> ``extracting`` transition); two-ticks-late is a
-    # signal the scheduler is stuck and a skip is preferable to a
-    # stacked catch-up. ``coalesce=True`` + ``max_instances=1`` keep
-    # a slow rung (a future PDF extractor) from stacking ticks on an
-    # overloaded host.
-    scheduler.add_job(
-        wrap_job(
-            _make_extract_document_body(resolved_clock),
-            job_id=EXTRACT_DOCUMENT_JOB_ID,
-            clock=resolved_clock,
-        ),
-        trigger=IntervalTrigger(seconds=EXTRACT_DOCUMENT_INTERVAL_SECONDS),
-        id=EXTRACT_DOCUMENT_JOB_ID,
-        name=EXTRACT_DOCUMENT_JOB_ID,
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=EXTRACT_DOCUMENT_INTERVAL_SECONDS,
-    )
-
-    # --- Hourly inventory reorder-point check (cd-kxr0) ---
-    scheduler.add_job(
-        wrap_job(
-            _make_inventory_reorder_body(resolved_clock),
-            job_id=INVENTORY_REORDER_JOB_ID,
-            clock=resolved_clock,
-        ),
-        trigger=CronTrigger(minute=0),
-        id=INVENTORY_REORDER_JOB_ID,
-        name=INVENTORY_REORDER_JOB_ID,
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=600,
-    )
-
-    # --- Hourly daily-digest fan-out (cd-f0ue) ---
-    # The body sends only users whose recipient-local clock is in the
-    # 07:00 hour, so an hourly UTC trigger covers every timezone
-    # without registering per-timezone jobs.
-    if not demo_mode:
-        scheduler.add_job(
-            wrap_job(
-                _make_daily_digest_fanout_body(resolved_clock),
-                job_id=DAILY_DIGEST_JOB_ID,
-                clock=resolved_clock,
-            ),
-            trigger=CronTrigger(minute=0),
-            id=DAILY_DIGEST_JOB_ID,
-            name=DAILY_DIGEST_JOB_ID,
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=DAILY_DIGEST_MISFIRE_GRACE_SECONDS,
-        )
-
-    # --- 60 s web-push delivery dispatcher (cd-y60x) ---
-    # The body walks the ``notification_push_queue`` staging table and
-    # fires :func:`pywebpush.webpush` for due rows. Cross-tenant by
-    # design — like the webhook dispatcher and approval-TTL sweep, the
-    # tick is deployment-scope; each row carries its own ``workspace_
-    # id`` so the per-row audit (token-purge on 410 / 404) keys off
-    # that field through a system-actor :class:`WorkspaceContext`.
-    if not demo_mode:
-        scheduler.add_job(
-            wrap_job(
-                _make_web_push_dispatch_body(resolved_clock),
-                job_id=WEB_PUSH_DISPATCH_JOB_ID,
-                clock=resolved_clock,
-            ),
-            trigger=IntervalTrigger(seconds=WEB_PUSH_DISPATCH_INTERVAL_SECONDS),
-            id=WEB_PUSH_DISPATCH_JOB_ID,
-            name=WEB_PUSH_DISPATCH_JOB_ID,
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=WEB_PUSH_DISPATCH_INTERVAL_SECONDS,
-        )
-
-    if not demo_mode:
-        scheduler.add_job(
-            wrap_job(
-                _make_email_delivery_retry_body(resolved_clock),
-                job_id=EMAIL_DELIVERY_RETRY_JOB_ID,
-                clock=resolved_clock,
-            ),
-            trigger=IntervalTrigger(seconds=EMAIL_DELIVERY_RETRY_INTERVAL_SECONDS),
-            id=EMAIL_DELIVERY_RETRY_JOB_ID,
-            name=EMAIL_DELIVERY_RETRY_JOB_ID,
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=EMAIL_DELIVERY_RETRY_INTERVAL_SECONDS,
-        )
-
-    if not demo_mode:
-        scheduler.add_job(
-            wrap_job(
-                _make_agent_compaction_body(resolved_clock),
-                job_id=AGENT_COMPACTION_JOB_ID,
-                clock=resolved_clock,
-            ),
-            trigger=IntervalTrigger(seconds=AGENT_COMPACTION_INTERVAL_SECONDS),
-            id=AGENT_COMPACTION_JOB_ID,
-            name=AGENT_COMPACTION_JOB_ID,
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=AGENT_COMPACTION_INTERVAL_SECONDS,
-        )
-
-    if demo_mode:
-        assert settings is not None
-        scheduler.add_job(
-            wrap_job(
-                _make_demo_gc_body(settings, resolved_clock),
-                job_id=DEMO_GC_JOB_ID,
-                clock=resolved_clock,
-            ),
-            trigger=IntervalTrigger(seconds=DEMO_GC_INTERVAL_SECONDS),
-            id=DEMO_GC_JOB_ID,
-            name=DEMO_GC_JOB_ID,
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=DEMO_GC_INTERVAL_SECONDS,
-        )
-        scheduler.add_job(
-            wrap_job(
-                _make_demo_usage_rollup_body(resolved_clock),
-                job_id=DEMO_USAGE_ROLLUP_JOB_ID,
-                clock=resolved_clock,
-            ),
-            trigger=IntervalTrigger(seconds=DEMO_USAGE_ROLLUP_INTERVAL_SECONDS),
-            id=DEMO_USAGE_ROLLUP_JOB_ID,
-            name=DEMO_USAGE_ROLLUP_JOB_ID,
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=90,
+            settings=settings,
         )
 
 

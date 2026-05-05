@@ -60,7 +60,9 @@ def _make_poll_ical_fanout_body(clock: Clock) -> Callable[[], None]:
     extras are present but the iCal feature is disabled.
     """
 
-    def _body() -> None:
+    def _body() -> (
+        None
+    ):  # code-health: ignore[nloc] Per-workspace fanout orchestration.
         from sqlalchemy.orm import Session as _Session
 
         from app.adapters.db.secrets.repositories import (

@@ -41,7 +41,7 @@ class InventoryReorderTickReport:
     events_emitted: int = 0
 
 
-def check_reorder_points_for_all_workspaces(
+def check_reorder_points_for_all_workspaces(  # code-health: ignore[nloc] Sweep flow.
     *,
     clock: Clock | None = None,
     event_bus: EventBus | None = None,

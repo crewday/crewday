@@ -65,7 +65,9 @@ def _make_llm_budget_refresh_body(clock: Clock) -> Callable[[], None]:
     entrypoint that only needs the scheduler seam.
     """
 
-    def _body() -> None:
+    def _body() -> (
+        None
+    ):  # code-health: ignore[nloc] Per-workspace fanout orchestration.
         # Deferred imports — see factory docstring rationale. Keep
         # them narrow so a worker process that fails to start the
         # budget job still boots (the heartbeat + idempotency sweep

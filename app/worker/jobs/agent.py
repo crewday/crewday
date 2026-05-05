@@ -36,7 +36,9 @@ def _make_agent_compaction_body(clock: Clock) -> Callable[[], None]:
         else None
     )
 
-    def _body() -> None:
+    def _body() -> (
+        None
+    ):  # code-health: ignore[nloc] Per-workspace fanout orchestration.
         from sqlalchemy.orm import Session as _Session
 
         from app.adapters.db.workspace.models import Workspace

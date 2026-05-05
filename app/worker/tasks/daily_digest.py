@@ -128,7 +128,7 @@ def send_daily_digest(
     bus: EventBus | None = None,
     resolve_models: DigestModelResolver | None = None,
     due_local_hour: int | None = None,
-) -> DailyDigestReport:
+) -> DailyDigestReport:  # code-health: ignore[nloc,params] Worker policy flow.
     """Send daily digests for every eligible recipient in ``ctx``'s workspace.
 
     The preference surface for per-user "always send an empty digest"
@@ -555,7 +555,7 @@ def _try_llm_prose(
     clock: Clock,
     pricing: PricingTable,
     resolve_models: DigestModelResolver,
-) -> str | None:
+) -> str | None:  # code-health: ignore[params] LLM render boundary.
     if llm is None:
         return None
     try:

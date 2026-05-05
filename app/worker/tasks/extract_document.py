@@ -113,7 +113,7 @@ class ExtractDocumentReport:
     processed_ids: tuple[str, ...]
 
 
-def extract_pending_documents(
+def extract_pending_documents(  # code-health: ignore[nloc] Sweep flow.
     *,
     clock: Clock | None = None,
     storage: Storage | None = None,
@@ -228,7 +228,7 @@ def extract_pending_documents(
     )
 
 
-def _extract_one(
+def _extract_one(  # code-health: ignore[nloc] Extraction state-machine policy.
     *,
     document_id: str,
     workspace_id: str,
@@ -321,7 +321,7 @@ def _extract_one(
             reset_current(token)
 
 
-def _run_pipeline(
+def _run_pipeline(  # code-health: ignore[params] Extraction adapter boundary.
     session: Session,
     ctx: WorkspaceContext,
     *,

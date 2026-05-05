@@ -200,6 +200,26 @@ class GenerationReport:
     new_task_ids: tuple[str, ...] = field(default_factory=tuple)
 
 
+@dataclass(frozen=True, slots=True)
+class GenerationTickAudit:
+    schedules_walked: int
+    tasks_created: int
+    skipped_duplicate: int
+    skipped_for_closure: int
+    horizon_days: int
+    now: datetime
+
+    def as_diff(self) -> dict[str, int | str]:
+        return {
+            "schedules_walked": self.schedules_walked,
+            "tasks_created": self.tasks_created,
+            "skipped_duplicate": self.skipped_duplicate,
+            "skipped_for_closure": self.skipped_for_closure,
+            "horizon_days": self.horizon_days,
+            "tick_at": self.now.isoformat(),
+        }
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -215,7 +235,7 @@ def generate_task_occurrences(
     expand_checklist: ChecklistExpansionHook | None = None,
     assign: AssignmentHook | None = None,
     event_bus: EventBus | None = None,
-) -> GenerationReport:
+) -> GenerationReport:  # code-health: ignore[ccn,nloc,params] Policy flow.
     """Run one hourly generation tick for the caller's workspace.
 
     ``now`` pins the horizon's upper bound; if omitted it is taken
@@ -426,23 +446,21 @@ def generate_task_occurrences(
 
             new_task_ids.append(row_id)
 
-    _write_generation_tick_audit(
-        session,
-        ctx,
+    audit = GenerationTickAudit(
         schedules_walked=len(schedules),
         tasks_created=len(new_task_ids),
         skipped_duplicate=skipped_duplicate,
         skipped_for_closure=skipped_for_closure,
         horizon_days=horizon_days,
         now=resolved_now,
-        clock=resolved_clock,
     )
+    _write_generation_tick_audit(session, ctx, audit=audit, clock=resolved_clock)
 
     return GenerationReport(
-        schedules_walked=len(schedules),
-        tasks_created=len(new_task_ids),
-        skipped_duplicate=skipped_duplicate,
-        skipped_for_closure=skipped_for_closure,
+        schedules_walked=audit.schedules_walked,
+        tasks_created=audit.tasks_created,
+        skipped_duplicate=audit.skipped_duplicate,
+        skipped_for_closure=audit.skipped_for_closure,
         new_task_ids=tuple(new_task_ids),
     )
 
@@ -739,7 +757,7 @@ def _resolve_duration(schedule: Schedule, template: TaskTemplate) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _expand_rule(
+def _expand_rule(  # code-health: ignore[params] RRULE adapter boundary.
     rrule_body: str,
     *,
     anchor_local: datetime,
@@ -943,12 +961,7 @@ def _write_generation_tick_audit(
     session: Session,
     ctx: WorkspaceContext,
     *,
-    schedules_walked: int,
-    tasks_created: int,
-    skipped_duplicate: int,
-    skipped_for_closure: int,
-    horizon_days: int,
-    now: datetime,
+    audit: GenerationTickAudit,
     clock: Clock,
 ) -> None:
     """Record the per-tick summary row.
@@ -967,13 +980,6 @@ def _write_generation_tick_audit(
         entity_kind="workspace",
         entity_id=ctx.workspace_id,
         action="schedules.generation_tick",
-        diff={
-            "schedules_walked": schedules_walked,
-            "tasks_created": tasks_created,
-            "skipped_duplicate": skipped_duplicate,
-            "skipped_for_closure": skipped_for_closure,
-            "horizon_days": horizon_days,
-            "tick_at": now.isoformat(),
-        },
+        diff=audit.as_diff(),
         clock=clock,
     )

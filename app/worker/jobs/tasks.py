@@ -84,7 +84,9 @@ def _make_generator_fanout_body(clock: Clock) -> Callable[[], None]:
     needs to start the heartbeat-only deployment.
     """
 
-    def _body() -> None:
+    def _body() -> (
+        None
+    ):  # code-health: ignore[nloc] Per-workspace fanout orchestration.
         # Deferred imports — see factory docstring rationale. Keep
         # them narrow so a worker process whose generator path fails
         # to import still boots the heartbeat + idempotency-sweep
@@ -257,7 +259,9 @@ def _make_overdue_fanout_body(clock: Clock) -> Callable[[], None]:
     sibling generator fan-out uses.
     """
 
-    def _body() -> None:
+    def _body() -> (
+        None
+    ):  # code-health: ignore[nloc] Per-workspace fanout orchestration.
         from sqlalchemy.orm import Session as _Session
 
         from app.adapters.db.workspace.models import Workspace

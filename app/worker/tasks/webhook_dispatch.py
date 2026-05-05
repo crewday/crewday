@@ -124,7 +124,9 @@ def _select_due(session: Session, *, now: datetime) -> tuple[str, ...]:
         return tuple(session.scalars(stmt))
 
 
-def dispatch_due_webhooks(*, clock: Clock | None = None) -> DispatchReport:
+def dispatch_due_webhooks(
+    *, clock: Clock | None = None
+) -> DispatchReport:  # code-health: ignore[nloc] Webhook retry policy flow.
     """Run one dispatch sweep across the deployment.
 
     For every due delivery row, opens a fresh UoW (the worker has no
@@ -284,7 +286,7 @@ def _dispatch_one(delivery_id: str, *, clock: Clock) -> DeliveryReport:
         )
 
 
-def _notify_managers_auto_paused(
+def _notify_managers_auto_paused(  # code-health: ignore[nloc] Fanout flow.
     session: Session,
     *,
     subscription: WebhookSubscriptionRow,

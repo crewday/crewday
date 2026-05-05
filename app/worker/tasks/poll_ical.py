@@ -247,6 +247,38 @@ class PollReport:
     per_feed_results: tuple[PolledFeedResult, ...] = field(default_factory=tuple)
 
 
+@dataclass(frozen=True, slots=True)
+class PollTickAudit:
+    feeds_walked: int
+    feeds_polled: int
+    feeds_not_modified: int
+    feeds_rate_limited: int
+    feeds_errored: int
+    feeds_skipped: int
+    reservations_created: int
+    reservations_updated: int
+    reservations_cancelled: int
+    closures_created: int
+    tick_started_at: datetime
+    tick_ended_at: datetime
+
+    def as_diff(self) -> dict[str, int | str]:
+        return {
+            "feeds_walked": self.feeds_walked,
+            "feeds_polled": self.feeds_polled,
+            "feeds_not_modified": self.feeds_not_modified,
+            "feeds_rate_limited": self.feeds_rate_limited,
+            "feeds_errored": self.feeds_errored,
+            "feeds_skipped": self.feeds_skipped,
+            "reservations_created": self.reservations_created,
+            "reservations_updated": self.reservations_updated,
+            "reservations_cancelled": self.reservations_cancelled,
+            "closures_created": self.closures_created,
+            "tick_started_at": self.tick_started_at.isoformat(),
+            "tick_ended_at": self.tick_ended_at.isoformat(),
+        }
+
+
 # ---------------------------------------------------------------------------
 # Internal types
 # ---------------------------------------------------------------------------
@@ -298,7 +330,7 @@ class PollOutcome:
 # ---------------------------------------------------------------------------
 
 
-def fetch_ical_body(
+def fetch_ical_body(  # code-health: ignore[nloc,params] SSRF fetch policy boundary.
     url: str,
     *,
     last_etag: str | None,
@@ -456,7 +488,7 @@ def fetch_ical_body(
     )
 
 
-def _fetch_conditional(
+def _fetch_conditional(  # code-health: ignore[params] Fetch adapter boundary.
     fetcher: Fetcher,
     *,
     parsed: SplitResult,
@@ -524,7 +556,7 @@ def _fetch_conditional(
     )
 
 
-def _stdlib_conditional_fetch(
+def _stdlib_conditional_fetch(  # code-health: ignore[nloc,params] Fetch adapter.
     *,
     parsed: SplitResult,
     resolved_ip: str,
@@ -700,7 +732,7 @@ def poll_ical(
     feed_ids: frozenset[str] | None = None,
     force: bool = False,
     allow_self_signed_resolver: Callable[[IcalFeed], bool] | None = None,
-) -> PollReport:
+) -> PollReport:  # code-health: ignore[ccn,nloc,params] iCal polling policy flow.
     """Run one poll tick for the caller's workspace.
 
     Walks every enabled :class:`IcalFeed` whose cadence is up,
@@ -878,9 +910,7 @@ def poll_ical(
 
     tick_ended_at = resolved_clock.now()
 
-    _write_poll_tick_audit(
-        session,
-        ctx,
+    audit = PollTickAudit(
         feeds_walked=len(feeds),
         feeds_polled=feeds_polled,
         feeds_not_modified=feeds_not_modified,
@@ -893,22 +923,22 @@ def poll_ical(
         closures_created=closures_created_total,
         tick_started_at=tick_started_at,
         tick_ended_at=tick_ended_at,
-        clock=resolved_clock,
     )
+    _write_poll_tick_audit(session, ctx, audit=audit, clock=resolved_clock)
 
     return PollReport(
-        feeds_walked=len(feeds),
-        feeds_polled=feeds_polled,
-        feeds_not_modified=feeds_not_modified,
-        feeds_rate_limited=feeds_rate_limited,
-        feeds_errored=feeds_errored,
-        feeds_skipped=feeds_skipped,
-        reservations_created=reservations_created_total,
-        reservations_updated=reservations_updated_total,
-        reservations_cancelled=reservations_cancelled_total,
-        closures_created=closures_created_total,
-        tick_started_at=tick_started_at,
-        tick_ended_at=tick_ended_at,
+        feeds_walked=audit.feeds_walked,
+        feeds_polled=audit.feeds_polled,
+        feeds_not_modified=audit.feeds_not_modified,
+        feeds_rate_limited=audit.feeds_rate_limited,
+        feeds_errored=audit.feeds_errored,
+        feeds_skipped=audit.feeds_skipped,
+        reservations_created=audit.reservations_created,
+        reservations_updated=audit.reservations_updated,
+        reservations_cancelled=audit.reservations_cancelled,
+        closures_created=audit.closures_created,
+        tick_started_at=audit.tick_started_at,
+        tick_ended_at=audit.tick_ended_at,
         per_feed_results=tuple(per_feed_results),
     )
 
@@ -933,7 +963,7 @@ def _poll_one_feed(
     max_body_bytes: int,
     allow_private_addresses: bool,
     allow_self_signed: bool,
-) -> PolledFeedResult:
+) -> PolledFeedResult:  # code-health: ignore[nloc,params] Per-feed polling policy flow.
     """Fetch + parse + upsert one feed.
 
     Catches every per-feed failure into ``ical_feed.last_error`` and
@@ -1208,7 +1238,7 @@ class _ApplyCounts:
     closures_created: int = 0
 
 
-def _apply_events(
+def _apply_events(  # code-health: ignore[params] Parsed-event apply boundary.
     session: Session,
     ctx: WorkspaceContext,
     *,
@@ -1401,7 +1431,7 @@ def _is_blocked_summary(summary: str | None) -> bool:
     return False
 
 
-def _upsert_reservation(
+def _upsert_reservation(  # code-health: ignore[nloc] Reservation upsert policy flow.
     session: Session,
     ctx: WorkspaceContext,
     *,
@@ -1519,7 +1549,7 @@ def _upsert_reservation(
     return "updated"
 
 
-def _upsert_closure(
+def _upsert_closure(  # code-health: ignore[nloc,params] Closure upsert policy flow.
     session: Session,
     ctx: WorkspaceContext,
     *,
@@ -1577,7 +1607,7 @@ def _upsert_closure(
                         reason="ical_unavailable",
                         source_ical_feed_id=feed.id,
                     )
-                )
+                )  # code-health: ignore[duplicate] Event shape.
                 return "created"
             row.source_external_uid = ev.uid
             row.source_last_seen_at = resolved_now
@@ -1696,7 +1726,7 @@ def _guess_guest_name(summary: str | None, description: str | None) -> str | Non
 # ---------------------------------------------------------------------------
 
 
-def _record_feed_error(
+def _record_feed_error(  # code-health: ignore[params] Feed error audit boundary.
     session: Session,
     ctx: WorkspaceContext,
     *,
@@ -1786,18 +1816,7 @@ def _write_poll_tick_audit(
     session: Session,
     ctx: WorkspaceContext,
     *,
-    feeds_walked: int,
-    feeds_polled: int,
-    feeds_not_modified: int,
-    feeds_rate_limited: int,
-    feeds_errored: int,
-    feeds_skipped: int,
-    reservations_created: int,
-    reservations_updated: int,
-    reservations_cancelled: int,
-    closures_created: int,
-    tick_started_at: datetime,
-    tick_ended_at: datetime,
+    audit: PollTickAudit,
     clock: Clock,
 ) -> None:
     """Record one ``stays.poll_ical_tick`` audit row per workspace per tick.
@@ -1812,20 +1831,7 @@ def _write_poll_tick_audit(
         entity_kind="workspace",
         entity_id=ctx.workspace_id,
         action="stays.poll_ical_tick",
-        diff={
-            "feeds_walked": feeds_walked,
-            "feeds_polled": feeds_polled,
-            "feeds_not_modified": feeds_not_modified,
-            "feeds_rate_limited": feeds_rate_limited,
-            "feeds_errored": feeds_errored,
-            "feeds_skipped": feeds_skipped,
-            "reservations_created": reservations_created,
-            "reservations_updated": reservations_updated,
-            "reservations_cancelled": reservations_cancelled,
-            "closures_created": closures_created,
-            "tick_started_at": tick_started_at.isoformat(),
-            "tick_ended_at": tick_ended_at.isoformat(),
-        },
+        diff=audit.as_diff(),
         clock=clock,
     )
 

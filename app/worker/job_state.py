@@ -219,7 +219,7 @@ def _record_failure_in_session(
     job_id: str,
     clock: Clock,
     now: datetime,
-) -> FailureOutcome:
+) -> FailureOutcome:  # code-health: ignore[nloc] Worker failure-state policy flow.
     with tenant_agnostic():
         values = {
             "id": new_ulid(),

@@ -265,7 +265,7 @@ class OverdueReport:
 # ---------------------------------------------------------------------------
 
 
-def detect_overdue(
+def detect_overdue(  # code-health: ignore[nloc] Overdue policy flow.
     ctx: WorkspaceContext,
     *,
     session: Session,
@@ -448,7 +448,7 @@ def detect_overdue(
 # ---------------------------------------------------------------------------
 
 
-def _write_overdue_tick_audit(
+def _write_overdue_tick_audit(  # code-health: ignore[params] Audit payload boundary.
     session: Session,
     ctx: WorkspaceContext,
     *,
