@@ -1,0 +1,8 @@
+Hi {{ recipient_display_name | default("there") }},
+
+A stay is coming up for {{ guest_name | default("a guest", true) }}.
+
+Check-in: {{ check_in }}
+Check-out: {{ check_out }}
+
+Open crew.day to review the stay and assigned work.

@@ -12,12 +12,10 @@ from app.adapters.db.authz.models import (
 )
 from app.tenancy import tenant_agnostic
 
-__all__ = ["list_owner_manager_user_ids"]
+__all__ = ["list_owner_manager_user_ids", "list_owner_user_ids"]
 
 
-def list_owner_manager_user_ids(
-    session: Session, *, workspace_id: str
-) -> tuple[str, ...]:
+def list_owner_user_ids(session: Session, *, workspace_id: str) -> tuple[str, ...]:
     with tenant_agnostic():
         owner_ids = session.scalars(
             select(PermissionGroupMember.user_id)
@@ -26,6 +24,14 @@ def list_owner_manager_user_ids(
             .where(PermissionGroupMember.workspace_id == workspace_id)
             .where(PermissionGroup.slug == "owners")
         ).all()
+    return tuple(sorted(set(owner_ids)))
+
+
+def list_owner_manager_user_ids(
+    session: Session, *, workspace_id: str
+) -> tuple[str, ...]:
+    owner_ids = list_owner_user_ids(session, workspace_id=workspace_id)
+    with tenant_agnostic():
         manager_ids = session.scalars(
             select(RoleGrant.user_id).where(
                 RoleGrant.workspace_id == workspace_id,

@@ -251,3 +251,100 @@ def _make_poll_ical_fanout_body(clock: Clock) -> Callable[[], None]:
         )
 
     return _body
+
+
+def _make_stay_upcoming_fanout_body(clock: Clock) -> Callable[[], None]:
+    """Build the hourly upcoming-stay notification fan-out body.
+
+    The domain sweep uses a 24-hour lookahead and deduplicates by
+    ``(stay_id, check_in, recipient)`` against existing notification
+    rows, so an hourly worker cadence gives timely delivery without
+    duplicate inbox rows.
+    """
+
+    def _body() -> None:
+        from sqlalchemy.orm import Session as _Session
+
+        from app.adapters.db.workspace.models import Workspace
+        from app.tenancy import tenant_agnostic
+        from app.tenancy.current import reset_current, set_current
+        from app.worker.tasks.stay_upcoming import emit_upcoming_stay_notifications
+
+        now = clock.now()
+        total_workspaces = 0
+        total_workspaces_skipped = 0
+        total_workspaces_failed = 0
+        total_stays_walked = 0
+        total_notifications_sent = 0
+
+        with make_uow() as session:
+            assert isinstance(session, _Session)
+            with tenant_agnostic():
+                rows = list(session.execute(select(Workspace.id, Workspace.slug)).all())
+                workspace_ids = [row.id for row in rows]
+                expired_ids = _demo_expired_workspace_ids(
+                    session, workspace_ids, now=now
+                )
+
+            for row in rows:
+                workspace_id = row.id
+                workspace_slug = row.slug
+                total_workspaces += 1
+                if workspace_id in expired_ids:
+                    total_workspaces_skipped += 1
+                    continue
+
+                ctx = _system_actor_context(
+                    workspace_id=workspace_id,
+                    workspace_slug=workspace_slug,
+                )
+                token = set_current(ctx)
+                try:
+                    try:
+                        with session.begin_nested():
+                            report = emit_upcoming_stay_notifications(
+                                ctx,
+                                session=session,
+                                now=now,
+                            )
+                    except Exception as exc:
+                        total_workspaces_failed += 1
+                        _log.warning(
+                            "upcoming stay notification sweep failed for workspace",
+                            extra={
+                                "event": "worker.stay_upcoming.workspace.failed",
+                                "workspace_id": workspace_id,
+                                "workspace_slug": workspace_slug,
+                                "error": type(exc).__name__,
+                            },
+                        )
+                        continue
+                finally:
+                    reset_current(token)
+
+                total_stays_walked += report.stays_walked
+                total_notifications_sent += report.notifications_sent
+                _log.info(
+                    "upcoming stay notifications ran for workspace",
+                    extra={
+                        "event": "worker.stay_upcoming.workspace.tick",
+                        "workspace_id": workspace_id,
+                        "workspace_slug": workspace_slug,
+                        "stays_walked": report.stays_walked,
+                        "notifications_sent": report.notifications_sent,
+                    },
+                )
+
+        _log.info(
+            "upcoming stay notification tick summary",
+            extra={
+                "event": "worker.stay_upcoming.tick.summary",
+                "total_workspaces": total_workspaces,
+                "total_workspaces_skipped": total_workspaces_skipped,
+                "total_workspaces_failed": total_workspaces_failed,
+                "total_stays_walked": total_stays_walked,
+                "total_notifications_sent": total_notifications_sent,
+            },
+        )
+
+    return _body

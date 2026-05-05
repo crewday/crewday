@@ -95,7 +95,10 @@ from app.worker.jobs.messaging import (
     _make_email_delivery_retry_body,
 )
 from app.worker.jobs.messaging_web_push import _make_web_push_dispatch_body
-from app.worker.jobs.stays import _make_poll_ical_fanout_body
+from app.worker.jobs.stays import (
+    _make_poll_ical_fanout_body,
+    _make_stay_upcoming_fanout_body,
+)
 from app.worker.jobs.tasks import _make_generator_fanout_body, _make_overdue_fanout_body
 
 _demo_expired_workspace_ids = _common_jobs._demo_expired_workspace_ids
@@ -135,6 +138,8 @@ __all__ = [
     "RETENTION_ROTATION_JOB_ID",
     "SIGNUP_GC_INTERVAL_SECONDS",
     "SIGNUP_GC_JOB_ID",
+    "STAY_UPCOMING_INTERVAL_SECONDS",
+    "STAY_UPCOMING_JOB_ID",
     "USER_WORKSPACE_REFRESH_INTERVAL_SECONDS",
     "USER_WORKSPACE_REFRESH_JOB_ID",
     "WEBHOOK_DISPATCH_INTERVAL_SECONDS",
@@ -236,6 +241,12 @@ POLL_ICAL_INTERVAL_SECONDS: int = 900
 # signal an operator dashboard wants to alert on, not a tick the
 # scheduler should backfill.
 POLL_ICAL_MISFIRE_GRACE_SECONDS: int = 600
+
+# Stable job id for upcoming-stay notifications. Runs hourly and the
+# task-level sweep looks 24 hours ahead, deduping by stay/check-in/
+# recipient against notification rows.
+STAY_UPCOMING_JOB_ID: str = "stays.upcoming_notifications"
+STAY_UPCOMING_INTERVAL_SECONDS: int = 3600
 
 
 # Stable job id for the ``user_workspace`` derive-refresh tick (cd-yqm4).
@@ -776,6 +787,13 @@ def _job_specs() -> tuple[
             _clock_body(_make_poll_ical_fanout_body),
             _interval(POLL_ICAL_INTERVAL_SECONDS),
             POLL_ICAL_MISFIRE_GRACE_SECONDS,
+            skip_in_demo=True,
+        ),
+        JobSpec(
+            STAY_UPCOMING_JOB_ID,
+            _clock_body(_make_stay_upcoming_fanout_body),
+            _interval(STAY_UPCOMING_INTERVAL_SECONDS),
+            STAY_UPCOMING_INTERVAL_SECONDS,
             skip_in_demo=True,
         ),
         JobSpec(

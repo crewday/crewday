@@ -344,6 +344,20 @@ class TestFanoutEndToEnd:
                 },
                 "Payslip issued",
             ),
+            (
+                NotificationKind.STAY_UPCOMING,
+                {
+                    "stay_id": "stay-1",
+                    "property_id": "prop-1",
+                    "check_in": "2026-04-25T12:00:00+00:00",
+                    "check_out": "2026-04-28T10:00:00+00:00",
+                    "guest_name": "Ada Guest",
+                    "guest_count": 2,
+                    "status": "scheduled",
+                    "source": "manual",
+                },
+                "Ada Guest",
+            ),
         ],
     )
     def test_required_kinds_persist_row_and_fire_sse_with_required_context(
