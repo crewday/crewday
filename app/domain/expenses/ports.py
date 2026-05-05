@@ -71,6 +71,7 @@ from sqlalchemy.orm import Session
 __all__ = [
     "AttachmentAlreadyExistsConflict",
     "CapabilityChecker",
+    "ExpenseApprovalDecision",
     "ExpenseAttachmentRow",
     "ExpenseClaimRow",
     "ExpensePayPeriodResolution",
@@ -207,6 +208,16 @@ class ExpensePayPeriodResolution:
 
     pay_period_id: str
     fallback_note_md: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ExpenseApprovalDecision:
+    """Repository payload for approving a submitted claim."""
+
+    decided_by: str
+    decided_at: datetime
+    pay_period_id: str | None
+    decision_note_md: str | None
 
 
 # ``status`` enum on the LlmUsage row — keeps the seam contract narrow.
@@ -565,10 +576,7 @@ class ExpensesRepository(Protocol):
         *,
         workspace_id: str,
         claim_id: str,
-        decided_by: str,
-        decided_at: datetime,
-        pay_period_id: str | None,
-        decision_note_md: str | None,
+        decision: ExpenseApprovalDecision,
     ) -> ExpenseClaimRow:
         """Stamp ``state='approved'`` + ``decided_by`` + ``decided_at``."""
         ...

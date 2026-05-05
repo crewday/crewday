@@ -119,7 +119,13 @@ from typing import Any, Final, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.audit import write_audit
-from app.domain.tasks.notifications import TaskNotificationSink, notify_comment_mentions
+from app.domain.tasks.notifications import (
+    CommentMentionNotification,
+    LegacyTaskOptions,
+    TaskNotificationRuntime,
+    TaskNotificationSink,
+    notify_comment_mentions,
+)
 from app.domain.tasks.ports import (
     CommentModerationAuthorizer,
     CommentRow,
@@ -146,6 +152,7 @@ __all__ = [
     "CommentNotEditable",
     "CommentNotFound",
     "CommentView",
+    "EditCommentOptions",
     "delete_comment",
     "edit_comment",
     "get_comment",
@@ -354,6 +361,23 @@ class CommentView:
     edited_at: datetime | None
     deleted_at: datetime | None
     llm_call_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class EditCommentOptions:
+    clock: Clock | None = None
+    event_bus: EventBus | None = None
+    notifications: TaskNotificationSink | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _EditMentionRuntime:
+    repo: CommentsRepository
+    ctx: WorkspaceContext
+    occurrence: OccurrenceCommentScopeRow
+    clock: Clock
+    event_bus: EventBus
+    notifications: TaskNotificationSink | None
 
 
 # ---------------------------------------------------------------------------
@@ -780,16 +804,20 @@ def post_comment(
     )
     if mentioned_user_ids:
         notify_comment_mentions(
-            repo.session,
-            ctx,
-            task_id=occurrence_id,
-            task_title=occurrence.title or "Task",
-            comment_id=row.id,
-            comment_body_md=payload.body_md,
-            mentioned_user_ids=mentioned_user_ids,
-            clock=resolved_clock,
-            bus=resolved_bus,
-            sink=notifications,
+            TaskNotificationRuntime(
+                repo.session,
+                ctx,
+                resolved_clock,
+                resolved_bus,
+                notifications,
+            ),
+            notification=CommentMentionNotification(
+                task_id=occurrence_id,
+                task_title=occurrence.title or "Task",
+                comment_id=row.id,
+                comment_body_md=payload.body_md,
+                mentioned_user_ids=mentioned_user_ids,
+            ),
         )
     return view
 
@@ -800,9 +828,8 @@ def edit_comment(
     comment_id: str,
     body_md: str,
     *,
-    clock: Clock | None = None,
-    event_bus: EventBus | None = None,
-    notifications: TaskNotificationSink | None = None,
+    options: EditCommentOptions | None = None,
+    **legacy_options: object,
 ) -> CommentView:
     """Rewrite ``body_md`` on ``comment_id`` within the author grace window.
 
@@ -822,45 +849,21 @@ def edit_comment(
     The audit row carries before / after shapes so reports can
     reconstruct the edit.
     """
-    resolved_clock = clock if clock is not None else SystemClock()
-    resolved_bus = event_bus if event_bus is not None else default_event_bus
+    resolved_options = _edit_comment_options(options, legacy_options)
+    resolved_clock = (
+        resolved_options.clock if resolved_options.clock is not None else SystemClock()
+    )
+    resolved_bus = (
+        resolved_options.event_bus
+        if resolved_options.event_bus is not None
+        else default_event_bus
+    )
 
     row, occurrence = _load_comment(repo, ctx, comment_id)
-
-    if row.kind != "user":
-        raise CommentNotEditable(
-            f"comment {comment_id!r} kind={row.kind!r} is not editable"
-        )
-    if row.deleted_at is not None:
-        raise CommentNotEditable(
-            f"comment {comment_id!r} is already deleted; edits refused"
-        )
-    if row.author_user_id != ctx.actor_id:
-        # Author-only edit path — moderators use
-        # ``tasks.comment_moderate`` for deletes; a moderator-edit
-        # surface is not part of the v1 slice.
-        raise CommentKindForbidden(
-            f"only the original author may edit comment {comment_id!r}"
-        )
-    created_at = _ensure_utc(row.created_at)
-    if resolved_clock.now() - created_at > EDIT_WINDOW:
-        raise CommentEditWindowExpired(
-            f"comment {comment_id!r} is past the {EDIT_WINDOW} edit window"
-        )
-    if not body_md or len(body_md) > _MAX_BODY_LEN:
-        raise ValueError(
-            f"edited body_md must be 1..{_MAX_BODY_LEN} chars (got {len(body_md)})"
-        )
+    _validate_edit_comment(row, ctx, comment_id, body_md, resolved_clock)
 
     before_view = _row_to_view(row)
-
-    slugs = _extract_mention_slugs(body_md)
-    resolved_mentions, unknown, ambiguous = _resolve_mentions(repo, ctx, slugs)
-    if unknown:
-        raise CommentMentionInvalid(unknown)
-    if ambiguous:
-        raise CommentMentionAmbiguous(ambiguous)
-
+    resolved_mentions = _resolve_edit_mentions(repo, ctx, body_md)
     updated = repo.update_comment_body(
         workspace_id=ctx.workspace_id,
         comment_id=row.id,
@@ -870,35 +873,135 @@ def edit_comment(
     )
 
     after_view = _row_to_view(updated)
+    _write_edit_comment_audit(
+        repo, ctx, row.id, before_view, after_view, resolved_clock
+    )
+    _notify_new_edit_mentions(
+        _EditMentionRuntime(
+            repo,
+            ctx,
+            occurrence,
+            resolved_clock,
+            resolved_bus,
+            resolved_options.notifications,
+        ),
+        before_view,
+        after_view,
+    )
+    return after_view
+
+
+def _validate_edit_comment(
+    row: CommentRow,
+    ctx: WorkspaceContext,
+    comment_id: str,
+    body_md: str,
+    clock: Clock,
+) -> None:
+    if row.kind != "user":
+        raise CommentNotEditable(
+            f"comment {comment_id!r} kind={row.kind!r} is not editable"
+        )
+    if row.deleted_at is not None:
+        raise CommentNotEditable(
+            f"comment {comment_id!r} is already deleted; edits refused"
+        )
+    if row.author_user_id != ctx.actor_id:
+        raise CommentKindForbidden(
+            f"only the original author may edit comment {comment_id!r}"
+        )
+    created_at = _ensure_utc(row.created_at)
+    if clock.now() - created_at > EDIT_WINDOW:
+        raise CommentEditWindowExpired(
+            f"comment {comment_id!r} is past the {EDIT_WINDOW} edit window"
+        )
+    if not body_md or len(body_md) > _MAX_BODY_LEN:
+        raise ValueError(
+            f"edited body_md must be 1..{_MAX_BODY_LEN} chars (got {len(body_md)})"
+        )
+
+
+def _resolve_edit_mentions(
+    repo: CommentsRepository,
+    ctx: WorkspaceContext,
+    body_md: str,
+) -> tuple[str, ...]:
+    slugs = _extract_mention_slugs(body_md)
+    resolved_mentions, unknown, ambiguous = _resolve_mentions(repo, ctx, slugs)
+    if unknown:
+        raise CommentMentionInvalid(unknown)
+    if ambiguous:
+        raise CommentMentionAmbiguous(ambiguous)
+    return tuple(resolved_mentions)
+
+
+def _write_edit_comment_audit(
+    repo: CommentsRepository,
+    ctx: WorkspaceContext,
+    comment_id: str,
+    before_view: CommentView,
+    after_view: CommentView,
+    clock: Clock,
+) -> None:
     write_audit(
         repo.session,
         ctx,
         entity_kind="task_comment",
-        entity_id=row.id,
+        entity_id=comment_id,
         action="task_comment.edit",
         diff={
             "before": _view_to_diff_dict(before_view),
             "after": _view_to_diff_dict(after_view),
         },
-        clock=resolved_clock,
+        clock=clock,
     )
+
+
+def _notify_new_edit_mentions(
+    runtime: _EditMentionRuntime,
+    before_view: CommentView,
+    after_view: CommentView,
+) -> None:
     newly_mentioned = set(after_view.mentioned_user_ids) - set(
         before_view.mentioned_user_ids
     )
-    if newly_mentioned:
-        notify_comment_mentions(
-            repo.session,
-            ctx,
+    if not newly_mentioned:
+        return
+    notify_comment_mentions(
+        TaskNotificationRuntime(
+            runtime.repo.session,
+            runtime.ctx,
+            runtime.clock,
+            runtime.event_bus,
+            runtime.notifications,
+        ),
+        notification=CommentMentionNotification(
             task_id=after_view.occurrence_id,
-            task_title=occurrence.title or "Task",
+            task_title=runtime.occurrence.title or "Task",
             comment_id=after_view.id,
             comment_body_md=after_view.body_md,
             mentioned_user_ids=newly_mentioned,
-            clock=resolved_clock,
-            bus=resolved_bus,
-            sink=notifications,
-        )
-    return after_view
+        ),
+    )
+
+
+def _edit_comment_options(
+    options: EditCommentOptions | None,
+    legacy_options: dict[str, object],
+) -> EditCommentOptions:
+    reader = LegacyTaskOptions("edit_comment", legacy_options)
+    reader.reject_if_combined(options is not None)
+    if options is not None:
+        return options
+    clock = reader.pop_clock("clock")
+    event_bus = reader.pop_event_bus("event_bus")
+    notifications = reader.pop_notifications("notifications")
+    reader.reject_unknown()
+    return EditCommentOptions(
+        clock=clock,
+        event_bus=event_bus,
+        notifications=notifications,
+    )
 
 
 def delete_comment(

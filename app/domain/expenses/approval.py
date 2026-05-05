@@ -79,6 +79,7 @@ manager)" / §"Reimbursement".
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
@@ -103,6 +104,7 @@ from app.domain.expenses.notifications import (
 )
 from app.domain.expenses.ports import (
     CapabilityChecker,
+    ExpenseApprovalDecision,
     ExpenseClaimRow,
     ExpensesRepository,
     PendingClaimsCursor,
@@ -121,6 +123,7 @@ from app.util.currency import ISO_4217_ALLOWLIST
 __all__ = [
     "ApprovalEdits",
     "ApprovalPermissionDenied",
+    "ApprovalRuntime",
     "ClaimNotApprovable",
     "ClaimNotFound",
     "ClaimNotReimbursable",
@@ -133,6 +136,14 @@ __all__ = [
     "mark_reimbursed",
     "reject_claim",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalRuntime:
+    """Optional runtime collaborators for approval transitions."""
+
+    clock: Clock | None = None
+    notification_sink: ExpenseNotificationSink | None = None
 
 
 def _json_enum(values: Iterable[str]) -> list[JsonValue]:
@@ -510,6 +521,48 @@ def _append_decision_note(existing: str | None, note: str) -> str:
     return f"{existing.rstrip()}\n\n{note}"
 
 
+def _require_rejection_reason(reason_md: str) -> None:
+    if reason_md and reason_md.strip():
+        return
+    # Defence-in-depth — the DTO enforces ``min_length=1`` on
+    # the HTTP path, but a Python caller bypassing the DTO
+    # would otherwise persist an empty rejection note. The
+    # state-machine guard is checked AFTER ownership-equivalent
+    # authz so the error envelope is consistent.
+    raise ValueError(
+        "reason_md must be a non-empty string; "
+        "an empty rejection hides the why from the worker."
+    )
+
+
+def _publish_rejection(
+    *,
+    ctx: WorkspaceContext,
+    now: datetime,
+    row: ExpenseClaimRow,
+    submitter_user_id: str,
+    notification_sink: ExpenseNotificationSink | None,
+) -> None:
+    bus.publish(
+        ExpenseRejected(
+            workspace_id=ctx.workspace_id,
+            actor_id=ctx.actor_id,
+            correlation_id=ctx.audit_correlation_id,
+            occurred_at=now,
+            claim_id=row.id,
+            work_engagement_id=row.work_engagement_id,
+            submitter_user_id=submitter_user_id,
+            decided_by_user_id=ctx.actor_id,
+        )
+    )
+    if notification_sink is not None:
+        notify_expense_rejected(
+            claim=row,
+            submitter_user_id=submitter_user_id,
+            sink=notification_sink,
+        )
+
+
 def approve_claim(
     repo: ExpensesRepository,
     checker: CapabilityChecker,
@@ -517,8 +570,7 @@ def approve_claim(
     *,
     claim_id: str,
     edits: ApprovalEdits | None = None,
-    clock: Clock | None = None,
-    notification_sink: ExpenseNotificationSink | None = None,
+    runtime: ApprovalRuntime | None = None,
 ) -> ExpenseClaimView:
     """Transition a submitted claim to ``approved``.
 
@@ -549,7 +601,8 @@ def approve_claim(
     the state and double-publish the event.
     """
     # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
-    resolved_clock = clock if clock is not None else SystemClock()
+    runtime = runtime if runtime is not None else ApprovalRuntime()
+    resolved_clock = runtime.clock if runtime.clock is not None else SystemClock()
     now = resolved_clock.now()
 
     _require_approval(checker)
@@ -590,12 +643,16 @@ def approve_claim(
     row = repo.mark_claim_approved(
         workspace_id=ctx.workspace_id,
         claim_id=row.id,
-        decided_by=ctx.actor_id,
-        decided_at=now,
-        pay_period_id=(
-            period_resolution.pay_period_id if period_resolution is not None else None
+        decision=ExpenseApprovalDecision(
+            decided_by=ctx.actor_id,
+            decided_at=now,
+            pay_period_id=(
+                period_resolution.pay_period_id
+                if period_resolution is not None
+                else None
+            ),
+            decision_note_md=decision_note_md,
         ),
-        decision_note_md=decision_note_md,
     )
     after = _row_to_view(repo, row)
 
@@ -625,11 +682,11 @@ def approve_claim(
             had_edits=had_edits,
         )
     )
-    if notification_sink is not None:
+    if runtime.notification_sink is not None:
         notify_expense_approved(
             claim=row,
             submitter_user_id=submitter_user_id,
-            sink=notification_sink,
+            sink=runtime.notification_sink,
         )
     return after
 
@@ -646,8 +703,7 @@ def reject_claim(
     *,
     claim_id: str,
     reason_md: str,
-    clock: Clock | None = None,
-    notification_sink: ExpenseNotificationSink | None = None,
+    runtime: ApprovalRuntime | None = None,
 ) -> ExpenseClaimView:
     """Transition a submitted claim to ``rejected``.
 
@@ -678,21 +734,13 @@ def reject_claim(
     :class:`ClaimNotApprovable`. Row-locked for the same race-
     avoidance reason as :func:`approve_claim`.
     """
-    resolved_clock = clock if clock is not None else SystemClock()
+    runtime = runtime if runtime is not None else ApprovalRuntime()
+    resolved_clock = runtime.clock if runtime.clock is not None else SystemClock()
     now = resolved_clock.now()
 
     _require_approval(checker)
 
-    if not reason_md or not reason_md.strip():
-        # Defence-in-depth — the DTO enforces ``min_length=1`` on
-        # the HTTP path, but a Python caller bypassing the DTO
-        # would otherwise persist an empty rejection note. The
-        # state-machine guard is checked AFTER ownership-equivalent
-        # authz so the error envelope is consistent.
-        raise ValueError(
-            "reason_md must be a non-empty string; "
-            "an empty rejection hides the why from the worker."
-        )
+    _require_rejection_reason(reason_md)
 
     row = _load_row(repo, ctx, claim_id=claim_id, for_update=True)
 
@@ -726,24 +774,13 @@ def reject_claim(
         },
         clock=resolved_clock,
     )
-    bus.publish(
-        ExpenseRejected(
-            workspace_id=ctx.workspace_id,
-            actor_id=ctx.actor_id,
-            correlation_id=ctx.audit_correlation_id,
-            occurred_at=now,
-            claim_id=row.id,
-            work_engagement_id=row.work_engagement_id,
-            submitter_user_id=submitter_user_id,
-            decided_by_user_id=ctx.actor_id,
-        )
+    _publish_rejection(
+        ctx=ctx,
+        now=now,
+        row=row,
+        submitter_user_id=submitter_user_id,
+        notification_sink=runtime.notification_sink,
     )
-    if notification_sink is not None:
-        notify_expense_rejected(
-            claim=row,
-            submitter_user_id=submitter_user_id,
-            sink=notification_sink,
-        )
     return after
 
 

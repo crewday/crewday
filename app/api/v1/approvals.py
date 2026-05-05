@@ -72,6 +72,7 @@ from app.authz.dep import Permission
 from app.domain.agent.approval import (
     DEFAULT_PAGE_LIMIT,
     MAX_PAGE_LIMIT,
+    ApprovalDecisionOptions,
     ApprovalReplayDispatcher,
     ApprovalsPage,
     ApprovalView,
@@ -642,7 +643,9 @@ def _deny_handler(
         session=db,
         approval_request_id=approval_request_id,
         decision_note_md=note,
-        notification_sink=_approval_notification_sink(db, ctx),
+        options=ApprovalDecisionOptions(
+            notification_sink=_approval_notification_sink(db, ctx),
+        ),
     )
     return ApprovalPayload.from_view(view)
 

@@ -47,7 +47,11 @@ from app.adapters.db.messaging.models import Notification
 from app.adapters.db.places.models import Property
 from app.adapters.db.tasks.models import Occurrence
 from app.adapters.db.workspace.models import Workspace
-from app.domain.llm.notifications import AnomalyDetectedView, notify_anomaly_detected
+from app.domain.llm.notifications import (
+    AnomalyDetectedView,
+    AnomalyNotificationOptions,
+    notify_anomaly_detected,
+)
 from app.events.bus import EventBus
 from app.events.types import NotificationCreated, TaskOverdue
 from app.tenancy import tenant_agnostic
@@ -448,8 +452,7 @@ class TestDetectOverdueIntegration:
                 explanation="Pool clean is 30 minutes past its scheduled end.",
                 severity="warning",
             ),
-            clock=clock,
-            bus=bus,
+            options=AnomalyNotificationOptions(clock=clock, bus=bus),
         )
 
         anomaly_rows = db_session.scalars(

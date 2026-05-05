@@ -1746,27 +1746,13 @@ def submit_claim(
     # and double-publish :class:`ExpenseSubmitted`.
     row = _load_row(repo, ctx, claim_id=claim_id, for_update=True)
 
-    author_user_id = _claim_user_id(repo, ctx, claim=row)
-    if (
-        author_user_id != ctx.actor_id
-    ):  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
-        raise ClaimPermissionDenied(
-            f"claim {claim_id!r} is not owned by actor {ctx.actor_id!r}"
-        )
-
-    # Capability re-check is intentionally AFTER ownership — a
-    # non-author caller never reaches the capability check, so the
-    # 403 envelope is consistent regardless of which guard fires.
-    try:
-        _require_capability(checker, action_key="expenses.submit")
-    except SeamPermissionDenied as exc:
-        raise ClaimPermissionDenied(str(exc)) from exc
-
-    if row.state != "draft":
-        raise ClaimStateTransitionInvalid(
-            f"claim {claim_id!r} is in state {row.state!r}; only draft "
-            "claims may be submitted"
-        )
+    _assert_claim_can_submit(
+        repo=repo,
+        checker=checker,
+        ctx=ctx,
+        claim_id=claim_id,
+        row=row,
+    )
 
     before = _row_to_view(repo, row)
     submitted_row = repo.mark_claim_submitted(
@@ -1808,6 +1794,37 @@ def submit_claim(
             sink=notification_sink,
         )
     return after
+
+
+def _assert_claim_can_submit(
+    *,
+    repo: ExpensesRepository,
+    checker: CapabilityChecker,
+    ctx: WorkspaceContext,
+    claim_id: str,
+    row: ExpenseClaimRow,
+) -> None:
+    author_user_id = _claim_user_id(repo, ctx, claim=row)
+    if (
+        author_user_id != ctx.actor_id
+    ):  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
+        raise ClaimPermissionDenied(
+            f"claim {claim_id!r} is not owned by actor {ctx.actor_id!r}"
+        )
+
+    # Capability re-check is intentionally AFTER ownership — a
+    # non-author caller never reaches the capability check, so the
+    # 403 envelope is consistent regardless of which guard fires.
+    try:
+        _require_capability(checker, action_key="expenses.submit")
+    except SeamPermissionDenied as exc:
+        raise ClaimPermissionDenied(str(exc)) from exc
+
+    if row.state != "draft":
+        raise ClaimStateTransitionInvalid(
+            f"claim {claim_id!r} is in state {row.state!r}; only draft "
+            "claims may be submitted"
+        )
 
 
 def cancel_claim(

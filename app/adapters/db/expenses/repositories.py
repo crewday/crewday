@@ -58,6 +58,7 @@ from app.authz import (
 from app.domain.expenses.ports import (
     AttachmentAlreadyExistsConflict,
     CapabilityChecker,
+    ExpenseApprovalDecision,
     ExpenseAttachmentRow,
     ExpenseClaimRow,
     ExpensePayPeriodResolution,
@@ -629,18 +630,15 @@ class SqlAlchemyExpensesRepository(ExpensesRepository):
         *,
         workspace_id: str,
         claim_id: str,
-        decided_by: str,
-        decided_at: datetime,
-        pay_period_id: str | None,
-        decision_note_md: str | None,
+        decision: ExpenseApprovalDecision,
     ) -> ExpenseClaimRow:
         row = self._load_claim(workspace_id=workspace_id, claim_id=claim_id)
         row.state = "approved"
-        row.decided_by = decided_by
-        row.decided_at = decided_at
-        row.pay_period_id = pay_period_id
-        if decision_note_md is not None:
-            row.decision_note_md = decision_note_md
+        row.decided_by = decision.decided_by
+        row.decided_at = decision.decided_at
+        row.pay_period_id = decision.pay_period_id
+        if decision.decision_note_md is not None:
+            row.decision_note_md = decision.decision_note_md
         self._session.flush()
         return _to_claim_row(row)
 

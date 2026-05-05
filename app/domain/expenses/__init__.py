@@ -13,6 +13,7 @@ See ``docs/specs/09-time-payroll-expenses.md`` §"Expense claims".
 from app.domain.expenses.approval import (
     ApprovalEdits,
     ApprovalPermissionDenied,
+    ApprovalRuntime,
     ClaimNotApprovable,
     ClaimNotReimbursable,
     ReimburseBody,
@@ -62,6 +63,7 @@ from app.domain.expenses.claims import (
 __all__ = [
     "ApprovalEdits",
     "ApprovalPermissionDenied",
+    "ApprovalRuntime",
     "AttachmentAlreadyExists",
     "BlobMimeNotAllowed",
     "BlobMissing",

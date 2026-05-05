@@ -17,6 +17,7 @@ writer's FK reference to ``entity_id``) sees the new row.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence, Set
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
@@ -294,6 +295,33 @@ def _booking_window_filters(
     )
 
 
+def _list_unsettled_booking_ids(
+    session: Session,
+    *,
+    workspace_id: str,
+    starts_at: datetime,
+    ends_at: datetime,
+    limit: int,
+) -> Sequence[str]:
+    rows = session.scalars(
+        select(Booking.id)
+        .where(
+            *_booking_window_filters(
+                workspace_id=workspace_id,
+                starts_at=starts_at,
+                ends_at=ends_at,
+            ),
+            or_(
+                Booking.status.in_(_UNSETTLED_BOOKING_STATUSES),
+                Booking.pending_amend_minutes.is_not(None),
+            ),
+        )
+        .order_by(Booking.scheduled_start.asc(), Booking.id.asc())
+        .limit(limit)
+    ).all()
+    return list(rows)
+
+
 def _hours_between(starts_at: datetime, ends_at: datetime) -> Decimal:
     seconds = Decimal(str((ends_at - starts_at).total_seconds()))
     return (seconds / Decimal("3600")).quantize(Decimal("0.01"))
@@ -361,6 +389,62 @@ def _remove_reimbursement_components(
     updated = dict(components)
     updated["reimbursements"] = kept
     return updated, removed_cents
+
+
+@dataclass(frozen=True, slots=True)
+class _ReimbursementSettlement:
+    workspace_id: str
+    user_id: str
+    claim_ids: Set[str]
+    pay_period_id: str
+    starts_at: datetime
+    ends_at: datetime
+    currency: str
+    reimbursed_at: datetime
+    reimbursed_by: str
+    reimbursed_via: Literal["bank"]
+
+
+def _settlement_claim_predicate(
+    settlement: _ReimbursementSettlement,
+) -> ColumnElement[bool]:
+    return and_(
+        ExpenseClaim.workspace_id == settlement.workspace_id,
+        ExpenseClaim.id.in_(sorted(settlement.claim_ids)),
+        WorkEngagement.user_id == settlement.user_id,
+        ExpenseClaim.state == "approved",
+        ExpenseClaim.deleted_at.is_(None),
+        ExpenseClaim.currency == settlement.currency,
+        or_(
+            ExpenseClaim.pay_period_id == settlement.pay_period_id,
+            and_(
+                ExpenseClaim.pay_period_id.is_(None),
+                ExpenseClaim.purchased_at >= settlement.starts_at,
+                ExpenseClaim.purchased_at < settlement.ends_at,
+            ),
+        ),
+    )
+
+
+def _snapshot_reimbursed_claim(claim: ExpenseClaim) -> PayslipReimbursableClaimRow:
+    return PayslipReimbursableClaimRow(
+        claim_id=claim.id,
+        work_engagement_id=claim.work_engagement_id,
+        purchased_at=claim.purchased_at,
+        decided_at=claim.decided_at,
+        description=claim.vendor,
+        currency=claim.currency,
+        amount_cents=claim.total_amount_cents,
+    )
+
+
+def _settle_reimbursement_claim(
+    claim: ExpenseClaim, settlement: _ReimbursementSettlement
+) -> None:
+    claim.state = "reimbursed"
+    claim.reimbursed_at = settlement.reimbursed_at
+    claim.reimbursed_via = settlement.reimbursed_via
+    claim.reimbursed_by = settlement.reimbursed_by
 
 
 def _payslip_currency_subquery() -> ScalarSelect[str | None]:
@@ -577,7 +661,7 @@ class SqlAlchemyPayPeriodRepository(PayPeriodRepository):
             )
         )
 
-    def list_unsettled_booking_ids(  # code-health: ignore[duplicate] Payroll query.  # noqa: E501
+    def list_unsettled_booking_ids(
         self,
         *,
         workspace_id: str,
@@ -585,23 +669,13 @@ class SqlAlchemyPayPeriodRepository(PayPeriodRepository):
         ends_at: datetime,
         limit: int,
     ) -> Sequence[str]:
-        rows = self._session.scalars(
-            select(Booking.id)
-            .where(
-                *_booking_window_filters(
-                    workspace_id=workspace_id,
-                    starts_at=starts_at,
-                    ends_at=ends_at,
-                ),
-                or_(
-                    Booking.status.in_(_UNSETTLED_BOOKING_STATUSES),
-                    Booking.pending_amend_minutes.is_not(None),
-                ),
-            )
-            .order_by(Booking.scheduled_start.asc(), Booking.id.asc())
-            .limit(limit)
-        ).all()
-        return list(rows)
+        return _list_unsettled_booking_ids(
+            self._session,
+            workspace_id=workspace_id,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            limit=limit,
+        )
 
 
 class SqlAlchemyBookingPayRepository(BookingPayRepository):
@@ -662,23 +736,13 @@ class SqlAlchemyBookingPayRepository(BookingPayRepository):
         ends_at: datetime,
         limit: int,
     ) -> Sequence[str]:
-        rows = self._session.scalars(
-            select(Booking.id)
-            .where(
-                *_booking_window_filters(
-                    workspace_id=workspace_id,
-                    starts_at=starts_at,
-                    ends_at=ends_at,
-                ),
-                or_(
-                    Booking.status.in_(_UNSETTLED_BOOKING_STATUSES),
-                    Booking.pending_amend_minutes.is_not(None),
-                ),
-            )
-            .order_by(Booking.scheduled_start.asc(), Booking.id.asc())
-            .limit(limit)
-        ).all()
-        return list(rows)
+        return _list_unsettled_booking_ids(
+            self._session,
+            workspace_id=workspace_id,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            limit=limit,
+        )
 
     def replace_period_entries(
         self,
@@ -1107,19 +1171,35 @@ class SqlAlchemyPayslipReadRepository(PayslipReadRepository):
         reimbursed_by: str,
         reimbursed_via: Literal["bank"],
     ) -> Sequence[PayslipReimbursableClaimRow]:
-        # Mirror the selection criteria
-        # :meth:`PayslipComputeRepository.list_reimbursable_claims_for_payslip`
-        # uses so the rows we flip are the same set the compute folded
-        # into ``net_cents``. The ``currency`` predicate keeps us in
-        # lockstep with compute's same-currency-only fold (§"Currency
-        # mismatch" leaves cross-currency claims for the manual
-        # ``mark_reimbursed`` route). Walk the rows individually rather
-        # than an ORM-level UPDATE so the SA identity-map sees the new
-        # column values inside the same UoW.
         # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
-        if not claim_ids:
+        settlement = _ReimbursementSettlement(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            claim_ids=claim_ids,
+            pay_period_id=pay_period_id,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            currency=currency,
+            reimbursed_at=reimbursed_at,
+            reimbursed_by=reimbursed_by,
+            reimbursed_via=reimbursed_via,
+        )
+        if not settlement.claim_ids:
             return ()
-        rows = (
+        rows = self._settlement_claim_rows(settlement)
+        snapshots: list[PayslipReimbursableClaimRow] = []
+        for claim in rows:
+            snapshots.append(_snapshot_reimbursed_claim(claim))
+            _settle_reimbursement_claim(claim, settlement)
+        self._session.flush()
+        return snapshots
+
+    def _settlement_claim_rows(
+        self, settlement: _ReimbursementSettlement
+    ) -> Sequence[ExpenseClaim]:
+        # Mirrors compute's criteria so the flipped rows match the
+        # claims already folded into ``net_cents`` on the payslip.
+        return (
             self._session.execute(
                 select(ExpenseClaim)
                 .join(
@@ -1129,46 +1209,12 @@ class SqlAlchemyPayslipReadRepository(PayslipReadRepository):
                         WorkEngagement.workspace_id == ExpenseClaim.workspace_id,
                     ),
                 )
-                .where(
-                    ExpenseClaim.workspace_id == workspace_id,
-                    ExpenseClaim.id.in_(sorted(claim_ids)),
-                    WorkEngagement.user_id == user_id,
-                    ExpenseClaim.state == "approved",
-                    ExpenseClaim.deleted_at.is_(None),
-                    ExpenseClaim.currency == currency,
-                    or_(
-                        ExpenseClaim.pay_period_id == pay_period_id,
-                        and_(
-                            ExpenseClaim.pay_period_id.is_(None),
-                            ExpenseClaim.purchased_at >= starts_at,
-                            ExpenseClaim.purchased_at < ends_at,
-                        ),
-                    ),
-                )
+                .where(_settlement_claim_predicate(settlement))
                 .order_by(ExpenseClaim.purchased_at.asc(), ExpenseClaim.id.asc())
             )
             .scalars()
             .all()
         )
-        snapshots: list[PayslipReimbursableClaimRow] = []
-        for claim in rows:
-            snapshots.append(
-                PayslipReimbursableClaimRow(
-                    claim_id=claim.id,
-                    work_engagement_id=claim.work_engagement_id,
-                    purchased_at=claim.purchased_at,
-                    decided_at=claim.decided_at,
-                    description=claim.vendor,
-                    currency=claim.currency,
-                    amount_cents=claim.total_amount_cents,
-                )
-            )
-            claim.state = "reimbursed"
-            claim.reimbursed_at = reimbursed_at
-            claim.reimbursed_via = reimbursed_via
-            claim.reimbursed_by = reimbursed_by
-        self._session.flush()
-        return snapshots
 
 
 class SqlAlchemyPayslipPdfRepository:

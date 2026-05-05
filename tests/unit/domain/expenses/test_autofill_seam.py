@@ -19,6 +19,7 @@ from app.adapters.llm.ports import (
     LLMCapabilityMissing,
     LLMResponse,
     LLMUsage,
+    Tool,
 )
 from app.config import Settings
 from app.domain.expenses.autofill import (
@@ -29,6 +30,7 @@ from app.domain.expenses.autofill import (
     run_extraction,
 )
 from app.domain.expenses.ports import (
+    ExpenseApprovalDecision,
     ExpenseAttachmentRow,
     ExpenseClaimRow,
     ExpensePayPeriodResolution,
@@ -263,10 +265,7 @@ class _FakeRepo:
         *,
         workspace_id: str,
         claim_id: str,
-        decided_by: str,
-        decided_at: datetime,
-        pay_period_id: str | None,
-        decision_note_md: str | None,
+        decision: ExpenseApprovalDecision,
     ) -> ExpenseClaimRow:
         raise NotImplementedError("autofill should not approve claims")
 
@@ -371,8 +370,10 @@ class _StubLLMClient:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> LLMResponse:
+        # code-health: ignore[params] Test fake mirrors LLMClient protocol.
         self.calls.append(("chat", model_id))
         if self._chat_error is not None:
             raise self._chat_error
@@ -404,8 +405,10 @@ class _StubLLMClient:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> Iterator[str]:
+        # code-health: ignore[params] Test fake mirrors LLMClient protocol.
         raise LLMCapabilityMissing("stream_chat")
 
 

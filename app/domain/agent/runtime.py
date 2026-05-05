@@ -1514,6 +1514,27 @@ def _append_tool_result_to_history(
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True, slots=True)
+class _ChatReplyAppend:
+    ctx: WorkspaceContext
+    thread_id: str
+    body_md: str
+    scope: AgentTurnScope
+    correlation_id: str
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class _ChatReplyFallback:
+    ctx: WorkspaceContext
+    body_md: str
+    thread_id: str | None
+    row_id: str | None
+    enabled: bool
+    sink: AgentMessageNotificationSink | None
+    recipient_user_id: str | None
+
+
 def _write_chat_reply(
     session: Session,
     *,
@@ -1542,25 +1563,62 @@ def _write_chat_reply(
     delegating user the same way every other write is.
     """
     # code-health: ignore[params] Port params are adapter API contract.
-    should_notify_fallback = (
-        agent_message_delivery_is_fallback
-        and agent_message_notification_sink is not None
-    )
     if thread_id is None:
-        if should_notify_fallback:
-            assert agent_message_notification_sink is not None
-            notify_agent_message_fallback(
-                recipient_user_id=agent_message_recipient_user_id or ctx.actor_id,
-                message_body=body_md,
-                workspace_slug=ctx.workspace_slug,
-                chat_thread_ref=None,
-                message_id=None,
+        _notify_chat_reply_fallback(
+            _ChatReplyFallback(
+                ctx=ctx,
+                body_md=body_md,
+                thread_id=None,
+                row_id=None,
+                enabled=agent_message_delivery_is_fallback,
                 sink=agent_message_notification_sink,
+                recipient_user_id=agent_message_recipient_user_id,
             )
+        )
         return None
-    row_id = new_ulid(clock=clock)
+
+    row = _insert_chat_reply_row(
+        session,
+        ctx=ctx,
+        thread_id=thread_id,
+        body_md=body_md,
+        clock=clock,
+    )
+    _publish_chat_reply_appended(
+        event_bus,
+        _ChatReplyAppend(
+            ctx=ctx,
+            thread_id=thread_id,
+            body_md=body_md,
+            scope=scope,
+            correlation_id=correlation_id,
+            created_at=row.created_at,
+        ),
+    )
+    _notify_chat_reply_fallback(
+        _ChatReplyFallback(
+            ctx=ctx,
+            body_md=body_md,
+            thread_id=thread_id,
+            row_id=row.id,
+            enabled=agent_message_delivery_is_fallback,
+            sink=agent_message_notification_sink,
+            recipient_user_id=agent_message_recipient_user_id,
+        )
+    )
+    return row.id
+
+
+def _insert_chat_reply_row(
+    session: Session,
+    *,
+    ctx: WorkspaceContext,
+    thread_id: str,
+    body_md: str,
+    clock: Clock,
+) -> ChatMessage:
     row = ChatMessage(
-        id=row_id,
+        id=new_ulid(clock=clock),
         workspace_id=ctx.workspace_id,
         channel_id=thread_id,
         author_user_id=ctx.actor_id,
@@ -1572,34 +1630,45 @@ def _write_chat_reply(
     )
     session.add(row)
     session.flush()
+    return row
+
+
+def _publish_chat_reply_appended(
+    event_bus: EventBus,
+    reply: _ChatReplyAppend,
+) -> None:
     event_bus.publish(
         AgentMessageAppended(
-            workspace_id=ctx.workspace_id,
-            actor_id=ctx.actor_id,
-            actor_user_id=ctx.actor_id,
-            correlation_id=correlation_id,
-            occurred_at=row.created_at,
-            scope=scope,
-            task_id=thread_id if scope == "task" else None,
+            workspace_id=reply.ctx.workspace_id,
+            actor_id=reply.ctx.actor_id,
+            actor_user_id=reply.ctx.actor_id,
+            correlation_id=reply.correlation_id,
+            occurred_at=reply.created_at,
+            scope=reply.scope,
+            task_id=reply.thread_id if reply.scope == "task" else None,
             message=AgentMessagePayload(
-                at=row.created_at,
+                at=reply.created_at,
                 kind="agent",
-                body=body_md,
+                body=reply.body_md,
                 channel_kind=None,
             ),
         )
     )
-    if should_notify_fallback:
-        assert agent_message_notification_sink is not None
-        notify_agent_message_fallback(
-            recipient_user_id=agent_message_recipient_user_id or ctx.actor_id,
-            message_body=body_md,
-            workspace_slug=ctx.workspace_slug,
-            chat_thread_ref=thread_id,
-            message_id=row_id,
-            sink=agent_message_notification_sink,
-        )
-    return row_id
+
+
+def _notify_chat_reply_fallback(
+    reply: _ChatReplyFallback,
+) -> None:
+    if not reply.enabled or reply.sink is None:
+        return
+    notify_agent_message_fallback(
+        recipient_user_id=reply.recipient_user_id or reply.ctx.actor_id,
+        message_body=reply.body_md,
+        workspace_slug=reply.ctx.workspace_slug,
+        chat_thread_ref=reply.thread_id,
+        message_id=reply.row_id,
+        sink=reply.sink,
+    )
 
 
 def _audit_tool_call(

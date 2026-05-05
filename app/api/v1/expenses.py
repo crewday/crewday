@@ -130,6 +130,7 @@ from app.domain.expenses import (
     # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     ApprovalEdits,
     ApprovalPermissionDenied,
+    ApprovalRuntime,
     AttachmentAlreadyExists,
     BlobMimeNotAllowed,
     BlobMissing,
@@ -1193,7 +1194,9 @@ def approve_expense_claim_route(
             ctx,
             claim_id=claim_id,
             edits=body,
-            notification_sink=_expense_notification_sink(repo, ctx),
+            runtime=ApprovalRuntime(
+                notification_sink=_expense_notification_sink(repo, ctx)
+            ),
         )
     except (
         ClaimNotFound,
@@ -1232,7 +1235,9 @@ def reject_expense_claim_route(
             ctx,
             claim_id=claim_id,
             reason_md=body.reason_md,
-            notification_sink=_expense_notification_sink(repo, ctx),
+            runtime=ApprovalRuntime(
+                notification_sink=_expense_notification_sink(repo, ctx)
+            ),
         )
     except (
         ClaimNotFound,

@@ -52,7 +52,7 @@ from app.adapters.db.llm.models import LlmUsage
 from app.adapters.db.payroll.models import PayPeriod
 from app.adapters.db.places.models import Property
 from app.adapters.db.workspace.models import WorkEngagement, Workspace
-from app.domain.expenses.ports import PendingClaimsCursor
+from app.domain.expenses.ports import ExpenseApprovalDecision, PendingClaimsCursor
 
 _PINNED = datetime(2026, 4, 25, 12, 0, 0, tzinfo=UTC)
 _PURCHASED = _PINNED - timedelta(days=2)
@@ -534,10 +534,12 @@ class TestStateTransitions:
         row = repo.mark_claim_approved(
             workspace_id=_WORKSPACE_ID,
             claim_id="C1",
-            decided_by=_USER_ID,
-            decided_at=_PINNED,
-            pay_period_id=None,
-            decision_note_md=None,
+            decision=ExpenseApprovalDecision(
+                decided_by=_USER_ID,
+                decided_at=_PINNED,
+                pay_period_id=None,
+                decision_note_md=None,
+            ),
         )
         assert row.state == "approved"
         assert row.decided_by == _USER_ID
@@ -587,10 +589,12 @@ class TestStateTransitions:
         row = repo.mark_claim_approved(
             workspace_id=_WORKSPACE_ID,
             claim_id="C1",
-            decided_by=_USER_ID,
-            decided_at=_PINNED,
-            pay_period_id="P_OPEN",
-            decision_note_md=None,
+            decision=ExpenseApprovalDecision(
+                decided_by=_USER_ID,
+                decided_at=_PINNED,
+                pay_period_id="P_OPEN",
+                decision_note_md=None,
+            ),
         )
 
         assert row.state == "approved"

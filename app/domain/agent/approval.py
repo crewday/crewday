@@ -78,6 +78,7 @@ __all__ = [
     "DEFAULT_PAGE_LIMIT",
     "EXPIRED_DECISION_NOTE",
     "MAX_PAGE_LIMIT",
+    "ApprovalDecisionOptions",
     "ApprovalNotFound",
     "ApprovalNotPending",
     "ApprovalReplayDispatcher",
@@ -198,6 +199,27 @@ class ApprovalReplayDispatcher:
     dispatcher: ToolDispatcher
     token: DelegatedToken
     headers: Mapping[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalDecisionOptions:
+    clock: Clock | None = None
+    event_bus: EventBus | None = None
+    notification_sink: ApprovalNotificationSink | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _ApprovalRuntime:
+    clock: Clock
+    bus: EventBus
+
+
+@dataclass(frozen=True, slots=True)
+class _ApprovalGrantOutcome:
+    tool_call: ToolCall
+    result: ToolResult
+    note: str | None
+    decided_at: datetime
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +426,104 @@ def list_pending(
 # ---------------------------------------------------------------------------
 
 
+def _approval_runtime(
+    *,
+    clock: Clock | None,
+    event_bus: EventBus | None,
+) -> _ApprovalRuntime:
+    return _ApprovalRuntime(
+        clock=clock if clock is not None else SystemClock(),
+        bus=event_bus if event_bus is not None else default_event_bus,
+    )
+
+
+def _apply_approved_decision(
+    row: ApprovalRequest,
+    ctx: WorkspaceContext,
+    outcome: _ApprovalGrantOutcome,
+) -> None:
+    row.status = "approved"
+    row.decided_by = ctx.actor_id
+    row.decided_at = outcome.decided_at
+    row.decision_note_md = outcome.note
+    row.result_json = _result_to_json(outcome.result)
+
+
+def _write_approval_granted_audit(
+    session: Session,
+    ctx: WorkspaceContext,
+    row: ApprovalRequest,
+    outcome: _ApprovalGrantOutcome,
+    clock: Clock,
+) -> None:
+    write_audit(
+        session,
+        ctx,
+        entity_kind="approval_request",
+        entity_id=row.id,
+        action="approval.granted",
+        diff={
+            "approval_request_id": row.id,
+            "decision": "approved",
+            "decided_by": ctx.actor_id,
+            "for_user_id": row.for_user_id,
+            "tool_name": outcome.tool_call.name,
+            "tool_call_id": outcome.tool_call.id,
+            "result_status_code": outcome.result.status_code,
+            "result_mutated": outcome.result.mutated,
+            "decision_note_md": outcome.note,
+        },
+        clock=clock,
+    )
+
+
+def _publish_approval_decided(
+    bus: EventBus,
+    ctx: WorkspaceContext,
+    row: ApprovalRequest,
+    *,
+    decision: Literal["approved", "rejected"],
+    decided_at: datetime,
+) -> None:
+    bus.publish(
+        ApprovalDecided(
+            workspace_id=ctx.workspace_id,
+            actor_id=ctx.actor_id,
+            correlation_id=ctx.audit_correlation_id,
+            occurred_at=decided_at,
+            approval_request_id=row.id,
+            decision=decision,
+            for_user_id=row.for_user_id,
+        )
+    )
+
+
+def _notify_approval_decision(
+    view: ApprovalView,
+    sink: ApprovalNotificationSink | None,
+) -> None:
+    if sink is not None:
+        notify_approval_decided(approval=view, sink=sink)
+
+
+def _approval_decision_options(
+    options: ApprovalDecisionOptions | None,
+    *,
+    clock: Clock | None,
+    event_bus: EventBus | None,
+    notification_sink: ApprovalNotificationSink | None,
+) -> ApprovalDecisionOptions:
+    if options is not None:
+        if clock is not None or event_bus is not None or notification_sink is not None:
+            raise TypeError("deny received options plus legacy decision keywords")
+        return options
+    return ApprovalDecisionOptions(
+        clock=clock,
+        event_bus=event_bus,
+        notification_sink=notification_sink,
+    )
+
+
 def approve(
     ctx: WorkspaceContext,
     *,
@@ -448,8 +568,7 @@ def approve(
     the caller; the row stays ``pending`` (no partial transition).
     """
     # code-health: ignore[params] Port params are adapter API contract.
-    eff_clock: Clock = clock if clock is not None else SystemClock()
-    bus = event_bus if event_bus is not None else default_event_bus
+    runtime = _approval_runtime(clock=clock, event_bus=event_bus)
 
     row = _load_pending(session, ctx=ctx, approval_request_id=approval_request_id)
 
@@ -467,48 +586,24 @@ def approve(
         headers=replay.headers,
     )
 
-    decided_at = eff_clock.now()
-    row.status = "approved"
-    row.decided_by = ctx.actor_id
-    row.decided_at = decided_at
-    row.decision_note_md = note
-    row.result_json = _result_to_json(result)
-
-    write_audit(
-        session,
-        ctx,
-        entity_kind="approval_request",
-        entity_id=row.id,
-        action="approval.granted",
-        diff={
-            "approval_request_id": row.id,
-            "decision": "approved",
-            "decided_by": ctx.actor_id,
-            "for_user_id": row.for_user_id,
-            "tool_name": tool_call.name,
-            "tool_call_id": tool_call.id,
-            "result_status_code": result.status_code,
-            "result_mutated": result.mutated,
-            "decision_note_md": note,
-        },
-        clock=eff_clock,
+    outcome = _ApprovalGrantOutcome(
+        tool_call=tool_call,
+        result=result,
+        note=note,
+        decided_at=runtime.clock.now(),
     )
-
-    bus.publish(
-        ApprovalDecided(
-            workspace_id=ctx.workspace_id,
-            actor_id=ctx.actor_id,
-            correlation_id=ctx.audit_correlation_id,
-            occurred_at=decided_at,
-            approval_request_id=row.id,
-            decision="approved",
-            for_user_id=row.for_user_id,
-        )
+    _apply_approved_decision(row, ctx, outcome)
+    _write_approval_granted_audit(session, ctx, row, outcome, runtime.clock)
+    _publish_approval_decided(
+        runtime.bus,
+        ctx,
+        row,
+        decision="approved",
+        decided_at=outcome.decided_at,
     )
 
     view = ApprovalView.from_row(row)
-    if notification_sink is not None:
-        notify_approval_decided(approval=view, sink=notification_sink)
+    _notify_approval_decision(view, notification_sink)
     return view
 
 
@@ -518,6 +613,7 @@ def deny(
     session: Session,
     approval_request_id: str,
     decision_note_md: str | None = None,
+    options: ApprovalDecisionOptions | None = None,
     clock: Clock | None = None,
     event_bus: EventBus | None = None,
     notification_sink: ApprovalNotificationSink | None = None,
@@ -530,15 +626,24 @@ def deny(
     A second :func:`deny` (or :func:`approve`) on the already-
     rejected row raises :class:`ApprovalNotPending`.
     """
-    eff_clock: Clock = clock if clock is not None else SystemClock()
-    bus = event_bus if event_bus is not None else default_event_bus
+    # code-health: ignore[params] Legacy keywords are kept for the domain seam.
+    resolved_options = _approval_decision_options(
+        options,
+        clock=clock,
+        event_bus=event_bus,
+        notification_sink=notification_sink,
+    )
+    runtime = _approval_runtime(
+        clock=resolved_options.clock,
+        event_bus=resolved_options.event_bus,
+    )
 
     row = _load_pending(session, ctx=ctx, approval_request_id=approval_request_id)
 
     note = _validate_decision_note(decision_note_md)
     tool_call = _tool_call_from_action(row.action_json)
 
-    decided_at = eff_clock.now()
+    decided_at = runtime.clock.now()
     row.status = "rejected"
     row.decided_by = ctx.actor_id
     row.decided_at = decided_at
@@ -559,24 +664,19 @@ def deny(
             "tool_call_id": tool_call.id,
             "decision_note_md": note,
         },
-        clock=eff_clock,
+        clock=runtime.clock,
     )
 
-    bus.publish(
-        ApprovalDecided(
-            workspace_id=ctx.workspace_id,
-            actor_id=ctx.actor_id,
-            correlation_id=ctx.audit_correlation_id,
-            occurred_at=decided_at,
-            approval_request_id=row.id,
-            decision="rejected",
-            for_user_id=row.for_user_id,
-        )
+    _publish_approval_decided(
+        runtime.bus,
+        ctx,
+        row,
+        decision="rejected",
+        decided_at=decided_at,
     )
 
     view = ApprovalView.from_row(row)
-    if notification_sink is not None:
-        notify_approval_decided(approval=view, sink=notification_sink)
+    _notify_approval_decision(view, resolved_options.notification_sink)
     return view
 
 

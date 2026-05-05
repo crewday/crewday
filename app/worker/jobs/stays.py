@@ -4,14 +4,114 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Protocol
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.adapters.db.session import make_uow
+from app.tenancy import WorkspaceContext
 from app.util.clock import Clock
 from app.worker.jobs.common import _demo_expired_workspace_ids, _system_actor_context
 
 _log = logging.getLogger("app.worker.scheduler")
+
+
+class _StayUpcomingReport(Protocol):
+    @property
+    def stays_walked(self) -> int: ...
+
+    @property
+    def notifications_sent(self) -> int: ...
+
+
+@dataclass(slots=True)
+class _StayUpcomingTotals:
+    workspaces: int = 0
+    skipped: int = 0
+    failed: int = 0
+    stays_walked: int = 0
+    notifications_sent: int = 0
+
+
+def _emit_upcoming_stay_notifications_for_workspace(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    now: datetime,
+) -> _StayUpcomingReport:
+    from app.worker.tasks.stay_upcoming import emit_upcoming_stay_notifications
+
+    with session.begin_nested():
+        return emit_upcoming_stay_notifications(ctx, session=session, now=now)
+
+
+def _stay_upcoming_workspace_rows(
+    session: Session,
+    *,
+    now: datetime,
+) -> tuple[list[tuple[str, str]], set[str]]:
+    from app.adapters.db.workspace.models import Workspace
+    from app.tenancy import tenant_agnostic
+
+    with tenant_agnostic():
+        rows = list(
+            session.execute(select(Workspace.id, Workspace.slug)).tuples().all()
+        )
+        workspace_ids = [workspace_id for workspace_id, _slug in rows]
+        expired_ids = _demo_expired_workspace_ids(session, workspace_ids, now=now)
+    return rows, expired_ids
+
+
+def _log_stay_upcoming_workspace_failure(
+    *,
+    workspace_id: str,
+    workspace_slug: str,
+    exc: Exception,
+) -> None:
+    _log.warning(
+        "upcoming stay notification sweep failed for workspace",
+        extra={
+            "event": "worker.stay_upcoming.workspace.failed",
+            "workspace_id": workspace_id,
+            "workspace_slug": workspace_slug,
+            "error": type(exc).__name__,
+        },
+    )
+
+
+def _log_stay_upcoming_workspace_tick(
+    *,
+    workspace_id: str,
+    workspace_slug: str,
+    report: _StayUpcomingReport,
+) -> None:
+    _log.info(
+        "upcoming stay notifications ran for workspace",
+        extra={
+            "event": "worker.stay_upcoming.workspace.tick",
+            "workspace_id": workspace_id,
+            "workspace_slug": workspace_slug,
+            "stays_walked": report.stays_walked,
+            "notifications_sent": report.notifications_sent,
+        },
+    )
+
+
+def _log_stay_upcoming_tick_summary(totals: _StayUpcomingTotals) -> None:
+    _log.info(
+        "upcoming stay notification tick summary",
+        extra={
+            "event": "worker.stay_upcoming.tick.summary",
+            "total_workspaces": totals.workspaces,
+            "total_workspaces_skipped": totals.skipped,
+            "total_workspaces_failed": totals.failed,
+            "total_stays_walked": totals.stays_walked,
+            "total_notifications_sent": totals.notifications_sent,
+        },
+    )
 
 
 def _make_poll_ical_fanout_body(clock: Clock) -> Callable[[], None]:
@@ -265,33 +365,19 @@ def _make_stay_upcoming_fanout_body(clock: Clock) -> Callable[[], None]:
     def _body() -> None:
         from sqlalchemy.orm import Session as _Session
 
-        from app.adapters.db.workspace.models import Workspace
-        from app.tenancy import tenant_agnostic
         from app.tenancy.current import reset_current, set_current
-        from app.worker.tasks.stay_upcoming import emit_upcoming_stay_notifications
 
         now = clock.now()
-        total_workspaces = 0
-        total_workspaces_skipped = 0
-        total_workspaces_failed = 0
-        total_stays_walked = 0
-        total_notifications_sent = 0
+        totals = _StayUpcomingTotals()
 
         with make_uow() as session:
             assert isinstance(session, _Session)
-            with tenant_agnostic():
-                rows = list(session.execute(select(Workspace.id, Workspace.slug)).all())
-                workspace_ids = [row.id for row in rows]
-                expired_ids = _demo_expired_workspace_ids(
-                    session, workspace_ids, now=now
-                )
+            rows, expired_ids = _stay_upcoming_workspace_rows(session, now=now)
 
-            for row in rows:
-                workspace_id = row.id
-                workspace_slug = row.slug
-                total_workspaces += 1
+            for workspace_id, workspace_slug in rows:
+                totals.workspaces += 1
                 if workspace_id in expired_ids:
-                    total_workspaces_skipped += 1
+                    totals.skipped += 1
                     continue
 
                 ctx = _system_actor_context(
@@ -301,50 +387,30 @@ def _make_stay_upcoming_fanout_body(clock: Clock) -> Callable[[], None]:
                 token = set_current(ctx)
                 try:
                     try:
-                        with session.begin_nested():
-                            report = emit_upcoming_stay_notifications(
-                                ctx,
-                                session=session,
-                                now=now,
-                            )
+                        report = _emit_upcoming_stay_notifications_for_workspace(
+                            session,
+                            ctx,
+                            now=now,
+                        )
                     except Exception as exc:
-                        total_workspaces_failed += 1
-                        _log.warning(
-                            "upcoming stay notification sweep failed for workspace",
-                            extra={
-                                "event": "worker.stay_upcoming.workspace.failed",
-                                "workspace_id": workspace_id,
-                                "workspace_slug": workspace_slug,
-                                "error": type(exc).__name__,
-                            },
+                        totals.failed += 1
+                        _log_stay_upcoming_workspace_failure(
+                            workspace_id=workspace_id,
+                            workspace_slug=workspace_slug,
+                            exc=exc,
                         )
                         continue
                 finally:
                     reset_current(token)
 
-                total_stays_walked += report.stays_walked
-                total_notifications_sent += report.notifications_sent
-                _log.info(
-                    "upcoming stay notifications ran for workspace",
-                    extra={
-                        "event": "worker.stay_upcoming.workspace.tick",
-                        "workspace_id": workspace_id,
-                        "workspace_slug": workspace_slug,
-                        "stays_walked": report.stays_walked,
-                        "notifications_sent": report.notifications_sent,
-                    },
+                totals.stays_walked += report.stays_walked
+                totals.notifications_sent += report.notifications_sent
+                _log_stay_upcoming_workspace_tick(
+                    workspace_id=workspace_id,
+                    workspace_slug=workspace_slug,
+                    report=report,
                 )
 
-        _log.info(
-            "upcoming stay notification tick summary",
-            extra={
-                "event": "worker.stay_upcoming.tick.summary",
-                "total_workspaces": total_workspaces,
-                "total_workspaces_skipped": total_workspaces_skipped,
-                "total_workspaces_failed": total_workspaces_failed,
-                "total_stays_walked": total_stays_walked,
-                "total_notifications_sent": total_notifications_sent,
-            },
-        )
+        _log_stay_upcoming_tick_summary(totals)
 
     return _body

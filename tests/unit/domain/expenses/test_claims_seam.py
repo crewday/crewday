@@ -52,6 +52,7 @@ from app.domain.expenses import (
     update_claim,
 )
 from app.domain.expenses.ports import (
+    ExpenseApprovalDecision,
     ExpenseAttachmentRow,
     ExpenseClaimRow,
     ExpensePayPeriodResolution,
@@ -384,19 +385,16 @@ class _FakeRepo:
         *,
         workspace_id: str,
         claim_id: str,
-        decided_by: str,
-        decided_at: datetime,
-        pay_period_id: str | None = None,
-        decision_note_md: str | None = None,
+        decision: ExpenseApprovalDecision,
     ) -> ExpenseClaimRow:
         row = self.claims[claim_id]
         new_row = replace(
             row,
             state="approved",
-            decided_by=decided_by,
-            decided_at=decided_at,
-            pay_period_id=pay_period_id,
-            decision_note_md=decision_note_md,
+            decided_by=decision.decided_by,
+            decided_at=decision.decided_at,
+            pay_period_id=decision.pay_period_id,
+            decision_note_md=decision.decision_note_md,
         )
         self.claims[claim_id] = new_row
         return new_row
@@ -915,8 +913,12 @@ class TestPendingReimbursement:
         repo.mark_claim_approved(
             workspace_id=_WS_ID,
             claim_id=created.id,
-            decided_by="manager-id",
-            decided_at=_PINNED,
+            decision=ExpenseApprovalDecision(
+                decided_by="manager-id",
+                decided_at=_PINNED,
+                pay_period_id=None,
+                decision_note_md=None,
+            ),
         )
         checker = _FakeChecker()
         view = pending_reimbursement(repo, checker, _ctx(), user_id=_ACTOR_ID)
@@ -942,8 +944,12 @@ class TestPendingReimbursement:
         repo.mark_claim_approved(
             workspace_id=_WS_ID,
             claim_id=a.id,
-            decided_by="m",
-            decided_at=_PINNED,
+            decision=ExpenseApprovalDecision(
+                decided_by="m",
+                decided_at=_PINNED,
+                pay_period_id=None,
+                decision_note_md=None,
+            ),
         )
         # Approved claim for other user.
         b = create_claim(
@@ -956,8 +962,12 @@ class TestPendingReimbursement:
         repo.mark_claim_approved(
             workspace_id=_WS_ID,
             claim_id=b.id,
-            decided_by="m",
-            decided_at=_PINNED,
+            decision=ExpenseApprovalDecision(
+                decided_by="m",
+                decided_at=_PINNED,
+                pay_period_id=None,
+                decision_note_md=None,
+            ),
         )
         view = pending_reimbursement(
             repo,

@@ -6,7 +6,7 @@ import datetime as dt
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import and_, or_, select
@@ -41,6 +41,13 @@ PublicHolidayRecurrence = Literal["annual"]
 _MAX_NAME_LEN = 160
 _MAX_NOTES_LEN = 20_000
 
+type _CountryCode = Annotated[str | None, Field(min_length=2, max_length=2)]
+type _PayrollMultiplier = Annotated[
+    Decimal | None,
+    Field(ge=Decimal("0"), max_digits=5, decimal_places=2),
+]
+type _NotesMarkdown = Annotated[str | None, Field(max_length=_MAX_NOTES_LEN)]
+
 
 class PublicHolidayNotFound(LookupError):
     """No live public-holiday row exists for this id in the workspace."""
@@ -55,15 +62,13 @@ class _PublicHolidayBase(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=_MAX_NAME_LEN)
     date: dt.date
-    country: str | None = Field(default=None, min_length=2, max_length=2)
+    country: _CountryCode = None
     scheduling_effect: PublicHolidaySchedulingEffect
     reduced_starts_local: dt.time | None = None
     reduced_ends_local: dt.time | None = None
-    payroll_multiplier: Decimal | None = Field(
-        default=None, ge=Decimal("0"), max_digits=5, decimal_places=2
-    )
+    payroll_multiplier: _PayrollMultiplier = None
     recurrence: PublicHolidayRecurrence | None = None
-    notes_md: str | None = Field(default=None, max_length=_MAX_NOTES_LEN)
+    notes_md: _NotesMarkdown = None
 
     @field_validator("name")
     @classmethod
@@ -112,15 +117,13 @@ class PublicHolidayUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=_MAX_NAME_LEN)
     date: dt.date | None = None
-    country: str | None = Field(default=None, min_length=2, max_length=2)
+    country: _CountryCode = None
     scheduling_effect: PublicHolidaySchedulingEffect | None = None
     reduced_starts_local: dt.time | None = None
     reduced_ends_local: dt.time | None = None
-    payroll_multiplier: Decimal | None = Field(
-        default=None, ge=Decimal("0"), max_digits=5, decimal_places=2
-    )
+    payroll_multiplier: _PayrollMultiplier = None
     recurrence: PublicHolidayRecurrence | None = None
-    notes_md: str | None = Field(default=None, max_length=_MAX_NOTES_LEN)
+    notes_md: _NotesMarkdown = None
 
     @field_validator("country")
     @classmethod

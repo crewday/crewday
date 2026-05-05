@@ -100,7 +100,12 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.tasks.models import Occurrence, Schedule
 from app.audit import write_audit
-from app.domain.tasks.notifications import TaskNotificationSink, notify_task_assigned
+from app.domain.tasks.notifications import (
+    LegacyTaskOptions,
+    TaskNotificationRuntime,
+    TaskNotificationSink,
+    notify_task_assigned,
+)
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import (
@@ -118,6 +123,7 @@ __all__ = [
     "AvailabilityPort",
     "AvailabilityVerdict",
     "CandidatePoolPort",
+    "ReassignTaskOptions",
     "RotaPort",
     "TaskAlreadyAssigned",
     "TaskNotFound",
@@ -256,6 +262,22 @@ class AssignmentResult:
     source: AssignmentSource
     candidate_count: int
     backup_index: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ReassignTaskOptions:
+    clock: Clock | None = None
+    event_bus: EventBus | None = None
+    notifications: TaskNotificationSink | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _ReassignRuntime:
+    session: Session
+    ctx: WorkspaceContext
+    clock: Clock
+    bus: EventBus
+    notifications: TaskNotificationSink | None
 
 
 # ---------------------------------------------------------------------------
@@ -928,13 +950,15 @@ def assign_task(
             )
         if previous_user_id != override_user_id:
             notify_task_assigned(
-                session,
-                ctx,
+                TaskNotificationRuntime(
+                    session,
+                    ctx,
+                    resolved_clock,
+                    resolved_bus,
+                    notifications,
+                ),
                 task=task,
                 recipient_user_id=override_user_id,
-                clock=resolved_clock,
-                bus=resolved_bus,
-                sink=notifications,
             )
         return result
 
@@ -975,13 +999,15 @@ def assign_task(
         )
         if previous_user_id != chosen:
             notify_task_assigned(
-                session,
-                ctx,
+                TaskNotificationRuntime(
+                    session,
+                    ctx,
+                    resolved_clock,
+                    resolved_bus,
+                    notifications,
+                ),
                 task=task,
                 recipient_user_id=chosen,
-                clock=resolved_clock,
-                bus=resolved_bus,
-                sink=notifications,
             )
         return result
 
@@ -1023,13 +1049,15 @@ def assign_task(
         )
         if previous_user_id != pool_pick:
             notify_task_assigned(
-                session,
-                ctx,
+                TaskNotificationRuntime(
+                    session,
+                    ctx,
+                    resolved_clock,
+                    resolved_bus,
+                    notifications,
+                ),
                 task=task,
                 recipient_user_id=pool_pick,
-                clock=resolved_clock,
-                bus=resolved_bus,
-                sink=notifications,
             )
         return result
 
@@ -1085,9 +1113,8 @@ def reassign_task(
     task_id: str,
     new_user_id: str,
     *,
-    clock: Clock | None = None,
-    event_bus: EventBus | None = None,
-    notifications: TaskNotificationSink | None = None,
+    options: ReassignTaskOptions | None = None,
+    **legacy_options: object,
 ) -> AssignmentResult:
     """Move a task from its current assignee to ``new_user_id``.
 
@@ -1103,40 +1130,67 @@ def reassign_task(
     reassigning requires a previous assignee) when ``assignee_user_id``
     is currently ``None``.
     """
-    resolved_clock = clock if clock is not None else SystemClock()
-    resolved_bus = event_bus if event_bus is not None else default_event_bus
+    resolved_options = _reassign_task_options(options, legacy_options)
+    resolved_clock = (
+        resolved_options.clock if resolved_options.clock is not None else SystemClock()
+    )
+    resolved_bus = (
+        resolved_options.event_bus
+        if resolved_options.event_bus is not None
+        else default_event_bus
+    )
 
     task = _load_task(session, ctx, task_id)
-    previous_user_id = task.assignee_user_id
-    if previous_user_id is None:
-        raise TaskAlreadyAssigned(
-            f"task {task_id!r} has no current assignee; use assign_task() "
-            "with override_user_id to pin one from scratch"
-        )
-
+    previous_user_id = _previous_assignee_or_raise(task_id, task.assignee_user_id)
     if previous_user_id == new_user_id:
-        # Idempotent — no-op write, no audit, no event. A manager who
-        # drags a task onto its existing assignee should not see a
-        # noisy audit trail or a toast.
-        return AssignmentResult(
-            task_id=task.id,
-            assigned_user_id=new_user_id,
-            source="manual",
-            candidate_count=0,
-        )
+        return _manual_assignment_result(task.id, new_user_id)
 
-    task.assignee_user_id = new_user_id
-    session.flush()
-    result = AssignmentResult(
-        task_id=task.id,
-        assigned_user_id=new_user_id,
-        source="manual",
-        candidate_count=0,
-    )
-    _audit_assignment(
+    runtime = _ReassignRuntime(
         session,
         ctx,
         resolved_clock,
+        resolved_bus,
+        resolved_options.notifications,
+    )
+    task.assignee_user_id = new_user_id
+    session.flush()
+    result = _manual_assignment_result(task.id, new_user_id)
+    _emit_reassigned(runtime, task, result, previous_user_id, new_user_id)
+    return result
+
+
+def _previous_assignee_or_raise(
+    task_id: str,
+    previous_user_id: str | None,
+) -> str:
+    if previous_user_id is not None:
+        return previous_user_id
+    raise TaskAlreadyAssigned(
+        f"task {task_id!r} has no current assignee; use assign_task() "
+        "with override_user_id to pin one from scratch"
+    )
+
+
+def _manual_assignment_result(task_id: str, user_id: str) -> AssignmentResult:
+    return AssignmentResult(
+        task_id=task_id,
+        assigned_user_id=user_id,
+        source="manual",
+        candidate_count=0,
+    )
+
+
+def _emit_reassigned(
+    runtime: _ReassignRuntime,
+    task: Occurrence,
+    result: AssignmentResult,
+    previous_user_id: str,
+    new_user_id: str,
+) -> None:
+    _audit_assignment(
+        runtime.session,
+        runtime.ctx,
+        runtime.clock,
         task=task,
         result=result,
         action="task.reassigned",
@@ -1144,23 +1198,43 @@ def reassign_task(
         reason=None,
     )
     _publish_reassigned(
-        resolved_bus,
-        ctx,
-        resolved_clock,
+        runtime.bus,
+        runtime.ctx,
+        runtime.clock,
         task_id=task.id,
         previous_user_id=previous_user_id,
         new_user_id=new_user_id,
     )
     notify_task_assigned(
-        session,
-        ctx,
+        TaskNotificationRuntime(
+            runtime.session,
+            runtime.ctx,
+            runtime.clock,
+            runtime.bus,
+            runtime.notifications,
+        ),
         task=task,
         recipient_user_id=new_user_id,
-        clock=resolved_clock,
-        bus=resolved_bus,
-        sink=notifications,
     )
-    return result
+
+
+def _reassign_task_options(
+    options: ReassignTaskOptions | None,
+    legacy_options: dict[str, object],
+) -> ReassignTaskOptions:
+    reader = LegacyTaskOptions("reassign_task", legacy_options)
+    reader.reject_if_combined(options is not None)
+    if options is not None:
+        return options
+    clock = reader.pop_clock("clock")
+    event_bus = reader.pop_event_bus("event_bus")
+    notifications = reader.pop_notifications("notifications")
+    reader.reject_unknown()
+    return ReassignTaskOptions(
+        clock=clock,
+        event_bus=event_bus,
+        notifications=notifications,
+    )
 
 
 def unassign_task(

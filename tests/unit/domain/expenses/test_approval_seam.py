@@ -9,6 +9,7 @@ import pytest
 from app.domain.expenses import (
     ApprovalEdits,
     ApprovalPermissionDenied,
+    ApprovalRuntime,
     ClaimNotApprovable,
     ReimburseBody,
     ReimbursePermissionDenied,
@@ -77,7 +78,7 @@ def test_approve_claim_uses_checker_and_repository_write_methods() -> None:
         _ctx(grant_role="manager"),
         claim_id="claim_1",
         edits=ApprovalEdits(vendor="Adjusted", currency="usd"),
-        clock=FrozenClock(_PINNED),
+        runtime=ApprovalRuntime(clock=FrozenClock(_PINNED)),
     )
 
     assert checker.required_keys == ["expenses.approve"]
@@ -100,7 +101,7 @@ def test_approve_claim_attaches_fallback_pay_period_note() -> None:
         _FakeChecker(allowed_keys={"expenses.approve"}),
         _ctx(grant_role="manager"),
         claim_id="claim_1",
-        clock=FrozenClock(_PINNED),
+        runtime=ApprovalRuntime(clock=FrozenClock(_PINNED)),
     )
 
     assert view.state == "approved"
@@ -124,7 +125,7 @@ def test_reject_claim_records_reason_through_repository() -> None:
         _ctx(grant_role="manager"),
         claim_id="claim_1",
         reason_md="Wrong receipt",
-        clock=FrozenClock(_PINNED),
+        runtime=ApprovalRuntime(clock=FrozenClock(_PINNED)),
     )
 
     assert view.state == "rejected"

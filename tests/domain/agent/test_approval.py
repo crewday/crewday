@@ -40,6 +40,7 @@ from app.adapters.llm.ports import Tool
 from app.domain.agent.approval import (
     EXPIRED_DECISION_NOTE,
     MAX_PAGE_LIMIT,
+    ApprovalDecisionOptions,
     ApprovalNotFound,
     ApprovalNotPending,
     ApprovalReplayDispatcher,
@@ -479,8 +480,7 @@ def test_approve_already_rejected_raises_not_pending(
         session=db_session,
         approval_request_id=pending.id,
         decision_note_md="no",
-        clock=clock,
-        event_bus=bus,
+        options=ApprovalDecisionOptions(clock=clock, event_bus=bus),
     )
     db_session.flush()
 
@@ -528,9 +528,11 @@ def test_deny_flips_to_rejected_audits_emits_no_dispatch(
         session=db_session,
         approval_request_id=pending.id,
         decision_note_md="too risky",
-        clock=clock,
-        event_bus=bus,
-        notification_sink=notification_sink,
+        options=ApprovalDecisionOptions(
+            clock=clock,
+            event_bus=bus,
+            notification_sink=notification_sink,
+        ),
     )
     db_session.flush()
 
@@ -564,6 +566,37 @@ def test_deny_flips_to_rejected_audits_emits_no_dispatch(
     assert notification_sink.calls[0][2]["status"] == "rejected"
 
 
+def test_deny_accepts_legacy_decision_keywords(
+    db_session: Session,
+    bus: EventBus,
+    clock: FrozenClock,
+) -> None:
+    workspace = seed_workspace(db_session)
+    actor_id = seed_user(db_session)
+    ctx = build_context(workspace.id, slug=workspace.slug, actor_id=actor_id)
+    set_current(ctx)
+    pending = _seed_pending(
+        db_session,
+        workspace_id=workspace.id,
+        requester_actor_id=actor_id,
+        for_user_id=actor_id,
+        clock=clock,
+    )
+    notification_sink = RecordingNotificationSink()
+
+    view = deny(
+        ctx,
+        session=db_session,
+        approval_request_id=pending.id,
+        clock=clock,
+        event_bus=bus,
+        notification_sink=notification_sink,
+    )
+
+    assert view.status == "rejected"
+    assert notification_sink.calls[0][0] == actor_id
+
+
 def test_deny_already_approved_raises_not_pending(
     db_session: Session,
     bus: EventBus,
@@ -595,8 +628,7 @@ def test_deny_already_approved_raises_not_pending(
             ctx,
             session=db_session,
             approval_request_id=pending.id,
-            clock=clock,
-            event_bus=bus,
+            options=ApprovalDecisionOptions(clock=clock, event_bus=bus),
         )
     assert info.value.status == "approved"
 
@@ -663,8 +695,7 @@ def test_deny_rejects_oversized_note(
             session=db_session,
             approval_request_id=pending.id,
             decision_note_md=huge,
-            clock=clock,
-            event_bus=bus,
+            options=ApprovalDecisionOptions(clock=clock, event_bus=bus),
         )
     assert "decision_note_md" in str(info.value)
 
@@ -806,8 +837,7 @@ def test_list_pending_skips_decided_rows(
         ctx,
         session=db_session,
         approval_request_id=decided.id,
-        clock=clock,
-        event_bus=bus,
+        options=ApprovalDecisionOptions(clock=clock, event_bus=bus),
     )
     db_session.flush()
 

@@ -21,6 +21,7 @@ from app.domain.tasks.comments import (
     CommentMentionInvalid,
     CommentNotEditable,
     CommentNotFound,
+    EditCommentOptions,
     delete_comment,
     edit_comment,
     list_comments,
@@ -166,11 +167,13 @@ def patch_task_comment_route(
             ctx,
             comment_id,
             body.body_md,
-            notifications=SqlAlchemyNotificationSink(
-                session,
-                ctx,
-                clock=SystemClock(),
-                bus=_task_lifecycle_bus(session, ctx),
+            options=EditCommentOptions(
+                notifications=SqlAlchemyNotificationSink(
+                    session,
+                    ctx,
+                    clock=SystemClock(),
+                    bus=_task_lifecycle_bus(session, ctx),
+                ),
             ),
         )
     except (

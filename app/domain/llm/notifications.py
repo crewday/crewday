@@ -17,6 +17,7 @@ from app.util.clock import Clock
 
 __all__ = [
     "AnomalyDetectedView",
+    "AnomalyNotificationOptions",
     "LlmNotificationSink",
     "notify_anomaly_detected",
 ]
@@ -56,20 +57,70 @@ class AnomalyDetectedView:
     severity: str
 
 
+@dataclass(frozen=True, slots=True)
+class AnomalyNotificationOptions:
+    clock: Clock
+    bus: EventBus
+    recipient_user_ids: Sequence[str] | None = None
+    sink: LlmNotificationSink | None = None
+
+
+def _anomaly_notification_options(
+    options: AnomalyNotificationOptions | None,
+    *,
+    clock: Clock | None,
+    bus: EventBus | None,
+    recipient_user_ids: Sequence[str] | None,
+    sink: LlmNotificationSink | None,
+) -> AnomalyNotificationOptions:
+    if options is not None:
+        if (
+            clock is not None
+            or bus is not None
+            or recipient_user_ids is not None
+            or sink is not None
+        ):
+            raise TypeError(
+                "notify_anomaly_detected received options plus legacy keywords"
+            )
+        return options
+    if clock is None or bus is None:
+        raise TypeError("notify_anomaly_detected requires clock and bus")
+    return AnomalyNotificationOptions(
+        clock=clock,
+        bus=bus,
+        recipient_user_ids=recipient_user_ids,
+        sink=sink,
+    )
+
+
 def notify_anomaly_detected(
     session: Session,
     ctx: WorkspaceContext,
     *,
     anomaly: AnomalyDetectedView,
-    clock: Clock,
-    bus: EventBus,
+    options: AnomalyNotificationOptions | None = None,
+    clock: Clock | None = None,
+    bus: EventBus | None = None,
     recipient_user_ids: Sequence[str] | None = None,
     sink: LlmNotificationSink | None = None,
 ) -> None:
-    _ = session, clock, bus
-    if sink is None:
+    # code-health: ignore[params] Legacy keywords are kept for the domain seam.
+    resolved_options = _anomaly_notification_options(
+        options,
+        clock=clock,
+        bus=bus,
+        recipient_user_ids=recipient_user_ids,
+        sink=sink,
+    )
+    _ = session, ctx, resolved_options.clock, resolved_options.bus
+    if resolved_options.sink is None:
         return
-    recipients = tuple(recipient_user_ids) if recipient_user_ids is not None else ()
+    recipients = (
+        tuple(resolved_options.recipient_user_ids)
+        if resolved_options.recipient_user_ids is not None
+        else ()
+    )
     dedupe_key = ":".join(
         (
             anomaly.anomaly_kind,
@@ -93,13 +144,13 @@ def notify_anomaly_detected(
     }
     for user_id in sorted(set(recipients)):
         if _notification_exists(
-            sink,
+            resolved_options.sink,
             recipient_user_id=user_id,
             dedupe_key=dedupe_key,
         ):
             continue
         _notify(
-            sink,
+            resolved_options.sink,
             recipient_user_id=user_id,
             kind=NotificationKind.ANOMALY_DETECTED,
             payload=payload,

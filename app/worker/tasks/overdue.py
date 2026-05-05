@@ -20,8 +20,7 @@ Public surface:
   flatten to JSON deterministically and tests can equality-check
   the full shape.
 * :func:`detect_overdue` — the entry point. Signature
-  ``(ctx, *, session, now=None, clock=None, grace_minutes=None,
-  event_bus=None) -> OverdueReport``.
+  ``(ctx, *, options=DetectOverdueOptions(...)) -> OverdueReport``.
 
 **Manual-transition safety.** Between the SELECT (load eligible
 candidates) and the per-row UPDATE (flip state), a worker / manager
@@ -55,7 +54,7 @@ See ``docs/specs/06-tasks-and-scheduling.md`` §"State machine"
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Final
@@ -70,13 +69,23 @@ from app.adapters.db.messaging.audiences import (
 from app.adapters.db.tasks.models import Occurrence
 from app.adapters.notifications.service import SqlAlchemyNotificationSink
 from app.audit import write_audit
-from app.domain.llm.notifications import AnomalyDetectedView, notify_anomaly_detected
+from app.domain.llm.notifications import (
+    AnomalyDetectedView,
+    AnomalyNotificationOptions,
+    notify_anomaly_detected,
+)
 from app.domain.settings.cascade import (
     SettingScopeChain,
     resolve_most_specific,
     task_scope_chain,
 )
-from app.domain.tasks.notifications import TaskNotificationSink, notify_task_overdue
+from app.domain.tasks.notifications import (
+    LegacyTaskOptions,
+    TaskNotificationRuntime,
+    TaskNotificationSink,
+    TaskOverdueNotification,
+    notify_task_overdue,
+)
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import TaskOverdue
@@ -89,6 +98,7 @@ __all__ = [
     "DEFAULT_OVERDUE_TICK_SECONDS",
     "SETTINGS_KEY_OVERDUE_GRACE_MINUTES",
     "SETTINGS_KEY_OVERDUE_TICK_SECONDS",
+    "DetectOverdueOptions",
     "OverdueReport",
     "detect_overdue",
     "resolve_overdue_grace_minutes",
@@ -267,20 +277,45 @@ class OverdueReport:
     flipped_task_ids: tuple[str, ...] = field(default_factory=tuple)
 
 
+@dataclass(frozen=True, slots=True)
+class DetectOverdueOptions:
+    session: Session
+    now: datetime | None = None
+    clock: Clock | None = None
+    grace_minutes: int | None = None
+    event_bus: EventBus | None = None
+    notifications: TaskNotificationSink | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _OverdueRuntime:
+    ctx: WorkspaceContext
+    session: Session
+    now: datetime
+    clock: Clock
+    bus: EventBus
+    notifications: TaskNotificationSink
+    default_notifications: SqlAlchemyNotificationSink
+    grace_minutes: int | None
+
+
+@dataclass(slots=True)
+class _OverdueAccumulator:
+    flipped_task_ids: list[str] = field(default_factory=list)
+    per_property_breakdown: dict[str, int] = field(default_factory=dict)
+    skipped_manual_transition: int = 0
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 
-def detect_overdue(  # code-health: ignore[nloc] Overdue policy flow.
+def detect_overdue(
     ctx: WorkspaceContext,
     *,
-    session: Session,
-    now: datetime | None = None,
-    clock: Clock | None = None,
-    grace_minutes: int | None = None,
-    event_bus: EventBus | None = None,
-    notifications: TaskNotificationSink | None = None,
+    options: DetectOverdueOptions | None = None,
+    **legacy_options: object,
 ) -> OverdueReport:
     """Run one sweeper tick for the caller's workspace.
 
@@ -305,196 +340,238 @@ def detect_overdue(  # code-health: ignore[nloc] Overdue policy flow.
     override — a zero or negative grace is almost certainly a caller
     bug (would flip every just-ended task instantly).
     """
-    if grace_minutes is not None and grace_minutes <= 0:
-        raise ValueError(
-            f"grace_minutes must be a positive integer; got {grace_minutes}"
+    runtime = _build_overdue_runtime(
+        ctx, _detect_overdue_options(options, legacy_options)
+    )
+    audit_grace = (
+        runtime.grace_minutes
+        if runtime.grace_minutes is not None
+        else resolve_overdue_grace_minutes(
+            runtime.session, workspace_id=ctx.workspace_id
         )
+    )
+    tick_started_at = runtime.now
+    totals = _OverdueAccumulator()
 
-    resolved_clock = clock if clock is not None else SystemClock()
-    resolved_now = now if now is not None else resolved_clock.now()
+    for task in _load_overdue_candidates(runtime):
+        _process_overdue_candidate(runtime, task, totals)
+
+    tick_ended_at = runtime.clock.now()
+
+    _write_overdue_tick_audit(
+        runtime.session,
+        ctx,
+        flipped_count=len(totals.flipped_task_ids),
+        skipped_already_overdue=0,
+        skipped_manual_transition=totals.skipped_manual_transition,
+        per_property_breakdown=totals.per_property_breakdown,
+        grace_minutes=audit_grace,
+        tick_started_at=tick_started_at,
+        tick_ended_at=tick_ended_at,
+        clock=runtime.clock,
+    )
+
+    return OverdueReport(
+        flipped_count=len(totals.flipped_task_ids),
+        skipped_already_overdue=0,
+        skipped_manual_transition=totals.skipped_manual_transition,
+        per_property_breakdown=totals.per_property_breakdown,
+        tick_started_at=tick_started_at,
+        tick_ended_at=tick_ended_at,
+        flipped_task_ids=tuple(totals.flipped_task_ids),
+    )
+
+
+def _detect_overdue_options(
+    options: DetectOverdueOptions | None,
+    legacy_options: dict[str, object],
+) -> DetectOverdueOptions:
+    reader = LegacyTaskOptions("detect_overdue", legacy_options)
+    reader.reject_if_combined(options is not None)
+    if options is not None:
+        return options
+    session = reader.pop_session()
+    now = reader.pop_datetime("now")
+    clock = reader.pop_clock("clock")
+    grace_minutes = reader.pop_int("grace_minutes")
+    event_bus = reader.pop_event_bus("event_bus")
+    notifications = reader.pop_notifications("notifications")
+    reader.reject_unknown()
+    return DetectOverdueOptions(
+        session=session,
+        now=now,
+        clock=clock,
+        grace_minutes=grace_minutes,
+        event_bus=event_bus,
+        notifications=notifications,
+    )
+
+
+def _build_overdue_runtime(
+    ctx: WorkspaceContext,
+    options: DetectOverdueOptions,
+) -> _OverdueRuntime:
+    if options.grace_minutes is not None and options.grace_minutes <= 0:
+        raise ValueError(
+            f"grace_minutes must be a positive integer; got {options.grace_minutes}"
+        )
+    resolved_clock = options.clock if options.clock is not None else SystemClock()
+    resolved_now = options.now if options.now is not None else resolved_clock.now()
     if resolved_now.tzinfo is None:
         raise ValueError("now must be a timezone-aware datetime in UTC")
-    resolved_bus = event_bus if event_bus is not None else default_event_bus
+    resolved_bus = (
+        options.event_bus if options.event_bus is not None else default_event_bus
+    )
     default_notifications = SqlAlchemyNotificationSink(
-        session,
+        options.session,
         ctx,
         clock=resolved_clock,
         bus=resolved_bus,
     )
-    task_notifications = notifications or default_notifications
-    audit_grace = (
-        grace_minutes
-        if grace_minutes is not None
-        else resolve_overdue_grace_minutes(session, workspace_id=ctx.workspace_id)
+    return _OverdueRuntime(
+        ctx=ctx,
+        session=options.session,
+        now=resolved_now,
+        clock=resolved_clock,
+        bus=resolved_bus,
+        notifications=options.notifications or default_notifications,
+        default_notifications=default_notifications,
+        grace_minutes=options.grace_minutes,
     )
 
-    tick_started_at = resolved_now
+
+def _load_overdue_candidates(runtime: _OverdueRuntime) -> list[Occurrence]:
     candidate_cutoff = (
-        resolved_now - timedelta(minutes=grace_minutes)
-        if grace_minutes is not None
-        else resolved_now
+        runtime.now - timedelta(minutes=runtime.grace_minutes)
+        if runtime.grace_minutes is not None
+        else runtime.now
     )
-
-    # 1. Load eligible candidates. Predicate matches §06: rows in a
-    #    flippable state whose ``ends_at`` is on the wrong side of the
-    #    cutoff. With an explicit grace override, keep the old
-    #    workspace-wide cutoff. Otherwise load every past-ended task
-    #    and apply the effective per-task grace before updating. The
-    #    ``state IN (...)`` leg is the selective one and
-    #    rides the cd-hurw composite index
-    #    ``ix_occurrence_workspace_state_overdue_since`` for the
-    #    per-tenant scan.
-    candidates = list(
-        session.scalars(
+    return list(
+        runtime.session.scalars(
             select(Occurrence)
-            .where(Occurrence.workspace_id == ctx.workspace_id)
+            .where(Occurrence.workspace_id == runtime.ctx.workspace_id)
             .where(Occurrence.state.in_(_FLIPPABLE_STATES))
             .where(Occurrence.ends_at < candidate_cutoff)
             .order_by(Occurrence.id.asc())
         ).all()
     )
 
-    flipped_task_ids: list[str] = []
-    per_property_breakdown: dict[str, int] = {}
-    skipped_manual_transition = 0
-    # ``skipped_already_overdue`` is always zero today (the load
-    # query excludes ``state='overdue'``); kept on the report shape
-    # for forward-compat. See :class:`OverdueReport`.
-    skipped_already_overdue = 0
 
-    for task in candidates:
-        ends_at_aware = _ensure_utc(task.ends_at)
-        task_grace = (
-            grace_minutes
-            if grace_minutes is not None
-            else _resolve_task_overdue_grace_minutes(
-                session, workspace_id=ctx.workspace_id, task=task
-            )
-        )
-        if ends_at_aware >= resolved_now - timedelta(minutes=task_grace):
-            continue
+def _process_overdue_candidate(
+    runtime: _OverdueRuntime,
+    task: Occurrence,
+    totals: _OverdueAccumulator,
+) -> None:
+    ends_at_aware = _ensure_utc(task.ends_at)
+    task_grace = _task_grace_minutes(runtime, task)
+    if ends_at_aware >= runtime.now - timedelta(minutes=task_grace):
+        return
+    if not _flip_task_overdue(runtime, task):
+        totals.skipped_manual_transition += 1
+        return
 
-        # 2. Re-assert the state predicate in the WHERE clause of the
-        #    UPDATE. A manual transition landing between SELECT and
-        #    UPDATE makes the row's state no longer match — the
-        #    UPDATE matches zero rows, the deliberate move stands,
-        #    and the sweeper silently skips. This is the
-        #    spec-mandated "soft state never overwrites a manual
-        #    transition" guard.
-        result = session.execute(
-            update(Occurrence)
-            .where(Occurrence.id == task.id)
-            .where(Occurrence.workspace_id == ctx.workspace_id)
-            .where(Occurrence.state.in_(_FLIPPABLE_STATES))
-            .values(state="overdue", overdue_since=resolved_now)
-        )
-        # ``Session.execute`` returns ``Result[Any]`` in the public
-        # type stubs; bulk-DML paths actually return a
-        # :class:`CursorResult` with a concrete ``rowcount``. The
-        # narrow assertion is precise, not defensive — a non-cursor
-        # result would mean SQLAlchemy's UPDATE seam regressed and we
-        # want the failure to be loud (mirrors the same pattern in
-        # :func:`app.api.middleware.idempotency._prune_in_session`).
-        assert isinstance(result, CursorResult)
-        if result.rowcount == 0:
-            # Manual transition won the race. No event, no per-row
-            # audit — the manual write already produced its own
-            # ``task.start`` / ``task.complete`` / ``task.skip`` /
-            # ``task.cancel`` row.
-            skipped_manual_transition += 1
-            continue
+    totals.flipped_task_ids.append(task.id)
+    bucket_key = task.property_id if task.property_id is not None else ""
+    totals.per_property_breakdown[bucket_key] = (
+        totals.per_property_breakdown.get(bucket_key, 0) + 1
+    )
+    _publish_overdue(runtime, task, ends_at_aware)
 
-        flipped_task_ids.append(task.id)
-        bucket_key = task.property_id if task.property_id is not None else ""
-        per_property_breakdown[bucket_key] = (
-            per_property_breakdown.get(bucket_key, 0) + 1
-        )
 
-        # 3. Emit ``task.overdue``. ``slipped_minutes`` is floored
-        #    minutes between ``ends_at`` and ``now``; under the load
-        #    predicate ``ends_at + grace < now`` the value is at
-        #    least ``grace`` (and zero only when ``grace == 0``,
-        #    which the resolver rejects). ``ends_at`` may come back
-        #    naive on SQLite — coerce to UTC before subtracting so
-        #    the arithmetic is portable.
-        slipped_seconds = (resolved_now - ends_at_aware).total_seconds()
-        slipped_minutes = max(0, math.floor(slipped_seconds / 60))
-        resolved_bus.publish(
-            TaskOverdue(
-                workspace_id=ctx.workspace_id,
-                actor_id=ctx.actor_id,
-                correlation_id=ctx.audit_correlation_id,
-                occurred_at=resolved_now,
-                task_id=task.id,
-                assigned_user_id=task.assignee_user_id,
-                overdue_since=resolved_now,
-                slipped_minutes=slipped_minutes,
-            )
-        )
-        notify_task_overdue(
-            session,
-            ctx,
-            task=task,
-            overdue_since=resolved_now,
-            slipped_minutes=slipped_minutes,
-            clock=resolved_clock,
-            bus=resolved_bus,
-            recipient_user_ids=(
-                list_owner_user_ids(session, workspace_id=ctx.workspace_id)
-                if task.is_personal
-                else list_owner_manager_user_ids(session, workspace_id=ctx.workspace_id)
-            ),
-            sink=task_notifications,
-        )
-        if not task.is_personal:
-            notify_anomaly_detected(
-                session,
-                ctx,
-                anomaly=AnomalyDetectedView(
-                    anomaly_kind="task_missed",
-                    subject_kind="task",
-                    subject_id=task.id,
-                    window_start=ends_at_aware,
-                    window_end=resolved_now,
-                    detected_at=resolved_now,
-                    title=task.title or "Task missed its scheduled window",
-                    explanation=(
-                        f"{task.title or 'Task'} is {slipped_minutes} minute"
-                        f"{'' if slipped_minutes == 1 else 's'} past its scheduled end."
-                    ),
-                    severity="warning",
-                ),
-                clock=resolved_clock,
-                bus=resolved_bus,
-                recipient_user_ids=list_owner_manager_user_ids(
-                    session, workspace_id=ctx.workspace_id
-                ),
-                sink=default_notifications,
-            )
-
-    tick_ended_at = resolved_clock.now()
-
-    _write_overdue_tick_audit(
-        session,
-        ctx,
-        flipped_count=len(flipped_task_ids),
-        skipped_already_overdue=skipped_already_overdue,
-        skipped_manual_transition=skipped_manual_transition,
-        per_property_breakdown=per_property_breakdown,
-        grace_minutes=audit_grace,
-        tick_started_at=tick_started_at,
-        tick_ended_at=tick_ended_at,
-        clock=resolved_clock,
+def _task_grace_minutes(runtime: _OverdueRuntime, task: Occurrence) -> int:
+    if runtime.grace_minutes is not None:
+        return runtime.grace_minutes
+    return _resolve_task_overdue_grace_minutes(
+        runtime.session, workspace_id=runtime.ctx.workspace_id, task=task
     )
 
-    return OverdueReport(
-        flipped_count=len(flipped_task_ids),
-        skipped_already_overdue=skipped_already_overdue,
-        skipped_manual_transition=skipped_manual_transition,
-        per_property_breakdown=per_property_breakdown,
-        tick_started_at=tick_started_at,
-        tick_ended_at=tick_ended_at,
-        flipped_task_ids=tuple(flipped_task_ids),
+
+def _flip_task_overdue(runtime: _OverdueRuntime, task: Occurrence) -> bool:
+    result = runtime.session.execute(
+        update(Occurrence)
+        .where(Occurrence.id == task.id)
+        .where(Occurrence.workspace_id == runtime.ctx.workspace_id)
+        .where(Occurrence.state.in_(_FLIPPABLE_STATES))
+        .values(state="overdue", overdue_since=runtime.now)
+    )
+    assert isinstance(result, CursorResult)
+    return result.rowcount != 0
+
+
+def _publish_overdue(
+    runtime: _OverdueRuntime,
+    task: Occurrence,
+    ends_at_aware: datetime,
+) -> None:
+    slipped_seconds = (runtime.now - ends_at_aware).total_seconds()
+    slipped_minutes = max(0, math.floor(slipped_seconds / 60))
+    runtime.bus.publish(
+        TaskOverdue(
+            workspace_id=runtime.ctx.workspace_id,
+            actor_id=runtime.ctx.actor_id,
+            correlation_id=runtime.ctx.audit_correlation_id,
+            occurred_at=runtime.now,
+            task_id=task.id,
+            assigned_user_id=task.assignee_user_id,
+            overdue_since=runtime.now,
+            slipped_minutes=slipped_minutes,
+        )
+    )
+    notify_task_overdue(
+        TaskNotificationRuntime(
+            runtime.session,
+            runtime.ctx,
+            runtime.clock,
+            runtime.bus,
+            runtime.notifications,
+        ),
+        notification=TaskOverdueNotification(
+            task=task,
+            overdue_since=runtime.now,
+            slipped_minutes=slipped_minutes,
+            recipient_user_ids=_overdue_recipient_user_ids(runtime, task),
+        ),
+    )
+    if task.is_personal:
+        return
+    notify_anomaly_detected(
+        runtime.session,
+        runtime.ctx,
+        anomaly=AnomalyDetectedView(
+            anomaly_kind="task_missed",
+            subject_kind="task",
+            subject_id=task.id,
+            window_start=ends_at_aware,
+            window_end=runtime.now,
+            detected_at=runtime.now,
+            title=task.title or "Task missed its scheduled window",
+            explanation=_missed_task_explanation(task, slipped_minutes),
+            severity="warning",
+        ),
+        options=AnomalyNotificationOptions(
+            clock=runtime.clock,
+            bus=runtime.bus,
+            recipient_user_ids=list_owner_manager_user_ids(
+                runtime.session, workspace_id=runtime.ctx.workspace_id
+            ),
+            sink=runtime.default_notifications,
+        ),
+    )
+
+
+def _overdue_recipient_user_ids(
+    runtime: _OverdueRuntime,
+    task: Occurrence,
+) -> Sequence[str]:
+    audience = list_owner_user_ids if task.is_personal else list_owner_manager_user_ids
+    return audience(runtime.session, workspace_id=runtime.ctx.workspace_id)
+
+
+def _missed_task_explanation(task: Occurrence, slipped_minutes: int) -> str:
+    minute_label = "minute" if slipped_minutes == 1 else "minutes"
+    return (
+        f"{task.title or 'Task'} is {slipped_minutes} "
+        f"{minute_label} past its scheduled end."
     )
 
 

@@ -155,8 +155,10 @@ def approve_claim(
         ctx,
         claim_id=claim_id,
         edits=edits,
-        clock=clock,
-        notification_sink=notification_sink,
+        runtime=_approval_module.ApprovalRuntime(
+            clock=clock,
+            notification_sink=notification_sink,
+        ),
     )
 
 
@@ -176,8 +178,10 @@ def reject_claim(
         ctx,
         claim_id=claim_id,
         reason_md=reason_md,
-        clock=clock,
-        notification_sink=notification_sink,
+        runtime=_approval_module.ApprovalRuntime(
+            clock=clock,
+            notification_sink=notification_sink,
+        ),
     )
 
 
