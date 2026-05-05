@@ -65,6 +65,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.tasks.models import Occurrence
 from app.audit import write_audit
+from app.domain.llm.notifications import AnomalyDetectedView, notify_anomaly_detected
 from app.domain.settings.cascade import (
     SettingScopeChain,
     resolve_most_specific,
@@ -428,6 +429,28 @@ def detect_overdue(  # code-health: ignore[nloc] Overdue policy flow.
             bus=resolved_bus,
             sink=notifications,
         )
+        if not task.is_personal:
+            notify_anomaly_detected(
+                session,
+                ctx,
+                anomaly=AnomalyDetectedView(
+                    anomaly_kind="task_missed",
+                    subject_kind="task",
+                    subject_id=task.id,
+                    window_start=ends_at_aware,
+                    window_end=resolved_now,
+                    detected_at=resolved_now,
+                    title=task.title or "Task missed its scheduled window",
+                    explanation=(
+                        f"{task.title or 'Task'} is {slipped_minutes} minute"
+                        f"{'' if slipped_minutes == 1 else 's'} past its scheduled end."
+                    ),
+                    severity="warning",
+                ),
+                clock=resolved_clock,
+                bus=resolved_bus,
+                sink=notifications,
+            )
 
     tick_ended_at = resolved_clock.now()
 

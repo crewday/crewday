@@ -38,11 +38,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.audit.models import AuditLog
+from app.adapters.db.authz.models import (
+    PermissionGroup,
+    PermissionGroupMember,
+    RoleGrant,
+)
+from app.adapters.db.messaging.models import Notification
 from app.adapters.db.places.models import Property
 from app.adapters.db.tasks.models import Occurrence
 from app.adapters.db.workspace.models import Workspace
+from app.domain.llm.notifications import AnomalyDetectedView, notify_anomaly_detected
 from app.events.bus import EventBus
-from app.events.types import TaskOverdue
+from app.events.types import NotificationCreated, TaskOverdue
 from app.tenancy import tenant_agnostic
 from app.tenancy.context import WorkspaceContext
 from app.tenancy.current import reset_current, set_current
@@ -172,6 +179,70 @@ def _seed_occurrence(
     return oid
 
 
+def _seed_user(session: Session, *, label: str) -> str:
+    from app.adapters.db.identity.models import User
+
+    user_id = new_ulid()
+    session.add(
+        User(
+            id=user_id,
+            email=f"{label}-{user_id}@example.com",
+            email_lower=f"{label}-{user_id}@example.com".lower(),
+            display_name=label.title(),
+            locale=None,
+            timezone=None,
+            avatar_blob_hash=None,
+            created_at=_PINNED,
+            last_login_at=None,
+        )
+    )
+    session.flush()
+    return user_id
+
+
+def _seed_owner_manager_recipients(
+    session: Session, *, workspace_id: str
+) -> tuple[str, str]:
+    with tenant_agnostic():
+        owner_id = _seed_user(session, label="owner")
+        manager_id = _seed_user(session, label="manager")
+        group = PermissionGroup(
+            id=new_ulid(),
+            workspace_id=workspace_id,
+            slug="owners",
+            name="Owners",
+            system=True,
+            capabilities_json={},
+            created_at=_PINNED,
+        )
+        session.add(group)
+        session.flush()
+        session.add(
+            PermissionGroupMember(
+                group_id=group.id,
+                user_id=owner_id,
+                workspace_id=workspace_id,
+                added_at=_PINNED,
+                added_by_user_id=None,
+            )
+        )
+        session.add(
+            RoleGrant(
+                id=new_ulid(),
+                workspace_id=workspace_id,
+                user_id=manager_id,
+                grant_role="manager",
+                scope_kind="workspace",
+                scope_property_id=None,
+                binding_org_id=None,
+                created_at=_PINNED,
+                created_by_user_id=None,
+            )
+        )
+        session.flush()
+    return owner_id, manager_id
+
+
 class TestDetectOverdueIntegration:
     """End-to-end: real schema, real CHECK, real index."""
 
@@ -299,6 +370,96 @@ class TestDetectOverdueIntegration:
             select(AuditLog).where(AuditLog.action == "tasks.overdue_tick")
         ).all()
         assert len(audits) == 2
+
+    def test_task_missed_anomaly_notifies_owner_managers_once(
+        self, db_session: Session
+    ) -> None:
+        workspace_id, property_id = _seed_workspace_property(
+            db_session, slug="overdue-anomaly"
+        )
+        owner_id, manager_id = _seed_owner_manager_recipients(
+            db_session, workspace_id=workspace_id
+        )
+        stuck_id = _seed_occurrence(
+            db_session,
+            workspace_id=workspace_id,
+            property_id=property_id,
+            state="pending",
+            ends_at=_PINNED - timedelta(minutes=30),
+        )
+
+        bus = EventBus()
+        captured: list[NotificationCreated] = []
+        bus.subscribe(NotificationCreated)(captured.append)
+        clock = FrozenClock(_PINNED)
+        ctx = _ctx(workspace_id, slug="overdue-anomaly")
+
+        first = detect_overdue(
+            ctx,
+            session=db_session,
+            now=_PINNED,
+            clock=clock,
+            event_bus=bus,
+            grace_minutes=15,
+        )
+        second = detect_overdue(
+            ctx,
+            session=db_session,
+            now=_PINNED,
+            clock=clock,
+            event_bus=bus,
+            grace_minutes=15,
+        )
+
+        assert first.flipped_count == 1
+        assert second.flipped_count == 0
+        anomaly_rows = db_session.scalars(
+            select(Notification).where(
+                Notification.workspace_id == workspace_id,
+                Notification.kind == "anomaly_detected",
+            )
+        ).all()
+        assert len(anomaly_rows) == 2
+        assert {row.recipient_user_id for row in anomaly_rows} == {
+            owner_id,
+            manager_id,
+        }
+        assert {row.payload_json["subject_id"] for row in anomaly_rows} == {stuck_id}
+        assert {row.payload_json["dedupe_key"] for row in anomaly_rows} == {
+            (
+                f"task_missed:task:{stuck_id}:"
+                f"{(_PINNED - timedelta(minutes=30)).isoformat()}:"
+                f"{_PINNED.isoformat()}"
+            )
+        }
+        assert [event.kind for event in captured].count("anomaly_detected") == 2
+
+        notify_anomaly_detected(
+            db_session,
+            ctx,
+            anomaly=AnomalyDetectedView(
+                anomaly_kind="task_missed",
+                subject_kind="task",
+                subject_id=stuck_id,
+                window_start=_PINNED - timedelta(minutes=30),
+                window_end=_PINNED,
+                detected_at=_PINNED,
+                title="Pool clean missed its scheduled window",
+                explanation="Pool clean is 30 minutes past its scheduled end.",
+                severity="warning",
+            ),
+            clock=clock,
+            bus=bus,
+        )
+
+        anomaly_rows = db_session.scalars(
+            select(Notification).where(
+                Notification.workspace_id == workspace_id,
+                Notification.kind == "anomaly_detected",
+            )
+        ).all()
+        assert len(anomaly_rows) == 2
+        assert [event.kind for event in captured].count("anomaly_detected") == 2
 
     def test_does_not_leak_across_workspaces(self, db_session: Session) -> None:
         """A tick on workspace A does not touch workspace B."""

@@ -370,6 +370,26 @@ class TestFanoutEndToEnd:
                 },
                 "The agent has an update",
             ),
+            (
+                NotificationKind.ANOMALY_DETECTED,
+                {
+                    "anomaly_kind": "task_missed",
+                    "subject_kind": "task",
+                    "subject_id": "task-1",
+                    "window_start": "2026-04-24T11:30:00+00:00",
+                    "window_end": "2026-04-24T12:00:00+00:00",
+                    "detected_at": "2026-04-24T12:00:00+00:00",
+                    "title": "Pool clean missed its scheduled window",
+                    "explanation": "Pool clean is 30 minutes past its scheduled end.",
+                    "severity": "warning",
+                    "dedupe_key": (
+                        "task_missed:task:task-1:"
+                        "2026-04-24T11:30:00+00:00:"
+                        "2026-04-24T12:00:00+00:00"
+                    ),
+                },
+                "Pool clean missed its scheduled window",
+            ),
         ],
     )
     def test_required_kinds_persist_row_and_fire_sse_with_required_context(
