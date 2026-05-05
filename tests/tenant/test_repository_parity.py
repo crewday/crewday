@@ -457,6 +457,13 @@ COVERED_METHODS: frozenset[str] = frozenset(
         # path as ad-hoc evidence, then filters the checklist item by
         # ``workspace_id`` and parent task id before mutating it.
         "app.domain.tasks.completion.attach_checklist_evidence",
+        # cd-dgqck: task notification helpers do no DB work unless a
+        # caller supplies a sink; API / worker callers inject the
+        # ctx-bound ``NotificationService`` sink, so emitted rows are
+        # stamped with ``ctx.workspace_id`` at that concrete boundary.
+        "app.domain.tasks.notifications.notify_comment_mentions",
+        "app.domain.tasks.notifications.notify_task_assigned",
+        "app.domain.tasks.notifications.notify_task_overdue",
         # time context
         "app.domain.time.shifts.open_shift",
         "app.domain.time.shifts.close_shift",
@@ -511,6 +518,12 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.llm.budget.warm_start_aggregate",
         "app.domain.llm.router.resolve_model",
         "app.domain.llm.router.resolve_primary",
+        # cd-dgqck: anomaly notification dedupe runs through the
+        # ctx-bound notification sink; its concrete ``exists`` path
+        # filters ``notification.workspace_id == ctx.workspace_id``
+        # before comparing payload keys, and ``notify`` writes via the
+        # same sink.
+        "app.domain.llm.notifications.notify_anomaly_detected",
         "app.domain.llm.usage_recorder.record",
         # cd-95zb: receipt OCR / autofill. Loads claim + attachment
         # through ``_load_claim`` / ``_load_attachment`` which scope
@@ -550,6 +563,11 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.expenses.claims.pending_reimbursement",
         "app.domain.expenses.claims.submit_claim",
         "app.domain.expenses.claims.update_claim",
+        # cd-dgqck: expense-submitted fanout obtains approvers from
+        # ``ExpensesRepository.list_expense_approver_user_ids`` with
+        # ``workspace_id=ctx.workspace_id``; no peer workspace approver
+        # can enter the recipient set.
+        "app.domain.expenses.notifications.notify_expense_submitted",
         # cd-5l5f: messaging push tokens — register / unregister /
         # list filter by ``workspace_id`` (and ``user_id``) through
         # the ORM filter; ``get_vapid_public_key`` reads a
