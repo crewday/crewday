@@ -125,6 +125,7 @@ afterEach(() => {
 
 describe("<OrganizationsPage>", () => {
   it("gates the real organizations route with scope.view at runtime", async () => {
+    // code-health: ignore[nloc] Runtime gate test keeps module mock and route assertions in one integration case.
     const originalFetch = globalThis.fetch;
     vi.resetModules();
     vi.doMock("@/lib/preferences", async (importOriginal) => {

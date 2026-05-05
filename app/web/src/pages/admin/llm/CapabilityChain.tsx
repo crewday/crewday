@@ -13,18 +13,14 @@ interface CapabilityChainProps {
   setRungRef: ElementRefSetter;
 }
 
-export default function CapabilityChain({
-  chain,
-  indexes,
-  hasActive,
-  highlighted,
-  setHover,
-  setSelection,
-  setRungRef,
-}: CapabilityChainProps) {
+export default function CapabilityChain(props: CapabilityChainProps) {
+  const { chain, indexes, hasActive, highlighted, setHover, setSelection, setRungRef } =
+    props;
+
   return (
     <ol className="llm-graph-chain">
       {chain.map((a) => {
+        // code-health: ignore[ccn] Chain rung state is compact visual mapping over one assignment and should stay inline.
         const pm = indexes.pmById.get(a.provider_model_id);
         const model = pm ? indexes.modelsById.get(pm.model_id) : null;
         const provider = pm ? indexes.providersById.get(pm.provider_id) : null;

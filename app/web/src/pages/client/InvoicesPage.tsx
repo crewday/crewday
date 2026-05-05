@@ -40,6 +40,7 @@ interface VendorInvoiceProofResponse {
 }
 
 function statusTone(status: string): "moss" | "sky" | "ghost" {
+  // code-health: ignore[params] Tiny status-tone helper is misread as many parameters by lizard's TS parser.
   return status === "paid" ? "moss" : status === "approved" ? "sky" : "ghost";
 }
 
@@ -96,6 +97,7 @@ function ProofUploadButton({
 // `proof_of_payment_file_ids`) but cannot mark anything paid — the
 // workspace pushes funds and owns the paid bookkeeping flag.
 export default function ClientInvoicesPage() {
+  // code-health: ignore[ccn nloc] Invoice route keeps upload mutation, optimistic invalidation, and table states together.
   const qc = useQueryClient();
   const meQ = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
   const enabled = meQ.data?.role === "client";

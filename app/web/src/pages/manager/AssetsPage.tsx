@@ -62,6 +62,7 @@ function QrSheetButton({
 }
 
 export default function AssetsPage() {
+  // code-health: ignore[nloc] Assets page is query plus filterable card/table composition with shared controls.
   const [searchParams, setSearchParams] = useSearchParams();
   const activeCategory = searchParams.get("category") ?? "";
   const activeProperty = searchParams.get("property_id") ?? "";

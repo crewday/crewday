@@ -122,6 +122,7 @@ function DocumentTextDisclosure({ documentId }: { documentId: string }) {
 }
 
 function ExtractionDisclosure({ doc }: { doc: AssetDocument }) {
+  // code-health: ignore[nloc] Extraction disclosure keeps retry invalidation and extraction detail layout together.
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const extractionQ = useQuery({

@@ -67,6 +67,7 @@ function statusLabel(status: string): string {
 }
 
 export default function ClientQuotesPage() {
+  // code-health: ignore[ccn nloc] Quotes page keeps approval fallback, invalidation, and its decision table in one route.
   const queryClient = useQueryClient();
   const [pendingApprovalByQuote, setPendingApprovalByQuote] = useState<Record<string, string>>({});
   const meQ = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });

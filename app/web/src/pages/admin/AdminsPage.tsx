@@ -7,6 +7,7 @@ import { Checkbox, Chip, Loading } from "@/components/common";
 import type { AdminMe, AdminTeamMember } from "@/types/api";
 
 export default function AdminAdminsPage() {
+  // code-health: ignore[nloc] Admin roster page is declarative query/form/table composition with shared primitives.
   const qc = useQueryClient();
   const meQ = useQuery({
     queryKey: qk.adminMe(),

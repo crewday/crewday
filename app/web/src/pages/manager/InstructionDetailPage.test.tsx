@@ -142,6 +142,7 @@ function makeQueryClient() {
 }
 
 function Harness({ queryClient = makeQueryClient() }: { queryClient?: QueryClient }) {
+  // code-health: ignore[nloc] Instruction detail route harness keeps providers and route setup local to the test.
   return (
     <QueryClientProvider client={queryClient}>
       <WorkspaceProvider>

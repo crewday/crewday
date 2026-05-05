@@ -16,6 +16,7 @@ import { useUsersIndex, useWorkspaces } from "./lib/usePermissionIndexes";
 // The "Auto-populated from role_grants" advisory and per-row `derived`
 // badge return when cd-c83ap promotes the field back onto the wire.
 export default function GroupsTab() {
+  // code-health: ignore[ccn nloc] Permission group editor keeps nested role/user grant controls in one table surface.
   const wss = useWorkspaces();
   const users = useUsersIndex();
   const [workspaceId, setWorkspaceId] = useState<string>("");

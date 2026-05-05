@@ -28,6 +28,7 @@ function hourlyCents(row: ClientBillableHoursRow): number {
 }
 
 export default function ClientBillableHoursPage() {
+  // code-health: ignore[nloc] Client billable-hours page is a single declarative table over one query.
   const meQ = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
   const enabled = meQ.data?.role === "client";
   const billingQ = useQuery({

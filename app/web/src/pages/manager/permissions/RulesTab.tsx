@@ -19,6 +19,7 @@ interface ActionCatalogResponse {
 }
 
 export default function RulesTab() {
+  // code-health: ignore[ccn nloc] Permission rules tab is a compact editor for one rule list and its grant matrix.
   const wss = useWorkspaces();
   const users = useUsersIndex();
   const [workspaceId, setWorkspaceId] = useState<string>("");

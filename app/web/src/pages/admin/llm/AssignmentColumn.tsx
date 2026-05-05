@@ -22,17 +22,19 @@ interface AssignmentColumnProps {
   setRungRef: ElementRefSetter;
 }
 
-export default function AssignmentColumn({
-  capabilities,
-  indexes,
-  selection,
-  setHover,
-  setSelection,
-  nodeClass,
-  hasActive,
-  highlighted,
-  setRungRef,
-}: AssignmentColumnProps) {
+export default function AssignmentColumn(props: AssignmentColumnProps) {
+  const {
+    capabilities,
+    indexes,
+    selection,
+    setHover,
+    setSelection,
+    nodeClass,
+    hasActive,
+    highlighted,
+    setRungRef,
+  } = props;
+
   return (
     <div className="llm-graph__col">
       {capabilities.map((cap) => {

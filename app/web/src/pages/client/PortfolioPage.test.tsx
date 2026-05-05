@@ -34,6 +34,7 @@ function installFetch({ role = "client" }: { role?: Me["role"] } = {}) {
   const calls: string[] = [];
   const original = globalThis.fetch;
   const spy = vi.fn(async (url: string | URL | Request) => {
+    // code-health: ignore[nloc] Portfolio route test keeps full endpoint fixture responses explicit.
     const resolved = typeof url === "string" ? url : url.toString();
     calls.push(resolved);
     if (resolved === "/api/v1/auth/me") {

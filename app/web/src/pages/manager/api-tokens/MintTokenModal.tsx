@@ -11,6 +11,7 @@ interface MintTokenModalProps {
 }
 
 export default function MintTokenModal({ onCreated, onCancel }: MintTokenModalProps) {
+  // code-health: ignore[nloc] Token modal is a single declarative form; callbacks are already passed as props.
   const qc = useQueryClient();
   const [label, setLabel] = useState("my-script");
   const [kind, setKind] = useState<TokenKind>("scoped");

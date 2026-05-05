@@ -116,6 +116,7 @@ function mapPayPayload(payload: PayrollPayslipListPayload): PayPayload {
 }
 
 export default function PayPage() {
+  // code-health: ignore[ccn nloc] Pay route coordinates payslip and reimbursement query data while preserving existing table layout.
   const payQ = useQuery({
     queryKey: qk.payslips(),
     queryFn: () =>

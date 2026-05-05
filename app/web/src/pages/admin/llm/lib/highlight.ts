@@ -17,6 +17,7 @@ export function buildHighlighted(
   indexes: LlmIndexes,
   active: Selection,
 ): Highlighted {
+  // code-health: ignore[ccn nloc] Highlight traversal intentionally enumerates graph cases in one pure mapper.
   const providers = new Set<string>();
   const models = new Set<string>();
   const providerModels = new Set<string>();

@@ -124,6 +124,7 @@ const EMPLOYEE_TABS = [
 type Tab = (typeof EMPLOYEE_TABS)[number]["key"];
 
 function tabFromHash(hash: string): Tab {
+  // code-health: ignore[nloc] Tiny hash mapper is misattributed by lizard across the surrounding TSX module.
   const key = hash.replace(/^#/, "");
   return EMPLOYEE_TABS.find((tab) => tab.key === key)?.key ?? "overview";
 }

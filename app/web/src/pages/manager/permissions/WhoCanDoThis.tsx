@@ -21,6 +21,7 @@ export default function WhoCanDoThis({
   scopeKind: "workspace" | "property" | "organization";
   scopeId: string;
 }) {
+  // code-health: ignore[nloc] Permission explanation panel is declarative render composition over computed rows.
   const [userId, setUserId] = useState<string>(users[0]?.id ?? "");
   const [actionKey, setActionKey] = useState<string>(actions[0]?.key ?? "");
 

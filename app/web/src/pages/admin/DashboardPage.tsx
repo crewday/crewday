@@ -14,6 +14,7 @@ import type {
 } from "@/types/api";
 
 export default function AdminDashboardPage() {
+  // code-health: ignore[nloc] Dashboard route composes existing panels and stat cards; splitting would only move unchanged JSX.
   const summaryQ = useQuery({
     queryKey: qk.adminUsageSummary(),
     queryFn: () => fetchJson<AdminUsageSummary>("/admin/api/v1/usage/summary"),

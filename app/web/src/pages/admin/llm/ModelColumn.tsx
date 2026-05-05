@@ -22,15 +22,17 @@ interface ModelColumnProps {
   onModelClick: (modelId: string) => boolean;
 }
 
-export default function ModelColumn({
-  models,
-  selection,
-  setHover,
-  setSelection,
-  nodeClass,
-  setModelRef,
-  onModelClick,
-}: ModelColumnProps) {
+export default function ModelColumn(props: ModelColumnProps) {
+  const {
+    models,
+    selection,
+    setHover,
+    setSelection,
+    nodeClass,
+    setModelRef,
+    onModelClick,
+  } = props;
+
   return (
     <div className="llm-graph__col">
       {models.map((m) => (

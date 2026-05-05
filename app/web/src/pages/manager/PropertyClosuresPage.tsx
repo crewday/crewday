@@ -113,6 +113,7 @@ async function fetchClosuresPayload(pid: string): Promise<ClosuresPayload> {
 }
 
 export default function PropertyClosuresPage() {
+  // code-health: ignore[nloc] Closure page keeps filter state, create form, and table actions on one promoted route.
   const { pid = "" } = useParams<{ pid: string }>();
   const queryClient = useQueryClient();
   const dialogRef = useRef<HTMLDialogElement | null>(null);

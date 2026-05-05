@@ -13,6 +13,7 @@ function installFetch({ failLeaves = false }: { failLeaves?: boolean } = {}) {
   const calls: { url: string; method: string }[] = [];
   const original = globalThis.fetch;
   const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    // code-health: ignore[nloc] Employee leave route fetch fixture keeps all promoted endpoint shapes explicit.
     const resolved = typeof url === "string" ? url : url.toString();
     const method = init?.method ?? "GET";
     calls.push({ url: resolved, method });

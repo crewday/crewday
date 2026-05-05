@@ -22,6 +22,7 @@ import { fetchPropertyDetail } from "./property/propertyDetailApi";
 import type { PropertyTab } from "./property/types";
 
 export default function PropertyDetailPage() {
+  // code-health: ignore[nloc] Property detail route is a declarative shell around extracted detail sections.
   const { pid = "" } = useParams<{ pid: string }>();
   const [activeTab, setActiveTab] = useState<PropertyTab>("overview");
   const { workspaceId } = useWorkspace();

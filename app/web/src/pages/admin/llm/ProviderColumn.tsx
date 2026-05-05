@@ -11,14 +11,10 @@ interface ProviderColumnProps {
   setProviderRef: ElementRefSetter;
 }
 
-export default function ProviderColumn({
-  providers,
-  selection,
-  setHover,
-  setSelection,
-  nodeClass,
-  setProviderRef,
-}: ProviderColumnProps) {
+export default function ProviderColumn(props: ProviderColumnProps) {
+  const { providers, selection, setHover, setSelection, nodeClass, setProviderRef } =
+    props;
+
   return (
     <div className="llm-graph__col">
       {providers.map((p) => (

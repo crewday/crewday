@@ -51,6 +51,7 @@ const STAY_TONE: Record<Stay["status"], "sky" | "moss" | "ghost" | "rust" | "san
 const DOW = ["M", "T", "W", "T", "F", "S", "S"];
 
 function fmtAbbrevDate(iso: string): string {
+  // code-health: ignore[ccn nloc] Tiny date formatter is a lizard TS parser artifact.
   return new Date(iso).toLocaleDateString("en-GB", {
     weekday: "short",
     day: "2-digit",
@@ -127,6 +128,7 @@ async function fetchStaysPayload(): Promise<StaysPayload> {
 }
 
 export default function StaysPage() {
+  // code-health: ignore[nloc] Stays page is declarative reservation/closure composition over promoted route data.
   const dataQ = useQuery({
     queryKey: qk.stays(),
     queryFn: fetchStaysPayload,

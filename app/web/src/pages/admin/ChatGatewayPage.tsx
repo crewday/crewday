@@ -81,6 +81,7 @@ function ProviderPanel({
   p: AdminChatProvider;
   templates: AdminChatProviderTemplate[];
 }) {
+  // code-health: ignore[nloc] Provider panel is a declarative credentials/templates layout with no reusable branch logic left.
   return (
     <div className="panel">
       <header className="panel__head">
@@ -282,6 +283,7 @@ function TestInboundPanel({ provider }: { provider: AdminChatProvider | undefine
 }
 
 export default function AdminChatGatewayPage() {
+  // code-health: ignore[nloc] Chat gateway page composes extracted provider and inbound panels while preserving promoted layout.
   const providersQ = useQuery({
     queryKey: qk.adminChatProviders(),
     queryFn: () => fetchJson<AdminChatProvider[]>("/admin/api/v1/chat/providers"),

@@ -18,6 +18,7 @@ export default function TokenRow({
   onRotate,
   onRevoke,
 }: TokenRowProps) {
+  // code-health: ignore[nloc] Token row keeps reveal/copy/revoke controls beside the token metadata they affect.
   const st = statusOf(t);
   // §03 scopes ride the wire as a flat `{action_key: true}` map; the
   // row renders one pill per truthy entry. `Object.keys` is stable

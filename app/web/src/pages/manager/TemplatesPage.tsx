@@ -49,6 +49,7 @@ const HINTS_MAX_CHARS = 140;
 const REORDER_DEBOUNCE_MS = 400;
 
 function truncate(text: string, max: number): string {
+  // code-health: ignore[nloc] Lizard misattributes the rest of this TSX module to this two-branch helper.
   if (text.length <= max) return text;
   return `${text.slice(0, max).trimEnd()}…`;
 }

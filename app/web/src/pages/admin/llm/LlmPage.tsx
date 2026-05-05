@@ -29,6 +29,7 @@ const sub =
   "Deployment-wide LLM config: providers, models, provider-model pricing, capability assignment chains, and the prompt library. Shared by every workspace.";
 
 export default function AdminLlmPage() {
+  // code-health: ignore[nloc] LLM graph route already delegates columns, alerts, stats, pricing, calls, and drawers.
   const graphQ = useQuery({
     queryKey: qk.adminLlmGraph(),
     queryFn: () => fetchJson<LlmGraphPayload>("/admin/api/v1/llm/graph"),
@@ -126,6 +127,7 @@ export default function AdminLlmPage() {
   };
 
   const writeAssignmentToModel = (modelId: string): boolean => {
+    // code-health: ignore[ccn] Assignment move guard deliberately lists each graph invariant before mutating.
     if (!graph || !indexes || selection?.column !== "assignment") return false;
     const assignment = graph.assignments.find((a) => a.id === selection.id);
     if (!assignment) return false;

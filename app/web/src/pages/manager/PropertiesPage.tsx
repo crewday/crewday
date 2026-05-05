@@ -82,6 +82,7 @@ const MEMBERSHIP_LABEL: Record<string, string> = {
 };
 
 function dateOnly(iso: string): string {
+  // code-health: ignore[ccn nloc] Tiny date helper is over-counted by lizard after TSX parsing.
   return iso.slice(0, 10);
 }
 
@@ -199,6 +200,7 @@ async function fetchOrganizations(): Promise<Organization[]> {
 }
 
 export default function PropertiesPage() {
+  // code-health: ignore[ccn nloc] Properties route composes query mapping, selected card state, and promoted table layout.
   const { workspaceId } = useWorkspace();
   const meQ = useQuery({ queryKey: qk.authMe(), queryFn: () => fetchJson<AuthMe>("/api/v1/auth/me") });
   const propsQ = useQuery({

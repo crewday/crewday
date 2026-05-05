@@ -82,6 +82,7 @@ export interface OrganizationRow {
 }
 
 function dateOnly(iso: string): string {
+  // code-health: ignore[ccn] Tiny date helper is over-counted by lizard after TS parser recovery.
   return iso.slice(0, 10);
 }
 

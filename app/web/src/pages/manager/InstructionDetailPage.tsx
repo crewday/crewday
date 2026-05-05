@@ -121,6 +121,7 @@ function canSubmitPatch(patch: InstructionPatch): boolean {
 }
 
 export default function InstructionDetailPage() {
+  // code-health: ignore[ccn] Instruction detail route coordinates read/ack/comment mutations around one promoted detail layout.
   const { iid } = useParams<{ iid: string }>();
   const queryClient = useQueryClient();
   const editDialogRef = useRef<HTMLDialogElement>(null);

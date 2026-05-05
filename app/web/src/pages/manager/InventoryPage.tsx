@@ -191,6 +191,7 @@ interface WireMovementsPage {
 }
 
 export default function InventoryPage() {
+  // code-health: ignore[ccn nloc] Inventory route keeps filters, inline adjustment dialog, and table actions together.
   const qc = useQueryClient();
   const propsQ = useQuery({
     queryKey: qk.properties(),

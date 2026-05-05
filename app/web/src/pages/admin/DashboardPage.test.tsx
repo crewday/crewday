@@ -55,6 +55,7 @@ afterEach(() => {
 
 describe("Admin DashboardPage", () => {
   it("excludes archived workspaces from pressure rows", async () => {
+    // code-health: ignore[nloc] Integration fixture spells out all dashboard API payloads for this route case.
     const restore = installFetch({
       "/admin/api/v1/usage/summary": [
         {

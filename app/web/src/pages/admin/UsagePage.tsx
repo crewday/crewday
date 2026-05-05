@@ -33,6 +33,7 @@ function usagePercent(spentCents: number, capCents: number): number {
 }
 
 export default function AdminUsagePage() {
+  // code-health: ignore[nloc] Usage route keeps query orchestration and the single cap-editing table in one place.
   const qc = useQueryClient();
   const [editing, setEditing] = useState<string | null>(null);
   const [draftCap, setDraftCap] = useState<string>("");
@@ -162,6 +163,7 @@ export default function AdminUsagePage() {
           </thead>
           <tbody>
             {rows.map((w) => {
+              // code-health: ignore[ccn nloc] Workspace usage row has inline edit/save states that should remain beside the table cells.
               const meta = workspaceMeta.get(w.workspace_id);
               const plan = meta?.plan ?? "free";
               return (

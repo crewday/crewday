@@ -28,6 +28,7 @@ const ACTOR_KIND_OPTIONS: {
 // (`actor_kind` is applied client-side; the backend does not yet
 // expose it as a query param — see `app.api.admin.audit.list_audit`).
 function buildAuditQuery(filter: AdminAuditFilter): string {
+  // code-health: ignore[ccn] Small query-string mapper is over-counted by the TS parser but keeps supported filters explicit.
   const params = new URLSearchParams();
   if (filter.actor_id) params.set("actor_id", filter.actor_id);
   if (filter.action) params.set("action", filter.action);

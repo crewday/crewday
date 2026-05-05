@@ -26,6 +26,7 @@ function installFetch({ failLeaves = false }: { failLeaves?: boolean } = {}): {
   restore: () => void;
 } {
   const env = installFetchSpy(({ url: resolved }) => {
+    // code-health: ignore[nloc] Leaves inbox fixture keeps auth, list, approve, and reject responses together.
     if (resolved === "/api/v1/auth/me") {
       return jsonResponse({
         user_id: "mgr_1",

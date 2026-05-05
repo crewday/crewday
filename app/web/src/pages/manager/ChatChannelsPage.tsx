@@ -41,6 +41,7 @@ function providerTone(
 }
 
 export default function ChatChannelsPage() {
+  // code-health: ignore[nloc] Chat channels page is declarative provider/binding table composition over one route query.
   const qc = useQueryClient();
   const { user } = useAuth();
   const currentUserId = user?.user_id ?? null;

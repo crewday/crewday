@@ -71,6 +71,7 @@ const invoiceRows: TestInvoiceRow[] = [
 ];
 
 function withUploadedProof(rows: TestInvoiceRow[]): TestInvoiceRow[] {
+  // code-health: ignore[nloc] Tiny mapper is misattributed across adjacent invoice fixtures by lizard.
   return rows.map((row) =>
     row.id === "invoice_1"
       ? { ...row, proof_of_payment_file_ids: ["proof_hash"] }

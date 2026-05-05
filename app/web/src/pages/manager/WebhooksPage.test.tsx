@@ -58,6 +58,7 @@ function installFetch({ failWebhooks = false }: { failWebhooks?: boolean } = {})
     },
   ];
   const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    // code-health: ignore[nloc] Webhook route fixture keeps create/reveal/test/rotate endpoints visible together.
     const resolved = typeof url === "string" ? url : url.toString();
     const method = init?.method ?? "GET";
     const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;

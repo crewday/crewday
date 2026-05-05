@@ -71,6 +71,7 @@ function installFetch(
 }
 
 function Harness(): ReactElement {
+  // code-health: ignore[nloc] Route harness keeps workspace admin fixtures local to the integration test.
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>

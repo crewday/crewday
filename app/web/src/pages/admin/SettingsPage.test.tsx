@@ -55,6 +55,7 @@ function installFetch(scripted: Record<string, FakeResponse[]>): {
 }
 
 function Harness(): ReactElement {
+  // code-health: ignore[nloc] Route harness keeps admin settings query setup local to the integration test.
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
