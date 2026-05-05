@@ -92,7 +92,7 @@ from app.adapters.db.identity.models import (
     User,
     canonicalise_email,
 )
-from app.adapters.db.places.repositories import active_property_workspace_ids_stmt
+from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.workspace.models import (
     UserWorkRole,
     WorkEngagement,
@@ -651,9 +651,13 @@ def _validate_grants(
             wanted = {pid for _idx, pid in property_ids}
             known = set(
                 session.scalars(
-                    active_property_workspace_ids_stmt(
-                        workspace_id=workspace_id,
-                        property_ids=wanted,
+                    select(PropertyWorkspace.property_id)
+                    .join(Property, Property.id == PropertyWorkspace.property_id)
+                    .where(
+                        PropertyWorkspace.workspace_id == workspace_id,
+                        PropertyWorkspace.property_id.in_(wanted),
+                        PropertyWorkspace.status == "active",
+                        Property.deleted_at.is_(None),
                     )
                 ).all()
             )

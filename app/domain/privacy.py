@@ -39,7 +39,7 @@ from app.adapters.db.tasks.models import Comment, Occurrence
 from app.adapters.db.workspace.models import UserWorkspace, WorkEngagement, Workspace
 from app.adapters.storage.ports import BlobNotFound, Storage
 from app.audit import write_audit
-from app.auth.session import invalidate_for_user as invalidate_sessions_for_user
+from app.auth.audit import agnostic_audit_ctx
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.redact import redact
@@ -284,7 +284,7 @@ def purge_person(
                 )
             )
         )
-        invalidate_sessions_for_user(
+        _invalidate_sessions_for_user(
             session,
             user_id=person_id,
             cause="user_archived",
@@ -583,6 +583,49 @@ def _audit_export_requested(
             action="audit.privacy.export.issued",
             diff={"issued_at": now.isoformat()},
         )
+
+
+def _invalidate_sessions_for_user(
+    session: Session,
+    *,
+    user_id: str,
+    cause: str,
+    now: datetime,
+) -> int:
+    target_ids = list(
+        session.scalars(
+            select(SessionRow.id).where(
+                SessionRow.user_id == user_id,
+                SessionRow.invalidated_at.is_(None),
+                SessionRow.expires_at > now,
+            )
+        ).all()
+    )
+    count = len(target_ids)
+    if count > 0:
+        session.execute(
+            update(SessionRow)
+            .where(SessionRow.id.in_(target_ids))
+            .values(invalidated_at=now, invalidation_cause=cause)
+            .execution_options(synchronize_session="fetch")
+        )
+        session.flush()
+    write_audit(
+        session,
+        agnostic_audit_ctx(),
+        entity_kind="session",
+        entity_id=user_id,
+        action="session.invalidated",
+        diff={
+            "user_id": user_id,
+            "cause": cause,
+            "except_session_id": None,
+            "count": count,
+            "at": now.isoformat(),
+        },
+        clock=SystemClock(),
+    )
+    return count
 
 
 def _workspace_ids_for_person(

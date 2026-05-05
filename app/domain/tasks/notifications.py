@@ -3,23 +3,14 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.authz.models import (
-    PermissionGroup,
-    PermissionGroupMember,
-    RoleGrant,
-)
-from app.adapters.db.messaging.repositories import SqlAlchemyEmailDeliveryRepository
-from app.adapters.db.tasks.models import Occurrence
-from app.adapters.mail.null import NullMailer
-from app.domain.messaging.notifications import NotificationKind, NotificationService
+from app.adapters.notifications.ports import NotificationKind
 from app.events.bus import EventBus
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock
@@ -29,7 +20,6 @@ __all__ = [
     "notify_comment_mentions",
     "notify_task_assigned",
     "notify_task_overdue",
-    "owner_manager_recipient_ids",
 ]
 
 _log = logging.getLogger(__name__)
@@ -43,6 +33,14 @@ class TaskNotificationSink(Protocol):
         kind: NotificationKind,
         payload: Mapping[str, object],
     ) -> str: ...
+
+
+class TaskNotificationSubject(Protocol):
+    id: str
+    title: str | None
+    starts_at: datetime
+    ends_at: datetime
+    assignee_user_id: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,18 +57,12 @@ def _default_sink(
     *,
     clock: Clock,
     bus: EventBus,
-) -> NotificationService:
-    return NotificationService(
-        session=session,
-        ctx=ctx,
-        mailer=NullMailer(),
-        clock=clock,
-        bus=bus,
-        email_deliveries=SqlAlchemyEmailDeliveryRepository(session),
-    )
+) -> TaskNotificationSink | None:
+    _ = session, ctx, clock, bus
+    return None
 
 
-def _task_context(task: Occurrence) -> _TaskNotificationContext:
+def _task_context(task: TaskNotificationSubject) -> _TaskNotificationContext:
     return _TaskNotificationContext(
         task_id=task.id,
         task_title=task.title or "Task",
@@ -83,14 +75,17 @@ def notify_task_assigned(
     session: Session,
     ctx: WorkspaceContext,
     *,
-    task: Occurrence,
+    task: TaskNotificationSubject,
     recipient_user_id: str,
     clock: Clock,
     bus: EventBus,
     sink: TaskNotificationSink | None = None,
 ) -> None:
+    service = sink or _default_sink(session, ctx, clock=clock, bus=bus)
+    if service is None:
+        return
     _notify(
-        sink or _default_sink(session, ctx, clock=clock, bus=bus),
+        service,
         recipient_user_id=recipient_user_id,
         kind=NotificationKind.TASK_ASSIGNED,
         payload=_task_payload(_task_context(task)),
@@ -101,22 +96,23 @@ def notify_task_overdue(
     session: Session,
     ctx: WorkspaceContext,
     *,
-    task: Occurrence,
+    task: TaskNotificationSubject,
     overdue_since: datetime,
     slipped_minutes: int,
     clock: Clock,
     bus: EventBus,
+    recipient_user_ids: Sequence[str] = (),
     sink: TaskNotificationSink | None = None,
 ) -> None:
     service = sink or _default_sink(session, ctx, clock=clock, bus=bus)
+    if service is None:
+        return
     payload = {
         **_task_payload(_task_context(task)),
         "overdue_since": overdue_since.isoformat(),
         "slipped_minutes": slipped_minutes,
     }
-    recipients = set(owner_recipient_ids(session, ctx.workspace_id))
-    if not task.is_personal:
-        recipients.update(manager_recipient_ids(session, ctx.workspace_id))
+    recipients = set(recipient_user_ids)
     if task.assignee_user_id is not None:
         recipients.add(task.assignee_user_id)
     for user_id in sorted(recipients):
@@ -142,6 +138,8 @@ def notify_comment_mentions(
     sink: TaskNotificationSink | None = None,
 ) -> None:
     service = sink or _default_sink(session, ctx, clock=clock, bus=bus)
+    if service is None:
+        return
     payload = {
         "task_id": task_id,
         "task_title": task_title or "Task",
@@ -156,37 +154,6 @@ def notify_comment_mentions(
             kind=NotificationKind.COMMENT_MENTION,
             payload=payload,
         )
-
-
-def owner_manager_recipient_ids(session: Session, workspace_id: str) -> tuple[str, ...]:
-    return tuple(
-        sorted(
-            set(owner_recipient_ids(session, workspace_id)).union(
-                manager_recipient_ids(session, workspace_id)
-            )
-        )
-    )
-
-
-def owner_recipient_ids(session: Session, workspace_id: str) -> tuple[str, ...]:
-    owner_ids = session.scalars(
-        select(PermissionGroupMember.user_id)
-        .join(PermissionGroup, PermissionGroup.id == PermissionGroupMember.group_id)
-        .where(PermissionGroup.workspace_id == workspace_id)
-        .where(PermissionGroup.slug == "owners")
-    ).all()
-    return tuple(sorted(set(owner_ids)))
-
-
-def manager_recipient_ids(session: Session, workspace_id: str) -> tuple[str, ...]:
-    manager_ids = session.scalars(
-        select(RoleGrant.user_id)
-        .where(RoleGrant.workspace_id == workspace_id)
-        .where(RoleGrant.scope_kind == "workspace")
-        .where(RoleGrant.grant_role == "manager")
-        .where(RoleGrant.revoked_at.is_(None))
-    ).all()
-    return tuple(sorted(set(manager_ids)))
 
 
 def _task_payload(task: _TaskNotificationContext) -> dict[str, object]:

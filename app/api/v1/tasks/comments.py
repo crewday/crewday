@@ -10,6 +10,7 @@ from app.adapters.db.tasks.repositories import (
     AuthzCommentModerationAuthorizer,
     SqlAlchemyCommentsRepository,
 )
+from app.adapters.notifications.service import SqlAlchemyNotificationSink
 from app.api.pagination import DEFAULT_LIMIT, LimitQuery, PageCursorQuery
 from app.domain.tasks.comments import (
     CommentAttachmentInvalid,
@@ -25,9 +26,10 @@ from app.domain.tasks.comments import (
     list_comments,
     post_comment,
 )
+from app.util.clock import SystemClock
 
 from .cursor import _decode_comment_cursor, _encode_comment_cursor
-from .deps import _Ctx, _Db
+from .deps import _Ctx, _Db, _task_lifecycle_bus
 from .errors import _comment_not_found, _http_for_comment_mutation, _task_not_found
 from .payloads import CommentEditRequest, CommentListResponse, CommentPayload
 
@@ -58,7 +60,19 @@ def post_task_comment_route(
     kind: Literal["user", "agent"] = "agent" if ctx.actor_kind == "agent" else "user"
     repo = SqlAlchemyCommentsRepository(session)
     try:
-        view = post_comment(repo, ctx, task_id, body, kind=kind)
+        view = post_comment(
+            repo,
+            ctx,
+            task_id,
+            body,
+            kind=kind,
+            notifications=SqlAlchemyNotificationSink(
+                session,
+                ctx,
+                clock=SystemClock(),
+                bus=_task_lifecycle_bus(session, ctx),
+            ),
+        )
     except CommentNotFound as exc:
         # ``post_comment`` raises :class:`CommentNotFound` when the
         # parent task is missing / cross-tenant / gated by the
@@ -147,7 +161,18 @@ def patch_task_comment_route(
     """
     repo = SqlAlchemyCommentsRepository(session)
     try:
-        view = edit_comment(repo, ctx, comment_id, body.body_md)
+        view = edit_comment(
+            repo,
+            ctx,
+            comment_id,
+            body.body_md,
+            notifications=SqlAlchemyNotificationSink(
+                session,
+                ctx,
+                clock=SystemClock(),
+                bus=_task_lifecycle_bus(session, ctx),
+            ),
+        )
     except (
         CommentNotFound,
         CommentKindForbidden,

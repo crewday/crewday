@@ -8,16 +8,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.messaging.audiences import list_owner_manager_user_ids
-from app.adapters.db.messaging.models import Notification
-from app.adapters.db.messaging.repositories import SqlAlchemyEmailDeliveryRepository
-from app.adapters.mail.null import NullMailer
-from app.domain.messaging.notifications import NotificationKind, NotificationService
+from app.adapters.notifications.ports import NotificationKind
 from app.events.bus import EventBus
-from app.tenancy import WorkspaceContext, tenant_agnostic
+from app.tenancy import WorkspaceContext
 from app.util.clock import Clock
 
 __all__ = [
@@ -37,6 +32,15 @@ class LlmNotificationSink(Protocol):
         kind: NotificationKind,
         payload: Mapping[str, object],
     ) -> str: ...
+
+    def exists(
+        self,
+        *,
+        recipient_user_id: str,
+        kind: NotificationKind,
+        payload_key: str,
+        payload_value: object,
+    ) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,19 +66,10 @@ def notify_anomaly_detected(
     recipient_user_ids: Sequence[str] | None = None,
     sink: LlmNotificationSink | None = None,
 ) -> None:
-    service = sink or NotificationService(
-        session=session,
-        ctx=ctx,
-        mailer=NullMailer(),
-        clock=clock,
-        bus=bus,
-        email_deliveries=SqlAlchemyEmailDeliveryRepository(session),
-    )
-    recipients = (
-        tuple(recipient_user_ids)
-        if recipient_user_ids is not None
-        else list_owner_manager_user_ids(session, workspace_id=ctx.workspace_id)
-    )
+    _ = session, clock, bus
+    if sink is None:
+        return
+    recipients = tuple(recipient_user_ids) if recipient_user_ids is not None else ()
     dedupe_key = ":".join(
         (
             anomaly.anomaly_kind,
@@ -98,14 +93,13 @@ def notify_anomaly_detected(
     }
     for user_id in sorted(set(recipients)):
         if _notification_exists(
-            session,
-            ctx,
+            sink,
             recipient_user_id=user_id,
             dedupe_key=dedupe_key,
         ):
             continue
         _notify(
-            service,
+            sink,
             recipient_user_id=user_id,
             kind=NotificationKind.ANOMALY_DETECTED,
             payload=payload,
@@ -113,20 +107,17 @@ def notify_anomaly_detected(
 
 
 def _notification_exists(
-    session: Session,
-    ctx: WorkspaceContext,
+    sink: LlmNotificationSink,
     *,
     recipient_user_id: str,
     dedupe_key: str,
 ) -> bool:
-    with tenant_agnostic():
-        payloads = session.scalars(
-            select(Notification.payload_json)
-            .where(Notification.workspace_id == ctx.workspace_id)
-            .where(Notification.recipient_user_id == recipient_user_id)
-            .where(Notification.kind == NotificationKind.ANOMALY_DETECTED.value)
-        ).all()
-    return any(payload.get("dedupe_key") == dedupe_key for payload in payloads)
+    return sink.exists(
+        recipient_user_id=recipient_user_id,
+        kind=NotificationKind.ANOMALY_DETECTED,
+        payload_key="dedupe_key",
+        payload_value=dedupe_key,
+    )
 
 
 def _notify(

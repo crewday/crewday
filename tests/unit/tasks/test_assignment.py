@@ -56,6 +56,7 @@ from app.adapters.db.places.models import Property
 from app.adapters.db.session import make_engine
 from app.adapters.db.tasks.models import Occurrence, Schedule, TaskTemplate
 from app.adapters.db.workspace.models import Workspace
+from app.adapters.notifications.service import SqlAlchemyNotificationSink
 from app.domain.tasks.assignment import (
     AvailabilityPort,
     AvailabilityVerdict,
@@ -144,6 +145,16 @@ def _ctx(workspace_id: str, *, slug: str = "ws") -> WorkspaceContext:
         actor_was_owner_member=True,
         audit_correlation_id="01HWA00000000000000000CRL1",
     )
+
+
+def _notifications(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    clock: FrozenClock,
+    bus: EventBus,
+) -> SqlAlchemyNotificationSink:
+    return SqlAlchemyNotificationSink(session, ctx, clock=clock, bus=bus)
 
 
 def _bootstrap_workspace(session: Session, *, slug: str = "ws") -> str:
@@ -416,14 +427,16 @@ class TestOverride:
         )
         captured: list[NotificationCreated] = []
         bus.subscribe(NotificationCreated)(captured.append)
+        ctx = _ctx(ws)
 
         assign_task(
             session,
-            _ctx(ws),
+            ctx,
             occ,
             override_user_id=u1,
             clock=clock,
             event_bus=bus,
+            notifications=_notifications(session, ctx, clock=clock, bus=bus),
         )
 
         row = session.scalar(
@@ -1055,8 +1068,17 @@ class TestReassign:
         )
         captured: list[NotificationCreated] = []
         bus.subscribe(NotificationCreated)(captured.append)
+        ctx = _ctx(ws)
 
-        reassign_task(session, _ctx(ws), occ, u2, clock=clock, event_bus=bus)
+        reassign_task(
+            session,
+            ctx,
+            occ,
+            u2,
+            clock=clock,
+            event_bus=bus,
+            notifications=_notifications(session, ctx, clock=clock, bus=bus),
+        )
 
         row = session.scalar(
             select(Notification).where(

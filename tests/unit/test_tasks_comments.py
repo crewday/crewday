@@ -58,6 +58,7 @@ from app.adapters.db.tasks.repositories import (
     SqlAlchemyCommentsRepository,
 )
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
+from app.adapters.notifications.service import SqlAlchemyNotificationSink
 from app.domain.tasks.comments import (
     EDIT_WINDOW,
     CommentAttachmentInvalid,
@@ -152,6 +153,16 @@ def _ctx(
         actor_was_owner_member=owner,
         audit_correlation_id=new_ulid(),
     )
+
+
+def _notifications(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    clock: FrozenClock,
+    bus: EventBus,
+) -> SqlAlchemyNotificationSink:
+    return SqlAlchemyNotificationSink(session, ctx, clock=clock, bus=bus)
 
 
 def _bootstrap_workspace(session: Session, *, slug: str = "ws") -> str:
@@ -383,14 +394,16 @@ class TestPostCommentUser:
         )
         captured: list[NotificationCreated] = []
         bus.subscribe(NotificationCreated)(captured.append)
+        ctx = _ctx(ws, role="worker", owner=False, actor_id=author)
 
         view = post_comment(
             SqlAlchemyCommentsRepository(session),
-            _ctx(ws, role="worker", owner=False, actor_id=author),
+            ctx,
             occ,
             CommentCreate(body_md="Hey @maya, filter replaced."),
             clock=clock,
             event_bus=bus,
+            notifications=_notifications(session, ctx, clock=clock, bus=bus),
         )
 
         row = session.scalar(

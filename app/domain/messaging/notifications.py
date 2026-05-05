@@ -95,7 +95,6 @@ stay module-level per the prevailing convention.
 
 from __future__ import annotations
 
-import enum
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -114,6 +113,7 @@ from app.adapters.db.messaging.models import (
     PushToken,
 )
 from app.adapters.mail.ports import MailDeliveryError, Mailer
+from app.adapters.notifications.ports import NotificationKind
 from app.audit import write_audit
 from app.domain.messaging.ports import EmailDeliveryRepository
 from app.events import NotificationCreated
@@ -137,42 +137,6 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Notification kind enum
 # ---------------------------------------------------------------------------
-
-
-class NotificationKind(enum.StrEnum):
-    """String-valued enum mirroring the DB CHECK constraint.
-
-    Each value is the on-disk template-name segment (``task_assigned``
-    → ``task_assigned.subject.j2``) and the
-    :class:`~app.adapters.db.messaging.models.EmailOptOut.category`
-    value the pre-send probe consults. Keeping one source of truth
-    per kind avoids a ``kind → category`` mapping drifting between
-    the inbox row and the opt-out table.
-
-    Widening the enum is a coordinated change: extend this enum,
-    extend :data:`~app.adapters.db.messaging.models._NOTIFICATION_KIND_VALUES`
-    (or widen the CHECK via an additive migration), and add the
-    templates. The ``__post_init__`` assertion below refuses to import
-    if the two enumerations drift.
-    """
-
-    TASK_ASSIGNED = "task_assigned"
-    TASK_OVERDUE = "task_overdue"
-    EXPENSE_APPROVED = "expense_approved"
-    EXPENSE_REJECTED = "expense_rejected"
-    EXPENSE_SUBMITTED = "expense_submitted"
-    APPROVAL_NEEDED = "approval_needed"
-    APPROVAL_DECIDED = "approval_decided"
-    ISSUE_REPORTED = "issue_reported"
-    ISSUE_RESOLVED = "issue_resolved"
-    COMMENT_MENTION = "comment_mention"
-    PAYSLIP_ISSUED = "payslip_issued"
-    STAY_UPCOMING = "stay_upcoming"
-    ANOMALY_DETECTED = "anomaly_detected"
-    AGENT_MESSAGE = "agent_message"
-    DAILY_DIGEST = "daily_digest"
-    PRIVACY_EXPORT_READY = "privacy_export_ready"
-    WEBHOOK_AUTO_PAUSED = "webhook_auto_paused"
 
 
 # Import-time invariant: the enum and the DB CHECK must stay aligned.

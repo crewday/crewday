@@ -63,7 +63,12 @@ from typing import Final
 from sqlalchemy import CursorResult, select, update
 from sqlalchemy.orm import Session
 
+from app.adapters.db.messaging.audiences import (
+    list_owner_manager_user_ids,
+    list_owner_user_ids,
+)
 from app.adapters.db.tasks.models import Occurrence
+from app.adapters.notifications.service import SqlAlchemyNotificationSink
 from app.audit import write_audit
 from app.domain.llm.notifications import AnomalyDetectedView, notify_anomaly_detected
 from app.domain.settings.cascade import (
@@ -310,6 +315,13 @@ def detect_overdue(  # code-health: ignore[nloc] Overdue policy flow.
     if resolved_now.tzinfo is None:
         raise ValueError("now must be a timezone-aware datetime in UTC")
     resolved_bus = event_bus if event_bus is not None else default_event_bus
+    default_notifications = SqlAlchemyNotificationSink(
+        session,
+        ctx,
+        clock=resolved_clock,
+        bus=resolved_bus,
+    )
+    task_notifications = notifications or default_notifications
     audit_grace = (
         grace_minutes
         if grace_minutes is not None
@@ -427,7 +439,12 @@ def detect_overdue(  # code-health: ignore[nloc] Overdue policy flow.
             slipped_minutes=slipped_minutes,
             clock=resolved_clock,
             bus=resolved_bus,
-            sink=notifications,
+            recipient_user_ids=(
+                list_owner_user_ids(session, workspace_id=ctx.workspace_id)
+                if task.is_personal
+                else list_owner_manager_user_ids(session, workspace_id=ctx.workspace_id)
+            ),
+            sink=task_notifications,
         )
         if not task.is_personal:
             notify_anomaly_detected(
@@ -449,7 +466,10 @@ def detect_overdue(  # code-health: ignore[nloc] Overdue policy flow.
                 ),
                 clock=resolved_clock,
                 bus=resolved_bus,
-                sink=notifications,
+                recipient_user_ids=list_owner_manager_user_ids(
+                    session, workspace_id=ctx.workspace_id
+                ),
+                sink=default_notifications,
             )
 
     tick_ended_at = resolved_clock.now()

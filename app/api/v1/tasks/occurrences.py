@@ -20,6 +20,7 @@ from fastapi import APIRouter, Query, Request, status
 from sqlalchemy import or_, select
 
 from app.adapters.db.tasks.models import ChecklistItem, Occurrence
+from app.adapters.notifications.service import SqlAlchemyNotificationSink
 from app.api.pagination import (
     DEFAULT_LIMIT,
     LimitQuery,
@@ -58,6 +59,7 @@ from app.domain.tasks.oneoff import (
 )
 from app.domain.tasks.oneoff import TaskNotFound as OneOffTaskNotFound
 from app.domain.tasks.templates import TaskTemplateNotFound
+from app.util.clock import SystemClock
 
 from .deps import _Ctx, _Db, _task_lifecycle_bus
 from .derived import _TERMINAL_STATES
@@ -410,7 +412,16 @@ def assign_task_route(
             action_key="tasks.assign_other",
         )
         result = assign_task(
-            session, ctx, task_id, override_user_id=body.assignee_user_id
+            session,
+            ctx,
+            task_id,
+            override_user_id=body.assignee_user_id,
+            notifications=SqlAlchemyNotificationSink(
+                session,
+                ctx,
+                clock=SystemClock(),
+                bus=_task_lifecycle_bus(session, ctx),
+            ),
         )
     except ApprovalRequired as exc:
         raise mint_and_envelope_for_http(request, session, ctx, exc) from exc
