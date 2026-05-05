@@ -924,9 +924,10 @@ outbound email. The following gates apply whenever
   feed in v1.
 - **Signup GC worker.** `signup_gc` runs every 15 minutes;
   removes stalled signup attempts (magic-link redeemed but
-  passkey never registered) after 1 hour, and archives
-  workspaces whose provisioning user never completed passkey
-  registration after 24 hours.
+  passkey never registered) after 1 hour. Under the cd-3i5
+  transaction model, an abandoned passkey ceremony leaves no
+  orphan workspace at all — only the `signup_attempt` row that
+  `signup_gc` prunes.
 - **No workspace enumeration.** `GET /w/<slug>/...` from an
   unauthenticated or non-member caller returns `404` uniformly,
   with a constant-time response so slug-probing can't time-
