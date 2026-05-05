@@ -200,10 +200,12 @@ Route: `/my/expenses`.
 
 Routes: `/chat`, `/issues/new`, `/asset/scan`, `/asset/scan/:token`, `/asset/:aid`, `/history`.
 
-- [ ] Worker chat full-screen route renders conversation history.
-- [ ] Worker chat sends message, shows pending state, receives response, and handles budget-at-cap refusal.
+- [ ] Worker `/chat` is the full-screen worker-side operations agent, not direct worker-manager messaging.
+- [ ] Worker chat full-screen route renders the worker agent conversation history.
+- [ ] Worker chat sends a message to the agent, shows pending state, receives response, and handles budget-at-cap refusal.
 - [ ] Worker chat persists through navigation and reload according to conversation rules.
 - [ ] Worker chat auto-translation behavior is visible for non-default worker language.
+- [ ] Worker-to-manager follow-up is represented only through specified task, approval, issue, or email paths; `/chat` does not expose a direct manager message thread.
 - [ ] Issue form validates title, location, severity/category where present, description, and attachment.
 - [ ] Issue submission creates the expected task/approval item and links back to detail.
 - [ ] Asset scan handles camera permission denied, no camera, valid QR, invalid QR, deleted asset, and login-required state.
@@ -415,8 +417,9 @@ Routes: `/portfolio`, `/billable_hours`, `/quotes`, `/invoices`.
 ## Agent, LLM, Chat Gateway, Notifications, And Approvals
 
 - [ ] Agent sidebar appears on desktop manager/worker shells where specified.
-- [ ] Worker mobile `/chat` is the first-class chat entry.
-- [ ] Manager bottom-dock/drawer behavior works on mobile if implemented.
+- [ ] Worker persona: mobile `/chat` is the first-class full-screen entry for the worker-side operations agent.
+- [ ] Manager persona: there is no manager full-screen `/chat` expectation; desktop uses the right-rail agent and mobile uses the bottom-dock drawer.
+- [ ] Admin persona: deployment admin chat stays in the `/admin` shell right rail or mobile drawer, not workspace `/chat`.
 - [ ] Admin agent surface is contextual to admin pages.
 - [ ] Agent conversation persists across route navigation.
 - [ ] Conversation compaction/older history loading is visible where specified.

@@ -25,7 +25,7 @@ describe("site demo intent routes", () => {
       "/schedule",
       "/dashboard",
       "/stays",
-      "/chat",
+      "/dashboard",
       "/schedule",
       "/dashboard",
       "/pay",

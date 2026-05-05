@@ -95,7 +95,7 @@ predict — what the slug will be.
 | Villa owner | "Organise my cleaner" | `/schedule` |
 | Villa owner | "See what's happening at home" | `/dashboard` |
 | Villa owner | "Manage incoming Airbnb stays" | `/stays` |
-| Villa owner | "Chat with the agent about my property" | `/chat` |
+| Villa owner | "Chat with the agent about my property" | `/dashboard` |
 | Rental manager | "Schedule staff across properties" | `/schedule` |
 | Rental manager | "Track today's operations" | `/dashboard` |
 | Rental manager | "See payroll at a glance" | `/pay` |
@@ -103,12 +103,21 @@ predict — what the slug will be.
 | Housekeeper | "See today's tasks" | `/today` |
 | Housekeeper | "Complete a task with photo" | `/today?focus=next-task` |
 | Housekeeper | "Review my hours" | `/schedule` |
-| Housekeeper | "Chat with the manager" | `/chat` |
+| Housekeeper | "Ask the agent about my work" | `/chat` |
 
 The intent list is data, not code. It lives in
 `site/web/src/content/<locale>/scenarios.ts` as a typed export the
 island imports at build time — translators only touch the label
 strings; the routes stay in English TypeScript.
+
+The chat-oriented demo intents represent the shipped in-app operations
+agent (app §11), not a direct worker-to-manager chat. Owner/manager
+intents land on normal manager pages where the shared agent rail or
+mobile drawer is available; worker `/chat` intents land on the worker
+full-screen chat entry. If a worker's chat request needs a manager,
+the agent routes it through the specified task, approval, or email
+notification paths (app §10); the public-site scenario copy must not
+imply live human-to-human messaging.
 
 ### Behaviour
 
