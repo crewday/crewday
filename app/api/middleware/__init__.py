@@ -13,8 +13,8 @@ Each middleware is a thin, single-purpose wrapper around
   Logs").
 * :mod:`app.api.middleware.metrics` — Prometheus HTTP histograms
   + counter (spec §16 "Observability / Metrics").
-* :mod:`app.api.middleware.rate_limit` — per-token / per-IP API
-  token buckets (spec §12 "Rate limiting").
+* :mod:`app.api.middleware.rate_limit` — per-token, per-session, and
+  per-IP API token buckets (spec §12 "Rate limiting").
 * :mod:`app.api.middleware.demo_guardrails` — demo-only edge caps and
   disabled-integration stubs (spec §24 "Abuse controls").
 

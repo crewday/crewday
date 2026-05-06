@@ -3,7 +3,8 @@
 The middleware applies one token bucket to every API-shaped route:
 
 * bearer-token callers key by token id;
-* session and anonymous callers fall back to a peppered source-IP hash;
+* passkey-session callers key by a peppered session-id hash;
+* anonymous callers fall back to a peppered source-IP hash;
 * personal access tokens whose scopes are all ``me.*`` get the larger
   self-service quota from §03.
 
@@ -64,6 +65,7 @@ __all__ = [
 RATE_LIMIT_REMAINING_HEADER: Final[str] = "X-RateLimit-Remaining"
 RATE_LIMIT_RESET_HEADER: Final[str] = "X-RateLimit-Reset"
 _IP_HASH_PURPOSE: Final[str] = "rate-limit-ip"
+_SESSION_HASH_PURPOSE: Final[str] = "rate-limit-session"
 _DEFAULT_CLIENT_HOST: Final[str] = "0.0.0.0"
 
 
@@ -165,15 +167,39 @@ def _client_host(request: Request) -> str:
     return request.client.host
 
 
-def _hash_ip(ip: str, settings: Settings) -> str:
+def _hash_bucket_subject(
+    subject: str,
+    *,
+    purpose: str,
+    settings: Settings,
+    fallback_namespace: str,
+) -> str:
     try:
-        pepper = derive_subkey(settings.root_key, purpose=_IP_HASH_PURPOSE)
+        pepper = derive_subkey(settings.root_key, purpose=purpose)
     except KeyDerivationError:
         # Some unit-test settings intentionally omit CREWDAY_ROOT_KEY. Do
-        # not persist the raw IP; collapse to an unkeyed digest for those
-        # local-only configurations.
-        return hashlib.sha256(f"crewday-rate-limit:{ip}".encode()).hexdigest()
-    return hash_with_pepper(ip, pepper)
+        # not persist the raw subject; collapse to an unkeyed digest for
+        # those local-only configurations.
+        return hashlib.sha256(f"{fallback_namespace}:{subject}".encode()).hexdigest()
+    return hash_with_pepper(subject, pepper)
+
+
+def _hash_ip(ip: str, settings: Settings) -> str:
+    return _hash_bucket_subject(
+        ip,
+        purpose=_IP_HASH_PURPOSE,
+        settings=settings,
+        fallback_namespace="crewday-rate-limit",
+    )
+
+
+def _hash_session_id(session_id: str, settings: Settings) -> str:
+    return _hash_bucket_subject(
+        session_id,
+        purpose=_SESSION_HASH_PURPOSE,
+        settings=settings,
+        fallback_namespace=f"crewday-rate-limit:{_SESSION_HASH_PURPOSE}",
+    )
 
 
 def _actor_from_request(request: Request) -> ActorIdentity | None:
@@ -200,6 +226,12 @@ def build_bucket_key(
         return _BucketIdentity(
             key=f"token:{actor.token_id}:{route_class}",
             limit_per_minute=limit,
+        )
+    if actor is not None and actor.principal_kind == "session" and actor.session_id:
+        session_hash = _hash_session_id(actor.session_id, settings)
+        return _BucketIdentity(
+            key=f"session:{session_hash}:{route_class}",
+            limit_per_minute=settings.rate_limit_token_per_minute,
         )
 
     ip_hash = _hash_ip(_client_host(request), settings)
@@ -386,7 +418,7 @@ def _rate_limited_response(request: Request, decision: RateLimitDecision) -> Res
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Apply per-token or per-IP API rate limits."""
+    """Apply per-token, per-session, or per-IP API rate limits."""
 
     def __init__(
         self,

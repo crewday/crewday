@@ -141,10 +141,11 @@ class RateLimitBucket(Base):
     """Persisted token-bucket state for API rate limiting.
 
     ``bucket_key`` is already privacy-preserving: token callers use the
-    opaque token row id, and anonymous/session callers use a peppered IP
-    hash. The table stores only the floating token balance and the last
-    update time as Unix epoch seconds so every worker can run the same
-    math without depending on process-local monotonic clock origins.
+    opaque token row id, session callers use a peppered session-id hash,
+    and anonymous callers use a peppered IP hash. The table stores only
+    the floating token balance and the last update time as Unix epoch
+    seconds so every worker can run the same math without depending on
+    process-local monotonic clock origins.
     """
 
     __tablename__ = "rate_limit_bucket"

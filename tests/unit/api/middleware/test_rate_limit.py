@@ -50,13 +50,17 @@ class FrozenRateLimitClock:
 
 def _settings(
     *,
+    root_key: SecretStr | None = None,
+    omit_root_key: bool = False,
     token_limit: int = 2,
     personal_limit: int = 4,
     anonymous_limit: int = 2,
 ) -> Settings:
+    if root_key is None and not omit_root_key:
+        root_key = SecretStr("unit-test-rate-limit-root-key")
     return Settings.model_construct(
         database_url="sqlite:///:memory:",
-        root_key=SecretStr("unit-test-rate-limit-root-key"),
+        root_key=root_key,
         rate_limit_backend="memory",
         rate_limit_token_per_minute=token_limit,
         rate_limit_personal_me_per_minute=personal_limit,
@@ -263,6 +267,42 @@ class TestMiddleware:
         assert first.status_code == 200
         assert second.status_code == 429
 
+    def test_session_requests_do_not_consume_anonymous_ip_bucket(self) -> None:
+        settings = _settings(token_limit=2, anonymous_limit=1)
+        clock = FrozenRateLimitClock()
+        backend = MemoryRateLimitBackend()
+        session_app = _app(
+            actor=_actor(None),
+            settings=settings,
+            clock=clock,
+            backend=backend,
+        )
+        anonymous_app = _app(
+            actor=None,
+            settings=settings,
+            clock=clock,
+            backend=backend,
+        )
+
+        with TestClient(session_app) as session_client:
+            assert session_client.get("/api/v1/ping").status_code == 200
+            assert session_client.get("/api/v1/ping").status_code == 200
+        with TestClient(anonymous_app) as anonymous_client:
+            assert anonymous_client.get("/api/v1/ping").status_code == 200
+            assert anonymous_client.get("/api/v1/ping").status_code == 429
+
+    def test_default_session_quota_allows_spa_read_burst(self) -> None:
+        settings = _settings(token_limit=60, anonymous_limit=30)
+        clock = FrozenRateLimitClock()
+        app = _app(actor=_actor(None), settings=settings, clock=clock)
+
+        with TestClient(app) as client:
+            statuses = [
+                client.get("/w/demo/api/v1/ping").status_code for _ in range(35)
+            ]
+
+        assert statuses == [200] * 35
+
     def test_scoped_workspace_rejections_are_ip_limited(self) -> None:
         settings = _settings(anonymous_limit=1)
         clock = FrozenRateLimitClock()
@@ -347,3 +387,51 @@ def test_ip_bucket_key_does_not_contain_raw_ip() -> None:
     )
     assert "203.0.113.9" not in bucket.key
     assert bucket.key.startswith("ip:")
+
+
+def test_unkeyed_ip_bucket_fallback_stays_compatible() -> None:
+    settings = _settings(omit_root_key=True)
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/api/v1/ping",
+        "headers": [],
+        "client": ("203.0.113.9", 1234),
+        "server": ("testserver", 80),
+        "scheme": "http",
+    }
+    bucket = build_bucket_key(
+        Request(scope),
+        route_class="bare-api",
+        settings=settings,
+    )
+
+    assert bucket.key == (
+        "ip:b8c0fa33c1a08b33bd65f34706815e5ece1962dd814e5c4488cdf3d5e79a8604:bare-api"
+    )
+
+
+def test_session_bucket_key_does_not_contain_raw_session_id() -> None:
+    settings = _settings()
+    actor = _actor(None)
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/api/v1/ping",
+        "headers": [],
+        "client": ("203.0.113.9", 1234),
+        "server": ("testserver", 80),
+        "scheme": "http",
+    }
+    request = Request(scope)
+    setattr(request.state, ACTOR_STATE_ATTR, actor)
+
+    bucket = build_bucket_key(
+        request,
+        route_class="bare-api",
+        settings=settings,
+    )
+
+    assert actor.session_id is not None
+    assert actor.session_id not in bucket.key
+    assert bucket.key.startswith("session:")

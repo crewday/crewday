@@ -353,7 +353,11 @@ mutating requests to enrich the audit trail (§02, §11):
 
 ### Rate limiting
 
-- Per token (see §03). 429 responses carry `Retry-After`.
+- Per token and authenticated browser session (see §03). Browser-session
+  buckets key by a stable, peppered hash of the session identifier and
+  use the standard token quota; personal access tokens restricted to
+  `me.*` keep the larger self-service quota. Anonymous API requests use
+  a source-IP bucket. 429 responses carry `Retry-After`.
 
 ### Request/response shape
 
