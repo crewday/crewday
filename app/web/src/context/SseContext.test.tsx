@@ -116,25 +116,22 @@ function Switcher({ slug }: { slug: string | null }) {
 }
 
 describe("<SseProvider>", () => {
-  it("opens /events when no workspace is selected", () => {
+  it("waits for a workspace slug when no workspace is selected", () => {
     render(
       <Providers>
         <div />
       </Providers>,
     );
-    expect(created).toHaveLength(1);
-    expect(created[0]!.url).toBe("/events");
-    expect(created[0]!.withCredentials).toBe(true);
+    expect(created).toHaveLength(0);
   });
 
-  it("re-opens /w/<slug>/events when the workspace is selected", () => {
+  it("opens /w/<slug>/events when the workspace is selected after a no-slug initial state", () => {
     const { rerender } = render(
       <Providers>
         <Switcher slug={null} />
       </Providers>,
     );
-    expect(created).toHaveLength(1);
-    expect(created[0]!.url).toBe("/events");
+    expect(created).toHaveLength(0);
 
     act(() => {
       rerender(
@@ -144,14 +141,13 @@ describe("<SseProvider>", () => {
       );
     });
 
-    // The first stream is closed on slug change, and a new one is
-    // opened at the workspace-scoped path.
     const scoped = created.find((e) => e.url === "/w/acme/events");
     expect(scoped).toBeDefined();
-    expect(created[0]!.closed).toBe(true);
+    expect(scoped!.withCredentials).toBe(true);
   });
 
   it("closes the stream on unmount", () => {
+    document.cookie = "crewday_workspace=acme; path=/";
     const { unmount } = render(
       <Providers>
         <div />
@@ -171,6 +167,7 @@ describe("<SseProvider>", () => {
     // Pre-unmount the default render() by doing nothing here; we
     // simulate a browser that lacks EventSource (old WebView, some
     // tests). The provider must tolerate it without throwing.
+    document.cookie = "crewday_workspace=acme; path=/";
     vi.stubGlobal("EventSource", undefined);
     const reset = () => vi.unstubAllGlobals();
     try {
@@ -192,6 +189,7 @@ describe("<SseProvider>", () => {
     // waiting real wall-clock. The provider only schedules a new
     // connect when readyState === CLOSED, so we simulate that before
     // firing onerror.
+    document.cookie = "crewday_workspace=acme; path=/";
     vi.useFakeTimers();
     try {
       render(
@@ -241,6 +239,7 @@ describe("<SseProvider>", () => {
   });
 
   it("closes the stream when auth flips to `unauthenticated` (logout)", () => {
+    document.cookie = "crewday_workspace=acme; path=/";
     render(
       <Providers>
         <div />
@@ -323,6 +322,7 @@ describe("<SseProvider>", () => {
     // continue climbing the previous ladder. This prevents a
     // long-running session from taking 30s to recover from a brief
     // blip.
+    document.cookie = "crewday_workspace=acme; path=/";
     vi.useFakeTimers();
     try {
       render(

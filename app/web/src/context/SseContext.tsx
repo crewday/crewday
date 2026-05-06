@@ -17,9 +17,10 @@ import { connectEventStream, type SseStatus } from "@/lib/sse";
 // per active workspace. Re-established on workspace switch (and on
 // transport drops, via exponential backoff handled inside
 // `connectEventStream`). When no workspace is picked yet (pre-/me, or
-// the user hasn't chosen one), we fall back to `/events` so the server
-// can still push workspace-agnostic events (e.g. onboarding, admin)
-// before the SPA knows its tenant.
+// the user hasn't chosen one), wait for the slug instead of opening the
+// bare `/events` stream; workspace updates are delivered on
+// `/w/<slug>/events`, and the bare path is not a valid replacement for
+// the protected app.
 //
 // The transport is only opened while the user is authenticated. A
 // logout flips `useAuth().isAuthenticated` to `false`, which tears
@@ -68,6 +69,7 @@ export function SseProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (typeof EventSource === "undefined") {
       setStatus("closed");
+      setLastEventId(null);
       return;
     }
     // Only open the stream once auth is positively resolved. On the
@@ -78,6 +80,12 @@ export function SseProvider({ children }: { children: ReactNode }) {
     // probe usually settles in a single tick.
     if (authStatus !== "authenticated") {
       setStatus("closed");
+      setLastEventId(null);
+      return;
+    }
+    if (!workspaceId) {
+      setStatus("closed");
+      setLastEventId(null);
       return;
     }
 
