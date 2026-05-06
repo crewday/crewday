@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { RoleProvider } from "@/context/RoleContext";
 import { ThemeProvider } from "@/context/ThemeContext";
+import { setAuthenticated } from "@/auth/authStore";
+import { __resetAuthStoreForTests } from "@/auth/useAuth";
 import PreviewShell from "@/layouts/PreviewShell";
 
 function installRuntimeFetch(demoMode: boolean): () => void {
@@ -49,6 +51,7 @@ function renderShell() {
 
 afterEach(() => {
   cleanup();
+  __resetAuthStoreForTests();
   vi.restoreAllMocks();
 });
 
@@ -81,6 +84,34 @@ describe("<PreviewShell> demo banner", () => {
       expect(screen.queryByText("PREVIEW")).not.toBeInTheDocument();
       expect(screen.queryByText("Interactive mocks · no real data")).not.toBeInTheDocument();
       expect(screen.getByRole("navigation", { name: "Shell controls" })).toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
+  it("does not show authority mode pills in authenticated workspace chrome", async () => {
+    const restore = installRuntimeFetch(false);
+    try {
+      setAuthenticated({
+        user_id: "usr_manager",
+        display_name: "Manager User",
+        email: "manager@example.com",
+        current_workspace_id: "ws_1",
+        is_deployment_admin: false,
+        available_workspaces: [],
+      });
+      renderShell();
+
+      await waitFor(() => {
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+          "/api/v1/runtime/info",
+          expect.objectContaining({ method: "GET" }),
+        );
+      });
+      expect(screen.queryByRole("button", { name: "Employee" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Manager" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Client" })).toBeNull();
+      expect(screen.getByRole("button", { name: /Theme:/ })).toBeInTheDocument();
     } finally {
       restore();
     }

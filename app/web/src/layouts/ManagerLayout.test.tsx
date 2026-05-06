@@ -1,0 +1,229 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { type ReactElement } from "react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setAuthenticated } from "@/auth/authStore";
+import { __resetAuthStoreForTests } from "@/auth/useAuth";
+import { WorkspaceProvider } from "@/context/WorkspaceContext";
+import { __resetApiProvidersForTests } from "@/lib/api";
+import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
+import * as preferences from "@/lib/preferences";
+import { installFetch, jsonResponse } from "@/test/helpers";
+import type { AuthMe } from "@/auth/types";
+import type { Me } from "@/types/api";
+import PageHeader from "@/components/PageHeader";
+import ManagerLayout from "./ManagerLayout";
+
+vi.mock("@/components/AgentSidebar", () => ({
+  default: function MockAgentSidebar({ role }: { role: string }): ReactElement {
+    return <aside data-testid="agent-sidebar">agent:{role}</aside>;
+  },
+}));
+
+function authMe(): AuthMe {
+  return {
+    user_id: "usr_manager",
+    display_name: "Manager User",
+    email: "manager@example.com",
+    current_workspace_id: "ws_1",
+    is_deployment_admin: false,
+    available_workspaces: [
+      {
+        workspace: {
+          id: "ws_1",
+          name: "Acme",
+          timezone: "UTC",
+          default_currency: "USD",
+          default_country: "US",
+          default_locale: "en",
+        },
+        grant_role: "manager",
+        binding_org_id: null,
+        source: "workspace_grant",
+      },
+    ],
+  };
+}
+
+function workspaceMe(): Me {
+  return {
+    role: "manager",
+    theme: "system",
+    agent_sidebar_collapsed: false,
+    employee: {
+      id: "emp_1",
+      name: "Manager User",
+      roles: ["property_manager"],
+      properties: [],
+      avatar_initials: "MU",
+      avatar_file_id: null,
+      avatar_url: null,
+      phone: "",
+      email: "manager@example.com",
+      started_on: "2026-01-01",
+      capabilities: {},
+      workspaces: ["ws_1"],
+      villas: [],
+      language: "en",
+      weekly_availability: {},
+      evidence_policy: "inherit",
+      preferred_locale: "en",
+      settings_override: {},
+    },
+    manager_name: "Manager User",
+    today: "2026-05-06",
+    now: "2026-05-06T00:00:00Z",
+    user_id: "usr_manager",
+    agent_approval_mode: "strict",
+    current_workspace_id: "ws_1",
+    available_workspaces: authMe().available_workspaces,
+    client_binding_org_ids: [],
+    is_deployment_admin: false,
+    is_deployment_owner: false,
+  };
+}
+
+function renderManagerLayout(allowed: Set<string>): string[] {
+  const permissionProbes: string[] = [];
+  vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("ws_1");
+  setAuthenticated(authMe());
+  installFetch(({ url }) => {
+    const parsed = new URL(url, "http://crewday.test");
+    if (parsed.pathname === "/w/ws_1/api/v1/me") {
+      return jsonResponse(workspaceMe());
+    }
+    if (parsed.pathname === "/w/ws_1/api/v1/permissions/resolved/self") {
+      const actionKey = parsed.searchParams.get("action_key") ?? "";
+      permissionProbes.push(actionKey);
+      return jsonResponse({
+        effect: allowed.has(actionKey) ? "allow" : "deny",
+        source_layer: "test",
+        source_rule_id: null,
+        matched_groups: allowed.has(actionKey) ? ["managers"] : [],
+      });
+    }
+    throw new Error(`Unscripted fetch: ${url}`);
+  });
+
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+
+  render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={["/dashboard"]}>
+        <WorkspaceProvider>
+          <Routes>
+            <Route element={<ManagerLayout />}>
+              <Route path="/dashboard" element={<main><PageHeader title="Dashboard" /></main>} />
+            </Route>
+          </Routes>
+        </WorkspaceProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  return permissionProbes;
+}
+
+beforeEach(() => {
+  __resetAuthStoreForTests();
+  __resetApiProvidersForTests();
+  __resetQueryKeyGetterForTests();
+  vi.clearAllMocks();
+});
+
+afterEach(() => {
+  cleanup();
+  __resetAuthStoreForTests();
+  __resetApiProvidersForTests();
+  __resetQueryKeyGetterForTests();
+  vi.restoreAllMocks();
+});
+
+describe("<ManagerLayout> permission-resolved navigation", () => {
+  it("keeps the fixed phone bottom row and puts extra allowed management destinations in nav", async () => {
+    renderManagerLayout(new Set([
+      "employees.read",
+      "permissions.edit_rules",
+      "payroll.view_other",
+      "api_tokens.manage",
+      "audit_log.view",
+      "scope.edit_settings",
+    ]));
+
+    const bottomNav = screen.getByRole("navigation", { name: "Bottom navigation" });
+    expect(within(bottomNav).getByRole("link", { name: /Today/i })).toBeInTheDocument();
+    expect(within(bottomNav).getByRole("link", { name: /Schedule/i })).toBeInTheDocument();
+    expect(within(bottomNav).getByRole("link", { name: /Chat/i })).toBeInTheDocument();
+    expect(within(bottomNav).getByRole("link", { name: /Expenses/i })).toBeInTheDocument();
+    expect(within(bottomNav).getByRole("link", { name: /Me/i })).toBeInTheDocument();
+
+    await waitFor(
+      () => {
+        expect(screen.getByRole("link", { name: /Dashboard/i })).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: /Employees/i })).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: /Pay/i })).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: /Permissions/i })).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: /Audit log/i })).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: /API tokens/i })).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: /Settings/i })).toBeInTheDocument();
+      },
+      { timeout: 3000 },
+    );
+    expect(screen.getByRole("button", { name: "Open menu" })).toBeInTheDocument();
+    expect(screen.getByTestId("agent-sidebar")).toHaveTextContent("agent:manager");
+  });
+
+  it("hides the hamburger when no extra management destinations are allowed", async () => {
+    const probes = renderManagerLayout(new Set());
+
+    await waitFor(
+      () => {
+        expect(probes).toContain("api_tokens.manage");
+        expect(screen.queryByRole("link", { name: /Dashboard/i })).toBeNull();
+        expect(screen.queryByRole("button", { name: "Open menu" })).toBeNull();
+      },
+      { timeout: 3000 },
+    );
+
+    const bottomNav = screen.getByRole("navigation", { name: "Bottom navigation" });
+    expect(within(bottomNav).getByRole("link", { name: /Today/i })).toBeInTheDocument();
+    expect(within(bottomNav).getByRole("link", { name: /Schedule/i })).toBeInTheDocument();
+    expect(within(bottomNav).getByRole("link", { name: /Chat/i })).toBeInTheDocument();
+    expect(within(bottomNav).getByRole("link", { name: /Expenses/i })).toBeInTheDocument();
+    expect(within(bottomNav).getByRole("link", { name: /Me/i })).toBeInTheDocument();
+  });
+
+  it("probes only unique action keys required by workspace nav links", async () => {
+    const probes = renderManagerLayout(new Set(["employees.read"]));
+
+    await waitFor(
+      () => {
+        expect(probes).toContain("api_tokens.manage");
+      },
+      { timeout: 3000 },
+    );
+
+    const unique = new Set(probes);
+    expect(probes).toHaveLength(unique.size);
+    expect(probes).toEqual([
+      "employees.read",
+      "properties.read",
+      "stays.read",
+      "tasks.create",
+      "availability_overrides.view_others",
+      "scope.view",
+      "instructions.edit",
+      "assets.manage_documents",
+      "approvals.read",
+      "leaves.view_others",
+      "expenses.approve",
+      "payroll.view_other",
+      "permissions.edit_rules",
+      "audit_log.view",
+      "scope.edit_settings",
+      "api_tokens.manage",
+    ]);
+  });
+});

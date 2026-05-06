@@ -231,6 +231,19 @@ describe("App /chat role routing", () => {
     expect(screen.queryByTestId("worker-chat")).toBeNull();
   });
 
+  it("uses the active manager grant instead of a stale employee role cookie", async () => {
+    installPermissionAllowFetch();
+    renderAppAt("/", "employee", "manager");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
+    });
+
+    expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
+    expect(mockRenders.managerLayout).toHaveBeenCalled();
+    expect(mockRenders.employeeLayout).not.toHaveBeenCalled();
+  });
+
   it("keeps worker /chat on the full-screen operations agent route", async () => {
     renderAppAt("/chat", "employee");
 
@@ -284,18 +297,14 @@ describe("App client portal role routing", () => {
     expect(mockRenders.managerLayout).not.toHaveBeenCalled();
   });
 
-  it("keeps mixed-role users in the visible manager persona until they switch explicitly", async () => {
-    installPermissionAllowFetch();
+  it("uses the active client grant instead of a stale manager role cookie", async () => {
     renderAppAt("/portfolio", "manager", "client");
 
-    await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
-    });
-
-    expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
-    expect(mockRenders.managerLayout).toHaveBeenCalled();
-    expect(mockRenders.clientLayout).not.toHaveBeenCalled();
-    expect(mockRenders.clientPortfolioPage).not.toHaveBeenCalled();
+    expect(await screen.findByTestId("client-portfolio")).toBeInTheDocument();
+    expect(screen.getByTestId("location")).toHaveTextContent("/portfolio");
+    expect(mockRenders.clientLayout).toHaveBeenCalled();
+    expect(mockRenders.clientPortfolioPage).toHaveBeenCalled();
+    expect(mockRenders.managerLayout).not.toHaveBeenCalled();
   });
 });
 

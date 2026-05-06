@@ -5,7 +5,6 @@ import EmployeeLayout from "@/layouts/EmployeeLayout";
 import ManagerLayout from "@/layouts/ManagerLayout";
 import AdminLayout from "@/layouts/AdminLayout";
 import PublicLayout from "@/layouts/PublicLayout";
-import { useRole } from "@/context/RoleContext";
 import { useWorkspace } from "@/context/WorkspaceContext";
 
 import TodayPage from "@/pages/employee/TodayPage";
@@ -93,12 +92,9 @@ const StyleguidePage = STYLEGUIDE_ENABLED
   : null;
 
 function RoleHome() {
-  const { role } = useRole();
-  const target =
-    role === "employee" ? "/today"
-    : role === "client" ? "/portfolio"
-    : "/dashboard";
-  return <Navigate to={target} replace />;
+  const { user } = useAuth();
+  const { workspaceId } = useWorkspace();
+  return <Navigate to={landingForGrantRole(activeWorkspaceGrantRole(user, workspaceId))} replace />;
 }
 
 // §14 — Shared routes (/today, /schedule, /my/expenses, etc.) render
@@ -106,9 +102,11 @@ function RoleHome() {
 // Client each get their own layout; only `/me` is currently shared by
 // all three (every persona has a profile screen).
 function Shell() {
-  const { role } = useRole();
-  if (role === "manager") return <ManagerLayout />;
-  if (role === "client") return <ClientLayout />;
+  const { user } = useAuth();
+  const { workspaceId } = useWorkspace();
+  const grantRole = activeWorkspaceGrantRole(user, workspaceId);
+  if (grantRole === "manager" || grantRole === "admin") return <ManagerLayout />;
+  if (grantRole === "client") return <ClientLayout />;
   return <EmployeeLayout />;
 }
 
@@ -131,10 +129,8 @@ function landingForGrantRole(grantRole: string | null): string {
 }
 
 function ClientPortalGuard() {
-  const { role } = useRole();
   const { user } = useAuth();
   const { workspaceId } = useWorkspace();
-  if (role !== "client") return <Navigate to="/" replace />;
   const grantRole = activeWorkspaceGrantRole(user, workspaceId);
   if (grantRole !== "client") {
     return <Navigate to={landingForGrantRole(grantRole)} replace />;
@@ -144,7 +140,11 @@ function ClientPortalGuard() {
 
 export default function App() {
   // code-health: ignore[nloc] App route tree keeps public, protected, admin, and guest routing together to make promotion drift visible.
-  const { role } = useRole();
+  const { user } = useAuth();
+  const { workspaceId } = useWorkspace();
+  const grantRole = activeWorkspaceGrantRole(user, workspaceId);
+  const isManagerSurface = grantRole === "manager" || grantRole === "admin";
+  const isWorkerSurface = grantRole === "worker";
 
   return (
     <Routes>
@@ -224,7 +224,7 @@ export default function App() {
               <Route path="/shifts" element={<Navigate to="/schedule" replace />} />
               <Route path="/history" element={<HistoryPage />} />
               <Route path="/issues/new" element={<IssueNewPage />} />
-              {role === "manager" ? null : (
+              {isManagerSurface ? null : (
                 <Route path="/asset/:aid" element={<EmployeeAssetPage />} />
               )}
             </Route>
@@ -233,17 +233,24 @@ export default function App() {
                 desktop both shells use AgentSidebar instead. Non-worker
                 direct hits return to RoleHome so managers land back in
                 the manager shell. */}
-            {role === "employee" ? (
+            {isWorkerSurface ? (
               <Route element={<EmployeeLayout />}>
                 <Route path="/chat" element={<ChatPage />} />
               </Route>
             ) : (
               <Route path="/chat" element={<Navigate to="/" replace />} />
             )}
-            <Route element={<EmployeeLayout />}>
-              <Route path="/asset/scan" element={<AssetScanPage />} />
-              <Route path="/asset/scan/:token" element={<AssetScanPage />} />
-            </Route>
+            {isWorkerSurface ? (
+              <Route element={<EmployeeLayout />}>
+                <Route path="/asset/scan" element={<AssetScanPage />} />
+                <Route path="/asset/scan/:token" element={<AssetScanPage />} />
+              </Route>
+            ) : (
+              <>
+                <Route path="/asset/scan" element={<Navigate to="/" replace />} />
+                <Route path="/asset/scan/:token" element={<Navigate to="/" replace />} />
+              </>
+            )}
 
             <Route element={<RequirePermission actionKey="approvals.read" />}>
               <Route element={<ManagerLayout />}>
@@ -318,7 +325,7 @@ export default function App() {
               </Route>
             </Route>
 
-            {role === "manager" ? (
+            {isManagerSurface ? (
               <Route element={<RequirePermission actionKey="scope.view" />}>
                 <Route element={<ManagerLayout />}>
                   <Route path="/asset/:aid" element={<AssetDetailPage />} />
@@ -345,15 +352,27 @@ export default function App() {
               </Route>
             </Route>
 
-            <Route element={<ManagerLayout />}>
-              <Route
-                path="/expenses"
-                element={
-                  role === "manager" ? <ExpensesApprovalsPage /> : <Navigate to="/my/expenses" replace />
-                }
-              />
-              <Route path="/templates" element={<TemplatesPage />} />
-              <Route path="/schedules" element={<SchedulesPage />} />
+            <Route element={<RequirePermission actionKey="expenses.approve" />}>
+              <Route element={<ManagerLayout />}>
+                <Route
+                  path="/expenses"
+                  element={
+                    isManagerSurface ? <ExpensesApprovalsPage /> : <Navigate to="/my/expenses" replace />
+                  }
+                />
+              </Route>
+            </Route>
+
+            <Route element={<RequirePermission actionKey="tasks.create" />}>
+              <Route element={<ManagerLayout />}>
+                <Route path="/templates" element={<TemplatesPage />} />
+              </Route>
+            </Route>
+
+            <Route element={<RequirePermission actionKey="availability_overrides.view_others" />}>
+              <Route element={<ManagerLayout />}>
+                <Route path="/schedules" element={<SchedulesPage />} />
+              </Route>
             </Route>
 
             <Route element={<RequirePermission actionKey="permissions.edit_rules" />}>

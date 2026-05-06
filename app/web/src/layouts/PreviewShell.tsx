@@ -55,6 +55,7 @@ export default function PreviewShell() {
     pathname === "/recover" ||
     pathname.startsWith("/accept/") ||
     isGuestPath(pathname);
+  const showRoleSwitch = roleNeutral;
 
   const switchRole = (r: typeof role) => {
     setRole(r);
@@ -79,27 +80,31 @@ export default function PreviewShell() {
 
       <div className="shell-controls">
         <nav className="shell-controls__switch" aria-label="Shell controls">
-          <button
-            type="button"
-            className={"pill" + (!roleNeutral && role === "employee" ? " pill--active" : "")}
-            onClick={() => switchRole("employee")}
-          >
-            Employee
-          </button>
-          <button
-            type="button"
-            className={"pill" + (!roleNeutral && role === "manager" ? " pill--active" : "")}
-            onClick={() => switchRole("manager")}
-          >
-            Manager
-          </button>
-          <button
-            type="button"
-            className={"pill" + (!roleNeutral && role === "client" ? " pill--active" : "")}
-            onClick={() => switchRole("client")}
-          >
-            Client
-          </button>
+          {showRoleSwitch && (
+            <>
+              <button
+                type="button"
+                className={"pill" + (!roleNeutral && role === "employee" ? " pill--active" : "")}
+                onClick={() => switchRole("employee")}
+              >
+                Employee
+              </button>
+              <button
+                type="button"
+                className={"pill" + (!roleNeutral && role === "manager" ? " pill--active" : "")}
+                onClick={() => switchRole("manager")}
+              >
+                Manager
+              </button>
+              <button
+                type="button"
+                className={"pill" + (!roleNeutral && role === "client" ? " pill--active" : "")}
+                onClick={() => switchRole("client")}
+              >
+                Client
+              </button>
+            </>
+          )}
           <button
             type="button"
             className="pill pill--ghost shell-controls__theme"

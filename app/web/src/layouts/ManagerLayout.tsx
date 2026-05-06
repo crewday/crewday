@@ -33,6 +33,7 @@ import AgentSidebar from "@/components/AgentSidebar";
 import BottomTabs from "@/components/BottomTabs";
 import SideNav, { type SideNavItem } from "@/components/SideNav";
 import { ShellNavProvider } from "@/context/ShellNavContext";
+import { useAuth } from "@/auth";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import {
@@ -41,6 +42,7 @@ import {
   persistNavCollapsed,
 } from "@/lib/preferences";
 import type { Me } from "@/types/api";
+import type { ResolvedPermission } from "@/types/auth";
 
 // ManagerLayout mounts AgentSidebar as a SIBLING of <Outlet />.
 // React Router remounts only the outlet subtree on navigation, so the
@@ -105,6 +107,31 @@ const ADMINISTRATION_LINK: SideNavItem = {
   icon: NAV_ICON(Shield),
 };
 
+const NAV_ACTIONS = new Map<string, string>([
+  ["/dashboard", "employees.read"],
+  ["/properties", "properties.read"],
+  ["/stays", "stays.read"],
+  ["/employees", "employees.read"],
+  ["/templates", "tasks.create"],
+  ["/schedules", "availability_overrides.view_others"],
+  ["/scheduler", "scope.view"],
+  ["/instructions", "instructions.edit"],
+  ["/inventory", "scope.view"],
+  ["/assets", "scope.view"],
+  ["/asset_types", "scope.view"],
+  ["/documents", "assets.manage_documents"],
+  ["/approvals", "approvals.read"],
+  ["/leaves", "leaves.view_others"],
+  ["/expenses", "expenses.approve"],
+  ["/pay", "payroll.view_other"],
+  ["/organizations", "scope.view"],
+  ["/permissions", "permissions.edit_rules"],
+  ["/audit", "audit_log.view"],
+  ["/webhooks", "scope.edit_settings"],
+  ["/tokens", "api_tokens.manage"],
+  ["/settings", "scope.edit_settings"],
+]);
+
 // Drawer-bar visibility: only render the hamburger + mobile top bar
 // when there's at least one non-`phoneHidden` link to put inside the
 // drawer. Today's RBAC is implicit (workers have no manager-only
@@ -115,7 +142,96 @@ function hasDrawerItems(items: SideNavItem[]): boolean {
   return items.some((it) => it.type === "link" && !it.phoneHidden);
 }
 
+function actionKeysFor(items: SideNavItem[]): string[] {
+  return Array.from(
+    new Set(
+      items.flatMap((item) => {
+        if (item.type !== "link") return [];
+        const actionKey = NAV_ACTIONS.get(item.to);
+        return actionKey ? [actionKey] : [];
+      }),
+    ),
+  );
+}
+
+function pruneEmptySections(items: SideNavItem[]): SideNavItem[] {
+  const result: SideNavItem[] = [];
+  for (let i = 0; i < items.length; i += 1) {
+    const item = items[i];
+    if (!item) continue;
+    if (item.type === "link") {
+      result.push(item);
+      continue;
+    }
+    const hasLinkBeforeNextSection = items
+      .slice(i + 1)
+      .some((next) => next.type === "section" ? false : true);
+    if (hasLinkBeforeNextSection) result.push(item);
+  }
+  return result.filter((item, index, all) => {
+    if (item.type === "link") return true;
+    const next = all[index + 1];
+    return next?.type === "link";
+  });
+}
+
+function filterNavItems(items: SideNavItem[], allowedActions: Set<string> | null): SideNavItem[] {
+  if (!allowedActions) {
+    return items.filter((item) => item.type !== "link" || !NAV_ACTIONS.has(item.to) || item.phoneHidden);
+  }
+  const visible = items.filter((item) => {
+    if (item.type !== "link") return true;
+    const actionKey = NAV_ACTIONS.get(item.to);
+    return !actionKey || allowedActions.has(actionKey);
+  });
+  return pruneEmptySections(visible);
+}
+
+function delayPermissionProbe(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const id = window.setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        window.clearTimeout(id);
+        reject(signal.reason);
+      },
+      { once: true },
+    );
+  });
+}
+
+async function resolveAllowedNavActions(
+  actionKeys: string[],
+  scopeId: string,
+  signal: AbortSignal,
+): Promise<Set<string>> {
+  const allowed = new Set<string>();
+  for (const [index, actionKey] of actionKeys.entries()) {
+    if (signal.aborted) break;
+    if (index > 0) await delayPermissionProbe(75, signal);
+    const params = new URLSearchParams({
+      action_key: actionKey,
+      scope_kind: "workspace",
+      scope_id: scopeId,
+    });
+    try {
+      const permission = await fetchJson<ResolvedPermission>(
+        `/api/v1/permissions/resolved/self?${params}`,
+        { signal },
+      );
+      if (permission.effect === "allow") allowed.add(actionKey);
+    } catch {
+      if (signal.aborted) break;
+      // A failed nav hint must not widen access. Direct routes still
+      // enforce the same action through RequirePermission.
+    }
+  }
+  return allowed;
+}
+
 export default function ManagerLayout() {
+  const { user } = useAuth();
   const { data } = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
   const collapsed = initialAgentCollapsed();
   const { pathname } = useLocation();
@@ -131,7 +247,20 @@ export default function ManagerLayout() {
   const navItems: SideNavItem[] = data?.is_deployment_admin
     ? [...BASE_NAV_ITEMS, ADMINISTRATION_LINK]
     : BASE_NAV_ITEMS;
-  const hasDrawer = hasDrawerItems(navItems);
+  const permissionScopeId = data?.current_workspace_id ?? null;
+  const permissionUserId = data?.user_id ?? user?.user_id ?? null;
+  const actionKeys = actionKeysFor(navItems);
+  const permissionQ = useQuery({
+    queryKey: permissionUserId && permissionScopeId
+      ? [...qk.permissionResolvedPrefix(), "nav", permissionUserId, permissionScopeId, actionKeys.join("|")]
+      : ["permission", "unresolved", "nav", "workspace"],
+    enabled: Boolean(permissionUserId && permissionScopeId),
+    queryFn: ({ signal }) => resolveAllowedNavActions(actionKeys, permissionScopeId ?? "", signal),
+    retry: false,
+  });
+  const allowedActions = permissionQ.isPending ? null : permissionQ.data ?? new Set<string>();
+  const filteredNavItems = filterNavItems(navItems, allowedActions);
+  const hasDrawer = hasDrawerItems(filteredNavItems);
   const toggleNav = useCallback(() => setNavOpen((v) => !v), []);
 
   useEffect(() => {
@@ -165,7 +294,7 @@ export default function ManagerLayout() {
         )}
 
         <SideNav
-          items={navItems}
+          items={filteredNavItems}
           collapsed={navCollapsed}
           onToggleCollapsed={toggleNavCollapsed}
           footer={{
