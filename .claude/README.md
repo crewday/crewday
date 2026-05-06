@@ -29,6 +29,7 @@ skills will land as code does.
 │   └── commiter.md        # Loads skills/commiter
 ├── skills/                # Reusable playbooks loaded per task
 │   ├── audit-spec/        # Spec ↔ code drift audit (matches `/audit-spec` trigger)
+│   ├── bbash/             # Interactive bug bashing and Beads task capture
 │   ├── selfreview/        # Skeptical review of your own recent changes
 │   ├── director/          # Top-level planning across specs / apps
 │   ├── coder/             # Implementation workflow

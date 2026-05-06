@@ -323,6 +323,8 @@ clearly matches the work. Do not turn every small task into a workflow.
 - `/specs`: interactive spec and mock co-evolution while there is no prod
   code.
 - `/audit-spec`: after a feature adds or removes behavior.
+- `/bbash`: interactive bug bashing; verify reports and create paired
+  Beads bug tasks for async fixes.
 - `/selfreview`: skeptical pass on non-trivial edits before handoff.
 - `/security-check`: auth, permission, PII, or privacy review.
 - `/gap-finder`: pre-implementation spec-gap walk.
