@@ -93,6 +93,7 @@ describe("qk — admin keys", () => {
     expect(qk.adminMe()).toEqual(["admin", "me"]);
     expect(qk.adminAudit()).toEqual(["admin", "audit"]);
     expect(qk.adminWorkspaces()).toEqual(["admin", "workspaces"]);
+    expect(qk.agentTyping("admin")).toEqual(["admin", "agent", "typing"]);
     expect(qk.adminAgentDocs()).toEqual(["admin", "agent_docs"]);
     expect(qk.adminAgentDoc("slug-x")).toEqual(["admin", "agent_docs", "slug-x"]);
   });

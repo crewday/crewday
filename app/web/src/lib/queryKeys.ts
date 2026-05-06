@@ -154,7 +154,9 @@ export const qk = {
   // pair; the task scope is keyed per task id so two open task chats
   // don't share a single indicator.
   agentTyping: (scope: "employee" | "manager" | "admin" | "task", taskId?: string) =>
-    scope === "task" && taskId
+    scope === "admin"
+      ? (["admin", "agent", "typing"] as const)
+      : scope === "task" && taskId
       ? ([...ws(), "agent", "typing", "task", taskId] as const)
       : ([...ws(), "agent", "typing", scope] as const),
   bookings: () => [...ws(), "bookings"] as const,

@@ -32,6 +32,11 @@ import { connectEventStream, type SseStatus } from "@/lib/sse";
 // typing flag) lives in `@/lib/sse`. This provider only owns the
 // lifecycle of the transport + the React-facing status state that
 // `useSseConnection` exposes to reconnect badges.
+//
+// The deployment admin shell uses the sibling `AdminSseProvider`
+// below. Keeping the providers distinct prevents workspace slug churn
+// from reopening `/admin/events`, and prevents `/admin/*` from needing
+// a selected workspace before deployment-scope invalidations can land.
 
 interface SseCtxValue {
   status: SseStatus;
@@ -105,6 +110,59 @@ export function SseProvider({ children }: { children: ReactNode }) {
       conn.close();
     };
   }, [qc, workspaceId, authStatus]);
+
+  const value = useMemo<SseCtxValue>(
+    () => ({ status, lastEventId }),
+    [status, lastEventId],
+  );
+
+  return <SseCtx.Provider value={value}>{children}</SseCtx.Provider>;
+}
+
+export function AdminSseProvider({ children }: { children: ReactNode }) {
+  const qc = useQueryClient();
+  const authState = useSyncExternalStore(
+    subscribeAuth,
+    getAuthState,
+    getAuthState,
+  );
+
+  const [status, setStatus] = useState<SseStatus>("closed");
+  const [lastEventId, setLastEventId] = useState<string | null>(null);
+
+  const statusRef = useRef(setStatus);
+  statusRef.current = setStatus;
+  const lastIdRef = useRef(setLastEventId);
+  lastIdRef.current = setLastEventId;
+
+  useEffect(() => {
+    if (typeof EventSource === "undefined") {
+      setStatus("closed");
+      setLastEventId(null);
+      return;
+    }
+    if (
+      authState.status !== "authenticated" ||
+      authState.user?.is_deployment_admin !== true
+    ) {
+      setStatus("closed");
+      setLastEventId(null);
+      return;
+    }
+
+    setLastEventId(null);
+
+    const conn = connectEventStream({
+      scope: "admin",
+      qc,
+      onStatus: (next) => statusRef.current(next),
+      onLastEventId: (id) => lastIdRef.current(id),
+    });
+
+    return () => {
+      conn.close();
+    };
+  }, [qc, authState.status, authState.user?.is_deployment_admin]);
 
   const value = useMemo<SseCtxValue>(
     () => ({ status, lastEventId }),

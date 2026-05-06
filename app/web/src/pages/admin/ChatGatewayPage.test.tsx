@@ -155,7 +155,7 @@ afterEach(() => {
 describe("<ChatGatewayPage>", () => {
   it("stays under the deployment-admin layout route", () => {
     expect(appSource).toMatch(
-      /<Route element={<AdminLayout \/>}>[\s\S]*<Route path="\/admin\/chat-gateway" element={<AdminChatGatewayPage \/>} \/>/,
+      /<AdminSseProvider>[\s\S]*<AdminLayout \/>[\s\S]*<\/AdminSseProvider>[\s\S]*<Route path="\/admin\/chat-gateway" element={<AdminChatGatewayPage \/>} \/>/,
     );
   });
 

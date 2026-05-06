@@ -474,10 +474,16 @@ describe("Admin SettingsPage", () => {
 
   it("redirects /admin/signup to /admin/settings#signup", async () => {
     vi.resetModules();
+    const authState = {
+      status: "authenticated",
+      user: { is_deployment_admin: true },
+    };
     vi.doMock("@/auth", () => ({
       RequireAuth: () => <Outlet />,
       RequirePermission: () => <Outlet />,
       WorkspaceGate: () => <Outlet />,
+      getAuthState: () => authState,
+      subscribeAuth: () => () => undefined,
       useAuth: () => ({ user: null }),
     }));
     vi.doMock("@/context/WorkspaceContext", () => ({

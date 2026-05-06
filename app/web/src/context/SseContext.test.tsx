@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, cleanup } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { SseProvider } from "@/context/SseContext";
+import { AdminSseProvider, SseProvider } from "@/context/SseContext";
 import { WorkspaceProvider, useWorkspace } from "@/context/WorkspaceContext";
 import { type ReactNode, useEffect, useState } from "react";
 import { __resetAuthStoreForTests, setAuthenticated, setUnauthenticated } from "@/auth";
@@ -14,6 +14,10 @@ const TEST_USER: AuthMe = {
   available_workspaces: [],
   current_workspace_id: null,
   is_deployment_admin: false,
+};
+const ADMIN_USER: AuthMe = {
+  ...TEST_USER,
+  is_deployment_admin: true,
 };
 
 // Collect every EventSource constructed during a test so we can assert
@@ -99,6 +103,17 @@ function Providers({ children }: { children: ReactNode }) {
     <QueryClientProvider client={qc}>
       <WorkspaceProvider>
         <SseProvider>{children}</SseProvider>
+      </WorkspaceProvider>
+    </QueryClientProvider>
+  );
+}
+
+function AdminProviders({ children }: { children: ReactNode }) {
+  const [qc] = useState(() => new QueryClient());
+  return (
+    <QueryClientProvider client={qc}>
+      <WorkspaceProvider>
+        <AdminSseProvider>{children}</AdminSseProvider>
       </WorkspaceProvider>
     </QueryClientProvider>
   );
@@ -312,6 +327,98 @@ describe("<SseProvider>", () => {
       });
 
       expect(created.filter((e) => e.url === "/w/acme/events")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("opens /admin/events once for the authenticated admin shell without a workspace slug", () => {
+    setAuthenticated(ADMIN_USER);
+    render(
+      <AdminProviders>
+        <div />
+      </AdminProviders>,
+    );
+
+    expect(created).toHaveLength(1);
+    expect(created[0]?.url).toBe("/admin/events");
+    expect(created[0]?.withCredentials).toBe(true);
+    expect(created.some((e) => e.url === "/events")).toBe(false);
+  });
+
+  it("does not open /admin/events for a signed-in non-admin", () => {
+    render(
+      <AdminProviders>
+        <div />
+      </AdminProviders>,
+    );
+
+    expect(created).toHaveLength(0);
+  });
+
+  it("closes the admin stream and cancels reconnect when the admin shell unmounts", () => {
+    setAuthenticated(ADMIN_USER);
+    vi.useFakeTimers();
+    try {
+      const { unmount } = render(
+        <AdminProviders>
+          <div />
+        </AdminProviders>,
+      );
+      expect(created).toHaveLength(1);
+
+      const live = created[0]! as unknown as {
+        readyState: number;
+        onerror: (() => void) | null;
+      };
+      live.readyState = TestEventSource.CLOSED;
+      act(() => {
+        live.onerror?.();
+      });
+
+      act(() => {
+        unmount();
+      });
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+
+      expect(created[0]?.closed).toBe(true);
+      expect(created.filter((e) => e.url === "/admin/events")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("closes the admin stream and cancels reconnect when auth becomes invalid", () => {
+    setAuthenticated(ADMIN_USER);
+    vi.useFakeTimers();
+    try {
+      render(
+        <AdminProviders>
+          <div />
+        </AdminProviders>,
+      );
+      expect(created).toHaveLength(1);
+
+      const live = created[0]! as unknown as {
+        readyState: number;
+        onerror: (() => void) | null;
+      };
+      live.readyState = TestEventSource.CLOSED;
+      act(() => {
+        live.onerror?.();
+      });
+
+      act(() => {
+        setUnauthenticated();
+      });
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+
+      expect(created[0]?.closed).toBe(true);
+      expect(created.filter((e) => e.url === "/admin/events")).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }

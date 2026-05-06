@@ -151,7 +151,12 @@ describe("INVALIDATIONS — coverage", () => {
     "admin.audit.appended",
     "admin.usage.updated",
     "admin.workspace.changed",
+    "admin.workspace.archived",
+    "admin.workspace.trusted",
     "admin.workspace.budget_paused",
+    "admin.settings.updated",
+    "admin.admins.updated",
+    "admin.llm.assignment_updated",
     "chat_gateway.provider.changed",
     "chat_gateway.template.changed",
     "chat_channel_binding.created",
@@ -712,6 +717,29 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     );
   });
 
+  it("admin agent.action.pending stays in deployment admin caches", () => {
+    const qc = makeClient();
+    INVALIDATIONS["agent.turn.started"](
+      makeEvent("agent.turn.started", { scope: "admin", started_at: "x" }),
+      qc,
+    );
+    const spy = vi.spyOn(qc, "invalidateQueries");
+
+    INVALIDATIONS["agent.action.pending"](
+      makeEvent("agent.action.pending", {
+        scope: "admin",
+        approval_request_id: "ar-admin",
+      }),
+      qc,
+    );
+
+    expect(qc.getQueryData(qk.agentTyping("admin"))).toBe(false);
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(expect.arrayContaining([qk.adminAgentActions()]));
+    expect(called).not.toContainEqual(qk.approvals());
+    expect(called).not.toContainEqual(qk.dashboard());
+  });
+
   it("expense.{approved,rejected,reimbursed,decided} invalidates expense roots", () => {
     for (const kind of [
       "expense.approved",
@@ -1099,6 +1127,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     for (const kind of [
       "admin.usage.updated",
       "admin.workspace.changed",
+      "admin.workspace.archived",
       "admin.workspace.budget_paused",
     ] as const) {
       const qc = makeClient();
@@ -1112,6 +1141,50 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
         ]),
       );
     }
+  });
+
+  it("admin workspace trusted events invalidate the deployment workspace list", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["admin.workspace.trusted"](
+      makeEvent("admin.workspace.trusted"),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(expect.arrayContaining([qk.adminWorkspaces()]));
+  });
+
+  it("admin settings and admin membership events invalidate deployment admin queries", () => {
+    const settingsClient = makeClient();
+    const settingsSpy = vi.spyOn(settingsClient, "invalidateQueries");
+    INVALIDATIONS["admin.settings.updated"](
+      makeEvent("admin.settings.updated"),
+      settingsClient,
+    );
+    expect(settingsSpy.mock.calls.map((c) => c[0]?.queryKey)).toEqual(
+      expect.arrayContaining([qk.adminSettings()]),
+    );
+
+    const adminsClient = makeClient();
+    const adminsSpy = vi.spyOn(adminsClient, "invalidateQueries");
+    INVALIDATIONS["admin.admins.updated"](
+      makeEvent("admin.admins.updated"),
+      adminsClient,
+    );
+    expect(adminsSpy.mock.calls.map((c) => c[0]?.queryKey)).toEqual(
+      expect.arrayContaining([qk.adminAdmins()]),
+    );
+  });
+
+  it("admin LLM assignment events invalidate the deployment LLM graph", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["admin.llm.assignment_updated"](
+      makeEvent("admin.llm.assignment_updated"),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(expect.arrayContaining([qk.adminLlmGraph()]));
   });
 
   it("chat gateway events invalidate deployment chat queries", () => {
@@ -1279,6 +1352,38 @@ describe("dispatchSseEvent — audit invalidation", () => {
       expect(called).not.toContainEqual(qk.audit());
       expect(called).not.toContainEqual(qk.webhooks());
     }
+  });
+
+  it("admin-stream deployment events do not invalidate workspace chat caches", () => {
+    for (const event of [
+      makeEvent("chat_gateway.provider.changed"),
+      makeEvent("chat_gateway.template.changed"),
+      makeEvent("agent.action.pending", {
+        scope: "admin",
+        approval_request_id: "ar-admin",
+      }),
+    ] as const) {
+      const qc = makeClient();
+      const spy = vi.spyOn(qc, "invalidateQueries");
+
+      dispatchSseEvent(event, qc, "admin");
+
+      const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+      expect(called).not.toContainEqual(qk.chatChannelProviders());
+      expect(called).not.toContainEqual(qk.approvals());
+      expect(called).not.toContainEqual(qk.dashboard());
+    }
+  });
+
+  it("workspace-stream chat gateway events still invalidate workspace chat caches", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+
+    dispatchSseEvent(makeEvent("chat_gateway.provider.changed"), qc);
+
+    expect(spy.mock.calls.map((c) => c[0]?.queryKey)).toEqual(
+      expect.arrayContaining([qk.chatChannelProviders()]),
+    );
   });
 });
 
@@ -1504,10 +1609,10 @@ describe("connectEventStream — URLs + lifecycle", () => {
   const factory = (url: string): EventSource =>
     new FakeEventSource(url) as unknown as EventSource;
 
-  it("opens /events when no slug is set", () => {
+  it("does not open a stream when no workspace slug is set", () => {
     const qc = makeClient();
     const conn = connectEventStream({ slug: null, qc, eventSourceFactory: factory });
-    expect(FakeEventSource.instances[0]?.url).toBe("/events");
+    expect(FakeEventSource.instances).toHaveLength(0);
     conn.close();
   });
 
@@ -1522,11 +1627,22 @@ describe("connectEventStream — URLs + lifecycle", () => {
     conn.close();
   });
 
+  it("opens /admin/events for the deployment admin stream", () => {
+    const qc = makeClient();
+    const conn = connectEventStream({
+      scope: "admin",
+      qc,
+      eventSourceFactory: factory,
+    });
+    expect(FakeEventSource.instances[0]?.url).toBe("/admin/events");
+    conn.close();
+  });
+
   it("close() is idempotent and closes the underlying EventSource", () => {
     const qc = makeClient();
     const statuses: SseStatus[] = [];
     const conn = connectEventStream({
-      slug: null,
+      slug: "acme",
       qc,
       onStatus: (s) => statuses.push(s),
       eventSourceFactory: factory,
@@ -1618,7 +1734,7 @@ describe("connectEventStream — URLs + lifecycle", () => {
     vi.useFakeTimers();
     const qc = makeClient();
     const conn = connectEventStream({
-      slug: null,
+      slug: "acme",
       qc,
       eventSourceFactory: factory,
     });
@@ -1681,7 +1797,7 @@ describe("connectEventStream — backoff ladder", () => {
     vi.useFakeTimers();
     const qc = makeClient();
     const conn = connectEventStream({
-      slug: null,
+      slug: "acme",
       qc,
       eventSourceFactory: factory,
       rng: () => 0.5,
@@ -1707,7 +1823,7 @@ describe("connectEventStream — backoff ladder", () => {
     vi.useFakeTimers();
     const qc = makeClient();
     const conn = connectEventStream({
-      slug: null,
+      slug: "acme",
       qc,
       eventSourceFactory: factory,
       rng: () => 0.5,
@@ -1742,7 +1858,7 @@ describe("connectEventStream — backoff ladder", () => {
     vi.useFakeTimers();
     const qc = makeClient();
     const conn = connectEventStream({
-      slug: null,
+      slug: "acme",
       qc,
       eventSourceFactory: factory,
       rng: () => 0.5,
@@ -1768,7 +1884,7 @@ describe("connectEventStream — backoff ladder", () => {
     vi.useFakeTimers();
     const qc = makeClient();
     const conn = connectEventStream({
-      slug: null,
+      slug: "acme",
       qc,
       eventSourceFactory: factory,
       rng: () => 0.5,

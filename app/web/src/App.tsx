@@ -57,6 +57,7 @@ import AdminSignupsPage from "@/pages/admin/SignupsPage";
 import AdminSettingsPage from "@/pages/admin/SettingsPage";
 import AdminAdminsPage from "@/pages/admin/AdminsPage";
 import AdminAuditPage from "@/pages/admin/AuditPage";
+import { AdminSseProvider } from "@/context/SseContext";
 
 import LoginPage from "@/pages/public/LoginPage";
 import RecoverPage from "@/pages/public/RecoverPage";
@@ -407,7 +408,13 @@ export default function App() {
               admin must be signed in) but **outside** `<WorkspaceGate>`:
               admin is a deployment-scope surface and intentionally
               has no workspace slug. */}
-          <Route element={<AdminLayout />}>
+          <Route
+            element={
+              <AdminSseProvider>
+                <AdminLayout />
+              </AdminSseProvider>
+            }
+          >
             <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
             <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
             <Route path="/admin/chat-gateway" element={<AdminChatGatewayPage />} />

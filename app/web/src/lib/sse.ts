@@ -161,7 +161,12 @@ export type EventKind =
   | "admin.audit.appended"
   | "admin.usage.updated"
   | "admin.workspace.changed"
+  | "admin.workspace.archived"
+  | "admin.workspace.trusted"
   | "admin.workspace.budget_paused"
+  | "admin.settings.updated"
+  | "admin.admins.updated"
+  | "admin.llm.assignment_updated"
   | "chat_gateway.provider.changed"
   | "chat_gateway.template.changed"
   | "chat_channel_binding.created"
@@ -539,6 +544,11 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
 
   "agent.action.pending": (event, qc) => {
     const payload = event.data as unknown as AgentActionPendingPayload;
+    if (payload.scope === "admin") {
+      stopTyping(qc, "admin");
+      invalidate(qc, qk.adminAgentActions());
+      return;
+    }
     // The approval card lives on the chat surface for the scope; the
     // turn has resolved into an approval rather than a reply, so the
     // typing bubble drops (§14 "Agent turn indicator"). The
@@ -1009,9 +1019,30 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.adminWorkspaces());
   },
 
+  "admin.workspace.archived": (_event, qc) => {
+    adminUsageInvalidations(qc);
+    invalidate(qc, qk.adminWorkspaces());
+  },
+
+  "admin.workspace.trusted": (_event, qc) => {
+    invalidate(qc, qk.adminWorkspaces());
+  },
+
   "admin.workspace.budget_paused": (_event, qc) => {
     adminUsageInvalidations(qc);
     invalidate(qc, qk.adminWorkspaces());
+  },
+
+  "admin.settings.updated": (_event, qc) => {
+    invalidate(qc, qk.adminSettings());
+  },
+
+  "admin.admins.updated": (_event, qc) => {
+    invalidate(qc, qk.adminAdmins());
+  },
+
+  "admin.llm.assignment_updated": (_event, qc) => {
+    invalidate(qc, qk.adminLlmGraph());
   },
 
   "chat_gateway.provider.changed": (_event, qc) => {
@@ -1095,6 +1126,20 @@ function isKnownKind(kind: string): kind is EventKind {
   return kind in INVALIDATIONS;
 }
 
+function dispatchAdminScopedEvent(event: SseEvent, qc: QueryClient): boolean {
+  if (event.kind === "chat_gateway.provider.changed") {
+    invalidate(qc, qk.adminChatProviders());
+    invalidate(qc, qk.adminChatOverrides());
+    return true;
+  }
+  if (event.kind === "chat_gateway.template.changed") {
+    invalidate(qc, qk.adminChatTemplates());
+    invalidate(qc, qk.adminChatProviders());
+    return true;
+  }
+  return false;
+}
+
 /**
  * Route a parsed frame through the `INVALIDATIONS` table.
  *
@@ -1104,7 +1149,11 @@ function isKnownKind(kind: string): kind is EventKind {
  * through `EventSource` and kills the `onmessage` callback chain on
  * some browsers).
  */
-export function dispatchSseEvent(event: SseEvent, qc: QueryClient): void {
+export function dispatchSseEvent(
+  event: SseEvent,
+  qc: QueryClient,
+  scope: SseStreamScope = "workspace",
+): void {
   if (!isKnownKind(event.kind)) {
     // eslint-disable-next-line no-console -- forward-compat diagnostic
     console.warn(`[sse] unknown event kind: ${event.kind}`);
@@ -1125,6 +1174,7 @@ export function dispatchSseEvent(event: SseEvent, qc: QueryClient): void {
       // the subscription catalog into the client.
       invalidate(qc, qk.webhooks());
     }
+    if (scope === "admin" && dispatchAdminScopedEvent(event, qc)) return;
     handler(event, qc);
   } catch (err) {
     // A handler bug must not take the SSE stream down. Log and move
@@ -1229,15 +1279,24 @@ export function backoffDelayMs(
  */
 export type SseStatus = "connecting" | "open" | "reconnecting" | "closed";
 
+export type SseStreamScope = "workspace" | "admin";
+
 export interface ConnectOptions {
   /**
-   * Active workspace slug, or `null` for the pre-workspace `/events`
-   * fallback. Changing the slug closes the live stream and opens a
-   * new one at the scoped URL; the `Last-Event-ID` is *not* carried
-   * across the switch (different workspace = different event stream
-   * on the server).
+   * Which server stream to open. Workspace pages use
+   * `/w/<slug>/events`; the deployment admin shell uses
+   * `/admin/events`.
    */
-  slug: string | null;
+  scope?: SseStreamScope;
+  /**
+   * Active workspace slug. Workspace streams are not opened until this
+   * is set; the protected app has no valid bare `/events` fallback.
+   * Changing the slug closes the live stream and opens a new one at
+   * the scoped URL; the `Last-Event-ID` is *not* carried across the
+   * switch (different workspace = different event stream on the
+   * server).
+   */
+  slug?: string | null;
   /** Query client the dispatcher invalidates. */
   qc: QueryClient;
   /** Status callback; called on every state transition. */
@@ -1266,8 +1325,9 @@ export interface SseConnection {
   close: () => void;
 }
 
-function sseUrl(slug: string | null): string {
-  return slug ? `/w/${slug}/events` : "/events";
+function sseUrl(scope: SseStreamScope, slug: string | null | undefined): string | null {
+  if (scope === "admin") return "/admin/events";
+  return slug ? `/w/${slug}/events` : null;
 }
 
 // `EventSource.CLOSED = 2` in the DOM spec; we read the numeric
@@ -1292,6 +1352,7 @@ const EVENT_SOURCE_CLOSED = 2 as const;
  */
 export function connectEventStream(opts: ConnectOptions): SseConnection {
   const {
+    scope = "workspace",
     slug,
     qc,
     onStatus,
@@ -1300,7 +1361,7 @@ export function connectEventStream(opts: ConnectOptions): SseConnection {
     rng,
   } = opts;
 
-  const url = sseUrl(slug);
+  const url = sseUrl(scope, slug);
   const factory =
     eventSourceFactory ??
     ((u: string): EventSource =>
@@ -1315,6 +1376,13 @@ export function connectEventStream(opts: ConnectOptions): SseConnection {
     if (onStatus) onStatus(status);
   };
 
+  if (!url) {
+    setStatus("closed");
+    return {
+      close: (): void => undefined,
+    };
+  }
+
   const handleMessage = (evt: MessageEvent<string>): void => {
     // `type` is the SSE `event:` header (defaults to `"message"` for
     // unnamed frames). `lastEventId` is whatever the browser parsed
@@ -1325,7 +1393,7 @@ export function connectEventStream(opts: ConnectOptions): SseConnection {
 
     const parsed = parseSseMessage(kind, lastEventId, evt.data);
     if (!parsed) return;
-    dispatchSseEvent(parsed, qc);
+    dispatchSseEvent(parsed, qc, scope);
   };
 
   const attachListeners = (source: EventSource): void => {
