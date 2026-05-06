@@ -1,0 +1,33 @@
+217. [GET] http://127.0.0.1:8100/api/v1/runtime/info => [200] OK
+218. [GET] http://127.0.0.1:8100/api/v1/auth/me => [200] OK
+222. [GET] http://127.0.0.1:8100/events => [404] Not Found
+223. [GET] http://127.0.0.1:8100/events => [404] Not Found
+224. [GET] http://127.0.0.1:8100/events => [404] Not Found
+225. [GET] http://127.0.0.1:8100/events => [404] Not Found
+226. [GET] http://127.0.0.1:8100/events => [404] Not Found
+227. [POST] http://127.0.0.1:8100/workspaces/switch/crewday => [204] No Content
+228. [GET] http://127.0.0.1:8100/api/v1/runtime/info => [200] OK
+229. [GET] http://127.0.0.1:8100/w/crewday/api/v1/me => [200] OK
+230. [GET] http://127.0.0.1:8100/w/crewday/api/v1/properties => [200] OK
+231. [GET] http://127.0.0.1:8100/w/crewday/api/v1/agent/manager/log => [200] OK
+232. [GET] http://127.0.0.1:8100/w/crewday/api/v1/approvals => [200] OK
+234. [POST] http://127.0.0.1:8100/workspaces/switch/crewday => [204] No Content
+235. [GET] http://127.0.0.1:8100/w/crewday/api/v1/tasks?scheduled_for_utc_gte=2026-05-06T00%3A00%3A00.000Z&scheduled_for_utc_lt=2026-05-07T00%3A00%3A00.000Z&limit=100&assignee_user_id=01KQG8DB71QKXW4X7585NTSZ1Z => [200] OK
+236. [GET] http://127.0.0.1:8100/w/crewday/api/v1/permissions/resolved/self?action_key=employees.read&scope_kind=workspace&scope_id=01KQPVBHGAM0ZSAF700P169N0Y => [200] OK
+237. [GET] http://127.0.0.1:8100/w/crewday/api/v1/permissions/resolved/self?action_key=properties.read&scope_kind=workspace&scope_id=01KQPVBHGAM0ZSAF700P169N0Y => [200] OK
+238. [GET] http://127.0.0.1:8100/w/crewday/api/v1/permissions/resolved/self?action_key=stays.read&scope_kind=workspace&scope_id=01KQPVBHGAM0ZSAF700P169N0Y => [200] OK
+239. [GET] http://127.0.0.1:8100/w/crewday/api/v1/permissions/resolved/self?action_key=tasks.create&scope_kind=workspace&scope_id=01KQPVBHGAM0ZSAF700P169N0Y => [200] OK
+240. [GET] http://127.0.0.1:8100/w/crewday/api/v1/permissions/resolved/self?action_key=availability_overrides.view_others&scope_kind=workspace&scope_id=01KQPVBHGAM0ZSAF700P169N0Y => [200] OK
+241. [GET] http://127.0.0.1:8100/w/crewday/api/v1/permissions/resolved/self?action_key=scope.view&scope_kind=workspace&scope_id=01KQPVBHGAM0ZSAF700P169N0Y => [200] OK
+242. [GET] http://127.0.0.1:8100/w/crewday/api/v1/permissions/resolved/self?action_key=instructions.edit&scope_kind=workspace&scope_id=01KQPVBHGAM0ZSAF700P169N0Y => [200] OK
+243. [GET] http://127.0.0.1:8100/w/crewday/api/v1/permissions/resolved/self?action_key=assets.manage_documents&scope_kind=workspace&scope_id=01KQPVBHGAM0ZSAF700P169N0Y => [200] OK
+244. [GET] http://127.0.0.1:8100/w/crewday/api/v1/permissions/resolved/self?action_key=approvals.read&scope_kind=workspace&scope_id=01KQPVBHGAM0ZSAF700P169N0Y => [200] OK
+245. [GET] http://127.0.0.1:8100/w/crewday/api/v1/permissions/resolved/self?action_key=leaves.view_others&scope_kind=workspace&scope_id=01KQPVBHGAM0ZSAF700P169N0Y => [200] OK
+246. [GET] http://127.0.0.1:8100/w/crewday/api/v1/permissions/resolved/self?action_key=expenses.approve&scope_kind=workspace&scope_id=01KQPVBHGAM0ZSAF700P169N0Y => [200] OK
+247. [GET] http://127.0.0.1:8100/w/crewday/api/v1/permissions/resolved/self?action_key=payroll.view_other&scope_kind=workspace&scope_id=01KQPVBHGAM0ZSAF700P169N0Y => [200] OK
+248. [GET] http://127.0.0.1:8100/w/crewday/api/v1/permissions/resolved/self?action_key=permissions.edit_rules&scope_kind=workspace&scope_id=01KQPVBHGAM0ZSAF700P169N0Y => [200] OK
+249. [GET] http://127.0.0.1:8100/w/crewday/api/v1/permissions/resolved/self?action_key=audit_log.view&scope_kind=workspace&scope_id=01KQPVBHGAM0ZSAF700P169N0Y => [200] OK
+250. [GET] http://127.0.0.1:8100/w/crewday/api/v1/permissions/resolved/self?action_key=scope.edit_settings&scope_kind=workspace&scope_id=01KQPVBHGAM0ZSAF700P169N0Y => [200] OK
+251. [GET] http://127.0.0.1:8100/w/crewday/api/v1/permissions/resolved/self?action_key=api_tokens.manage&scope_kind=workspace&scope_id=01KQPVBHGAM0ZSAF700P169N0Y => [200] OK
+
+Note: 220 static requests not shown, run with "static" option to see them.

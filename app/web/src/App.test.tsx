@@ -18,6 +18,8 @@ const mockRenders = vi.hoisted(() => ({
   clientLayout: vi.fn(),
   clientPortfolioPage: vi.fn(),
   employeeLayout: vi.fn(),
+  agentFetches: false,
+  agentSidebar: vi.fn(),
   managerLayout: vi.fn(),
   chatPage: vi.fn(),
   dashboardPage: vi.fn(),
@@ -39,11 +41,21 @@ vi.mock("@/layouts/EmployeeLayout", async () => {
   const { Outlet: RouterOutlet } = await vi.importActual<typeof import("react-router-dom")>(
     "react-router-dom",
   );
+  const { useEffect } = await vi.importActual<typeof import("react")>("react");
+  function MockAgentSidebar({ role }: { role: "employee" | "manager" }): ReactElement {
+    mockRenders.agentSidebar(role);
+    useEffect(() => {
+      if (!mockRenders.agentFetches) return;
+      void fetch(`/w/ws_1/api/v1/agent/${role}/log`);
+    }, [role]);
+    return <aside data-testid="agent-sidebar">agent:{role}</aside>;
+  }
   return {
     default: function MockEmployeeLayout(): ReactElement {
       mockRenders.employeeLayout();
       return (
         <div data-testid="employee-layout">
+          <MockAgentSidebar role="employee" />
           <RouterOutlet />
         </div>
       );
@@ -55,11 +67,21 @@ vi.mock("@/layouts/ManagerLayout", async () => {
   const { Outlet: RouterOutlet } = await vi.importActual<typeof import("react-router-dom")>(
     "react-router-dom",
   );
+  const { useEffect } = await vi.importActual<typeof import("react")>("react");
+  function MockAgentSidebar({ role }: { role: "employee" | "manager" }): ReactElement {
+    mockRenders.agentSidebar(role);
+    useEffect(() => {
+      if (!mockRenders.agentFetches) return;
+      void fetch(`/w/ws_1/api/v1/agent/${role}/log`);
+    }, [role]);
+    return <aside data-testid="agent-sidebar">agent:{role}</aside>;
+  }
   return {
     default: function MockManagerLayout(): ReactElement {
       mockRenders.managerLayout();
       return (
         <div data-testid="manager-layout">
+          <MockAgentSidebar role="manager" />
           <RouterOutlet />
         </div>
       );
@@ -204,6 +226,7 @@ beforeEach(() => {
   __resetAuthStoreForTests();
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
+  mockRenders.agentFetches = false;
   vi.clearAllMocks();
 });
 
@@ -241,6 +264,37 @@ describe("App /chat role routing", () => {
 
     expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
     expect(mockRenders.managerLayout).toHaveBeenCalled();
+    expect(mockRenders.employeeLayout).not.toHaveBeenCalled();
+  });
+
+  it("uses the manager sidebar log scope with a stale employee role cookie", async () => {
+    const requestedPaths: string[] = [];
+    mockRenders.agentFetches = true;
+    installFetch(({ url }) => {
+      const parsed = new URL(url, "http://crewday.test");
+      requestedPaths.push(parsed.pathname);
+      if (parsed.pathname === "/w/ws_1/api/v1/agent/manager/log") {
+        return jsonResponse([]);
+      }
+      if (parsed.pathname === "/w/ws_1/api/v1/permissions/resolved/self") {
+        return jsonResponse({
+          effect: "allow",
+          source_layer: "default_allow",
+          source_rule_id: null,
+          matched_groups: ["managers"],
+        });
+      }
+      throw new Error(`Unscripted fetch: ${url}`);
+    });
+
+    renderAppAt("/today", "employee", "manager");
+
+    await waitFor(() => {
+      expect(requestedPaths).toContain("/w/ws_1/api/v1/agent/manager/log");
+    });
+
+    expect(requestedPaths).not.toContain("/w/ws_1/api/v1/agent/employee/log");
+    expect(mockRenders.agentSidebar).toHaveBeenCalledWith("manager");
     expect(mockRenders.employeeLayout).not.toHaveBeenCalled();
   });
 
