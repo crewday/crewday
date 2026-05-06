@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,13 +11,16 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
+from app.adapters.db.capabilities.models import DeploymentSetting
 from app.adapters.db.llm.models import ApprovalRequest, LlmProvider
 from app.adapters.db.ops.models import AdminAgentAction, AdminAgentChatMessage
 from app.adapters.llm.fake import FakeLLMClient
+from app.adapters.llm.openrouter import OPENROUTER_API_KEY_SETTING
 from app.adapters.llm.ports import ToolCall as LlmToolCall
 from app.api.admin.agent import AdminAgentActionProposal
 from app.api.transport import admin_sse
 from app.auth.session import SESSION_COOKIE_NAME
+from app.capabilities import probe as probe_capabilities
 from app.config import Settings
 from app.domain.agent.admin_runtime import (
     AdminAgentRuntimeActionProducer,
@@ -177,6 +181,21 @@ def _seed_admin_model_default(session_factory: sessionmaker[Session]) -> None:
         assert provider is not None
         provider.default_model = provider_model.id
         session.commit()
+
+
+@contextmanager
+def _session_uow(
+    session_factory: sessionmaker[Session],
+) -> Iterator[Session]:
+    session = session_factory()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
 @pytest.fixture
@@ -632,7 +651,7 @@ class TestAdminAgent:
         assert resp.json()["error"] == "admin_agent_no_action_proposal"
         _assert_no_agent_writes(session_factory)
 
-    def test_runtime_producer_settings_tool_fails_closed_without_writes(
+    def test_runtime_producer_supported_non_secret_setting_creates_action(
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
@@ -657,8 +676,96 @@ class TestAdminAgent:
             json={"body": "turn signup on"},
         )
 
+        assert resp.status_code == 201
+        with session_factory() as session, tenant_agnostic():
+            rows = session.scalars(select(AdminAgentAction)).all()
+            approvals = session.scalars(select(ApprovalRequest)).all()
+        assert len(rows) == 1
+        assert approvals == []
+        row = rows[0]
+        assert row.action == "admin.settings.update"
+        assert row.resolved_payload_json == {
+            "tool_call_id": "call_settings",
+            "tool_input": {"key": "signup_enabled", "value": True},
+        }
+        assert row.card_summary == "Update deployment setting"
+        assert row.card_fields_json == [
+            ["Setting", "signup_enabled"],
+            ["Value", "true"],
+        ]
+        assert row.card_risk == "medium"
+
+    def test_runtime_producer_secret_setting_fails_closed_without_plaintext_write(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        _seed_admin_model_default(session_factory)
+        client.app.state.admin_agent_action_producer = AdminAgentRuntimeActionProducer(
+            llm=FakeLLMClient(
+                tool_calls=(
+                    LlmToolCall(
+                        id="call_secret",
+                        name="admin.settings.update",
+                        arguments={
+                            "key": OPENROUTER_API_KEY_SETTING,
+                            "value": "sk-plaintext-must-not-persist",
+                        },
+                    ),
+                )
+            )
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            json={"body": "set the OpenRouter key"},
+        )
+
         assert resp.status_code == 503
         assert resp.json()["error"] == "admin_agent_no_action_proposal"
+        _assert_no_agent_writes(session_factory)
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            (OPENROUTER_API_KEY_SETTING, "sk-plaintext-must-not-persist"),
+            ("trusted_interfaces", ["lo"]),
+            ("signup_enabled", "definitely-not-a-bool"),
+        ],
+    )
+    def test_invalid_settings_action_proposal_fails_before_persisting_payload(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        key: str,
+        value: object,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        client.app.state.admin_agent_action_producer = _FakeActionProducer(
+            AdminAgentActionProposal(
+                tool_call=ToolCall(
+                    id="call_bad_setting",
+                    name="admin.settings.update",
+                    input={"key": key, "value": value},
+                ),
+                card_summary="Update deployment setting",
+                card_fields=(("Setting", key), ("Value", str(value))),
+                card_risk="medium",
+                gate_source="workspace_always",
+                requested_by_token_id="tok_live_admin_agent",
+            )
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            json={"body": "change deployment setting"},
+        )
+
+        assert resp.status_code == 503
+        assert resp.json()["error"] == "admin_agent_action_proposal_invalid"
         _assert_no_agent_writes(session_factory)
 
     def test_runtime_producer_multiple_tool_calls_fail_closed_without_writes(
@@ -738,6 +845,64 @@ class TestAdminAgent:
         assert result.status_code == 422
         assert result.body == {"error": "invalid_cap"}
         assert result.mutated is False
+
+    def test_deployment_admin_dispatcher_rejects_secret_setting_replay(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+    ) -> None:
+        dispatcher = DeploymentAdminToolDispatcher(app=client.app)
+
+        result = dispatcher.dispatch(
+            ToolCall(
+                id="call_secret_setting",
+                name="admin.settings.update",
+                input={
+                    "key": OPENROUTER_API_KEY_SETTING,
+                    "value": "sk-plaintext-must-not-replay",
+                },
+            ),
+            token=DelegatedToken(plaintext="mip_test", token_id="tok_test"),
+            headers={"X-Crewday-Replay-Actor-Id": "user_admin"},
+        )
+
+        assert result.status_code == 422
+        assert result.body == {"error": "invalid_setting_value"}
+        assert result.mutated is False
+        with session_factory() as session, tenant_agnostic():
+            assert session.get(DeploymentSetting, OPENROUTER_API_KEY_SETTING) is None
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            ("trusted_interfaces", ["lo"]),
+            ("signup_enabled", "definitely-not-a-bool"),
+        ],
+    )
+    def test_deployment_admin_dispatcher_rejects_root_and_invalid_setting_replay(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        key: str,
+        value: object,
+    ) -> None:
+        dispatcher = DeploymentAdminToolDispatcher(app=client.app)
+
+        result = dispatcher.dispatch(
+            ToolCall(
+                id="call_invalid_setting",
+                name="admin.settings.update",
+                input={"key": key, "value": value},
+            ),
+            token=DelegatedToken(plaintext="mip_test", token_id="tok_test"),
+            headers={"X-Crewday-Replay-Actor-Id": "user_admin"},
+        )
+
+        assert result.status_code == 422
+        assert result.body == {"error": "invalid_setting_value"}
+        assert result.mutated is False
+        with session_factory() as session, tenant_agnostic():
+            assert session.scalars(select(DeploymentSetting)).all() == []
 
     def test_live_message_produces_one_scoped_pending_admin_action(
         self,
@@ -935,6 +1100,85 @@ class TestAdminAgent:
             assert row is not None
             assert row.state == "executed"
             assert row.decided_by_user_id == user_id
+
+    def test_approve_settings_action_writes_once_refreshes_and_publishes(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        user_id, cookie = seed_admin(
+            session_factory,
+            settings=settings,
+            email="settings-agent-owner@example.com",
+            display_name="Settings Owner",
+            owner=True,
+        )
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+        client.app.state.admin_agent_action_producer = _FakeActionProducer(
+            AdminAgentActionProposal(
+                tool_call=ToolCall(
+                    id="call_signup_enabled",
+                    name="admin.settings.update",
+                    input={"key": "signup_enabled", "value": False},
+                ),
+                card_summary="Update deployment setting",
+                card_fields=(("Setting", "signup_enabled"), ("Value", "false")),
+                card_risk="medium",
+                gate_source="workspace_always",
+                requested_by_token_id="tok_live_admin_agent",
+            )
+        )
+        client.app.state.capabilities = probe_capabilities(settings)
+        client.app.state.tool_dispatcher = DeploymentAdminToolDispatcher(app=client.app)
+        monkeypatch.setattr(
+            "app.adapters.db.session.make_uow",
+            lambda: _session_uow(session_factory),
+        )
+        published: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            admin_sse.default_admin_fanout,
+            "publish",
+            lambda **kwargs: published.append(kwargs),
+        )
+
+        produced = client.post(
+            "/admin/api/v1/agent/message",
+            headers={"X-Agent-Page": "route=/admin/settings"},
+            json={"body": "turn signup off"},
+        )
+        assert produced.status_code == 201
+        with session_factory() as session, tenant_agnostic():
+            action_id = session.scalar(select(AdminAgentAction.id))
+            assert action_id is not None
+        published.clear()
+
+        first = client.post(f"/admin/api/v1/agent/action/{action_id}/approve")
+        retry = client.post(f"/admin/api/v1/agent/action/{action_id}/approve")
+
+        assert first.status_code == 200, first.text
+        assert retry.status_code == 200, retry.text
+        with session_factory() as session, tenant_agnostic():
+            setting = session.get(DeploymentSetting, "signup_enabled")
+            setting_audits = session.scalars(
+                select(AuditLog).where(AuditLog.action == "deployment_setting.updated")
+            ).all()
+            approvals = session.scalars(select(ApprovalRequest)).all()
+        assert setting is not None
+        assert setting.value is False
+        assert setting.updated_by == user_id
+        assert len(setting_audits) == 1
+        assert setting_audits[0].actor_id == user_id
+        assert setting_audits[0].actor_was_owner_member is True
+        assert approvals == []
+        assert client.app.state.capabilities.settings.signup_enabled is False
+        assert [event["kind"] for event in published] == [
+            "admin.audit.appended",
+            "admin.settings.updated",
+            "admin.audit.appended",
+        ]
+        assert published[1]["payload"]["key"] == "signup_enabled"
 
     def test_approve_without_dispatcher_fails_and_keeps_action_pending(
         self,

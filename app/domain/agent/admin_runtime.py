@@ -7,7 +7,7 @@ import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -34,8 +34,15 @@ from app.api.admin._workspace_state import (
     verification_state_of,
 )
 from app.api.admin.agent import AdminAgentActionProducer, AdminAgentActionProposal
+from app.api.admin.settings import (
+    preview_deployment_setting_for_agent,
+    write_deployment_setting,
+)
 from app.api.admin.usage import UsageCapPayload
+from app.api.transport import admin_sse
 from app.audit import write_deployment_audit
+from app.capabilities import Capabilities
+from app.config import Settings
 from app.domain.agent.runtime import (
     DelegatedToken,
     GateDecision,
@@ -43,10 +50,13 @@ from app.domain.agent.runtime import (
     ToolDispatcher,
     ToolResult,
 )
-from app.domain.errors import DomainError, ServiceUnavailable
+from app.domain.errors import DomainError, ServiceUnavailable, Validation
 from app.tenancy import DeploymentContext, tenant_agnostic
 from app.util.redact import ConsentSet
 from app.util.ulid import new_ulid
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 __all__ = [
     "AdminAgentRuntimeActionProducer",
@@ -62,6 +72,7 @@ _GATE_SOURCE: Literal["workspace_always"] = "workspace_always"
 
 _SUPPORTED_TOOL_NAMES: frozenset[str] = frozenset(
     {
+        "admin.settings.update",
         "admin.usage.workspaces.cap",
         "admin.workspaces.trust",
         "admin.workspaces.archive",
@@ -143,8 +154,14 @@ class AdminAgentRuntimeActionProducer(AdminAgentActionProducer):
 class DeploymentAdminToolDispatcher(ToolDispatcher):
     """Replay supported deployment-admin action cards through domain code."""
 
-    def __init__(self, fallback: ToolDispatcher | None = None) -> None:
+    def __init__(
+        self,
+        fallback: ToolDispatcher | None = None,
+        *,
+        app: FastAPI | None = None,
+    ) -> None:
         self._fallback = fallback
+        self._app = app
 
     @property
     def tools(self) -> tuple[Tool, ...]:
@@ -169,6 +186,8 @@ class DeploymentAdminToolDispatcher(ToolDispatcher):
         token: DelegatedToken,
         headers: Mapping[str, str],
     ) -> ToolResult:
+        if call.name == "admin.settings.update":
+            return _dispatch_settings_update(call, headers=headers, app=self._app)
         if call.name == "admin.usage.workspaces.cap":
             return _dispatch_usage_cap(call, headers=headers)
         if call.name == "admin.workspaces.trust":
@@ -187,6 +206,22 @@ class DeploymentAdminToolDispatcher(ToolDispatcher):
 
 def _admin_tools() -> tuple[Tool, ...]:
     return (
+        {
+            "name": "admin.settings.update",
+            "description": (
+                "Propose changing one non-secret deployment setting. "
+                "Secret settings are not supported through chat."
+            ),
+            "input_schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "key": {"type": "string"},
+                    "value": {},
+                },
+                "required": ["key", "value"],
+            },
+        },
         {
             "name": "admin.usage.workspaces.cap",
             "description": "Propose changing one workspace LLM budget cap.",
@@ -301,6 +336,8 @@ def _resolve_supported_proposal(
     *,
     session: Session,
 ) -> _ResolvedProposal | None:
+    if call.name == "admin.settings.update":
+        return _settings_update_proposal(call)
     if call.name == "admin.usage.workspaces.cap":
         return _usage_cap_proposal(call, session=session)
     if call.name == "admin.workspaces.trust":
@@ -320,6 +357,31 @@ def _resolve_supported_proposal(
             risk="high",
         )
     return None
+
+
+def _settings_update_proposal(call: ToolCall) -> _ResolvedProposal | None:
+    key = _input_str(call.input, "key")
+    if key is None or "value" not in call.input:
+        return None
+    preview = preview_deployment_setting_for_agent(
+        key=key,
+        raw_value=call.input["value"],
+    )
+    if preview is None:
+        return None
+    return _ResolvedProposal(
+        call=ToolCall(
+            id=call.id,
+            name=call.name,
+            input={"key": preview.key, "value": preview.value},
+        ),
+        summary="Update deployment setting",
+        fields=(
+            ("Setting", preview.key),
+            ("Value", _display_setting_value(preview.value)),
+        ),
+        risk="medium",
+    )
 
 
 def _usage_cap_proposal(
@@ -373,6 +435,90 @@ def _workspace_id_proposal(
         summary=summary,
         fields=((label, workspace_id),),
         risk=risk,
+    )
+
+
+def _dispatch_settings_update(
+    call: ToolCall,
+    *,
+    headers: Mapping[str, str],
+    app: FastAPI | None,
+) -> ToolResult:
+    key = _input_str(call.input, "key")
+    if key is None or "value" not in call.input:
+        return _result(call, 422, {"error": "invalid_setting_input"})
+    ctx = _ctx_from_headers(headers)
+    if ctx is None:
+        return _result(call, 422, {"error": "missing_replay_actor"})
+    if app is None:
+        return _result(call, 503, {"error": "dispatcher_not_configured"})
+    settings = getattr(app.state, "settings", None)
+    if not isinstance(settings, Settings):
+        return _result(call, 503, {"error": "deployment_settings_unavailable"})
+    capabilities = getattr(app.state, "capabilities", None)
+    preview = preview_deployment_setting_for_agent(
+        key=key,
+        raw_value=call.input["value"],
+    )
+    if preview is None:
+        return _result(call, 422, {"error": "invalid_setting_value"})
+
+    from app.adapters.db.session import make_uow
+
+    with make_uow() as session:
+        if not isinstance(session, Session):
+            return _result(call, 500, {"error": "unsupported_session"})
+        try:
+            result = write_deployment_setting(
+                key=preview.key,
+                raw_value=preview.value,
+                ctx=ctx,
+                session=session,
+                settings=settings,
+            )
+        except Validation as exc:
+            return _result(
+                call,
+                422,
+                {"error": str(exc.extra.get("error", "invalid_setting_value"))},
+            )
+        except DomainError:
+            return _result(call, 404, {"error": "not_found"})
+        correlation_id = _replay_correlation_id(headers, call)
+        _audit_replay(
+            session,
+            ctx=ctx,
+            correlation_id=correlation_id,
+            entity_kind="deployment_setting",
+            entity_id=key,
+            action="deployment_setting.updated",
+            diff=result.audit_diff,
+        )
+        if isinstance(capabilities, Capabilities):
+            capabilities.refresh_settings(session)
+        session.flush()
+
+    _publish_admin_replay_event(
+        kind="admin.audit.appended",
+        ctx=ctx,
+        correlation_id=correlation_id,
+        payload={
+            "entity_kind": "deployment_setting",
+            "entity_id": key,
+            "action": "deployment_setting.updated",
+        },
+    )
+    _publish_admin_replay_event(
+        kind="admin.settings.updated",
+        ctx=ctx,
+        correlation_id=correlation_id,
+        payload={"key": key},
+    )
+    return _result(
+        call,
+        200,
+        result.response.model_dump(mode="json"),
+        mutated=True,
     )
 
 
@@ -536,6 +682,36 @@ def _ctx_from_headers(headers: Mapping[str, str]) -> DeploymentContext | None:
         actor_kind="user",
         deployment_scopes=frozenset(),
     )
+
+
+def _display_setting_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _replay_correlation_id(headers: Mapping[str, str], call: ToolCall) -> str:
+    value = headers.get("Idempotency-Key")
+    if value:
+        return value
+    return call.id
+
+
+def _publish_admin_replay_event(
+    *,
+    kind: str,
+    ctx: DeploymentContext,
+    correlation_id: str,
+    payload: Mapping[str, Any],
+) -> None:
+    occurred_at = datetime.now(UTC)
+    body = dict(payload)
+    body.setdefault("actor_id", ctx.user_id)
+    body.setdefault("correlation_id", correlation_id)
+    body.setdefault("occurred_at", occurred_at.isoformat())
+    admin_sse.default_admin_fanout.publish(kind=kind, payload=body)
 
 
 def _audit_replay(

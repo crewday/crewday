@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal, Protocol
 
@@ -19,6 +19,7 @@ from app.adapters.db.ops.models import AdminAgentAction as AdminAgentActionRow
 from app.adapters.db.ops.models import AdminAgentChatMessage as AdminAgentMessageRow
 from app.api.admin._audit import audit_admin
 from app.api.admin.deps import current_deployment_admin_principal
+from app.api.admin.settings import preview_deployment_setting_for_agent
 from app.api.deps import db_session
 from app.api.transport import admin_sse
 from app.domain.agent.runtime import (
@@ -523,9 +524,35 @@ def _validated_action_proposal(
         raise _admin_agent_unavailable("admin_agent_action_proposal_invalid")
     if not _proposal_card_fields_valid(proposal):
         raise _admin_agent_unavailable("admin_agent_action_proposal_invalid")
+    proposal = _validated_settings_update_proposal(proposal)
     if not _proposal_jsonable(proposal):
         raise _admin_agent_unavailable("admin_agent_action_proposal_invalid")
     return proposal
+
+
+def _validated_settings_update_proposal(
+    proposal: AdminAgentActionProposal,
+) -> AdminAgentActionProposal:
+    tool_call = proposal.tool_call
+    if tool_call.name != "admin.settings.update":
+        return proposal
+    key = tool_call.input.get("key")
+    if not isinstance(key, str) or "value" not in tool_call.input:
+        raise _admin_agent_unavailable("admin_agent_action_proposal_invalid")
+    preview = preview_deployment_setting_for_agent(
+        key=key,
+        raw_value=tool_call.input["value"],
+    )
+    if preview is None:
+        raise _admin_agent_unavailable("admin_agent_action_proposal_invalid")
+    return replace(
+        proposal,
+        tool_call=ToolCall(
+            id=tool_call.id,
+            name=tool_call.name,
+            input={"key": preview.key, "value": preview.value},
+        ),
+    )
 
 
 def _proposal_card_fields_valid(proposal: AdminAgentActionProposal) -> bool:

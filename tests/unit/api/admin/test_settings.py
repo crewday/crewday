@@ -24,7 +24,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.capabilities.models import DeploymentSetting
-from app.adapters.llm.openrouter import OPENROUTER_API_KEY_SETTING
+from app.adapters.db.secrets.models import SecretEnvelope
+from app.adapters.llm.openrouter import (
+    OPENROUTER_API_KEY_PURPOSE,
+    OPENROUTER_API_KEY_SETTING,
+)
+from app.adapters.mail.smtp_config import SMTP_PASSWORD_PURPOSE, SMTP_PASSWORD_SETTING
 from app.api.admin.settings import (
     ERROR_ROOT_ONLY,
     ERROR_UNKNOWN_KEY,
@@ -284,6 +289,77 @@ class TestUpdateSetting:
         )
         assert resp.status_code == 422
         assert resp.json().get("error") == ERROR_VALUE_TYPE
+
+    @pytest.mark.parametrize(
+        ("key", "plaintext", "purpose", "display_stub"),
+        [
+            (
+                OPENROUTER_API_KEY_SETTING,
+                "sk-route-openrouter",
+                OPENROUTER_API_KEY_PURPOSE,
+                "********",
+            ),
+            (
+                SMTP_PASSWORD_SETTING,
+                "route-smtp-password",
+                SMTP_PASSWORD_PURPOSE,
+                "**********",
+            ),
+        ],
+    )
+    def test_secret_setting_write_stores_envelope_id_not_plaintext(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        key: str,
+        plaintext: str,
+        purpose: str,
+        display_stub: str,
+    ) -> None:
+        client.cookies.set(
+            SESSION_COOKIE_NAME, _admin_cookie(session_factory, settings, owner=True)
+        )
+
+        resp = client.put(
+            f"/admin/api/v1/settings/{key}",
+            json={"value": plaintext},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["value"] == {"display_stub": display_stub}
+        with session_factory() as session, tenant_agnostic():
+            setting = session.get(DeploymentSetting, key)
+            assert setting is not None
+            envelope = session.get(SecretEnvelope, setting.value)
+        assert setting.value != plaintext
+        assert envelope is not None
+        assert envelope.purpose == purpose
+        assert envelope.owner_entity_kind == "deployment_setting"
+        assert envelope.owner_entity_id == key
+        assert plaintext.encode() not in envelope.ciphertext
+
+    def test_secret_setting_write_requires_root_key_before_storing_rows(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        client.app.state.settings = settings.model_copy(update={"root_key": None})
+        client.cookies.set(
+            SESSION_COOKIE_NAME, _admin_cookie(session_factory, settings, owner=True)
+        )
+
+        resp = client.put(
+            f"/admin/api/v1/settings/{OPENROUTER_API_KEY_SETTING}",
+            json={"value": "sk-without-root-key"},
+        )
+
+        assert resp.status_code == 422
+        assert resp.json().get("error") == ERROR_VALUE_TYPE
+        with session_factory() as session, tenant_agnostic():
+            assert session.get(DeploymentSetting, OPENROUTER_API_KEY_SETTING) is None
+            assert session.scalars(select(SecretEnvelope)).all() == []
 
     def test_audit_row_not_emitted_when_owner_gate_fails(
         self,

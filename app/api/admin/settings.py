@@ -72,10 +72,14 @@ from app.domain.errors import Validation
 from app.tenancy import DeploymentContext, tenant_agnostic
 
 __all__ = [
+    "DeploymentSettingAgentPreview",
     "DeploymentSettingPayload",
     "DeploymentSettingResponse",
+    "DeploymentSettingWriteResult",
     "DeploymentSettingsResponse",
     "build_admin_settings_router",
+    "preview_deployment_setting_for_agent",
+    "write_deployment_setting",
 ]
 
 
@@ -437,6 +441,23 @@ class DeploymentSettingPayload(BaseModel):
     value: Any = Field(...)
 
 
+@dataclass(frozen=True, slots=True)
+class DeploymentSettingWriteResult:
+    """Result of a validated deployment-setting write."""
+
+    response: DeploymentSettingResponse
+    audit_diff: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentSettingAgentPreview:
+    """Log-safe admin-agent preview for a supported setting write."""
+
+    key: str
+    value: Any
+    kind: str
+
+
 def _existing_row(session: Session, *, key: str) -> DeploymentSetting | None:
     """Tenant-agnostic ``session.get`` for one ``deployment_setting`` row."""
     with tenant_agnostic():
@@ -507,14 +528,13 @@ def _stored_value_for_write(
     definition: _SettingDef,
     value: Any,
     session: Session,
-    request: Request,
+    settings: Settings,
 ) -> Any:
     """Return the DB value for a coerced admin setting write."""
     if definition.key not in {OPENROUTER_API_KEY_SETTING, SMTP_PASSWORD_SETTING}:
         return value
     if not isinstance(value, str):  # pragma: no cover - coerce narrows first
         raise ValueError("expected a non-blank JSON string")
-    settings = _settings_from_request(request)
     if settings.root_key is None:
         setting_label = (
             "OpenRouter API key"
@@ -553,6 +573,104 @@ def _problem(error: str, *, message: str) -> Validation:
     spread), so the SPA reads ``body.error`` directly.
     """
     return Validation(message, extra={"error": error, "message": message})
+
+
+def preview_deployment_setting_for_agent(
+    *,
+    key: str,
+    raw_value: Any,
+) -> DeploymentSettingAgentPreview | None:
+    """Return a log-safe preview for settings the admin agent may propose."""
+    definition = _REGISTRY_INDEX.get(key)
+    if definition is None or definition.root_only or definition.kind == "secret":
+        return None
+    try:
+        value = definition.coerce(raw_value)
+    except ValueError:
+        return None
+    return DeploymentSettingAgentPreview(
+        key=definition.key,
+        value=value,
+        kind=definition.kind,
+    )
+
+
+def write_deployment_setting(
+    *,
+    key: str,
+    raw_value: Any,
+    ctx: DeploymentContext,
+    session: Session,
+    settings: Settings,
+) -> DeploymentSettingWriteResult:
+    """Validate and upsert one deployment setting row.
+
+    Transport callers own audit, SSE, and capability refresh so route
+    requests and admin-agent replay can preserve their own attribution.
+    """
+    definition = _REGISTRY_INDEX.get(key)
+    if definition is None:
+        raise _problem(_ERROR_UNKNOWN_KEY, message=f"unknown setting key: {key!r}")
+    if definition.root_only:
+        raise _problem(
+            _ERROR_ROOT_ONLY,
+            message=(
+                f"setting {key!r} is root-only and must be configured "
+                "outside the admin surface"
+            ),
+        )
+    ensure_deployment_owner(session, ctx=ctx)
+    try:
+        value = definition.coerce(raw_value)
+    except ValueError as exc:
+        raise _problem(_ERROR_VALUE_TYPE, message=str(exc)) from exc
+
+    now = datetime.now(UTC)
+    with tenant_agnostic():
+        row = _existing_row(session, key=key)
+        previous: Any
+        if row is None:
+            previous = None
+            stored_value = _stored_value_for_write(
+                definition=definition,
+                value=value,
+                session=session,
+                settings=settings,
+            )
+            row = DeploymentSetting(
+                key=key,
+                value=stored_value,
+                updated_at=now,
+                updated_by=ctx.user_id,
+            )
+            session.add(row)
+        else:
+            previous = row.value
+            row.value = _stored_value_for_write(
+                definition=definition,
+                value=value,
+                session=session,
+                settings=settings,
+            )
+            row.updated_at = now
+            row.updated_by = ctx.user_id
+        audit_diff = {
+            "value": {
+                "before": _audit_value(definition, previous),
+                "after": _audit_value(definition, row.value),
+            }
+        }
+        session.flush()
+        response = DeploymentSettingResponse(
+            key=key,
+            value=_resolve_value(definition, row),
+            kind=definition.kind,
+            description=definition.description,
+            root_only=definition.root_only,
+            updated_at=_format_updated_at(row),
+            updated_by=row.updated_by or "",
+        )
+    return DeploymentSettingWriteResult(response=response, audit_diff=audit_diff)
 
 
 def build_admin_settings_router() -> APIRouter:
@@ -648,70 +766,22 @@ def build_admin_settings_router() -> APIRouter:
         5. Upsert the ``deployment_setting`` row, write the
            audit, refresh the in-memory capability registry.
         """
-        definition = _REGISTRY_INDEX.get(key)
-        if definition is None:
-            raise _problem(_ERROR_UNKNOWN_KEY, message=f"unknown setting key: {key!r}")
-        if definition.root_only:
-            raise _problem(
-                _ERROR_ROOT_ONLY,
-                message=(
-                    f"setting {key!r} is root-only and must be configured "
-                    "outside the admin surface"
-                ),
-            )
-        # Every non-root-only setting still requires deployment-owner
-        # authority for v1. A later per-key matrix can narrow this
-        # gate without changing the wire shape.
-        ensure_deployment_owner(session, ctx=ctx)
-        try:
-            value = definition.coerce(payload.value)
-        except ValueError as exc:
-            raise _problem(_ERROR_VALUE_TYPE, message=str(exc)) from exc
-
-        now = datetime.now(UTC)
-        with tenant_agnostic():
-            row = _existing_row(session, key=key)
-            previous: Any
-            if row is None:
-                previous = None
-                stored_value = _stored_value_for_write(
-                    definition=definition,
-                    value=value,
-                    session=session,
-                    request=request,
-                )
-                row = DeploymentSetting(
-                    key=key,
-                    value=stored_value,
-                    updated_at=now,
-                    updated_by=ctx.user_id,
-                )
-                session.add(row)
-            else:
-                previous = row.value
-                row.value = _stored_value_for_write(
-                    definition=definition,
-                    value=value,
-                    session=session,
-                    request=request,
-                )
-                row.updated_at = now
-                row.updated_by = ctx.user_id
-            audit_admin(
-                session,
-                ctx=ctx,
-                request=request,
-                entity_kind="deployment_setting",
-                entity_id=key,
-                action="deployment_setting.updated",
-                diff={
-                    "value": {
-                        "before": _audit_value(definition, previous),
-                        "after": _audit_value(definition, row.value),
-                    }
-                },
-            )
-            session.flush()
+        result = write_deployment_setting(
+            key=key,
+            raw_value=payload.value,
+            ctx=ctx,
+            session=session,
+            settings=_settings_from_request(request),
+        )
+        audit_admin(
+            session,
+            ctx=ctx,
+            request=request,
+            entity_kind="deployment_setting",
+            entity_id=key,
+            action="deployment_setting.updated",
+            diff=result.audit_diff,
+        )
         _refresh_capabilities(request, session)
         admin_sse.publish_admin_event(
             kind="admin.settings.updated",
@@ -719,15 +789,7 @@ def build_admin_settings_router() -> APIRouter:
             request=request,
             payload={"key": key},
         )
-        return DeploymentSettingResponse(
-            key=key,
-            value=_resolve_value(definition, row),
-            kind=definition.kind,
-            description=definition.description,
-            root_only=definition.root_only,
-            updated_at=_format_updated_at(row),
-            updated_by=row.updated_by or "",
-        )
+        return result.response
 
     return router
 
