@@ -10,12 +10,18 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
-from app.adapters.db.llm.models import ApprovalRequest
+from app.adapters.db.llm.models import ApprovalRequest, LlmProvider
 from app.adapters.db.ops.models import AdminAgentAction, AdminAgentChatMessage
+from app.adapters.llm.fake import FakeLLMClient
+from app.adapters.llm.ports import ToolCall as LlmToolCall
 from app.api.admin.agent import AdminAgentActionProposal
 from app.api.transport import admin_sse
 from app.auth.session import SESSION_COOKIE_NAME
 from app.config import Settings
+from app.domain.agent.admin_runtime import (
+    AdminAgentRuntimeActionProducer,
+    DeploymentAdminToolDispatcher,
+)
 from app.domain.agent.runtime import (
     DelegatedToken,
     GateDecision,
@@ -23,6 +29,7 @@ from app.domain.agent.runtime import (
     ToolCall,
     ToolResult,
 )
+from app.fixtures.llm import DEFAULT_PROVIDER_NAME, seed_default_registry
 from app.tenancy import tenant_agnostic
 from app.util.ulid import new_ulid
 from tests.unit.api.admin._helpers import (
@@ -31,6 +38,7 @@ from tests.unit.api.admin._helpers import (
     engine_fixture,
     install_admin_cookie,
     seed_admin,
+    seed_workspace,
     settings_fixture,
 )
 
@@ -158,6 +166,17 @@ def _assert_no_agent_writes(session_factory: sessionmaker[Session]) -> None:
         assert session.scalars(select(AdminAgentChatMessage)).all() == []
         assert session.scalars(select(AdminAgentAction)).all() == []
         assert session.scalars(select(ApprovalRequest)).all() == []
+
+
+def _seed_admin_model_default(session_factory: sessionmaker[Session]) -> None:
+    with session_factory() as session, tenant_agnostic():
+        provider_model = seed_default_registry(session)
+        provider = session.scalar(
+            select(LlmProvider).where(LlmProvider.name == DEFAULT_PROVIDER_NAME)
+        )
+        assert provider is not None
+        provider.default_model = provider_model.id
+        session.commit()
 
 
 @pytest.fixture
@@ -441,6 +460,284 @@ class TestAdminAgent:
         assert resp.status_code == 503
         assert resp.json()["error"] == "admin_agent_runtime_error"
         _assert_no_agent_writes(session_factory)
+
+    def test_runtime_producer_model_unavailable_fails_closed_without_writes(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        client.app.state.admin_agent_action_producer = AdminAgentRuntimeActionProducer(
+            llm=FakeLLMClient(
+                tool_calls=(
+                    LlmToolCall(
+                        id="call_cap",
+                        name="admin.usage.workspaces.cap",
+                        arguments={"id": "ws_missing", "cap_cents_30d": 2000},
+                    ),
+                )
+            )
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            json={"body": "raise that workspace cap"},
+        )
+
+        assert resp.status_code == 503
+        assert resp.json()["error"] == "admin_agent_model_unavailable"
+        _assert_no_agent_writes(session_factory)
+
+    def test_runtime_producer_supported_tool_creates_pending_admin_action(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        user_id = install_admin_cookie(client, session_factory, settings)
+        _seed_admin_model_default(session_factory)
+        with session_factory() as session:
+            workspace_id = seed_workspace(
+                session,
+                slug="runtime-admin",
+                name="Runtime Admin",
+            )
+            session.commit()
+        client.app.state.admin_agent_action_producer = AdminAgentRuntimeActionProducer(
+            llm=FakeLLMClient(
+                tool_calls=(
+                    LlmToolCall(
+                        id="call_cap",
+                        name="admin.usage.workspaces.cap",
+                        arguments={"id": workspace_id, "cap_cents_30d": 2000},
+                    ),
+                )
+            )
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            headers={"X-Agent-Page": "route=/admin/usage; params=ws=runtime-admin"},
+            json={"body": "raise that workspace cap"},
+        )
+
+        assert resp.status_code == 201
+        with session_factory() as session, tenant_agnostic():
+            rows = session.scalars(select(AdminAgentAction)).all()
+            approvals = session.scalars(select(ApprovalRequest)).all()
+        assert len(rows) == 1
+        assert approvals == []
+        row = rows[0]
+        assert row.for_user_id == user_id
+        assert row.action == "admin.usage.workspaces.cap"
+        assert row.resolved_payload_json == {
+            "tool_call_id": "call_cap",
+            "tool_input": {"id": workspace_id, "cap_cents_30d": 2000},
+        }
+        assert row.card_summary == "Update workspace LLM budget cap"
+        assert row.card_fields_json == [
+            ["Workspace", workspace_id],
+            ["Cap", "2000"],
+        ]
+        assert row.card_risk == "high"
+
+    def test_runtime_producer_rejects_missing_workspace_without_writes(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        _seed_admin_model_default(session_factory)
+        client.app.state.admin_agent_action_producer = AdminAgentRuntimeActionProducer(
+            llm=FakeLLMClient(
+                tool_calls=(
+                    LlmToolCall(
+                        id="call_cap",
+                        name="admin.usage.workspaces.cap",
+                        arguments={"id": "ws_missing", "cap_cents_30d": 2000},
+                    ),
+                )
+            )
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            json={"body": "raise that workspace cap"},
+        )
+
+        assert resp.status_code == 503
+        assert resp.json()["error"] == "admin_agent_no_action_proposal"
+        _assert_no_agent_writes(session_factory)
+
+    def test_runtime_producer_rejects_negative_cap_without_writes(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        _seed_admin_model_default(session_factory)
+        with session_factory() as session:
+            workspace_id = seed_workspace(session, slug="runtime-negative-cap")
+            session.commit()
+        client.app.state.admin_agent_action_producer = AdminAgentRuntimeActionProducer(
+            llm=FakeLLMClient(
+                tool_calls=(
+                    LlmToolCall(
+                        id="call_cap",
+                        name="admin.usage.workspaces.cap",
+                        arguments={"id": workspace_id, "cap_cents_30d": -1},
+                    ),
+                )
+            )
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            json={"body": "set that workspace cap below zero"},
+        )
+
+        assert resp.status_code == 503
+        assert resp.json()["error"] == "admin_agent_no_action_proposal"
+        _assert_no_agent_writes(session_factory)
+
+    def test_runtime_producer_unsupported_tool_fails_closed_without_writes(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        _seed_admin_model_default(session_factory)
+        client.app.state.admin_agent_action_producer = AdminAgentRuntimeActionProducer(
+            llm=FakeLLMClient(
+                tool_calls=(
+                    LlmToolCall(
+                        id="call_read",
+                        name="admin.usage.summary",
+                        arguments={},
+                    ),
+                )
+            )
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            json={"body": "show usage"},
+        )
+
+        assert resp.status_code == 503
+        assert resp.json()["error"] == "admin_agent_no_action_proposal"
+        _assert_no_agent_writes(session_factory)
+
+    def test_runtime_producer_settings_tool_fails_closed_without_writes(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        _seed_admin_model_default(session_factory)
+        client.app.state.admin_agent_action_producer = AdminAgentRuntimeActionProducer(
+            llm=FakeLLMClient(
+                tool_calls=(
+                    LlmToolCall(
+                        id="call_settings",
+                        name="admin.settings.update",
+                        arguments={"key": "signup_enabled", "value": True},
+                    ),
+                )
+            )
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            json={"body": "turn signup on"},
+        )
+
+        assert resp.status_code == 503
+        assert resp.json()["error"] == "admin_agent_no_action_proposal"
+        _assert_no_agent_writes(session_factory)
+
+    def test_runtime_producer_multiple_tool_calls_fail_closed_without_writes(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        _seed_admin_model_default(session_factory)
+        with session_factory() as session:
+            workspace_id = seed_workspace(session, slug="runtime-many-tools")
+            session.commit()
+        client.app.state.admin_agent_action_producer = AdminAgentRuntimeActionProducer(
+            llm=FakeLLMClient(
+                tool_calls=(
+                    LlmToolCall(
+                        id="call_cap",
+                        name="admin.usage.workspaces.cap",
+                        arguments={"id": workspace_id, "cap_cents_30d": 2000},
+                    ),
+                    LlmToolCall(
+                        id="call_trust",
+                        name="admin.workspaces.trust",
+                        arguments={"id": workspace_id},
+                    ),
+                )
+            )
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            json={"body": "raise the cap and trust it"},
+        )
+
+        assert resp.status_code == 503
+        assert resp.json()["error"] == "admin_agent_no_action_proposal"
+        _assert_no_agent_writes(session_factory)
+
+    def test_runtime_producer_without_tools_fails_closed_without_writes(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        _seed_admin_model_default(session_factory)
+        client.app.state.admin_agent_action_producer = AdminAgentRuntimeActionProducer(
+            llm=FakeLLMClient(),
+            tools=(),
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            json={"body": "trust that workspace"},
+        )
+
+        assert resp.status_code == 503
+        assert resp.json()["error"] == "dispatcher_not_configured"
+        _assert_no_agent_writes(session_factory)
+
+    def test_deployment_admin_dispatcher_rejects_invalid_cap_before_mutation(
+        self,
+    ) -> None:
+        dispatcher = DeploymentAdminToolDispatcher()
+
+        result = dispatcher.dispatch(
+            ToolCall(
+                id="call_cap",
+                name="admin.usage.workspaces.cap",
+                input={"id": "ws_123", "cap_cents_30d": -1},
+            ),
+            token=DelegatedToken(plaintext="mip_test", token_id="tok_test"),
+            headers={"X-Crewday-Replay-Actor-Id": "user_admin"},
+        )
+
+        assert result.status_code == 422
+        assert result.body == {"error": "invalid_cap"}
+        assert result.mutated is False
 
     def test_live_message_produces_one_scoped_pending_admin_action(
         self,

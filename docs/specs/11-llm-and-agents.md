@@ -213,6 +213,10 @@ component mounts with `role="admin"`. Its characteristics:
   layer always gates in v1: `deployment.workspaces.archive`,
   `deployment.settings.edit` (root-protected keys),
   `deployment.budget.edit` when the new cap is ≥ 2× the old.
+  The first production runtime slice (`cd-gh73t`) advertises only
+  workspace budget-cap, workspace trust, and workspace archive
+  proposals; deployment settings edits fail closed until `cd-azjy8`
+  lands the secret-safe settings replay path.
 - **Capability key.** `chat.admin`, seeded with
   `google/gemma-4-31b-it`. Distinct from `chat.manager` so an
   operator can run a smaller model for admin chatter without

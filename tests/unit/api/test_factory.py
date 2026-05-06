@@ -575,6 +575,36 @@ class TestBuildLlm:
 
         assert isinstance(client, FakeLLMClient)
 
+    def test_create_app_wires_admin_agent_producer_when_llm_available(self) -> None:
+        from app.domain.agent.admin_runtime import (
+            AdminAgentRuntimeActionProducer,
+            DeploymentAdminToolDispatcher,
+        )
+
+        app = create_app(
+            settings=self._llm_settings(
+                llm_provider="fake",
+                root_key=SecretStr("unit-test-factory-root-key"),
+            )
+        )
+
+        assert isinstance(
+            app.state.admin_agent_action_producer,
+            AdminAgentRuntimeActionProducer,
+        )
+        assert isinstance(app.state.tool_dispatcher, DeploymentAdminToolDispatcher)
+
+    def test_admin_agent_runtime_wire_leaves_producer_absent_without_llm(self) -> None:
+        from fastapi import FastAPI
+
+        from app.api.factory import _wire_admin_agent_runtime
+
+        app = FastAPI()
+        app.state.llm = None
+        app.state.tool_dispatcher = object()
+        _wire_admin_agent_runtime(app)
+        assert not hasattr(app.state, "admin_agent_action_producer")
+
     def test_provider_openrouter_with_key_returns_openrouter_client(self) -> None:
         from app.adapters.llm.openrouter import OpenRouterClient
         from app.api.factory import _build_llm

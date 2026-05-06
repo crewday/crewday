@@ -189,6 +189,10 @@ from app.demo import (
     normalise_start_path,
     seed_workspace,
 )
+from app.domain.agent.admin_runtime import (
+    AdminAgentRuntimeActionProducer,
+    DeploymentAdminToolDispatcher,
+)
 from app.observability import build_metrics_router, setup_tracing
 from app.security import BindGuardError, assert_bind_allowed
 from app.security.hmac_signer import HmacSigner
@@ -469,6 +473,22 @@ def _wire_services(
     app.state.llm = llm
     app.state.mime_sniffer = mime_sniffer
     return mailer, throttle, capabilities
+
+
+def _wire_admin_agent_runtime(app: FastAPI) -> None:
+    """Configure the deployment-admin action producer when dependencies exist."""
+    llm: LLMClient | None = getattr(app.state, "llm", None)
+    dispatcher: Any = getattr(app.state, "tool_dispatcher", None)
+    if llm is None or dispatcher is None:
+        if hasattr(app.state, "admin_agent_action_producer"):
+            delattr(app.state, "admin_agent_action_producer")
+        return
+    app.state.tool_dispatcher = DeploymentAdminToolDispatcher(dispatcher)
+    app.state.admin_agent_action_producer = AdminAgentRuntimeActionProducer(llm=llm)
+    _log.info(
+        "admin agent action producer wired",
+        extra={"event": "admin_agent.producer_wired"},
+    )
 
 
 def _smtp_env_config(settings: Settings) -> SmtpConfig:
@@ -1830,6 +1850,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     mailer, throttle, capabilities = _wire_services(app, cfg)
+    _wire_admin_agent_runtime(app)
 
     _register_ops_routes(app)
     _register_runtime_routes(app)
