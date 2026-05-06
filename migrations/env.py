@@ -22,6 +22,7 @@ from __future__ import annotations
 import importlib
 import logging
 import pkgutil
+from contextlib import nullcontext
 from logging.config import fileConfig
 
 from alembic import context
@@ -33,6 +34,7 @@ from app.adapters.db.session import normalise_sync_url
 from app.config import get_settings
 from migrations.autogenerate_filters import (
     process_sqlite_expression_index_false_positives,
+    suppress_sqlite_role_grant_expression_index_warnings_if_safe,
 )
 
 _log = logging.getLogger("alembic.env")
@@ -95,6 +97,11 @@ def _is_sqlite() -> bool:
     return url.startswith("sqlite")
 
 
+def _is_check_command() -> bool:
+    cmd = getattr(getattr(config, "cmd_opts", None), "cmd", None)
+    return isinstance(cmd, tuple) and getattr(cmd[0], "__name__", None) == "check"
+
+
 def run_migrations_offline() -> None:
     """Run migrations without an active DB connection (emit SQL)."""
     context.configure(
@@ -130,7 +137,12 @@ def run_migrations_online() -> None:
             process_revision_directives=process_sqlite_expression_index_false_positives,
         )
 
-        with context.begin_transaction():
+        warning_context = (
+            suppress_sqlite_role_grant_expression_index_warnings_if_safe(connection)
+            if _is_sqlite() and _is_check_command()
+            else nullcontext()
+        )
+        with warning_context, context.begin_transaction():
             context.run_migrations()
 
 

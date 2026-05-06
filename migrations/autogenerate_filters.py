@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 
 from alembic.operations import ops
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import text
+from sqlalchemy.engine import Connection
+from sqlalchemy.exc import SAWarning
 from sqlalchemy.sql.elements import TextClause
 from sqlalchemy.sql.schema import Column
 
@@ -14,6 +17,18 @@ _STOCKTAKE_INDEX_TABLE = "inventory_stocktake"
 _STOCKTAKE_INDEX_NAME = "ix_inventory_stocktake_workspace_property_started"
 _STOCKTAKE_INDEX_COLUMNS = ("workspace_id", "property_id")
 _STOCKTAKE_INDEX_EXPRESSION = "started_at desc"
+_ROLE_GRANT_INDEX_TABLE = "role_grant"
+_ROLE_GRANT_INDEX_NAME = "uq_role_grant_workspace_user_role_scope_active"
+_ROLE_GRANT_INDEX_COLUMNS = ("workspace_id", "user_id", "grant_role")
+_ROLE_GRANT_INDEX_EXPRESSION = "coalesce(scope_property_id, '')"
+_ROLE_GRANT_INDEX_PREDICATE = "where scope_kind = 'workspace' and revoked_at is null"
+_ROLE_GRANT_INDEX_DEFINITION = (
+    f"create unique index {_ROLE_GRANT_INDEX_NAME} "
+    f"on {_ROLE_GRANT_INDEX_TABLE} "
+    f"({_ROLE_GRANT_INDEX_COLUMNS[0]}, {_ROLE_GRANT_INDEX_COLUMNS[1]}, "
+    f"{_ROLE_GRANT_INDEX_COLUMNS[2]}, {_ROLE_GRANT_INDEX_EXPRESSION}) "
+    f"{_ROLE_GRANT_INDEX_PREDICATE}"
+)
 
 
 def process_sqlite_expression_index_false_positives(
@@ -40,6 +55,55 @@ def process_sqlite_expression_index_false_positives(
             filter_sqlite_expression_index_false_positives(upgrade_ops)
         for downgrade_ops in directive.downgrade_ops_list:
             filter_sqlite_expression_index_false_positives(downgrade_ops)
+
+
+@contextmanager
+def suppress_sqlite_role_grant_expression_index_warnings_if_safe(
+    connection: Connection,
+) -> Iterator[None]:
+    """Suppress SQLite role-grant expression-index warnings after a live check."""
+    if not sqlite_role_grant_workspace_active_index_matches_metadata(connection):
+        raise RuntimeError(
+            "SQLite Alembic check cannot compare expression index "
+            f"{_ROLE_GRANT_INDEX_NAME!r}; live sqlite_master SQL does not match "
+            "the expected unique COALESCE(scope_property_id, '') partial index."
+        )
+
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=(
+                ".*Skipped unsupported reflection of expression-based index "
+                f"{_ROLE_GRANT_INDEX_NAME}.*"
+            ),
+            category=SAWarning,
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message=(
+                ".*autogenerate skipping metadata-specified expression-based index "
+                f"'{_ROLE_GRANT_INDEX_NAME}'.*"
+            ),
+            category=UserWarning,
+        )
+        yield
+
+
+def sqlite_role_grant_workspace_active_index_matches_metadata(
+    connection: Connection,
+) -> bool:
+    """Return whether SQLite's role-grant expression index matches metadata."""
+    normalized_definition = _sqlite_index_definition(
+        connection,
+        table_name=_ROLE_GRANT_INDEX_TABLE,
+        index_name=_ROLE_GRANT_INDEX_NAME,
+    )
+    if normalized_definition is None:
+        return False
+
+    return normalized_definition == _ROLE_GRANT_INDEX_DEFINITION
 
 
 def filter_sqlite_expression_index_false_positives(container: ops.OpContainer) -> None:
@@ -137,6 +201,27 @@ def _sqlite_stocktake_started_index_matches_metadata(
     if connection is None:
         return False
 
+    normalized_definition = _sqlite_index_definition(
+        connection,
+        table_name=_STOCKTAKE_INDEX_TABLE,
+        index_name=_STOCKTAKE_INDEX_NAME,
+    )
+    if normalized_definition is None:
+        return False
+
+    return (
+        f"on {_STOCKTAKE_INDEX_TABLE} "
+        f"({_STOCKTAKE_INDEX_COLUMNS[0]}, {_STOCKTAKE_INDEX_COLUMNS[1]}, "
+        f"{_STOCKTAKE_INDEX_EXPRESSION})" in normalized_definition
+    )
+
+
+def _sqlite_index_definition(
+    connection: Connection,
+    *,
+    table_name: str,
+    index_name: str,
+) -> str | None:
     definition = connection.execute(
         text(
             """
@@ -148,14 +233,14 @@ def _sqlite_stocktake_started_index_matches_metadata(
             """
         ),
         {
-            "table_name": _STOCKTAKE_INDEX_TABLE,
-            "index_name": _STOCKTAKE_INDEX_NAME,
+            "table_name": table_name,
+            "index_name": index_name,
         },
     ).scalar_one_or_none()
     if not isinstance(definition, str):
-        return False
+        return None
 
-    normalized_definition = " ".join(
+    normalized = " ".join(
         definition.lower()
         .replace('"', "")
         .replace("`", "")
@@ -163,11 +248,7 @@ def _sqlite_stocktake_started_index_matches_metadata(
         .replace("]", "")
         .split()
     )
-    return (
-        f"on {_STOCKTAKE_INDEX_TABLE} "
-        f"({_STOCKTAKE_INDEX_COLUMNS[0]}, {_STOCKTAKE_INDEX_COLUMNS[1]}, "
-        f"{_STOCKTAKE_INDEX_EXPRESSION})" in normalized_definition
-    )
+    return normalized.replace("( ", "(").replace(" )", ")")
 
 
 def _column_name(column: object) -> str | None:
