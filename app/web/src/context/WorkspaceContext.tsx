@@ -1,6 +1,6 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { persistWorkspace, readWorkspaceCookie } from "@/lib/preferences";
+import { clearWorkspaceCookie, persistWorkspace, readWorkspaceCookie } from "@/lib/preferences";
 import { registerWorkspaceSlugGetter } from "@/lib/api";
 import { registerQueryKeyWorkspaceGetter } from "@/lib/queryKeys";
 
@@ -20,9 +20,16 @@ import { registerQueryKeyWorkspaceGetter } from "@/lib/queryKeys";
 interface WorkspaceCtx {
   workspaceId: string | null;
   setWorkspaceId: (wsid: string) => void;
+  clearWorkspaceId: () => void;
 }
 
 const Ctx = createContext<WorkspaceCtx | null>(null);
+let recoveryClearWorkspace: (() => void) | null = null;
+
+export function clearActiveWorkspaceForRecovery(): void {
+  clearWorkspaceCookie();
+  recoveryClearWorkspace?.();
+}
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [workspaceId, setWorkspaceIdState] = useState<string | null>(() => readWorkspaceCookie());
@@ -62,7 +69,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     queryClient.invalidateQueries();
   }, [queryClient]);
 
-  const value = useMemo(() => ({ workspaceId, setWorkspaceId }), [workspaceId, setWorkspaceId]);
+  const clearWorkspaceId = useCallback(() => {
+    setWorkspaceIdState(null);
+    clearWorkspaceCookie();
+    queryClient.clear();
+  }, [queryClient]);
+
+  recoveryClearWorkspace = clearWorkspaceId;
+  useEffect(() => {
+    return () => {
+      if (recoveryClearWorkspace === clearWorkspaceId) recoveryClearWorkspace = null;
+    };
+  }, [clearWorkspaceId]);
+
+  const value = useMemo(
+    () => ({ workspaceId, setWorkspaceId, clearWorkspaceId }),
+    [workspaceId, setWorkspaceId, clearWorkspaceId],
+  );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

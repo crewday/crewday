@@ -8,9 +8,11 @@ import {
   AuthProvider,
   __resetAuthStoreForTests,
   getAuthState,
+  WorkspaceGate,
   useAuth,
 } from ".";
-import { __resetApiProvidersForTests } from "@/lib/api";
+import { WorkspaceProvider } from "@/context/WorkspaceContext";
+import { __resetApiProvidersForTests, getActiveWorkspaceSlug, registerWorkspaceSlugGetter } from "@/lib/api";
 import { installFetchRoutes, type FakeResponse } from "@/test/helpers";
 
 function installFetch(scripted: Record<string, FakeResponse[]>) {
@@ -31,12 +33,14 @@ function Providers({ children, initial = "/" }: { children: ReactNode; initial?:
 beforeEach(() => {
   __resetAuthStoreForTests();
   __resetApiProvidersForTests();
+  document.cookie = "crewday_workspace=; path=/; max-age=0";
 });
 
 afterEach(() => {
   cleanup();
   __resetAuthStoreForTests();
   __resetApiProvidersForTests();
+  document.cookie = "crewday_workspace=; path=/; max-age=0";
 });
 
 describe("useAuthBootstrap — initial /auth/me probe", () => {
@@ -232,6 +236,153 @@ describe("useAuth — 401 mid-session", () => {
       });
       expect(getAuthState().status).toBe("unauthenticated");
       expect(location).toBe("/login");
+    } finally {
+      restore();
+    }
+  });
+
+  it("a masked workspace /api/v1/me 404 clears a stale workspace and returns an authenticated user to workspace selection", async () => {
+    document.cookie = "crewday_workspace=acme; path=/";
+    const { restore } = installFetch({
+      "/api/v1/auth/me": [{
+        status: 200,
+        body: {
+          user_id: "01HZ_USER",
+          display_name: "Eve",
+          email: "eve@example.com",
+          available_workspaces: [
+            {
+              workspace_id: "beta",
+              workspace: {
+                id: "beta",
+                name: "Beta",
+                timezone: "UTC",
+                default_currency: "USD",
+                default_country: "US",
+                default_locale: "en",
+              },
+              grant_role: "manager",
+              binding_org_id: null,
+              source: "workspace_grant",
+            },
+            {
+              workspace_id: "gamma",
+              workspace: {
+                id: "gamma",
+                name: "Gamma",
+                timezone: "UTC",
+                default_currency: "USD",
+                default_country: "US",
+                default_locale: "en",
+              },
+              grant_role: "worker",
+              binding_org_id: null,
+              source: "workspace_grant",
+            },
+          ],
+          current_workspace_id: null,
+        },
+      }],
+      "/w/acme/api/v1/me": [{
+        status: 404,
+        body: {
+          type: "https://crewday.dev/errors/not_found",
+          title: "Not found",
+          status: 404,
+          instance: "/w/acme/api/v1/me",
+        },
+      }],
+    });
+
+    let location = "";
+    function LocationProbe() {
+      const loc = useLocation();
+      location = loc.pathname;
+      return <WorkspaceGate />;
+    }
+
+    try {
+      render(
+        <Providers initial="/w/acme/">
+          <WorkspaceProvider>
+            <Routes>
+              <Route path="/w/acme/" element={<div>workspace</div>} />
+              <Route path="/" element={<LocationProbe />} />
+              <Route path="/login" element={<LocationProbe />} />
+            </Routes>
+          </WorkspaceProvider>
+        </Providers>,
+      );
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      expect(getAuthState().status).toBe("authenticated");
+      expect(getActiveWorkspaceSlug()).toBe("acme");
+
+      const { fetchJson } = await import("@/lib/api");
+      await act(async () => {
+        await expect(fetchJson("/api/v1/me")).rejects.toBeDefined();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(getAuthState().status).toBe("authenticated");
+      expect(getActiveWorkspaceSlug()).toBeNull();
+      expect(location).toBe("/");
+      expect(document.body.textContent).toContain("Pick a workspace");
+    } finally {
+      restore();
+    }
+  });
+
+  it("an ordinary workspace entity 404 remains a normal not-found error", async () => {
+    const { restore } = installFetch({
+      "/api/v1/auth/me": [{
+        status: 200,
+        body: {
+          user_id: "01HZ_USER",
+          display_name: "Eve",
+          email: "eve@example.com",
+          available_workspaces: [],
+          current_workspace_id: null,
+        },
+      }],
+      "/w/acme/api/v1/tasks/missing": [{
+        status: 404,
+        body: {
+          type: "https://crewday.dev/errors/not_found",
+          title: "Not found",
+          status: 404,
+          instance: "/w/acme/api/v1/tasks/missing",
+        },
+      }],
+    });
+
+    let location = "";
+    function LocationProbe() {
+      const loc = useLocation();
+      location = loc.pathname;
+      return null;
+    }
+
+    try {
+      render(
+        <Providers initial="/today">
+          <Routes>
+            <Route path="/today" element={<><div>today</div><LocationProbe /></>} />
+            <Route path="/login" element={<LocationProbe />} />
+          </Routes>
+        </Providers>,
+      );
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      expect(getAuthState().status).toBe("authenticated");
+
+      registerWorkspaceSlugGetter(() => "acme");
+      const { fetchJson } = await import("@/lib/api");
+      await act(async () => {
+        await expect(fetchJson("/api/v1/tasks/missing")).rejects.toBeDefined();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(getAuthState().status).toBe("authenticated");
+      expect(location).toBe("/today");
     } finally {
       restore();
     }

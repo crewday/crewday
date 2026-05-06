@@ -487,6 +487,14 @@ describe("fetchJson — 401 onUnauthorized seam", () => {
     let count = 0;
     registerOnUnauthorized(() => { count += 1; });
     const { restore } = installFetch([
+      {
+        status: 404,
+        body: {
+          type: "https://crewday.dev/errors/not_found",
+          title: "Not found",
+          status: 404,
+        },
+      },
       { status: 403, body: {} },
       { status: 422, body: {} },
       { status: 500, body: {} },
@@ -495,10 +503,85 @@ describe("fetchJson — 401 onUnauthorized seam", () => {
       await expect(fetchJson("/api/v1/me")).rejects.toBeInstanceOf(ApiError);
       await expect(fetchJson("/api/v1/me", { method: "POST" })).rejects.toBeInstanceOf(ApiError);
       await expect(fetchJson("/api/v1/me")).rejects.toBeInstanceOf(ApiError);
+      await expect(fetchJson("/api/v1/me")).rejects.toBeInstanceOf(ApiError);
     } finally {
       restore();
     }
     expect(count).toBe(0);
+  });
+
+  it("invokes the handler for workspace-scoped /api/v1/me masked 404s", async () => {
+    registerWorkspaceSlugGetter(() => "acme");
+    const calls: Array<{ status: number; path: string }> = [];
+    registerOnUnauthorized((status, path) => calls.push({ status, path }));
+
+    const { restore } = installFetch([
+      {
+        status: 404,
+        body: {
+          type: "https://crewday.dev/errors/not_found",
+          title: "Not found",
+          status: 404,
+          instance: "/w/acme/api/v1/me",
+        },
+      },
+    ]);
+    try {
+      await expect(fetchJson("/api/v1/me")).rejects.toBeInstanceOf(ApiError);
+    } finally {
+      restore();
+    }
+
+    expect(calls).toEqual([{ status: 404, path: "/w/acme/api/v1/me" }]);
+  });
+
+  it("does not invoke the handler for ordinary workspace entity 404s", async () => {
+    registerWorkspaceSlugGetter(() => "acme");
+    const calls: Array<{ status: number; path: string }> = [];
+    registerOnUnauthorized((status, path) => calls.push({ status, path }));
+
+    const { restore } = installFetch([
+      {
+        status: 404,
+        body: {
+          type: "https://crewday.dev/errors/not_found",
+          title: "Not found",
+          status: 404,
+          instance: "/w/acme/api/v1/tasks/missing",
+        },
+      },
+    ]);
+    try {
+      await expect(fetchJson("/api/v1/tasks/missing")).rejects.toBeInstanceOf(ApiError);
+    } finally {
+      restore();
+    }
+
+    expect(calls).toHaveLength(0);
+  });
+
+  it("does not invoke the handler for absolute URLs with a matching path shape", async () => {
+    const calls: Array<{ status: number; path: string }> = [];
+    registerOnUnauthorized((status, path) => calls.push({ status, path }));
+
+    const { restore } = installFetch([
+      {
+        status: 404,
+        body: {
+          type: "https://crewday.dev/errors/not_found",
+          title: "Not found",
+          status: 404,
+          instance: "/w/acme/api/v1/me",
+        },
+      },
+    ]);
+    try {
+      await expect(fetchJson("https://example.test/w/acme/api/v1/me")).rejects.toBeInstanceOf(ApiError);
+    } finally {
+      restore();
+    }
+
+    expect(calls).toHaveLength(0);
   });
 
   it("survives a handler that throws — the original ApiError still surfaces", async () => {

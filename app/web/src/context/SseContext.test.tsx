@@ -80,6 +80,7 @@ beforeEach(() => {
   // teardown rather than auth wiring.
   __resetAuthStoreForTests();
   setAuthenticated(TEST_USER);
+  document.cookie = "crewday_workspace=; path=/; max-age=0";
 });
 
 afterEach(() => {
@@ -268,6 +269,53 @@ describe("<SseProvider>", () => {
       </Providers>,
     );
     expect(created).toHaveLength(0);
+  });
+
+  it("does not open a workspace stream while auth is loading even with a saved workspace", () => {
+    document.cookie = "crewday_workspace=acme; path=/";
+    __resetAuthStoreForTests(); // back to `loading`
+    cleanup();
+
+    render(
+      <Providers>
+        <div />
+      </Providers>,
+    );
+
+    expect(created).toHaveLength(0);
+  });
+
+  it("cancels a pending reconnect when auth becomes invalid", () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <Providers>
+          <Switcher slug="acme" />
+        </Providers>,
+      );
+      const scoped = created.find((e) => e.url === "/w/acme/events");
+      expect(scoped).toBeDefined();
+
+      const live = scoped! as unknown as {
+        readyState: number;
+        onerror: (() => void) | null;
+      };
+      live.readyState = TestEventSource.CLOSED;
+      act(() => {
+        live.onerror?.();
+      });
+
+      act(() => {
+        setUnauthenticated();
+      });
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+
+      expect(created.filter((e) => e.url === "/w/acme/events")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("resets the backoff ladder after a successful open", () => {

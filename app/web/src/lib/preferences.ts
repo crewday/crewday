@@ -118,6 +118,10 @@ export function persistWorkspace(workspaceId: string): void {
     .catch(() => { /* best-effort */ });
 }
 
+export function clearWorkspaceCookie(): void {
+  document.cookie = WORKSPACE_COOKIE + "=; path=/; max-age=0";
+}
+
 export function persistAgentCollapsed(state: "open" | "collapsed"): void {
   const url = "/agent/sidebar/" + state;
   let delivered = false;

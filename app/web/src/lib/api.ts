@@ -207,13 +207,7 @@ export class ApiError extends Error {
 
   /** Short `type` key from the RFC 7807 body (e.g. `"validation"`). */
   get type(): string | null {
-    const raw = this.problem?.type;
-    if (typeof raw !== "string") return null;
-    // Spec §12: the full `type` URI has a `crewday.dev/errors/` prefix;
-    // strip it so callers compare on the short name. Unknown URIs pass
-    // through untouched.
-    const m = raw.match(/\/errors\/([^/]+)$/);
-    return m?.[1] ?? raw;
+    return this.problem ? problemType(this.problem) : null;
   }
 
   /** RFC 7807 `title` (short human summary). */
@@ -299,11 +293,11 @@ export async function fetchJson<T>(path: string, opts: FetchOpts = {}): Promise<
   const body: unknown = text ? safeParse(text) : null;
   if (!res.ok) {
     const message = pickMessage(body, res.statusText, res.status);
-    if (res.status === 401 && onUnauthorizedHandler) {
+    if (shouldInvokeAuthRecovery(res.status, url, body) && onUnauthorizedHandler) {
       // Fire-and-forget: the handler clears the auth store + navigates
       // to /login. Any throw inside the handler is intentionally
       // swallowed (logged) because it must not mask the underlying
-      // 401 the caller is about to see.
+      // ApiError the caller is about to see.
       try {
         onUnauthorizedHandler(res.status, url);
       } catch (err) {
@@ -314,6 +308,23 @@ export async function fetchJson<T>(path: string, opts: FetchOpts = {}): Promise<
     throw new ApiError(message, res.status, body);
   }
   return body as T;
+}
+
+function shouldInvokeAuthRecovery(status: number, url: string, body: unknown): boolean {
+  if (status === 401) return true;
+  if (status !== 404) return false;
+  if (!isProblemDetail(body)) return false;
+  if (problemType(body) !== "not_found") return false;
+  if (/^https?:\/\//i.test(url)) return false;
+  const pathname = new URL(url, "http://crewday.local").pathname;
+  return /^\/w\/[^/]+\/api\/v1\/me$/.test(pathname);
+}
+
+function problemType(problem: ProblemDetail): string | null {
+  const raw = problem.type;
+  if (typeof raw !== "string") return null;
+  const m = raw.match(/\/errors\/([^/]+)$/);
+  return m?.[1] ?? raw;
 }
 
 function safeParse(text: string): unknown {

@@ -11,7 +11,8 @@
 // one-line `createOnUnauthorized({ navigate: spy, ... })`.
 
 import type { QueryClient } from "@tanstack/react-query";
-import { setUnauthenticated } from "./authStore";
+import { clearActiveWorkspaceForRecovery } from "@/context/WorkspaceContext";
+import { getAuthState, setUnauthenticated } from "./authStore";
 
 export interface OnUnauthorizedDeps {
   navigate: (to: string, options?: { replace?: boolean }) => void;
@@ -118,8 +119,14 @@ export function sanitizeNext(value: string | null | undefined): string | null {
 export function createOnUnauthorized(deps: OnUnauthorizedDeps): (status: number, path: string) => void {
   const here = deps.getCurrentLocation
     ?? (() => window.location.pathname + window.location.search + window.location.hash);
-  return (_status, path) => {
+  return (status, path) => {
     if (isAuthEndpoint(path)) return;
+    if (status === 404 && getAuthState().status === "authenticated") {
+      clearActiveWorkspaceForRecovery();
+      deps.queryClient.clear();
+      deps.navigate("/", { replace: true });
+      return;
+    }
     setUnauthenticated();
     deps.queryClient.clear();
     const safeNext = sanitizeNext(here());

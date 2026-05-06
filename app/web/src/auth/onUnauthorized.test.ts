@@ -19,10 +19,12 @@ const SAMPLE_USER: AuthMe = {
 
 beforeEach(() => {
   __resetAuthStoreForTests();
+  document.cookie = "crewday_workspace=; path=/; max-age=0";
 });
 
 afterEach(() => {
   __resetAuthStoreForTests();
+  document.cookie = "crewday_workspace=; path=/; max-age=0";
 });
 
 describe("isAuthEndpoint", () => {
@@ -142,6 +144,26 @@ describe("createOnUnauthorized", () => {
       "/login?next=%2Fproperty%2Fabc%3Ftab%3Dtasks",
       { replace: true },
     );
+  });
+
+  it("keeps an authenticated user signed in on a masked workspace /me 404 and routes back to workspace selection", () => {
+    setAuthenticated(SAMPLE_USER);
+    document.cookie = "crewday_workspace=stale; path=/";
+    const qc = new QueryClient();
+    qc.setQueryData(["w", "stale", "me"], { stale: true });
+    const navigate = vi.fn();
+
+    const handler = createOnUnauthorized({
+      navigate,
+      queryClient: qc,
+      getCurrentLocation: () => "/w/stale/",
+    });
+    handler(404, "/w/stale/api/v1/me");
+
+    expect(getAuthState().status).toBe("authenticated");
+    expect(qc.getQueryData(["w", "stale", "me"])).toBeUndefined();
+    expect(document.cookie).not.toContain("crewday_workspace=stale");
+    expect(navigate).toHaveBeenCalledWith("/", { replace: true });
   });
 
   it("redirects without `?next=` when the user is already on /login", () => {
