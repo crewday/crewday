@@ -10,7 +10,9 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
+from app.adapters.db.llm.models import ApprovalRequest
 from app.adapters.db.ops.models import AdminAgentAction, AdminAgentChatMessage
+from app.api.admin.agent import AdminAgentActionProposal
 from app.api.transport import admin_sse
 from app.auth.session import SESSION_COOKIE_NAME
 from app.config import Settings
@@ -31,6 +33,8 @@ from tests.unit.api.admin._helpers import (
     seed_admin,
     settings_fixture,
 )
+
+_DEFAULT_PROPOSAL = object()
 
 
 class _FakeDispatcher:
@@ -60,6 +64,60 @@ class _FakeDispatcher:
             body={"ok": True, "tool": call.name},
             mutated=self.result_status_code < 400,
         )
+
+
+class _FakeActionProducer:
+    def __init__(
+        self,
+        proposal: AdminAgentActionProposal | None | object = _DEFAULT_PROPOSAL,
+    ) -> None:
+        self.calls: list[tuple[str, str, str]] = []
+        if proposal is _DEFAULT_PROPOSAL:
+            self.proposal = AdminAgentActionProposal(
+                tool_call=ToolCall(
+                    id="call_deployment_settings_edit",
+                    name="deployment.settings.edit",
+                    input={"setting": "root_llm_budget", "value": "200"},
+                ),
+                card_summary="Update root LLM budget",
+                card_fields=(("Setting", "root_llm_budget"), ("Value", "200")),
+                card_risk="high",
+                gate_source="workspace_always",
+                requested_by_token_id="tok_live_admin_agent",
+            )
+        else:
+            self.proposal = proposal
+
+    def produce_action(
+        self,
+        *,
+        message: str,
+        page_context: str,
+        ctx: object,
+        session: Session,
+    ) -> AdminAgentActionProposal | None:
+        _ = session
+        user_id = ctx.user_id
+        assert isinstance(user_id, str)
+        self.calls.append((message, page_context, user_id))
+        assert self.proposal is None or isinstance(
+            self.proposal,
+            AdminAgentActionProposal,
+        )
+        return self.proposal
+
+
+class _FailingActionProducer:
+    def produce_action(
+        self,
+        *,
+        message: str,
+        page_context: str,
+        ctx: object,
+        session: Session,
+    ) -> AdminAgentActionProposal:
+        _ = message, page_context, ctx, session
+        raise RuntimeError("producer failed")
 
 
 def _seed_action(
@@ -93,6 +151,13 @@ def _seed_action(
         )
         session.commit()
     return row_id
+
+
+def _assert_no_agent_writes(session_factory: sessionmaker[Session]) -> None:
+    with session_factory() as session, tenant_agnostic():
+        assert session.scalars(select(AdminAgentChatMessage)).all() == []
+        assert session.scalars(select(AdminAgentAction)).all() == []
+        assert session.scalars(select(ApprovalRequest)).all() == []
 
 
 @pytest.fixture
@@ -152,6 +217,8 @@ class TestAdminAgent:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         user_id = install_admin_cookie(client, session_factory, settings)
+        producer = _FakeActionProducer()
+        client.app.state.admin_agent_action_producer = producer
         published: list[dict[str, object]] = []
         monkeypatch.setattr(
             admin_sse,
@@ -171,6 +238,9 @@ class TestAdminAgent:
         assert body["body"] == "show owners"
         assert body["channel_kind"] is None
         assert isinstance(body["at"], str)
+        assert producer.calls == [
+            ("show owners", "route=/admin/admins", user_id),
+        ]
 
         reload_resp = client.get("/admin/api/v1/agent/log")
         assert reload_resp.status_code == 200
@@ -193,18 +263,29 @@ class TestAdminAgent:
             assert audit.diff["page"] == "route=/admin/admins"
 
         assert [event["kind"] for event in published] == [
-            "admin.audit.appended",
             "agent.turn.started",
+            "admin.audit.appended",
             "agent.message.appended",
+            "admin.audit.appended",
+            "agent.action.pending",
             "agent.turn.finished",
         ]
-        assert published[1]["user_scope"] == user_id
+        assert published[0]["user_scope"] == user_id
         assert published[2]["user_scope"] == user_id
-        assert published[3]["user_scope"] == user_id
+        assert published[4]["user_scope"] == user_id
+        assert published[5]["user_scope"] == user_id
         message_payload = published[2]["payload"]
         assert isinstance(message_payload, dict)
         assert message_payload["scope"] == "admin"
         assert message_payload["message"] == body
+        pending_payload = published[4]["payload"]
+        assert isinstance(pending_payload, dict)
+        assert pending_payload["scope"] == "admin"
+        assert pending_payload["actor_user_id"] == user_id
+        assert pending_payload["thread_id"] is None
+        finished_payload = published[5]["payload"]
+        assert isinstance(finished_payload, dict)
+        assert finished_payload["outcome"] == "action"
 
     def test_log_is_oldest_first_and_scoped_to_current_admin(
         self,
@@ -213,6 +294,7 @@ class TestAdminAgent:
         settings: Settings,
     ) -> None:
         install_admin_cookie(client, session_factory, settings)
+        client.app.state.admin_agent_action_producer = _FakeActionProducer()
 
         first = client.post("/admin/api/v1/agent/message", json={"body": "first"})
         second = client.post("/admin/api/v1/agent/message", json={"body": "second"})
@@ -236,6 +318,190 @@ class TestAdminAgent:
 
         assert other_log_resp.status_code == 200
         assert other_log_resp.json() == []
+
+    def test_message_without_action_producer_fails_closed_without_phantom_write(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        user_id = install_admin_cookie(client, session_factory, settings)
+        published: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            admin_sse,
+            "publish_admin_event",
+            lambda **kwargs: published.append(kwargs),
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            headers={"X-Agent-Page": "route=/admin/settings"},
+            json={"body": "change the budget"},
+        )
+
+        assert resp.status_code == 503
+        assert resp.json()["error"] == "admin_agent_runtime_unwired"
+        with session_factory() as session, tenant_agnostic():
+            actions = session.scalars(select(AdminAgentAction)).all()
+            approvals = session.scalars(select(ApprovalRequest)).all()
+            messages = session.scalars(select(AdminAgentChatMessage)).all()
+        assert messages == []
+        assert actions == []
+        assert approvals == []
+        assert [event["kind"] for event in published] == [
+            "agent.turn.started",
+            "agent.turn.finished",
+        ]
+        assert published[0]["user_scope"] == user_id
+        assert published[1]["user_scope"] == user_id
+        finished_payload = published[1]["payload"]
+        assert isinstance(finished_payload, dict)
+        assert finished_payload["outcome"] == "error"
+        assert finished_payload["error"] == "admin_agent_runtime_unwired"
+
+    def test_message_without_action_proposal_fails_closed_without_phantom_write(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        client.app.state.admin_agent_action_producer = _FakeActionProducer(None)
+        published: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            admin_sse,
+            "publish_admin_event",
+            lambda **kwargs: published.append(kwargs),
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            headers={"X-Agent-Page": "route=/admin/settings"},
+            json={"body": "say something that has no tool call"},
+        )
+
+        assert resp.status_code == 503
+        assert resp.json()["error"] == "admin_agent_no_action_proposal"
+        _assert_no_agent_writes(session_factory)
+        assert [event["kind"] for event in published] == [
+            "agent.turn.started",
+            "agent.turn.finished",
+        ]
+        finished_payload = published[1]["payload"]
+        assert isinstance(finished_payload, dict)
+        assert finished_payload["outcome"] == "error"
+        assert finished_payload["error"] == "admin_agent_no_action_proposal"
+
+    def test_message_with_invalid_action_proposal_fails_closed_without_writes(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        client.app.state.admin_agent_action_producer = _FakeActionProducer(
+            AdminAgentActionProposal(
+                tool_call=ToolCall(
+                    id="call_invalid",
+                    name="deployment.settings.edit",
+                    input={"setting": {"not_jsonable"}},
+                ),
+                card_summary="Update root LLM budget",
+                card_fields=(("Setting", "root_llm_budget"),),
+                card_risk="high",
+                gate_source="workspace_always",
+            )
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            json={"body": "raise root llm budget"},
+        )
+
+        assert resp.status_code == 503
+        assert resp.json()["error"] == "admin_agent_action_proposal_invalid"
+        _assert_no_agent_writes(session_factory)
+
+    def test_message_when_action_producer_errors_fails_closed_without_writes(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        client.app.state.admin_agent_action_producer = _FailingActionProducer()
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            json={"body": "raise root llm budget"},
+        )
+
+        assert resp.status_code == 503
+        assert resp.json()["error"] == "admin_agent_runtime_error"
+        _assert_no_agent_writes(session_factory)
+
+    def test_live_message_produces_one_scoped_pending_admin_action(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        user_id = install_admin_cookie(client, session_factory, settings)
+        client.app.state.admin_agent_action_producer = _FakeActionProducer()
+
+        first = client.post(
+            "/admin/api/v1/agent/message",
+            headers={"X-Agent-Page": "route=/admin/settings; params=tab=llm"},
+            json={"body": "raise root llm budget"},
+        )
+        retry = client.post(
+            "/admin/api/v1/agent/message",
+            headers={"X-Agent-Page": "route=/admin/settings; params=tab=llm"},
+            json={"body": "raise root llm budget"},
+        )
+
+        assert first.status_code == 201
+        assert retry.status_code == 201
+        with session_factory() as session, tenant_agnostic():
+            rows = session.scalars(select(AdminAgentAction)).all()
+            approvals = session.scalars(select(ApprovalRequest)).all()
+        assert len(rows) == 1
+        assert approvals == []
+        row = rows[0]
+        assert row.for_user_id == user_id
+        assert row.inline_channel == "web_admin_sidebar"
+        assert row.page_context == "route=/admin/settings; params=tab=llm"
+        assert row.idempotency_key.startswith("admin-agent:")
+        assert row.action == "deployment.settings.edit"
+        assert row.resolved_payload_json == {
+            "tool_call_id": "call_deployment_settings_edit",
+            "tool_input": {"setting": "root_llm_budget", "value": "200"},
+        }
+        assert row.card_summary == "Update root LLM budget"
+        assert row.card_fields_json == [
+            ["Setting", "root_llm_budget"],
+            ["Value", "200"],
+        ]
+        assert row.card_risk == "high"
+        assert row.gate_source == "workspace_always"
+        assert row.requested_by_token_id == "tok_live_admin_agent"
+
+        actions_resp = client.get("/admin/api/v1/agent/actions")
+        assert actions_resp.status_code == 200
+        assert [item["id"] for item in actions_resp.json()] == [row.id]
+
+        _, other_cookie = seed_admin(
+            session_factory,
+            settings=settings,
+            email="other-produced-action@example.com",
+            display_name="Other Produced",
+        )
+        client.cookies.set(SESSION_COOKIE_NAME, other_cookie)
+        other_resp = client.get("/admin/api/v1/agent/actions")
+        assert other_resp.status_code == 200
+        assert other_resp.json() == []
 
     def test_actions_returns_only_current_admin_pending_sidebar_cards(
         self,
@@ -335,6 +601,44 @@ class TestAdminAgent:
             assert audit.diff["page"] == "route=/admin/usage"
             assert audit.diff["requested_by_token_id"] == "tok_agent"
 
+    def test_approve_replays_action_produced_by_live_message_once(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        user_id = install_admin_cookie(client, session_factory, settings)
+        client.app.state.admin_agent_action_producer = _FakeActionProducer()
+        dispatcher = _FakeDispatcher()
+        client.app.state.tool_dispatcher = dispatcher
+
+        produced = client.post(
+            "/admin/api/v1/agent/message",
+            headers={"X-Agent-Page": "route=/admin/settings"},
+            json={"body": "raise root llm budget"},
+        )
+        assert produced.status_code == 201
+        with session_factory() as session, tenant_agnostic():
+            action_id = session.scalar(select(AdminAgentAction.id))
+            assert action_id is not None
+
+        first = client.post(f"/admin/api/v1/agent/action/{action_id}/approve")
+        retry = client.post(f"/admin/api/v1/agent/action/{action_id}/approve")
+
+        assert first.status_code == 200
+        assert retry.status_code == 200
+        assert len(dispatcher.calls) == 1
+        call, headers = dispatcher.calls[0]
+        assert call.name == "deployment.settings.edit"
+        assert call.id == "call_deployment_settings_edit"
+        assert call.input == {"setting": "root_llm_budget", "value": "200"}
+        assert headers["X-Agent-Page"] == "route=/admin/settings"
+        with session_factory() as session, tenant_agnostic():
+            row = session.get(AdminAgentAction, action_id)
+            assert row is not None
+            assert row.state == "executed"
+            assert row.decided_by_user_id == user_id
+
     def test_approve_without_dispatcher_fails_and_keeps_action_pending(
         self,
         client: TestClient,
@@ -408,6 +712,38 @@ class TestAdminAgent:
             assert audit.actor_id == user_id
             assert audit.actor_kind == "user"
             assert audit.diff["page"] == "route=/admin/settings"
+
+    def test_deny_produced_action_never_dispatches(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        user_id = install_admin_cookie(client, session_factory, settings)
+        client.app.state.admin_agent_action_producer = _FakeActionProducer()
+        dispatcher = _FakeDispatcher()
+        client.app.state.tool_dispatcher = dispatcher
+
+        produced = client.post(
+            "/admin/api/v1/agent/message",
+            headers={"X-Agent-Page": "route=/admin/settings"},
+            json={"body": "raise root llm budget"},
+        )
+        assert produced.status_code == 201
+        with session_factory() as session, tenant_agnostic():
+            action_id = session.scalar(select(AdminAgentAction.id))
+            assert action_id is not None
+
+        resp = client.post(f"/admin/api/v1/agent/action/{action_id}/deny")
+
+        assert resp.status_code == 200
+        assert dispatcher.calls == []
+        with session_factory() as session, tenant_agnostic():
+            row = session.get(AdminAgentAction, action_id)
+            assert row is not None
+            assert row.state == "rejected"
+            assert row.decided_by_user_id == user_id
+            assert row.executed_at is None
 
     def test_cross_user_and_already_decided_actions_fail_safely(
         self,

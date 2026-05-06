@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.adapters.db.ops.models import AdminAgentAction as AdminAgentActionRow
@@ -34,6 +39,8 @@ from app.util.ulid import new_ulid
 
 __all__ = [
     "AdminAgentAction",
+    "AdminAgentActionProducer",
+    "AdminAgentActionProposal",
     "AdminAgentDecisionResponse",
     "AdminAgentMessage",
     "AdminAgentMessageRequest",
@@ -48,6 +55,39 @@ _ADMIN_INLINE_CHANNEL: Literal["web_admin_sidebar"] = "web_admin_sidebar"
 _ADMIN_AGENT_CAPABILITY: Literal["chat.admin"] = "chat.admin"
 _ADMIN_AGENT_CHANNEL: Literal["web_admin_sidebar"] = "web_admin_sidebar"
 _ADMIN_DECIDED_STATES: frozenset[str] = frozenset({"rejected", "executed"})
+
+
+@dataclass(frozen=True, slots=True)
+class AdminAgentActionProposal:
+    """Resolved gated deployment mutation produced by the admin agent."""
+
+    tool_call: ToolCall
+    card_summary: str
+    card_fields: Sequence[tuple[str, str]]
+    card_risk: Literal["low", "medium", "high"]
+    gate_source: Literal[
+        "workspace_always",
+        "workspace_configurable",
+        "user_auto_annotation",
+        "user_strict_mutation",
+    ]
+    requested_by_token_id: str | None = None
+    idempotency_key: str | None = None
+
+
+class AdminAgentActionProducer(Protocol):
+    """Configured runtime seam for live admin-agent action production."""
+
+    def produce_action(
+        self,
+        *,
+        message: str,
+        page_context: str,
+        ctx: DeploymentContext,
+        session: Session,
+    ) -> AdminAgentActionProposal | None:
+        """Resolve ``message`` into one gated deployment action proposal."""
+        ...
 
 
 class AdminAgentMessageRequest(BaseModel):
@@ -167,6 +207,35 @@ def build_admin_agent_router() -> APIRouter:
     ) -> AdminAgentMessage:
         page = request.headers.get("X-Agent-Page", "")
         created_at = _now_utc()
+        _publish_admin_turn_started(request, ctx, created_at)
+        try:
+            producer = _get_action_producer(request)
+            proposal = _validated_action_proposal(
+                producer.produce_action(
+                    message=body.body,
+                    page_context=page,
+                    ctx=ctx,
+                    session=session,
+                )
+            )
+        except ServiceUnavailable as exc:
+            _publish_admin_turn_finished(
+                request,
+                ctx,
+                created_at,
+                outcome="error",
+                error=str(exc.extra.get("error", "admin_agent_runtime_unwired")),
+            )
+            raise
+        except Exception as exc:
+            _publish_admin_turn_finished(
+                request,
+                ctx,
+                created_at,
+                outcome="error",
+                error="admin_agent_runtime_error",
+            )
+            raise _admin_agent_unavailable("admin_agent_runtime_error") from exc
         row = AdminAgentMessageRow(
             id=new_ulid(),
             admin_user_id=ctx.user_id,
@@ -195,9 +264,28 @@ def build_admin_agent_router() -> APIRouter:
             },
         )
         payload = _message_payload(row)
-        _publish_admin_turn_started(request, ctx, row.created_at)
         _publish_admin_message(request, ctx, payload)
-        _publish_admin_turn_finished(request, ctx, row.created_at)
+        try:
+            action = _produce_admin_action(
+                proposal,
+                request,
+                ctx=ctx,
+                session=session,
+                message=body.body,
+                page_context=page,
+                requested_at=row.created_at,
+            )
+        except ServiceUnavailable as exc:
+            _publish_admin_turn_finished(
+                request,
+                ctx,
+                row.created_at,
+                outcome="error",
+                error=str(exc.extra.get("error", "admin_agent_runtime_unwired")),
+            )
+            raise
+        _publish_admin_action_pending(request, ctx, action)
+        _publish_admin_turn_finished(request, ctx, row.created_at, outcome="action")
         return payload
 
     @router.get(
@@ -398,6 +486,175 @@ def _get_tool_dispatcher(request: Request) -> ToolDispatcher:
     return dispatcher
 
 
+def _get_action_producer(request: Request) -> AdminAgentActionProducer:
+    producer: AdminAgentActionProducer | None = getattr(
+        request.app.state, "admin_agent_action_producer", None
+    )
+    if producer is None:
+        raise _admin_agent_unavailable("admin_agent_runtime_unwired")
+    return producer
+
+
+def _admin_agent_unavailable(error: str) -> ServiceUnavailable:
+    message = "admin agent action production requires a configured runtime"
+    return ServiceUnavailable(message, extra={"error": error, "message": message})
+
+
+def _validated_action_proposal(
+    proposal: AdminAgentActionProposal | None,
+) -> AdminAgentActionProposal:
+    if proposal is None:
+        raise _admin_agent_unavailable("admin_agent_no_action_proposal")
+    tool_call = proposal.tool_call
+    if not tool_call.id.strip() or not tool_call.name.strip():
+        raise _admin_agent_unavailable("admin_agent_action_proposal_invalid")
+    if not proposal.card_summary.strip():
+        raise _admin_agent_unavailable("admin_agent_action_proposal_invalid")
+    if proposal.card_risk not in {"low", "medium", "high"}:
+        raise _admin_agent_unavailable("admin_agent_action_proposal_invalid")
+    if proposal.gate_source not in {
+        "workspace_always",
+        "workspace_configurable",
+        "user_auto_annotation",
+        "user_strict_mutation",
+    }:
+        raise _admin_agent_unavailable("admin_agent_action_proposal_invalid")
+    if proposal.idempotency_key is not None and not proposal.idempotency_key.strip():
+        raise _admin_agent_unavailable("admin_agent_action_proposal_invalid")
+    if not _proposal_card_fields_valid(proposal):
+        raise _admin_agent_unavailable("admin_agent_action_proposal_invalid")
+    if not _proposal_jsonable(proposal):
+        raise _admin_agent_unavailable("admin_agent_action_proposal_invalid")
+    return proposal
+
+
+def _proposal_card_fields_valid(proposal: AdminAgentActionProposal) -> bool:
+    try:
+        for item in proposal.card_fields:
+            if len(item) != 2:
+                return False
+            key, value = item
+            if not isinstance(key, str) or not isinstance(value, str):
+                return False
+    except TypeError:
+        return False
+    return True
+
+
+def _proposal_jsonable(proposal: AdminAgentActionProposal) -> bool:
+    try:
+        json.dumps(
+            {
+                "tool_input": dict(proposal.tool_call.input),
+                "card_fields": [[key, value] for key, value in proposal.card_fields],
+            },
+            sort_keys=True,
+        )
+    except TypeError, ValueError:
+        return False
+    return True
+
+
+def _produce_admin_action(
+    proposal: AdminAgentActionProposal,
+    request: Request,
+    *,
+    ctx: DeploymentContext,
+    session: Session,
+    message: str,
+    page_context: str,
+    requested_at: datetime,
+) -> AdminAgentActionRow:
+    idempotency_key = proposal.idempotency_key or _stable_action_idempotency_key(
+        ctx=ctx,
+        message=message,
+        page_context=page_context,
+        proposal=proposal,
+    )
+    existing = _get_action_by_idempotency_key(session, idempotency_key)
+    if existing is not None:
+        return existing
+
+    row = AdminAgentActionRow(
+        id=new_ulid(),
+        requested_at=requested_at,
+        requested_by_token_id=proposal.requested_by_token_id,
+        for_user_id=ctx.user_id,
+        action=proposal.tool_call.name,
+        resolved_payload_json={
+            "tool_call_id": proposal.tool_call.id,
+            "tool_input": dict(proposal.tool_call.input),
+        },
+        idempotency_key=idempotency_key,
+        state="pending",
+        gate_source=proposal.gate_source,
+        card_summary=proposal.card_summary,
+        card_risk=proposal.card_risk,
+        card_fields_json=[[key, value] for key, value in proposal.card_fields],
+        inline_channel=_ADMIN_INLINE_CHANNEL,
+        page_context=page_context,
+    )
+    with tenant_agnostic():
+        try:
+            with session.begin_nested():
+                session.add(row)
+                session.flush()
+        except IntegrityError:
+            existing = _get_action_by_idempotency_key(session, idempotency_key)
+            if existing is not None:
+                return existing
+            raise
+    audit_admin(
+        session,
+        ctx=ctx,
+        request=request,
+        entity_kind="admin_agent_action",
+        entity_id=row.id,
+        action="admin_agent.action.proposed",
+        diff={
+            "action": row.action,
+            "for_user_id": row.for_user_id,
+            "inline_channel": row.inline_channel,
+            "requested_by_token_id": row.requested_by_token_id,
+            "idempotency_key": row.idempotency_key,
+            "gate_source": row.gate_source,
+            "risk": row.card_risk,
+            "page": row.page_context,
+        },
+    )
+    return row
+
+
+def _get_action_by_idempotency_key(
+    session: Session,
+    idempotency_key: str,
+) -> AdminAgentActionRow | None:
+    with tenant_agnostic():
+        return session.scalar(
+            select(AdminAgentActionRow).where(
+                AdminAgentActionRow.idempotency_key == idempotency_key
+            )
+        )
+
+
+def _stable_action_idempotency_key(
+    *,
+    ctx: DeploymentContext,
+    message: str,
+    page_context: str,
+    proposal: AdminAgentActionProposal,
+) -> str:
+    body = {
+        "admin_user_id": ctx.user_id,
+        "message": message,
+        "page_context": page_context,
+        "tool_name": proposal.tool_call.name,
+        "tool_input": dict(proposal.tool_call.input),
+    }
+    encoded = json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+    return f"admin-agent:{hashlib.sha256(encoded).hexdigest()}"
+
+
 def _tool_call_from_row(row: AdminAgentActionRow) -> ToolCall:
     payload = row.resolved_payload_json
     if not isinstance(payload, dict):
@@ -554,19 +811,43 @@ def _publish_admin_turn_finished(
     request: Request,
     ctx: DeploymentContext,
     started_at: datetime,
+    *,
+    outcome: Literal["action", "error"],
+    error: str | None = None,
 ) -> None:
     finished_at = _now_utc()
     _ = started_at
+    payload: dict[str, str] = {
+        "scope": "admin",
+        "finished_at": finished_at.isoformat(),
+        "outcome": outcome,
+    }
+    if error is not None:
+        payload["error"] = error
     admin_sse.publish_admin_event(
         kind="agent.turn.finished",
         ctx=ctx,
         request=request,
         user_scope=ctx.user_id,
+        payload=payload,
+    )
+
+
+def _publish_admin_action_pending(
+    request: Request,
+    ctx: DeploymentContext,
+    row: AdminAgentActionRow,
+) -> None:
+    admin_sse.publish_admin_event(
+        kind="agent.action.pending",
+        ctx=ctx,
+        request=request,
+        user_scope=ctx.user_id,
         payload={
+            "actor_user_id": ctx.user_id,
+            "approval_request_id": row.id,
             "scope": "admin",
-            "finished_at": finished_at.isoformat(),
-            "outcome": "error",
-            "error": "admin_agent_runtime_unwired",
+            "thread_id": None,
         },
     )
 
