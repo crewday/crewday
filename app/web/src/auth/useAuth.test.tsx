@@ -73,9 +73,27 @@ describe("useAuthBootstrap — initial /auth/me probe", () => {
     }
   });
 
-  it("settles in `unauthenticated` when /auth/me returns 401 (no session)", async () => {
+  it("settles in `unauthenticated` when /auth/me returns 204 (no session)", async () => {
     const { restore } = installFetch({
-      "/api/v1/auth/me": [{ status: 401, body: { detail: "no session" } }],
+      "/api/v1/auth/me": [{ status: 204, body: null }],
+    });
+    try {
+      render(
+        <Providers>
+          <div>app</div>
+        </Providers>,
+      );
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      expect(getAuthState().status).toBe("unauthenticated");
+      expect(getAuthState().user).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("still handles a 401 from /auth/me as an invalid or expired session", async () => {
+    const { restore } = installFetch({
+      "/api/v1/auth/me": [{ status: 401, body: { detail: "session invalid" } }],
     });
     try {
       render(

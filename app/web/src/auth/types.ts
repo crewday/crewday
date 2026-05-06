@@ -11,10 +11,12 @@
 import type { AvailableWorkspace } from "@/types/auth";
 
 /**
- * Minimal "who is logged in" envelope returned by
- * `GET /api/v1/auth/me`. The bare-host variant of `/me` is identity-
- * only (no workspace context) — we can't return the full `Me`
- * because the caller may not have picked a workspace yet.
+ * Minimal "who is logged in" envelope returned by a successful
+ * `GET /api/v1/auth/me`. The no-session bootstrap response is `204 No
+ * Content` and is handled before this type is used. The bare-host
+ * variant of `/me` is identity-only (no workspace context) — we can't
+ * return the full `Me` because the caller may not have picked a
+ * workspace yet.
  *
  * Property notes:
  * - `user_id`: the canonical ULID of the authenticated user. Stable

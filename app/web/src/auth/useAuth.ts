@@ -67,6 +67,18 @@ function subscribe(listener: () => void): () => void {
   return subscribeAuth(listener);
 }
 
+async function fetchAuthMe(): Promise<AuthMe | null> {
+  return fetchJson<AuthMe | null>("/api/v1/auth/me");
+}
+
+async function requireAuthMe(): Promise<AuthMe> {
+  const me = await fetchAuthMe();
+  if (me === null) {
+    throw new Error("Login completed but no session was available");
+  }
+  return me;
+}
+
 /**
  * Read the current auth state from any component. Re-renders the
  * caller on every store change. Side-effect-free — does not probe
@@ -86,7 +98,7 @@ export function useAuth(): UseAuthApi {
       // envelope so the store's `user` is populated before any
       // protected route renders. A 401 here would be a server bug
       // (login just succeeded), so we surface it.
-      const me = await fetchJson<AuthMe>("/api/v1/auth/me");
+      const me = await requireAuthMe();
       setAuthenticated(me);
       // Drop every cached query — the previous user's data must not
       // bleed into the next session's TanStack cache.
@@ -121,7 +133,11 @@ export function useAuth(): UseAuthApi {
   const refresh = useCallback(async (): Promise<void> => {
     setLoading();
     try {
-      const me = await fetchJson<AuthMe>("/api/v1/auth/me");
+      const me = await fetchAuthMe();
+      if (me === null) {
+        setUnauthenticated();
+        return;
+      }
       setAuthenticated(me);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -180,7 +196,11 @@ export function useAuthBootstrap(enabled = true): void {
 
     void (async () => {
       try {
-        const me = await fetchJson<AuthMe>("/api/v1/auth/me");
+        const me = await fetchAuthMe();
+        if (me === null) {
+          setUnauthenticated();
+          return;
+        }
         setAuthenticated(me);
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {

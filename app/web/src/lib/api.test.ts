@@ -632,11 +632,24 @@ describe("fetchJson success parsing", () => {
     }
   });
 
-  it("returns null for a 200 with an empty body", async () => {
+  it("returns null for an empty success body", async () => {
     const { restore } = installFetch([{ status: 204, body: "" }]);
     try {
       const data = await fetchJson<unknown>("/api/v1/me");
       expect(data).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("treats /auth/me 204 as a handled no-session success, not unauthorized recovery", async () => {
+    let unauthorizedCount = 0;
+    registerOnUnauthorized(() => { unauthorizedCount += 1; });
+    const { restore } = installFetch([{ status: 204, body: "" }]);
+    try {
+      const data = await fetchJson<unknown>("/api/v1/auth/me");
+      expect(data).toBeNull();
+      expect(unauthorizedCount).toBe(0);
     } finally {
       restore();
     }

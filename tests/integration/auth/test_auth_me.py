@@ -21,7 +21,8 @@ Coverage:
   SPA bootstrap.
 * **Deployment-admin flag.** A user with a deployment-scope role
   grant flips ``is_deployment_admin`` to ``True``.
-* **401 absent cookie.** ``error == 'session_required'``.
+* **204 absent cookie.** Anonymous bootstrap with no session cookie is
+  an explicit quiet unauthenticated state.
 * **401 expired cookie.** A session row past its ``expires_at`` →
   ``error == 'session_invalid'``.
 * **401 invalidated cookie.** A session row stamped with
@@ -547,11 +548,14 @@ class TestAuthMeDeploymentAdmin:
 
 
 class TestAuthMeUnauthorized:
-    """Every failure mode of :func:`auth_session.validate` collapses to 401."""
+    """Anonymous bootstrap is quiet; rejected cookies still collapse to 401."""
 
-    def test_no_cookie_returns_401_session_required(self, client: TestClient) -> None:
+    def test_no_cookie_returns_204_anonymous_bootstrap(
+        self, client: TestClient
+    ) -> None:
         r = client.get("/api/v1/auth/me")
-        _assert_unauthorized_error(r, error="session_required")
+        assert r.status_code == 204, r.text
+        assert r.content == b""
 
     def test_unknown_cookie_returns_401_session_invalid(
         self, client: TestClient

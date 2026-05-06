@@ -26,7 +26,7 @@ the workspace's URL slug (§01 "Workspace addressing", §02
   `/api/openapi.json`, `/api/v1/signup/start`,
   `/api/v1/signup/verify`, `/api/v1/signup/passkey/start`,
   `/api/v1/signup/passkey/finish`,
-  `/api/v1/auth/{logout,magic/{request,consume},passkey/login/{start,finish}}`,
+  `/api/v1/auth/{me,logout,magic/{request,consume},passkey/login/{start,finish}}`,
   `/api/v1/recover/passkey/{request,verify,start,finish}`,
   `/api/v1/me/workspaces` (returns the caller's accessible
   workspaces for the switcher), `/api/v1/healthz`,
@@ -736,7 +736,16 @@ POST   /api/v1/recover/passkey/finish            # complete recovery — registe
                                                  #     422 rather than a 500.
                                                  #   422 — Pydantic field error (missing `recovery_session_id` /
                                                  #     `challenge_id` / `credential`); shape per §12 "Errors".
-GET    /api/v1/auth/me
+GET    /api/v1/auth/me                         # identity bootstrap. 200 returns
+                                                # {user_id, display_name, email,
+                                                # available_workspaces,
+                                                # current_workspace_id,
+                                                # is_deployment_admin}. No session
+                                                # cookie returns 204 No Content
+                                                # (handled anonymous state, not a
+                                                # smoke failure). Present but
+                                                # invalid / expired cookie returns
+                                                # 401 problem+json.
 POST   /api/v1/auth/logout                       # invalidate every active session for the caller (cause `logout`, §15 "Session-invalidation causes"); always 204 + Set-Cookie clearing `__Host-crewday_session` (best-effort: no cookie / invalid cookie still 204 + clear, no audit row)
 GET    /api/v1/me/workspaces                     # cd-y5z3 — switcher payload for the
                                                   # current session. Distinct from

@@ -2,9 +2,10 @@
 
 Bare-host route, tenant-agnostic (runs before a workspace is picked).
 The SPA's :mod:`authStore` hits this on every load to decide whether
-the cookied user is still live; a 401 drops the store into the
-unauthenticated state and bounces the visitor to ``/login``, a 200
-seeds ``useAuth()`` with the user + their available workspaces.
+the cookied user is still live; a no-cookie request returns ``204 No
+Content`` and drops the store into the unauthenticated state quietly,
+while a rejected cookie returns ``401``. A 200 seeds ``useAuth()``
+with the user + their available workspaces.
 
 Response shape matches :class:`AuthMe` in
 ``app/web/src/auth/types.ts``. The :class:`AvailableWorkspace` inner
@@ -32,7 +33,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Cookie, Depends, Request
+from fastapi import APIRouter, Cookie, Depends, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
@@ -725,6 +726,11 @@ def build_me_router() -> APIRouter:
     @router.get(
         "/me",
         response_model=AuthMeResponse,
+        responses={
+            204: {
+                "description": "No active session cookie; anonymous bootstrap.",
+            },
+        },
         operation_id="auth.me.get",
         summary="Return the authenticated user + their available workspaces",
         openapi_extra={
@@ -752,18 +758,18 @@ def build_me_router() -> APIRouter:
             str | None,
             Cookie(alias="crewday_session"),
         ] = None,
-    ) -> AuthMeResponse:
+    ) -> AuthMeResponse | Response:
         """Validate the session cookie, hydrate user + workspaces.
 
-        Returns 401 when the cookie is absent or rejected by
-        :func:`auth_session.validate`. The SPA's
-        :mod:`auth.onUnauthorized` seam routes every 401 to the store
-        reset + login bounce.
+        Returns 204 when no session cookie is present. That is the
+        ordinary anonymous bootstrap state and should stay quiet in
+        browser smoke output. Returns 401 when a provided cookie is
+        rejected by :func:`auth_session.validate`.
         """
-        cookie_value = _session_cookie_value(
-            session_cookie_primary=session_cookie_primary,
-            session_cookie_dev=session_cookie_dev,
-        )
+        cookie_value = session_cookie_primary or session_cookie_dev
+        if not cookie_value:
+            return Response(status_code=204)
+
         user, _session_row = _validated_session_user(
             request,
             session,
