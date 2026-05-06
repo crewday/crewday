@@ -38,12 +38,46 @@ export interface PropertyPatchBody {
 
 interface PropertyEditDialogProps {
   open: boolean;
-  property: PropertyRecord;
+  property: PropertyRecord | null;
+  initialDraft?: PropertyEditDraft;
+  mode?: "create" | "edit";
   saving: boolean;
   error: string | null;
   onSubmit: (draft: PropertyEditDraft) => void;
   onClose: () => void;
 }
+
+export interface PropertyCreateBody {
+  name: string;
+  kind: Property["kind"];
+  address_json: PropertyAddress;
+  country: string;
+  locale: string | null;
+  default_currency: string | null;
+  timezone: string;
+  lat: null;
+  lon: null;
+  client_org_id: null;
+  owner_user_id: null;
+  tags_json: string[];
+  welcome_defaults_json: Record<string, unknown>;
+  property_notes_md: string;
+}
+
+const BLANK_PROPERTY_DRAFT: PropertyEditDraft = {
+  name: "",
+  kind: "residence",
+  line1: "",
+  line2: "",
+  city: "",
+  state_province: "",
+  postal_code: "",
+  country: "",
+  timezone: "UTC",
+  locale: "",
+  default_currency: "",
+  property_notes_md: "",
+};
 
 export function draftFromProperty(property: PropertyRecord): PropertyEditDraft {
   return {
@@ -60,6 +94,10 @@ export function draftFromProperty(property: PropertyRecord): PropertyEditDraft {
     default_currency: property.default_currency ?? "",
     property_notes_md: property.property_notes_md,
   };
+}
+
+export function blankPropertyDraft(defaults?: Partial<PropertyEditDraft>): PropertyEditDraft {
+  return { ...BLANK_PROPERTY_DRAFT, ...defaults };
 }
 
 export function buildPropertyPatchBody(
@@ -94,20 +132,52 @@ export function buildPropertyPatchBody(
   };
 }
 
+export function buildPropertyCreateBody(draft: PropertyEditDraft): PropertyCreateBody {
+  const country = draft.country.trim().toUpperCase();
+  const currency = draft.default_currency.trim().toUpperCase();
+  return {
+    name: draft.name.trim(),
+    kind: draft.kind,
+    address_json: {
+      line1: draft.line1.trim(),
+      line2: draft.line2.trim(),
+      city: draft.city.trim(),
+      state_province: draft.state_province.trim(),
+      postal_code: draft.postal_code.trim(),
+      country,
+    },
+    country,
+    locale: draft.locale.trim() || null,
+    default_currency: currency || null,
+    timezone: draft.timezone.trim(),
+    lat: null,
+    lon: null,
+    client_org_id: null,
+    owner_user_id: null,
+    tags_json: [],
+    welcome_defaults_json: {},
+    property_notes_md: draft.property_notes_md.trim(),
+  };
+}
+
 export default function PropertyEditDialog({
   open,
   property,
+  initialDraft,
+  mode = "edit",
   saving,
   error,
   onSubmit,
   onClose,
 }: PropertyEditDialogProps) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
-  const [draft, setDraft] = useState<PropertyEditDraft>(() => draftFromProperty(property));
+  const [draft, setDraft] = useState<PropertyEditDraft>(() =>
+    property ? draftFromProperty(property) : blankPropertyDraft(initialDraft)
+  );
 
   useEffect(() => {
-    if (open) setDraft(draftFromProperty(property));
-  }, [open, property]);
+    if (open) setDraft(property ? draftFromProperty(property) : blankPropertyDraft(initialDraft));
+  }, [initialDraft, open, property]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -141,7 +211,9 @@ export default function PropertyEditDialog({
       onClose={onClose}
     >
       <form className="modal__body form" onSubmit={submit}>
-        <h3 id="property-edit-dialog-title" className="modal__title">Edit property</h3>
+        <h3 id="property-edit-dialog-title" className="modal__title">
+          {mode === "create" ? "Add property" : "Edit property"}
+        </h3>
         <div className="form-grid form-grid--two">
           <label className="field">
             <span>Name</span>
@@ -251,7 +323,7 @@ export default function PropertyEditDialog({
             Cancel
           </button>
           <button type="submit" className="btn btn--moss" disabled={saving}>
-            {saving ? "Saving..." : "Save property"}
+            {saving ? "Saving..." : mode === "create" ? "Create property" : "Save property"}
           </button>
         </div>
       </form>

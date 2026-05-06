@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
@@ -21,18 +21,39 @@ function installFetch({
   holdPermission?: boolean;
 } = {}) {
   const calls: string[] = [];
+  const requests: { url: string; method: string; body: unknown }[] = [];
   const original = globalThis.fetch;
-  const spy = vi.fn(async (url: string | URL | Request) => {
+  let createdProperty = false;
+  const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     // code-health: ignore[nloc] Properties route fetch fixture keeps all promoted endpoint shapes explicit.
     const resolved = typeof url === "string" ? url : url.toString();
+    const method = init?.method ?? "GET";
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
     calls.push(resolved);
+    requests.push({ url: resolved, method, body });
     if (resolved === "/api/v1/auth/me") {
       return jsonResponse({
         user_id: "usr_1",
         display_name: "Mina",
         email: "mina@example.com",
-        available_workspaces: [],
+        available_workspaces: [
+          {
+            workspace_id: "ws_owner",
+            workspace: {
+              id: "acme",
+              name: "Acme",
+              timezone: "Europe/Lisbon",
+              default_currency: "EUR",
+              default_country: "PT",
+              default_locale: "pt-PT",
+            },
+            grant_role: "manager",
+            binding_org_id: null,
+            source: "workspace_grant",
+          },
+        ],
         current_workspace_id: "ws_owner",
+        is_deployment_admin: false,
       });
     }
     if (resolved === "/api/v1/me/workspaces") {
@@ -48,26 +69,63 @@ function installFetch({
       ]);
     }
     if (resolved === "/w/acme/api/v1/properties") {
+      if (method === "POST") {
+        const createBody = body as {
+          name: string;
+          kind: string;
+          address_json: Record<string, unknown>;
+          country: string;
+          locale: string | null;
+          default_currency: string | null;
+          timezone: string;
+          property_notes_md: string;
+        };
+        createdProperty = true;
+        return jsonResponse(
+          {
+            id: "prop_created",
+            name: createBody.name,
+            kind: createBody.kind,
+            address: "Austin, US",
+            address_json: createBody.address_json,
+            country: createBody.country,
+            locale: createBody.locale,
+            default_currency: createBody.default_currency,
+            timezone: createBody.timezone,
+            lat: null,
+            lon: null,
+            client_org_id: null,
+            owner_user_id: null,
+            tags_json: [],
+            welcome_defaults_json: {},
+            property_notes_md: createBody.property_notes_md,
+            created_at: "2026-05-06T00:00:00Z",
+            updated_at: null,
+            deleted_at: null,
+          },
+          201,
+        );
+      }
       if (failProperties) {
         return jsonResponse({ type: "server_error", title: "Server error" }, 500);
       }
-      if (emptyProperties) {
+      if (emptyProperties && !createdProperty) {
         return jsonResponse([]);
       }
       return jsonResponse([
         {
-          id: "prop_1",
-          name: "Villa Rosa",
-          city: "Porto",
-          timezone: "Europe/Lisbon",
+          id: createdProperty ? "prop_created" : "prop_1",
+          name: createdProperty ? "Lake House" : "Villa Rosa",
+          city: createdProperty ? "Austin" : "Porto",
+          timezone: createdProperty ? "America/Chicago" : "Europe/Lisbon",
           color: "moss",
-          kind: "str",
-          areas: ["Kitchen", "Terrace"],
+          kind: createdProperty ? "residence" : "str",
+          areas: createdProperty ? [] : ["Kitchen", "Terrace"],
           evidence_policy: "inherit",
           country: "PT",
           locale: "pt-PT",
           settings_override: {},
-          client_org_id: "org_1",
+          client_org_id: createdProperty ? null : "org_1",
           owner_user_id: null,
         },
       ]);
@@ -146,6 +204,23 @@ function installFetch({
         has_more: false,
       });
     }
+    if (resolved === "/w/acme/api/v1/properties/prop_created/share") {
+      return jsonResponse({
+        data: [
+          {
+            property_id: "prop_created",
+            workspace_id: "ws_owner",
+            label: "Lake House",
+            membership_role: "owner_workspace",
+            status: "active",
+            share_guest_identity: true,
+            created_at: "2026-05-06T00:00:00Z",
+          },
+        ],
+        next_cursor: null,
+        has_more: false,
+      });
+    }
     if (resolved === "/w/acme/api/v1/property_closures?property_id=prop_1&limit=100") {
       return jsonResponse({
         data: [
@@ -161,11 +236,19 @@ function installFetch({
         has_more: false,
       });
     }
+    if (resolved === "/w/acme/api/v1/property_closures?property_id=prop_created&limit=100") {
+      return jsonResponse({
+        data: [],
+        next_cursor: null,
+        has_more: false,
+      });
+    }
     throw new Error(`Unexpected fetch call: ${resolved}`);
   });
   (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
   return {
     calls,
+    requests,
     restore: () => {
       (globalThis as { fetch: typeof fetch }).fetch = original;
     },
@@ -189,6 +272,12 @@ beforeEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("acme");
+  HTMLDialogElement.prototype.showModal = vi.fn(function showModal(this: HTMLDialogElement) {
+    this.setAttribute("open", "");
+  });
+  HTMLDialogElement.prototype.close = vi.fn(function close(this: HTMLDialogElement) {
+    this.removeAttribute("open");
+  });
 });
 
 afterEach(() => {
@@ -231,6 +320,58 @@ describe("<PropertiesPage>", () => {
       expect(await screen.findByRole("button", { name: "Add property" })).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "Villa Rosa" })).toBeNull();
       expect(fake.calls).not.toContain("/w/acme/api/v1/properties/prop_1/share");
+      expect(fake.calls).not.toContain("/w/acme/api/v1/stays/reservations?limit=500");
+      expect(fake.calls).not.toContain("/w/acme/api/v1/billing/organizations");
+      expect(fake.calls).not.toContain("/api/v1/me/workspaces");
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("opens creation from the zero-property empty state and adds the created property", async () => {
+    const fake = installFetch({ emptyProperties: true });
+    try {
+      render(<Harness />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Add property" }));
+      const dialog = await screen.findByRole("dialog", { name: "Add property" });
+      expect(within(dialog).getByLabelText("Country")).toHaveValue("PT");
+      expect(within(dialog).getByLabelText("Timezone")).toHaveValue("Europe/Lisbon");
+      expect(within(dialog).getByLabelText("Locale")).toHaveValue("pt-PT");
+      expect(within(dialog).getByLabelText("Default currency")).toHaveValue("EUR");
+      fireEvent.change(within(dialog).getByLabelText("Name"), {
+        target: { value: "Lake House" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("City"), {
+        target: { value: "Austin" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Timezone"), {
+        target: { value: "America/Chicago" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create property" }));
+
+      expect(await screen.findByRole("heading", { name: "Lake House" })).toBeInTheDocument();
+      expect(screen.getByText("Austin · America/Chicago")).toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          fake.requests.some((request) => request.url === "/w/acme/api/v1/properties" && request.method === "POST"),
+        ).toBe(true),
+      );
+      const createRequest = fake.requests.find((request) =>
+        request.url === "/w/acme/api/v1/properties" && request.method === "POST"
+      );
+      expect(createRequest?.body).toMatchObject({
+        name: "Lake House",
+        timezone: "America/Chicago",
+        country: "PT",
+        locale: "pt-PT",
+        default_currency: "EUR",
+        address_json: { city: "Austin", country: "PT" },
+      });
+      const propertiesReads = fake.requests.filter((request) =>
+        request.url === "/w/acme/api/v1/properties" && request.method === "GET"
+      );
+      expect(propertiesReads.length).toBeGreaterThanOrEqual(2);
     } finally {
       fake.restore();
     }

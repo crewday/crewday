@@ -1,4 +1,5 @@
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
@@ -16,6 +17,12 @@ import type {
   Stay,
   Workspace,
 } from "@/types/api";
+import PropertyEditDialog, {
+  blankPropertyDraft,
+  buildPropertyCreateBody,
+  type PropertyEditDraft,
+} from "./property/PropertyEditDialog";
+import type { PropertyRecord } from "./property/types";
 
 interface StaysPayload {
   stays: Stay[];
@@ -209,25 +216,48 @@ async function fetchCreatePropertyPermission(activeWsId: string): Promise<Resolv
   return fetchJson<ResolvedPermission>("/api/v1/permissions/resolved/self?" + params);
 }
 
+function createDraftFromWorkspaceDefaults(me: AuthMe | undefined, workspaceSlug: string | null): PropertyEditDraft {
+  const activeWorkspace = me?.available_workspaces.find((entry) =>
+    entry.workspace.id === workspaceSlug || entry.workspace_id === me.current_workspace_id
+  );
+  return blankPropertyDraft(
+    activeWorkspace
+      ? {
+          country: activeWorkspace.workspace.default_country,
+          timezone: activeWorkspace.workspace.timezone,
+          locale: activeWorkspace.workspace.default_locale,
+          default_currency: activeWorkspace.workspace.default_currency,
+        }
+      : undefined,
+  );
+}
+
 export default function PropertiesPage() {
   // code-health: ignore[ccn nloc] Properties route composes query mapping, selected card state, and promoted table layout.
   const { workspaceId } = useWorkspace();
+  const queryClient = useQueryClient();
+  const [creatingProperty, setCreatingProperty] = useState(false);
+  const [propertyCreateError, setPropertyCreateError] = useState<string | null>(null);
   const meQ = useQuery({ queryKey: qk.authMe(), queryFn: () => fetchJson<AuthMe>("/api/v1/auth/me") });
   const propsQ = useQuery({
     queryKey: qk.properties(),
     queryFn: () => fetchJson<Property[]>("/api/v1/properties"),
   });
+  const visiblePropertyCount = propsQ.data?.length ?? 0;
   const staysQ = useQuery({
     queryKey: qk.stays(),
     queryFn: fetchStaysPayload,
+    enabled: visiblePropertyCount > 0,
   });
   const wsQ = useQuery({
     queryKey: qk.workspaces(),
     queryFn: fetchWorkspaces,
+    enabled: (meQ.isSuccess && !meQ.data.current_workspace_id) || visiblePropertyCount > 0,
   });
   const orgsQ = useQuery({
     queryKey: qk.organizations(workspaceId ?? "active"),
     queryFn: fetchOrganizations,
+    enabled: visiblePropertyCount > 0,
   });
   const propertyIds = propsQ.data?.map((p) => p.id) ?? [];
   const pwQs = useQueries({
@@ -246,6 +276,10 @@ export default function PropertiesPage() {
   const closuresPending = propsQ.isPending || (propsQ.data ? closureQs.some((q) => q.isPending) : false);
   const activeWsId = meQ.data?.current_workspace_id ?? (workspaceId ? wsQ.data?.find((w) => w.slug === workspaceId)?.id : null) ?? null;
   const currentUserId = meQ.data?.user_id ?? null;
+  const createPropertyInitialDraft = useMemo(
+    () => createDraftFromWorkspaceDefaults(meQ.data, workspaceId),
+    [meQ.data, workspaceId],
+  );
   const createPermissionQ = useQuery({
     queryKey:
       currentUserId && activeWsId
@@ -261,14 +295,51 @@ export default function PropertiesPage() {
     meQ.isPending ||
     (workspaceId !== null && !meQ.data?.current_workspace_id && wsQ.isPending) ||
     (Boolean(currentUserId && activeWsId) && createPermissionQ.isPending);
+  const createProperty = useMutation({
+    mutationFn: (draft: PropertyEditDraft) =>
+      fetchJson<PropertyRecord>("/api/v1/properties", {
+        method: "POST",
+        body: buildPropertyCreateBody(draft),
+      }),
+    onSuccess: async () => {
+      setPropertyCreateError(null);
+      setCreatingProperty(false);
+      await queryClient.invalidateQueries({ queryKey: qk.properties() });
+    },
+    onError: (err) => {
+      setPropertyCreateError(err instanceof Error ? err.message : "Property could not be created.");
+    },
+  });
+  function openCreateProperty(): void {
+    setPropertyCreateError(null);
+    setCreatingProperty(true);
+  }
   const createPropertyAction = canCreateProperty
-    ? <button type="button" className="btn btn--moss">+ Add property</button>
+    ? <button type="button" className="btn btn--moss" onClick={openCreateProperty}>+ Add property</button>
     : null;
+  const createPropertyDialog = (
+    <PropertyEditDialog
+      open={creatingProperty}
+      mode="create"
+      property={null}
+      initialDraft={createPropertyInitialDraft}
+      saving={createProperty.isPending}
+      error={propertyCreateError}
+      onSubmit={(draft) => createProperty.mutate(draft)}
+      onClose={() => {
+        if (!createProperty.isPending) {
+          setCreatingProperty(false);
+          setPropertyCreateError(null);
+        }
+      }}
+    />
+  );
 
   if (propsQ.isPending) {
     return (
       <DeskPage title="Properties" actions={createPropertyAction}>
         <Loading />
+        {createPropertyDialog}
       </DeskPage>
     );
   }
@@ -276,6 +347,7 @@ export default function PropertiesPage() {
     return (
       <DeskPage title="Properties" actions={createPropertyAction}>
         Failed to load.
+        {createPropertyDialog}
       </DeskPage>
     );
   }
@@ -288,7 +360,7 @@ export default function PropertiesPage() {
             Properties added to this workspace or shared with it will appear here.
           </p>
           {canCreateProperty ? (
-            <button type="button" className="btn btn--moss">Add property</button>
+            <button type="button" className="btn btn--moss" onClick={openCreateProperty}>Add property</button>
           ) : isCheckingCreatePermission ? (
             <p className="muted" role="status" aria-live="polite">Checking whether you can add a property.</p>
           ) : createPermissionLookupFailed ? (
@@ -297,6 +369,7 @@ export default function PropertiesPage() {
             <p className="muted">Ask an owner or manager to add a property or share one with this workspace.</p>
           )}
         </section>
+        {createPropertyDialog}
       </DeskPage>
     );
   }
@@ -305,6 +378,7 @@ export default function PropertiesPage() {
     return (
       <DeskPage title="Properties" actions={createPropertyAction}>
         <Loading />
+        {createPropertyDialog}
       </DeskPage>
     );
   }
@@ -312,6 +386,7 @@ export default function PropertiesPage() {
     return (
       <DeskPage title="Properties" actions={createPropertyAction}>
         Failed to load.
+        {createPropertyDialog}
       </DeskPage>
     );
   }
@@ -341,6 +416,7 @@ export default function PropertiesPage() {
       title="Properties"
       actions={createPropertyAction}
     >
+      {createPropertyDialog}
       <section className="grid grid--cards">
         {properties.map((p) => {
           const propStays = stays.filter((s) => s.property_id === p.id);
