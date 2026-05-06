@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
-import { Chip, FilterChipGroup, Loading } from "@/components/common";
+import { Chip, EmptyState, FilterChipGroup, Loading } from "@/components/common";
 import type {
   Asset,
   AssetDocument,
@@ -234,6 +235,27 @@ export default function DocumentsPage() {
   const propsById = new Map(propsQ.data.map((p) => [p.id, p]));
 
   const kinds = Array.from(new Set(docsQ.data.map((d) => d.kind)));
+
+  if (docsQ.data.length === 0) {
+    return (
+      <DeskPage title="Documents" sub={sub}>
+        <section className="panel">
+          <EmptyState>
+            <h2>No documents listed yet</h2>
+            <p>
+              Documents are attached from the property or asset they belong to.
+              Open a property for permits, contracts, and insurance, or open an
+              asset for manuals, warranties, and invoices.
+            </p>
+            <p>
+              <Link className="btn btn--moss" to="/assets">Open assets</Link>{" "}
+              <Link className="btn btn--ghost" to="/properties">Open properties</Link>
+            </p>
+          </EmptyState>
+        </section>
+      </DeskPage>
+    );
+  }
 
   const filtered = docsQ.data.filter((d) => {
     if (activeKind && d.kind !== activeKind) return false;

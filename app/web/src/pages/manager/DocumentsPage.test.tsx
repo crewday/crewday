@@ -103,7 +103,7 @@ const PROPERTIES: Property[] = [
   },
 ];
 
-function installFetch() {
+function installFetch({ documents = DOCUMENTS }: { documents?: AssetDocument[] } = {}) {
   const calls: string[] = [];
   const requests: Array<{ url: string; method: string }> = [];
   const original = globalThis.fetch;
@@ -113,7 +113,7 @@ function installFetch() {
     calls.push(resolved);
     requests.push({ url: resolved, method });
     if (resolved === "/w/acme/api/v1/documents") {
-      return jsonResponse({ data: DOCUMENTS });
+      return jsonResponse({ data: documents });
     }
     if (resolved === "/w/acme/api/v1/assets") {
       return jsonResponse({ data: ASSETS });
@@ -210,6 +210,27 @@ describe("<DocumentsPage>", () => {
       fireEvent.click(warrantyFilter);
       expect(screen.queryByText("Pool pump manual")).toBeNull();
       expect(screen.getByText("Boiler warranty")).toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("renders an actionable empty state when no documents are listed", async () => {
+    const fake = installFetch({ documents: [] });
+    try {
+      render(<Harness />);
+      expect(await screen.findByRole("heading", { name: "No documents listed yet" })).toBeInTheDocument();
+      expect(screen.getByText(/Documents are attached from the property or asset they belong to/)).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Open assets" })).toHaveAttribute("href", "/assets");
+      expect(screen.getByRole("link", { name: "Open properties" })).toHaveAttribute("href", "/properties");
+      expect(screen.queryByRole("columnheader", { name: "Title" })).toBeNull();
+      expect(fake.calls).toEqual(
+        expect.arrayContaining([
+          "/w/acme/api/v1/documents",
+          "/w/acme/api/v1/assets",
+          "/w/acme/api/v1/properties",
+        ]),
+      );
     } finally {
       fake.restore();
     }
