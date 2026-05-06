@@ -41,6 +41,8 @@ from app.adapters.db.llm.models import BudgetLedger
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.auth.signup import FALLBACK_CAP_CENTS
+from app.util.clock import SystemClock
+from app.util.ulid import new_ulid
 from scripts import dev_login
 
 # ---------------------------------------------------------------------------
@@ -249,6 +251,146 @@ class TestMintSessionIdempotency:
             )
             assert second_diff["user_created"] is False
             assert second_diff["workspace_created"] is False
+
+    def test_existing_workspace_without_membership_repairs_live_grant_state(
+        self,
+        patched_uow: sessionmaker[Session],
+        patched_settings: _config_mod.Settings,
+    ) -> None:
+        """Existing slug is reused and incomplete dev-login state is repaired."""
+        now = SystemClock().now()
+        user_id = new_ulid()
+        workspace_id = new_ulid()
+        owners_group_id = new_ulid()
+        revoked_grant_id = new_ulid()
+        property_grant_id = new_ulid()
+        deployment_grant_id = new_ulid()
+
+        with patched_uow() as s:
+            s.add(
+                Workspace(
+                    id=workspace_id,
+                    slug="preexisting",
+                    name="Preexisting",
+                    plan="free",
+                    quota_json={},
+                    created_at=now,
+                )
+            )
+            s.add(
+                User(
+                    id=user_id,
+                    email="repair@dev.local",
+                    email_lower="repair@dev.local",
+                    display_name="Repair",
+                    timezone="UTC",
+                    created_at=now,
+                )
+            )
+            s.flush()
+            s.add(
+                PermissionGroup(
+                    id=owners_group_id,
+                    workspace_id=workspace_id,
+                    slug="owners",
+                    name="Owners",
+                    system=True,
+                    capabilities_json={"all": True},
+                    created_at=now,
+                )
+            )
+            s.add(
+                RoleGrant(
+                    id=revoked_grant_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    grant_role="manager",
+                    scope_kind="workspace",
+                    scope_property_id=None,
+                    created_at=now,
+                    created_by_user_id=None,
+                    revoked_at=now,
+                )
+            )
+            s.add(
+                RoleGrant(
+                    id=property_grant_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    grant_role="manager",
+                    scope_kind="workspace",
+                    scope_property_id=new_ulid(),
+                    created_at=now,
+                    created_by_user_id=None,
+                    revoked_at=None,
+                )
+            )
+            s.add(
+                RoleGrant(
+                    id=deployment_grant_id,
+                    workspace_id=None,
+                    user_id=user_id,
+                    grant_role="manager",
+                    scope_kind="deployment",
+                    scope_property_id=None,
+                    created_at=now,
+                    created_by_user_id=None,
+                    revoked_at=None,
+                )
+            )
+            s.commit()
+
+        result = dev_login.mint_session(
+            email="repair@dev.local",
+            workspace_slug="preexisting",
+            role="owner",
+        )
+        repeated = dev_login.mint_session(
+            email="repair@dev.local",
+            workspace_slug="preexisting",
+            role="owner",
+        )
+
+        assert result.user_created is False
+        assert result.workspace_created is False
+        assert repeated.user_created is False
+        assert repeated.workspace_created is False
+
+        with patched_uow() as s:
+            workspaces = s.scalars(
+                select(Workspace).where(Workspace.slug == "preexisting")
+            ).all()
+            assert [workspace.id for workspace in workspaces] == [workspace_id]
+
+            membership = s.scalars(
+                select(UserWorkspace)
+                .where(UserWorkspace.user_id == user_id)
+                .where(UserWorkspace.workspace_id == workspace_id)
+            ).one()
+            assert membership.source == "workspace_grant"
+
+            live_grants = s.scalars(
+                select(RoleGrant)
+                .where(RoleGrant.user_id == user_id)
+                .where(RoleGrant.workspace_id == workspace_id)
+                .where(RoleGrant.grant_role == "manager")
+                .where(RoleGrant.scope_kind == "workspace")
+                .where(RoleGrant.scope_property_id.is_(None))
+                .where(RoleGrant.revoked_at.is_(None))
+            ).all()
+            assert len(live_grants) == 1
+            assert live_grants[0].id not in {
+                revoked_grant_id,
+                property_grant_id,
+                deployment_grant_id,
+            }
+
+            owners_member = s.scalars(
+                select(PermissionGroupMember)
+                .where(PermissionGroupMember.group_id == owners_group_id)
+                .where(PermissionGroupMember.user_id == user_id)
+            ).one()
+            assert owners_member.workspace_id == workspace_id
 
 
 class TestMintSessionFingerprintWiped:

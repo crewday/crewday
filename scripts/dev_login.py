@@ -274,7 +274,9 @@ def _ensure_role_grant(
             .where(RoleGrant.user_id == user_id)
             .where(RoleGrant.workspace_id == workspace_id)
             .where(RoleGrant.grant_role == grant_role)
+            .where(RoleGrant.scope_kind == "workspace")
             .where(RoleGrant.scope_property_id.is_(None))
+            .where(RoleGrant.revoked_at.is_(None))
         ).one_or_none()
         if existing is not None:
             return
@@ -284,6 +286,7 @@ def _ensure_role_grant(
                 workspace_id=workspace_id,
                 user_id=user_id,
                 grant_role=grant_role,
+                scope_kind="workspace",
                 scope_property_id=None,
                 created_at=now,
                 created_by_user_id=None,
