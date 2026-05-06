@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-rou
 import type { ReactElement } from "react";
 import { fetchJson } from "@/lib/api";
 import { __resetAuthStoreForTests } from "@/auth";
+import { NavHistoryProvider } from "@/context/NavHistoryContext";
 import HistoryPage from "./HistoryPage";
 import MePage from "./MePage";
 
@@ -45,6 +46,12 @@ beforeEach(() => {
     if (path === "/api/v1/history?tab=tasks") {
       return { data: [], next_cursor: null, has_more: false };
     }
+    if (path === "/api/v1/history?tab=chats") {
+      return { data: [], next_cursor: null, has_more: false };
+    }
+    if (path === "/api/v1/history?tab=expenses") {
+      return { data: [], next_cursor: null, has_more: false };
+    }
     throw new Error("Unscripted fetch: " + path);
   });
 });
@@ -64,11 +71,13 @@ function renderProfile(initial = "/me"): ReactElement {
   return (
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[initial]}>
-        <Routes>
-          <Route path="/me" element={<><MePage /><LocationProbe /><BackProbe /></>} />
-          <Route path="/history" element={<><HistoryPage /><LocationProbe /><BackProbe /></>} />
-          <Route path="/login" element={<><span>Login</span><LocationProbe /></>} />
-        </Routes>
+        <NavHistoryProvider>
+          <Routes>
+            <Route path="/me" element={<><MePage /><LocationProbe /><BackProbe /></>} />
+            <Route path="/history" element={<><HistoryPage /><LocationProbe /><BackProbe /></>} />
+            <Route path="/login" element={<><span>Login</span><LocationProbe /></>} />
+          </Routes>
+        </NavHistoryProvider>
       </MemoryRouter>
     </QueryClientProvider>
   );
@@ -79,7 +88,7 @@ function LocationProbe(): ReactElement {
   const state = loc.state as { notice?: unknown } | null;
   return (
     <>
-      <span data-testid="location">{loc.pathname}</span>
+      <span data-testid="location">{loc.pathname + loc.search}</span>
       {typeof state?.notice === "string" && (
         <span data-testid="location-notice">{state.notice}</span>
       )}
@@ -151,6 +160,33 @@ describe("MePage", () => {
     });
     expect(screen.getAllByRole("button", { name: "Change" })).toHaveLength(2);
     expect(screen.getByText("English")).toBeInTheDocument();
+  });
+
+  it("PageHeader NavHistory back skips History query-only tab entries", async () => {
+    render(renderProfile());
+
+    expect(await screen.findByText("Mina Manager")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("link", { name: /Past tasks, chats, expenses, leaves/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/history");
+    });
+
+    fireEvent.click(screen.getByRole("link", { name: "Chats" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/history?tab=chats");
+    });
+
+    fireEvent.click(screen.getByRole("link", { name: "Expenses" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/history?tab=expenses");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/me");
+    });
   });
 
   it("registers another passkey through start, credentials.create, and finish", async () => {

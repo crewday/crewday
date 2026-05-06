@@ -2,53 +2,98 @@ import {
   createContext,
   useContext,
   useEffect,
-  useRef,
+  useMemo,
   useState,
   type ReactNode,
 } from "react";
 import { useLocation, useNavigationType } from "react-router-dom";
 
-// Tracks how many in-app navigations the user has stacked since the
-// page first loaded. The header back button uses this to choose
-// between "navigate(-1)" (real back) and the static parent map
-// (cold-load deep links). Without it, every /task/:id back button
-// goes to /today regardless of where the user came from — see
-// `routeParents.ts`.
+// Tracks in-app navigations since the page first loaded. The header
+// back button uses this to choose between real browser back and the
+// static parent map (cold-load deep links). Without it, every /task/:id
+// back button goes to /today regardless of where the user came from —
+// see `routeParents.ts`.
 //
 // Counts:
-//   PUSH    → +1 (Link click, navigate(to))
-//   POP     → -1 (browser back/forward, navigate(-1))
-//   REPLACE → no-op (Navigate replace, navigate(to, {replace: true}))
+//   PUSH    → append (Link click, navigate(to))
+//   POP     → move to a known entry (browser back/forward, navigate(-1))
+//   REPLACE → replace current entry (Navigate replace, navigate(to, {replace: true}))
 //
-// The very first location event is always POP (initial mount); we
-// skip it via the `initialised` ref so depth starts at 0.
+// Query-only same-path entries stay in the local stack so the header
+// can skip them in one browser-history pop instead of walking through
+// tabs or filters.
 interface NavHistoryValue {
   canGoBack: boolean;
+  backDelta: number | null;
 }
 
-const Ctx = createContext<NavHistoryValue>({ canGoBack: false });
+interface NavEntry {
+  key: string;
+  pathname: string;
+}
+
+interface NavStack {
+  entries: NavEntry[];
+  index: number;
+}
+
+const Ctx = createContext<NavHistoryValue>({ canGoBack: false, backDelta: null });
 
 export function NavHistoryProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
   const navType = useNavigationType();
-  const [depth, setDepth] = useState(0);
-  const initialised = useRef(false);
+  const [stack, setStack] = useState<NavStack>(() => ({
+    entries: [entryFromLocation(location)],
+    index: 0,
+  }));
 
   useEffect(() => {
-    if (!initialised.current) {
-      initialised.current = true;
-      return;
-    }
-    if (navType === "PUSH") {
-      setDepth((d) => d + 1);
-    } else if (navType === "POP") {
-      setDepth((d) => Math.max(0, d - 1));
-    }
-  }, [location.key, navType]);
+    const entry = entryFromLocation(location);
+    setStack((current) => {
+      if (navType === "PUSH") {
+        return {
+          entries: [...current.entries.slice(0, current.index + 1), entry],
+          index: current.index + 1,
+        };
+      }
 
-  return <Ctx.Provider value={{ canGoBack: depth > 0 }}>{children}</Ctx.Provider>;
+      if (navType === "REPLACE") {
+        const entries = [...current.entries];
+        entries[current.index] = entry;
+        return { entries, index: current.index };
+      }
+
+      const index = current.entries.findIndex((item) => item.key === entry.key);
+      if (index === -1 || index === current.index) return current;
+      return { entries: current.entries, index };
+    });
+  }, [location, navType]);
+
+  const backDelta = useMemo(() => previousPathnameDelta(stack), [stack]);
+
+  return (
+    <Ctx.Provider value={{ canGoBack: stack.index > 0, backDelta }}>
+      {children}
+    </Ctx.Provider>
+  );
 }
 
 export function useNavHistory(): NavHistoryValue {
   return useContext(Ctx);
+}
+
+function entryFromLocation(location: ReturnType<typeof useLocation>): NavEntry {
+  return { key: location.key, pathname: location.pathname };
+}
+
+function previousPathnameDelta(stack: NavStack): number | null {
+  const current = stack.entries[stack.index];
+  if (!current) return null;
+
+  for (let index = stack.index - 1; index >= 0; index -= 1) {
+    if (stack.entries[index]?.pathname !== current.pathname) {
+      return stack.index - index;
+    }
+  }
+  return null;
 }

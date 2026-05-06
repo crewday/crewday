@@ -32,7 +32,7 @@ export default function PageHeader({ title, sub, actions, overflow, back }: Prop
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const shellNav = useShellNav();
-  const { canGoBack } = useNavHistory();
+  const { backDelta } = useNavHistory();
 
   const resolved: ParentDescriptor | null =
     back === false
@@ -46,28 +46,29 @@ export default function PageHeader({ title, sub, actions, overflow, back }: Prop
   const showHamburger = !resolved && Boolean(shellNav?.hasDrawer);
 
   // When the user actually navigated here in-app, "back" should pop
-  // the SPA history stack (so /schedule → /task/:id → back lands on
-  // /schedule, not the static /today fallback). The static parent
-  // map only kicks in for cold-load deep links (canGoBack=false) or
-  // when the caller passed an explicit `back` override.
-  const useHistoryBack = resolved !== null && canGoBack && back === undefined;
+  // to the previous different pathname (so /schedule → /task/:id →
+  // back lands on /schedule, while /history tab changes do not walk
+  // through query-only entries). The static parent map only kicks in
+  // for cold-load deep links or when the caller passed an explicit
+  // `back` override.
+  const historyBackDelta = resolved !== null && back === undefined ? backDelta : null;
 
   const hasOverflow = Boolean(overflow && overflow.length > 0);
 
   return (
     <header className="page-topbar">
       <div className="page-topbar__leading">
-        {resolved && useHistoryBack && (
+        {resolved && historyBackDelta !== null && (
           <button
             type="button"
-            onClick={() => navigate(-1)}
+            onClick={() => navigate(-historyBackDelta)}
             className="page-topbar__icon-btn"
             aria-label="Back"
           >
             <ChevronLeft size={22} strokeWidth={2} aria-hidden="true" />
           </button>
         )}
-        {resolved && !useHistoryBack && (
+        {resolved && historyBackDelta === null && (
           <Link
             to={resolved.to}
             className="page-topbar__icon-btn"
