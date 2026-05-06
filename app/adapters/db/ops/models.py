@@ -5,6 +5,8 @@ workspace schema:
 
 * :class:`WorkerHeartbeat` — one row per named background worker,
   bumped every 30 s, read by ``/readyz``.
+* :class:`AdminAgentChatMessage` — deployment-admin embedded agent
+  transcript rows, scoped to the admin caller rather than a workspace.
 * :class:`IdempotencyKey` — the persisted replay cache for the
   ``Idempotency-Key`` middleware (spec §12 "Idempotency"). Keyed by
   ``(token_id, key)``; a TTL sweep deletes rows older than 24 h.
@@ -30,6 +32,7 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     Float,
+    ForeignKey,
     Index,
     Integer,
     LargeBinary,
@@ -40,8 +43,14 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
+from app.adapters.db.identity import models as _identity_models  # noqa: F401
 
-__all__ = ["IdempotencyKey", "RateLimitBucket", "WorkerHeartbeat"]
+__all__ = [
+    "AdminAgentChatMessage",
+    "IdempotencyKey",
+    "RateLimitBucket",
+    "WorkerHeartbeat",
+]
 
 
 class WorkerHeartbeat(Base):
@@ -87,6 +96,40 @@ class WorkerHeartbeat(Base):
 
     __table_args__ = (
         UniqueConstraint("worker_name", name="uq_worker_heartbeat_worker_name"),
+    )
+
+
+class AdminAgentChatMessage(Base):
+    """Deployment-scoped transcript row for the `/admin` agent sidebar.
+
+    Workspace ``ChatChannel`` / ``ChatMessage`` rows require a
+    ``workspace_id`` and therefore cannot represent the deployment
+    admin shell. This table stores the current admin's transcript,
+    the page-context header that shaped the turn, and enough author
+    metadata to project the shared ``AgentSidebar`` message shape.
+    """
+
+    __tablename__ = "admin_agent_chat_message"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    admin_user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    body_md: Mapped[str] = mapped_column(String, nullable=False)
+    page_context: Mapped[str] = mapped_column(String, nullable=False, default="")
+    author_label: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+
+    __table_args__ = (
+        Index(
+            "ix_admin_agent_chat_message_user_created",
+            "admin_user_id",
+            "created_at",
+            "id",
+        ),
     )
 
 
