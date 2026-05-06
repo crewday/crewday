@@ -4,7 +4,7 @@ Exercises ``request → verify → passkey/start → passkey/finish``
 against a real engine (SQLite by default; Postgres when
 ``CREWDAY_TEST_DB=postgres``) driving the FastAPI router with a stub
 mailer that captures the magic-link URL and a stub passkey verifier
-that produces a deterministic credential.
+that produces a test credential.
 
 The flow must, in one happy path:
 
@@ -118,10 +118,10 @@ def _stub_passkey_verifier(
 ) -> bytes:
     """Patch :func:`app.auth.passkey._verify_or_raise` with a stub.
 
-    Returns the deterministic credential id the stub produces, so
+    Returns the credential id the stub produces, so
     tests can assert the persisted passkey row carries it.
     """
-    credential_id = b"recovery-cred-" + b"x" * 18
+    credential_id = f"recovery-cred-{new_ulid()}".encode("ascii")
     verified = VerifiedRegistration(
         credential_id=credential_id,
         credential_public_key=b"pub-" + b"\x00" * 60,

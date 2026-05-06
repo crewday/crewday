@@ -52,6 +52,7 @@ See ``docs/specs/04-properties-and-stays.md`` §"iCal feed",
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -709,7 +710,7 @@ def _raise_for_duplicate_feed(
     for row in session.scalars(stmt):
         try:
             existing_url = envelope.decrypt(
-                row.url.encode("latin-1"),
+                _str_to_ciphertext(row.url),
                 purpose=_URL_PURPOSE,
                 expected_owner=_owner_for_feed(row.id),
             ).decode("utf-8")
@@ -719,19 +720,21 @@ def _raise_for_duplicate_feed(
             raise IcalFeedDuplicate(canonical_url)
 
 
+_CIPHERTEXT_B64_PREFIX = "b64:"
+
+
 def _ciphertext_to_str(ciphertext: bytes) -> str:
     """Encode ciphertext bytes for the ``ical_feed.url`` TEXT column.
 
     The column is TEXT (v1 slice — §02 ``secret_envelope`` carries
     the canonical bytes; the inline blob lives here for back-compat).
-    We latin-1 encode the raw bytes, which is the canonical "1:1
-    byte-to-codepoint" text mapping — every byte value ``0..255``
-    maps to exactly one Unicode codepoint so round-tripping through
-    TEXT is lossless. cd-znv4 row-backed pointers are short ASCII
-    (``0x02 || ULID``) so the encoding is identity-on-the-wire for
-    the new format too.
+    New writes use prefixed base64 so the value is portable across
+    SQLite and Postgres TEXT columns. Older rows used latin-1 as a
+    1:1 byte-to-codepoint mapping; :func:`_str_to_ciphertext` keeps
+    that legacy shape readable.
     """
-    return ciphertext.decode("latin-1")
+    encoded = base64.b64encode(ciphertext).decode("ascii")
+    return f"{_CIPHERTEXT_B64_PREFIX}{encoded}"
 
 
 def _owner_for_feed(feed_id: str) -> EnvelopeOwner:
@@ -749,6 +752,12 @@ def _owner_for_feed(feed_id: str) -> EnvelopeOwner:
 
 def _str_to_ciphertext(stored: str) -> bytes:
     """Inverse of :func:`_ciphertext_to_str`."""
+    if stored.startswith(_CIPHERTEXT_B64_PREFIX):
+        encoded = stored.removeprefix(_CIPHERTEXT_B64_PREFIX)
+        try:
+            return base64.b64decode(encoded.encode("ascii"), validate=True)
+        except ValueError, UnicodeEncodeError:
+            pass
     return stored.encode("latin-1")
 
 

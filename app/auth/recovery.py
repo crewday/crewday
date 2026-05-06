@@ -185,6 +185,7 @@ _SELF_SERVICE_RECOVERY_KEY: Final[str] = "auth.self_service_recovery_enabled"
 # not be able to distinguish "known user, operator disabled recovery"
 # from the normal hit branch by latency (§15 self-service mitigations).
 _KILL_SWITCH_SYNTHETIC_DELAY_SECONDS: Final[float] = 0.020
+_KILL_SWITCH_HIT_BRANCH_OVERHEAD_SECONDS: Final[float] = 0.004
 _KILL_SWITCH_MAX_SYNTHETIC_DELAY_SECONDS: Final[float] = 0.050
 
 
@@ -642,7 +643,10 @@ def _burn_cpu_for_stepup_refusal(pepper: bytes) -> None:
 def _delay_kill_switch_recovery_response(*, started_at_ns: int) -> None:
     """Pad kill-switch recovery latency into the normal hit-branch band."""
     elapsed_seconds = (time.perf_counter_ns() - started_at_ns) / 1_000_000_000
-    remaining = _KILL_SWITCH_SYNTHETIC_DELAY_SECONDS - elapsed_seconds
+    target_seconds = (
+        _KILL_SWITCH_SYNTHETIC_DELAY_SECONDS + _KILL_SWITCH_HIT_BRANCH_OVERHEAD_SECONDS
+    )
+    remaining = target_seconds - elapsed_seconds
     if remaining <= 0:
         return
     time.sleep(min(remaining, _KILL_SWITCH_MAX_SYNTHETIC_DELAY_SECONDS))

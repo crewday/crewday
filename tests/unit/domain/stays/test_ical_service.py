@@ -44,7 +44,6 @@ from app.adapters.ical.ports import (
     IcalValidation,
     IcalValidationError,
 )
-from app.adapters.storage.ports import EnvelopeOwner
 from app.domain.stays.ical_service import (
     IcalFeedCreate,
     IcalFeedNotFound,
@@ -274,7 +273,7 @@ class TestRegister:
         # One DB row landed, encrypted, not plaintext.
         row = session_stays.scalars(select(IcalFeed)).one()
         assert row.url != "https://www.airbnb.com/ical/abc.ics"
-        assert row.url.startswith("fake-envelope::ical-feed-url::")
+        assert row.url.startswith("b64:")
         assert row.enabled is True
         # Audit row written. The path-stripping happens at the domain
         # layer (``view.url_preview`` is host-only by construction in
@@ -581,12 +580,13 @@ class TestUpdate:
         # Row's ciphertext now decrypts to the new URL.
         row = session_stays.get(IcalFeed, feed_id)
         assert row is not None
-        plain = envelope.decrypt(
-            row.url.encode("latin-1"),
-            purpose="ical-feed-url",
-            expected_owner=EnvelopeOwner(kind="ical_feed", id=feed_id),
+        plain = get_plaintext_url(
+            session_stays,
+            ctx,
+            feed_id=feed_id,
+            envelope=envelope,
         )
-        assert plain == new_url.encode("utf-8")
+        assert plain == new_url
 
     def test_update_override_only_skips_probe(
         self,
@@ -720,12 +720,13 @@ class TestUpdate:
         row_after = session_stays.get(IcalFeed, feed_id)
         assert row_after is not None
         assert row_after.url == ciphertext_before
-        decrypted = envelope.decrypt(
-            row_after.url.encode("latin-1"),
-            purpose="ical-feed-url",
-            expected_owner=EnvelopeOwner(kind="ical_feed", id=feed_id),
+        decrypted = get_plaintext_url(
+            session_stays,
+            ctx,
+            feed_id=feed_id,
+            envelope=envelope,
         )
-        assert decrypted == original_url.encode("utf-8")
+        assert decrypted == original_url
 
 
 # ---------------------------------------------------------------------------

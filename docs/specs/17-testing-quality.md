@@ -187,6 +187,11 @@ comment).
   because the remaining identity surface includes one-time auth
   ceremonies, signed cursors, multipart avatar upload, and seeded-FK
   flows that need narrower fixtures before the full tag can run.
+- The default coding-session gate uses one fuzzing example per
+  operation (`SCHEMATHESIS_MAX_EXAMPLES=1`) because Schemathesis'
+  coverage phase already generates thousands of boundary and negative
+  cases across the curated scope. Set `SCHEMATHESIS_MAX_EXAMPLES`
+  explicitly for a deeper sweep when investigating a contract change.
 
 ## End-to-end
 

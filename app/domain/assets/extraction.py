@@ -36,6 +36,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Enum,
     Integer,
     MetaData,
     String,
@@ -141,6 +142,32 @@ class FileExtractionRecord:
 # returns at most this many leading characters. The full ``body_text``
 # stays on the row for ``GET /extraction/pages/{n}`` to slice.
 _BODY_PREVIEW_CHARS: Final[int] = 4000
+_FILE_EXTRACTION_STATUS_VALUES: Final[tuple[str, ...]] = (
+    "pending",
+    "extracting",
+    "succeeded",
+    "failed",
+    "unsupported",
+    "empty",
+)
+_FILE_EXTRACTION_EXTRACTOR_VALUES: Final[tuple[str, ...]] = (
+    "passthrough",
+    "pdf",
+    "docx",
+    "ocr",
+)
+_FILE_EXTRACTION_STATUS_ENUM = Enum(
+    *_FILE_EXTRACTION_STATUS_VALUES,
+    name="file_extraction_status",
+    native_enum=True,
+    create_constraint=False,
+)
+_FILE_EXTRACTION_EXTRACTOR_ENUM = Enum(
+    *_FILE_EXTRACTION_EXTRACTOR_VALUES,
+    name="file_extraction_extractor",
+    native_enum=True,
+    create_constraint=False,
+)
 
 _METADATA = MetaData()
 _FILE_EXTRACTION = Table(
@@ -148,8 +175,8 @@ _FILE_EXTRACTION = Table(
     _METADATA,
     Column("id", String),
     Column("workspace_id", String),
-    Column("extraction_status", String),
-    Column("extractor", String),
+    Column("extraction_status", _FILE_EXTRACTION_STATUS_ENUM),
+    Column("extractor", _FILE_EXTRACTION_EXTRACTOR_ENUM),
     Column("body_text", String),
     Column("pages_json", JSON),
     Column("token_count", Integer),

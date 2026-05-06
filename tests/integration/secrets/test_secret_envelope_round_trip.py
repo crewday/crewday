@@ -15,8 +15,9 @@ session bound to the test backend (SQLite by default; PG when
   :class:`KeyFingerprintMismatch` with the §15 actionable message
   shape when the operator restores under the wrong root key.
 * iCal feed migration (cd-1ai consumer): ``register_feed`` lands a
-  row-backed ``0x02`` blob in ``ical_feed.url``; the matching
-  ``secret_envelope`` row carries ``owner_entity_kind='ical_feed'``.
+  Postgres-safe text encoding of a row-backed ``0x02`` blob in
+  ``ical_feed.url``; the matching ``secret_envelope`` row carries
+  ``owner_entity_kind='ical_feed'``.
 
 The schema test is implicit: the cd-znv4 migration ran via
 ``migrate_once``; if the table doesn't exist the insert below
@@ -28,6 +29,7 @@ See ``docs/specs/15-security-privacy.md`` §"Secret envelope" /
 
 from __future__ import annotations
 
+import base64
 from datetime import UTC, datetime
 
 import pytest
@@ -262,10 +264,12 @@ class TestIcalFeedMigration:
             clock=FrozenClock(_PINNED),
         )
 
-        # Stored URL is a row-backed pointer-tagged blob.
+        # Stored URL is a Postgres-safe text encoding of a row-backed
+        # pointer-tagged blob.
         feed = db_session.get(IcalFeed, view.id)
         assert feed is not None
-        stored_blob = feed.url.encode("latin-1")
+        assert feed.url.startswith("b64:")
+        stored_blob = base64.b64decode(feed.url.removeprefix("b64:"), validate=True)
         assert stored_blob[0] == 0x02
 
         # Matching secret_envelope row landed.
@@ -386,10 +390,11 @@ class TestIcalFeedMigration:
             clock=FrozenClock(_PINNED),
         )
 
-        # The stored URL is now a 0x02 pointer.
+        # The stored URL is now a text-encoded 0x02 pointer.
         feed = db_session.get(IcalFeed, feed_id)
         assert feed is not None
-        stored_blob = feed.url.encode("latin-1")
+        assert feed.url.startswith("b64:")
+        stored_blob = base64.b64decode(feed.url.removeprefix("b64:"), validate=True)
         assert stored_blob[0] == 0x02
 
         # And a matching secret_envelope row exists, owned by this feed.
