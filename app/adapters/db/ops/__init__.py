@@ -18,6 +18,7 @@ See ``docs/specs/16-deployment-operations.md`` §"Healthchecks" and
 from __future__ import annotations
 
 from app.adapters.db.ops.models import (
+    AdminAgentAction,
     AdminAgentChatMessage,
     IdempotencyKey,
     RateLimitBucket,
@@ -25,6 +26,7 @@ from app.adapters.db.ops.models import (
 )
 
 __all__ = [
+    "AdminAgentAction",
     "AdminAgentChatMessage",
     "IdempotencyKey",
     "RateLimitBucket",

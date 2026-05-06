@@ -31,6 +31,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    CheckConstraint,
     Float,
     ForeignKey,
     Index,
@@ -46,6 +47,7 @@ from app.adapters.db.base import Base
 from app.adapters.db.identity import models as _identity_models  # noqa: F401
 
 __all__ = [
+    "AdminAgentAction",
     "AdminAgentChatMessage",
     "IdempotencyKey",
     "RateLimitBucket",
@@ -129,6 +131,67 @@ class AdminAgentChatMessage(Base):
             "admin_user_id",
             "created_at",
             "id",
+        ),
+    )
+
+
+class AdminAgentAction(Base):
+    """Deployment-scoped gated action proposed by the `/admin` agent."""
+
+    __tablename__ = "admin_agent_action"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    requested_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    requested_by_token_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    for_user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    resolved_payload_json: Mapped[Any] = mapped_column(JSON, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String, nullable=False)
+    state: Mapped[str] = mapped_column(String, nullable=False)
+    gate_source: Mapped[str] = mapped_column(String, nullable=False)
+    card_summary: Mapped[str] = mapped_column(String, nullable=False)
+    card_risk: Mapped[str] = mapped_column(String, nullable=False)
+    card_fields_json: Mapped[Any] = mapped_column(JSON, nullable=False)
+    inline_channel: Mapped[str] = mapped_column(String, nullable=False)
+    page_context: Mapped[str] = mapped_column(String, nullable=False, default="")
+    decided_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    decided_by_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    decision_note_md: Mapped[str | None] = mapped_column(String, nullable=True)
+    executed_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    result_json: Mapped[Any | None] = mapped_column(JSON, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('pending', 'rejected', 'executed')",
+            name="ck_admin_agent_action_state",
+        ),
+        CheckConstraint(
+            "card_risk IN ('low', 'medium', 'high')",
+            name="ck_admin_agent_action_card_risk",
+        ),
+        CheckConstraint(
+            "inline_channel IN ('desk_only', 'web_admin_sidebar')",
+            name="ck_admin_agent_action_inline_channel",
+        ),
+        Index(
+            "ix_admin_agent_action_pending_user_channel",
+            "for_user_id",
+            "state",
+            "inline_channel",
+            "requested_at",
+            "id",
+        ),
+        UniqueConstraint(
+            "idempotency_key",
+            name="uq_admin_agent_action_idempotency_key",
         ),
     )
 

@@ -3,19 +3,32 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.adapters.db.ops.models import AdminAgentAction as AdminAgentActionRow
 from app.adapters.db.ops.models import AdminAgentChatMessage as AdminAgentMessageRow
 from app.api.admin._audit import audit_admin
 from app.api.admin.deps import current_deployment_admin_principal
 from app.api.deps import db_session
 from app.api.transport import admin_sse
-from app.domain.errors import NotFound
+from app.domain.agent.runtime import (
+    DelegatedToken,
+    ToolCall,
+    ToolDispatcher,
+    ToolResult,
+)
+from app.domain.errors import (
+    Conflict,
+    Forbidden,
+    NotFound,
+    ServiceUnavailable,
+    Validation,
+)
 from app.tenancy import DeploymentContext, tenant_agnostic
 from app.util.ulid import new_ulid
 
@@ -34,6 +47,7 @@ _Ctx = Annotated[DeploymentContext, Depends(current_deployment_admin_principal)]
 _ADMIN_INLINE_CHANNEL: Literal["web_admin_sidebar"] = "web_admin_sidebar"
 _ADMIN_AGENT_CAPABILITY: Literal["chat.admin"] = "chat.admin"
 _ADMIN_AGENT_CHANNEL: Literal["web_admin_sidebar"] = "web_admin_sidebar"
+_ADMIN_DECIDED_STATES: frozenset[str] = frozenset({"rejected", "executed"})
 
 
 class AdminAgentMessageRequest(BaseModel):
@@ -83,6 +97,37 @@ class AdminAgentDecisionResponse(BaseModel):
     """Mutation response shape used by ``AgentSidebar``."""
 
     ok: Literal[True]
+
+
+class AdminAgentActionNotPending(Conflict):
+    """The admin action row already has a terminal decision."""
+
+    title = "Admin agent action no longer pending"
+    type_name = "admin_agent_action_not_pending"
+
+    def __init__(self, action_id: str, *, state: str) -> None:
+        super().__init__(
+            f"admin agent action {action_id!r} is in state {state!r}",
+            extra={
+                "error": "admin_agent_action_not_pending",
+                "id": action_id,
+                "state": state,
+            },
+        )
+
+
+class AdminAgentApprovalRequiresSession(Forbidden):
+    """Admin action decisions must come from a human session."""
+
+    title = "Approval requires session credential"
+    type_name = "approval_requires_session"
+
+
+class AdminAgentActionReplayFailed(ServiceUnavailable):
+    """The recorded admin action could not be replayed successfully."""
+
+    title = "Admin agent action replay failed"
+    type_name = "admin_agent_action_replay_failed"
 
 
 def build_admin_agent_router() -> APIRouter:
@@ -161,11 +206,21 @@ def build_admin_agent_router() -> APIRouter:
         operation_id="admin.agent.actions.list",
     )
     def get_actions(ctx: _Ctx, session: _Db) -> list[AdminAgentAction]:
-        # There is not yet a deployment-scoped executable action model.
-        # Returning no cards is the safe state: the UI cannot approve an
-        # action that the server cannot replay.
-        _ = (ctx, session)
-        return []
+        # justification: deployment-admin action rows are not workspace-scoped.
+        with tenant_agnostic():
+            rows = session.scalars(
+                select(AdminAgentActionRow)
+                .where(
+                    AdminAgentActionRow.for_user_id == ctx.user_id,
+                    AdminAgentActionRow.state == "pending",
+                    AdminAgentActionRow.inline_channel == _ADMIN_INLINE_CHANNEL,
+                )
+                .order_by(
+                    AdminAgentActionRow.requested_at.asc(),
+                    AdminAgentActionRow.id.asc(),
+                )
+            ).all()
+        return [_action_payload(row) for row in rows]
 
     @router.post(
         "/action/{action_id}/approve",
@@ -184,7 +239,6 @@ def build_admin_agent_router() -> APIRouter:
             ctx=ctx,
             session=session,
             status_value="approved",
-            audit_action="admin_agent.action.approved",
         )
 
     @router.post(
@@ -204,7 +258,6 @@ def build_admin_agent_router() -> APIRouter:
             ctx=ctx,
             session=session,
             status_value="rejected",
-            audit_action="admin_agent.action.denied",
         )
 
     return router
@@ -217,10 +270,237 @@ def _decide_action(
     ctx: DeploymentContext,
     session: Session,
     status_value: Literal["approved", "rejected"],
-    audit_action: str,
 ) -> AdminAgentDecisionResponse:
-    _ = (request, ctx, session, status_value, audit_action)
-    raise NotFound(extra={"error": "admin_agent_action_not_found", "id": action_id})
+    _require_human_decider(ctx, action_id=action_id)
+    # justification: deployment-admin action rows are not workspace-scoped.
+    with tenant_agnostic():
+        row = session.get(AdminAgentActionRow, action_id)
+        if row is None or row.for_user_id != ctx.user_id:
+            raise NotFound(
+                extra={"error": "admin_agent_action_not_found", "id": action_id}
+            )
+        if status_value == "approved":
+            _approve_action_row(row, request=request, ctx=ctx, session=session)
+        else:
+            _deny_action_row(row, request=request, ctx=ctx, session=session)
+    return AdminAgentDecisionResponse(ok=True)
+
+
+def _require_human_decider(ctx: DeploymentContext, *, action_id: str) -> None:
+    if ctx.actor_kind == "user":
+        return
+    raise AdminAgentApprovalRequiresSession(
+        "admin action decisions must be submitted under a passkey session",
+        extra={
+            "error": "approval_requires_session",
+            "id": action_id,
+            "credential_kind": ctx.actor_kind,
+            "token_id": ctx.principal,
+        },
+    )
+
+
+def _approve_action_row(
+    row: AdminAgentActionRow,
+    *,
+    request: Request,
+    ctx: DeploymentContext,
+    session: Session,
+) -> None:
+    if row.state == "executed":
+        return
+    if row.state in _ADMIN_DECIDED_STATES:
+        raise AdminAgentActionNotPending(row.id, state=row.state)
+
+    dispatcher = _get_tool_dispatcher(request)
+    tool_call = _tool_call_from_row(row)
+    result = dispatcher.dispatch(
+        tool_call,
+        token=_replay_token(),
+        headers=_replay_headers(ctx, row),
+    )
+    if result.status_code >= 400:
+        raise AdminAgentActionReplayFailed(
+            "admin action replay failed",
+            extra={
+                "error": "admin_agent_action_replay_failed",
+                "id": row.id,
+                "result_status_code": result.status_code,
+                "result_body": result.body,
+            },
+        )
+    decided_at = _now_utc()
+    row.state = "executed"
+    row.decided_at = decided_at
+    row.decided_by_user_id = ctx.user_id
+    row.executed_at = decided_at
+    row.result_json = _result_to_json(result)
+    audit_admin(
+        session,
+        ctx=ctx,
+        request=request,
+        entity_kind="admin_agent_action",
+        entity_id=row.id,
+        action="admin_agent.action.approved",
+        diff={
+            "decision": "approved",
+            "action": row.action,
+            "for_user_id": row.for_user_id,
+            "requested_by_token_id": row.requested_by_token_id,
+            "idempotency_key": row.idempotency_key,
+            "result_status_code": result.status_code,
+            "result_mutated": result.mutated,
+            "page": _page_context(request, row),
+        },
+    )
+
+
+def _deny_action_row(
+    row: AdminAgentActionRow,
+    *,
+    request: Request,
+    ctx: DeploymentContext,
+    session: Session,
+) -> None:
+    if row.state in _ADMIN_DECIDED_STATES:
+        raise AdminAgentActionNotPending(row.id, state=row.state)
+    row.state = "rejected"
+    row.decided_at = _now_utc()
+    row.decided_by_user_id = ctx.user_id
+    audit_admin(
+        session,
+        ctx=ctx,
+        request=request,
+        entity_kind="admin_agent_action",
+        entity_id=row.id,
+        action="admin_agent.action.denied",
+        diff={
+            "decision": "denied",
+            "action": row.action,
+            "for_user_id": row.for_user_id,
+            "requested_by_token_id": row.requested_by_token_id,
+            "idempotency_key": row.idempotency_key,
+            "page": _page_context(request, row),
+        },
+    )
+
+
+def _get_tool_dispatcher(request: Request) -> ToolDispatcher:
+    dispatcher: ToolDispatcher | None = getattr(
+        request.app.state, "tool_dispatcher", None
+    )
+    if dispatcher is None:
+        message = "admin action replay requires a configured ToolDispatcher"
+        raise ServiceUnavailable(
+            message,
+            extra={"error": "dispatcher_not_configured", "message": message},
+        )
+    return dispatcher
+
+
+def _tool_call_from_row(row: AdminAgentActionRow) -> ToolCall:
+    payload = row.resolved_payload_json
+    if not isinstance(payload, dict):
+        raise Validation(
+            "admin action payload must be a JSON object",
+            extra={"error": "admin_agent_action_payload_invalid", "id": row.id},
+        )
+    call_id = row.idempotency_key
+    tool_input: dict[str, object]
+    if isinstance(payload.get("tool_input"), dict):
+        tool_input = dict(payload["tool_input"])
+        raw_call_id = payload.get("tool_call_id")
+        if isinstance(raw_call_id, str):
+            call_id = raw_call_id
+    else:
+        tool_input = dict(payload)
+    return ToolCall(id=call_id, name=row.action, input=tool_input)
+
+
+def _replay_token() -> DelegatedToken:
+    return DelegatedToken(
+        plaintext=f"mip_ADMIN_REPLAY_{new_ulid()}",
+        token_id=new_ulid(),
+    )
+
+
+def _replay_headers(
+    ctx: DeploymentContext,
+    row: AdminAgentActionRow,
+) -> dict[str, str]:
+    return {
+        "Idempotency-Key": row.idempotency_key,
+        "X-Agent-Channel": _ADMIN_AGENT_CHANNEL,
+        "X-Agent-Page": row.page_context,
+        "X-Crewday-Replay": "1",
+        "X-Crewday-Replay-Actor-Id": ctx.user_id,
+    }
+
+
+def _result_to_json(result: ToolResult) -> dict[str, Any]:
+    return {
+        "status_code": result.status_code,
+        "mutated": result.mutated,
+        "body": result.body,
+    }
+
+
+def _page_context(request: Request, row: AdminAgentActionRow) -> str:
+    page = request.headers.get("X-Agent-Page")
+    if page is not None:
+        return page
+    return row.page_context
+
+
+def _action_payload(row: AdminAgentActionRow) -> AdminAgentAction:
+    card_fields: list[tuple[str, str]] = []
+    raw_fields = row.card_fields_json
+    if isinstance(raw_fields, dict):
+        card_fields = [(str(key), str(value)) for key, value in raw_fields.items()]
+    elif isinstance(raw_fields, list):
+        for item in raw_fields:
+            if (
+                isinstance(item, (list, tuple))
+                and len(item) == 2
+                and item[0] is not None
+                and item[1] is not None
+            ):
+                card_fields.append((str(item[0]), str(item[1])))
+    return AdminAgentAction(
+        id=row.id,
+        title=row.card_summary,
+        detail=row.card_summary,
+        risk=_risk(row.card_risk),
+        card_summary=row.card_summary,
+        card_fields=card_fields,
+        gate_source=_gate_source(row.gate_source),
+        inline_channel=_ADMIN_INLINE_CHANNEL,
+    )
+
+
+def _risk(value: str) -> Literal["low", "medium", "high"]:
+    if value == "medium":
+        return "medium"
+    if value == "high":
+        return "high"
+    return "low"
+
+
+def _gate_source(
+    value: str,
+) -> Literal[
+    "workspace_always",
+    "workspace_configurable",
+    "user_auto_annotation",
+    "user_strict_mutation",
+]:
+    if value == "workspace_configurable":
+        return "workspace_configurable"
+    if value == "user_auto_annotation":
+        return "user_auto_annotation"
+    if value == "user_strict_mutation":
+        return "user_strict_mutation"
+    return "workspace_always"
 
 
 def _message_payload(row: AdminAgentMessageRow) -> AdminAgentMessage:
