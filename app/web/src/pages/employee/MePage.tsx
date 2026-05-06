@@ -1,7 +1,15 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { Link, useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil } from "lucide-react";
+import {
+  PasskeyCancelledError,
+  PasskeyTimeoutError,
+  PasskeyTransientError,
+  PasskeyUnsupportedError,
+} from "@/auth";
+import { runAuthenticatedPasskeyRegisterCeremony } from "@/auth/passkey-register";
+import { setUnauthenticated } from "@/auth/authStore";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { fmtDate } from "@/lib/dates";
@@ -21,9 +29,17 @@ const LANG_LABEL: Record<string, string> = {
   pt: "Português",
 };
 
+type PasskeyRegisterState =
+  | { kind: "idle" }
+  | { kind: "pending" }
+  | { kind: "error"; message: string };
+
 export default function MePage() {
   // code-health: ignore[nloc] Profile page is declarative settings composition with no reusable logic left to extract.
   const [editorOpen, setEditorOpen] = useState(false);
+  const [passkeyRegister, setPasskeyRegister] = useState<PasskeyRegisterState>({ kind: "idle" });
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const me = useQuery({
     queryKey: qk.me(),
@@ -43,6 +59,25 @@ export default function MePage() {
 
   const { employee } = me.data;
   const langLabel = LANG_LABEL[employee.language] ?? employee.language;
+  const registerPending = passkeyRegister.kind === "pending";
+
+  async function onRegisterPasskey(): Promise<void> {
+    if (registerPending) return;
+    setPasskeyRegister({ kind: "pending" });
+    try {
+      await runAuthenticatedPasskeyRegisterCeremony();
+      queryClient.clear();
+      setUnauthenticated();
+      navigate("/login", {
+        replace: true,
+        state: {
+          notice: "Passkey registered. For your security, all sessions were signed out. Sign in again to continue.",
+        },
+      });
+    } catch (err) {
+      setPasskeyRegister({ kind: "error", message: messageForPasskeyRegisterError(err) });
+    }
+  }
 
   return (
     <section className="me-page">
@@ -133,8 +168,19 @@ export default function MePage() {
               re-enrolling on a new device revokes the rest automatically.
             </p>
           </div>
-          <button className="btn btn--moss btn--sm" type="button">+ Register another device</button>
+          <button
+            className="btn btn--moss btn--sm"
+            type="button"
+            onClick={() => { void onRegisterPasskey(); }}
+            disabled={registerPending}
+            aria-busy={registerPending}
+          >
+            {registerPending ? "Registering…" : "+ Register another device"}
+          </button>
         </header>
+        {passkeyRegister.kind === "error" && (
+          <p className="muted" role="alert">{passkeyRegister.message}</p>
+        )}
         <ul className="entry-cards">
           <li className="entry-card">
             <div className="entry-card__head">
@@ -177,4 +223,51 @@ export default function MePage() {
       />
     </section>
   );
+}
+
+function messageForPasskeyRegisterError(err: unknown): string {
+  if (err instanceof PasskeyCancelledError) {
+    return "Passkey prompt closed. Click “+ Register another device” to try again.";
+  }
+  if (err instanceof PasskeyTimeoutError) {
+    return "Your authenticator didn't respond in time. Click “+ Register another device” to try again.";
+  }
+  if (err instanceof PasskeyTransientError) {
+    return "Couldn't reach your authenticator. Wait a moment and try again.";
+  }
+  if (err instanceof PasskeyUnsupportedError) {
+    if (err.kind === "invalid_state") {
+      return "This device already has a passkey registered. Try another device.";
+    }
+    if (err.kind === "security") {
+      return "This browser blocked passkey registration for this site. Use the secure app URL and try again.";
+    }
+    return "This browser or device can't register passkeys. Try another browser or device.";
+  }
+
+  const apiError = apiErrorStatus(err);
+  if (apiError?.status === 422 && apiError.error === "too_many_passkeys") {
+    return "You already have the maximum 5 passkeys. Remove one before registering another device.";
+  }
+  if (apiError?.status === 429) {
+    return "Too many register attempts. Wait a minute and try again.";
+  }
+  if (apiError?.detail) return apiError.detail;
+  return "We couldn't finish registering your passkey. Try again in a moment.";
+}
+
+function apiErrorStatus(err: unknown): { status: number; error: string | null; detail: string | null } | null {
+  if (!err || typeof err !== "object") return null;
+  const record = err as Record<string, unknown>;
+  if (typeof record.status !== "number") return null;
+  const problem = record.problem;
+  const problemRecord =
+    problem && typeof problem === "object" && !Array.isArray(problem)
+      ? problem as Record<string, unknown>
+      : null;
+  return {
+    status: record.status,
+    error: typeof problemRecord?.error === "string" ? problemRecord.error : null,
+    detail: typeof problemRecord?.detail === "string" ? problemRecord.detail : null,
+  };
 }

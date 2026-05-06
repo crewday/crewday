@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import type { ReactElement } from "react";
 import { fetchJson } from "@/lib/api";
+import { __resetAuthStoreForTests } from "@/auth";
 import HistoryPage from "./HistoryPage";
 import MePage from "./MePage";
 
@@ -51,6 +52,11 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   fetchJsonMock.mockReset();
+  __resetAuthStoreForTests();
+  Object.defineProperty(navigator, "credentials", {
+    value: undefined,
+    configurable: true,
+  });
 });
 
 function renderProfile(initial = "/me"): ReactElement {
@@ -61,6 +67,7 @@ function renderProfile(initial = "/me"): ReactElement {
         <Routes>
           <Route path="/me" element={<><MePage /><LocationProbe /><BackProbe /></>} />
           <Route path="/history" element={<><HistoryPage /><LocationProbe /><BackProbe /></>} />
+          <Route path="/login" element={<><span>Login</span><LocationProbe /></>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
@@ -69,7 +76,15 @@ function renderProfile(initial = "/me"): ReactElement {
 
 function LocationProbe(): ReactElement {
   const loc = useLocation();
-  return <span data-testid="location">{loc.pathname}</span>;
+  const state = loc.state as { notice?: unknown } | null;
+  return (
+    <>
+      <span data-testid="location">{loc.pathname}</span>
+      {typeof state?.notice === "string" && (
+        <span data-testid="location-notice">{state.notice}</span>
+      )}
+    </>
+  );
 }
 
 function BackProbe(): ReactElement {
@@ -137,4 +152,133 @@ describe("MePage", () => {
     expect(screen.getAllByRole("button", { name: "Change" })).toHaveLength(2);
     expect(screen.getByText("English")).toBeInTheDocument();
   });
+
+  it("registers another passkey through start, credentials.create, and finish", async () => {
+    const events: string[] = [];
+    fetchJsonMock.mockImplementation(async (path: string, opts?: { body?: unknown }) => {
+      if (path === "/api/v1/me") return mePayload();
+      if (path === "/api/v1/auth/passkey/register/start") {
+        events.push("start");
+        return creationOptions();
+      }
+      if (path === "/api/v1/auth/passkey/register/finish") {
+        events.push("finish");
+        expect(opts?.body).toMatchObject({ challenge_id: "ch_1" });
+        expect((opts?.body as { credential?: { rawId?: string } }).credential?.rawId).toBe("qrs");
+        return {
+          credential_id: "cred_new",
+          transports: "internal",
+          backup_eligible: true,
+          aaguid: "00000000-0000-0000-0000-000000000000",
+        };
+      }
+      throw new Error("Unscripted fetch: " + path);
+    });
+    const createSpy = vi.fn(async () => {
+      events.push("create");
+      return fakeCredential();
+    });
+    Object.defineProperty(navigator, "credentials", {
+      value: { create: createSpy },
+      configurable: true,
+    });
+
+    render(renderProfile());
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Register another device" }));
+
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/login"));
+    expect(screen.getByTestId("location-notice")).toHaveTextContent(
+      "Passkey registered. For your security, all sessions were signed out. Sign in again to continue.",
+    );
+    expect(events).toEqual(["start", "create", "finish"]);
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    expect(fetchJsonMock).toHaveBeenCalledWith(
+      "/api/v1/auth/passkey/register/start",
+      { method: "POST", body: {} },
+    );
+    expect(fetchJsonMock).toHaveBeenCalledWith(
+      "/api/v1/auth/passkey/register/finish",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("surfaces a cancelled passkey prompt and re-arms the register button", async () => {
+    fetchJsonMock.mockImplementation(async (path: string) => {
+      if (path === "/api/v1/me") return mePayload();
+      if (path === "/api/v1/auth/passkey/register/start") return creationOptions();
+      throw new Error("Unscripted fetch: " + path);
+    });
+    Object.defineProperty(navigator, "credentials", {
+      value: {
+        create: vi.fn(async () => {
+          throw new DOMException("closed", "NotAllowedError");
+        }),
+      },
+      configurable: true,
+    });
+
+    render(renderProfile());
+
+    const button = await screen.findByRole("button", { name: "+ Register another device" });
+    fireEvent.click(button);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Passkey prompt closed/i);
+    await waitFor(() => expect(button).not.toBeDisabled());
+  });
+
+  it("surfaces structured API passkey errors and re-arms the register button", async () => {
+    fetchJsonMock.mockImplementation(async (path: string) => {
+      if (path === "/api/v1/me") return mePayload();
+      if (path === "/api/v1/auth/passkey/register/start") {
+        throw {
+          status: 422,
+          problem: { error: "too_many_passkeys" },
+        };
+      }
+      throw new Error("Unscripted fetch: " + path);
+    });
+    Object.defineProperty(navigator, "credentials", {
+      value: { create: vi.fn() },
+      configurable: true,
+    });
+
+    render(renderProfile());
+
+    const button = await screen.findByRole("button", { name: "+ Register another device" });
+    fireEvent.click(button);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "You already have the maximum 5 passkeys. Remove one before registering another device.",
+    );
+    await waitFor(() => expect(button).not.toBeDisabled());
+    expect(navigator.credentials?.create).not.toHaveBeenCalled();
+  });
 });
+
+function creationOptions(): unknown {
+  return {
+    challenge_id: "ch_1",
+    options: {
+      challenge: "AQID",
+      rp: { name: "crew.day" },
+      user: { id: "AQID", name: "mina@example.test", displayName: "Mina Manager" },
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+    },
+  };
+}
+
+function fakeCredential(): Credential {
+  return {
+    id: "cred_new",
+    rawId: new Uint8Array([0xaa, 0xbb]).buffer,
+    type: "public-key",
+    response: {
+      clientDataJSON: new Uint8Array([0x01]).buffer,
+      attestationObject: new Uint8Array([0x02]).buffer,
+      getTransports: () => ["internal"],
+    },
+    authenticatorAttachment: "platform",
+    getClientExtensionResults: () => ({}),
+  } as unknown as Credential;
+}

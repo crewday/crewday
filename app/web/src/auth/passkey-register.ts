@@ -108,6 +108,18 @@ export interface SignupFinishResponse {
   redirect: string;
 }
 
+export interface AuthenticatedPasskeyStartResponse {
+  challenge_id: string;
+  options: PublicKeyCredentialCreationOptionsJSON;
+}
+
+export interface AuthenticatedPasskeyFinishResponse {
+  credential_id: string;
+  transports: string | null;
+  backup_eligible: boolean;
+  aaguid: string;
+}
+
 // Invite-acceptance passkey wire shapes — mirrors
 // `app/api/v1/auth/invite.py::Invite{PasskeyStart,PasskeyFinish}{Request,Response}`.
 // New invitees (no passkey on file) run this ceremony after the
@@ -230,6 +242,26 @@ export async function finishSignupEnroll(
       challenge_id: challengeId,
       display_name: displayName,
       timezone,
+      credential,
+    },
+  });
+}
+
+export async function beginAuthenticatedPasskeyRegister(): Promise<AuthenticatedPasskeyStartResponse> {
+  return fetchJson<AuthenticatedPasskeyStartResponse>("/api/v1/auth/passkey/register/start", {
+    method: "POST",
+    body: {},
+  });
+}
+
+export async function finishAuthenticatedPasskeyRegister(
+  challengeId: string,
+  credential: PasskeyRegisterCredential,
+): Promise<AuthenticatedPasskeyFinishResponse> {
+  return fetchJson<AuthenticatedPasskeyFinishResponse>("/api/v1/auth/passkey/register/finish", {
+    method: "POST",
+    body: {
+      challenge_id: challengeId,
       credential,
     },
   });
@@ -420,6 +452,16 @@ export async function runSignupEnrollCeremony(
         timezone,
         credential,
       ),
+    options.signal,
+  );
+}
+
+export async function runAuthenticatedPasskeyRegisterCeremony(
+  options: { signal?: AbortSignal } = {},
+): Promise<AuthenticatedPasskeyFinishResponse> {
+  return runRegisterCeremony(
+    () => beginAuthenticatedPasskeyRegister(),
+    (challengeId, credential) => finishAuthenticatedPasskeyRegister(challengeId, credential),
     options.signal,
   );
 }

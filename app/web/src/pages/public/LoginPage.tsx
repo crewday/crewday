@@ -93,10 +93,17 @@ type FormState =
   | { kind: "pending" }
   | { kind: "error"; message: string; tone: "info" | "danger" };
 
+type LoginLocationState = {
+  notice?: unknown;
+};
+
 export default function LoginPage() {
   const { isAuthenticated, loginWithPasskey, user } = useAuth();
   const location = useLocation();
-  const [form, setForm] = useState<FormState>({ kind: "idle" });
+  const initialNotice = loginNotice(location.state);
+  const [form, setForm] = useState<FormState>(
+    initialNotice ? { kind: "error", message: initialNotice, tone: "info" } : { kind: "idle" },
+  );
   // Concurrency guard. `disabled={pending}` blocks the next click only
   // after React commits the `pending` state, so a rapid double-click
   // (or a keyboard Enter-spam) in the same event tick can enqueue two
@@ -193,4 +200,10 @@ export default function LoginPage() {
       </main>
     </div>
   );
+}
+
+function loginNotice(state: unknown): string | null {
+  if (!state || typeof state !== "object" || Array.isArray(state)) return null;
+  const notice = (state as LoginLocationState).notice;
+  return typeof notice === "string" && notice ? notice : null;
 }
