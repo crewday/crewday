@@ -90,6 +90,10 @@ from app.adapters.storage.localfs import LocalFsStorage
 from app.adapters.storage.mime import FiletypeMimeSniffer
 from app.adapters.storage.ports import MimeSniffer, Storage
 from app.api.admin import admin_router
+from app.api.admin.agent_runtime import (
+    AdminAgentRuntimeActionProducer,
+    DeploymentAdminToolDispatcher,
+)
 from app.api.chat_gateway import (
     build_chat_channel_bindings_router,
     build_chat_gateway_router,
@@ -188,10 +192,6 @@ from app.demo import (
     mint_demo_cookie,
     normalise_start_path,
     seed_workspace,
-)
-from app.domain.agent.admin_runtime import (
-    AdminAgentRuntimeActionProducer,
-    DeploymentAdminToolDispatcher,
 )
 from app.observability import build_metrics_router, setup_tracing
 from app.security import BindGuardError, assert_bind_allowed

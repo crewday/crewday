@@ -576,7 +576,7 @@ class TestBuildLlm:
         assert isinstance(client, FakeLLMClient)
 
     def test_create_app_wires_admin_agent_producer_when_llm_available(self) -> None:
-        from app.domain.agent.admin_runtime import (
+        from app.api.admin.agent_runtime import (
             AdminAgentRuntimeActionProducer,
             DeploymentAdminToolDispatcher,
         )

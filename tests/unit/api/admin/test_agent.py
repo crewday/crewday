@@ -18,14 +18,14 @@ from app.adapters.llm.fake import FakeLLMClient
 from app.adapters.llm.openrouter import OPENROUTER_API_KEY_SETTING
 from app.adapters.llm.ports import ToolCall as LlmToolCall
 from app.api.admin.agent import AdminAgentActionProposal
+from app.api.admin.agent_runtime import (
+    AdminAgentRuntimeActionProducer,
+    DeploymentAdminToolDispatcher,
+)
 from app.api.transport import admin_sse
 from app.auth.session import SESSION_COOKIE_NAME
 from app.capabilities import probe as probe_capabilities
 from app.config import Settings
-from app.domain.agent.admin_runtime import (
-    AdminAgentRuntimeActionProducer,
-    DeploymentAdminToolDispatcher,
-)
 from app.domain.agent.runtime import (
     DelegatedToken,
     GateDecision,
