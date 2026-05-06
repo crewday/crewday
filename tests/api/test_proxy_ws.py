@@ -366,6 +366,7 @@ class TestNonSpaPathPredicate:
             "/api/v1/ping",
             "/admin/api/v1/health",
             "/w/demo/api/v1/tasks",
+            "/w/demo/api/v1/auth/tokens",
             "/events",
             "/w/demo/events",
         ],
@@ -378,6 +379,7 @@ class TestNonSpaPathPredicate:
         [
             "/",
             "/dashboard",
+            "/api-tokens",
             "/w/demo/today",
             "/@vite/client",
             "/src/main.tsx",

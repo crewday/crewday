@@ -171,6 +171,7 @@ export default function App() {
           <Route path="/organizations" element={<OrganizationsPage />} />
           <Route path="/webhooks" element={<WebhooksPage />} />
           <Route path="/tokens" element={<ApiTokensPage />} />
+          <Route path="/api-tokens" element={<ApiTokensPage />} />
           <Route path="/chat/channels" element={<ChatChannelsPage />} />
           <Route path="/w/:slug/chat/channels" element={<ChatChannelsPage />} />
           <Route path="/settings" element={<SettingsPage />} />

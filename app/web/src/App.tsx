@@ -365,6 +365,7 @@ export default function App() {
             <Route element={<RequirePermission actionKey="api_tokens.manage" />}>
               <Route element={<ManagerLayout />}>
                 <Route path="/tokens" element={<ApiTokensPage />} />
+                <Route path="/api-tokens" element={<ApiTokensPage />} />
               </Route>
             </Route>
 

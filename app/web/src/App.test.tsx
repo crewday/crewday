@@ -21,6 +21,7 @@ const mockRenders = vi.hoisted(() => ({
   managerLayout: vi.fn(),
   chatPage: vi.fn(),
   dashboardPage: vi.fn(),
+  apiTokensPage: vi.fn(),
 }));
 
 vi.mock("@/layouts/PreviewShell", async () => {
@@ -93,6 +94,13 @@ vi.mock("@/pages/manager/DashboardPage", () => ({
   default: function MockDashboardPage(): ReactElement {
     mockRenders.dashboardPage();
     return <main data-testid="manager-dashboard">Manager dashboard</main>;
+  },
+}));
+
+vi.mock("@/pages/manager/ApiTokensPage", () => ({
+  default: function MockApiTokensPage(): ReactElement {
+    mockRenders.apiTokensPage();
+    return <main data-testid="api-tokens-page">API tokens</main>;
   },
 }));
 
@@ -288,5 +296,17 @@ describe("App client portal role routing", () => {
     expect(mockRenders.managerLayout).toHaveBeenCalled();
     expect(mockRenders.clientLayout).not.toHaveBeenCalled();
     expect(mockRenders.clientPortfolioPage).not.toHaveBeenCalled();
+  });
+});
+
+describe("App manager API token routes", () => {
+  it("renders the API tokens manager page at the /api-tokens alias", async () => {
+    installPermissionAllowFetch();
+    renderAppAt("/api-tokens", "manager");
+
+    expect(await screen.findByTestId("api-tokens-page")).toBeInTheDocument();
+    expect(screen.getByTestId("location")).toHaveTextContent("/api-tokens");
+    expect(mockRenders.managerLayout).toHaveBeenCalled();
+    expect(mockRenders.apiTokensPage).toHaveBeenCalled();
   });
 });

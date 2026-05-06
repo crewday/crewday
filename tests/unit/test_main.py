@@ -340,6 +340,12 @@ class TestSpaCatchAll:
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/html")
 
+    def test_api_tokens_page_is_spa_fallback(self, app_factory: Settings) -> None:
+        client = _client(create_app(settings=app_factory))
+        resp = client.get("/api-tokens")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/html")
+
     def test_root_stub_fallback_when_no_dist(
         self, app_factory: Settings, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -712,6 +718,7 @@ class TestIsApiPath:
             "/api/v1/ping",
             "/api/openapi.json",
             "/w/villa-sud/api/v1/tasks",
+            "/w/villa-sud/api/v1/auth/tokens",
         ],
     )
     def test_api_paths_classified_as_api(self, path: str) -> None:
@@ -727,6 +734,7 @@ class TestIsApiPath:
             "/w/villa-sud",
             "/w/villa-sud/today",
             "/assets/index-abc.js",
+            "/api-tokens",
             "/apish-but-not-api",
         ],
     )
@@ -795,6 +803,20 @@ class TestDevProfileViteProxy:
         assert resp.status_code == 200
         assert captured["path"] == "/src/main.tsx"
         assert captured["query"] == "t=123&v=abc"
+
+    def test_dev_profile_proxies_api_tokens_spa_path(self) -> None:
+        """``/api-tokens`` is SPA chrome, not the token API."""
+        captured: dict[str, str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["path"] = request.url.path
+            return httpx.Response(200, content=b"api tokens spa")
+
+        client = _client(self._dev_app_with_mock(handler))
+        resp = client.get("/api-tokens")
+        assert resp.status_code == 200
+        assert resp.content == b"api tokens spa"
+        assert captured["path"] == "/api-tokens"
 
     def test_dev_profile_proxies_mutating_mocks_paths(self) -> None:
         """Loopback `/mocks/api` writes must reach the mocks Vite proxy."""
