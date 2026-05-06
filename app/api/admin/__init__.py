@@ -29,9 +29,11 @@ router; the wired surface today is:
   ``GET /chat/overrides`` / ``GET /chat/health``.
 * :mod:`app.api.admin.agent_docs` — system docs read by chat agents:
   ``GET /agent_docs`` / ``GET /agent_docs/{slug}``.
+* :mod:`app.api.admin.agent` — deployment-admin embedded agent:
+  ``GET /agent/log`` / ``POST /agent/message`` /
+  ``GET /agent/actions`` / action approve + deny.
 
-Subsequent admin families (LLM graph, admin chat agent — per spec
-§12 "Admin surface") will add their own routers and register them
+Subsequent admin families will add their own routers and register them
 here.
 
 Authorisation lives on the per-route deps. Every route gates on
@@ -50,6 +52,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.admin.admins import build_admin_admins_router
+from app.api.admin.agent import build_admin_agent_router
 from app.api.admin.agent_docs import build_admin_agent_docs_router
 from app.api.admin.audit import build_admin_audit_router
 from app.api.admin.chat_gateway import build_admin_chat_gateway_router
@@ -77,3 +80,4 @@ admin_router.include_router(build_admin_usage_router())
 admin_router.include_router(build_admin_chat_gateway_router())
 admin_router.include_router(build_admin_agent_docs_router())
 admin_router.include_router(build_admin_llm_router())
+admin_router.include_router(build_admin_agent_router())
