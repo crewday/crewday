@@ -145,7 +145,14 @@ describe("MePage", () => {
     expect(screen.getAllByRole("button", { name: "Change" })).toHaveLength(2);
     expect(screen.getByText("English")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("link", { name: /Past tasks, chats, expenses, leaves/i }));
+    const historyLink = screen.getByRole("link", { name: /Past tasks, chats, expenses, leaves/i });
+    const historyAction = screen.getByText("View");
+    expect(historyLink).toContainElement(historyAction);
+    expect(historyAction.tagName).toBe("SPAN");
+    expect(historyAction).toHaveClass("btn", "btn--ghost", "btn--sm");
+    expect(historyAction).not.toHaveClass("chip");
+
+    fireEvent.click(historyAction);
 
     await waitFor(() => {
       expect(screen.getByTestId("location")).toHaveTextContent("/history");

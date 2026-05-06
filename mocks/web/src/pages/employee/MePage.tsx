@@ -164,7 +164,7 @@ export default function MePage() {
             <strong>Past tasks, chats, expenses, leaves</strong>
             <div className="stack-row__sub">Browse what's been wrapped up →</div>
           </div>
-          <Chip tone="ghost" size="sm">View</Chip>
+          <span className="btn btn--ghost btn--sm">View</span>
         </Link>
       </section>
 
