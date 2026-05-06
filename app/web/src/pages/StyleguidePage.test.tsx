@@ -46,7 +46,7 @@ afterEach(() => {
 });
 
 describe("/styleguide", () => {
-  it("renders preview controls and the styleguide baseline without auth bootstrap", async () => {
+  it("renders shell controls and the styleguide baseline without auth bootstrap", async () => {
     const { calls, restore } = installFetch({
       "/api/v1/runtime/info": [{ body: { runtime: { demo_mode: false } } }],
     });
@@ -56,7 +56,7 @@ describe("/styleguide", () => {
       expect(
         await screen.findByRole("heading", { name: "Paper, moss, and a little grit." }),
       ).toBeInTheDocument();
-      expect(screen.getByRole("navigation", { name: "Preview controls" })).toBeInTheDocument();
+      expect(screen.getByRole("navigation", { name: "Shell controls" })).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "Palette" })).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "Buttons" })).toBeInTheDocument();
 

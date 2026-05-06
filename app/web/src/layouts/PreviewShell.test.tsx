@@ -60,12 +60,14 @@ describe("<PreviewShell> demo banner", () => {
       expect(
         await screen.findByText("Demo data - resets on inactivity"),
       ).toBeInTheDocument();
+      expect(screen.queryByText("PREVIEW")).not.toBeInTheDocument();
+      expect(screen.queryByText("Interactive mocks · no real data")).not.toBeInTheDocument();
     } finally {
       restore();
     }
   });
 
-  it("omits the demo banner when runtime demo mode is off", async () => {
+  it("omits the demo banner and mocks preview copy when runtime demo mode is off", async () => {
     const restore = installRuntimeFetch(false);
     try {
       renderShell();
@@ -76,6 +78,9 @@ describe("<PreviewShell> demo banner", () => {
         );
       });
       expect(screen.queryByText("Demo data - resets on inactivity")).toBeNull();
+      expect(screen.queryByText("PREVIEW")).not.toBeInTheDocument();
+      expect(screen.queryByText("Interactive mocks · no real data")).not.toBeInTheDocument();
+      expect(screen.getByRole("navigation", { name: "Shell controls" })).toBeInTheDocument();
     } finally {
       restore();
     }

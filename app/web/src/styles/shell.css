@@ -1,4 +1,4 @@
-/* Shell — grain overlay, demo + preview banners, employee phone layout,
+/* Shell — grain overlay, demo banner, production shell controls, employee phone layout,
    and the tablet/desktop responsive shell adjustments. Loaded first by
    globals.css so every later layer can rely on `.phone`, `.phone__body`,
    `.phone__section`, `.phone__tabs`, and `.phone__dock` already being
@@ -26,39 +26,31 @@
   border-bottom-color: rgba(255,255,255,0.16);
 }
 
-/* ── Preview banner ──────────────────────────────────────────── */
-.preview-banner {
+/* ── Production shell controls ──────────────────────────────── */
+.shell-controls {
   position: sticky; top: 0; z-index: 50;
-  display: flex; align-items: center; gap: 14px;
+  display: flex; align-items: center; justify-content: flex-end; gap: 14px;
   padding: 8px 16px;
   background: linear-gradient(90deg, var(--moss), var(--moss-2));
   color: #fff; font-size: 13px;
   min-height: 40px;
 }
-.preview-banner__badge {
-  background: rgba(255,255,255,0.18); padding: 2px 8px;
-  border-radius: 4px; font-weight: 700; letter-spacing: 0.08em; font-size: 11px;
-  flex: 0 0 auto;
-}
-.preview-banner__note { opacity: 0.9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.preview-banner__switch { margin-left: auto; display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+.shell-controls__switch { margin-left: auto; display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
 
 @media (max-width: 640px) {
-  .preview-banner { gap: 8px; padding: 6px 10px; }
-  .preview-banner__note { display: none; }
+  .shell-controls { gap: 8px; padding: 6px 10px; }
 }
 @media (max-width: 420px) {
-  .preview-banner .pill { padding: 3px 10px; font-size: 12px; }
-  .preview-banner .pill--ghost:last-of-type { display: none; }
+  .shell-controls .pill { padding: 3px 10px; font-size: 12px; }
+  .shell-controls .pill--ghost:last-of-type { display: none; }
 }
-/* §17 360 px walker — the preview banner is mocks-only chrome but it
-   ships to the e2e suite, so its tappables share the same 44×44 floor
-   as the rest of the SPA. At ≥720px the banner stays slim because
+/* §17 360 px walker — shell-control tappables share the same 44×44
+   floor as the rest of the SPA. At ≥720px the controls stay slim because
    pointer users hit the small pills precisely; the floor only kicks
    in below the breakpoint where a thumb is the input device. */
 @media (max-width: 720px) {
-  .preview-banner .pill,
-  .preview-banner__theme {
+  .shell-controls .pill,
+  .shell-controls__theme {
     min-height: 44px; min-width: 44px;
     display: inline-flex; align-items: center; justify-content: center;
   }
@@ -71,7 +63,7 @@
 }
 .pill--active { background: #fff; color: var(--moss); border-color: #fff; font-weight: 600; }
 .pill--ghost { border-color: rgba(255,255,255,0.22); padding: 4px 10px; }
-.preview-banner__theme {
+.shell-controls__theme {
   display: inline-flex; align-items: center; justify-content: center;
   padding: 4px 8px; min-width: 30px; line-height: 1;
 }

@@ -220,7 +220,7 @@
    thumbs through weeks, so the actionable alert stays reachable even
    after the infinite agenda auto-scrolls to today.
    Sticky offset depends on the scroll container rather than the
-   breakpoint. Phone's shell is document-scrolled so the preview banner
+   breakpoint. Phone's shell is document-scrolled so the shell controls
    consumes 40px of viewport and sticky must clear it; desktop variants
    both scroll inside an own-overflow pane (`.phone__body` for worker,
    `.desk__main` for manager) that already sits below the banner, so
@@ -295,7 +295,7 @@
    applies to the element actually being scrolled into view, so we
    set it there. Desktop scrolls inside a pane that already sits
    below the banner (88px = monthbar + intro border); phone scrolls
-   the document and needs an extra banner-h to clear the preview
+   the document and needs an extra banner-h to clear the shell control
    strip above the monthbar. The pending-banner above the monthbar
    adds ~48px when present, so bump the offset with :has(). */
 .schedule [data-schedule-iso] { scroll-margin-top: 88px; }

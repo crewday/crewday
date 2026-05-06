@@ -22,9 +22,10 @@ function isGuestPath(pathname: string): boolean {
   return pathname.startsWith("/guest/") || /^\/w\/[^/]+\/guest\//.test(pathname);
 }
 
-// PreviewShell is the outermost layout: grain, sticky preview banner,
-// then the routed layout inside <Outlet />. Grain is mounted once at
-// tree root (not per-page) so navigation doesn't flicker.
+// PreviewShell is the outermost layout: grain, optional demo banner,
+// production shell controls, then the routed layout inside <Outlet />.
+// Grain is mounted once at tree root (not per-page) so navigation
+// doesn't flicker.
 export default function PreviewShell() {
   // code-health: ignore[ccn nloc] Preview shell coordinates role switching, demo banner, theme toggle, and root outlet chrome in one layout.
   const { role, setRole } = useRole();
@@ -76,10 +77,8 @@ export default function PreviewShell() {
         </div>
       ) : null}
 
-      <div className="preview-banner">
-        <span className="preview-banner__badge">PREVIEW</span>
-        <span className="preview-banner__note">Interactive mocks · no real data</span>
-        <nav className="preview-banner__switch" aria-label="Preview controls">
+      <div className="shell-controls">
+        <nav className="shell-controls__switch" aria-label="Shell controls">
           <button
             type="button"
             className={"pill" + (!roleNeutral && role === "employee" ? " pill--active" : "")}
@@ -103,7 +102,7 @@ export default function PreviewShell() {
           </button>
           <button
             type="button"
-            className="pill pill--ghost preview-banner__theme"
+            className="pill pill--ghost shell-controls__theme"
             aria-label={"Theme: " + theme + " (click to cycle)"}
             title={"Theme: " + theme}
             onClick={toggle}

@@ -44,7 +44,7 @@
     min-height: 0;
   }
   /* When the nav drawer is open, promote .desk's stacking context
-     above the preview banner (which also uses z-index: 50) so the
+     above the shell controls (which also use z-index: 50) so the
      drawer overlays it end-to-end. */
   .desk[data-nav-open="true"] {
     z-index: 60;
@@ -88,7 +88,7 @@
      paper-coloured strip so content scrolls under it without
      bleed-through. The `top` value depends on which scroll container
      owns the page: the worker shell scrolls the document (so we must
-     clear the sticky preview banner), while the manager/admin/client
+     clear the sticky shell controls), while the manager/admin/client
      shells scroll `.desk__main`, which already sits below the banner
      — sticky there must be top: 0 or the header floats 42px down. */
   .page-topbar {
@@ -110,7 +110,7 @@
     margin-inline: -18px;
   }
   /* Worker shell: the document is the scroll container, so the sticky
-     header must clear the sticky preview banner above it. */
+     header must clear the sticky shell controls above it. */
   .phone > .page-topbar,
   .phone__body > .page-topbar {
     margin-inline: 0;
@@ -243,4 +243,3 @@
   .desk__main { padding: 0 14px 96px; }
   .desk__main > .page-topbar { margin-inline: -14px; }
 }
-
