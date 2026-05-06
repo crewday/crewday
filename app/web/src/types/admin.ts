@@ -180,3 +180,27 @@ export interface AdminTeamMember {
   granted_at: string;
   granted_by: string;
 }
+
+export interface AdminListResponse {
+  admins: AdminTeamMember[];
+}
+
+export interface AdminGrantResponse {
+  admin: AdminTeamMember;
+}
+
+export interface AdminRevokeResponse {
+  revoked_id: string;
+}
+
+export interface AdminGroupMember {
+  user_id: string;
+  display_name: string;
+  email: string;
+  added_at: string;
+  added_by: string;
+}
+
+export interface OwnersGroupResponse {
+  members: AdminGroupMember[];
+}

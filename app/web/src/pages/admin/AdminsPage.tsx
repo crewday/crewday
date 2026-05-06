@@ -4,7 +4,18 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import { Checkbox, Chip, Loading } from "@/components/common";
-import type { AdminMe, AdminTeamMember } from "@/types/api";
+import type {
+  AdminGrantResponse,
+  AdminListResponse,
+  AdminMe,
+  AdminRevokeResponse,
+  OwnersGroupResponse,
+} from "@/types/api";
+
+interface GrantAdminInput {
+  email: string;
+  asOwner: boolean;
+}
 
 export default function AdminAdminsPage() {
   // code-health: ignore[nloc] Admin roster page is declarative query/form/table composition with shared primitives.
@@ -15,16 +26,27 @@ export default function AdminAdminsPage() {
   });
   const teamQ = useQuery({
     queryKey: qk.adminAdmins(),
-    queryFn: () => fetchJson<AdminTeamMember[]>("/admin/api/v1/admins"),
+    queryFn: () => fetchJson<AdminListResponse>("/admin/api/v1/admins"),
   });
   const grant = useMutation({
-    mutationFn: (body: { email: string; as_owner: boolean }) =>
-      fetchJson<AdminTeamMember>("/admin/api/v1/admins", { method: "POST", body }),
+    mutationFn: async ({ email, asOwner }: GrantAdminInput) => {
+      const response = await fetchJson<AdminGrantResponse>("/admin/api/v1/admins", {
+        method: "POST",
+        body: { email },
+      });
+      if (asOwner) {
+        await fetchJson<OwnersGroupResponse>("/admin/api/v1/admins/groups/owners/members", {
+          method: "POST",
+          body: { email },
+        });
+      }
+      return response;
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.adminAdmins() }),
   });
   const revoke = useMutation({
     mutationFn: (id: string) =>
-      fetchJson<{ ok: true }>(`/admin/api/v1/admins/${id}/revoke`, { method: "POST" }),
+      fetchJson<AdminRevokeResponse>(`/admin/api/v1/admins/${id}/revoke`, { method: "POST" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.adminAdmins() }),
   });
 
@@ -40,7 +62,7 @@ export default function AdminAdminsPage() {
   if (!teamQ.data) return <DeskPage title="Admins" sub={sub}>Failed to load.</DeskPage>;
 
   const isOwner = meQ.data?.is_owner ?? false;
-  const team = teamQ.data;
+  const team = teamQ.data.admins;
   const owners = team.filter((m) => m.is_owner);
 
   return (
@@ -127,7 +149,7 @@ export default function AdminAdminsPage() {
             className="btn btn--moss"
             disabled={!email || grant.isPending}
             onClick={() => {
-              grant.mutate({ email, as_owner: asOwner });
+              grant.mutate({ email, asOwner });
               setEmail("");
               setAsOwner(false);
             }}
