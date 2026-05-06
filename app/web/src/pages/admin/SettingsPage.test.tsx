@@ -161,6 +161,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.doUnmock("@/auth");
+  vi.doUnmock("@/context/WorkspaceContext");
   vi.doUnmock("@/layouts/PreviewShell");
   vi.doUnmock("@/layouts/PublicLayout");
   vi.doUnmock("@/layouts/EmployeeLayout");
@@ -477,6 +478,14 @@ describe("Admin SettingsPage", () => {
       RequireAuth: () => <Outlet />,
       RequirePermission: () => <Outlet />,
       WorkspaceGate: () => <Outlet />,
+      useAuth: () => ({ user: null }),
+    }));
+    vi.doMock("@/context/WorkspaceContext", () => ({
+      useWorkspace: () => ({
+        workspaceId: null,
+        setWorkspaceId: vi.fn(),
+        clearWorkspaceId: vi.fn(),
+      }),
     }));
     vi.doMock("@/context/RoleContext", () => ({
       useRole: () => ({ role: "manager", setRole: vi.fn() }),

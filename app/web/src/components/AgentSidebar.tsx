@@ -94,30 +94,12 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
   const pageHeader = buildAgentPageHeader(pathname, params, role);
 
   const sendMessage = useMutation({
-    mutationFn: async (body: string) => {
-      // fetchJson doesn't accept custom headers; we call fetch directly
-      // here to add X-Agent-Page (a §12 header). Everything else matches
-      // the wrapper's CSRF + JSON convention.
-      const csrf = document.cookie
-        .split(";")
-        .map((c) => c.trim())
-        .find((c) => c.startsWith("crewday_csrf="))
-        ?.slice("crewday_csrf=".length);
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "X-Agent-Page": pageHeader,
-      };
-      if (csrf) headers["X-CSRF"] = decodeURIComponent(csrf);
-      const res = await fetch(messageUrl, {
+    mutationFn: (body: string) =>
+      fetchJson<AgentMessage>(messageUrl, {
         method: "POST",
-        credentials: "same-origin",
-        headers,
-        body: JSON.stringify({ body }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json() as Promise<AgentMessage>;
-    },
+        headers: { "X-Agent-Page": pageHeader },
+        body: { body },
+      }),
     onMutate: async (body) => {
       await qc.cancelQueries({ queryKey: logKey });
       const prev = qc.getQueryData<AgentMessage[]>(logKey) ?? [];
