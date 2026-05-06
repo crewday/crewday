@@ -113,12 +113,12 @@ export interface Schedule {
   id: string;
   name: string;
   template_id: string;
-  property_id: string;
+  property_id: string | null;
   rrule_human: string;
   default_assignee_id: string | null;
   backup_assignee_user_ids: string[];
-  duration_minutes: number;
-  active_from: string;
+  duration_minutes: number | null;
+  active_from: string | null;
   paused: boolean;
 }
 
