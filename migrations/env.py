@@ -31,6 +31,9 @@ import app.adapters.db as adapters_db_pkg
 from app.adapters.db.base import Base
 from app.adapters.db.session import normalise_sync_url
 from app.config import get_settings
+from migrations.autogenerate_filters import (
+    process_sqlite_expression_index_false_positives,
+)
 
 _log = logging.getLogger("alembic.env")
 
@@ -101,6 +104,7 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
         render_as_batch=_is_sqlite(),
+        process_revision_directives=process_sqlite_expression_index_false_positives,
     )
 
     with context.begin_transaction():
@@ -123,6 +127,7 @@ def run_migrations_online() -> None:
             target_metadata=target_metadata,
             compare_type=True,
             render_as_batch=_is_sqlite(),
+            process_revision_directives=process_sqlite_expression_index_false_positives,
         )
 
         with context.begin_transaction():

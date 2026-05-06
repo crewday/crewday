@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import Engine, inspect, select
+from sqlalchemy import Engine, inspect, select, text
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -354,6 +354,27 @@ class TestMigrationShape:
         assert indexes["ix_inventory_stocktake_workspace_property_started"][
             "column_names"
         ][:2] == ["workspace_id", "property_id"]
+
+    def test_inventory_stocktake_index_orders_started_at_desc(
+        self, engine: Engine
+    ) -> None:
+        if engine.dialect.name == "sqlite":
+            statement = text(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = :name"
+            )
+        elif engine.dialect.name == "postgresql":
+            statement = text("SELECT indexdef FROM pg_indexes WHERE indexname = :name")
+        else:
+            pytest.skip(f"unsupported dialect: {engine.dialect.name}")
+
+        with engine.connect() as conn:
+            definition = conn.execute(
+                statement,
+                {"name": "ix_inventory_stocktake_workspace_property_started"},
+            ).scalar_one()
+
+        normalized = " ".join(str(definition).lower().split())
+        assert "started_at desc" in normalized
 
     def test_inventory_stocktake_line_columns(self, engine: Engine) -> None:
         cols = {
