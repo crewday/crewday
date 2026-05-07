@@ -7,9 +7,11 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, String, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.adapters.db.audit.models import AuditLog
+from app.adapters.db.base import Base
 from app.adapters.db.demo.models import DemoWorkspace
 from app.adapters.db.expenses.models import ExpenseClaim
 from app.adapters.db.session import UnitOfWorkImpl
@@ -91,6 +93,64 @@ def test_cold_get_rental_manager_mints_cookie_and_seeds_rows(
         )
         assert "Turnover - Apt 3B" in titles
         assert "Fix loose cupboard handle" in titles
+
+
+def test_demo_start_redirects_to_allowlisted_workspace_path(
+    demo_client: TestClient,
+) -> None:
+    response = demo_client.get(
+        "/app?scenario=villa-owner&as=owner&start=%2Fschedule",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/w/demo-villa-owner-")
+    assert response.headers["location"].endswith("/schedule")
+
+
+@pytest.mark.parametrize(
+    ("query", "default_start"),
+    [
+        ("", "/today"),
+        ("&start=%2Fw%2Facme%2Fschedule", "/today"),
+        ("&start=dashboard", "/today"),
+        (f"&start=%2F{'a' * 257}", "/today"),
+        ("&start=%2Fnot-in-catalog", "/today"),
+    ],
+)
+def test_demo_start_falls_back_to_default_for_missing_and_invalid_values(
+    demo_client: TestClient,
+    query: str,
+    default_start: str,
+) -> None:
+    response = demo_client.get(
+        f"/app?scenario=villa-owner&as=owner{query}",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/w/demo-villa-owner-")
+    assert response.headers["location"].endswith(default_start)
+
+
+def test_demo_start_invalid_value_is_not_persisted_or_echoed(
+    demo_client: TestClient,
+    session_factory: sessionmaker[Session],
+) -> None:
+    invalid_start = "/w/acme/schedule"
+
+    response = demo_client.get(
+        "/app?scenario=villa-owner&as=owner&start=%2Fw%2Facme%2Fschedule",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert invalid_start not in response.headers["location"]
+    assert invalid_start.encode() not in response.content
+    assert invalid_start not in response.headers["set-cookie"]
+    with session_factory() as session:
+        assert _count_all(session, AuditLog) == 0
+        _assert_text_not_persisted(session, invalid_start)
 
 
 def test_tampered_cookie_is_absent_and_remints(
@@ -226,7 +286,7 @@ def _workspace_count(factory: sessionmaker[Session]) -> int:
 
 def _count_all(
     session: Session,
-    model: type[Workspace] | type[DemoWorkspace],
+    model: type[Workspace] | type[DemoWorkspace] | type[AuditLog],
 ) -> int:
     return session.scalar(select(func.count()).select_from(model)) or 0
 
@@ -249,3 +309,13 @@ def _cookie_value(set_cookie: str, scenario_key: str) -> str:
     start = set_cookie.index(prefix) + len(prefix)
     end = set_cookie.index(";", start)
     return set_cookie[start:end]
+
+
+def _assert_text_not_persisted(session: Session, forbidden: str) -> None:
+    for table in Base.metadata.sorted_tables:
+        columns = [column for column in table.c if isinstance(column.type, String)]
+        if not columns:
+            continue
+        for row in session.execute(select(*columns)):
+            for value in row:
+                assert not isinstance(value, str) or forbidden not in value

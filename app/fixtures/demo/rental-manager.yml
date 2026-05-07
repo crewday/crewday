@@ -5,7 +5,7 @@ workspace:
   currency: EUR
 default_persona: manager
 default_start: /tasks
-start_paths: [/, /today, /tasks, /schedule, /expenses, /properties]
+start_paths: [/, /today, /tasks, /schedule, /dashboard, /pay, /organizations, /expenses, /properties]
 personas:
   manager:
     user: olivia

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -66,10 +67,13 @@ SCENARIO_KEYS: Final[tuple[str, ...]] = (
 )
 
 _FIXTURE_DIR: Final[Path] = Path(__file__).resolve().parent.parent / "fixtures" / "demo"
+_log = logging.getLogger(__name__)
 _OFFSET_RE: Final[re.Pattern[str]] = re.compile(
     r"^(?P<sign>[+-])(?P<n>\d+)(?P<u>[dhm])$"
 )
-_START_RE: Final[re.Pattern[str]] = re.compile(r"^/[-A-Za-z0-9_./]*$")
+_START_MAX_BYTES: Final[int] = 256
+_START_PATH_RE: Final[re.Pattern[str]] = re.compile(r"^/[-A-Za-z0-9_./]*$")
+_START_QUERY_RE: Final[re.Pattern[str]] = re.compile(r"^[-A-Za-z0-9_.~=&%]*$")
 _WINDOW: Final[timedelta] = timedelta(days=30)
 _DEMO_WORKSPACE_TTL: Final[timedelta] = timedelta(days=30)
 _ACTIVITY_TOUCH_INTERVAL: Final[timedelta] = timedelta(seconds=5)
@@ -272,14 +276,31 @@ def seed_workspace(
 def normalise_start_path(fixture: Mapping[str, object], candidate: str | None) -> str:
     """Validate a workspace-relative start path from the demo URL."""
     default = _str(fixture, "default_start", default="/")
-    if candidate is None or len(candidate) > 256 or candidate.startswith("/w/"):
+    if candidate is None or len(candidate.encode("utf-8")) > _START_MAX_BYTES:
         return default
-    if not _START_RE.match(candidate):
+    if candidate.startswith("/w/") or not _is_workspace_relative_start(candidate):
         return default
     allowlist = _string_list(fixture.get("start_paths"), "start_paths")
     if candidate not in allowlist:
+        _log.warning(
+            "demo start path is not allowlisted; using scenario default",
+            extra={"demo_default_start": default},
+        )
         return default
     return candidate
+
+
+def _is_workspace_relative_start(candidate: str) -> bool:
+    if not candidate.startswith("/"):
+        return False
+    path, separator, query = candidate.partition("?")
+    if "?" in query or "#" in query:
+        return False
+    if path.startswith("//"):
+        return False
+    if not _START_PATH_RE.fullmatch(path):
+        return False
+    return not separator or bool(_START_QUERY_RE.fullmatch(query))
 
 
 def load_scenario_fixture(scenario_key: str) -> Mapping[str, object]:

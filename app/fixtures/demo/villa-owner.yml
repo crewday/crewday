@@ -5,7 +5,7 @@ workspace:
   currency: EUR
 default_persona: owner
 default_start: /today
-start_paths: [/, /today, /tasks, /schedule, /expenses]
+start_paths: [/, /today, /tasks, /schedule, /dashboard, /stays, /expenses]
 personas:
   owner:
     user: elodie

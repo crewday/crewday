@@ -5,7 +5,7 @@ workspace:
   currency: EUR
 default_persona: worker
 default_start: /today
-start_paths: [/, /today, /tasks, /expenses]
+start_paths: [/, /today, "/today?focus=next-task", /tasks, /schedule, /chat, /expenses]
 personas:
   worker:
     user: maria

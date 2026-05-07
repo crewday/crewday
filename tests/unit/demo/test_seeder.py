@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
@@ -70,11 +71,33 @@ class TestNormaliseStartPath:
 
         assert normalise_start_path(fixture, "/expenses") == "/expenses"
 
+    def test_accepts_allowlisted_query_paths(self) -> None:
+        fixture = load_scenario_fixture("housekeeper")
+
+        assert (
+            normalise_start_path(fixture, "/today?focus=next-task")
+            == "/today?focus=next-task"
+        )
+
     def test_rejects_workspace_prefixed_and_overlong_paths(self) -> None:
         fixture = load_scenario_fixture("rental-manager")
 
         assert normalise_start_path(fixture, "/w/other/tasks") == "/tasks"
         assert normalise_start_path(fixture, f"/{'a' * 257}") == "/tasks"
+
+    def test_rejects_relative_and_unknown_paths_without_echoing(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        fixture = load_scenario_fixture("rental-manager")
+
+        assert normalise_start_path(fixture, "dashboard") == "/tasks"
+
+        with caplog.at_level(logging.WARNING, logger="app.demo.seeder"):
+            assert normalise_start_path(fixture, "/not-in-catalog") == "/tasks"
+
+        assert "not allowlisted" in caplog.text
+        assert "/not-in-catalog" not in caplog.text
 
 
 class TestSeedWorkspace:
