@@ -19,7 +19,7 @@ current release phase.
 
 ## How Agents Should Use This Plan
 
-- Run browser checks against `http://127.0.0.1:8100`, not `https://dev.crew.day`.
+- Run app browser checks against `http://127.0.0.1:8100`, not `https://dev-app.crew.day`.
 - Bring up the app with `./scripts/dev-stack-up.sh` before browser smoke.
 - Use Playwright browser evidence for anything visual, interactive, offline, passkey-like, camera-like, or responsive.
 - Use `./scripts/agent-curl.sh` only to seed or inspect state around a browser journey, not as a replacement for the UI check.

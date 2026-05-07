@@ -17,8 +17,10 @@ docker compose -f mocks/docker-compose.yml up -d --build
 ```
 
 - Local: http://127.0.0.1:8100
-- Public: https://dev.crew.day (via Pangolin / Traefik with
+- Public app: https://dev-app.crew.day (via Pangolin / Traefik with
   badger auth; same wiring as `../fj2`)
+- Public site: https://dev.crew.day (served by `../site/docker-compose.yml`
+  through the same Traefik / badger front door)
 
 ## Topology (cd-g1cy)
 
@@ -39,23 +41,23 @@ browser ──▶ FastAPI (app-api :8000)  ── /api, /events, /healthz, …
    │                                                                    └ ``/mocks/api`` ──▶
    │                                                                      mocks-api (FastAPI)
    │
-   └── 127.0.0.1:8100 (loopback) or dev.crew.day (Traefik)
+   └── 127.0.0.1:8100 (loopback) or dev-app.crew.day (Traefik)
 ```
 
 Key points:
 
 - The browser never talks to Vite directly. FastAPI is the only
   thing bound to host port 8100, and the only thing Traefik routes
-  for un-prefixed `dev.crew.day` requests.
+  for un-prefixed `dev-app.crew.day` requests.
 - The dev profile (`CREWDAY_PROFILE=dev`) turns on the Vite reverse
   proxy in `app/api/proxy.py` — HTTP for module loads, WebSocket
   upgrade for Vite's `vite-hmr` HMR socket.
 - `web-dev` and `mocks-web-dev` Vite containers are joined to the
   compose network only; they have no host port and (for `web-dev`)
   no Traefik labels. `mocks-web-dev` keeps a higher-priority
-  (`priority=100`) `Host(dev.crew.day) && PathPrefix(/mocks)`
+  (`priority=100`) `Host(dev-app.crew.day) && PathPrefix(/mocks)`
   Traefik router so requests via the **public host**
-  (`dev.crew.day/mocks/*`) go straight to it — they do **not** flow
+  (`dev-app.crew.day/mocks/*`) go straight to it — they do **not** flow
   through FastAPI. On the **loopback front door**
   (`127.0.0.1:8100/mocks/*`) the request does take the longer path
   drawn above (FastAPI → web-dev → mocks-web-dev) because Traefik is
@@ -162,11 +164,13 @@ no utility frameworks). Tokens follow §14:
 
 The container joins the existing `traefik-proxy` network and
 registers Traefik labels — same pattern as `../fj2`. For badger to
-gate the domain, `dev.crew.day` needs to exist as a **resource**
+gate the app domain, `dev-app.crew.day` needs to exist as a **resource**
 in the Pangolin dashboard (target `crewday-app-api:8000` under the
 flipped topology — cd-g1cy renamed the front-door container from
-`crewday-mocks` to `crewday-app-api`). DNS is already CNAMEd to this
-host.
+`crewday-mocks` to `crewday-app-api`). The public-site domain
+`dev.crew.day` is registered by `../site/docker-compose.yml` and also
+needs a Pangolin resource when badger protects the dev surfaces. DNS is
+already CNAMEd to this host.
 
 ## Files
 

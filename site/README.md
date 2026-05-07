@@ -15,9 +15,11 @@ site/
 └── api/     # FastAPI site backend
 ```
 
-`site/web` has its own `package.json` and lockfile. `site/api` has its
-own `pyproject.toml`. Neither package imports from or shares build
-configuration with `app/` or `mocks/`.
+`site/web` has its own `package.json` and lockfile. Its Docker build
+context is the repo root only so the build-time design drift check can
+read `mocks/web/src/styles/tokens.css`; the runtime image receives only
+the built site files. `site/api` has its own `pyproject.toml`. Neither
+runtime package imports from or shares build configuration with `app/`.
 
 ## Local checks
 
@@ -60,3 +62,8 @@ curl -i http://127.0.0.1:18080/api/healthz
 The compose stack binds Caddy to `127.0.0.1:18080` by default. Override the
 host port with `SITE_HTTP_PORT=<port>` when needed. `site-api` is only
 exposed on the internal Docker network.
+
+On the shared dev host the same compose file also joins Caddy to the
+external `traefik-proxy` network and registers `dev.crew.day` with the
+`badger@file` middleware. Pangolin needs a matching `dev.crew.day`
+resource. The app dev stack lives separately at `dev-app.crew.day`.

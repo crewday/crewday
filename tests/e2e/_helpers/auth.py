@@ -21,7 +21,7 @@ Two surfaces:
   **RP-ID gate.** The e2e compose override must serve a WebAuthn
   ``rp_id`` that matches the loopback host. The helper raises
   :class:`RPIDMismatch` with a focused message when the running stack
-  still advertises the normal ``dev.crew.day`` RP ID.
+  still advertises the normal ``dev-app.crew.day`` RP ID.
 
 The dev_login fast path is intentionally separate from the full
 ceremony: the spec's GA journeys (§17) cover the *user* flow at the
@@ -110,7 +110,7 @@ _DEV_FALLBACK_COOKIE_NAME: Final[str] = DEV_SESSION_COOKIE_NAME
 
 # Compiled regex used to extract the magic-link token URL from
 # Mailpit's text/HTML bodies. The signup email body contains a single
-# anchor like ``https://dev.crew.day/auth/magic/<base64url-token>``;
+# anchor like ``https://dev-app.crew.day/auth/magic/<base64url-token>``;
 # the consume endpoint accepts only the token portion. Group 1 is the
 # token. We accept either ``https`` or ``http`` so a self-hosted
 # tweak that points ``CREWDAY_PUBLIC_URL`` at a plain-HTTP origin
@@ -385,7 +385,7 @@ def consume_magic_link_via_mailpit(
     + ``page.goto``. Returns the raw token string for assertions.
 
     The email body carries a fully-qualified URL pointing at
-    ``CREWDAY_PUBLIC_URL`` (``https://dev.crew.day``); the helper
+    ``CREWDAY_PUBLIC_URL`` (``https://dev-app.crew.day``); the helper
     rewrites the host to ``base_url`` so the navigation lands on the
     test's actual origin (the loopback). Without the rewrite the
     page would try to reach the externally-protected host and never

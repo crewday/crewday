@@ -1,9 +1,10 @@
 FROM node:24-alpine AS build
 
 WORKDIR /src
-COPY package.json package-lock.json ./
+COPY site/web/package.json site/web/package-lock.json ./
 RUN npm ci
-COPY . .
+COPY site/web/ .
+COPY mocks/web/src/styles/tokens.css /mocks/web/src/styles/tokens.css
 RUN npm run build
 
 FROM alpine:3.22

@@ -70,7 +70,7 @@ const BACKEND =
 // Mocks SPA — the sibling Vite container serving ``mocks/web/`` at
 // ``/mocks/`` so operators can compare the production app against the
 // disposable mocks page-for-page on the same origin. Production
-// (dev.crew.day) routes this via Traefik with a higher-priority
+// (dev-app.crew.day) routes this via Traefik with a higher-priority
 // router; the loopback host port (127.0.0.1:8100) reuses the same
 // path by forwarding ``/mocks/*`` over the compose network to the
 // mocks Vite dev server. Unset in non-docker dev → the proxy entry
@@ -160,7 +160,7 @@ export default defineConfig({
   // `app-api` container proxies to `http://web-dev:5173` for SPA
   // routes and `ws://web-dev:5173/` for HMR upgrades (cd-g1cy).
   // The browser never talks to Vite directly — it talks to FastAPI
-  // on `127.0.0.1:8100` (loopback) or `dev.crew.day` (Traefik), and
+  // on `127.0.0.1:8100` (loopback) or `dev-app.crew.day` (Traefik), and
   // FastAPI's dev-profile reverse proxy (`app/api/proxy.py`) does
   // the rest.
   //
@@ -178,7 +178,7 @@ export default defineConfig({
     host: "0.0.0.0",
     port: 5173,
     strictPort: true,
-    allowedHosts: ["dev.crew.day", "localhost", "127.0.0.1", "web-dev"],
+    allowedHosts: ["dev-app.crew.day", "localhost", "127.0.0.1", "web-dev"],
     proxy: {
       ...Object.fromEntries(
         API_PATHS.map((p) => [p, { target: BACKEND, changeOrigin: true, ws: true }]),
@@ -187,7 +187,7 @@ export default defineConfig({
       // Vite container when ``VITE_MOCKS_BACKEND_URL`` is set (the
       // compose file wires this). Production routes the same prefix
       // via a higher-priority Traefik router, so the loopback (127.0.0.1:8100)
-      // and the public host (dev.crew.day) behave the same. Mocks Vite
+      // and the public host (dev-app.crew.day) behave the same. Mocks Vite
       // is configured with ``--base /mocks/`` so it emits asset URLs
       // carrying that prefix — no StripPrefix needed here either.
       ...(MOCKS_BACKEND

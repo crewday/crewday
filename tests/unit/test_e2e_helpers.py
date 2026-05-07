@@ -71,14 +71,16 @@ class TestExtractMagicLinkToken:
         body = (
             "Welcome to crew.day.\n"
             "Click here to verify your email and finish signing up:\n"
-            "https://dev.crew.day/auth/magic/abc.def-123_xyz\n"
+            "https://dev-app.crew.day/auth/magic/abc.def-123_xyz\n"
         )
         token = extract_magic_link_token(_msg(text=body))
         assert token == "abc.def-123_xyz"
 
     def test_falls_back_to_html_body_when_text_empty(self) -> None:
         """HTML-only template path — older templates omit the text alt."""
-        body = '<a href="https://dev.crew.day/auth/magic/HtmlOnlyToken_42">Verify</a>'
+        body = (
+            '<a href="https://dev-app.crew.day/auth/magic/HtmlOnlyToken_42">Verify</a>'
+        )
         token = extract_magic_link_token(_msg(html=body))
         assert token == "HtmlOnlyToken_42"
 
@@ -89,8 +91,8 @@ class TestExtractMagicLinkToken:
         would still leave the plain-text body untouched; pinning text
         precedence shields the helper from those tweaks.
         """
-        text = "Verify: https://dev.crew.day/auth/magic/text-token"
-        html = '<a href="https://dev.crew.day/auth/magic/html-token">x</a>'
+        text = "Verify: https://dev-app.crew.day/auth/magic/text-token"
+        html = '<a href="https://dev-app.crew.day/auth/magic/html-token">x</a>'
         token = extract_magic_link_token(_msg(text=text, html=html))
         assert token == "text-token"
 
@@ -124,7 +126,7 @@ class TestExtractMagicLinkToken:
         the rare padding shape. A char outside that set must NOT
         extend the captured token.
         """
-        body = "https://dev.crew.day/auth/magic/aA0_-.X then garbage"
+        body = "https://dev-app.crew.day/auth/magic/aA0_-.X then garbage"
         token = extract_magic_link_token(_msg(text=body))
         assert token == "aA0_-.X"
 

@@ -29,7 +29,7 @@ The suite skips with a focused message if `/healthz` is unreachable —
 bring compose up first.
 
 Use the compose command above for passkey tests. `./scripts/dev-stack-up.sh`
-starts the normal dev stack only, which advertises `rp_id=dev.crew.day`;
+starts the normal dev app stack only, which advertises `rp_id=dev-app.crew.day`;
 the e2e preflight skips with the same command when `CREWDAY_E2E_BASE_URL`
 is `http://localhost:8100`.
 

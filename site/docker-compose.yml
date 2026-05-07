@@ -1,7 +1,8 @@
 services:
   site-web:
     build:
-      context: ./web
+      context: ..
+      dockerfile: site/web/Dockerfile
     restart: "no"
     volumes:
       - site-web-dist:/srv/www
@@ -14,13 +15,15 @@ services:
     environment:
       SITE_BIND_HOST: "0.0.0.0"
       SITE_BIND_PORT: "8001"
-      SITE_PUBLIC_URL: "http://127.0.0.1:${SITE_HTTP_PORT:-18080}"
+      SITE_PUBLIC_URL: "${SITE_PUBLIC_URL:-https://dev.crew.day}"
     expose:
       - "8001"
 
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    expose:
+      - "80"
     ports:
       - "127.0.0.1:${SITE_HTTP_PORT:-18080}:80"
     volumes:
@@ -33,6 +36,22 @@ services:
         condition: service_completed_successfully
       site-api:
         condition: service_started
+    networks:
+      - default
+      - traefik-proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-proxy"
+      - "traefik.http.routers.crewday-dev-site.rule=Host(`dev.crew.day`)"
+      - "traefik.http.routers.crewday-dev-site.entrypoints=websecure"
+      - "traefik.http.routers.crewday-dev-site.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.crewday-dev-site.middlewares=badger@file"
+      - "traefik.http.routers.crewday-dev-site.service=crewday-dev-site"
+      - "traefik.http.services.crewday-dev-site.loadbalancer.server.port=80"
+
+networks:
+  traefik-proxy:
+    external: true
 
 volumes:
   site-web-dist:

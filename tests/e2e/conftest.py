@@ -69,7 +69,7 @@ __all__ = [
 # The Vite container binds to 127.0.0.1 only, but the e2e suite uses
 # localhost so Chromium can complete WebAuthn registration: IP
 # literals are not valid RP IDs. This is still loopback-only; the
-# public ``dev.crew.day`` host remains blocked by Pangolin badger
+# public ``dev-app.crew.day`` app host remains blocked by Pangolin badger
 # forward-auth for scripted verification.
 DEFAULT_BASE_URL: Final[str] = "http://localhost:8100"
 ENV_BASE_URL: Final[str] = "CREWDAY_E2E_BASE_URL"

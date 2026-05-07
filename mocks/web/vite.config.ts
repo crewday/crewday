@@ -158,7 +158,7 @@ export default defineConfig({
   // The dev server binds inside the Docker `web-dev` container on
   // 0.0.0.0 and is reached two ways:
   //   - locally: 127.0.0.1:8100 → container :5173 (port forward)
-  //   - publicly: https://dev.crew.day → Traefik → web-dev:5173
+  //   - publicly: https://dev-app.crew.day → Traefik → web-dev:5173
   // Letting Vite pick HMR host/port from the page origin makes both
   // work without per-URL config: ws:// for 127.0.0.1:8100, wss://
   // for the public host (Traefik upgrades the websocket).
@@ -172,14 +172,14 @@ export default defineConfig({
     // — ``changeOrigin: true`` on that proxy rewrites the Host header
     // to the target, which Vite's host-check rejects unless whitelisted
     // here. Accept the bare service name alongside the public host.
-    allowedHosts: ["dev.crew.day", "localhost", "127.0.0.1", "mocks-web-dev"],
+    allowedHosts: ["dev-app.crew.day", "localhost", "127.0.0.1", "mocks-web-dev"],
     // Two proxy entry sets:
     //
     // * ``/api`` / ``/events`` / … — hit directly by the mocks SPA
     //   when it's served standalone (``localhost:5173``). Unchanged.
     // * ``/mocks/api`` / ``/mocks/events`` / … — hit when the mocks
     //   SPA is mounted under the ``/mocks/`` base (compose path
-    //   ``dev.crew.day/mocks/...``); each entry strips the ``/mocks``
+    //   ``dev-app.crew.day/mocks/...``); each entry strips the ``/mocks``
     //   prefix before forwarding so the mocks-api FastAPI container
     //   sees the canonical ``/api/...`` paths.
     proxy: {

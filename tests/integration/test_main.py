@@ -250,21 +250,53 @@ class TestSpaProdMountAgainstRealDist:
         assert resp.status_code == 404
         assert resp.headers["content-type"].startswith("application/problem+json")
 
-    def test_dev_compose_configures_same_origin_public_landing_route(
+    def test_dev_compose_routes_app_to_dev_app_host_and_public_site(
         self,
     ) -> None:
-        """The loopback dev stack routes logged-out root to dev-hosted landing."""
+        """The dev app lives on dev-app and sends logged-out root to the site."""
         compose = yaml.safe_load(
             Path("mocks/docker-compose.yml").read_text(encoding="utf-8")
         )
-        app_env = compose["services"]["app-api"]["environment"]
+        app_api = compose["services"]["app-api"]
+        app_env = app_api["environment"]
         web_env = compose["services"]["web-dev"]["environment"]
+        labels = set(app_api["labels"])
 
+        assert app_env["CREWDAY_PUBLIC_URL"] == "https://dev-app.crew.day"
         assert app_env["CREWDAY_PUBLIC_SITE_URL"] == (
-            "${CREWDAY_PUBLIC_SITE_URL:-/mocks/landing/}"
+            "${CREWDAY_PUBLIC_SITE_URL:-https://dev.crew.day}"
         )
+        assert app_env["CREWDAY_WEBAUTHN_RP_ID"] == "dev-app.crew.day"
         assert web_env["VITE_CREWDAY_PUBLIC_SITE_URL"] == (
-            "${CREWDAY_PUBLIC_SITE_URL:-/mocks/landing/}"
+            "${CREWDAY_PUBLIC_SITE_URL:-https://dev.crew.day}"
         )
         assert "https://crew.day" not in app_env["CREWDAY_PUBLIC_SITE_URL"]
         assert "https://crew.day" not in web_env["VITE_CREWDAY_PUBLIC_SITE_URL"]
+        assert (
+            "traefik.http.routers.crewday-dev-app.rule=Host(`dev-app.crew.day`)"
+            in labels
+        )
+        assert "traefik.http.routers.crewday-dev-app.middlewares=badger@file" in labels
+
+    def test_site_compose_routes_public_dev_host_through_badger(
+        self,
+    ) -> None:
+        """The public dev hostname is owned by the isolated site stack."""
+        compose = yaml.safe_load(
+            Path("site/docker-compose.yml").read_text(encoding="utf-8")
+        )
+        site_web_build = compose["services"]["site-web"]["build"]
+        site_api_env = compose["services"]["site-api"]["environment"]
+        caddy = compose["services"]["caddy"]
+        labels = set(caddy["labels"])
+
+        assert site_web_build == {"context": "..", "dockerfile": "site/web/Dockerfile"}
+        assert (
+            site_api_env["SITE_PUBLIC_URL"]
+            == "${SITE_PUBLIC_URL:-https://dev.crew.day}"
+        )
+        assert "traefik-proxy" in caddy["networks"]
+        assert (
+            "traefik.http.routers.crewday-dev-site.rule=Host(`dev.crew.day`)" in labels
+        )
+        assert "traefik.http.routers.crewday-dev-site.middlewares=badger@file" in labels

@@ -63,6 +63,10 @@ The SaaS operator at `crew.day` runs the full stack — site + app +
 demo — as three independent deployments behind their own reverse
 proxies.
 
+The shared dev environment mirrors that split with `dev.crew.day` for
+the public site and `dev-app.crew.day` for the app. Both hostnames sit
+behind the shared Traefik / Pangolin badger front door on the dev box.
+
 ## Tech stack
 
 **Frontend** — Astro 4+ with React islands.
