@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
+from sqlalchemy import JSON as SqlJson
 from sqlalchemy import Engine, String, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -21,6 +24,7 @@ from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.factory import create_app
 from app.config import Settings
 from app.demo import demo_cookie_name, mint_demo_cookie
+from app.util.ulid import new_ulid
 
 pytestmark = pytest.mark.integration
 
@@ -145,12 +149,24 @@ def test_demo_start_invalid_value_is_not_persisted_or_echoed(
     )
 
     assert response.status_code == 303
-    assert invalid_start not in response.headers["location"]
-    assert invalid_start.encode() not in response.content
-    assert invalid_start not in response.headers["set-cookie"]
+    location = response.headers["location"]
+    assert location.startswith("/w/demo-villa-owner-")
+    assert location.endswith("/today")
+    slug = location.split("/")[2]
+    forbidden_values = (invalid_start, f"/w/{slug}{invalid_start}")
+    for forbidden in forbidden_values:
+        assert forbidden not in location
+        assert forbidden.encode() not in response.content
+        assert forbidden not in response.headers["set-cookie"]
+        assert all(forbidden not in value for value in demo_client.cookies.values())
     with session_factory() as session:
-        assert _count_all(session, AuditLog) == 0
-        _assert_text_not_persisted(session, invalid_start)
+        workspace_id = session.scalar(
+            select(Workspace.id).where(Workspace.slug == slug)
+        )
+        assert workspace_id is not None
+        _seed_benign_audit_row(session, workspace_id)
+        _assert_text_not_in_audit_payloads(session, forbidden_values)
+        _assert_text_not_persisted(session, forbidden_values)
 
 
 def test_tampered_cookie_is_absent_and_remints(
@@ -311,11 +327,58 @@ def _cookie_value(set_cookie: str, scenario_key: str) -> str:
     return set_cookie[start:end]
 
 
-def _assert_text_not_persisted(session: Session, forbidden: str) -> None:
+def _seed_benign_audit_row(session: Session, workspace_id: str) -> None:
+    session.add(
+        AuditLog(
+            id=new_ulid(),
+            workspace_id=workspace_id,
+            actor_id=new_ulid(),
+            actor_kind="user",
+            actor_grant_role="owner",
+            actor_was_owner_member=True,
+            entity_kind="demo_workspace",
+            entity_id=workspace_id,
+            action="demo.workspace_seeded",
+            diff={"start": "/today"},
+            correlation_id=new_ulid(),
+            scope_kind="workspace",
+            via="web",
+            created_at=datetime(2026, 5, 7, tzinfo=UTC),
+        )
+    )
+    session.flush()
+
+
+def _assert_text_not_in_audit_payloads(
+    session: Session,
+    forbidden_values: tuple[str, ...],
+) -> None:
+    for diff in session.scalars(select(AuditLog.diff)):
+        text = _searchable_text(diff)
+        for forbidden in forbidden_values:
+            assert forbidden not in text
+
+
+def _assert_text_not_persisted(
+    session: Session,
+    forbidden_values: tuple[str, ...],
+) -> None:
     for table in Base.metadata.sorted_tables:
-        columns = [column for column in table.c if isinstance(column.type, String)]
+        columns = [
+            column for column in table.c if isinstance(column.type, (String, SqlJson))
+        ]
         if not columns:
             continue
         for row in session.execute(select(*columns)):
             for value in row:
-                assert not isinstance(value, str) or forbidden not in value
+                text = _searchable_text(value)
+                for forbidden in forbidden_values:
+                    assert forbidden not in text
+
+
+def _searchable_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, sort_keys=True, default=str)
