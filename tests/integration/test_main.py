@@ -23,6 +23,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import Engine
@@ -126,6 +127,30 @@ class TestSpaProdMountAgainstRealDist:
             in resp.text
         )
 
+    def test_root_bootstrap_carries_configured_public_site_url(
+        self, pinned_settings: Settings, real_make_uow: None
+    ) -> None:
+        """Configured managed deployments expose the bare-root public target."""
+        settings = pinned_settings.model_copy(
+            update={"public_site_url": "https://crew.day"}
+        )
+        app = create_app(settings=settings)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.get("/")
+
+        assert resp.status_code == 200
+        match = re.search(
+            r"script-src 'self' 'nonce-(?P<nonce>[^']+)'",
+            resp.headers["Content-Security-Policy"],
+        )
+        assert match is not None
+        nonce = match.group("nonce")
+        assert (
+            f'<script id="crewday-bootstrap" nonce="{nonce}">'
+            f'window.__CREWDAY__={{"cspNonce":"{nonce}","publicSiteUrl":"https://crew.day"}};</script>'
+            in resp.text
+        )
+
     def test_deep_link_returns_spa_index(
         self, pinned_settings: Settings, real_make_uow: None
     ) -> None:
@@ -199,3 +224,20 @@ class TestSpaProdMountAgainstRealDist:
         resp = client.get("/api/v1/does-not-exist")
         assert resp.status_code == 404
         assert resp.headers["content-type"].startswith("application/problem+json")
+
+    def test_dev_compose_configures_public_site_url_for_managed_root_smoke(
+        self,
+    ) -> None:
+        """The loopback dev stack supplies the public-root target to both SPA seams."""
+        compose = yaml.safe_load(
+            Path("mocks/docker-compose.yml").read_text(encoding="utf-8")
+        )
+        app_env = compose["services"]["app-api"]["environment"]
+        web_env = compose["services"]["web-dev"]["environment"]
+
+        assert app_env["CREWDAY_PUBLIC_SITE_URL"] == (
+            "${CREWDAY_PUBLIC_SITE_URL:-https://crew.day}"
+        )
+        assert web_env["VITE_CREWDAY_PUBLIC_SITE_URL"] == (
+            "${CREWDAY_PUBLIC_SITE_URL:-https://crew.day}"
+        )

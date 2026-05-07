@@ -89,6 +89,34 @@ describe("<RequireAuth>", () => {
     expect(screen.queryByText("protected today")).toBeNull();
   });
 
+  it("uses the Vite public-site env when the server bootstrap is absent", async () => {
+    setUnauthenticated();
+    vi.stubEnv("VITE_CREWDAY_PUBLIC_SITE_URL", "https://crew.day");
+    const redirectExternal = vi.fn();
+    const qc = new QueryClient();
+
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/"]}>
+          <Routes>
+            <Route path="/login" element={<div>login page</div>} />
+            <Route element={<RequireAuth redirectExternal={redirectExternal} />}>
+              <Route path="/" element={<div>protected root</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(redirectExternal).toHaveBeenCalledWith("https://crew.day/");
+    expect(screen.getByRole("status")).toHaveTextContent("Opening crew.day");
+    expect(screen.queryByText("login page")).toBeNull();
+    expect(screen.queryByText("protected root")).toBeNull();
+  });
+
   it("keeps the local login fallback when the server bootstrap explicitly unsets the public site", () => {
     setUnauthenticated();
     vi.stubEnv("VITE_CREWDAY_PUBLIC_SITE_URL", "https://crew.day");
