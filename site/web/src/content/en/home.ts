@@ -37,9 +37,6 @@ export const homeCopy = {
     },
   ],
   tryIt: {
-    eyebrow: "Demo picker",
-    heading: "Try the demo",
-    body: "The scenario picker lands here next. For now, this section reserves the stable anchor used by the landing page and persona pages.",
-    cta: { label: "Create an account", href: appLinks.signup.href },
+    label: "Interactive demo picker",
   },
 } as const;

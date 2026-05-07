@@ -2,6 +2,7 @@
 import FeatureIllustration from "@/components/FeatureIllustration.astro";
 import SiteShell from "@/components/SiteShell.astro";
 import { homeCopy } from "@/content/en/home";
+import { ScenarioPicker } from "@/islands/ScenarioPicker";
 import { ArrowRight, Sparkles } from "@/icons";
 
 const description = homeCopy.description;
@@ -50,11 +51,8 @@ const description = homeCopy.description;
       </div>
     </section>
 
-    <section id="try-it" class="try-it-reservation" aria-labelledby="try-it-title">
-      <p class="eyebrow">{homeCopy.tryIt.eyebrow}</p>
-      <h2 id="try-it-title">{homeCopy.tryIt.heading}</h2>
-      <p>{homeCopy.tryIt.body}</p>
-      <a class="button button--primary" href={homeCopy.tryIt.cta.href}>{homeCopy.tryIt.cta.label}</a>
+    <section id="try-it" class="try-it-section" aria-label={homeCopy.tryIt.label}>
+      <ScenarioPicker client:load />
     </section>
   </main>
 </SiteShell>

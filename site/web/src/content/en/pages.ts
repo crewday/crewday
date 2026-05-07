@@ -20,7 +20,9 @@ export type PersonaPageCopy = {
   primaryCta: LinkAction;
   secondaryCta: LinkAction;
   sections: readonly ContentSection[];
-  tryIt: ContentSection;
+  tryIt: {
+    label: string;
+  };
 };
 
 export const personaPages = {
@@ -52,9 +54,7 @@ export const personaPages = {
       },
     ],
     tryIt: {
-      eyebrow: "Reserved demo area",
-      heading: "Owner scenario picker",
-      body: "The picker task will mount here with the villa-owner persona pre-selected and the owner intents from the site spec.",
+      label: "Owner demo picker",
     },
   },
   agencies: {
@@ -85,9 +85,7 @@ export const personaPages = {
       },
     ],
     tryIt: {
-      eyebrow: "Reserved demo area",
-      heading: "Agency scenario picker",
-      body: "The picker task will mount here with the rental-manager persona pre-selected and the agency intents from the site spec.",
+      label: "Agency demo picker",
     },
   },
   housekeepers: {
@@ -118,9 +116,7 @@ export const personaPages = {
       },
     ],
     tryIt: {
-      eyebrow: "Reserved demo area",
-      heading: "Housekeeper scenario picker",
-      body: "The picker task will mount here with the housekeeper persona pre-selected and the worker intents from the site spec.",
+      label: "Housekeeper demo picker",
     },
   },
 } as const satisfies Record<string, PersonaPageCopy>;

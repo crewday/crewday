@@ -142,7 +142,7 @@
 
 .home-hero,
 .page-hero,
-.try-it-reservation {
+.try-it-section {
   border: 1px solid var(--line);
   border-radius: 10px;
   background:
@@ -162,7 +162,7 @@
 .home-hero__copy,
 .page-hero,
 .story-card,
-.try-it-reservation,
+.try-it-section,
 .section-heading,
 .site-footer__brand,
 .content-stack {
@@ -172,7 +172,7 @@
 .home-hero__copy,
 .page-hero,
 .story-card,
-.try-it-reservation,
+.try-it-section,
 .section-heading {
   gap: var(--space-7);
 }
@@ -256,7 +256,7 @@
 
 .feature-band h3,
 .story-card h2,
-.try-it-reservation h2 {
+.scenario-picker h2 {
   color: var(--ink);
   font-size: clamp(1.5rem, 3vw, 2.4rem);
   line-height: 1.12;
@@ -265,7 +265,7 @@
 
 .feature-band p,
 .story-card p,
-.try-it-reservation p,
+.scenario-picker p,
 .page-hero__intro,
 .not-found-page p,
 .site-footer p {
@@ -373,7 +373,7 @@
 }
 
 .story-card,
-.try-it-reservation {
+.try-it-section {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--card);
@@ -389,11 +389,206 @@
   gap: var(--space-8);
 }
 
-.try-it-reservation {
-  max-width: 860px;
+.try-it-section {
+  overflow: clip;
 }
 
-.try-it-reservation .button {
+.scenario-picker {
+  display: grid;
+  gap: var(--space-10);
+}
+
+.scenario-picker__intro {
+  display: grid;
+  gap: var(--space-6);
+  max-width: 720px;
+}
+
+.scenario-picker__layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr);
+  gap: var(--space-10);
+  align-items: start;
+}
+
+.scenario-picker__controls {
+  display: grid;
+  gap: var(--space-8);
+}
+
+.scenario-picker__group {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.scenario-picker__group legend,
+.scenario-picker__locked-persona p,
+.demo-frame__mode {
+  color: var(--ink-3);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.scenario-picker__options {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.scenario-picker__option {
+  display: grid;
+  gap: var(--space-2);
+  min-height: 48px;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card-raised);
+  color: var(--ink-2);
+  padding: var(--space-6) var(--space-7);
+  text-align: left;
+  cursor: pointer;
+}
+
+.scenario-picker__option span,
+.scenario-picker__locked-persona strong {
+  color: var(--ink);
+  font-size: 0.96rem;
+  font-weight: 700;
+}
+
+.scenario-picker__option small {
+  color: var(--ink-3);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.scenario-picker__option:hover,
+.scenario-picker__option[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--moss) 56%, var(--line));
+  background: var(--moss-soft);
+  color: var(--ink);
+}
+
+.scenario-picker__option[aria-pressed="true"] {
+  box-shadow: inset 3px 0 0 var(--moss);
+}
+
+.scenario-picker__locked-persona {
+  display: grid;
+  gap: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+  padding: var(--space-7);
+}
+
+.demo-frame {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--ink);
+  box-shadow: var(--shadow-raised);
+}
+
+.demo-frame__chrome {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  min-height: 34px;
+  border-bottom: 1px solid color-mix(in srgb, var(--card) 14%, transparent);
+  padding: 0 var(--space-7);
+}
+
+.demo-frame__chrome span {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card) 54%, transparent);
+}
+
+.demo-frame__viewport {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background:
+    linear-gradient(90deg, rgba(255, 253, 249, 0.07) 1px, transparent 1px),
+    linear-gradient(rgba(255, 253, 249, 0.07) 1px, transparent 1px),
+    var(--ink);
+  background-size: 30px 30px;
+}
+
+.demo-frame__video,
+.demo-frame__embed {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.demo-frame__video {
+  object-fit: cover;
+}
+
+.demo-frame__caption {
+  position: absolute;
+  inset: auto var(--space-7) var(--space-7) var(--space-7);
+  display: grid;
+  gap: var(--space-3);
+  max-width: min(520px, calc(100% - 28px));
+  border: 1px solid rgba(255, 253, 249, 0.16);
+  border-radius: 8px;
+  background: rgba(31, 26, 20, 0.82);
+  color: var(--card);
+  padding: var(--space-6) var(--space-7);
+  backdrop-filter: blur(12px);
+}
+
+.demo-frame__caption p {
+  color: var(--card);
+  font-size: 0.92rem;
+  line-height: 1.42;
+}
+
+.demo-frame__mode {
+  color: color-mix(in srgb, var(--sand) 82%, var(--card));
+}
+
+.demo-frame__action {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-7);
+  align-items: center;
+  min-height: 84px;
+  border-top: 1px solid color-mix(in srgb, var(--card) 14%, transparent);
+  padding: var(--space-7);
+}
+
+.demo-frame__status {
+  width: fit-content;
+  border: 1px solid color-mix(in srgb, var(--card) 18%, transparent);
+  border-radius: 999px;
+  color: var(--card);
+  font-weight: 700;
+  padding: var(--space-4) var(--space-7);
+}
+
+.demo-frame__action p {
+  color: color-mix(in srgb, var(--card) 72%, transparent);
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.demo-frame__button {
   width: fit-content;
 }
 
@@ -488,6 +683,7 @@
   .feature-band,
   .feature-band:nth-child(even),
   .page-hero--split,
+  .scenario-picker__layout,
   .site-footer__inner {
     grid-template-columns: 1fr;
   }
@@ -536,7 +732,7 @@
   .home-hero,
   .page-hero,
   .story-card,
-  .try-it-reservation,
+  .try-it-section,
   .feature-band {
     padding: var(--space-9);
   }
@@ -551,6 +747,26 @@
   }
 
   .button {
+    width: 100%;
+  }
+
+  .scenario-picker__options--persona {
+    grid-template-columns: 1fr;
+  }
+
+  .demo-frame__viewport {
+    aspect-ratio: 9 / 19;
+  }
+
+  .demo-frame__caption {
+    inset: auto var(--space-5) var(--space-5) var(--space-5);
+  }
+
+  .demo-frame__action {
+    grid-template-columns: 1fr;
+  }
+
+  .demo-frame__button {
     width: 100%;
   }
 

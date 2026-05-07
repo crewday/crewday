@@ -1,13 +1,16 @@
 ---
 import { ArrowRight } from "@/icons";
 import type { PersonaPageCopy } from "@/content/en/pages";
+import type { PersonaKey } from "@/content/en/scenarios";
+import { ScenarioPicker } from "@/islands/ScenarioPicker";
 import SiteShell from "./SiteShell.astro";
 
 interface Props {
   page: PersonaPageCopy;
+  fixedPersona: PersonaKey;
 }
 
-const { page } = Astro.props;
+const { fixedPersona, page } = Astro.props;
 ---
 
 <SiteShell title={page.title} description={page.description}>
@@ -47,10 +50,8 @@ const { page } = Astro.props;
       </div>
     </section>
 
-    <section id="try-it" class="try-it-reservation" aria-labelledby="try-it-title">
-      <p class="eyebrow">{page.tryIt.eyebrow}</p>
-      <h2 id="try-it-title">{page.tryIt.heading}</h2>
-      <p>{page.tryIt.body}</p>
+    <section id="try-it" class="try-it-section" aria-label={page.tryIt.label}>
+      <ScenarioPicker fixedPersona={fixedPersona} client:load />
     </section>
   </main>
 </SiteShell>
