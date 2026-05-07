@@ -1,7 +1,0 @@
-227. [GET] http://127.0.0.1:8100/w/dev/api/v1/agent/manager/log => [200] OK
-269. [GET] http://127.0.0.1:8100/w/dev/api/v1/agent/manager/log => [200] OK
-514. [GET] http://127.0.0.1:8100/w/dev/api/v1/agent/manager/log => [200] OK
-792. [GET] http://127.0.0.1:8100/w/dev/api/v1/agent/manager/log => [200] OK
-1035. [GET] http://127.0.0.1:8100/w/dev/api/v1/agent/manager/log => [200] OK
-
-Note: 892 static requests not shown, run with "static" option to see them.
