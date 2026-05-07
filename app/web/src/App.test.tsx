@@ -5,7 +5,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { RoleProvider } from "@/context/RoleContext";
-import { setAuthenticated } from "@/auth/authStore";
+import { setAuthenticated, setUnauthenticated } from "@/auth/authStore";
 import { __resetAuthStoreForTests } from "@/auth/useAuth";
 import type { AuthMe } from "@/auth/types";
 import { __resetApiProvidersForTests } from "@/lib/api";
@@ -23,6 +23,7 @@ const mockRenders = vi.hoisted(() => ({
   managerLayout: vi.fn(),
   chatPage: vi.fn(),
   dashboardPage: vi.fn(),
+  schedulerPage: vi.fn(),
   apiTokensPage: vi.fn(),
 }));
 
@@ -119,6 +120,13 @@ vi.mock("@/pages/manager/DashboardPage", () => ({
   },
 }));
 
+vi.mock("@/pages/SchedulerPage", () => ({
+  default: function MockSchedulerPage(): ReactElement {
+    mockRenders.schedulerPage();
+    return <main data-testid="scheduler-page">Scheduler</main>;
+  },
+}));
+
 vi.mock("@/pages/manager/ApiTokensPage", () => ({
   default: function MockApiTokensPage(): ReactElement {
     mockRenders.apiTokensPage();
@@ -130,6 +138,54 @@ vi.mock("@/pages/client/PortfolioPage", () => ({
   default: function MockClientPortfolioPage(): ReactElement {
     mockRenders.clientPortfolioPage();
     return <main data-testid="client-portfolio">Client portfolio</main>;
+  },
+}));
+
+vi.mock("@/pages/public/LoginPage", () => ({
+  default: function MockLoginPage(): ReactElement {
+    return <main data-testid="login-page">Login</main>;
+  },
+}));
+
+vi.mock("@/pages/public/RecoverPage", () => ({
+  default: function MockRecoverPage(): ReactElement {
+    return <main data-testid="recover-page">Recover</main>;
+  },
+}));
+
+vi.mock("@/pages/public/EnrollPage", () => ({
+  default: function MockEnrollPage(): ReactElement {
+    return <main data-testid="recover-enroll-page">Recover enroll</main>;
+  },
+}));
+
+vi.mock("@/pages/public/AcceptPage", () => ({
+  default: function MockAcceptPage(): ReactElement {
+    return <main data-testid="accept-page">Accept</main>;
+  },
+}));
+
+vi.mock("@/pages/public/GuestPage", () => ({
+  default: function MockGuestPage(): ReactElement {
+    return <main data-testid="guest-page">Guest</main>;
+  },
+}));
+
+vi.mock("@/pages/public/SignupPage", () => ({
+  default: function MockSignupPage(): ReactElement {
+    return <main data-testid="signup-page">Signup</main>;
+  },
+}));
+
+vi.mock("@/pages/public/SignupVerifyPage", () => ({
+  default: function MockSignupVerifyPage(): ReactElement {
+    return <main data-testid="signup-verify-page">Signup verify</main>;
+  },
+}));
+
+vi.mock("@/pages/public/SignupEnrollPage", () => ({
+  default: function MockSignupEnrollPage(): ReactElement {
+    return <main data-testid="signup-enroll-page">Signup enroll</main>;
   },
 }));
 
@@ -196,13 +252,34 @@ function installPermissionAllowFetch(): void {
 
 function LocationProbe(): ReactElement {
   const location = useLocation();
-  return <span data-testid="location">{location.pathname}</span>;
+  return <span data-testid="location">{location.pathname + location.search}</span>;
 }
 
 function renderAppAt(path: string, role: AppRole, grantRole?: WorkspaceGrantRole): void {
   vi.spyOn(preferences, "readRoleCookie").mockReturnValue(role);
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("ws_1");
   setAuthenticated(authMeFor(role, grantRole));
+
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+
+  render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[path]}>
+        <RoleProvider>
+          <WorkspaceProvider>
+            <LocationProbe />
+            <App />
+          </WorkspaceProvider>
+        </RoleProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+function renderUnauthenticatedAppAt(path: string): void {
+  setUnauthenticated();
 
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -236,6 +313,76 @@ afterEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.restoreAllMocks();
+});
+
+describe("App public root and protected deep links", () => {
+  it("keeps authenticated / on the role home", async () => {
+    installPermissionAllowFetch();
+    renderAppAt("/", "manager");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
+    });
+    expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
+  });
+
+  it("sends logged-out bare protected links to /login with next", async () => {
+    renderUnauthenticatedAppAt("/dashboard");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location"))
+        .toHaveTextContent("/login?next=%2Fdashboard");
+    });
+  });
+
+  it("sends logged-out workspace-prefixed protected links to /login with next", async () => {
+    renderUnauthenticatedAppAt("/w/dev/dashboard?tab=ops");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location"))
+        .toHaveTextContent("/login?next=%2Fw%2Fdev%2Fdashboard%3Ftab%3Dops");
+    });
+  });
+
+  it("normalises authenticated workspace-prefixed protected links after setting the workspace", async () => {
+    installPermissionAllowFetch();
+    renderAppAt("/w/ws_1/dashboard", "manager");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
+    });
+    expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
+  });
+
+  it("normalises authenticated workspace-prefixed aliases before specific protected routes render", async () => {
+    installPermissionAllowFetch();
+    renderAppAt("/w/ws_1/scheduler?view=day", "manager");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/scheduler?view=day");
+    });
+    expect(await screen.findByTestId("scheduler-page")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["/login", "login-page"],
+    ["/signup", "signup-page"],
+    ["/signup/verify", "signup-verify-page"],
+    ["/signup/enroll", "signup-enroll-page"],
+    ["/recover", "recover-page"],
+    ["/recover/enroll", "recover-enroll-page"],
+    ["/auth/magic/tok_1", "signup-verify-page"],
+    ["/accept/tok_1", "accept-page"],
+    ["/guest/tok_1", "guest-page"],
+    ["/w/dev/guest/tok_1", "guest-page"],
+  ])("keeps %s on the public route branch", async (path, testId) => {
+    renderUnauthenticatedAppAt(path);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent(path);
+    });
+    expect(await screen.findByTestId(testId)).toBeInTheDocument();
+  });
 });
 
 describe("App /chat role routing", () => {

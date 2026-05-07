@@ -444,7 +444,8 @@ class TestSpaCatchAll:
         assert f'<script nonce="{nonce}">window.n = "{nonce}";</script>' in resp.text
         assert (
             f'<script id="crewday-bootstrap" nonce="{nonce}">'
-            f'window.__CREWDAY__={{"cspNonce":"{nonce}"}};</script>' in resp.text
+            f'window.__CREWDAY__={{"cspNonce":"{nonce}","publicSiteUrl":null}};</script>'
+            in resp.text
         )
         assert 'nonce="stale"' not in resp.text
         assert f'<style nonce="{nonce}">body {{ color: black; }}</style>' in resp.text

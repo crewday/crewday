@@ -50,6 +50,9 @@ do not build, deploy, or maintain anything under `site/`. Concretely:
 - The app boots cleanly with no site in sight. The "Give feedback"
   link in the app is hidden when `CREWDAY_FEEDBACK_URL` is unset
   (default).
+- The app's logged-out bare-root redirect is off unless
+  `CREWDAY_PUBLIC_SITE_URL` is set. Without that URL, self-hosters
+  keep the local app login fallback and do not need to build `site/`.
 - The app's `feedback.cluster` capability (§03, app §11) is off
   by default on every deployment; a self-hoster does not pay LLM
   budget for it unless they explicitly turn it on.

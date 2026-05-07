@@ -8,6 +8,7 @@ x-app-env: &app-env
   CREWDAY_ALLOW_PUBLIC_BIND: "1"
   CREWDAY_WORKER: "external"
   CREWDAY_PUBLIC_URL: "${CREWDAY_PUBLIC_URL:-https://localhost:8443}"
+  CREWDAY_PUBLIC_SITE_URL: "${CREWDAY_PUBLIC_SITE_URL:-}"
   CREWDAY_ROOT_KEY:
   CREWDAY_LOG_LEVEL: "${CREWDAY_LOG_LEVEL:-INFO}"
   # MinIO is part of the compose topology; keep localfs until the S3

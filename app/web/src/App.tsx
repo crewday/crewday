@@ -1,5 +1,5 @@
-import { lazy, Suspense } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import PreviewShell from "@/layouts/PreviewShell";
 import EmployeeLayout from "@/layouts/EmployeeLayout";
 import ManagerLayout from "@/layouts/ManagerLayout";
@@ -139,6 +139,32 @@ function ClientPortalGuard() {
   return <ClientLayout />;
 }
 
+function WorkspacePrefixedGate() {
+  const location = useLocation();
+  const { setWorkspaceId } = useWorkspace();
+  const workspacePrefix = useMemo(() => {
+    const match = /^\/w\/([^/]+)(\/.*)?$/.exec(location.pathname);
+    if (!match) return null;
+    const slug = match[1];
+    if (!slug) return null;
+    return {
+      slug,
+      targetPath: match[2] ?? "/",
+    };
+  }, [location.pathname]);
+  const [consumedPath, setConsumedPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!workspacePrefix) return;
+    setWorkspaceId(workspacePrefix.slug);
+    setConsumedPath(location.pathname);
+  }, [location.pathname, setWorkspaceId, workspacePrefix]);
+
+  if (!workspacePrefix) return <Outlet />;
+  if (consumedPath !== location.pathname) return null;
+  return <Navigate to={workspacePrefix.targetPath + location.search + location.hash} replace />;
+}
+
 export default function App() {
   // code-health: ignore[nloc] App route tree keeps public, protected, admin, and guest routing together to make promotion drift visible.
   const { user } = useAuth();
@@ -195,12 +221,16 @@ export default function App() {
 
         {/* Everything else sits behind the auth gate.
             `<RequireAuth>` resolves the session (loading | login |
-            authenticated). Once authenticated, `<WorkspaceGate>`
-            holds the protected tree until a workspace slug is
-            picked (auto-adopted for single-workspace users). */}
+            authenticated). Once authenticated, `<WorkspacePrefixedGate>`
+            consumes `/w/:slug/*` deep links before protected children
+            render. Then `<WorkspaceGate>` holds the protected tree
+            until a workspace slug is picked (auto-adopted for
+            single-workspace users). */}
         <Route element={<RequireAuth />}>
-          <Route element={<WorkspaceGate />}>
-            <Route path="/" element={<RoleHome />} />
+          <Route element={<WorkspacePrefixedGate />}>
+            <Route path="/w/:slug/*" element={<Outlet />} />
+            <Route element={<WorkspaceGate />}>
+              <Route path="/" element={<RoleHome />} />
 
             {/* Shared routes — any role. Shell picks the right layout. */}
             <Route element={<Shell />}>
@@ -401,32 +431,33 @@ export default function App() {
               <Route path="/quotes" element={<ClientQuotesPage />} />
               <Route path="/invoices" element={<ClientInvoicesPage />} />
             </Route>
-          </Route>
+            </Route>
 
-          {/* /admin — bare-host deployment admin shell (§14 "Admin
+            {/* /admin — bare-host deployment admin shell (§14 "Admin
               shell"). Sits inside `<RequireAuth>` (the deployment
               admin must be signed in) but **outside** `<WorkspaceGate>`:
               admin is a deployment-scope surface and intentionally
               has no workspace slug. */}
-          <Route
-            element={
-              <AdminSseProvider>
-                <AdminLayout />
-              </AdminSseProvider>
-            }
-          >
-            <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
-            <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
-            <Route path="/admin/chat-gateway" element={<AdminChatGatewayPage />} />
-            <Route path="/admin/llm" element={<AdminLlmPage />} />
-            <Route path="/admin/agent-docs" element={<AdminAgentDocsPage />} />
-            <Route path="/admin/usage" element={<AdminUsagePage />} />
-            <Route path="/admin/workspaces" element={<AdminWorkspacesPage />} />
-            <Route path="/admin/signups" element={<AdminSignupsPage />} />
-            <Route path="/admin/signup" element={<Navigate to="/admin/settings#signup" replace />} />
-            <Route path="/admin/settings" element={<AdminSettingsPage />} />
-            <Route path="/admin/admins" element={<AdminAdminsPage />} />
-            <Route path="/admin/audit" element={<AdminAuditPage />} />
+            <Route
+              element={
+                <AdminSseProvider>
+                  <AdminLayout />
+                </AdminSseProvider>
+              }
+            >
+              <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
+              <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
+              <Route path="/admin/chat-gateway" element={<AdminChatGatewayPage />} />
+              <Route path="/admin/llm" element={<AdminLlmPage />} />
+              <Route path="/admin/agent-docs" element={<AdminAgentDocsPage />} />
+              <Route path="/admin/usage" element={<AdminUsagePage />} />
+              <Route path="/admin/workspaces" element={<AdminWorkspacesPage />} />
+              <Route path="/admin/signups" element={<AdminSignupsPage />} />
+              <Route path="/admin/signup" element={<Navigate to="/admin/settings#signup" replace />} />
+              <Route path="/admin/settings" element={<AdminSettingsPage />} />
+              <Route path="/admin/admins" element={<AdminAdminsPage />} />
+              <Route path="/admin/audit" element={<AdminAuditPage />} />
+            </Route>
           </Route>
         </Route>
 

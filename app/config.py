@@ -55,6 +55,9 @@ class Settings(BaseSettings):
 
     # --- Public URL ---
     public_url: str | None = None
+    # Optional marketing-site target for anonymous visitors who hit the
+    # app bare root. When unset, the SPA keeps the local login fallback.
+    public_site_url: str | None = None
 
     # --- WebAuthn (optional override; derived from public_url otherwise) ---
     # Only needed when the rp_id should differ from the origin's hostname —
@@ -345,6 +348,14 @@ class Settings(BaseSettings):
         """
         if isinstance(value, str):  # code-health: ignore[duplicate] Env validators.
             return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("public_site_url", mode="before")
+    @classmethod
+    def _blank_public_site_url_to_none(cls, value: object) -> object:
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
         return value
 
     @field_validator("cors_allow_origins", mode="before")

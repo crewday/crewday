@@ -98,6 +98,7 @@ services:
       CREWDAY_PROFILE: "dev"
       CREWDAY_VITE_DEV_URL: "http://web-dev:5173"
       CREWDAY_PUBLIC_URL: "https://dev.crew.day"
+      CREWDAY_PUBLIC_SITE_URL: "${CREWDAY_PUBLIC_SITE_URL:-}"
       CREWDAY_WEBAUTHN_RP_ID: "dev.crew.day"
       # DEV-ONLY signing secret — 64 hex chars (256 bits). NEVER a
       # production value; the compose file is world-readable in the
@@ -191,6 +192,7 @@ services:
       # (``cd app/web && npm run dev``) and in case a future debug
       # session re-publishes Vite on the host.
       VITE_BACKEND_URL: "http://app-api:8000"
+      VITE_CREWDAY_PUBLIC_SITE_URL: "${CREWDAY_PUBLIC_SITE_URL:-}"
       # ``/mocks/*`` requests reach FastAPI first; FastAPI's Vite proxy
       # forwards them to this same Vite container, which in turn
       # ``server.proxy``-fans out to ``mocks-web-dev`` through this

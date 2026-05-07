@@ -1,6 +1,12 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
+import { useEffect, useRef } from "react";
 import { useAuth } from "./useAuth";
 import { sanitizeNext } from "./onUnauthorized";
+import { configuredPublicSiteUrl } from "@/lib/runtimeConfig";
+
+function defaultExternalRedirect(url: string): void {
+  window.location.replace(url);
+}
 
 // §14 "Auth" — route guard that defers child rendering until the
 // auth store has resolved. Three terminal states:
@@ -22,7 +28,13 @@ import { sanitizeNext } from "./onUnauthorized";
 // dropped before the bounce — a defence-in-depth guard that matches
 // the central 401 handler's posture.
 
-export function RequireAuth({ children }: { children?: React.ReactNode }) {
+export function RequireAuth({
+  children,
+  redirectExternal = defaultExternalRedirect,
+}: {
+  children?: React.ReactNode;
+  redirectExternal?: (url: string) => void;
+}) {
   const { status } = useAuth();
   const location = useLocation();
 
@@ -39,6 +51,10 @@ export function RequireAuth({ children }: { children?: React.ReactNode }) {
   }
 
   if (status === "unauthenticated") {
+    const publicSiteUrl = location.pathname === "/" ? configuredPublicSiteUrl() : null;
+    if (publicSiteUrl) {
+      return <ExternalRedirect to={publicSiteUrl} redirectExternal={redirectExternal} />;
+    }
     const here = location.pathname + location.search + location.hash;
     const safeHere = sanitizeNext(here);
     const target = safeHere ? `/login?next=${encodeURIComponent(safeHere)}` : "/login";
@@ -56,3 +72,23 @@ export function RequireAuth({ children }: { children?: React.ReactNode }) {
 }
 
 export default RequireAuth;
+
+function ExternalRedirect({
+  to,
+  redirectExternal,
+}: {
+  to: string;
+  redirectExternal: (url: string) => void;
+}) {
+  const redirectedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (redirectedRef.current === to) return;
+    redirectedRef.current = to;
+    redirectExternal(to);
+  }, [redirectExternal, to]);
+  return (
+    <div className="auth-hold" role="status" aria-live="polite" aria-busy="true">
+      <span className="auth-hold__label">Opening crew.day…</span>
+    </div>
+  );
+}

@@ -122,7 +122,11 @@ workspace once and the rest of the tree is unaware of the prefix.
 ### Public (bare host, no workspace prefix)
 
 ```
-/                          → auth redirect (to /login or /select-workspace)
+/                          → authenticated role home; when logged out and
+                             `CREWDAY_PUBLIC_SITE_URL` (or Vite dev
+                             `VITE_CREWDAY_PUBLIC_SITE_URL`) is set,
+                             redirects to that separate public site;
+                             otherwise falls back to the local login flow
 /signup                    → SaaS self-serve signup (§03)
 /signup/verify             → magic-link landing after signup email
 /select-workspace          → picker for users with ≥2 workspaces (see below)

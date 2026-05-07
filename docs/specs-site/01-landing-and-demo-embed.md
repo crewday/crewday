@@ -272,6 +272,10 @@ requirement is simpler:
   prospect. Links to the app all go to `https://app.crew.day/`
   (root), `app.crew.day/signup/start`, or the specific help
   anchors on `crew.day/docs/*` when docs ship.
+- **The app only links out to the site by URL.** A logged-out visit
+  to the app bare root may redirect to the configured
+  `CREWDAY_PUBLIC_SITE_URL`; the app must not import or render
+  marketing-site code from `site/`.
 - **The site does not read any cookie set by the app or the
   demo.** Different origins, CHIPS partitioning on the demo side
   (app §24). The site's scenario picker has no knowledge of any

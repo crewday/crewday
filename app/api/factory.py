@@ -420,8 +420,11 @@ def _stamp_inline_csp_nonces(html: str, nonce: str) -> str:
     return _INLINE_CSP_TAG_RE.sub(replace, html)
 
 
-def _spa_bootstrap_tag(nonce: str) -> str:
-    payload = json.dumps({"cspNonce": nonce}, separators=(",", ":"))
+def _spa_bootstrap_tag(nonce: str, *, public_site_url: str | None) -> str:
+    payload = json.dumps(
+        {"cspNonce": nonce, "publicSiteUrl": public_site_url},
+        separators=(",", ":"),
+    )
     payload = payload.replace("</", "<\\/")
     return (
         f'<script id="crewday-bootstrap" nonce="{nonce}">'
@@ -430,19 +433,31 @@ def _spa_bootstrap_tag(nonce: str) -> str:
     )
 
 
-def _inject_spa_bootstrap(html: str, nonce: str) -> str:
-    bootstrap = _spa_bootstrap_tag(nonce)
+def _inject_spa_bootstrap(
+    html: str,
+    nonce: str,
+    *,
+    public_site_url: str | None,
+) -> str:
+    bootstrap = _spa_bootstrap_tag(nonce, public_site_url=public_site_url)
     if _HTML_HEAD_CLOSE_RE.search(html):
         return _HTML_HEAD_CLOSE_RE.sub(f"{bootstrap}</head>", html, count=1)
     return f"{bootstrap}{html}"
 
 
-def _render_spa_index(index: Path, request: Request) -> HTMLResponse:
+def _render_spa_index(
+    index: Path,
+    request: Request,
+    *,
+    public_site_url: str | None,
+) -> HTMLResponse:
     """Render the Vite index with the request-scoped CSP nonce seam."""
     csp_nonce = request.state.csp_nonce
     template = _SPA_TEMPLATE_ENV.from_string(index.read_text(encoding="utf-8"))
     rendered = template.render(csp_nonce=csp_nonce, request=request)
-    rendered = _inject_spa_bootstrap(rendered, csp_nonce)
+    rendered = _inject_spa_bootstrap(
+        rendered, csp_nonce, public_site_url=public_site_url
+    )
     rendered = _stamp_inline_csp_nonces(rendered, csp_nonce)
     return HTMLResponse(content=rendered, status_code=200)
 
@@ -1121,7 +1136,7 @@ def _workspace_redirect_url(workspace_slug: str, start: str) -> str:
     return f"/w/{workspace_slug}{start}"
 
 
-def _register_spa_catch_all(app: FastAPI) -> None:
+def _register_spa_catch_all(app: FastAPI, *, settings: Settings) -> None:
     """Mount the SPA static assets + fallback route (prod profile).
 
     Assets under ``/assets/*`` are served by
@@ -1198,7 +1213,11 @@ def _register_spa_catch_all(app: FastAPI) -> None:
 
             index = dist / "index.html"
             if index.is_file():
-                return _render_spa_index(index, request)
+                return _render_spa_index(
+                    index,
+                    request,
+                    public_site_url=settings.public_site_url,
+                )
 
         return HTMLResponse(content=_SPA_STUB_HTML, status_code=200)
 
@@ -1887,7 +1906,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         register_vite_proxy(app, vite_dev_url=cfg.vite_dev_url)
     else:
-        _register_spa_catch_all(app)
+        _register_spa_catch_all(app, settings=cfg)
 
     # OpenTelemetry tracing is opt-in via ``OTEL_EXPORTER_OTLP_ENDPOINT``
     # — a no-op when the env var is unset (the §16 default). Wiring

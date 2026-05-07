@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, render, screen, cleanup } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
@@ -25,6 +25,7 @@ function App({ initial = "/today", children }: { initial?: string; children?: Re
         <Routes>
           <Route path="/login" element={<div>login page</div>} />
           <Route element={<RequireAuth />}>
+            <Route path="/" element={<div>protected root</div>} />
             <Route path="/today" element={<div>protected today</div>} />
             <Route path="/property/:id" element={<div>protected property</div>} />
           </Route>
@@ -42,6 +43,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   __resetAuthStoreForTests();
+  vi.unstubAllEnvs();
+  delete window.__CREWDAY__;
 });
 
 describe("<RequireAuth>", () => {
@@ -53,15 +56,48 @@ describe("<RequireAuth>", () => {
     expect(screen.queryByText("protected today")).toBeNull();
   });
 
-  it("redirects to /login (without `next`) when unauthenticated and the user is on /", () => {
+  it("redirects to the local login fallback when unauthenticated on / and no public site is configured", () => {
     setUnauthenticated();
     render(<App initial="/" />);
-    // /  has no protected route in this harness, so MemoryRouter
-    // renders no match — but we exercise the redirect via /today
-    // explicitly in the next test. The point of this case is just
-    // that a `setUnauthenticated()` doesn't render the protected
-    // child.
+    expect(screen.getByText("login page")).toBeInTheDocument();
+    expect(screen.queryByText("protected root")).toBeNull();
+  });
+
+  it("sends unauthenticated bare-root visitors to the configured public site", async () => {
+    setUnauthenticated();
+    window.__CREWDAY__ = { publicSiteUrl: "https://crew.day" };
+    const redirectExternal = vi.fn();
+    const qc = new QueryClient();
+
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/"]}>
+          <Routes>
+            <Route path="/login" element={<div>login page</div>} />
+            <Route element={<RequireAuth redirectExternal={redirectExternal} />}>
+              <Route path="/" element={<div>protected root</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(redirectExternal).toHaveBeenCalledWith("https://crew.day/");
+    expect(screen.getByRole("status")).toHaveTextContent("Opening crew.day");
+    expect(screen.queryByText("login page")).toBeNull();
     expect(screen.queryByText("protected today")).toBeNull();
+  });
+
+  it("keeps the local login fallback when the server bootstrap explicitly unsets the public site", () => {
+    setUnauthenticated();
+    vi.stubEnv("VITE_CREWDAY_PUBLIC_SITE_URL", "https://crew.day");
+    window.__CREWDAY__ = { publicSiteUrl: null };
+
+    render(<App initial="/" />);
+
+    expect(screen.getByText("login page")).toBeInTheDocument();
+    expect(screen.queryByText("protected root")).toBeNull();
   });
 
   it("redirects to /login?next=<encoded-path> when unauthenticated mid-deep-link", () => {
