@@ -290,7 +290,11 @@ class TestSpaProdMountAgainstRealDist:
         caddy = compose["services"]["caddy"]
         labels = set(caddy["labels"])
 
-        assert site_web_build == {"context": "..", "dockerfile": "site/web/Dockerfile"}
+        assert site_web_build["context"] == ".."
+        assert site_web_build["dockerfile"] == "site/web/Dockerfile"
+        assert site_web_build["args"]["PUBLIC_CREWDAY_APP_ORIGIN"] == (
+            "${PUBLIC_CREWDAY_APP_ORIGIN:-https://dev-app.crew.day}"
+        )
         assert (
             site_api_env["SITE_PUBLIC_URL"]
             == "${SITE_PUBLIC_URL:-https://dev.crew.day}"
