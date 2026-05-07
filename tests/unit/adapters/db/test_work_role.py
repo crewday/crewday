@@ -24,6 +24,7 @@ work role".
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, date, datetime
 
 import pytest
@@ -48,6 +49,33 @@ from app.tenancy import registry
 _PINNED = datetime(2026, 4, 24, 12, 0, 0, tzinfo=UTC)
 _LATER = datetime(2026, 4, 25, 12, 0, 0, tzinfo=UTC)
 _TODAY = date(2026, 4, 24)
+
+
+@contextmanager
+def _workspace_registration_reloaded_after_reset() -> Iterator[None]:
+    """Exercise the package registration path without leaking registry state."""
+    import importlib
+
+    import app.adapters.db.workspace as ws_pkg
+
+    scoped_tables = registry.scoped_tables()
+    join_tables = registry.scope_through_join_tables()
+    registry._reset_for_tests()
+    try:
+        importlib.reload(ws_pkg)
+        yield
+    finally:
+        registry._reset_for_tests()
+        for table_name in scoped_tables - join_tables.keys():
+            registry.register(table_name)
+        for table_name, spec in join_tables.items():
+            registry.register_scope_through_join(
+                table_name,
+                via_table=spec.via_table,
+                via_local_column=spec.via_local_column,
+                via_remote_column=spec.via_remote_column,
+                workspace_column=spec.workspace_column,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -251,18 +279,27 @@ class TestUserWorkRoleModelShape:
 
 
 class TestRegistryMembership:
-    """``work_role`` and ``user_work_role`` are registered as scoped."""
+    """``work_role`` and ``user_work_role`` are registered as scoped.
+
+    Sibling tests can wipe the process-wide registry via
+    :func:`registry._reset_for_tests`; this class reloads the workspace
+    package after such a reset so the assertions still cover the app's
+    registration path rather than test-local calls to :func:`registry.register`.
+    """
 
     def test_work_role_registered(self) -> None:
-        assert registry.is_scoped("work_role")
+        with _workspace_registration_reloaded_after_reset():
+            assert registry.is_scoped("work_role")
 
     def test_user_work_role_registered(self) -> None:
-        assert registry.is_scoped("user_work_role")
+        with _workspace_registration_reloaded_after_reset():
+            assert registry.is_scoped("user_work_role")
 
     def test_workspace_table_not_registered(self) -> None:
         """Sanity: the tenancy anchor stays agnostic — verifies the
         new registrations did not accidentally widen the set."""
-        assert not registry.is_scoped("workspace")
+        with _workspace_registration_reloaded_after_reset():
+            assert not registry.is_scoped("workspace")
 
 
 # ---------------------------------------------------------------------------
