@@ -1,0 +1,15 @@
+**
+
+!site/
+!site/web/
+!site/web/**
+site/web/.astro/
+site/web/dist/
+site/web/node_modules/
+site/web/*.tsbuildinfo
+
+!mocks/
+!mocks/web/
+!mocks/web/src/
+!mocks/web/src/styles/
+!mocks/web/src/styles/tokens.css

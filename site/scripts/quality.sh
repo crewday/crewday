@@ -31,6 +31,7 @@ run_step "Lint site web" npm --prefix "$web_dir" run lint --if-present
 run_step "Typecheck site web" npm --prefix "$web_dir" run typecheck
 run_step "Test site web" npm --prefix "$web_dir" run test --if-present
 run_step "Build site web" npm --prefix "$web_dir" run build
+run_step "Check site CSP hashes" node "$site_root/scripts/check-csp-hashes.mjs"
 
 run_step "Check site API formatting" run_in "$api_dir" uv run ruff format --check .
 run_step "Lint site API" run_in "$api_dir" uv run ruff check .

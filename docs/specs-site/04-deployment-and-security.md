@@ -22,8 +22,11 @@ demo/…                       # the app image with CREWDAY_DEMO_MODE=1
                              # (app §24); deployed separately as well
 ```
 
-`site/docker-compose.yml` never references any file outside
-`site/`. `app/`'s compose files never reference anything inside
+`site/docker-compose.yml` keeps the public-site runtime isolated from
+`app/`. Its web image build context may read the shared design-token
+source under `mocks/web/src/styles/tokens.css` so the existing drift
+check can run inside Docker; the built image still contains only the
+site output. `app/`'s compose files never reference anything inside
 `site/`.
 
 ## `site/docker-compose.yml`
@@ -122,7 +125,7 @@ crew.day {
         Cross-Origin-Opener-Policy "same-origin"
         Cross-Origin-Resource-Policy "same-origin"
         Permissions-Policy "geolocation=(), microphone=(), camera=()"
-        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://crew.day; media-src 'self'; frame-src https://demo.crew.day; connect-src 'self' https://crew.day; font-src 'self'; object-src 'none'; frame-ancestors 'self'; base-uri 'self'; form-action 'self';"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'sha256-QzWFZi+FLIx23tnm9SBU4aEgx4x8DsuASP07mfqol/c=' 'sha256-BrDhGE1lwa85arfXcrBxSo+n37uVSX5CAROXnIM6Q+g='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://crew.day; media-src 'self'; frame-src https://demo.crew.day; connect-src 'self' https://crew.day; font-src 'self'; object-src 'none'; frame-ancestors 'self'; base-uri 'self'; form-action 'self';"
     }
 }
 
@@ -135,6 +138,15 @@ CSP notes:
 
 - `frame-src https://demo.crew.day` — only the demo subdomain may
   be iframed by site pages. Nothing else.
+- `script-src 'self' <Astro hashes>` — external scripts must be
+  self-hosted, and the only inline scripts allowed are Astro's two
+  static island bootstrap scripts. `site/scripts/quality.sh` builds
+  the site and runs `site/scripts/check-csp-hashes.mjs`, which
+  recomputes the hashes from `site/web/dist/**/*.html` and fails when
+  `site/Caddyfile` is missing a current hash or still allows a stale
+  one. After an Astro upgrade or build output change that alters the
+  inline bootstrap, update `site/Caddyfile` and this spec from that
+  generated hash list.
 - `style-src 'self' 'unsafe-inline'` — Astro emits a small number
   of inline styles for route-scoped CSS. Narrow to the generated
   hashes in a follow-up spec update once the Astro config stabilises.
