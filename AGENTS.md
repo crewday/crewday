@@ -11,11 +11,12 @@ OpenClaw, etc.) operating on this repository.
 
 ## Environments
 
-- **Dev**: <https://dev.crew.day> is gated by Pangolin badger
-  forward-auth and is the user's remote entry point. Agents on this
-  host can't pass badger and must use the loopback equivalent
+- **Dev app**: <https://dev-app.crew.day> is gated by Pangolin badger
+  forward-auth and is the user's remote app entry point. Agents on
+  this host can't pass badger and must use the loopback equivalent
   <http://127.0.0.1:8100> (same Vite container, paths 1:1). Point
-  `curl`, Playwright, and scripted verification there.
+  app `curl`, Playwright, and scripted verification there. The public
+  dev site lives at <https://dev.crew.day> via `site/docker-compose.yml`.
 - **Production**: not yet deployed. The production app code lives
   under `app/`; high-fidelity mocks remain under `mocks/`. See
   `docs/specs/19-roadmap.md`.
@@ -173,7 +174,7 @@ multi-step scripts) or the wrappers misbehave.
   raw equivalent; the wrapper adds a `/readyz` drift gate that names
   the failing check and prints a remediation hint instead of letting
   the next test session inherit a stale alembic head.)
-- Use the loopback app, not `dev.crew.day`: `http://127.0.0.1:8100`.
+- Use the loopback app, not `dev-app.crew.day`: `http://127.0.0.1:8100`.
 - Create a dev session inside the compose stack:
   ```bash
   docker compose -f mocks/docker-compose.yml exec app-api \
@@ -193,7 +194,7 @@ multi-step scripts) or the wrappers misbehave.
 - **Personal passkey re-seed.** After a DB reset, run
   `./scripts/dev-seed-personal.sh apply` to rehydrate your user +
   workspace + passkey rows from `scripts/dev_seed_personal.json` so
-  your physical authenticator still works at `https://dev.crew.day`.
+  your physical authenticator still works at `https://dev-app.crew.day`.
   See the script docstrings for `capture` and other flags.
 - If `dev_login`, `/readyz`, or a smoke request fails with a missing
   column/table, run:
@@ -309,6 +310,11 @@ update in your wrap-up.
   non-zero prints exactly what still needs a manual fix. Use it instead
   of running the individual `uv run ruff …` / `uv run mypy …` commands
   by hand.
+- **Python env sync.** If a Python gate fails during import or pytest
+  config loading because a dependency or pytest plugin from
+  `pyproject.toml` is missing, run `uv sync --all-groups` from the repo
+  root, then retry the original gate. Do not install ad hoc packages
+  outside the project dependency definitions.
 - **Read dependencies from the local env**: Python packages under
   the active venv; do not curl GitHub for dependency source.
 - **Never `cd` out of the worktree root** — always use absolute
