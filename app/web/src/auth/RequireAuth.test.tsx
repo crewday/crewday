@@ -89,6 +89,66 @@ describe("<RequireAuth>", () => {
     expect(screen.queryByText("protected today")).toBeNull();
   });
 
+  it("keeps same-origin public-site routes off the login fallback", async () => {
+    setUnauthenticated();
+    window.__CREWDAY__ = { publicSiteUrl: "/mocks/landing/" };
+    const redirectExternal = vi.fn();
+    const qc = new QueryClient();
+
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/"]}>
+          <Routes>
+            <Route path="/login" element={<div>login page</div>} />
+            <Route element={<RequireAuth redirectExternal={redirectExternal} />}>
+              <Route path="/" element={<div>protected root</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(redirectExternal).toHaveBeenCalledWith(
+      `${window.location.origin}/mocks/landing/`,
+    );
+    expect(redirectExternal).not.toHaveBeenCalledWith("https://crew.day/");
+    expect(screen.queryByText("login page")).toBeNull();
+    expect(screen.queryByText("protected root")).toBeNull();
+  });
+
+  it("uses same-origin public-site routes from Vite env when the server bootstrap is absent", async () => {
+    setUnauthenticated();
+    vi.stubEnv("VITE_CREWDAY_PUBLIC_SITE_URL", "/mocks/landing/");
+    const redirectExternal = vi.fn();
+    const qc = new QueryClient();
+
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/"]}>
+          <Routes>
+            <Route path="/login" element={<div>login page</div>} />
+            <Route element={<RequireAuth redirectExternal={redirectExternal} />}>
+              <Route path="/" element={<div>protected root</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(redirectExternal).toHaveBeenCalledWith(
+      `${window.location.origin}/mocks/landing/`,
+    );
+    expect(redirectExternal).not.toHaveBeenCalledWith("https://crew.day/");
+    expect(screen.queryByText("login page")).toBeNull();
+    expect(screen.queryByText("protected root")).toBeNull();
+  });
+
   it("uses the Vite public-site env when the server bootstrap is absent", async () => {
     setUnauthenticated();
     vi.stubEnv("VITE_CREWDAY_PUBLIC_SITE_URL", "https://crew.day");
@@ -128,10 +188,32 @@ describe("<RequireAuth>", () => {
     expect(screen.queryByText("protected root")).toBeNull();
   });
 
-  it("redirects to /login?next=<encoded-path> when unauthenticated mid-deep-link", () => {
+  it("keeps protected app routes on the login fallback when a public site is configured", () => {
     setUnauthenticated();
-    render(<App initial="/today" />);
-    expect(screen.getByText("login page")).toBeInTheDocument();
+    window.__CREWDAY__ = { publicSiteUrl: "/mocks/landing/" };
+    const redirectExternal = vi.fn();
+    function LoginProbe() {
+      const loc = useLocation();
+      return <span data-testid="loc">{loc.pathname + loc.search}</span>;
+    }
+    const qc = new QueryClient();
+
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/today"]}>
+          <Routes>
+            <Route path="/login" element={<LoginProbe />} />
+            <Route element={<RequireAuth redirectExternal={redirectExternal} />}>
+              <Route path="/today" element={<div>protected today</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByTestId("loc")).toHaveTextContent("/login?next=%2Ftoday");
+    expect(redirectExternal).not.toHaveBeenCalled();
+    expect(screen.queryByText("protected today")).toBeNull();
   });
 
   it("preserves search and hash in the `next` parameter", () => {

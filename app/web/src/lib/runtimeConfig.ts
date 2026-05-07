@@ -19,6 +19,9 @@ export function configuredPublicSiteUrl(): string | null {
 function normalisePublicSiteUrl(value: string | null | undefined): string | null {
   const raw = value?.trim();
   if (!raw) return null;
+  if (raw.startsWith("/") && !raw.startsWith("//")) {
+    return new URL(raw, window.location.origin).href;
+  }
   try {
     const url = new URL(raw);
     if (url.protocol !== "https:" && url.protocol !== "http:") return null;

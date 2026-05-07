@@ -125,7 +125,10 @@ workspace once and the rest of the tree is unaware of the prefix.
 /                          → authenticated role home; when logged out and
                              `CREWDAY_PUBLIC_SITE_URL` (or Vite dev
                              `VITE_CREWDAY_PUBLIC_SITE_URL`) is set,
-                             redirects to that separate public site;
+                             redirects to that public site URL (managed
+                             deployments normally use a separate public
+                             site origin; dev may use a same-origin
+                             public-site route);
                              otherwise falls back to the local login flow
 /signup                    → SaaS self-serve signup (§03)
 /signup/verify             → magic-link landing after signup email
