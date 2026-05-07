@@ -5,7 +5,7 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import PageHeader from "@/components/PageHeader";
 import DeskPage from "@/components/DeskPage";
-import { useRole } from "@/context/RoleContext";
+import { useActiveAppRole } from "@/auth";
 import type { Me } from "@/types/api";
 import { InfiniteScheduleBody } from "./schedule/InfiniteScheduleBody";
 import { isoDate } from "./schedule/lib/dateHelpers";
@@ -31,7 +31,7 @@ import { useIsPhone } from "./schedule/lib/useIsPhone";
 // internals live next door under `./schedule/`.
 
 export default function SchedulePage() {
-  const { role } = useRole();
+  const role = useActiveAppRole();
   const isPhone = useIsPhone();
   // Manager always renders inside `.desk__main` (own scroll
   // container); the phone agenda assumes the document scrolls. So we

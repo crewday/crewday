@@ -1197,16 +1197,19 @@ the property page.
 
 ### Client portal shell (§22)
 
-The third role pill alongside Employee / Manager renders the
-**client portal** — a separate `ClientLayout` with a narrower
-nav: Properties (only those whose `client_org_id` matches one of
-the user's `binding_org_id`s on the active workspace), **Scheduler**
-(read-only rota calendar scoped to the client's own properties;
-user cells render **first name + work role only** per §15
-cross-workspace visibility — no last names, no contact, no tasks
-the client has no business seeing), Billable hours (read-only
-`booking_billing` rollup), Quotes (with accept / reject controls —
-acceptance still routes through the unconditionally
+Users whose active workspace grant resolves to `client` render the
+**client portal** through `ClientLayout`. Production chrome does not
+offer Employee / Manager / Client persona pills; the visible surface
+is selected from the authenticated user's active `role_grants` row
+and the same permission resolver that gates manager and worker
+actions. The client nav is narrower: Properties (only those whose
+`client_org_id` matches one of the user's `binding_org_id`s on the
+active workspace), **Scheduler** (read-only rota calendar scoped to
+the client's own properties; user cells render **first name + work
+role only** per §15 cross-workspace visibility — no last names, no
+contact, no tasks the client has no business seeing), Billable hours
+(read-only `booking_billing` rollup), Quotes (with accept / reject
+controls — acceptance still routes through the unconditionally
 approval-gated set in §22 in production; the mock applies it
 in-memory), Invoices (read-only `vendor_invoice` list, no mark-paid
 control, **Upload proof** control on any invoice in `status =

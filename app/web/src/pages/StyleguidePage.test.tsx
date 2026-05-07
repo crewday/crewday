@@ -46,7 +46,7 @@ afterEach(() => {
 });
 
 describe("/styleguide", () => {
-  it("renders shell controls and the styleguide baseline without auth bootstrap", async () => {
+  it("renders the dev/staging styleguide baseline without auth bootstrap or route chrome controls", async () => {
     const { calls, restore } = installFetch({
       "/api/v1/runtime/info": [{ body: { runtime: { demo_mode: false } } }],
     });
@@ -56,7 +56,11 @@ describe("/styleguide", () => {
       expect(
         await screen.findByRole("heading", { name: "Paper, moss, and a little grit." }),
       ).toBeInTheDocument();
-      expect(screen.getByRole("navigation", { name: "Shell controls" })).toBeInTheDocument();
+      expect(screen.queryByRole("navigation", { name: "Shell controls" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Employee" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Manager" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Client" })).toBeNull();
+      expect(screen.queryByRole("link", { name: "§ styleguide" })).toBeNull();
       expect(screen.getByRole("heading", { name: "Palette" })).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "Buttons" })).toBeInTheDocument();
 

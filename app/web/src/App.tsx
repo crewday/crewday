@@ -80,8 +80,8 @@ import {
   RequireAuth,
   RequirePermission,
   WorkspaceGate,
+  activeWorkspaceGrantRole,
   useAuth,
-  type AuthMe,
 } from "@/auth";
 
 const STYLEGUIDE_ENABLED =
@@ -101,7 +101,7 @@ function RoleHome() {
 // §14 — Shared routes (/today, /schedule, /my/expenses, etc.) render
 // under the viewer's role-appropriate shell. Manager / Employee /
 // Client each get their own layout; only `/me` is currently shared by
-// all three (every persona has a profile screen).
+// all three (every surface has a profile screen).
 function Shell() {
   const { user } = useAuth();
   const { workspaceId } = useWorkspace();
@@ -109,18 +109,6 @@ function Shell() {
   if (grantRole === "manager" || grantRole === "admin") return <ManagerLayout />;
   if (grantRole === "client") return <ClientLayout />;
   return <EmployeeLayout />;
-}
-
-function activeWorkspaceGrantRole(
-  user: AuthMe | null,
-  workspaceId: string | null,
-): string | null {
-  const activeId = workspaceId ?? user?.current_workspace_id ?? null;
-  if (!user || !activeId) return null;
-  const workspace = user.available_workspaces.find(
-    (w) => w.workspace.id === activeId || w.workspace_id === activeId,
-  );
-  return workspace?.grant_role ?? null;
 }
 
 function landingForGrantRole(grantRole: string | null): string {

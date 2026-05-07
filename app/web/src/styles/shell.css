@@ -1,5 +1,5 @@
-/* Shell — grain overlay, demo banner, production shell controls, employee phone layout,
-   and the tablet/desktop responsive shell adjustments. Loaded first by
+/* Shell — grain overlay, demo banner, employee phone layout, and the
+   tablet/desktop responsive shell adjustments. Loaded first by
    globals.css so every later layer can rely on `.phone`, `.phone__body`,
    `.phone__section`, `.phone__tabs`, and `.phone__dock` already being
    set up. */
@@ -24,48 +24,6 @@
 [data-theme="dark"] .demo-banner {
   color: var(--paper);
   border-bottom-color: rgba(255,255,255,0.16);
-}
-
-/* ── Production shell controls ──────────────────────────────── */
-.shell-controls {
-  position: sticky; top: 0; z-index: 50;
-  display: flex; align-items: center; justify-content: flex-end; gap: 14px;
-  padding: 8px 16px;
-  background: linear-gradient(90deg, var(--moss), var(--moss-2));
-  color: #fff; font-size: 13px;
-  min-height: 40px;
-}
-.shell-controls__switch { margin-left: auto; display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
-
-@media (max-width: 640px) {
-  .shell-controls { gap: 8px; padding: 6px 10px; }
-}
-@media (max-width: 420px) {
-  .shell-controls .pill { padding: 3px 10px; font-size: 12px; }
-  .shell-controls .pill--ghost:last-of-type { display: none; }
-}
-/* §17 360 px walker — shell-control tappables share the same 44×44
-   floor as the rest of the SPA. At ≥720px the controls stay slim because
-   pointer users hit the small pills precisely; the floor only kicks
-   in below the breakpoint where a thumb is the input device. */
-@media (max-width: 720px) {
-  .shell-controls .pill,
-  .shell-controls__theme {
-    min-height: 44px; min-width: 44px;
-    display: inline-flex; align-items: center; justify-content: center;
-  }
-}
-.pill {
-  padding: 4px 12px; border-radius: 999px;
-  font-size: 13px; color: rgba(255,255,255,0.85);
-  border: 1px solid rgba(255,255,255,0.35); line-height: 1.4;
-  cursor: pointer; background: transparent; font: inherit;
-}
-.pill--active { background: #fff; color: var(--moss); border-color: #fff; font-weight: 600; }
-.pill--ghost { border-color: rgba(255,255,255,0.22); padding: 4px 10px; }
-.shell-controls__theme {
-  display: inline-flex; align-items: center; justify-content: center;
-  padding: 4px 8px; min-width: 30px; line-height: 1;
 }
 
 /* ══════════════════════════════════════════════════════════════

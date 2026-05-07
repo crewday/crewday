@@ -474,7 +474,7 @@ describe("App client portal role routing", () => {
     },
   );
 
-  it("redirects a stale client persona when the active workspace grant is manager", async () => {
+  it("redirects a stale client role cookie when the active workspace grant is manager", async () => {
     installPermissionAllowFetch();
     renderAppAt("/portfolio", "client", "manager");
 

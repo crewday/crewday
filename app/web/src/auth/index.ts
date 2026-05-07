@@ -38,4 +38,5 @@ export {
 } from "./passkey";
 export { createOnUnauthorized, isAuthEndpoint, sanitizeNext } from "./onUnauthorized";
 export { ROLE_LANDING, pickRoleLanding } from "./roleLanding";
+export { activeWorkspaceGrantRole, appRoleForGrantRole, useActiveAppRole } from "./activeGrantRole";
 export type { AuthMe, PasskeyLoginFinish, PasskeyLoginStart } from "./types";

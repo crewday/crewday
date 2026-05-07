@@ -3,7 +3,7 @@ import { useEffect } from "react";
 export function useBannerHeightVar(refreshKey: unknown = null): void {
   useEffect(() => {
     const sync = (): void => {
-      const banners = document.querySelectorAll(".demo-banner, .shell-controls");
+      const banners = document.querySelectorAll(".demo-banner");
       const h = Array.from(banners).reduce(
         (total, banner) => total + banner.getBoundingClientRect().height,
         0,

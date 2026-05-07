@@ -3,19 +3,16 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
+import { setAuthenticated } from "@/auth/authStore";
+import { __resetAuthStoreForTests } from "@/auth/useAuth";
 import { __resetApiProvidersForTests } from "@/lib/api";
 import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
 import * as preferences from "@/lib/preferences";
-import type { Role, SchedulerCalendarPayload } from "@/types/api";
+import type { GrantRole } from "@/types/auth";
+import type { SchedulerCalendarPayload } from "@/types/api";
 import SchedulerPage from "./SchedulerPage";
 import appSource from "../App.tsx?raw";
 import { jsonResponse } from "@/test/helpers";
-
-const roleState = vi.hoisted(() => ({ role: "manager" as Role }));
-
-vi.mock("@/context/RoleContext", () => ({
-  useRole: () => ({ role: roleState.role, setRole: vi.fn() }),
-}));
 
 const CALENDAR: SchedulerCalendarPayload = {
   window: { from: "2026-05-04", to: "2026-05-10" },
@@ -54,6 +51,32 @@ const CALENDAR: SchedulerCalendarPayload = {
   properties: [{ id: "prop_villa", name: "Villa Rosa", timezone: "Europe/Lisbon" }],
 };
 
+function authenticate(grantRole: GrantRole): void {
+  setAuthenticated({
+    user_id: "usr_test",
+    display_name: "Test User",
+    email: "test@example.com",
+    current_workspace_id: "ws_1",
+    is_deployment_admin: false,
+    available_workspaces: [
+      {
+        workspace_id: "acme",
+        workspace: {
+          id: "ws_1",
+          name: "Acme",
+          timezone: "UTC",
+          default_currency: "USD",
+          default_country: "US",
+          default_locale: "en",
+        },
+        grant_role: grantRole,
+        binding_org_id: grantRole === "client" ? "org_client" : null,
+        source: "workspace_grant",
+      },
+    ],
+  });
+}
+
 function installFetch(payload: SchedulerCalendarPayload = CALENDAR) {
   const calls: string[] = [];
   const original = globalThis.fetch;
@@ -85,7 +108,7 @@ function Harness() {
 }
 
 beforeEach(() => {
-  roleState.role = "manager";
+  authenticate("manager");
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("acme");
@@ -93,6 +116,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  __resetAuthStoreForTests();
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.restoreAllMocks();
@@ -124,7 +148,7 @@ describe("<SchedulerPage>", () => {
   });
 
   it("keeps client views to first names while still rendering scoped rota data", async () => {
-    roleState.role = "client";
+    authenticate("client");
     const fake = installFetch();
     try {
       render(<Harness />);

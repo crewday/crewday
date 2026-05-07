@@ -5,7 +5,7 @@ import { qk } from "@/lib/queryKeys";
 import PageHeader from "@/components/PageHeader";
 import DeskPage from "@/components/DeskPage";
 import { Loading } from "@/components/common";
-import { useRole } from "@/context/RoleContext";
+import { useActiveAppRole } from "@/auth";
 import type {
   SchedulerCalendarPayload,
   ScheduleAssignment,
@@ -113,7 +113,7 @@ function SchedulerCell({
 }
 
 export default function SchedulerPage() {
-  const { role } = useRole();
+  const role = useActiveAppRole();
   const scope: "manager" | "employee" | "client" =
     role === "client" ? "client" : role === "employee" ? "employee" : "manager";
 
