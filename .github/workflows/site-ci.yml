@@ -1,0 +1,73 @@
+name: Site CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "docs/specs-site/**"
+      - "mocks/web/src/styles/tokens.css"
+      - ".github/workflows/site-ci.yml"
+  pull_request:
+    paths:
+      - "site/**"
+      - "docs/specs-site/**"
+      - "mocks/web/src/styles/tokens.css"
+      - ".github/workflows/site-ci.yml"
+
+concurrency:
+  group: site-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: site quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: site/web/package-lock.json
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: site/api/uv.lock
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Site quality
+        run: site/scripts/quality.sh
+
+  images:
+    name: site images
+    runs-on: ubuntu-latest
+    needs: quality
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build site web image
+        uses: docker/build-push-action@v6
+        with:
+          context: site/web
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ghcr.io/${{ github.repository_owner }}/crewday-site-web:${{ github.sha }}
+      - name: Build site api image
+        uses: docker/build-push-action@v6
+        with:
+          context: site/api
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ghcr.io/${{ github.repository_owner }}/crewday-site-api:${{ github.sha }}

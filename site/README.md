@@ -22,20 +22,32 @@ configuration with `app/` or `mocks/`.
 ## Local checks
 
 ```bash
-npm run build
-npm run typecheck
+site/scripts/quality.sh
 ```
 
-Run those from `site/web`.
+Run the site quality command from the repository root. It installs the
+isolated site dependencies, checks design-token/icon drift, runs any
+`site/web` lint/test scripts that exist, typechecks and builds `site/web`,
+then formats, lints, typechecks, and tests `site/api`.
 
 ```bash
-uv run ruff format --check .
-uv run ruff check .
-uv run mypy --strict site_api
-uv run pytest -q
+SITE_QUALITY_INSTALL=0 site/scripts/quality.sh
 ```
 
-Run those from `site/api`.
+Use `SITE_QUALITY_INSTALL=0` after dependencies are already installed.
+
+## Site release lane
+
+`.github/workflows/site-ci.yml` is scoped to public-site changes under
+`site/**`, site specs, the site workflow itself, and the app token source
+that feeds the design drift check. The lane runs `site/scripts/quality.sh`
+and builds the two site images independently from the app images. On
+`main` pushes, it publishes both images to GHCR with commit-SHA tags:
+
+```text
+ghcr.io/<owner>/crewday-site-web:<commit-sha>
+ghcr.io/<owner>/crewday-site-api:<commit-sha>
+```
 
 ## Local compose smoke
 

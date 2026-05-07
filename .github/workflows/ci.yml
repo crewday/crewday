@@ -44,7 +44,15 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "site/**"
+      - "docs/specs-site/**"
+      - ".github/workflows/site-ci.yml"
   pull_request:
+    paths-ignore:
+      - "site/**"
+      - "docs/specs-site/**"
+      - ".github/workflows/site-ci.yml"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
