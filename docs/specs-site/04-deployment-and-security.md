@@ -35,6 +35,9 @@ site output. `app/`'s compose files never reference anything inside
 services:
   site-web:
     image: ghcr.io/<org>/crewday-site-web:<tag>
+    build:
+      args:
+        PUBLIC_CREWDAY_APP_ORIGIN: "https://app.crew.day"
     restart: unless-stopped
     # Emits only static files; served by caddy below, not by a
     # live process. The image is a file-only bundle.

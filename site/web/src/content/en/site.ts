@@ -3,17 +3,6 @@ export type SiteLink = {
   href: string;
 };
 
-export const appLinks = {
-  signup: {
-    label: "Sign up",
-    href: "https://app.crew.day/signup/start",
-  },
-  login: {
-    label: "Log in",
-    href: "https://app.crew.day/login",
-  },
-} as const satisfies Record<string, SiteLink>;
-
 export const siteCopy = {
   skipLink: "Skip to content",
   brand: "crew.day",

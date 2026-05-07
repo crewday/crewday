@@ -1,6 +1,8 @@
 FROM node:24-alpine AS build
 
 WORKDIR /src
+ARG PUBLIC_CREWDAY_APP_ORIGIN=https://app.crew.day
+ENV PUBLIC_CREWDAY_APP_ORIGIN=$PUBLIC_CREWDAY_APP_ORIGIN
 COPY site/web/package.json site/web/package-lock.json ./
 RUN npm ci
 COPY site/web/ .

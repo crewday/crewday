@@ -1,4 +1,4 @@
-import { appLinks } from "./site";
+import { appLinks } from "@/config/appLinks";
 
 export type ContentSection = {
   eyebrow?: string;

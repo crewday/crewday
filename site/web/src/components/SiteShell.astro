@@ -3,17 +3,24 @@ import "../styles/fonts.css";
 import "../styles/tokens.css";
 import "../styles/reset.css";
 import "../styles/globals.css";
-import SiteFooter from "./SiteFooter.astro";
-import SiteHeader from "./SiteHeader.astro";
+import type { SiteLink } from "@/content/en/site";
+import { siteCopy } from "@/content/en/site";
+import LandingImprint from "./LandingImprint.astro";
+import LandingMasthead from "./LandingMasthead.astro";
 
 interface Props {
   title: string;
   description: string;
-  hideHeader?: boolean;
-  hideFooter?: boolean;
+  navLinks?: readonly SiteLink[];
+  navAriaLabel?: string;
 }
 
-const { title, description, hideHeader = false, hideFooter = false } = Astro.props;
+const {
+  title,
+  description,
+  navAriaLabel = siteCopy.header.navLabel,
+  navLinks = siteCopy.header.navLinks,
+} = Astro.props;
 ---
 
 <!doctype html>
@@ -29,8 +36,17 @@ const { title, description, hideHeader = false, hideFooter = false } = Astro.pro
     <title>{title}</title>
   </head>
   <body class="site-surface">
-    {hideHeader ? null : <SiteHeader />}
-    <slot />
-    {hideFooter ? null : <SiteFooter />}
+    <a class="skip-link" href="#main">{siteCopy.skipLink}</a>
+    <div class="landing-grain" aria-hidden="true"></div>
+    <main id="main" class="landing-page">
+      <div class="landing-frame">
+        <LandingMasthead navLinks={navLinks} navAriaLabel={navAriaLabel} />
+        <hr class="landing-rule" />
+      </div>
+      <slot />
+      <div class="landing-frame">
+        <LandingImprint />
+      </div>
+    </main>
   </body>
 </html>

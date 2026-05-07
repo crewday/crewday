@@ -10,26 +10,8 @@ const description = homeCopy.description;
 const heroSubhead = homeCopy.hero.subhead.replace(/^crew\.day /u, "");
 ---
 
-<SiteShell title={homeCopy.title} description={description} hideHeader hideFooter>
-  <a class="skip-link" href="#main">{siteCopy.skipLink}</a>
-  <div class="landing-grain" aria-hidden="true"></div>
-
-  <main id="main" class="landing-page">
+<SiteShell title={homeCopy.title} description={description} navLinks={homeCopy.masthead.navLinks} navAriaLabel={homeCopy.masthead.navAriaLabel}>
     <div class="landing-frame">
-      <header class="landing-masthead" aria-label={homeCopy.masthead.ariaLabel}>
-        <a class="landing-masthead__mark" href="/" aria-label={homeCopy.masthead.homeAriaLabel}>
-          <span class="landing-masthead__dot" aria-hidden="true"></span>
-          <span>{siteCopy.brand}</span>
-        </a>
-        <p class="landing-masthead__dateline">
-          {homeCopy.masthead.dateline} · <a href={homeCopy.masthead.github.href}>{homeCopy.masthead.github.label}</a>
-        </p>
-        <nav class="landing-masthead__nav" aria-label={homeCopy.masthead.navAriaLabel}>
-          {homeCopy.masthead.navLinks.map((link) => <a href={link.href}>{link.label}</a>)}
-        </nav>
-      </header>
-      <hr class="landing-rule" />
-
       <section class="landing-hero" aria-labelledby="home-title">
         <div class="landing-hero__copy">
           <p class="landing-kicker">{homeCopy.hero.eyebrow}</p>
@@ -128,30 +110,5 @@ const heroSubhead = homeCopy.hero.subhead.replace(/^crew\.day /u, "");
         <strong>{homeCopy.pricing.copy}</strong>
         <a href={homeCopy.pricing.cta.href}>{homeCopy.pricing.cta.label}</a>
       </section>
-
-      <footer class="landing-imprint" aria-label={homeCopy.sections.footerAriaLabel}>
-        <div class="landing-imprint__about">
-          <h2>{homeCopy.imprint.heading}</h2>
-          <p>{homeCopy.imprint.body}</p>
-          <a href={homeCopy.imprint.rss.href}>{homeCopy.imprint.rss.label}</a>
-        </div>
-        {
-          siteCopy.footer.columns.map((column) => (
-            <section class="landing-imprint__column" aria-labelledby={`landing-footer-${column.heading.toLowerCase()}`}>
-              <h3 id={`landing-footer-${column.heading.toLowerCase()}`}>{column.heading}</h3>
-              <ul>
-                {column.links.map((link) => (
-                  <li><a href={link.href}>{link.label}</a></li>
-                ))}
-              </ul>
-            </section>
-          ))
-        }
-      </footer>
-      <div class="landing-imprint__bottom">
-        <span>{homeCopy.imprint.bottomLeft}</span>
-        <span>{homeCopy.imprint.bottomRight}</span>
-      </div>
     </div>
-  </main>
 </SiteShell>

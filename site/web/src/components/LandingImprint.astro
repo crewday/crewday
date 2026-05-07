@@ -1,0 +1,28 @@
+---
+import { homeCopy } from "@/content/en/home";
+import { siteCopy } from "@/content/en/site";
+---
+
+<footer class="landing-imprint" aria-label={homeCopy.sections.footerAriaLabel}>
+  <div class="landing-imprint__about">
+    <h2>{homeCopy.imprint.heading}</h2>
+    <p>{homeCopy.imprint.body}</p>
+    <a href={homeCopy.imprint.rss.href}>{homeCopy.imprint.rss.label}</a>
+  </div>
+  {
+    siteCopy.footer.columns.map((column) => (
+      <section class="landing-imprint__column" aria-labelledby={`landing-footer-${column.heading.toLowerCase()}`}>
+        <h3 id={`landing-footer-${column.heading.toLowerCase()}`}>{column.heading}</h3>
+        <ul>
+          {column.links.map((link) => (
+            <li><a href={link.href}>{link.label}</a></li>
+          ))}
+        </ul>
+      </section>
+    ))
+  }
+</footer>
+<div class="landing-imprint__bottom">
+  <span>{homeCopy.imprint.bottomLeft}</span>
+  <span>{homeCopy.imprint.bottomRight}</span>
+</div>

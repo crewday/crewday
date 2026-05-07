@@ -1,4 +1,4 @@
-import { appLinks } from "./site";
+import { appLinks } from "@/config/appLinks";
 
 export const homeCopy = {
   title: "crew.day",
@@ -15,7 +15,6 @@ export const homeCopy = {
       { label: "Demo", href: "#try-it" },
       { label: "Who it's for", href: "#audiences" },
       { label: "Pricing", href: "#pricing" },
-      { label: "App preview", href: "https://app.crew.day/" },
     ],
   },
   hero: {

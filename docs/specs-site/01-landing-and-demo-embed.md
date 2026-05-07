@@ -42,7 +42,7 @@ Single moss-tinted hero band. Three pieces:
 3. **Primary and secondary call-to-action.**
    - Primary: "Try the demo" — scrolls to `#try-it`, which is the
      scenario picker + embed section below.
-   - Secondary: "Sign up" — linked to `https://app.crew.day/signup/start`.
+   - Secondary: "Sign up" — linked to `/signup/start` on the configured app origin, defaulting to `https://app.crew.day`.
 
 No carousel, no autoplay video above the fold, no background video.
 First paint must be legible on a cold 3G connection.

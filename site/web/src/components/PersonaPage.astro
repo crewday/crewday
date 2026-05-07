@@ -14,7 +14,7 @@ const { fixedPersona, page } = Astro.props;
 ---
 
 <SiteShell title={page.title} description={page.description}>
-  <main id="main" class="persona-page">
+  <div class="landing-frame persona-page">
     <section class="page-hero page-hero--split" aria-labelledby="page-title">
       <div class="page-hero__copy">
         <p class="eyebrow">{page.eyebrow}</p>
@@ -53,5 +53,5 @@ const { fixedPersona, page } = Astro.props;
     <section id="try-it" class="try-it-section" aria-label={page.tryIt.label}>
       <ScenarioPicker fixedPersona={fixedPersona} client:load />
     </section>
-  </main>
+  </div>
 </SiteShell>

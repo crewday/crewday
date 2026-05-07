@@ -63,6 +63,16 @@ The compose stack binds Caddy to `127.0.0.1:18080` by default. Override the
 host port with `SITE_HTTP_PORT=<port>` when needed. `site-api` is only
 exposed on the internal Docker network.
 
+`site/web` derives public account links from
+`PUBLIC_CREWDAY_APP_ORIGIN`, defaulting to `https://app.crew.day` for a
+plain production build. The compose smoke path passes
+`https://dev-app.crew.day` by default so the shared dev site points at
+the shared dev app:
+
+```bash
+PUBLIC_CREWDAY_APP_ORIGIN=https://dev-app.crew.day docker compose -f site/docker-compose.yml up --build
+```
+
 On the shared dev host the same compose file also joins Caddy to the
 external `traefik-proxy` network and registers `dev.crew.day` with the
 `badger@file` middleware. Pangolin needs a matching `dev.crew.day`

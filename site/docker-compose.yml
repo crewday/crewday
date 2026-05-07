@@ -3,6 +3,8 @@ services:
     build:
       context: ..
       dockerfile: site/web/Dockerfile
+      args:
+        PUBLIC_CREWDAY_APP_ORIGIN: "${PUBLIC_CREWDAY_APP_ORIGIN:-https://dev-app.crew.day}"
     restart: "no"
     volumes:
       - site-web-dist:/srv/www

@@ -18,7 +18,7 @@ const { title, description, eyebrow, heading, intro, sections, primaryCta, secon
 ---
 
 <SiteShell title={title} description={description}>
-  <main id="main" class="content-page">
+  <div class="landing-frame content-page">
     <section class="page-hero" aria-labelledby="page-title">
       <p class="eyebrow">{eyebrow}</p>
       <h1 id="page-title">{heading}</h1>
@@ -51,5 +51,5 @@ const { title, description, eyebrow, heading, intro, sections, primaryCta, secon
         }
       </div>
     </section>
-  </main>
+  </div>
 </SiteShell>

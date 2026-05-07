@@ -1,0 +1,32 @@
+---
+import { appLinks } from "@/config/appLinks";
+import type { SiteLink } from "@/content/en/site";
+import { homeCopy } from "@/content/en/home";
+import { siteCopy } from "@/content/en/site";
+
+interface Props {
+  navLinks: readonly SiteLink[];
+  navAriaLabel: string;
+}
+
+const { navAriaLabel, navLinks } = Astro.props;
+---
+
+<header class="landing-masthead" aria-label={homeCopy.masthead.ariaLabel}>
+  <a class="landing-masthead__mark" href="/" aria-label={homeCopy.masthead.homeAriaLabel}>
+    <span class="landing-masthead__dot" aria-hidden="true"></span>
+    <span>{siteCopy.brand}</span>
+  </a>
+  <p class="landing-masthead__dateline">
+    {homeCopy.masthead.dateline} · <a href={homeCopy.masthead.github.href}>{homeCopy.masthead.github.label}</a>
+  </p>
+  <div class="landing-masthead__links">
+    <nav class="landing-masthead__nav" aria-label={navAriaLabel}>
+      {navLinks.map((link) => <a href={link.href}>{link.label}</a>)}
+    </nav>
+    <nav class="landing-masthead__account" aria-label={siteCopy.header.accountLabel}>
+      <a class="landing-masthead__login" href={appLinks.login.href}>{appLinks.login.label}</a>
+      <a class="landing-masthead__signup" href={appLinks.signup.href}>{appLinks.signup.label}</a>
+    </nav>
+  </div>
+</header>

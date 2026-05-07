@@ -4,12 +4,12 @@ import { notFoundCopy } from "@/content/en/notFound";
 ---
 
 <SiteShell title={notFoundCopy.title} description={notFoundCopy.description}>
-  <main id="main" class="not-found-page">
+  <div class="landing-frame not-found-page">
     <section class="not-found-page__body" aria-labelledby="not-found-title">
       <p class="eyebrow">{notFoundCopy.eyebrow}</p>
       <h1 id="not-found-title">{notFoundCopy.heading}</h1>
       <p>{notFoundCopy.body}</p>
       <a class="button button--primary" href={notFoundCopy.action.href}>{notFoundCopy.action.label}</a>
     </section>
-  </main>
+  </div>
 </SiteShell>
