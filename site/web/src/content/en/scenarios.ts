@@ -39,6 +39,10 @@ export type ScenarioPickerCopy = {
   personaLegend: string;
   intentLegend: string;
   lockedPersonaLabel: string;
+  previewLabel: string;
+  previewEmphasis: string;
+  scenarioMetaLabel: string;
+  startMetaLabel: string;
   videoModeLabel: string;
   liveModeLabel: string;
   liveModeNotice: string;
@@ -50,11 +54,15 @@ export type ScenarioPickerCopy = {
 
 export const scenarioPickerCopy = {
   eyebrow: "Demo picker",
-  heading: "Choose the day you want to inspect.",
-  body: "Start with a recorded pass through the same fixture the live demo opens. The app iframe is only created when you ask for it.",
-  personaLegend: "Choose a role",
-  intentLegend: "Choose a job to try",
+  heading: "Compose your demo.",
+  body: "Step 01 · pick a persona · Step 02 · pick an intent · Step 03 · run it",
+  personaLegend: "Persona · who you are",
+  intentLegend: "Intent · what you came to do",
   lockedPersonaLabel: "Selected role",
+  previewLabel: "Preview",
+  previewEmphasis: "live or looped",
+  scenarioMetaLabel: "scenario",
+  startMetaLabel: "start",
   videoModeLabel: "Recorded demo",
   liveModeLabel: "Live demo workspace",
   liveModeNotice: "Picker changes now open the selected live demo.",

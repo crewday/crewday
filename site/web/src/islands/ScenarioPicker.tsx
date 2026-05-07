@@ -93,16 +93,23 @@ export function ScenarioPicker({
   const shouldShowPersonaAxis = fixedPersona === undefined;
 
   useEffect(() => {
-    const hashSelection = readHashSelection(fixedPersona);
-    const hashPersona = findPersona(hashSelection.personaKey);
-    const hashIntent = findIntent(hashPersona, hashSelection.intentSlug);
-    setPersonaKey(hashSelection.personaKey);
-    setIntentSlug(hashSelection.intentSlug);
+    const syncFromHash = () => {
+      if (!window.location.hash.startsWith("#try-it?")) {
+        return;
+      }
 
-    if (window.location.hash.startsWith("#try-it?")) {
+      const hashSelection = readHashSelection(fixedPersona);
+      const hashPersona = findPersona(hashSelection.personaKey);
+      const hashIntent = findIntent(hashPersona, hashSelection.intentSlug);
+      setPersonaKey(hashSelection.personaKey);
+      setIntentSlug(hashIntent.slug);
       writeHash(hashPersona, hashIntent);
       document.getElementById("try-it")?.scrollIntoView({ block: "start" });
-    }
+    };
+
+    syncFromHash();
+    window.addEventListener("hashchange", syncFromHash);
+    return () => window.removeEventListener("hashchange", syncFromHash);
   }, [fixedPersona]);
 
   useEffect(() => {
@@ -128,8 +135,7 @@ export function ScenarioPicker({
 
   return (
     <div className="scenario-picker">
-      <div className="scenario-picker__intro">
-        <p className="eyebrow">{scenarioPickerCopy.eyebrow}</p>
+      <div className="scenario-picker__heading">
         <h2>{scenarioPickerCopy.heading}</h2>
         <p>{scenarioPickerCopy.body}</p>
       </div>
@@ -148,8 +154,11 @@ export function ScenarioPicker({
                     type="button"
                     onClick={() => selectPersona(option.key)}
                   >
+                    <span className="scenario-picker__glyph">{option.shortLabel[0]}</span>
                     <span>{option.shortLabel}</span>
-                    <small>{option.label}</small>
+                    <small>
+                      {scenarioPickerCopy.scenarioMetaLabel} · {option.scenarioKey}
+                    </small>
                   </button>
                 ))}
               </div>
@@ -164,7 +173,7 @@ export function ScenarioPicker({
           <fieldset className="scenario-picker__group">
             <legend>{scenarioPickerCopy.intentLegend}</legend>
             <div className="scenario-picker__options scenario-picker__options--intent">
-              {persona.intents.map((option) => (
+              {persona.intents.map((option, index) => (
                 <button
                   aria-pressed={option.slug === intent.slug}
                   className="scenario-picker__option"
@@ -172,7 +181,11 @@ export function ScenarioPicker({
                   type="button"
                   onClick={() => selectIntent(option)}
                 >
-                  {option.label}
+                  <span className="scenario-picker__glyph">{index + 1}</span>
+                  <span>{option.label}</span>
+                  <small>
+                    {scenarioPickerCopy.startMetaLabel} · {option.start}
+                  </small>
                 </button>
               ))}
             </div>

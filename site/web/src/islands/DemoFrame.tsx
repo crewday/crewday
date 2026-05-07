@@ -8,6 +8,8 @@ type DemoFrameCopy = {
   liveFrameTitle: string;
   liveModeLabel: string;
   liveModeNotice: string;
+  previewEmphasis: string;
+  previewLabel: string;
   tryLiveLabel: string;
   tryLiveNotice: string;
   videoFallback: string;
@@ -39,15 +41,20 @@ export function DemoFrame({
 }) {
   const videoBase = `/demo/${selection.persona.scenarioKey}/${selection.intent.slug}`;
   const demoUrl = buildDemoUrl(selection);
+  const displayUrl = `demo.crew.day/app?scenario=${selection.persona.scenarioKey}&as=${selection.persona.as}&start=${encodeURIComponent(selection.intent.start)}`;
 
   return (
     <div className="demo-frame" data-mode={liveMode ? "live" : "video"}>
-      <div className="demo-frame__chrome" aria-hidden="true">
-        <span></span>
-        <span></span>
-        <span></span>
-      </div>
+      <p className="demo-frame__label">
+        {copy.previewLabel} · <em>{copy.previewEmphasis}</em>
+      </p>
       <div className="demo-frame__viewport">
+        <div className="demo-frame__chrome" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+          <strong>{displayUrl}</strong>
+        </div>
         {liveMode ? (
           <iframe
             className="demo-frame__embed"
@@ -81,10 +88,11 @@ export function DemoFrame({
         </div>
       </div>
       <div className="demo-frame__action" aria-live="polite">
+        <code className="demo-frame__url">{displayUrl}</code>
         {liveMode ? (
           <p className="demo-frame__status">{copy.liveModeLabel}</p>
         ) : (
-          <button className="button button--primary demo-frame__button" type="button" onClick={onTryLive}>
+          <button className="demo-frame__button" type="button" onClick={onTryLive}>
             {copy.tryLiveLabel}
           </button>
         )}

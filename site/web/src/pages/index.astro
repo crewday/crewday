@@ -1,58 +1,157 @@
 ---
-import FeatureIllustration from "@/components/FeatureIllustration.astro";
 import SiteShell from "@/components/SiteShell.astro";
+import LandingFeaturePlate from "@/components/LandingFeaturePlate.astro";
 import { homeCopy } from "@/content/en/home";
+import { siteCopy } from "@/content/en/site";
 import { ScenarioPicker } from "@/islands/ScenarioPicker";
-import { ArrowRight, Sparkles } from "@/icons";
+import { ArrowRight } from "@/icons";
 
 const description = homeCopy.description;
+const heroSubhead = homeCopy.hero.subhead.replace(/^crew\.day /u, "");
 ---
 
-<SiteShell title={homeCopy.title} description={description}>
-  <main id="main" class="home-page">
-    <section class="home-hero" aria-labelledby="home-title">
-      <div class="home-hero__copy">
-        <p class="eyebrow">{homeCopy.hero.eyebrow}</p>
-        <h1 id="home-title">{homeCopy.hero.headline}</h1>
-        <p class="home-hero__summary">{homeCopy.hero.subhead}</p>
-      </div>
+<SiteShell title={homeCopy.title} description={description} hideHeader hideFooter>
+  <a class="skip-link" href="#main">{siteCopy.skipLink}</a>
+  <div class="landing-grain" aria-hidden="true"></div>
 
-      <div class="action-row">
-        <a class="button button--primary" href={homeCopy.hero.primaryCta.href}>
-          <Sparkles size={18} strokeWidth={1.75} aria-hidden="true" />
-          <span>{homeCopy.hero.primaryCta.label}</span>
+  <main id="main" class="landing-page">
+    <div class="landing-frame">
+      <header class="landing-masthead" aria-label={homeCopy.masthead.ariaLabel}>
+        <a class="landing-masthead__mark" href="/" aria-label={homeCopy.masthead.homeAriaLabel}>
+          <span class="landing-masthead__dot" aria-hidden="true"></span>
+          <span>{siteCopy.brand}</span>
         </a>
-        <a class="button button--secondary" href={homeCopy.hero.secondaryCta.href}>
-          <span>{homeCopy.hero.secondaryCta.label}</span>
-          <ArrowRight size={18} strokeWidth={1.75} aria-hidden="true" />
-        </a>
-      </div>
+        <p class="landing-masthead__dateline">
+          {homeCopy.masthead.dateline} · <a href={homeCopy.masthead.github.href}>{homeCopy.masthead.github.label}</a>
+        </p>
+        <nav class="landing-masthead__nav" aria-label={homeCopy.masthead.navAriaLabel}>
+          {homeCopy.masthead.navLinks.map((link) => <a href={link.href}>{link.label}</a>)}
+        </nav>
+      </header>
+      <hr class="landing-rule" />
+
+      <section class="landing-hero" aria-labelledby="home-title">
+        <div class="landing-hero__copy">
+          <p class="landing-kicker">{homeCopy.hero.eyebrow}</p>
+          <h1 id="home-title">
+            {homeCopy.hero.headlineLead}
+            <em>{homeCopy.hero.headlineEmphasis}</em>
+          </h1>
+          <p class="landing-hero__summary">
+            <span class="landing-brand"><span aria-hidden="true"></span>{siteCopy.brand}</span>
+            {heroSubhead}
+          </p>
+          <div class="landing-actions">
+            <a class="landing-button landing-button--primary" href={homeCopy.hero.primaryCta.href}>
+              <span>{homeCopy.hero.primaryCta.label}</span>
+              <ArrowRight size={18} strokeWidth={1.75} aria-hidden="true" />
+            </a>
+            <a class="landing-button landing-button--secondary" href={homeCopy.hero.secondaryCta.href}>
+              <span>{homeCopy.hero.secondaryCta.label}</span>
+              <ArrowRight size={18} strokeWidth={1.75} aria-hidden="true" />
+            </a>
+          </div>
+        </div>
+
+        <figure class="landing-device" aria-label={homeCopy.devicePreview.ariaLabel}>
+          <span class="landing-device__speaker" aria-hidden="true"></span>
+          <span class="landing-device__camera" aria-hidden="true"></span>
+          <div class="landing-device__screen">
+            <div class="device-preview" aria-hidden="true">
+              <div class="device-preview__top">{homeCopy.devicePreview.heading}</div>
+              {
+                homeCopy.devicePreview.cards.map((card) => (
+                  <div class:list={["device-preview__card", { "device-preview__card--active": card.active }]}>
+                    <span>{card.time}</span>
+                    <strong>{card.title}</strong>
+                    <small>{card.note}</small>
+                  </div>
+                ))
+              }
+              <div class="device-preview__chat">
+                <span>{homeCopy.devicePreview.chat.label}</span>
+                <p>{homeCopy.devicePreview.chat.body}</p>
+              </div>
+            </div>
+          </div>
+        </figure>
+      </section>
+    </div>
+
+    <section class="landing-quote">
+      <div class="landing-quote__mark" aria-hidden="true">“</div>
+      <blockquote>{homeCopy.quote.text}</blockquote>
+      <p>{homeCopy.quote.cite}</p>
     </section>
 
-    <section class="section-band home-features" aria-labelledby="features-title">
-      <div class="section-heading">
-        <p class="eyebrow">{homeCopy.featureIntro.eyebrow}</p>
-        <h2 id="features-title">{homeCopy.featureIntro.heading}</h2>
-      </div>
-
-      <div class="feature-band-list">
+    <div class="landing-frame">
+      <section class="landing-bands" id="why" aria-label={homeCopy.sections.whyAriaLabel}>
         {
           homeCopy.features.map((feature) => (
-            <article class="feature-band">
-              <div class="feature-band__copy">
-                <p class="eyebrow">{feature.eyebrow}</p>
-                <h3>{feature.heading}</h3>
-                <p>{feature.body}</p>
+            <article class="landing-band">
+              <div class="landing-band__numeral">{feature.numeral}</div>
+              <div class="landing-band__body">
+                <span class="landing-tag">{feature.eyebrow}</span>
+                <h2>{feature.heading}</h2>
+                {feature.body.map((paragraph) => <p>{paragraph}</p>)}
               </div>
-              <FeatureIllustration variant={feature.illustration} />
+              <div class="landing-band__art">
+                <span>{feature.figureLabel}</span>
+                <LandingFeaturePlate variant={feature.illustration} />
+              </div>
             </article>
           ))
         }
-      </div>
-    </section>
+      </section>
+    </div>
 
-    <section id="try-it" class="try-it-section" aria-label={homeCopy.tryIt.label}>
+    <section id="try-it" class="landing-compose" aria-label={homeCopy.tryIt.label}>
       <ScenarioPicker client:load />
     </section>
+
+    <div class="landing-frame">
+      <section class="landing-audiences" id="audiences" aria-label={homeCopy.sections.audiencesAriaLabel}>
+        {
+          homeCopy.audiences.map((audience) => (
+            <article class="landing-audience">
+              <p>{audience.tag}</p>
+              <h2>{audience.title}</h2>
+              <span>{audience.body}</span>
+              <a href={audience.href}>{audience.cta}</a>
+            </article>
+          ))
+        }
+      </section>
+
+      <section class="landing-pricing" id="pricing" aria-label={homeCopy.sections.pricingAriaLabel}>
+        <p>{homeCopy.pricing.label}</p>
+        <strong>{homeCopy.pricing.copy}</strong>
+        <a href={homeCopy.pricing.cta.href}>{homeCopy.pricing.cta.label}</a>
+      </section>
+
+      <footer class="landing-imprint" aria-label={homeCopy.sections.footerAriaLabel}>
+        <div class="landing-imprint__about">
+          <h2>{homeCopy.imprint.heading}</h2>
+          <p>{homeCopy.imprint.body}</p>
+          <a href={homeCopy.imprint.rss.href}>{homeCopy.imprint.rss.label}</a>
+        </div>
+        {
+          siteCopy.footer.columns.map((column) => (
+            <section class="landing-imprint__column" aria-labelledby={`landing-footer-${column.heading.toLowerCase()}`}>
+              <h3 id={`landing-footer-${column.heading.toLowerCase()}`}>{column.heading}</h3>
+              <ul>
+                {column.links.map((link) => (
+                  <li><a href={link.href}>{link.label}</a></li>
+                ))}
+              </ul>
+            </section>
+          ))
+        }
+      </footer>
+      <div class="landing-imprint__bottom">
+        <span>{homeCopy.imprint.bottomLeft}</span>
+        <span>{homeCopy.imprint.bottomRight}</span>
+      </div>
+    </div>
   </main>
 </SiteShell>

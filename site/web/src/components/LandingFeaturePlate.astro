@@ -1,0 +1,87 @@
+---
+interface Props {
+  variant: "agent" | "operations" | "selfHost";
+}
+
+const { variant } = Astro.props;
+---
+
+{
+  variant === "agent" ? (
+    <svg viewBox="0 0 360 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <ellipse cx="180" cy="92" rx="36" ry="3" fill="currentColor" opacity="0.14" />
+      <path d="M154 82Q154 44 180 44Q206 44 206 82Z" fill="var(--sand)" stroke="currentColor" stroke-width="1.4" />
+      <rect x="150" y="82" width="60" height="8" fill="currentColor" />
+      <line x1="180" y1="44" x2="180" y2="34" stroke="currentColor" stroke-width="1.4" />
+      <circle cx="180" cy="30" r="4" fill="var(--sand)" stroke="currentColor" stroke-width="1.4" />
+      <g stroke="currentColor" stroke-width="0.9" fill="none" stroke-linecap="round" stroke-dasharray="2 3" opacity="0.55">
+        <path d="M170 94C132 108 92 122 66 136" />
+        <path d="M180 94L180 130" />
+        <path d="M190 94C228 108 268 122 294 136" />
+      </g>
+      <rect x="20" y="140" width="94" height="58" rx="3" fill="var(--card)" stroke="currentColor" stroke-width="1.2" />
+      <rect x="20" y="140" width="94" height="10" fill="var(--moss)" />
+      <rect x="156" y="132" width="48" height="66" rx="7" fill="var(--card)" stroke="currentColor" stroke-width="1.2" />
+      <path d="M248 140H338Q342 140 342 144V182Q342 186 338 186H264L254 198L258 186H248Q244 186 244 182V144Q244 140 248 140Z" fill="var(--card)" stroke="currentColor" stroke-width="1.2" />
+      <text x="67" y="214" text-anchor="middle">desk</text>
+      <text x="180" y="214" text-anchor="middle">pocket</text>
+      <text x="293" y="214" text-anchor="middle">message</text>
+    </svg>
+  ) : variant === "operations" ? (
+    <svg viewBox="0 0 360 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="24" y="20" width="312" height="180" rx="4" fill="var(--card)" stroke="currentColor" stroke-width="1.4" />
+      <line x1="180" y1="20" x2="180" y2="200" stroke="currentColor" stroke-width="1.4" />
+      <g font-family="JetBrains Mono" font-size="9" fill="currentColor">
+        <text x="44" y="44">PLACE</text>
+        <text x="112" y="44">PERSON</text>
+        <text x="200" y="44">TASK</text>
+        <text x="290" y="44">WHEN</text>
+      </g>
+      <line x1="36" y1="52" x2="324" y2="52" stroke="currentColor" stroke-width="0.8" />
+      <g font-family="Fraunces" font-style="italic" font-size="13" fill="currentColor">
+        <text x="44" y="76">Villa Mar</text>
+        <text x="112" y="76">Luz</text>
+        <text x="200" y="76">Turnover</text>
+        <text x="290" y="76">10:00</text>
+        <text x="44" y="102">La Bastide</text>
+        <text x="112" y="102">Bernard</text>
+        <text x="200" y="102">Checklist</text>
+        <text x="290" y="102">14:30</text>
+        <text x="44" y="128">Le Clos</text>
+        <text x="112" y="128">Agent</text>
+        <text x="200" y="128">Draft reply</text>
+        <text x="290" y="128">16:00</text>
+        <text x="44" y="154">Villa Mar</text>
+        <text x="112" y="154">Carla</text>
+        <text x="200" y="154">Airport run</text>
+        <text x="290" y="154">18:40</text>
+      </g>
+      <rect x="24" y="136" width="312" height="24" fill="var(--moss)" opacity="0.06" />
+      <rect x="24" y="164" width="312" height="24" fill="var(--sand)" opacity="0.12" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 360 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <text x="24" y="18" font-family="JetBrains Mono" font-size="8" fill="currentColor" opacity="0.65">ASSET</text>
+      <text x="336" y="18" text-anchor="end" font-family="JetBrains Mono" font-size="8" fill="currentColor" opacity="0.65">INVENTORY</text>
+      <path d="M48 32L60 22H146V58H48Z" fill="var(--sand)" stroke="currentColor" stroke-width="1.2" />
+      <text x="74" y="37" font-family="JetBrains Mono" font-size="7" fill="currentColor">WARRANTY</text>
+      <text x="74" y="50" font-family="Fraunces" font-style="italic" font-size="10" fill="currentColor">exp. 2029-05</text>
+      <rect x="30" y="72" width="120" height="56" rx="3" fill="var(--card)" stroke="currentColor" stroke-width="1.4" />
+      <g stroke="currentColor" stroke-width="0.9">
+        <rect x="200" y="92" width="36" height="5" fill="var(--card)" />
+        <rect x="200" y="99" width="36" height="5" fill="var(--card)" />
+        <rect x="250" y="94" width="36" height="5" fill="var(--card)" />
+        <rect x="250" y="101" width="36" height="5" fill="var(--sand)" opacity="0.35" />
+        <rect x="300" y="102" width="32" height="4" fill="var(--card)" />
+      </g>
+      <text x="30" y="148" font-family="Fraunces" font-style="italic" font-size="12" fill="currentColor">air conditioner · Villa Mar</text>
+      <text x="30" y="164" font-family="JetBrains Mono" font-size="9" fill="var(--moss)">filter · due in 12d</text>
+      <text x="218" y="150" text-anchor="middle" font-family="JetBrains Mono" font-size="12" fill="var(--moss)">x12</text>
+      <text x="268" y="150" text-anchor="middle" font-family="JetBrains Mono" font-size="12" fill="var(--moss)">x08</text>
+      <text x="316" y="150" text-anchor="middle" font-family="JetBrains Mono" font-size="12" fill="var(--rust)">x04</text>
+      <rect x="16" y="184" width="328" height="30" rx="2" fill="var(--moss)" opacity="0.08" />
+      <text x="68" y="204" font-family="Fraunces" font-style="italic" font-size="11" fill="currentColor">turnover · Villa Mar</text>
+      <text x="190" y="204" font-family="JetBrains Mono" font-size="10" fill="var(--moss)">-2 sheets · filter ok</text>
+    </svg>
+  )
+}
