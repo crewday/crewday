@@ -1,0 +1,47 @@
+---
+import SiteShell from "@/components/SiteShell.astro";
+import { homeCopy } from "@/content/en-US/home";
+import { ArrowRight, House, Sparkles } from "@/icons";
+import { SiteStatus } from "@/islands/SiteStatus";
+
+const description = homeCopy.summary;
+---
+
+<SiteShell title="crew.day" description={description}>
+  <main class="home-page">
+    <section class="home-hero" aria-labelledby="home-title">
+      <div class="home-hero__brand" aria-label={homeCopy.brandLabel}>
+        <House size={22} strokeWidth={1.75} aria-hidden="true" />
+        <span>crew.day</span>
+      </div>
+
+      <div class="home-hero__copy">
+        <p class="home-hero__eyebrow">{homeCopy.eyebrow}</p>
+        <h1 id="home-title">{homeCopy.title}</h1>
+        <p class="home-hero__summary">{homeCopy.summary}</p>
+      </div>
+
+      <nav class="home-actions" aria-label={homeCopy.primaryNavLabel}>
+        <a class="home-actions__primary" href={homeCopy.primaryHref}>
+          <Sparkles size={18} strokeWidth={1.75} aria-hidden="true" />
+          <span>{homeCopy.primaryCta}</span>
+        </a>
+        <a class="home-actions__secondary" href={homeCopy.secondaryHref}>
+          <span>{homeCopy.secondaryCta}</span>
+          <ArrowRight size={18} strokeWidth={1.75} aria-hidden="true" />
+        </a>
+      </nav>
+    </section>
+
+    <section id="demo" class="home-next" aria-label={homeCopy.statusSectionLabel}>
+      <div id="status">
+        <SiteStatus
+          ariaLabel={homeCopy.statusAriaLabel}
+          label={homeCopy.statusLabel}
+          text={homeCopy.statusText}
+          client:idle
+        />
+      </div>
+    </section>
+  </main>
+</SiteShell>

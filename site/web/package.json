@@ -1,0 +1,27 @@
+{
+  "name": "@crewday/site-web",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "crew.day public site — Astro static frontend.",
+  "scripts": {
+    "build": "ASTRO_TELEMETRY_DISABLED=1 astro build",
+    "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev --host 127.0.0.1",
+    "preview": "ASTRO_TELEMETRY_DISABLED=1 astro preview --host 127.0.0.1",
+    "typecheck": "ASTRO_TELEMETRY_DISABLED=1 astro check"
+  },
+  "dependencies": {
+    "@astrojs/mdx": "^5.0.4",
+    "@astrojs/react": "^5.0.4",
+    "astro": "^6.2.2",
+    "lucide-react": "^1.8.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.9",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^6.0.3"
+  }
+}

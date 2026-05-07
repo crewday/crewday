@@ -1,0 +1,40 @@
+services:
+  site-web:
+    build:
+      context: ./web
+    restart: "no"
+    volumes:
+      - site-web-dist:/srv/www
+
+  site-api:
+    build:
+      context: ./api
+    restart: unless-stopped
+    user: "10001:10001"
+    environment:
+      SITE_BIND_HOST: "0.0.0.0"
+      SITE_BIND_PORT: "8001"
+      SITE_PUBLIC_URL: "http://127.0.0.1:${SITE_HTTP_PORT:-18080}"
+    expose:
+      - "8001"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${SITE_HTTP_PORT:-18080}:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - site-web-dist:/srv/www:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      site-web:
+        condition: service_completed_successfully
+      site-api:
+        condition: service_started
+
+volumes:
+  site-web-dist:
+  caddy-data:
+  caddy-config:

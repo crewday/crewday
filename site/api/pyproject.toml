@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "crewday-site-api"
+version = "0.0.1"
+description = "crew.day public site API."
+readme = "README.md"
+requires-python = ">=3.14"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "fastapi>=0.115",
+    "pydantic>=2.6",
+    "uvicorn[standard]>=0.30",
+]
+
+[dependency-groups]
+dev = [
+    "httpx",
+    "mypy",
+    "pytest",
+    "ruff",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["site_api"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

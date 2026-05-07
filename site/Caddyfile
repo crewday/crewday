@@ -1,0 +1,23 @@
+:80 {
+    encode zstd gzip
+
+    handle_path /api/* {
+        reverse_proxy site-api:8001
+    }
+
+    handle {
+        root * /srv/www
+        try_files {path} {path}/index.html /404.html
+        file_server
+    }
+
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Cross-Origin-Opener-Policy "same-origin"
+        Cross-Origin-Resource-Policy "same-origin"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; frame-src https://demo.crew.day; connect-src 'self'; font-src 'self'; object-src 'none'; frame-ancestors 'self'; base-uri 'self'; form-action 'self';"
+    }
+}

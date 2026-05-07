@@ -1,0 +1,29 @@
+---
+import "../styles/fonts.css";
+import "../styles/tokens.css";
+import "../styles/reset.css";
+import "../styles/globals.css";
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <title>{title}</title>
+  </head>
+  <body class="site-surface">
+    <slot />
+  </body>
+</html>

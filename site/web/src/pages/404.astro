@@ -1,0 +1,16 @@
+---
+import SiteShell from "@/components/SiteShell.astro";
+import { notFoundCopy } from "@/content/en-US/notFound";
+---
+
+<SiteShell title={notFoundCopy.title} description={notFoundCopy.description}>
+  <main class="not-found-page">
+    <a class="not-found-page__brand" href="/">{notFoundCopy.brand}</a>
+    <section class="not-found-page__body" aria-labelledby="not-found-title">
+      <p class="not-found-page__eyebrow">{notFoundCopy.eyebrow}</p>
+      <h1 id="not-found-title">{notFoundCopy.heading}</h1>
+      <p>{notFoundCopy.body}</p>
+      <a class="not-found-page__action" href="/">{notFoundCopy.action}</a>
+    </section>
+  </main>
+</SiteShell>
