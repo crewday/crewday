@@ -1,0 +1,15 @@
+---
+import InfoPage from "@/components/InfoPage.astro";
+import { legalPages } from "@/content/en/pages";
+
+const page = legalPages.terms;
+---
+
+<InfoPage
+  title={page.title}
+  description={page.description}
+  eyebrow={page.eyebrow}
+  heading={page.heading}
+  intro={page.intro}
+  sections={page.sections}
+/>

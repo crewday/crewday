@@ -1,0 +1,56 @@
+---
+import { ArrowRight } from "@/icons";
+import type { PersonaPageCopy } from "@/content/en/pages";
+import SiteShell from "./SiteShell.astro";
+
+interface Props {
+  page: PersonaPageCopy;
+}
+
+const { page } = Astro.props;
+---
+
+<SiteShell title={page.title} description={page.description}>
+  <main id="main" class="persona-page">
+    <section class="page-hero page-hero--split" aria-labelledby="page-title">
+      <div class="page-hero__copy">
+        <p class="eyebrow">{page.eyebrow}</p>
+        <h1 id="page-title">{page.heading}</h1>
+        <p class="page-hero__intro">{page.intro}</p>
+        <div class="action-row">
+          <a class="button button--primary" href={page.primaryCta.href}>{page.primaryCta.label}</a>
+          <a class="button button--secondary" href={page.secondaryCta.href}>
+            <span>{page.secondaryCta.label}</span>
+            <ArrowRight size={17} strokeWidth={1.75} aria-hidden="true" />
+          </a>
+        </div>
+      </div>
+      <div class="persona-ledger" aria-hidden="true">
+        <span></span>
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+    </section>
+
+    <section class="section-band" aria-label={page.eyebrow}>
+      <div class="section-grid section-grid--three">
+        {
+          page.sections.map((section) => (
+            <article class="story-card">
+              {section.eyebrow && <p class="eyebrow">{section.eyebrow}</p>}
+              <h2>{section.heading}</h2>
+              <p>{section.body}</p>
+            </article>
+          ))
+        }
+      </div>
+    </section>
+
+    <section id="try-it" class="try-it-reservation" aria-labelledby="try-it-title">
+      <p class="eyebrow">{page.tryIt.eyebrow}</p>
+      <h2 id="try-it-title">{page.tryIt.heading}</h2>
+      <p>{page.tryIt.body}</p>
+    </section>
+  </main>
+</SiteShell>

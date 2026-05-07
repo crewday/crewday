@@ -1,47 +1,60 @@
 ---
+import FeatureIllustration from "@/components/FeatureIllustration.astro";
 import SiteShell from "@/components/SiteShell.astro";
-import { homeCopy } from "@/content/en-US/home";
-import { ArrowRight, House, Sparkles } from "@/icons";
-import { SiteStatus } from "@/islands/SiteStatus";
+import { homeCopy } from "@/content/en/home";
+import { ArrowRight, Sparkles } from "@/icons";
 
-const description = homeCopy.summary;
+const description = homeCopy.description;
 ---
 
-<SiteShell title="crew.day" description={description}>
-  <main class="home-page">
+<SiteShell title={homeCopy.title} description={description}>
+  <main id="main" class="home-page">
     <section class="home-hero" aria-labelledby="home-title">
-      <div class="home-hero__brand" aria-label={homeCopy.brandLabel}>
-        <House size={22} strokeWidth={1.75} aria-hidden="true" />
-        <span>crew.day</span>
-      </div>
-
       <div class="home-hero__copy">
-        <p class="home-hero__eyebrow">{homeCopy.eyebrow}</p>
-        <h1 id="home-title">{homeCopy.title}</h1>
-        <p class="home-hero__summary">{homeCopy.summary}</p>
+        <p class="eyebrow">{homeCopy.hero.eyebrow}</p>
+        <h1 id="home-title">{homeCopy.hero.headline}</h1>
+        <p class="home-hero__summary">{homeCopy.hero.subhead}</p>
       </div>
 
-      <nav class="home-actions" aria-label={homeCopy.primaryNavLabel}>
-        <a class="home-actions__primary" href={homeCopy.primaryHref}>
+      <div class="action-row">
+        <a class="button button--primary" href={homeCopy.hero.primaryCta.href}>
           <Sparkles size={18} strokeWidth={1.75} aria-hidden="true" />
-          <span>{homeCopy.primaryCta}</span>
+          <span>{homeCopy.hero.primaryCta.label}</span>
         </a>
-        <a class="home-actions__secondary" href={homeCopy.secondaryHref}>
-          <span>{homeCopy.secondaryCta}</span>
+        <a class="button button--secondary" href={homeCopy.hero.secondaryCta.href}>
+          <span>{homeCopy.hero.secondaryCta.label}</span>
           <ArrowRight size={18} strokeWidth={1.75} aria-hidden="true" />
         </a>
-      </nav>
+      </div>
     </section>
 
-    <section id="demo" class="home-next" aria-label={homeCopy.statusSectionLabel}>
-      <div id="status">
-        <SiteStatus
-          ariaLabel={homeCopy.statusAriaLabel}
-          label={homeCopy.statusLabel}
-          text={homeCopy.statusText}
-          client:idle
-        />
+    <section class="section-band home-features" aria-labelledby="features-title">
+      <div class="section-heading">
+        <p class="eyebrow">{homeCopy.featureIntro.eyebrow}</p>
+        <h2 id="features-title">{homeCopy.featureIntro.heading}</h2>
       </div>
+
+      <div class="feature-band-list">
+        {
+          homeCopy.features.map((feature) => (
+            <article class="feature-band">
+              <div class="feature-band__copy">
+                <p class="eyebrow">{feature.eyebrow}</p>
+                <h3>{feature.heading}</h3>
+                <p>{feature.body}</p>
+              </div>
+              <FeatureIllustration variant={feature.illustration} />
+            </article>
+          ))
+        }
+      </div>
+    </section>
+
+    <section id="try-it" class="try-it-reservation" aria-labelledby="try-it-title">
+      <p class="eyebrow">{homeCopy.tryIt.eyebrow}</p>
+      <h2 id="try-it-title">{homeCopy.tryIt.heading}</h2>
+      <p>{homeCopy.tryIt.body}</p>
+      <a class="button button--primary" href={homeCopy.tryIt.cta.href}>{homeCopy.tryIt.cta.label}</a>
     </section>
   </main>
 </SiteShell>

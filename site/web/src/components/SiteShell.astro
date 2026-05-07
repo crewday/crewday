@@ -3,6 +3,8 @@ import "../styles/fonts.css";
 import "../styles/tokens.css";
 import "../styles/reset.css";
 import "../styles/globals.css";
+import SiteFooter from "./SiteFooter.astro";
+import SiteHeader from "./SiteHeader.astro";
 
 interface Props {
   title: string;
@@ -18,12 +20,15 @@ const { title, description } = Astro.props;
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content={description} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
     <title>{title}</title>
   </head>
   <body class="site-surface">
+    <SiteHeader />
     <slot />
+    <SiteFooter />
   </body>
 </html>

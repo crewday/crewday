@@ -1,0 +1,55 @@
+---
+import { ArrowRight } from "@/icons";
+import type { ContentSection, LinkAction } from "@/content/en/pages";
+import SiteShell from "./SiteShell.astro";
+
+interface Props {
+  title: string;
+  description: string;
+  eyebrow: string;
+  heading: string;
+  intro: string;
+  sections: readonly ContentSection[];
+  primaryCta?: LinkAction;
+  secondaryCta?: LinkAction;
+}
+
+const { title, description, eyebrow, heading, intro, sections, primaryCta, secondaryCta } = Astro.props;
+---
+
+<SiteShell title={title} description={description}>
+  <main id="main" class="content-page">
+    <section class="page-hero" aria-labelledby="page-title">
+      <p class="eyebrow">{eyebrow}</p>
+      <h1 id="page-title">{heading}</h1>
+      <p class="page-hero__intro">{intro}</p>
+      {
+        (primaryCta || secondaryCta) && (
+          <div class="action-row">
+            {primaryCta && <a class="button button--primary" href={primaryCta.href}>{primaryCta.label}</a>}
+            {secondaryCta && (
+              <a class="button button--secondary" href={secondaryCta.href}>
+                <span>{secondaryCta.label}</span>
+                <ArrowRight size={17} strokeWidth={1.75} aria-hidden="true" />
+              </a>
+            )}
+          </div>
+        )
+      }
+    </section>
+
+    <section class="section-band" aria-label={eyebrow}>
+      <div class="content-stack">
+        {
+          sections.map((section) => (
+            <article class="story-card story-card--wide">
+              {section.eyebrow && <p class="eyebrow">{section.eyebrow}</p>}
+              <h2>{section.heading}</h2>
+              <p>{section.body}</p>
+            </article>
+          ))
+        }
+      </div>
+    </section>
+  </main>
+</SiteShell>
