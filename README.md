@@ -4,14 +4,17 @@ A self-hosted, agent-first system for managing household and short-term-rental
 staff across one or more properties: maids, cooks, drivers, gardeners,
 handymen, nannies, pool technicians, and the like.
 
-Think **hotel operations for a single owner**: properties, rooms, guests,
-staff roles, task schedules, standing instructions, inventories, timesheets,
-payslips — all accessible to both humans (via a mobile-first web app) and LLM
-agents (via a documented REST API and a thin CLI that wraps it).
+Think **hotel operations for a household or small property team**: properties,
+rooms, guests, staff roles, task schedules, standing instructions,
+inventories, timesheets, payslips — all accessible to both humans (via a
+mobile-first web app) and LLM agents (via a documented REST API and a thin CLI
+that wraps it).
 
-> **Status:** pre-implementation. This repository currently contains
-> **specifications only**. See [`docs/specs/`](docs/specs/) for the full
-> design. No code has been written yet.
+> **Status as of 2026-05-09:** active implementation. The original spec
+> tree is still the source of truth, but the repo now contains the production
+> FastAPI service, React SPA, CLI, migrations, tests, high-fidelity mocks, and
+> a separate public-site deployable. It is not production-deployed yet; the
+> shared dev app runs on loopback at `http://127.0.0.1:8100`.
 
 ## Why
 
@@ -34,9 +37,10 @@ owner, a REST API for the agent.
 - **Passkeys only** for human login. No passwords. Managers bootstrap
   employees via emailed magic links that register a WebAuthn credential on
   the employee's phone.
-- **Self-hosted, single-household, multi-property.** One deployment manages
-  one owner's portfolio of properties (home, vacation home, rentals). No
-  multi-tenant plumbing.
+- **Self-hosted or managed, workspace-scoped, multi-property.** The same
+  codebase can run as a self-hosted household install or a managed SaaS
+  deployment. Workspaces are the tenancy boundary; each workspace can manage
+  one or more properties.
 - **FastAPI + React SPA + SQLite/Postgres.** FastAPI on the server, a
   Vite + React + TypeScript strict SPA on the client (served by the
   same FastAPI process from `dist/`), with SQLite by default and
@@ -49,10 +53,39 @@ owner, a REST API for the agent.
 - **PWA with offline support.** Staff open the site on their phone, add it
   to the home screen, and today's tasks remain tickable without connection.
 
+## Current status
+
+crew.day has moved well past the "specifications only" phase. The main
+application now includes:
+
+- A FastAPI backend under [`app/`](app/) with workspace-scoped APIs for auth,
+  identity, properties, tasks, scheduling, stays, inventory, assets, payroll,
+  expenses, billing, messaging, LLM routing, audit, admin, and health/runtime
+  surfaces.
+- A production React + Vite SPA under [`app/web/`](app/web/) with manager,
+  worker, client, admin, public enrollment, passkey, settings, agent, and
+  styleguide screens.
+- The `crewday` CLI under [`cli/`](cli/) as a thin client/code-generated
+  command surface over the OpenAPI-described API.
+- Alembic migrations, SQLAlchemy models, SQLite/Postgres support, capability
+  detection, audit/event plumbing, and deployment/admin commands.
+- Automated coverage across unit, integration, contract, frontend, and
+  Playwright end-to-end tests under [`tests/`](tests/) and `app/web/src/**/*.test.*`.
+- A disposable dev/demo topology under [`mocks/`](mocks/) and an independently
+  deployable marketing/suggestion-box surface under [`site/`](site/).
+
+The remaining work is product hardening rather than blank-slate scaffolding:
+open Beads tasks currently track frontend polish, empty-state gaps, asset
+creation/document upload refinements, task-template creation, navigation edge
+cases, and similar readiness issues. See [`SETUP.md`](SETUP.md) for the dev
+stack and [`docs/specs/19-roadmap.md`](docs/specs/19-roadmap.md) for the
+phase plan.
+
 ## How it's organized
 
-The spec is split across focused documents. Start at
-[`docs/specs/00-overview.md`](docs/specs/00-overview.md) for the full tour.
+The project is split across the production app, CLI, mocks, public site, and
+specs. Start at [`docs/specs/00-overview.md`](docs/specs/00-overview.md) for
+the product model and [`SETUP.md`](SETUP.md) for local development.
 
 | # | Document | Purpose |
 |---|----------|---------|
@@ -77,6 +110,11 @@ The spec is split across focused documents. Start at
 | 18 | [`i18n.md`](docs/specs/18-i18n.md) | Deferred locales, seam design |
 | 19 | [`roadmap.md`](docs/specs/19-roadmap.md) | Phased delivery plan |
 | 20 | [`glossary.md`](docs/specs/20-glossary.md) | Terms used across the spec |
+| 21 | [`assets.md`](docs/specs/21-assets.md) | Asset catalog, documents, QR, maintenance |
+| 22 | [`clients-and-vendors.md`](docs/specs/22-clients-and-vendors.md) | Agency/client/vendor workflows |
+| 23 | [`chat-gateway.md`](docs/specs/23-chat-gateway.md) | Chat gateway adapter seam |
+| 24 | [`demo-mode.md`](docs/specs/24-demo-mode.md) | Demo deployment behavior and guardrails |
+| 25 | [`marketplace.md`](docs/specs/25-marketplace.md) | Deferred marketplace design reservation |
 
 For agent-development conventions (how to work on this codebase), see
 [`AGENTS.md`](AGENTS.md).
@@ -86,12 +124,12 @@ For agent-development conventions (how to work on this codebase), see
 Explicitly **not** in scope for v1 (see `docs/specs/00-overview.md` for the
 full list and rationale):
 
-- Multi-tenancy / SaaS billing
+- Paid plans, metered billing, payment collection, or tax handling
 - Tax calculation, statutory filings, or legal HR compliance
 - Guest booking / payment acceptance (we import reservations; we do not sell them)
 - Integrated accounting (QuickBooks, Xero) — CSV export only
 - Native mobile apps
-- Real-time two-way chat between managers and employees (use comments + email)
+- Real-time human-to-human chat (use task comments, email, and agent chat)
 
 ## Lines of Code over Time
 
