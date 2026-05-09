@@ -339,8 +339,24 @@ describe("<PropertiesPage>", () => {
       expect(within(dialog).getByLabelText("Timezone")).toHaveValue("Europe/Lisbon");
       expect(within(dialog).getByLabelText("Locale")).toHaveValue("pt-PT");
       expect(within(dialog).getByLabelText("Default currency")).toHaveValue("EUR");
+      expect(within(dialog).getByRole("option", {
+        name: "Primary residence - no automatic area or stay lifecycle setup",
+      })).toHaveValue("residence");
+      expect(within(dialog).getByRole("option", {
+        name: "Vacation home - seed turnover areas and checkout workflow",
+      })).toHaveValue("vacation");
+      expect(within(dialog).getByRole("option", {
+        name: "Short-term rental - seed turnover areas and checkout workflow",
+      })).toHaveValue("str");
+      expect(within(dialog).getByRole("option", {
+        name: "Mixed use - seed turnover setup for guest, staff, and other stays",
+      })).toHaveValue("mixed");
+      expect(within(dialog).queryByRole("option", { name: "str" })).toBeNull();
       fireEvent.change(within(dialog).getByLabelText("Name"), {
         target: { value: "Lake House" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Kind"), {
+        target: { value: "str" },
       });
       fireEvent.change(within(dialog).getByLabelText("City"), {
         target: { value: "Austin" },
@@ -362,6 +378,7 @@ describe("<PropertiesPage>", () => {
       );
       expect(createRequest?.body).toMatchObject({
         name: "Lake House",
+        kind: "str",
         timezone: "America/Chicago",
         country: "PT",
         locale: "pt-PT",

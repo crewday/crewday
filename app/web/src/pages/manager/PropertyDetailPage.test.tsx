@@ -437,8 +437,24 @@ describe("<PropertyDetailPage>", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Edit property" }));
       const dialog = await screen.findByRole("dialog", { name: "Edit property" });
+      expect(within(dialog).getByRole("option", {
+        name: "Primary residence - no automatic area or stay lifecycle setup",
+      })).toHaveValue("residence");
+      expect(within(dialog).getByRole("option", {
+        name: "Vacation home - seed turnover areas and checkout workflow",
+      })).toHaveValue("vacation");
+      expect(within(dialog).getByRole("option", {
+        name: "Short-term rental - seed turnover areas and checkout workflow",
+      })).toHaveValue("str");
+      expect(within(dialog).getByRole("option", {
+        name: "Mixed use - seed turnover setup for guest, staff, and other stays",
+      })).toHaveValue("mixed");
+      expect(within(dialog).queryByRole("option", { name: "str" })).toBeNull();
       fireEvent.change(within(dialog).getByLabelText("Name"), {
         target: { value: "Villa Aurora" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Kind"), {
+        target: { value: "mixed" },
       });
       fireEvent.change(within(dialog).getByLabelText("City"), {
         target: { value: "Braga" },
@@ -459,6 +475,7 @@ describe("<PropertyDetailPage>", () => {
       );
       expect(patch?.body).toMatchObject({
         name: "Villa Aurora",
+        kind: "mixed",
         timezone: "Europe/Madrid",
         country: "PT",
         client_org_id: "org_1",

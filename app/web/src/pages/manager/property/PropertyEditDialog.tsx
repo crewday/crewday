@@ -2,7 +2,27 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Property } from "@/types/api";
 import type { PropertyAddress, PropertyRecord } from "./types";
 
-const PROPERTY_KINDS: readonly Property["kind"][] = ["residence", "vacation", "str", "mixed"];
+const PROPERTY_KIND_OPTIONS: readonly {
+  value: Property["kind"];
+  label: string;
+}[] = [
+  {
+    value: "residence",
+    label: "Primary residence - no automatic area or stay lifecycle setup",
+  },
+  {
+    value: "vacation",
+    label: "Vacation home - seed turnover areas and checkout workflow",
+  },
+  {
+    value: "str",
+    label: "Short-term rental - seed turnover areas and checkout workflow",
+  },
+  {
+    value: "mixed",
+    label: "Mixed use - seed turnover setup for guest, staff, and other stays",
+  },
+];
 
 export interface PropertyEditDraft {
   name: string;
@@ -231,8 +251,8 @@ export default function PropertyEditDialog({
                 setDraft({ ...draft, kind: event.currentTarget.value as Property["kind"] })
               }
             >
-              {PROPERTY_KINDS.map((kind) => (
-                <option key={kind} value={kind}>{kind}</option>
+              {PROPERTY_KIND_OPTIONS.map((kind) => (
+                <option key={kind.value} value={kind.value}>{kind.label}</option>
               ))}
             </select>
           </label>
