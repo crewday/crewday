@@ -525,9 +525,25 @@ class TestLlmBudgetRefreshJob:
 
         fake_rows = [_FakeRow("01HWA00000000000000000WSP1", "ws-one")]
 
+        class _FakeLedgerRow:
+            id = "01HWA00000000000000000LGR0"
+            spent_cents = 100
+
         class _FakeResult:
+            def __init__(
+                self,
+                *,
+                rows: list[_FakeRow] | None = None,
+                one: _FakeLedgerRow | None = None,
+            ) -> None:
+                self._rows = rows or []
+                self._one = one
+
             def all(self) -> list[_FakeRow]:
-                return list(fake_rows)
+                return list(self._rows)
+
+            def one_or_none(self) -> _FakeLedgerRow | None:
+                return self._one
 
         class _FakeNestedTx:
             """Trivial context manager standing in for ``session.begin_nested()``.
@@ -552,20 +568,24 @@ class TestLlmBudgetRefreshJob:
             fake session survives the runtime type check.
             """
 
-            def execute(self, _stmt: object) -> _FakeResult:
-                return _FakeResult()
+            def __init__(self) -> None:
+                self._execute_calls = 0
 
-            def scalar(self, _stmt: object) -> str:
-                """Stand-in for ``session.scalar(select(BudgetLedger.id)...)``.
+            def execute(self, _stmt: object) -> _FakeResult:
+                self._execute_calls += 1
+                if self._execute_calls == 1:
+                    return _FakeResult(rows=fake_rows)
+                return _FakeResult(one=_FakeLedgerRow())
+
+            def scalar(self, _stmt: object) -> bool:
+                """Stand-in for the metered-usage ``EXISTS`` probe.
 
                 The body pre-checks ledger presence before calling
-                :func:`refresh_aggregate` — a truthy return (any
-                non-``None`` value) tells the body the ledger exists
-                and the refresh path should fire. Returning a fixed
-                ULID-shaped sentinel keeps the test DB-free while
-                guiding the body past the ``no_ledger`` early-skip.
+                :func:`refresh_aggregate`; returning ``True`` keeps
+                the test DB-free while guiding the body past the idle
+                zero-spend early-skip.
                 """
-                return "01HWA00000000000000000LGR0"
+                return True
 
             def begin_nested(self) -> _FakeNestedTx:
                 return _FakeNestedTx()

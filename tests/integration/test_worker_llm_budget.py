@@ -31,6 +31,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import Engine, delete, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.adapters.db.session as _session_mod
@@ -170,6 +171,7 @@ def _seed_usage(
     workspace_id: str,
     cost_cents: int,
     created_at: datetime,
+    status: str = "ok",
 ) -> None:
     """Insert one :class:`LlmUsageRow` inside the 30-day window."""
     factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
@@ -184,7 +186,7 @@ def _seed_usage(
                 tokens_out=50,
                 cost_cents=cost_cents,
                 latency_ms=0,
-                status="ok",
+                status=status,
                 correlation_id=new_ulid(),
                 attempt=0,
                 created_at=created_at,
@@ -437,6 +439,186 @@ class TestRefreshFanOut:
 
         # Tick summary records the workspace attempt (no failure,
         # zero spend summed in).
+        tick_events = [
+            rec
+            for rec in caplog.records
+            if getattr(rec, "event", None) == "llm.budget.refresh.tick"
+        ]
+        assert len(tick_events) == 1
+        tick = tick_events[0]
+        assert getattr(tick, "workspaces", None) == 1
+        assert getattr(tick, "failures", None) == 0
+        assert getattr(tick, "total_cents", None) == 0
+
+    def test_idle_zero_spend_workspace_skips_refresh_write_path(
+        self,
+        engine: Engine,
+        real_make_uow: None,
+        clean_budget_tables: None,
+        caplog: pytest.LogCaptureFixture,
+        allow_propagated_log_capture: Callable[..., None],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Idle zero-spend ledgers avoid the SQLite write-lock path.
+
+        The dev OperationalError shape was an idle workspace with a
+        ledger row, ``spent_cents=0``, and no metered ``llm_usage``.
+        For that shape the periodic refresh would only UPDATE the
+        ledger's rolling-window timestamps, which is not needed for
+        cap enforcement and can collide with other SQLite writer ticks.
+        """
+        allow_propagated_log_capture("app.worker.scheduler")
+
+        frozen = FrozenClock(_PINNED)
+        ws_idle = _seed_workspace(engine, slug="idle-zero-spend")
+        _seed_ledger(engine, workspace_id=ws_idle, spent_cents=0)
+
+        def locked_refresh(
+            session: Session,
+            ctx: WorkspaceContext,
+            *,
+            clock: Clock | None = None,
+        ) -> int:
+            del session, ctx, clock
+            raise OperationalError(
+                "UPDATE budget_ledger ...",
+                {},
+                Exception("database is locked"),
+            )
+
+        monkeypatch.setattr(
+            "app.domain.llm.budget.refresh_aggregate",
+            locked_refresh,
+        )
+
+        body = _make_llm_budget_refresh_body(frozen)
+        with caplog.at_level(logging.DEBUG, logger="app.worker.scheduler"):
+            body()
+
+        assert _read_ledger_spent(engine, workspace_id=ws_idle) == 0
+        assert [
+            rec
+            for rec in caplog.records
+            if getattr(rec, "event", None) == "llm.budget.refresh.workspace_failed"
+        ] == []
+
+        tick_events = [
+            rec
+            for rec in caplog.records
+            if getattr(rec, "event", None) == "llm.budget.refresh.tick"
+        ]
+        assert len(tick_events) == 1
+        tick = tick_events[0]
+        assert getattr(tick, "workspaces", None) == 1
+        assert getattr(tick, "failures", None) == 0
+        assert getattr(tick, "total_cents", None) == 0
+
+    def test_non_idle_operationalerror_still_warns(
+        self,
+        engine: Engine,
+        real_make_uow: None,
+        clean_budget_tables: None,
+        caplog: pytest.LogCaptureFixture,
+        allow_propagated_log_capture: Callable[..., None],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A real DB failure outside the idle skip still stays visible."""
+        allow_propagated_log_capture("app.worker.scheduler")
+
+        frozen = FrozenClock(_PINNED)
+        ws_busy = _seed_workspace(engine, slug="non-idle-db-failure")
+        _seed_usage(
+            engine,
+            workspace_id=ws_busy,
+            cost_cents=125,
+            created_at=frozen.now() - timedelta(days=1),
+        )
+        _seed_ledger(engine, workspace_id=ws_busy, spent_cents=0)
+
+        def locked_refresh(
+            session: Session,
+            ctx: WorkspaceContext,
+            *,
+            clock: Clock | None = None,
+        ) -> int:
+            del session, ctx, clock
+            raise OperationalError(
+                "UPDATE budget_ledger ...",
+                {},
+                Exception("database is locked"),
+            )
+
+        monkeypatch.setattr(
+            "app.domain.llm.budget.refresh_aggregate",
+            locked_refresh,
+        )
+
+        body = _make_llm_budget_refresh_body(frozen)
+        with caplog.at_level(logging.WARNING, logger="app.worker.scheduler"):
+            body()
+
+        failed_events = [
+            rec
+            for rec in caplog.records
+            if getattr(rec, "event", None) == "llm.budget.refresh.workspace_failed"
+            and getattr(rec, "workspace_id", None) == ws_busy
+        ]
+        assert len(failed_events) == 1
+        assert failed_events[0].levelno == logging.WARNING
+        assert getattr(failed_events[0], "error", None) == "OperationalError"
+
+    def test_refused_usage_keeps_zero_spend_workspace_on_idle_skip(
+        self,
+        engine: Engine,
+        real_make_uow: None,
+        clean_budget_tables: None,
+        caplog: pytest.LogCaptureFixture,
+        allow_propagated_log_capture: Callable[..., None],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Historical refused rows do not count as metered usage."""
+        allow_propagated_log_capture("app.worker.scheduler")
+
+        frozen = FrozenClock(_PINNED)
+        ws_refused = _seed_workspace(engine, slug="refused-only")
+        _seed_usage(
+            engine,
+            workspace_id=ws_refused,
+            cost_cents=0,
+            created_at=frozen.now() - timedelta(days=1),
+            status="refused",
+        )
+        _seed_ledger(engine, workspace_id=ws_refused, spent_cents=0)
+
+        def locked_refresh(
+            session: Session,
+            ctx: WorkspaceContext,
+            *,
+            clock: Clock | None = None,
+        ) -> int:
+            del session, ctx, clock
+            raise OperationalError(
+                "UPDATE budget_ledger ...",
+                {},
+                Exception("database is locked"),
+            )
+
+        monkeypatch.setattr(
+            "app.domain.llm.budget.refresh_aggregate",
+            locked_refresh,
+        )
+
+        body = _make_llm_budget_refresh_body(frozen)
+        with caplog.at_level(logging.DEBUG, logger="app.worker.scheduler"):
+            body()
+
+        failed_events = [
+            rec
+            for rec in caplog.records
+            if getattr(rec, "event", None) == "llm.budget.refresh.workspace_failed"
+        ]
+        assert failed_events == []
+
         tick_events = [
             rec
             for rec in caplog.records

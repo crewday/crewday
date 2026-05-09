@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from datetime import timedelta
 
 from app.adapters.db.session import make_uow
 from app.util.clock import Clock
@@ -75,10 +76,11 @@ def _make_llm_budget_refresh_body(clock: Clock) -> Callable[[], None]:
         # imported at module scope (the heartbeat writer uses it);
         # the budget / workspace / tenancy imports are the ones we
         # defer to keep the standalone worker's import surface lean.
-        from sqlalchemy import select
+        from sqlalchemy import exists, select
         from sqlalchemy.orm import Session
 
         from app.adapters.db.llm.models import BudgetLedger
+        from app.adapters.db.llm.models import LlmUsage as LlmUsageRow
         from app.adapters.db.workspace.models import Workspace
         from app.domain.llm.budget import refresh_aggregate
         from app.tenancy import tenant_agnostic
@@ -91,6 +93,8 @@ def _make_llm_budget_refresh_body(clock: Clock) -> Callable[[], None]:
         # ``int`` is arbitrary-precision so overflow is impossible;
         # downstream log serializers see a plain integer.
         total_cents = 0
+
+        window_start = clock.now() - timedelta(days=30)
 
         with make_uow() as session:
             # ``UnitOfWorkImpl.__enter__`` returns the concrete
@@ -161,10 +165,10 @@ def _make_llm_budget_refresh_body(clock: Clock) -> Callable[[], None]:
                     #    silently disconnected from actual progress.
                     try:
                         with session.begin_nested():
-                            # Pre-check the ledger row existence BEFORE
-                            # calling :func:`refresh_aggregate`. The
-                            # domain function returns ``0`` for two
-                            # distinct shapes:
+                            # Pre-check the ledger row BEFORE calling
+                            # :func:`refresh_aggregate`. The domain
+                            # function returns ``0`` for two distinct
+                            # shapes:
                             #   (a) no ledger row — the seeding bug
                             #       cd-tubi tracks; the workspace-
                             #       create handler has not yet run
@@ -184,23 +188,50 @@ def _make_llm_budget_refresh_body(clock: Clock) -> Callable[[], None]:
                             # ``llm.budget.ledger_missing_on_refresh``
                             # WARNING) entirely on path (a).
                             #
+                            # A second low-noise shape is an idle
+                            # zero-spend ledger with no metered usage
+                            # in the 30-day window. Calling
+                            # ``refresh_aggregate`` there only rolls
+                            # timestamp labels forward via an UPDATE;
+                            # under SQLite's database-wide writer lock
+                            # that no-op write can collide with sibling
+                            # scheduler ticks every minute. Skip just
+                            # that known idle shape; non-idle refresh
+                            # OperationalErrors still go through the
+                            # WARNING path below.
+                            #
                             # The ledger probe is itself a workspace-
                             # scoped SELECT — ``budget_ledger`` is in
                             # the tenancy registry — so it runs INSIDE
                             # the ``set_current`` / ``reset_current``
                             # bracket, not before.
-                            ledger_exists = (
-                                session.scalar(
-                                    select(BudgetLedger.id)
-                                    .where(BudgetLedger.workspace_id == workspace_id)
-                                    .limit(1)
-                                )
-                                is not None
-                            )
-                            if not ledger_exists:
+                            ledger = session.execute(
+                                select(BudgetLedger.id, BudgetLedger.spent_cents)
+                                .where(BudgetLedger.workspace_id == workspace_id)
+                                .order_by(BudgetLedger.period_end.desc())
+                                .limit(1)
+                            ).one_or_none()
+                            if ledger is None:
                                 result = None
                             else:
-                                result = refresh_aggregate(session, ctx, clock=clock)
+                                has_metered_usage = bool(
+                                    session.scalar(
+                                        select(
+                                            exists().where(
+                                                LlmUsageRow.workspace_id
+                                                == workspace_id,
+                                                LlmUsageRow.created_at >= window_start,
+                                                LlmUsageRow.status != "refused",
+                                            )
+                                        )
+                                    )
+                                )
+                                if ledger.spent_cents == 0 and not has_metered_usage:
+                                    result = 0
+                                else:
+                                    result = refresh_aggregate(
+                                        session, ctx, clock=clock
+                                    )
                     except Exception as exc:
                         # SAVEPOINT already rolled back by the context
                         # manager; the outer transaction is still

@@ -76,10 +76,12 @@ Check readiness with:
 ./scripts/agent-status.sh
 ```
 
-Trust the `endpoints:` line over the compose `stack:` line. The `app-api`
-container healthcheck can flip unhealthy when stale dev DB workspace rows make
-the LLM budget refresh tick log `OperationalError`, while `/readyz`, `/healthz`,
-and API routes still serve correctly.
+Trust the `endpoints:` line over the compose `stack:` line. A transient
+`app-api` container healthcheck failure can lag behind `/readyz`, `/healthz`,
+and API routes. Recurring `llm.budget.refresh.workspace_failed` warnings for
+idle zero-spend dev workspaces are not expected; if they continue after a code
+change, first check whether WatchFiles is waiting for open connections to drain
+before the app process reloads.
 
 If `/healthz` itself times out, treat that as an app-loop availability problem,
 not a DB readiness failure. `scripts/agent-status.sh` exits non-zero for that
