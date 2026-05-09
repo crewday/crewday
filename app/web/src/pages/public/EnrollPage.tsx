@@ -29,30 +29,11 @@ import {
   runRecoveryEnrollCeremony,
   verifyRecoveryToken,
 } from "@/auth/passkey-register";
-import { useAuth } from "@/auth";
-import type { AuthMe } from "@/auth";
+import { pickRoleLanding, useAuth } from "@/auth";
 import {
   messageForRecoveryEnrollError,
   messageForRecoveryVerifyError,
 } from "./publicAuthMappers";
-
-// Same landing map LoginPage uses — one source of truth would be nicer,
-// but extracting it means a two-file diff every time a new grant-role
-// ships. Kept in-file per the current convention.
-const ROLE_LANDING: Record<string, string> = {
-  worker: "/today",
-  client: "/portfolio",
-  manager: "/dashboard",
-  admin: "/dashboard",
-  guest: "/",
-};
-
-function pickLanding(user: AuthMe | null): string {
-  const first = user?.available_workspaces?.[0];
-  const role = first?.grant_role;
-  if (role && ROLE_LANDING[role]) return ROLE_LANDING[role];
-  return "/";
-}
 
 type VerifyState =
   | { kind: "idle" }
@@ -132,14 +113,14 @@ export default function EnrollPage() {
   useEffect(() => {
     if (enroll.kind !== "done") return;
     if (!isAuthenticated) return;
-    navigate(pickLanding(user), { replace: true });
+    navigate(pickRoleLanding(user), { replace: true });
   }, [enroll.kind, isAuthenticated, user, navigate]);
 
   // Already-signed-in user following a stale link: bounce them to
   // their landing so they don't burn a fresh magic link for an account
   // they're already authenticated against.
   if (isAuthenticated && enroll.kind === "idle") {
-    return <Navigate to={pickLanding(user)} replace />;
+    return <Navigate to={pickRoleLanding(user)} replace />;
   }
 
   return (

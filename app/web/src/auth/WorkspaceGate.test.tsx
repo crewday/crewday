@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
@@ -207,7 +207,7 @@ describe("<WorkspaceGate>", () => {
     expect(document.activeElement).toBe(adminLink);
   });
 
-  it("auto-focuses the first pickable button so keyboard users land inside the dialog", () => {
+  it("auto-focuses the first pickable link so keyboard users land inside the dialog", () => {
     setAuthenticated(makeUser([
       {
         workspace: { id: "ws_a", name: "Acme", timezone: "UTC", default_currency: "USD", default_country: "US", default_locale: "en" },
@@ -235,7 +235,7 @@ describe("<WorkspaceGate>", () => {
     // `role="dialog"` + `aria-modal="true"` alone don't trap focus;
     // the auto-focus is what keeps keyboard users from landing on
     // chrome behind the backdrop.
-    const firstPick = screen.getByText("Acme").closest("button");
+    const firstPick = screen.getByText("Acme").closest("a");
     expect(firstPick).toBeTruthy();
     expect(document.activeElement).toBe(firstPick);
   });
@@ -253,7 +253,7 @@ describe("<WorkspaceGate>", () => {
     expect(document.activeElement).toBe(signOut);
   });
 
-  it("picking a workspace from the chooser commits the slug and reveals the protected tree", () => {
+  it("links each workspace pick to the role-appropriate prefixed landing", () => {
     setAuthenticated(makeUser([
       {
         workspace: { id: "ws_a", name: "Acme", timezone: "UTC", default_currency: "USD", default_country: "US", default_locale: "en" },
@@ -271,18 +271,16 @@ describe("<WorkspaceGate>", () => {
 
     render(
       <App>
-        <Routes>
-          <Route element={<WorkspaceGate />}>
-            <Route path="/" element={<div>protected tree</div>} />
-          </Route>
-        </Routes>
+        <WorkspaceGate>
+          <div>protected tree</div>
+        </WorkspaceGate>
       </App>,
     );
 
     expect(screen.queryByText("protected tree")).toBeNull();
-    act(() => {
-      screen.getByText("Beta Co").closest("button")!.click();
-    });
-    expect(screen.getByText("protected tree")).toBeInTheDocument();
+    expect(screen.getByText("Acme").closest("a")?.getAttribute("href"))
+      .toBe("/w/ws_a/dashboard");
+    expect(screen.getByText("Beta Co").closest("a")?.getAttribute("href"))
+      .toBe("/w/ws_b/today");
   });
 });

@@ -2,6 +2,7 @@ import { Link, Outlet } from "react-router-dom";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Building2, ArrowRight } from "lucide-react";
 import { useAuth } from "./useAuth";
+import { landingForWorkspace } from "./roleLanding";
 import { useWorkspace } from "@/context/WorkspaceContext";
 
 // §14 "Workspace selector" — when the caller is authenticated but
@@ -152,9 +153,9 @@ export function WorkspaceGate({ children }: { children?: React.ReactNode }) {
             const slug = slugFor(w.workspace.id, w.workspace.name);
             return (
               <li key={w.workspace.id} className="auth-gate__item">
-                <button
+                <Link
                   ref={idx === 0 ? setFirstAction : undefined}
-                  type="button"
+                  to={landingForWorkspace(w)}
                   className="auth-gate__pick"
                   onClick={() => setWorkspaceId(slug)}
                 >
@@ -170,7 +171,7 @@ export function WorkspaceGate({ children }: { children?: React.ReactNode }) {
                   <span className="auth-gate__pick-chev" aria-hidden="true">
                     <ArrowRight size={16} strokeWidth={1.6} />
                   </span>
-                </button>
+                </Link>
               </li>
             );
           })}

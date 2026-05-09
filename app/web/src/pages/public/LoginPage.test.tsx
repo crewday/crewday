@@ -97,10 +97,15 @@ function Harness({
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/select-workspace" element={<LocationProbe testid="landed-select-workspace" />} />
             <Route path="/today" element={<LocationProbe testid="landed-today" />} />
             <Route path="/dashboard" element={<LocationProbe testid="landed-dashboard" />} />
             <Route path="/portfolio" element={<LocationProbe testid="landed-portfolio" />} />
             <Route path="/property/abc" element={<LocationProbe testid="landed-property" />} />
+            <Route path="/w/:slug/today" element={<LocationProbe testid="landed-today" />} />
+            <Route path="/w/:slug/dashboard" element={<LocationProbe testid="landed-dashboard" />} />
+            <Route path="/w/:slug/portfolio" element={<LocationProbe testid="landed-portfolio" />} />
+            <Route path="/w/:slug/property/abc" element={<LocationProbe testid="landed-property" />} />
             <Route path="*" element={<LocationProbe testid="landed-other" />} />
           </Routes>
           {children}
@@ -194,7 +199,7 @@ describe("<LoginPage> — happy path", () => {
         .toBeLessThan(paths.indexOf("/api/v1/auth/passkey/login/finish"));
 
       // Redirected to the `next` param (sanitised, same-origin path).
-      expect(screen.getByTestId("landed-property").textContent).toBe("/property/abc");
+      expect(screen.getByTestId("landed-property").textContent).toBe("/w/ws_1/property/abc");
     } finally {
       restore();
     }
@@ -240,7 +245,7 @@ describe("<LoginPage> — happy path", () => {
       });
       await flush();
 
-      expect(screen.getByTestId("landed-today").textContent).toBe("/today");
+      expect(screen.getByTestId("landed-today").textContent).toBe("/w/ws_1/today");
     } finally {
       restore();
     }
@@ -285,7 +290,103 @@ describe("<LoginPage> — happy path", () => {
         await new Promise((r) => setTimeout(r, 0));
       });
       await flush();
-      expect(screen.getByTestId("landed-dashboard").textContent).toBe("/dashboard");
+      expect(screen.getByTestId("landed-dashboard").textContent).toBe("/w/ws_1/dashboard");
+    } finally {
+      restore();
+    }
+  });
+
+  it("routes clients to /portfolio when no ?next is provided", async () => {
+    const { restore } = installFetch({
+      "/api/v1/auth/me": [
+        { status: 401, body: { detail: "no session" } },
+        {
+          status: 200,
+          body: {
+            user_id: "01HZ_CLIENT",
+            display_name: "Nadia",
+            email: "nadia@example.com",
+            available_workspaces: [
+              {
+                workspace: { id: "client-ws", name: "Client Portal", timezone: "UTC", default_currency: "EUR", default_country: "FR", default_locale: "fr" },
+                grant_role: "client",
+                binding_org_id: "org_1",
+                source: "org_grant",
+              },
+            ],
+            current_workspace_id: null,
+          },
+        },
+      ],
+      "/api/v1/auth/passkey/login/start": [
+        { status: 200, body: { challenge_id: "ch_1", options: { challenge: "AQID" } } },
+      ],
+      "/api/v1/auth/passkey/login/finish": [
+        { status: 200, body: { user_id: "01HZ_CLIENT" } },
+      ],
+    });
+    installCredentialsGet(() => fakeAssertion());
+
+    try {
+      render(<Harness initial="/login" />);
+      await flush();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("login-passkey"));
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flush();
+      expect(screen.getByTestId("landed-portfolio").textContent).toBe("/w/client-ws/portfolio");
+    } finally {
+      restore();
+    }
+  });
+
+  it("routes multi-workspace users to the bare workspace picker when no ?next is provided", async () => {
+    const { restore } = installFetch({
+      "/api/v1/auth/me": [
+        { status: 401, body: { detail: "no session" } },
+        {
+          status: 200,
+          body: {
+            user_id: "01HZ_MULTI",
+            display_name: "Sam",
+            email: "sam@example.com",
+            available_workspaces: [
+              {
+                workspace: { id: "ws_a", name: "Acme", timezone: "UTC", default_currency: "USD", default_country: "US", default_locale: "en" },
+                grant_role: "manager",
+                binding_org_id: null,
+                source: "workspace_grant",
+              },
+              {
+                workspace: { id: "ws_b", name: "Beta", timezone: "UTC", default_currency: "USD", default_country: "US", default_locale: "en" },
+                grant_role: "worker",
+                binding_org_id: null,
+                source: "workspace_grant",
+              },
+            ],
+            current_workspace_id: null,
+          },
+        },
+      ],
+      "/api/v1/auth/passkey/login/start": [
+        { status: 200, body: { challenge_id: "ch_1", options: { challenge: "AQID" } } },
+      ],
+      "/api/v1/auth/passkey/login/finish": [
+        { status: 200, body: { user_id: "01HZ_MULTI" } },
+      ],
+    });
+    installCredentialsGet(() => fakeAssertion());
+
+    try {
+      render(<Harness initial="/login" />);
+      await flush();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("login-passkey"));
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flush();
+      expect(screen.getByTestId("landed-select-workspace").textContent).toBe("/select-workspace");
     } finally {
       restore();
     }
@@ -555,9 +656,9 @@ describe("<LoginPage> — sanitizeNext wiring (closes cd-g5c2)", () => {
       await flush();
 
       // The crafted `next` was dropped by `sanitizeNext`; the user lands
-      // on `/today` (worker role home), NOT an off-origin URL and NOT
+      // on `/w/ws_1/today` (worker role home), NOT an off-origin URL and NOT
       // an absolute path concocted from the crafted value.
-      expect(screen.getByTestId("landed-today").textContent).toBe("/today");
+      expect(screen.getByTestId("landed-today").textContent).toBe("/w/ws_1/today");
       // Defensive: none of the "landed-other" fallbacks fired with an
       // attacker-controlled path.
       expect(screen.queryByTestId("landed-other")).toBeNull();
@@ -605,7 +706,97 @@ describe("<LoginPage> — sanitizeNext wiring (closes cd-g5c2)", () => {
         await new Promise((r) => setTimeout(r, 0));
       });
       await flush();
-      expect(screen.getByTestId("landed-today").textContent).toBe("/today");
+      expect(screen.getByTestId("landed-today").textContent).toBe("/w/ws_1/today");
+    } finally {
+      restore();
+    }
+  });
+
+  it("honours a workspace-prefixed ?next after authentication", async () => {
+    const { restore } = installFetch({
+      "/api/v1/auth/me": [
+        { status: 401, body: { detail: "no session" } },
+        {
+          status: 200,
+          body: {
+            user_id: "01HZ_USER",
+            display_name: "Maria",
+            email: "maria@example.com",
+            available_workspaces: [
+              {
+                workspace: { id: "ws_1", name: "Villa Sud", timezone: "UTC", default_currency: "EUR", default_country: "FR", default_locale: "fr" },
+                grant_role: "worker",
+                binding_org_id: null,
+                source: "workspace_grant",
+              },
+            ],
+            current_workspace_id: null,
+          },
+        },
+      ],
+      "/api/v1/auth/passkey/login/start": [
+        { status: 200, body: { challenge_id: "ch_1", options: { challenge: "AQID" } } },
+      ],
+      "/api/v1/auth/passkey/login/finish": [
+        { status: 200, body: { user_id: "01HZ_USER" } },
+      ],
+    });
+    installCredentialsGet(() => fakeAssertion());
+
+    try {
+      render(<Harness initial="/login?next=%2Fw%2Fws_1%2Ftoday" />);
+      await flush();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("login-passkey"));
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flush();
+      expect(screen.getByTestId("landed-today").textContent).toBe("/w/ws_1/today");
+    } finally {
+      restore();
+    }
+  });
+
+  it("canonicalizes a bare workspace ?next=/dashboard to the active workspace slug", async () => {
+    const { restore } = installFetch({
+      "/api/v1/auth/me": [
+        { status: 401, body: { detail: "no session" } },
+        {
+          status: 200,
+          body: {
+            user_id: "01HZ_MGR",
+            display_name: "Élodie",
+            email: "elodie@example.com",
+            available_workspaces: [
+              {
+                workspace: { id: "ws_1", name: "Villa Sud", timezone: "UTC", default_currency: "EUR", default_country: "FR", default_locale: "fr" },
+                grant_role: "manager",
+                binding_org_id: null,
+                source: "workspace_grant",
+              },
+            ],
+            current_workspace_id: null,
+          },
+        },
+      ],
+      "/api/v1/auth/passkey/login/start": [
+        { status: 200, body: { challenge_id: "ch_1", options: { challenge: "AQID" } } },
+      ],
+      "/api/v1/auth/passkey/login/finish": [
+        { status: 200, body: { user_id: "01HZ_MGR" } },
+      ],
+    });
+    installCredentialsGet(() => fakeAssertion());
+
+    try {
+      render(<Harness initial="/login?next=%2Fdashboard" />);
+      await flush();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("login-passkey"));
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flush();
+      expect(screen.getByTestId("landed-dashboard").textContent).toBe("/w/ws_1/dashboard");
     } finally {
       restore();
     }
@@ -703,7 +894,7 @@ describe("<LoginPage> — already-signed-in bounce", () => {
     try {
       render(<Harness initial="/login" />);
       await flush();
-      expect(screen.getByTestId("landed-dashboard").textContent).toBe("/dashboard");
+      expect(screen.getByTestId("landed-dashboard").textContent).toBe("/w/ws_1/dashboard");
     } finally {
       restore();
     }
@@ -716,7 +907,7 @@ describe("<LoginPage> — admin-next role check (closes cd-28s7)", () => {
     // otherwise honour `next` verbatim and bounce the worker onto the
     // admin shell. The role gate in `pickLanding` filters `/admin/*`
     // when the caller is not `is_deployment_admin`, so the user lands
-    // on their role home (worker → /today) instead.
+    // on their role home (worker → /w/ws_1/today) instead.
     const { restore } = installFetch({
       "/api/v1/auth/me": [
         {
@@ -743,7 +934,7 @@ describe("<LoginPage> — admin-next role check (closes cd-28s7)", () => {
     try {
       render(<Harness initial="/login?next=%2Fadmin%2Fdashboard" />);
       await flush();
-      expect(screen.getByTestId("landed-today").textContent).toBe("/today");
+      expect(screen.getByTestId("landed-today").textContent).toBe("/w/ws_1/today");
       // Defensive: the catch-all probe never fired with an admin path.
       expect(screen.queryByTestId("landed-other")).toBeNull();
     } finally {
@@ -809,7 +1000,7 @@ describe("<LoginPage> — admin-next role check (closes cd-28s7)", () => {
     try {
       render(<Harness initial="/login?next=%2Fadmin" />);
       await flush();
-      expect(screen.getByTestId("landed-today").textContent).toBe("/today");
+      expect(screen.getByTestId("landed-today").textContent).toBe("/w/ws_1/today");
     } finally {
       restore();
     }

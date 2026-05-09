@@ -49,7 +49,7 @@ import {
   PasskeyUnsupportedError,
 } from "@/auth/passkey";
 import { runInvitePasskeyCeremony } from "@/auth/passkey-register";
-import { useAuth } from "@/auth";
+import { landingForGrantRole, useAuth } from "@/auth";
 import type {
   InviteAcceptResponse,
   InviteIntrospection,
@@ -130,7 +130,8 @@ export default function AcceptPage(): ReactElement {
       // existing_user — grants activated on the same call. Use the
       // returned slug to land on the workspace today page.
       const slug = outcome.workspace_slug ?? "";
-      const redirect = slug ? `/w/${slug}/today` : "/";
+      const role = outcome.grants?.[0]?.grant_role ?? "worker";
+      const redirect = slug ? landingForGrantRole(role, slug) : "/";
       queryClient.removeQueries({ queryKey: qk.authMe() });
       setState({ kind: "done", redirect });
     } catch (err) {

@@ -115,6 +115,9 @@ function Harness({
             <Route path="/today" element={<LocationProbe testid="landed-today" />} />
             <Route path="/dashboard" element={<LocationProbe testid="landed-dashboard" />} />
             <Route path="/portfolio" element={<LocationProbe testid="landed-portfolio" />} />
+            <Route path="/w/:slug/today" element={<LocationProbe testid="landed-today" />} />
+            <Route path="/w/:slug/dashboard" element={<LocationProbe testid="landed-dashboard" />} />
+            <Route path="/w/:slug/portfolio" element={<LocationProbe testid="landed-portfolio" />} />
             <Route path="*" element={<LocationProbe testid="landed-other" />} />
           </Routes>
           {children}
@@ -195,7 +198,7 @@ describe("<SignupEnrollPage> — happy path", () => {
         available_workspaces: [
           {
             workspace: {
-              id: "ws_villa",
+              id: "villa-sud",
               name: "Villa Sud",
               timezone: "Europe/Paris",
               default_currency: "EUR",
@@ -233,7 +236,7 @@ describe("<SignupEnrollPage> — happy path", () => {
       "/api/v1/signup/passkey/finish": [
         {
           status: 200,
-          body: { workspace_slug: "villa-sud", redirect: "/w/villa-sud/dashboard" },
+          body: { workspace_slug: "villa-sud", redirect: "/w/villa-sud/today" },
         },
       ],
       "/api/v1/auth/passkey/login/start": [
@@ -307,8 +310,8 @@ describe("<SignupEnrollPage> — happy path", () => {
       expect(meIdxs.length).toBeGreaterThanOrEqual(2);
       expect(lastIdx("/api/v1/auth/me")).toBeGreaterThan(loginFinish);
 
-      // Manager role lands on /dashboard.
-      expect(screen.getByTestId("landed-dashboard").textContent).toBe("/dashboard");
+      // The post-login /auth/me role landing wins over signup-finish's generic redirect.
+      expect(screen.getByTestId("landed-dashboard").textContent).toBe("/w/villa-sud/dashboard");
 
       // Body of signup-finish carries display_name + timezone.
       const finishCall = calls.find((c) =>

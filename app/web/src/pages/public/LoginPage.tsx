@@ -29,64 +29,11 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { KeyRound } from "lucide-react";
 import {
+  pickLoginLanding,
   sanitizeNext,
   useAuth,
 } from "@/auth";
-import type { AuthMe } from "@/auth";
 import { messageForLoginError } from "./publicAuthMappers";
-
-// Landing pages for each grant-role bucket. Mirrors `RoleHome` in
-// `App.tsx` (and §14 "Role selector") so the redirect after login
-// matches the redirect from `/`. Falls back to `/` when the user has
-// no available workspaces — `WorkspaceGate` will then render the
-// "no access yet" empty state.
-const ROLE_LANDING: Record<string, string> = {
-  worker: "/today",
-  client: "/portfolio",
-  manager: "/dashboard",
-  admin: "/dashboard",
-  guest: "/",
-};
-
-/**
- * Pick the landing URL for a freshly-logged-in user.
- *
- * Priority (higher wins):
- *   1. `?next=<path>` passed through `sanitizeNext` (defence in depth
- *      — the sanitiser that guards the emission points in
- *      `<RequireAuth>` and `createOnUnauthorized` is re-applied here
- *      because the LoginPage is the consumer that hands the value to
- *      `<Navigate to={...}>`). Same-origin `/admin/*` paths additionally
- *      require `is_deployment_admin` — a phishing link of the form
- *      `/login?next=/admin/dashboard` must not drop a worker on the
- *      admin shell they didn't ask to see (cd-28s7).
- *   2. The user's first available workspace grant role, mapped
- *      through `ROLE_LANDING`.
- *   3. `/` as a last resort — the `<RoleHome>` at the root already
- *      routes sensibly when no role signal is present.
- */
-function pickLanding(next: string | null, user: AuthMe | null): string {
-  if (next && !isAdminPathBlockedFor(next, user)) return next;
-  const first = user?.available_workspaces?.[0];
-  const role = first?.grant_role;
-  if (role && ROLE_LANDING[role]) return ROLE_LANDING[role];
-  return "/";
-}
-
-/**
- * True when `next` points at the deployment admin surface and the
- * caller is not a deployment admin. The caller drops `next` and falls
- * back to the role landing — see `pickLanding`. Trailing-slash and
- * query/fragment variants of `/admin` are all caught.
- */
-function isAdminPathBlockedFor(next: string, user: AuthMe | null): boolean {
-  if (user?.is_deployment_admin === true) return false;
-  // `sanitizeNext` already rejected anything that doesn't start with a
-  // single `/`, so a simple prefix check is safe — no `//admin.evil.com`
-  // smuggling, no scheme prefix.
-  return next === "/admin" || next.startsWith("/admin/")
-    || next.startsWith("/admin?") || next.startsWith("/admin#");
-}
 
 type FormState =
   | { kind: "idle" }
@@ -152,7 +99,7 @@ export default function LoginPage() {
   // passkey button can render — `<AuthProvider>` will re-run the probe
   // but we don't want to flash a spinner here.
   if (isAuthenticated) {
-    return <Navigate to={pickLanding(safeNext, user)} replace />;
+    return <Navigate to={pickLoginLanding(safeNext, user)} replace />;
   }
 
   const pending = form.kind === "pending";

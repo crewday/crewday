@@ -106,6 +106,8 @@ function Harness({
             <Route path="/recover" element={<LocationProbe testid="landed-recover" />} />
             <Route path="/today" element={<LocationProbe testid="landed-today" />} />
             <Route path="/dashboard" element={<LocationProbe testid="landed-dashboard" />} />
+            <Route path="/w/:slug/today" element={<LocationProbe testid="landed-today" />} />
+            <Route path="/w/:slug/dashboard" element={<LocationProbe testid="landed-dashboard" />} />
             <Route path="*" element={<LocationProbe testid="landed-other" />} />
           </Routes>
           {children}
@@ -301,8 +303,8 @@ describe("<EnrollPage> — happy path", () => {
       expect(meIdxs.length).toBeGreaterThanOrEqual(2);
       expect(meIdxs[meIdxs.length - 1]!).toBeGreaterThan(finishIdx);
 
-      // Worker role lands on /today.
-      expect(screen.getByTestId("landed-today").textContent).toBe("/today");
+      // Worker role lands on the workspace-prefixed today page.
+      expect(screen.getByTestId("landed-today").textContent).toBe("/w/ws_1/today");
     } finally {
       restore();
     }
