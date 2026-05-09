@@ -10,6 +10,7 @@ import type { Asset, AssetType, Property } from "@/types/api";
 import AssetsPage from "./AssetsPage";
 import appSource from "../../App.tsx?raw";
 import managerPanelsCss from "@/styles/manager-panels.css?raw";
+import tasksCss from "@/styles/tasks.css?raw";
 import { jsonResponse } from "@/test/helpers";
 
 const originalShowModal = HTMLDialogElement.prototype.showModal;
@@ -326,6 +327,34 @@ describe("<AssetsPage>", () => {
       expect(within(table).getByText("Smart lock")).toBeInTheDocument();
       expect(screen.getAllByText("Villa Rosa").length).toBeGreaterThan(0);
     } finally {
+      restore();
+    }
+  });
+
+  it("marks filter chips as interactive without changing passive row badges", async () => {
+    const { restore } = installFetch();
+    const style = document.createElement("style");
+    style.textContent = tasksCss;
+    document.head.append(style);
+    try {
+      render(<Harness />);
+      await screen.findByText("Front door lock");
+
+      const filters = document.querySelectorAll(".desk-filters .chip");
+      expect(filters.length).toBeGreaterThan(0);
+      for (const filter of filters) {
+        expect(filter).toHaveClass("chip--interactive");
+        expect(getComputedStyle(filter).cursor).toBe("pointer");
+      }
+
+      const passiveChips = document.querySelectorAll("tbody .chip");
+      expect(passiveChips.length).toBeGreaterThan(0);
+      for (const chip of passiveChips) {
+        expect(chip).not.toHaveClass("chip--interactive");
+        expect(getComputedStyle(chip).cursor).not.toBe("pointer");
+      }
+    } finally {
+      style.remove();
       restore();
     }
   });

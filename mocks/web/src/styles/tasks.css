@@ -66,6 +66,7 @@
 .chip--sky   { background: var(--sky-soft);  color: var(--sky); }
 .chip--ghost { background: var(--paper-2);   color: var(--ink-2); }
 .chip--active { background: var(--moss); color: #fff; }
+.chip--interactive { cursor: pointer; }
 
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .dot--moss { background: var(--moss); }

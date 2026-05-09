@@ -112,7 +112,7 @@ export function FilterChipGroup<T extends string>({
   return (
     <div className="desk-filters">
       <span
-        className={"chip chip--ghost chip--sm" + (value === "" ? " chip--active" : "")}
+        className={"chip chip--ghost chip--sm chip--interactive" + (value === "" ? " chip--active" : "")}
         onClick={() => onChange("")}
       >
         {allLabel}
@@ -123,7 +123,7 @@ export function FilterChipGroup<T extends string>({
         return (
           <span
             key={opt.value}
-            className={"chip chip--" + tone + " chip--sm" + active}
+            className={"chip chip--" + tone + " chip--sm chip--interactive" + active}
             onClick={() => onChange(opt.value)}
           >
             {opt.label}
