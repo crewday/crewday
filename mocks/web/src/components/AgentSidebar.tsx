@@ -242,6 +242,7 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
           onSubmit={handleSend}
           placeholder={isAdmin ? "Ask the admin agent…" : "Ask the agent…"}
           ariaLabel="Message agent"
+          textareaMaxHeight={null}
         />
       </div>
     </aside>

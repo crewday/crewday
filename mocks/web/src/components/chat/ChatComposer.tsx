@@ -11,6 +11,7 @@ export interface ChatComposerProps {
   /** `inline` lets the composer flow inside a regular page section rather
    *  than sticking to the viewport bottom like the full-screen `/chat`. */
   variant?: "screen" | "inline";
+  textareaMaxHeight?: number | null;
 }
 
 export default function ChatComposer({
@@ -20,6 +21,7 @@ export default function ChatComposer({
   placeholder = "Message",
   ariaLabel = "Message",
   variant = "screen",
+  textareaMaxHeight = 140,
 }: ChatComposerProps) {
   const textRef = useRef<HTMLTextAreaElement>(null);
 
@@ -41,7 +43,7 @@ export default function ChatComposer({
         <AutoGrowTextarea
           ref={textRef}
           rows={1}
-          maxHeight={140}
+          maxHeight={textareaMaxHeight ?? undefined}
           placeholder={placeholder}
           aria-label={ariaLabel}
           value={value}

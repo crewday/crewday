@@ -200,6 +200,54 @@ describe("AgentSidebar", () => {
     }
   });
 
+  it("lets the sidebar composer grow without an internal textarea scrollbar", async () => {
+    const scrollHeight = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "scrollHeight",
+    );
+    Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", {
+      configurable: true,
+      value: 196,
+    });
+    const env = installFetchRouteHandlers([
+      {
+        path: "/w/crewday/api/v1/agent/manager/log",
+        respond: { body: [] },
+      },
+      {
+        path: "/w/crewday/api/v1/approvals",
+        respond: { body: [] },
+      },
+    ]);
+
+    try {
+      renderWithProviders(
+        <MemoryRouter initialEntries={["/w/crewday/dashboard"]}>
+          <AgentSidebar role="manager" />
+        </MemoryRouter>,
+        { queryClient: makeTestQueryClient() },
+      );
+
+      const input = screen.getByLabelText<HTMLTextAreaElement>("Message agent");
+      fireEvent.change(input, {
+        target: {
+          value:
+            "Please draft a detailed plan for tomorrow's turnover, including supplies, priorities, and which open approvals need a manager decision before the morning shift starts.",
+        },
+      });
+
+      expect(input.style.height).toBe("196px");
+      expect(input.style.overflowY).toBe("hidden");
+    } finally {
+      env.restore();
+      if (scrollHeight) {
+        Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", scrollHeight);
+      } else {
+        delete (HTMLTextAreaElement.prototype as { scrollHeight?: number }).scrollHeight;
+      }
+    }
+  });
+
   it("renders a manager runtime fallback from the refreshed log", async () => {
     const sentAt = "2026-05-06T12:00:00Z";
     const fallbackAt = "2026-05-06T12:00:01Z";

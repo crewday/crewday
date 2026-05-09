@@ -193,7 +193,11 @@
 .desk__agent .chat-composer__icon--inline { width: 30px; height: 30px; }
 .desk__agent .chat-composer__send { width: 36px; height: 36px; }
 .desk__agent .chat-composer__field { padding: var(--space-1) var(--space-4) var(--space-1) var(--space-6); }
-.desk__agent .chat-composer textarea { font-size: 13px; padding: var(--space-4) var(--space-0); }
+.desk__agent .chat-composer textarea {
+  font-size: 13px;
+  padding: var(--space-4) var(--space-0);
+  max-height: none;
+}
 
 /* ══════════════════════════════════════════════════════════════
    MANAGER — icon button (used by hamburger inside the header's
@@ -234,4 +238,3 @@
   from { opacity: 0; }
   to { opacity: 1; }
 }
-
