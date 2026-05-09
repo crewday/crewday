@@ -314,21 +314,44 @@
 
 /* ── Misc ───────────────────────────────────────────────── */
 .empty-state {
-  padding: 24px; text-align: center; color: var(--ink-3);
-  background: var(--card); border: 1px dashed var(--line);
+  padding: var(--space-10); text-align: center; color: var(--ink-2);
+  background:
+    linear-gradient(180deg, var(--card-raised), var(--card));
+  border: 1px solid var(--line);
   border-radius: 10px;
+  box-shadow: inset 0 1px 0 var(--card-raised);
 }
 .empty-state--celebrate { color: var(--moss); }
 .empty-state__glyph {
   display: flex; align-items: center; justify-content: center;
-  font-size: 32px; margin: 0 auto 6px; color: var(--ink-3);
+  width: 42px; height: 42px; margin: var(--space-0) auto var(--space-5);
+  color: var(--moss-2); background: var(--moss-softer);
+  border: 1px solid var(--line); border-radius: 999px;
 }
 .empty-state--celebrate .empty-state__glyph {
   color: var(--moss);
   width: 56px; height: 56px; border-radius: 50%;
   background: var(--moss-softer);
 }
-.empty-state--quiet { background: transparent; border: 0; padding: 10px 0; }
+.empty-state__title {
+  margin: var(--space-0); color: var(--ink);
+  font-family: "Fraunces", serif; font-size: 1rem; line-height: 1.25;
+  font-weight: 600; letter-spacing: 0;
+}
+.empty-state__copy,
+.empty-state__content {
+  max-width: 34rem; margin: var(--space-3) auto var(--space-0);
+  color: var(--ink-2); font-size: 14px; line-height: 1.45;
+}
+.empty-state__action {
+  display: flex; justify-content: center; flex-wrap: wrap;
+  gap: var(--space-4); margin-top: var(--space-8);
+}
+.empty-state--compact { padding: var(--space-9); }
+.empty-state--quiet {
+  background: transparent; border: 0; box-shadow: none;
+  padding: var(--space-5) var(--space-0);
+}
 
 .completed-group summary {
   display: flex; align-items: center; gap: 8px; cursor: pointer;

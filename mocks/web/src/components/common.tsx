@@ -208,18 +208,30 @@ export function ProgressBar({ value, slim }: { value: number; slim?: boolean }) 
 
 export function EmptyState({
   glyph,
+  title,
+  copy,
+  action,
   children,
   variant,
 }: {
   glyph?: ReactNode;
-  children: ReactNode;
-  variant?: "celebrate" | "quiet";
+  title?: ReactNode;
+  copy?: ReactNode;
+  action?: ReactNode;
+  children?: ReactNode;
+  variant?: "celebrate" | "quiet" | "compact";
 }) {
   const cls = ["empty-state", variant ? "empty-state--" + variant : ""].filter(Boolean).join(" ");
+  const body = copy ?? (typeof children === "string" ? children : null);
   return (
     <div className={cls}>
       {glyph ? <span className="empty-state__glyph" aria-hidden="true">{glyph}</span> : null}
-      {typeof children === "string" ? <p>{children}</p> : children}
+      {title ? <h3 className="empty-state__title">{title}</h3> : null}
+      {body ? <p className="empty-state__copy">{body}</p> : null}
+      {children && typeof children !== "string" ? (
+        <div className="empty-state__content">{children}</div>
+      ) : null}
+      {action ? <div className="empty-state__action">{action}</div> : null}
     </div>
   );
 }

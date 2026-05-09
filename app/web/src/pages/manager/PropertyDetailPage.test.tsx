@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
+import { EmptyState } from "@/components/common";
 import { __resetApiProvidersForTests } from "@/lib/api";
 import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
 import * as preferences from "@/lib/preferences";
@@ -60,6 +61,7 @@ interface TestProperty {
 }
 
 interface InstallFetchOptions {
+  emptyOverview?: boolean;
   failAreaPost?: boolean;
   failAreasList?: boolean;
   failPropertyPatch?: boolean;
@@ -272,6 +274,9 @@ function installFetch(options: InstallFetchOptions = {}) {
       }
     }
     if (resolved === "/w/acme/api/v1/tasks?property_id=prop_1&limit=100") {
+      if (options.emptyOverview) {
+        return jsonResponse({ data: [], next_cursor: null, has_more: false });
+      }
       return jsonResponse({
         data: [
           {
@@ -289,6 +294,9 @@ function installFetch(options: InstallFetchOptions = {}) {
       });
     }
     if (resolved === "/w/acme/api/v1/stays/reservations?property_id=prop_1&limit=100") {
+      if (options.emptyOverview) {
+        return jsonResponse({ data: [], next_cursor: null, has_more: false });
+      }
       return jsonResponse({
         data: [
           {
@@ -476,6 +484,29 @@ afterEach(() => {
 });
 
 describe("<PropertyDetailPage>", () => {
+  it("renders shared empty states for blank overview stays and tasks", async () => {
+    render(<EmptyState>Legacy empty copy.</EmptyState>);
+    expect(screen.getByText("Legacy empty copy.").tagName).toBe("P");
+    cleanup();
+
+    const fake = installFetch({ emptyOverview: true });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByRole("heading", { name: "Villa Rosa" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Upcoming stays" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "No upcoming stays" })).toBeInTheDocument();
+      expect(screen.getByText("New reservations for this property will appear here with guest, source, and date details.")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Tasks for this property" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "No tasks scheduled" })).toBeInTheDocument();
+      expect(screen.getByText("Property tasks will land here once cleanings, inspections, or maintenance work are assigned.")).toBeInTheDocument();
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
+      expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("edits supported property fields through the property API", async () => {
     const fake = installFetch();
     try {
