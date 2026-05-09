@@ -251,8 +251,25 @@ def _parse_scoped_path(path: str) -> str | None:
 
 
 def _is_scoped_api_path(path: str) -> bool:
-    segments = path.split("/")
-    return len(segments) >= 5 and segments[1] == "w" and segments[3] == "api"
+    segments = [segment for segment in path.split("/") if segment]
+    return len(segments) >= 3 and segments[0] == "w" and segments[2] == "api"
+
+
+def _is_scoped_sse_path(path: str) -> bool:
+    segments = [segment for segment in path.split("/") if segment]
+    return len(segments) == 3 and segments[0] == "w" and segments[2] == "events"
+
+
+def _should_skip_dev_spa_path(path: str, method: str, settings: Settings) -> bool:
+    if settings.profile != "dev":
+        return False
+    if method not in {"GET", "HEAD"}:
+        return False
+    return (
+        _parse_scoped_path(path) is not None
+        and not _is_scoped_api_path(path)
+        and not _is_scoped_sse_path(path)
+    )
 
 
 def _not_found(request: Request) -> JSONResponse:
@@ -857,12 +874,17 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
         if correlation_id is None:
             correlation_id = request.headers.get(CORRELATION_ID_HEADER) or new_ulid()
 
+        settings = getattr(request.app.state, "settings", None)
+        if not isinstance(settings, Settings):
+            settings = get_settings()
+
         # 1) Bare-host skip paths (health, signup, static, docs, ...)
         #    and requests that aren't scoped ``/w/<slug>/...`` at all.
         if (
             _is_skip_path(path)
             or _is_bare_w_path(path)
             or _parse_scoped_path(path) is None
+            or _should_skip_dev_spa_path(path, request.method, settings)
         ):
             _log_tenancy_event(
                 slug=None,
@@ -880,7 +902,6 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
             return response
 
         # 2) Scoped request — build the context or 404.
-        settings = get_settings()
         try:
             ctx, actor, outcome = await asyncio.to_thread(
                 self._resolve_context,
