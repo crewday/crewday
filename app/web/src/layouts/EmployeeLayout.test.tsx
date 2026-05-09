@@ -51,7 +51,7 @@ function authMe(): AuthMe {
 
 function workspaceMe(): Me {
   return {
-    role: "worker",
+    role: "employee",
     theme: "system",
     agent_sidebar_collapsed: false,
     employee: {
@@ -74,7 +74,7 @@ function workspaceMe(): Me {
       preferred_locale: "en",
       settings_override: {},
     },
-    manager_name: null,
+    manager_name: "",
     today: "2026-05-09",
     now: "2026-05-09T08:00:00Z",
     user_id: "usr_worker",

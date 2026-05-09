@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import CountrySelect from "@/components/CountrySelect";
+import TimezoneSelect from "@/components/TimezoneSelect";
 import type { Property } from "@/types/api";
 import type { PropertyAddress, PropertyRecord } from "./types";
 
@@ -291,23 +293,16 @@ export default function PropertyEditDialog({
               onChange={(event) => setDraft({ ...draft, postal_code: event.currentTarget.value })}
             />
           </label>
-          <label className="field">
-            <span>Country</span>
-            <input
-              value={draft.country}
-              onChange={(event) => setDraft({ ...draft, country: event.currentTarget.value })}
-              maxLength={2}
-              required
-            />
-          </label>
-          <label className="field">
-            <span>Timezone</span>
-            <input
-              value={draft.timezone}
-              onChange={(event) => setDraft({ ...draft, timezone: event.currentTarget.value })}
-              required
-            />
-          </label>
+          <CountrySelect
+            value={draft.country}
+            onChange={(country) => setDraft({ ...draft, country })}
+            required
+          />
+          <TimezoneSelect
+            value={draft.timezone}
+            onChange={(timezone) => setDraft({ ...draft, timezone })}
+            required
+          />
           <label className="field">
             <span>Locale</span>
             <input

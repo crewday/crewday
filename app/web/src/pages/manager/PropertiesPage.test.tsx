@@ -335,10 +335,12 @@ describe("<PropertiesPage>", () => {
 
       fireEvent.click(await screen.findByRole("button", { name: "Add property" }));
       const dialog = await screen.findByRole("dialog", { name: "Add property" });
-      expect(within(dialog).getByLabelText("Country")).toHaveValue("PT");
-      expect(within(dialog).getByLabelText("Timezone")).toHaveValue("Europe/Lisbon");
+      expect(within(dialog).getByRole("combobox", { name: "Country" })).toHaveValue("Portugal");
+      expect(within(dialog).getByRole("combobox", { name: "Timezone" })).toHaveValue("Europe/Lisbon");
       expect(within(dialog).getByLabelText("Locale")).toHaveValue("pt-PT");
       expect(within(dialog).getByLabelText("Default currency")).toHaveValue("EUR");
+      const countryInput = within(dialog).getByRole("combobox", { name: "Country" });
+      const timezoneInput = within(dialog).getByRole("combobox", { name: "Timezone" });
       expect(within(dialog).getByRole("option", {
         name: "Primary residence - no automatic area or stay lifecycle setup",
       })).toHaveValue("residence");
@@ -361,9 +363,24 @@ describe("<PropertiesPage>", () => {
       fireEvent.change(within(dialog).getByLabelText("City"), {
         target: { value: "Austin" },
       });
-      fireEvent.change(within(dialog).getByLabelText("Timezone"), {
-        target: { value: "America/Chicago" },
+      fireEvent.change(countryInput, {
+        target: { value: "Atlantis" },
       });
+      await waitFor(() => expect(countryInput).toBeInvalid());
+      fireEvent.change(countryInput, {
+        target: { value: "United" },
+      });
+      expect((await within(dialog).findAllByText("United States")).length).toBeGreaterThan(0);
+      fireEvent.keyDown(countryInput, { key: "ArrowDown" });
+      fireEvent.keyDown(countryInput, { key: "ArrowDown" });
+      fireEvent.keyDown(countryInput, { key: "Enter" });
+      expect(countryInput).toHaveValue("United States");
+      fireEvent.change(timezoneInput, {
+        target: { value: "Chicago" },
+      });
+      expect((await within(dialog).findAllByText("America/Chicago")).length).toBeGreaterThan(0);
+      fireEvent.keyDown(timezoneInput, { key: "Enter" });
+      expect(timezoneInput).toHaveValue("America/Chicago");
       fireEvent.click(within(dialog).getByRole("button", { name: "Create property" }));
 
       expect(await screen.findByRole("heading", { name: "Lake House" })).toBeInTheDocument();
@@ -380,10 +397,10 @@ describe("<PropertiesPage>", () => {
         name: "Lake House",
         kind: "str",
         timezone: "America/Chicago",
-        country: "PT",
+        country: "US",
         locale: "pt-PT",
         default_currency: "EUR",
-        address_json: { city: "Austin", country: "PT" },
+        address_json: { city: "Austin", country: "US" },
       });
       const propertiesReads = fake.requests.filter((request) =>
         request.url === "/w/acme/api/v1/properties" && request.method === "GET"

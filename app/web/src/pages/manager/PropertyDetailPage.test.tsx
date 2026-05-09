@@ -437,6 +437,8 @@ describe("<PropertyDetailPage>", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Edit property" }));
       const dialog = await screen.findByRole("dialog", { name: "Edit property" });
+      expect(within(dialog).getByRole("combobox", { name: "Country" })).toHaveValue("Portugal");
+      expect(within(dialog).getByRole("combobox", { name: "Timezone" })).toHaveValue("Europe/Lisbon");
       expect(within(dialog).getByRole("option", {
         name: "Primary residence - no automatic area or stay lifecycle setup",
       })).toHaveValue("residence");
@@ -459,9 +461,11 @@ describe("<PropertyDetailPage>", () => {
       fireEvent.change(within(dialog).getByLabelText("City"), {
         target: { value: "Braga" },
       });
-      fireEvent.change(within(dialog).getByLabelText("Timezone"), {
-        target: { value: "Europe/Madrid" },
+      fireEvent.change(within(dialog).getByRole("combobox", { name: "Timezone" }), {
+        target: { value: "Madrid" },
       });
+      expect((await within(dialog).findAllByText("Europe/Madrid")).length).toBeGreaterThan(0);
+      fireEvent.keyDown(within(dialog).getByRole("combobox", { name: "Timezone" }), { key: "Enter" });
       fireEvent.click(within(dialog).getByRole("button", { name: "Save property" }));
 
       expect(await screen.findByRole("heading", { name: "Villa Aurora" })).toBeInTheDocument();
