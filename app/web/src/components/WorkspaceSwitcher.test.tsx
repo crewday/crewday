@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import WorkspaceSwitcher from "./WorkspaceSwitcher";
 import { fetchJson } from "@/lib/api";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
@@ -37,9 +38,14 @@ function renderSwitcher(): QueryClient {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={qc}>
-      <WorkspaceProvider>
-        <WorkspaceSwitcher />
-      </WorkspaceProvider>
+      <MemoryRouter initialEntries={["/w/acme/dashboard"]}>
+        <WorkspaceProvider>
+          <Routes>
+            <Route path="/w/:slug/dashboard" element={<><WorkspaceSwitcher /><LocationProbe /></>} />
+            <Route path="/workspaces/new" element={<LocationProbe />} />
+          </Routes>
+        </WorkspaceProvider>
+      </MemoryRouter>
     </QueryClientProvider>,
   );
   return qc;
@@ -52,7 +58,7 @@ describe("WorkspaceSwitcher", () => {
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
 
     fireEvent.click(await screen.findByRole("button", { name: /Acme/i }));
-    fireEvent.click(screen.getByRole("button", { name: /Beta/i }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Beta/i }));
 
     await waitFor(() => {
       expect(persistWorkspace).toHaveBeenCalledWith("beta");
@@ -60,7 +66,7 @@ describe("WorkspaceSwitcher", () => {
     expect(invalidateSpy).toHaveBeenCalled();
   });
 
-  it("renders an inert context chip for single-workspace users", async () => {
+  it("opens the menu for single-workspace users and lists the current workspace", async () => {
     fetchJsonMock.mockResolvedValue({
       ...mePayload(),
       available_workspaces: [mePayload().available_workspaces[0]],
@@ -69,11 +75,43 @@ describe("WorkspaceSwitcher", () => {
     renderSwitcher();
 
     const trigger = await screen.findByRole("button", { name: /Acme/i });
-    expect(trigger).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(trigger);
-    expect(screen.queryByRole("listbox", { name: "Switch workspace" })).toBeNull();
+    const menu = screen.getByRole("menu", { name: "Workspace menu" });
+    expect(menu).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: /Acme/i })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("menuitem", { name: "New workspace" })).toBeInTheDocument();
+  });
+
+  it("routes the new-workspace action to the signed-in creation flow", async () => {
+    renderSwitcher();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Acme/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New workspace" }));
+
+    expect(screen.getByTestId("location")).toHaveTextContent("/workspaces/new");
+  });
+
+  it("closes the menu on Escape and outside click", async () => {
+    renderSwitcher();
+
+    const trigger = await screen.findByRole("button", { name: /Acme/i });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menu", { name: "Workspace menu" })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "Workspace menu" })).toBeNull();
+
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menu", { name: "Workspace menu" })).toBeInTheDocument();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("menu", { name: "Workspace menu" })).toBeNull();
   });
 });
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location">{location.pathname}</div>;
+}
 
 function mePayload() {
   return {

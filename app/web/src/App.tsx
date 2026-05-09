@@ -67,6 +67,7 @@ import GuestPage from "@/pages/public/GuestPage";
 import SignupPage from "@/pages/public/SignupPage";
 import SignupVerifyPage from "@/pages/public/SignupVerifyPage";
 import SignupEnrollPage from "@/pages/public/SignupEnrollPage";
+import WorkspaceCreatePage from "@/pages/WorkspaceCreatePage";
 
 import SchedulerPage from "@/pages/SchedulerPage";
 
@@ -452,6 +453,7 @@ export default function App() {
             the gate and redirect to the canonical `/w/:slug/*` URL. */}
         <Route element={<RequireAuth />}>
           <Route element={<WorkspacePathAdopter />}>
+            <Route path="/workspaces/new" element={<WorkspaceCreatePage />} />
             <Route path="/select-workspace" element={<WorkspacePickerRoute />} />
             <Route element={<WorkspaceGate />}>
               <Route path="/" element={<RoleHome />} />

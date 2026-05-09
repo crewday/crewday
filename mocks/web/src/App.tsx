@@ -61,6 +61,7 @@ import LoginPage from "@/pages/public/LoginPage";
 import RecoverPage from "@/pages/public/RecoverPage";
 import AcceptPage from "@/pages/public/AcceptPage";
 import GuestPage from "@/pages/public/GuestPage";
+import WorkspaceCreatePage from "@/pages/WorkspaceCreatePage";
 
 import StyleguidePage from "@/pages/StyleguidePage";
 import SchedulerPage from "@/pages/SchedulerPage";
@@ -105,6 +106,7 @@ export default function App() {
       <Route element={<PreviewShell />}>
         <Route path="/" element={<RoleHome />} />
         <Route path="/styleguide" element={<StyleguidePage />} />
+        <Route path="/workspaces/new" element={<WorkspaceCreatePage />} />
 
         {/* Shared routes — any role. Shell picks the right layout. */}
         <Route element={<Shell />}>

@@ -1,0 +1,22 @@
+- generic [ref=e3]:
+  - img
+  - main [ref=e298]:
+    - generic [ref=e299]:
+      - generic [ref=e300]:
+        - generic [ref=e301]: ◈
+        - generic [ref=e302]: crew.day
+      - heading "New workspace" [level=1] [ref=e303]
+      - paragraph [ref=e304]: Create another workspace for this signed-in account. Your existing passkey stays attached to your account.
+      - generic [ref=e305]:
+        - generic [ref=e306]:
+          - generic [ref=e307]: Workspace name
+          - textbox "Workspace name" [ref=e308]:
+            - /placeholder: Villa Sud
+        - generic [ref=e309]:
+          - generic [ref=e310]: Workspace handle
+          - textbox "Workspace handle Lowercase letters, digits, and hyphens. Lives at /w/<handle>/." [ref=e311]:
+            - /placeholder: villa-sud
+          - generic [ref=e312]
+        - button "Create workspace" [ref=e314] [cursor=pointer]
+      - link "Back to current workspace" [ref=e315] [cursor=pointer]:
+        - /url: /w/dev

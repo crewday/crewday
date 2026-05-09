@@ -95,6 +95,7 @@ describe("normalizeWorkspaceSlugInput", () => {
     expect(normalizeWorkspaceSlugInput("Villa Sud!")).toBe("villasud");
     expect(normalizeWorkspaceSlugInput("MIXED_case.123")).toBe("mixedcase123");
     expect(normalizeWorkspaceSlugInput("villa--sud")).toBe("villa--sud");
+    expect(normalizeWorkspaceSlugInput("villa-")).toBe("villa-");
   });
 });
 

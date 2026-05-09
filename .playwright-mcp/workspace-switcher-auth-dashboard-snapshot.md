@@ -1,0 +1,167 @@
+- generic [ref=e3]:
+  - img
+  - generic [ref=e4]:
+    - complementary "Main navigation" [ref=e5]:
+      - generic "crew.day" [ref=e6]:
+        - generic [ref=e7]: ◈
+        - button "Expand sidebar" [ref=e8] [cursor=pointer]:
+          - img [ref=e10]
+          - text: Expand sidebar
+      - navigation:
+        - generic [ref=e14]: MY WORK
+        - link "My Day" [ref=e16] [cursor=pointer]:
+          - /url: /w/dev/today
+          - img [ref=e18]
+          - text: My Day
+        - link "My Schedule" [ref=e23] [cursor=pointer]:
+          - /url: /w/dev/schedule
+          - img [ref=e25]
+          - text: My Schedule
+        - link "My Expenses" [ref=e29] [cursor=pointer]:
+          - /url: /w/dev/my/expenses
+          - img [ref=e31]
+          - text: My Expenses
+        - link "My profile" [ref=e33] [cursor=pointer]:
+          - /url: /w/dev/me
+          - img [ref=e35]
+          - text: My profile
+        - generic [ref=e40]: OPERATE
+        - link "Dashboard" [ref=e42] [cursor=pointer]:
+          - /url: /w/dev/dashboard
+          - img [ref=e44]
+          - text: Dashboard
+        - link "Properties" [ref=e50] [cursor=pointer]:
+          - /url: /w/dev/properties
+          - img [ref=e52]
+          - text: Properties
+        - link "Stays" [ref=e55] [cursor=pointer]:
+          - /url: /w/dev/stays
+          - img [ref=e57]
+          - text: Stays
+        - link "Employees" [ref=e60] [cursor=pointer]:
+          - /url: /w/dev/employees
+          - img [ref=e62]
+          - text: Employees
+        - link "Templates" [ref=e67] [cursor=pointer]:
+          - /url: /w/dev/templates
+          - img [ref=e69]
+          - text: Templates
+        - link "Schedules" [ref=e72] [cursor=pointer]:
+          - /url: /w/dev/schedules
+          - img [ref=e74]
+          - text: Schedules
+        - link "Scheduler" [ref=e77] [cursor=pointer]:
+          - /url: /w/dev/scheduler
+          - img [ref=e79]
+          - text: Scheduler
+        - link "Instructions" [ref=e81] [cursor=pointer]:
+          - /url: /w/dev/instructions
+          - img [ref=e83]
+          - text: Instructions
+        - link "Inventory" [ref=e86] [cursor=pointer]:
+          - /url: /w/dev/inventory
+          - img [ref=e88]
+          - text: Inventory
+        - generic [ref=e99]: ASSETS
+        - link "Assets" [ref=e101] [cursor=pointer]:
+          - /url: /w/dev/assets
+          - img [ref=e103]
+          - text: Assets
+        - link "Catalog" [ref=e105] [cursor=pointer]:
+          - /url: /w/dev/asset_types
+          - img [ref=e107]
+          - text: Catalog
+        - link "Documents" [ref=e110] [cursor=pointer]:
+          - /url: /w/dev/documents
+          - img [ref=e112]
+          - text: Documents
+        - generic [ref=e117]: DECIDE
+        - link "Approvals" [ref=e119] [cursor=pointer]:
+          - /url: /w/dev/approvals
+          - img [ref=e121]
+          - text: Approvals
+        - link "Leaves" [ref=e125] [cursor=pointer]:
+          - /url: /w/dev/leaves
+          - img [ref=e127]
+          - text: Leaves
+        - link "Expenses" [ref=e132] [cursor=pointer]:
+          - /url: /w/dev/expenses
+          - img [ref=e134]
+          - text: Expenses
+        - link "Pay" [ref=e136] [cursor=pointer]:
+          - /url: /w/dev/pay
+          - img [ref=e138]
+          - text: Pay
+        - generic [ref=e142]: ADMIN
+        - link "Organizations" [ref=e144] [cursor=pointer]:
+          - /url: /w/dev/organizations
+          - img [ref=e146]
+          - text: Organizations
+        - link "Permissions" [ref=e150] [cursor=pointer]:
+          - /url: /w/dev/permissions
+          - img [ref=e152]
+          - text: Permissions
+        - link "Audit log" [ref=e155] [cursor=pointer]:
+          - /url: /w/dev/audit
+          - img [ref=e157]
+          - text: Audit log
+        - link "Webhooks" [ref=e160] [cursor=pointer]:
+          - /url: /w/dev/webhooks
+          - img [ref=e162]
+          - text: Webhooks
+        - link "API tokens" [ref=e166] [cursor=pointer]:
+          - /url: /w/dev/tokens
+          - img [ref=e168]
+          - text: API tokens
+        - link "Workspace settings" [ref=e171] [cursor=pointer]:
+          - /url: /w/dev/settings
+          - img [ref=e173]
+          - text: Workspace settings
+      - generic [ref=e176]:
+        - generic [ref=e177]: ME
+        - text: me · Manager
+    - generic [ref=e178]:
+      - generic [ref=e179]:
+        - generic [ref=e180]:
+          - heading "Dashboard" [level=1] [ref=e181]
+          - paragraph [ref=e182]: Good morning, me · Saturday, 9 May 2026 · 0 properties · 5 staff · 0 tasks today
+        - generic [ref=e183]:
+          - button "+ New task" [ref=e184] [cursor=pointer]
+          - button "More actions" [ref=e185] [cursor=pointer]:
+            - img [ref=e186]
+      - generic [ref=e190]:
+        - generic [ref=e191]:
+          - generic [ref=e192]:
+            - generic [ref=e193]: Tasks today
+            - generic [ref=e194]: 0/0
+            - generic [ref=e195]: completed
+          - generic [ref=e196]:
+            - generic [ref=e197]: Working now
+            - generic [ref=e198]: "0"
+            - generic [ref=e199]: of 5 staff
+          - generic [ref=e200]:
+            - generic [ref=e201]: Approvals
+            - generic [ref=e202]: "0"
+            - generic [ref=e203]: agent actions awaiting review
+          - generic [ref=e204]:
+            - generic [ref=e205]: Stays in house
+            - generic [ref=e206]: "0"
+            - generic [ref=e207]: across 0 properties
+        - generic [ref=e208]:
+          - generic [ref=e209]:
+            - generic [ref=e210]
+            - table [ref=e213]
+          - generic [ref=e221]:
+            - generic [ref=e222]
+            - list
+        - generic [ref=e225]:
+          - generic [ref=e226]:
+            - generic [ref=e227]
+            - list
+          - generic [ref=e230]:
+            - generic [ref=e231]
+            - list [ref=e234]
+    - complementary "Agent sidebar" [ref=e236]:
+      - button "Agent" [ref=e237] [cursor=pointer]:
+        - generic [ref=e238]: Agent
+        - img [ref=e240]

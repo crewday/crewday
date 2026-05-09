@@ -46,6 +46,9 @@ import {
   type SignupFormState,
   type SlugError,
 } from "./publicAuthMappers";
+import { normalizeWorkspaceSlugInput } from "@/lib/workspaceSlug";
+
+export { normalizeWorkspaceSlugInput } from "@/lib/workspaceSlug";
 
 interface SignupStartBody {
   email: string;
@@ -78,13 +81,6 @@ declare global {
 
 const TURNSTILE_SCRIPT_ID = "crewday-turnstile-script";
 const TURNSTILE_SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-
-export function normalizeWorkspaceSlugInput(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, "");
-}
 
 export default function SignupPage(): ReactElement {
   const [email, setEmail] = useState("");

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Check } from "lucide-react";
+import { ChevronDown, Check, Plus } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { useWorkspace } from "@/context/WorkspaceContext";
@@ -10,9 +11,6 @@ import type { AvailableWorkspace, Me } from "@/types/api";
 // Lists every workspace the current user has a grant on (from /me's
 // `available_workspaces`); selecting one writes the cookie and
 // invalidates every query so the next render is in the new tenant.
-//
-// Hidden when the user has only one workspace — keeps the chrome
-// quiet for the single-tenant default case.
 
 const ROLE_LABEL: Record<string, string> = {
   manager: "Manager",
@@ -24,6 +22,7 @@ const ROLE_LABEL: Record<string, string> = {
 export default function WorkspaceSwitcher() {
   // code-health: ignore[ccn] Workspace switcher keeps tenant visibility, outside-click handling, and selected-workspace menu state together.
   const { workspaceId, setWorkspaceId } = useWorkspace();
+  const navigate = useNavigate();
   const meQ = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -49,41 +48,42 @@ export default function WorkspaceSwitcher() {
   const activeId = workspaceId ?? meQ.data.current_workspace_id;
   const active = available.find((a) => a.workspace.id === activeId) ?? available[0];
   if (!active) return null;
-  // Render the chip even with a single workspace so the active tenant
-  // is always visible. The trigger is inert in that case (no menu, no
-  // hover affordance) — the user just sees "Bernard workspace ·
-  // Manager" as page context.
-  const interactive = available.length > 1;
 
   const pick = (next: AvailableWorkspace) => {
     setOpen(false);
     if (next.workspace.id !== activeId) setWorkspaceId(next.workspace.id);
   };
 
+  const createWorkspace = () => {
+    setOpen(false);
+    navigate("/workspaces/new");
+  };
+
   return (
     <div className="ws-switcher" ref={ref}>
       <button
         type="button"
-        className={"ws-switcher__trigger" + (interactive ? "" : " ws-switcher__trigger--inert")}
-        aria-haspopup={interactive ? "listbox" : undefined}
-        aria-expanded={interactive ? open : undefined}
-        aria-disabled={interactive ? undefined : true}
-        onClick={() => { if (interactive) setOpen((v) => !v); }}
+        className="ws-switcher__trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => { setOpen((v) => !v); }}
       >
         <span className="ws-switcher__name">{active.workspace.name}</span>
         {active.grant_role && (
           <span className="ws-switcher__role">{ROLE_LABEL[active.grant_role] ?? active.grant_role}</span>
         )}
-        {interactive && <ChevronDown size={14} aria-hidden="true" className="ws-switcher__chev" />}
+        <ChevronDown size={14} aria-hidden="true" className="ws-switcher__chev" />
       </button>
-      {interactive && open && (
-        <ul className="ws-switcher__menu" role="listbox" aria-label="Switch workspace">
+      {open && (
+        <ul className="ws-switcher__menu" role="menu" aria-label="Workspace menu">
           {available.map((w) => {
             const selected = w.workspace.id === activeId;
             return (
-              <li key={w.workspace.id} role="option" aria-selected={selected}>
+              <li key={w.workspace.id} role="none">
                 <button
                   type="button"
+                  role="menuitemradio"
+                  aria-checked={selected}
                   className={"ws-switcher__opt" + (selected ? " ws-switcher__opt--active" : "")}
                   onClick={() => pick(w)}
                 >
@@ -96,6 +96,18 @@ export default function WorkspaceSwitcher() {
               </li>
             );
           })}
+          <li className="ws-switcher__separator" role="separator" aria-hidden="true" />
+          <li role="none">
+            <button
+              type="button"
+              role="menuitem"
+              className="ws-switcher__opt ws-switcher__opt--create"
+              onClick={createWorkspace}
+            >
+              <Plus size={14} aria-hidden="true" className="ws-switcher__opt-check" />
+              <span className="ws-switcher__opt-name">New workspace</span>
+            </button>
+          </li>
         </ul>
       )}
     </div>

@@ -1,0 +1,14 @@
+- generic [ref=e3]:
+  - img
+  - main [ref=e7]:
+    - generic [ref=e8]:
+      - generic [ref=e9]
+      - heading "Sign in with your passkey" [level=1] [ref=e12]
+      - paragraph [ref=e13]: No passwords, ever. Tap once to unlock the house.
+      - button "Use passkey" [ref=e14] [cursor=pointer]
+      - link "Lost your device? Recover access →" [ref=e18] [cursor=pointer]:
+        - /url: /recover?next=%2Fdashboard
+    - paragraph [ref=e19]:
+      - text: First time here? Open the invite link your manager sent.
+      - link "See what accepting an invite looks like →" [ref=e20] [cursor=pointer]:
+        - /url: /accept/demo-abc123
