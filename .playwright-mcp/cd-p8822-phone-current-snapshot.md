@@ -1,0 +1,70 @@
+- generic [ref=e3]:
+  - img
+  - generic [ref=e6]:
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - link "Back to Properties" [ref=e10] [cursor=pointer]:
+          - /url: /w/smoke/properties
+          - img [ref=e11]
+        - generic [ref=e13]:
+          - heading "Home" [level=1] [ref=e14]
+          - paragraph [ref=e15]: · Asia/Dubai
+        - generic [ref=e16]:
+          - button "Edit property" [ref=e17] [cursor=pointer]
+          - button "More actions" [ref=e18] [cursor=pointer]:
+            - img [ref=e19]
+      - generic [ref=e23]:
+        - generic [ref=e24]:
+          - tablist "Property sections" [ref=e25]:
+            - tab "Overview" [selected] [ref=e26] [cursor=pointer]
+            - tab "Areas" [ref=e27] [cursor=pointer]
+            - tab "Assets" [ref=e28] [cursor=pointer]
+            - tab "Sharing & client" [ref=e29] [cursor=pointer]
+            - tab "Settings" [ref=e30] [cursor=pointer]
+          - navigation "Related property pages" [ref=e31]:
+            - link "Stays" [ref=e32] [cursor=pointer]:
+              - /url: /w/smoke/stays?property_id=01KR5ZKGQ3HNK1Q6MMRF6541WS
+            - link "Instructions" [ref=e33] [cursor=pointer]:
+              - /url: /w/smoke/instructions?property_id=01KR5ZKGQ3HNK1Q6MMRF6541WS
+            - link "Closures" [ref=e34] [cursor=pointer]:
+              - /url: /w/smoke/property/01KR5ZKGQ3HNK1Q6MMRF6541WS/closures
+        - tabpanel [ref=e35]:
+          - generic [ref=e36]:
+            - generic [ref=e37]:
+              - heading "Upcoming stays" [level=2] [ref=e39]
+              - generic [ref=e40]:
+                - img [ref=e42]
+                - heading "No upcoming stays" [level=3] [ref=e46]
+                - paragraph [ref=e47]: New reservations for this property will appear here with guest, source, and date details.
+            - generic [ref=e48]:
+              - heading "Tasks for this property" [level=2] [ref=e50]
+              - generic [ref=e51]:
+                - img [ref=e53]
+                - heading "No tasks scheduled" [level=3] [ref=e56]
+                - paragraph [ref=e57]: Property tasks will land here once cleanings, inspections, or maintenance work are assigned.
+        - generic [ref=e58]:
+          - generic [ref=e60]:
+            - heading "Agent preferences — Home" [level=2] [ref=e61]
+            - paragraph [ref=e62]: Sits between workspace and user preferences when the agent discusses this property. Soft guidance only — hard rules belong in the settings cascade above.
+          - paragraph [ref=e63]: Failed to load preferences.
+    - navigation "Bottom navigation" [ref=e64]:
+      - link "Today" [ref=e65] [cursor=pointer]:
+        - /url: /w/smoke/today
+        - img [ref=e67]
+        - generic [ref=e70]: Today
+      - link "Schedule" [ref=e71] [cursor=pointer]:
+        - /url: /w/smoke/schedule
+        - img [ref=e73]
+        - generic [ref=e75]: Schedule
+      - link "Chat" [ref=e76] [cursor=pointer]:
+        - /url: /w/smoke/chat
+        - img [ref=e78]
+        - generic [ref=e80]: Chat
+      - link "Expenses" [ref=e81] [cursor=pointer]:
+        - /url: /w/smoke/my/expenses
+        - img [ref=e83]
+        - generic [ref=e85]: Expenses
+      - link "Me" [ref=e86] [cursor=pointer]:
+        - /url: /w/smoke/me
+        - img [ref=e88]
+        - generic [ref=e91]: Me
