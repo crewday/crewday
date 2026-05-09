@@ -14847,7 +14847,7 @@
         "type": "object"
       },
       "MintPersonalTokenBody": {
-        "description": "Request body for ``POST /api/v1/me/tokens``.\n\n``scopes`` is a flat ``{\"me.action_key\": true}`` mapping \u2014 every\nkey MUST start with ``me.`` per \u00a703 \"Personal access tokens\".\n``expires_at_days`` overrides the 90-day default.",
+        "description": "Request body for ``POST /api/v1/me/tokens``.\n\n``scopes`` is a flat ``{\"me.action_key\": true}`` mapping \u2014 every\nkey MUST start with ``me.`` per \u00a703 \"Personal access tokens\".\n``expires_at_days`` overrides the 90-day default unless\n``never_expires`` is true.",
         "properties": {
           "expires_at_days": {
             "anyOf": [
@@ -14867,6 +14867,12 @@
             "minLength": 1,
             "title": "Label",
             "type": "string"
+          },
+          "never_expires": {
+            "default": false,
+            "description": "When true, store NULL expires_at for a non-expiring token.",
+            "title": "Never Expires",
+            "type": "boolean"
           },
           "scopes": {
             "additionalProperties": true,
@@ -14928,7 +14934,7 @@
         "type": "object"
       },
       "MintTokenBody": {
-        "description": "Request body for ``POST /auth/tokens``.\n\n``scopes`` is a flat ``{\"action_key\": true}`` mapping for v1. It\nmatches the :attr:`ApiToken.scope_json` column shape, so the router\nstores it as supplied: empty dicts are valid for scoped tokens and\nunknown workspace scope keys are not catalog-validated here.\n\n``delegate`` (\u00a703 \"Delegated tokens\") \u2014 when ``true``, the row\nis minted as a delegated token acting for the session user\n(``delegate_for_user_id``); ``scopes`` MUST be empty because\nauthority resolves against the delegating user's grants. When\n``false`` (default), the row is a classic scoped token.\n\n``expires_at_days`` overrides the per-kind default (90 days for\nscoped, 30 days for delegated); ``None`` means \"use the default\".",
+        "description": "Request body for ``POST /auth/tokens``.\n\n``scopes`` is a flat ``{\"action_key\": true}`` mapping for v1. It\nmatches the :attr:`ApiToken.scope_json` column shape, so the router\nstores it as supplied: empty dicts are valid for scoped tokens and\nunknown workspace scope keys are not catalog-validated here.\n\n``delegate`` (\u00a703 \"Delegated tokens\") \u2014 when ``true``, the row\nis minted as a delegated token acting for the session user\n(``delegate_for_user_id``); ``scopes`` MUST be empty because\nauthority resolves against the delegating user's grants. When\n``false`` (default), the row is a classic scoped token.\n\n``expires_at_days`` overrides the per-kind default (90 days for\nscoped, 30 days for delegated); ``None`` means \"use the default\"\nunless ``never_expires`` is true.",
         "properties": {
           "delegate": {
             "default": false,
@@ -14954,6 +14960,12 @@
             "minLength": 1,
             "title": "Label",
             "type": "string"
+          },
+          "never_expires": {
+            "default": false,
+            "description": "When true, store NULL expires_at for a non-expiring token.",
+            "title": "Never Expires",
+            "type": "boolean"
           },
           "scopes": {
             "additionalProperties": true,
@@ -15758,6 +15770,17 @@
             "minLength": 1,
             "title": "Display Name",
             "type": "string"
+          },
+          "locale_country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locale Country"
           },
           "signup_session_id": {
             "title": "Signup Session Id",

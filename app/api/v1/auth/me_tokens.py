@@ -9,13 +9,15 @@ relies on the session cookie dep chain that :mod:`me` already uses.
 
 Routes:
 
-* ``POST /me/tokens`` ``{label, scopes, expires_at_days?}`` →
-  ``201 {token, key_id, prefix, expires_at, kind='personal'}``.
+* ``POST /me/tokens`` ``{label, scopes, expires_at_days?,
+  never_expires?}`` → ``201 {token, key_id, prefix, expires_at,
+  kind='personal'}``.
   The plaintext ``token`` is returned **only on this response**.
   The router applies the spec's 90-day PAT default TTL when
-  ``expires_at_days`` is omitted. Scopes MUST all start with
-  ``me.``; an empty scope set returns 422 ``scopes_required``
-  and a workspace scope mixed in returns 422
+  ``expires_at_days`` is omitted; ``never_expires: true`` stores
+  ``expires_at = NULL``. Scopes MUST all start with ``me.``; an
+  empty scope set returns 422 ``scopes_required`` and a workspace
+  scope mixed in returns 422
   ``me_scope_conflict`` (§03 "Personal access tokens").
 * ``GET /me/tokens`` → list of :class:`TokenSummaryResponse`
   projections. Returns every PAT owned by the session user
@@ -131,12 +133,17 @@ class MintPersonalTokenBody(BaseModel):
 
     ``scopes`` is a flat ``{"me.action_key": true}`` mapping — every
     key MUST start with ``me.`` per §03 "Personal access tokens".
-    ``expires_at_days`` overrides the 90-day default.
+    ``expires_at_days`` overrides the 90-day default unless
+    ``never_expires`` is true.
     """
 
     label: str = Field(..., min_length=1, max_length=160)
     scopes: dict[str, Any] = Field(default_factory=dict)
     expires_at_days: int | None = Field(default=None, ge=1, le=_MAX_TTL_DAYS)
+    never_expires: bool = Field(
+        default=False,
+        description="When true, store NULL expires_at for a non-expiring token.",
+    )
 
 
 class MintPersonalTokenResponse(BaseModel):
@@ -219,8 +226,10 @@ def _resolve_session_user(
         raise auth_unauthorized("session_invalid") from exc
 
 
-def _resolve_expires_at(body: MintPersonalTokenBody, now: datetime) -> datetime:
+def _resolve_expires_at(body: MintPersonalTokenBody, now: datetime) -> datetime | None:
     """Return the concrete ``expires_at`` for a PAT mint request."""
+    if body.never_expires:
+        return None
     days = (
         body.expires_at_days
         if body.expires_at_days is not None

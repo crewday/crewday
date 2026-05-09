@@ -1,10 +1,14 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, KeyRound, Trash2 } from "lucide-react";
+import { KeyRound, Trash2 } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { fmtDateTime } from "@/lib/dates";
 import { Loading } from "@/components/common";
+import TokenCreateForm, {
+  type TokenCreatePayload,
+  type TokenScopeOption,
+} from "@/components/TokenCreateForm";
 import TokenRevealPanel from "@/components/TokenRevealPanel";
 import type { ApiToken, ApiTokenCreated } from "@/types/api";
 
@@ -13,7 +17,7 @@ import type { ApiToken, ApiTokenCreated } from "@/types/api";
 // ever see her own rows through it. The manager /tokens page hides
 // these entirely — this is the only surface where they appear.
 
-const ME_SCOPES: { key: string; hint: string; verb: string }[] = [
+const ME_SCOPES: TokenScopeOption[] = [
   { key: "me.tasks:read",     verb: "Read",  hint: "Your assigned tasks and the unassigned tasks you can claim." },
   { key: "me.bookings:read",  verb: "Read",  hint: "Your bookings, amend history, and payslips." },
   { key: "me.expenses:read",  verb: "Read",  hint: "Your expense claims." },
@@ -23,7 +27,6 @@ const ME_SCOPES: { key: string; hint: string; verb: string }[] = [
 ];
 
 export default function PersonalTokensPanel() {
-  // code-health: ignore[nloc] Personal token panel keeps create, reveal, revoke, and scope-pick state together for the self-service token flow.
   const qc = useQueryClient();
   const listQ = useQuery({
     queryKey: qk.meApiTokens(),
@@ -31,12 +34,10 @@ export default function PersonalTokensPanel() {
   });
 
   const [showCreate, setShowCreate] = useState(false);
-  const [name, setName] = useState("my-script");
-  const [picked, setPicked] = useState<Set<string>>(new Set(["me.tasks:read"]));
   const [justCreated, setJustCreated] = useState<ApiTokenCreated | null>(null);
 
   const createM = useMutation({
-    mutationFn: (body: Record<string, unknown>) =>
+    mutationFn: (body: TokenCreatePayload) =>
       fetchJson<ApiTokenCreated>("/api/v1/me/tokens", { method: "POST", body }),
     onSuccess: (created) => {
       setJustCreated(created);
@@ -55,29 +56,8 @@ export default function PersonalTokensPanel() {
   const live = rows.filter((t) => !t.revoked_at);
   const overCap = live.length >= 5;
 
-  function togglePick(key: string) {
-    setPicked((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
-
-  function submitCreate(e: React.FormEvent) {
-    e.preventDefault();
-    // §03 wire shape: scopes is `{me.action: true}`. The server resolves
-    // the absolute `expires_at` from `expires_at_days`, defaulting to 90
-    // days when omitted; we pass it explicitly so the UI hint stays
-    // truthful even after the default changes server-side.
-    const scopes: Record<string, true> = Object.fromEntries(
-      Array.from(picked).map((k) => [k, true]),
-    );
-    createM.mutate({
-      label: name,
-      scopes,
-      expires_at_days: 90,
-    });
+  function submitCreate(payload: TokenCreatePayload) {
+    createM.mutate(payload);
   }
 
   return (
@@ -121,85 +101,20 @@ export default function PersonalTokensPanel() {
         )}
 
         {showCreate && (
-          <form className="tokens-form" onSubmit={submitCreate}>
-            <div className="tokens-form__section">
-              <label className="tokens-form__legend" htmlFor="pat-name">Name</label>
-              <input
-                id="pat-name"
-                type="text"
-                className="tokens-name-input"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="kitchen-printer"
-                maxLength={80}
-                required
-              />
-            </div>
-
-            <div className="tokens-form__section">
-              <div className="tokens-form__legend">
-                Scopes
-                <span className="tokens-form__legend-hint">
-                  {picked.size} selected — each one only reads/writes your own data
-                </span>
-              </div>
-              <ul className="tokens-scope-list">
-                {ME_SCOPES.map((s) => {
-                  const on = picked.has(s.key);
-                  return (
-                    <li key={s.key}>
-                      <label
-                        className={
-                          "tokens-scope-list__item" +
-                          (on ? " tokens-scope-list__item--on" : "")
-                        }
-                      >
-                        <input
-                          type="checkbox"
-                          checked={on}
-                          onChange={() => togglePick(s.key)}
-                        />
-                        <span className="tokens-scope-list__check" aria-hidden="true">
-                          <Check size={12} strokeWidth={2.5} />
-                        </span>
-                        <span className="tokens-scope-list__key">{s.key}</span>
-                        <span className="tokens-scope-list__badge">{s.verb}</span>
-                        <span className="tokens-scope-list__hint">{s.hint}</span>
-                      </label>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-
-            {createM.isError && (
-              <p className="tokens-form__error">
-                {(createM.error as Error)?.message ?? "Create failed"}
-              </p>
-            )}
-
-            <div className="tokens-form__actions">
-              <div className="tokens-form__actions-hint">
-                Default expiry is 90 days. The plaintext is shown exactly once on the next screen.
-              </div>
-              <div className="tokens-form__actions-buttons">
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  onClick={() => setShowCreate(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="btn btn--moss"
-                  disabled={createM.isPending || picked.size === 0}
-                >
-                  {createM.isPending ? "Creating…" : "Create token"}
-                </button>
-              </div>
-            </div>
-          </form>
+          <TokenCreateForm
+            labelId="pat-name"
+            initialLabel="my-script"
+            labelPlaceholder="kitchen-printer"
+            labelMaxLength={80}
+            scopes={ME_SCOPES}
+            initialScopes={["me.tasks:read"]}
+            scopeTone="personal"
+            isPending={createM.isPending}
+            error={createM.isError ? (createM.error as Error) : null}
+            actionHint="Default expiry is 90 days unless you choose never expires. The plaintext is shown exactly once on the next screen."
+            onSubmit={submitCreate}
+            onCancel={() => setShowCreate(false)}
+          />
         )}
 
         {listQ.isPending ? (
@@ -261,6 +176,12 @@ export default function PersonalTokensPanel() {
                     <span>
                       <span className="entry-card__meta-label">Expires</span>
                       {fmtDateTime(t.expires_at)}
+                    </span>
+                  )}
+                  {!t.expires_at && (
+                    <span>
+                      <span className="entry-card__meta-label">Expires</span>
+                      never
                     </span>
                   )}
                 </div>

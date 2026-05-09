@@ -832,7 +832,8 @@ POST   /api/v1/invite/passkey/finish             # body: {invite_id, challenge_i
 # scoped, passkey-session only, `me:*` scopes only, subject is always
 # the authenticated user. Not listed on the workspace admin page.
 GET    /api/v1/me/tokens                         # list PATs the caller owns
-POST   /api/v1/me/tokens                         # create a PAT (plaintext shown once)
+POST   /api/v1/me/tokens                         # create a PAT (plaintext shown once);
+                                                 # body accepts expires_at_days or never_expires
 DELETE /api/v1/me/tokens/{id}                    # revoke — flips `revoked_at`. Idempotent.
                                                  #   204 No Content on success.
                                                  #   404 {"error": "token_not_found"} for unknown / cross-subject ids.
@@ -889,11 +890,12 @@ above, not here:
 # identifiers the handler uses to pick `type` + `title`, not a literal
 # wire payload.
 POST   /w/<slug>/api/v1/auth/tokens              # mint a scoped or delegated token; body:
-                                                 #   {label, scopes, expires_at_days?}. `label` is 1-160 chars;
+                                                 #   {label, scopes, expires_at_days?, never_expires?}. `label` is 1-160 chars;
                                                  #   `scopes` is a flat `{"<action_key>": true}` dict (matches
                                                  #   the `api_token.scope_json` column — see §03 "Scoped tokens"
                                                  #   example); `expires_at_days` is 1-3650, defaulting to 90
-                                                 #   per §03 "Guardrails" when omitted.
+                                                 #   per §03 "Guardrails" when omitted. `never_expires: true`
+                                                 #   stores `expires_at = null`.
                                                  #   201 {token, key_id, prefix, expires_at} — `token` is the
                                                  #     full `mip_<key_id>_<secret>` plaintext; store it now.
                                                  #   401 {"error": "not_authenticated"} — no session / invalid.
@@ -902,8 +904,9 @@ POST   /w/<slug>/api/v1/auth/tokens              # mint a scoped or delegated to
                                                  #   422 {"error": "too_many_tokens"} — user already holds 5
                                                  #     active tokens on this workspace (§03 "Guardrails" cap).
                                                  #   422 `type: validation` — empty `label`, `label` > 160
-                                                 #     chars, `scopes` not an object, or `expires_at_days`
-                                                 #     outside [1, 3650]. Pydantic field errors surface in the
+                                                 #     chars, `scopes` not an object, `expires_at_days`
+                                                 #     outside [1, 3650], or `never_expires` not boolean.
+                                                 #     Pydantic field errors surface in the
                                                  #     `errors[]` array of the problem+json envelope per §12
                                                  #     "Errors".
 GET    /w/<slug>/api/v1/auth/tokens              # list every token on the workspace (active + revoked, most

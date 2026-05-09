@@ -290,9 +290,18 @@
   font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--ink-3);
 }
+.tokens-form__legend--with-action {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+}
 .tokens-form__legend-hint {
   font-size: 12px; color: var(--ink-3); font-weight: 400;
   text-transform: none; letter-spacing: 0; margin-left: 8px;
+}
+.tokens-form__legend-action {
+  flex-shrink: 0;
+  letter-spacing: 0;
+  text-transform: none;
 }
 .tokens-form__row {
   display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
@@ -533,7 +542,8 @@
   border-radius: 10px;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 12.5px; line-height: 1.55; letter-spacing: 0.01em;
-  overflow-x: auto; white-space: pre;
+  overflow-x: hidden; white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 [data-theme="dark"] .tokens-reveal__code {
   background: var(--paper-3); color: var(--ink);
@@ -701,20 +711,27 @@
   font-size: 12.5px; color: var(--ink-3); margin: 0;
 }
 
-/* Inline name field — same breath as .field but typographically
-   louder so it feels like a headline rather than a form input. */
+/* Inline name field — visibly editable, with enough typographic
+   weight to stay anchored in the token ceremony. */
 .tokens-name-input {
+  width: 100%;
   font-family: "Fraunces", serif; font-weight: 600;
-  font-size: 22px; line-height: 1.1;
+  font-size: 18px; line-height: 1.2;
   color: var(--ink);
-  background: transparent;
-  border: 0; border-bottom: 2px solid var(--line-strong);
-  padding: 4px 2px;
-  transition: border-color 140ms ease;
-  font-variation-settings: "opsz" 36;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 11px 13px 10px;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--paper) 70%, transparent);
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+  font-variation-settings: "opsz" 24;
 }
 .tokens-name-input:focus {
-  outline: none; border-bottom-color: var(--moss);
+  outline: none;
+  border-color: var(--moss);
+  box-shadow:
+    0 0 0 3px var(--moss-softer),
+    inset 0 1px 0 color-mix(in srgb, var(--paper) 70%, transparent);
 }
 .tokens-name-input::placeholder { color: var(--ink-4); font-style: italic; }
 
@@ -760,6 +777,16 @@
 .tokens-expiry__preset:hover { border-color: var(--moss); }
 .tokens-expiry__preset--on {
   background: var(--moss); color: var(--card); border-color: var(--moss);
+}
+.tokens-expiry__preset--never.tokens-expiry__preset--on {
+  background: var(--rust); border-color: var(--rust);
+}
+
+@media (max-width: 640px) {
+  .tokens-form__legend--with-action {
+    align-items: flex-start; flex-direction: column;
+  }
+  .tokens-form__legend-action { align-self: flex-start; }
 }
 
 /* Motion rules — honour reduced-motion */

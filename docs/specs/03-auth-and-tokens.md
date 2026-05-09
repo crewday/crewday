@@ -692,7 +692,9 @@ auth dep edge alongside the change_request / verify routes.
   `expires_at_days` is a positive integer count of days (1–3650,
   defaulting to 90 when omitted); the server computes the absolute
   `expires_at` timestamp from it at mint time and returns the ISO
-  value on the response for the client's reference.
+  value on the response for the client's reference. Clients may send
+  `never_expires: true` to store `expires_at = NULL` instead of using
+  a TTL.
 - `scopes` is a flat `{"<action_key>": true}` dict — the same shape
   the `api_token.scope_json` column stores, so the router holds no
   list-to-dict coercion. The key should be an action string from the
@@ -827,7 +829,9 @@ Key properties:
   require empty).
 - A PAT can only be created by a **passkey session** — no
   transitive creation from another token.
-- Default TTL: **90 days**. A workspace-level expiry ceiling can still
+- Default TTL: **90 days**. Clients may send `never_expires: true`
+  to store `expires_at = NULL` when the user deliberately chooses a
+  non-expiring PAT. A workspace-level expiry ceiling can still
   limit PAT lifetime, but the scoped/delegated workspace-count cap in
   Guardrails does not count PATs. The user can always override their
   own PAT to a shorter expiry — never a longer one than the workspace
@@ -979,8 +983,8 @@ subject narrowing is enforced at the row level regardless of which
 - Tokens cannot accept their own `admin:*` approval (§11).
 - Scoped tokens default to 90 days TTL if `expires_at_days` is
   omitted; delegated tokens default to 30 days; personal access
-  tokens default to 90 days. A workspace-level setting can raise any
-  of them to "never" but emits a noisy warning in the UI.
+  tokens default to 90 days. `never_expires: true` stores
+  `expires_at = NULL`; the UI must make that choice explicit.
 - Delegated tokens cannot create other delegated tokens (no transitive
   delegation). A delegated token cannot outlive its delegating user's
   account — archiving the user effectively revokes all their delegated

@@ -17,16 +17,18 @@ Routes:
 * ``POST /auth/tokens`` → ``201 {token, key_id, prefix, expires_at,
   kind}``. Two shapes:
 
-  * **Scoped** (default): ``{label, scopes, expires_at_days?}``.
+  * **Scoped** (default): ``{label, scopes, expires_at_days?,
+    never_expires?}``.
     ``scopes`` is the flat ``{"action_key": true}`` shape §03 pins;
     default TTL 90 days (§03 "Guardrails"). An empty dict is accepted
     for compatibility with existing scoped-token callers, and unknown
     scope keys are stored as supplied rather than catalog-validated at
     this API layer.
   * **Delegated**: ``{label, delegate: true, expires_at_days?,
-    scopes: {}}``. The session user's id populates
+    never_expires?, scopes: {}}``. The session user's id populates
     ``delegate_for_user_id``; scopes MUST be empty (§03 "Delegated
-    tokens"); default TTL 30 days.
+    tokens"); default TTL 30 days. ``never_expires: true`` stores
+    ``expires_at = NULL`` for either shape.
 
   The plaintext ``token`` is returned **only on this response**;
   never again.
@@ -173,12 +175,17 @@ class MintTokenBody(BaseModel):
     ``false`` (default), the row is a classic scoped token.
 
     ``expires_at_days`` overrides the per-kind default (90 days for
-    scoped, 30 days for delegated); ``None`` means "use the default".
+    scoped, 30 days for delegated); ``None`` means "use the default"
+    unless ``never_expires`` is true.
     """
 
     label: str = Field(..., min_length=1, max_length=160)
     scopes: dict[str, Any] = Field(default_factory=dict)
     expires_at_days: int | None = Field(default=None, ge=1, le=_MAX_TTL_DAYS)
+    never_expires: bool = Field(
+        default=False,
+        description="When true, store NULL expires_at for a non-expiring token.",
+    )
     delegate: bool = Field(
         default=False,
         description=(
@@ -267,7 +274,7 @@ class TokenAuditEntryResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _resolve_expires_at(body: MintTokenBody, now: datetime) -> datetime:
+def _resolve_expires_at(body: MintTokenBody, now: datetime) -> datetime | None:
     """Return the concrete ``expires_at`` for a mint request.
 
     Applies the spec's per-kind default when the client omits
@@ -276,6 +283,8 @@ def _resolve_expires_at(body: MintTokenBody, now: datetime) -> datetime:
     validator already rejects out-of-range values, so the clamp is
     defensive against a future schema change).
     """
+    if body.never_expires:
+        return None
     if body.expires_at_days is not None:
         days = body.expires_at_days
     elif body.delegate:

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { KeyRound, X, Copy, Check } from "lucide-react";
+import { getActiveWorkspaceSlug } from "@/lib/api";
 import type { ApiTokenCreated } from "@/types/api";
 
 // §03 "Save this token now" ceremony. The only moment the plaintext
@@ -29,13 +30,18 @@ export default function TokenRevealPanel({
     }
   }
 
-  // Built-in suggestion so the user can paste the secret into a
-  // working request in the next breath. Workspace tokens hit the
-  // workspace-scoped surface; personal tokens hit `/me/...`.
-  const curl =
+  const origin =
+    typeof window === "undefined" ? "https://app.crew.day" : window.location.origin;
+  const workspaceSlug = getActiveWorkspaceSlug() ?? "<workspace>";
+  const examplePath =
     kind === "personal"
-      ? `curl -H "Authorization: Bearer ${created.token}" https://app.crew.day/api/v1/me`
-      : `curl -H "Authorization: Bearer ${created.token}" https://app.crew.day/w/<slug>/api/v1/...`;
+      ? `/w/${workspaceSlug}/api/v1/me/schedule`
+      : `/w/${workspaceSlug}/api/v1/tasks?limit=1`;
+  const curl = [
+    "curl \\",
+    `  -H "Authorization: Bearer ${created.token}" \\`,
+    `  "${origin}${examplePath}"`,
+  ].join("\n");
 
   return (
     <section className="tokens-reveal" role="status" aria-live="polite">
@@ -54,9 +60,9 @@ export default function TokenRevealPanel({
           type="button"
           className="btn btn--ghost btn--sm tokens-reveal__dismiss"
           onClick={onDismiss}
-          aria-label="Dismiss"
+          aria-label="Close"
         >
-          <X size={14} strokeWidth={2} /> Dismiss
+          <X size={14} strokeWidth={2} /> Close
         </button>
       </header>
 

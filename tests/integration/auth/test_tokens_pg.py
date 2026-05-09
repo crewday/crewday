@@ -377,6 +377,28 @@ class TestTokensHttpFlow:
         with session_factory() as s, pytest.raises(TokenRevoked):
             verify_token(s, token=body["token"])
 
+    def test_mint_can_store_no_expiry(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+    ) -> None:
+        r = client.post(
+            "/api/v1/auth/tokens",
+            json={
+                "label": "batch-import",
+                "scopes": {"tasks:read": True},
+                "never_expires": True,
+            },
+        )
+        assert r.status_code == 201, r.text
+        body = r.json()
+        assert body["expires_at"] is None
+
+        with session_factory() as s, tenant_agnostic():
+            row = s.get(ApiToken, body["key_id"])
+            assert row is not None
+            assert row.expires_at is None
+
     def test_revoke_unknown_token_is_404(self, client: TestClient) -> None:
         r = client.delete("/api/v1/auth/tokens/01HWA00000000000000000NOPE")
         assert r.status_code == 404

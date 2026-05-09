@@ -347,6 +347,37 @@ class TestMeTokensHttpFlow:
         assert rows2[0]["key_id"] == key_id
         assert rows2[0]["revoked_at"] is not None
 
+    def test_mint_can_store_no_expiry(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        seed_user: str,
+    ) -> None:
+        cookie_value = _issue_session(
+            session_factory, user_id=seed_user, settings=settings
+        )
+        client.cookies.set(SESSION_COOKIE_NAME, cookie_value)
+
+        r = client.post(
+            "/api/v1/me/tokens",
+            json={
+                "label": "kitchen-printer",
+                "scopes": {"me.tasks:read": True},
+                "never_expires": True,
+            },
+        )
+        assert r.status_code == 201, r.text
+        body = r.json()
+        assert body["expires_at"] is None
+
+        with session_factory() as s, tenant_agnostic():
+            row = s.get(ApiToken, body["key_id"])
+            assert row is not None
+            assert row.kind == "personal"
+            assert row.subject_user_id == seed_user
+            assert row.expires_at is None
+
     def test_empty_scopes_is_422_scopes_required(
         self,
         client: TestClient,

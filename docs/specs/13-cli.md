@@ -222,7 +222,7 @@ crewday auth
   login                       # writes/updates a profile
   whoami
   tokens list
-  tokens create --name --scopes --expires
+  tokens create --name --scopes --expires [--never-expires]
   tokens revoke <id>
   tokens rotate <id>
 

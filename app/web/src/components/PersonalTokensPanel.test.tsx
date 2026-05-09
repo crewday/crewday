@@ -115,7 +115,7 @@ describe("PersonalTokensPanel", () => {
 
       fireEvent.click(screen.getByRole("button", { name: /New token/ }));
 
-      const nameInput = screen.getByLabelText("Name") as HTMLInputElement;
+      const nameInput = screen.getByLabelText(/Name/) as HTMLInputElement;
       fireEvent.change(nameInput, { target: { value: "kitchen-printer" } });
 
       // The default scope (me.tasks:read) is preselected; submit.
@@ -124,6 +124,8 @@ describe("PersonalTokensPanel", () => {
       // The reveal panel surfaces the plaintext exactly once.
       await screen.findByText("Save this token now");
       expect(screen.getByText("mip_tok_99_secretpart")).toBeInTheDocument();
+      expect(screen.getByText(/\/w\/dev\/api\/v1\/me\/schedule/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
 
       const post = env.calls.find(
         (c) =>
@@ -136,6 +138,51 @@ describe("PersonalTokensPanel", () => {
         label: "kitchen-printer",
         scopes: { "me.tasks:read": true },
         expires_at_days: 90,
+      });
+    } finally {
+      env.restore();
+    }
+  });
+
+  it("can mint a PAT with every me:* scope and no expiry", async () => {
+    const env = installFetchRoutes(
+      {
+        "/api/v1/me/tokens": [
+          { body: [] },
+          { status: 201, body: created({ expires_at: null }) },
+          { body: [{ ...(token() as object), key_id: "tok_99", expires_at: null }] },
+        ],
+      },
+      { match: "endsWith" },
+    );
+    try {
+      render(<Harness />);
+      await screen.findByText("No personal tokens yet");
+
+      fireEvent.click(screen.getByRole("button", { name: /New token/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Add all scopes" }));
+      fireEvent.click(screen.getByRole("button", { name: "Never expires" }));
+      fireEvent.click(screen.getByRole("button", { name: "Create token" }));
+
+      await screen.findByText("Save this token now");
+
+      const post = env.calls.find(
+        (c) =>
+          c.url.endsWith("/api/v1/me/tokens") && c.init.method === "POST",
+      );
+      expect(post).toBeDefined();
+      const body = JSON.parse(String(post?.init.body));
+      expect(body).toEqual({
+        label: "my-script",
+        scopes: {
+          "me.tasks:read": true,
+          "me.bookings:read": true,
+          "me.expenses:read": true,
+          "me.expenses:write": true,
+          "me.profile:read": true,
+          "me.profile:write": true,
+        },
+        never_expires: true,
       });
     } finally {
       env.restore();
