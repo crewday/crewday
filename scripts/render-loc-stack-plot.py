@@ -40,32 +40,46 @@ LABEL_NAMES = {
     "scripts/": "Scripts",
     "site/": "Website",
     "tests/": "Tests",
+    "Other": "Other",
     "other": "Other",
 }
 
 
 PREFERRED_COLORS = {
-    ".py": "#356D9D",
-    ".tsx": "#2AA198",
-    ".ts": "#52A7E8",
-    ".css": "#C44E52",
-    ".html": "#D98C2B",
-    ".js": "#E3B341",
-    ".sh": "#6B8E23",
-    ".toml": "#7F62B3",
+    ".py": "#3F6E3B",
+    ".tsx": "#4F7CA8",
+    ".ts": "#78A7C8",
+    ".css": "#B04A27",
+    ".html": "#D9A441",
+    ".js": "#C28E2D",
+    ".sh": "#7A7442",
+    ".toml": "#7C5F8E",
     ".cfg": "#8C6D5A",
-    ".ini": "#9A879D",
-    ".po": "#B36B9E",
-    ".pot": "#D19AB7",
+    ".ini": "#A18B72",
+    ".po": "#A85E82",
+    ".pot": "#C982A0",
     ".mo": "#8E9AAF",
-    "": "#A0A6A8",
-    "App + website": "#356D9D",
-    "Tests": "#C44E52",
-    "Mocks": "#D98C2B",
-    "Supporting code": "#7F62B3",
-    "Other": "#D0D4D6",
-    "other": "#D0D4D6",
+    "": "#B5AD9F",
+    "App + website": "#3F6E3B",
+    "Tests": "#B04A27",
+    "Mocks": "#D9A441",
+    "Supporting code": "#4F7CA8",
+    "Other": "#D6CCB7",
+    "other": "#D6CCB7",
 }
+
+FALLBACK_COLORS = [
+    "#3F6E3B",
+    "#4F7CA8",
+    "#B04A27",
+    "#D9A441",
+    "#7C5F8E",
+    "#A18B72",
+    "#2AA198",
+    "#C982A0",
+    "#7A7442",
+    "#8E9AAF",
+]
 
 
 def strip_svg_trailing_whitespace(output_path: Path) -> None:
@@ -78,15 +92,21 @@ def strip_svg_trailing_whitespace(output_path: Path) -> None:
 
 
 def display_label(label: str) -> str:
-    return LABEL_NAMES.get(label, label.removeprefix(".").upper() or label)
+    if label in LABEL_NAMES:
+        return LABEL_NAMES[label]
+    if label.startswith("."):
+        return label.removeprefix(".").upper()
+    return label
 
 
 def series_colors(labels: list[str]) -> list[str]:
-    generated = iter(generate_n_colors(len(labels)))
     colors = []
-    for label in labels:
+    generated = iter(generate_n_colors(len(labels)))
+    for index, label in enumerate(labels):
         if label in PREFERRED_COLORS:
             colors.append(PREFERRED_COLORS[label])
+        elif index < len(FALLBACK_COLORS):
+            colors.append(FALLBACK_COLORS[index])
         else:
             colors.append(next(generated))
     return colors
@@ -176,35 +196,51 @@ def render_stack_plot(
 
     ts = [dateutil.parser.parse(t) for t in data["ts"]]
     colors = series_colors(labels)
+    displayed_labels = [display_label(label) for label in labels]
 
     pyplot.style.use("default")
-    figure, axis = pyplot.subplots(figsize=(13, 7), dpi=144, layout="constrained")
+    figure, axis = pyplot.subplots(figsize=(12, 6.4), dpi=144, layout="constrained")
     axis.stackplot(
         ts,
         numpy.array(y),
-        labels=[display_label(label) for label in labels],
+        labels=displayed_labels,
         colors=colors,
-        linewidth=0.25,
-        edgecolor="#ffffff",
-        alpha=0.95,
+        linewidth=0.45,
+        edgecolor="#FFFCF5",
+        alpha=0.96,
     )
-    axis.legend(
-        loc="center left",
-        bbox_to_anchor=(1.01, 0.5),
-        frameon=False,
-        fontsize=9,
+    legend_columns = 2 if len(displayed_labels) > 6 else 1
+    legend = axis.legend(
+        loc="upper left",
+        bbox_to_anchor=(0.012, 0.988),
+        borderaxespad=0,
+        frameon=True,
+        fancybox=True,
+        framealpha=0.92,
+        edgecolor="#D6CCB7",
+        facecolor="#FFFCF5",
+        fontsize=8.6,
         title=legend_title,
-        title_fontsize=10,
+        title_fontsize=9.5,
+        labelspacing=0.42,
+        handlelength=1.45,
+        handletextpad=0.55,
+        borderpad=0.72,
+        columnspacing=1.0,
+        ncols=legend_columns,
     )
-    axis.set_title(title, loc="left", pad=14, fontsize=18)
+    legend.get_title().set_color("#524A3E")
+    for text in legend.get_texts():
+        text.set_color("#524A3E")
+    axis.set_title(title, loc="left", pad=13, fontsize=18, color="#1F1A14", weight=600)
     axis.set_xlabel("")
-    axis.grid(axis="y", color="#D7DEE2", linewidth=0.8)
+    axis.grid(axis="y", color="#E7E0D1", linewidth=0.9)
     axis.grid(axis="x", visible=False)
-    axis.set_facecolor("#F8FAF9")
-    figure.patch.set_facecolor("#FFFFFF")
+    axis.set_facecolor("#FAF7F2")
+    figure.patch.set_facecolor("#FAF7F2")
     axis.spines[["top", "right", "left"]].set_visible(False)
-    axis.spines["bottom"].set_color("#B8C1C7")
-    axis.tick_params(axis="both", colors="#52616A", labelsize=9, length=0)
+    axis.spines["bottom"].set_color("#D6CCB7")
+    axis.tick_params(axis="both", colors="#524A3E", labelsize=9, length=0, pad=7)
     axis.xaxis.set_major_locator(dates.AutoDateLocator(minticks=4, maxticks=8))
     span_days = (max(ts) - min(ts)).days if ts else 0
     if span_days > 730:
@@ -221,9 +257,11 @@ def render_stack_plot(
     else:
         axis.set_ylabel("Lines of code")
         axis.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
-    axis.yaxis.label.set_color("#34434B")
+        axis.margins(y=0.04)
+    axis.yaxis.label.set_color("#524A3E")
+    axis.yaxis.labelpad = 10
     figure.savefig(
-        output_path, bbox_inches="tight", pad_inches=0.18, metadata={"Date": None}
+        output_path, bbox_inches="tight", pad_inches=0.12, metadata={"Date": None}
     )
     pyplot.close(figure)
     strip_svg_trailing_whitespace(output_path)
