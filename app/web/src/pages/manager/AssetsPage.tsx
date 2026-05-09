@@ -233,6 +233,13 @@ function NewAssetButton({
     : !hasProperties
       ? "Add a property before creating an asset."
       : null;
+  const formErrorId = formError ? "asset-create-error" : undefined;
+  const nameInvalid = formError === "Enter an asset name before creating the asset.";
+  const propertyInvalid = formError === "Choose a property for this asset.";
+  const currencyInvalid = formError === "Use a three-letter currency code, such as USD.";
+  const priceInvalid =
+    formError === "Purchase price must be zero or more with up to two decimal places.";
+  const lifespanInvalid = formError === "Expected lifespan must be at least one year.";
 
   return (
     <>
@@ -247,7 +254,7 @@ function NewAssetButton({
       </button>
 
       <dialog
-        className="modal modal--sheet"
+        className="modal modal--sheet asset-create-dialog"
         ref={dialogRef}
         aria-labelledby="new-asset-title"
         onCancel={(event) => {
@@ -255,214 +262,270 @@ function NewAssetButton({
         }}
         onClose={reset}
       >
-        <form className="modal__body form" onSubmit={submit} noValidate>
-          <h3 id="new-asset-title" className="modal__title">New asset</h3>
-          <p className="modal__sub">
-            Track equipment identity, location, purchase details, and guest visibility.
-          </p>
-
-          <label className="field">
-            <span>Name</span>
-            <input
-              autoFocus
-              required
-              value={name}
-              onChange={(event) => {
-                setName(event.target.value);
-                setFormError(null);
-              }}
-              placeholder="e.g. Kitchen fridge"
-            />
-          </label>
-
-          <label className="field">
-            <span>Property</span>
-            <select
-              required
-              value={propertyId}
-              onChange={(event) => {
-                setPropertyId(event.target.value);
-                setAreaId("");
-                setFormError(null);
-              }}
+        <form className="asset-create" onSubmit={submit} noValidate>
+          <header className="asset-create__head">
+            <div>
+              <p className="asset-create__eyebrow">Asset record</p>
+              <h3 id="new-asset-title" className="asset-create__title">New asset</h3>
+              <p className="asset-create__sub">
+                Track equipment identity, location, purchase details, and guest visibility.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="asset-create__close"
+              disabled={create.isPending}
+              onClick={() => dialogRef.current?.close()}
+              aria-label="Close"
             >
-              <option value="">Choose property</option>
-              {properties?.map((property) => (
-                <option key={property.id} value={property.id}>{property.name}</option>
-              ))}
-            </select>
-          </label>
+              ×
+            </button>
+          </header>
 
-          <label className="field">
-            <span>Area</span>
-            <select
-              value={areaId}
-              disabled={!propertyId || areasQ.isPending || areasQ.isError}
-              onChange={(event) => {
-                setAreaId(event.target.value);
-                setFormError(null);
-              }}
-            >
-              <option value="">No area</option>
-              {areasQ.data?.map((area) => (
-                <option key={area.id} value={area.id}>{area.name}</option>
-              ))}
-            </select>
-          </label>
+          <div className="asset-create__body">
+            <section className="asset-create__section" aria-labelledby="asset-create-basics">
+              <h4 id="asset-create-basics" className="asset-create__section-title">
+                Basics and location
+              </h4>
+              <label className="field asset-create__field">
+                <span>Name</span>
+                <input
+                  autoFocus
+                  required
+                  aria-invalid={nameInvalid}
+                  aria-describedby={nameInvalid ? formErrorId : undefined}
+                  value={name}
+                  onChange={(event) => {
+                    setName(event.target.value);
+                    setFormError(null);
+                  }}
+                  placeholder="e.g. Kitchen fridge"
+                />
+              </label>
+              <div className="asset-create__grid">
+                <label className="field asset-create__field">
+                  <span>Property</span>
+                  <select
+                    required
+                    aria-invalid={propertyInvalid}
+                    aria-describedby={propertyInvalid ? formErrorId : undefined}
+                    value={propertyId}
+                    onChange={(event) => {
+                      setPropertyId(event.target.value);
+                      setAreaId("");
+                      setFormError(null);
+                    }}
+                  >
+                    <option value="">Choose property</option>
+                    {properties?.map((property) => (
+                      <option key={property.id} value={property.id}>{property.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field asset-create__field">
+                  <span>Area</span>
+                  <select
+                    value={areaId}
+                    disabled={!propertyId || areasQ.isPending || areasQ.isError}
+                    onChange={(event) => {
+                      setAreaId(event.target.value);
+                      setFormError(null);
+                    }}
+                  >
+                    <option value="">No area</option>
+                    {areasQ.data?.map((area) => (
+                      <option key={area.id} value={area.id}>{area.name}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="asset-create__grid">
+                <label className="field asset-create__field">
+                  <span>Type</span>
+                  <select
+                    value={assetTypeId}
+                    onChange={(event) => {
+                      setAssetTypeId(event.target.value);
+                      setFormError(null);
+                    }}
+                  >
+                    <option value="">Uncategorized</option>
+                    {assetTypes?.map((assetType) => (
+                      <option key={assetType.id} value={assetType.id}>{assetType.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field asset-create__field">
+                  <span>Condition</span>
+                  <select
+                    value={condition}
+                    onChange={(event) => setCondition(event.target.value as AssetCondition)}
+                  >
+                    {ASSET_CONDITIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </section>
 
-          <label className="field">
-            <span>Type</span>
-            <select
-              value={assetTypeId}
-              onChange={(event) => {
-                setAssetTypeId(event.target.value);
-                setFormError(null);
-              }}
-            >
-              <option value="">Uncategorized</option>
-              {assetTypes?.map((assetType) => (
-                <option key={assetType.id} value={assetType.id}>{assetType.name}</option>
-              ))}
-            </select>
-          </label>
+            <section className="asset-create__section" aria-labelledby="asset-create-identity">
+              <h4 id="asset-create-identity" className="asset-create__section-title">
+                Identity
+              </h4>
+              <div className="asset-create__grid">
+                <label className="field asset-create__field">
+                  <span>Make</span>
+                  <input value={make} onChange={(event) => setMake(event.target.value)} />
+                </label>
+                <label className="field asset-create__field">
+                  <span>Model</span>
+                  <input value={model} onChange={(event) => setModel(event.target.value)} />
+                </label>
+              </div>
+              <div className="asset-create__grid">
+                <label className="field asset-create__field">
+                  <span>Serial number</span>
+                  <input
+                    value={serialNumber}
+                    onChange={(event) => setSerialNumber(event.target.value)}
+                  />
+                </label>
+                <label className="field asset-create__field">
+                  <span>Status</span>
+                  <select
+                    value={status}
+                    onChange={(event) => setStatus(event.target.value as AssetStatus)}
+                  >
+                    {ASSET_STATUSES.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </section>
 
-          <label className="field">
-            <span>Condition</span>
-            <select
-              value={condition}
-              onChange={(event) => setCondition(event.target.value as AssetCondition)}
-            >
-              {ASSET_CONDITIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
+            <section className="asset-create__section" aria-labelledby="asset-create-purchase">
+              <h4 id="asset-create-purchase" className="asset-create__section-title">
+                Purchase and warranty
+              </h4>
+              <div className="asset-create__grid">
+                <label className="field asset-create__field">
+                  <span>Installed on</span>
+                  <input
+                    type="date"
+                    value={installedOn}
+                    onChange={(event) => setInstalledOn(event.target.value)}
+                  />
+                </label>
+                <label className="field asset-create__field">
+                  <span>Purchased on</span>
+                  <input
+                    type="date"
+                    value={purchasedOn}
+                    onChange={(event) => setPurchasedOn(event.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="asset-create__grid">
+                <label className="field asset-create__field">
+                  <span>Purchase price</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    aria-invalid={priceInvalid}
+                    aria-describedby={priceInvalid ? formErrorId : undefined}
+                    value={purchasePrice}
+                    onChange={(event) => setPurchasePrice(event.target.value)}
+                    placeholder="0.00"
+                  />
+                </label>
+                <label className="field asset-create__field">
+                  <span>Currency</span>
+                  <input
+                    aria-invalid={currencyInvalid}
+                    aria-describedby={currencyInvalid ? formErrorId : undefined}
+                    value={purchaseCurrency}
+                    onChange={(event) => setPurchaseCurrency(event.target.value)}
+                    placeholder="USD"
+                    maxLength={3}
+                  />
+                </label>
+              </div>
+              <div className="asset-create__grid">
+                <label className="field asset-create__field">
+                  <span>Vendor</span>
+                  <input
+                    value={purchaseVendor}
+                    onChange={(event) => setPurchaseVendor(event.target.value)}
+                  />
+                </label>
+                <label className="field asset-create__field">
+                  <span>Warranty expires</span>
+                  <input
+                    type="date"
+                    value={warrantyExpiresOn}
+                    onChange={(event) => setWarrantyExpiresOn(event.target.value)}
+                  />
+                </label>
+              </div>
+              <label className="field asset-create__field asset-create__field--short">
+                <span>Expected lifespan years</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  aria-invalid={lifespanInvalid}
+                  aria-describedby={lifespanInvalid ? formErrorId : undefined}
+                  value={expectedLifespanYears}
+                  onChange={(event) => setExpectedLifespanYears(event.target.value)}
+                />
+              </label>
+            </section>
 
-          <label className="field">
-            <span>Status</span>
-            <select
-              value={status}
-              onChange={(event) => setStatus(event.target.value as AssetStatus)}
-            >
-              {ASSET_STATUSES.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
+            <section className="asset-create__section" aria-labelledby="asset-create-guest">
+              <h4 id="asset-create-guest" className="asset-create__section-title">
+                Guest visibility
+              </h4>
+              <Checkbox
+                className="asset-create__checkbox"
+                label="Visible to guests"
+                checked={guestVisible}
+                onChange={(event) => setGuestVisible(event.target.checked)}
+              />
+              <label className="field asset-create__field">
+                <span>Guest instructions</span>
+                <textarea
+                  value={guestInstructions}
+                  onChange={(event) => setGuestInstructions(event.target.value)}
+                />
+              </label>
+            </section>
 
-          <label className="field">
-            <span>Make</span>
-            <input value={make} onChange={(event) => setMake(event.target.value)} />
-          </label>
+            <section className="asset-create__section" aria-labelledby="asset-create-notes">
+              <h4 id="asset-create-notes" className="asset-create__section-title">
+                Notes
+              </h4>
+              <label className="field asset-create__field">
+                <span>Internal notes</span>
+                <textarea value={notes} onChange={(event) => setNotes(event.target.value)} />
+              </label>
+            </section>
 
-          <label className="field">
-            <span>Model</span>
-            <input value={model} onChange={(event) => setModel(event.target.value)} />
-          </label>
+            {areasQ.isError && (
+              <p className="form-notice form-notice--error" role="alert">
+                Areas could not load. You can save the asset without an area.
+              </p>
+            )}
+            {formError && (
+              <p id="asset-create-error" className="form-error" role="alert">
+                {formError}
+              </p>
+            )}
+          </div>
 
-          <label className="field">
-            <span>Serial number</span>
-            <input
-              value={serialNumber}
-              onChange={(event) => setSerialNumber(event.target.value)}
-            />
-          </label>
-
-          <label className="field">
-            <span>Installed on</span>
-            <input
-              type="date"
-              value={installedOn}
-              onChange={(event) => setInstalledOn(event.target.value)}
-            />
-          </label>
-
-          <label className="field">
-            <span>Purchased on</span>
-            <input
-              type="date"
-              value={purchasedOn}
-              onChange={(event) => setPurchasedOn(event.target.value)}
-            />
-          </label>
-
-          <label className="field">
-            <span>Purchase price</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={purchasePrice}
-              onChange={(event) => setPurchasePrice(event.target.value)}
-              placeholder="0.00"
-            />
-          </label>
-
-          <label className="field">
-            <span>Currency</span>
-            <input
-              value={purchaseCurrency}
-              onChange={(event) => setPurchaseCurrency(event.target.value)}
-              placeholder="USD"
-              maxLength={3}
-            />
-          </label>
-
-          <label className="field">
-            <span>Vendor</span>
-            <input
-              value={purchaseVendor}
-              onChange={(event) => setPurchaseVendor(event.target.value)}
-            />
-          </label>
-
-          <label className="field">
-            <span>Warranty expires</span>
-            <input
-              type="date"
-              value={warrantyExpiresOn}
-              onChange={(event) => setWarrantyExpiresOn(event.target.value)}
-            />
-          </label>
-
-          <label className="field">
-            <span>Expected lifespan years</span>
-            <input
-              type="number"
-              min="1"
-              step="1"
-              value={expectedLifespanYears}
-              onChange={(event) => setExpectedLifespanYears(event.target.value)}
-            />
-          </label>
-
-          <Checkbox
-            label="Visible to guests"
-            checked={guestVisible}
-            onChange={(event) => setGuestVisible(event.target.checked)}
-          />
-
-          <label className="field">
-            <span>Guest instructions</span>
-            <textarea
-              value={guestInstructions}
-              onChange={(event) => setGuestInstructions(event.target.value)}
-            />
-          </label>
-
-          <label className="field">
-            <span>Internal notes</span>
-            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} />
-          </label>
-
-          {areasQ.isError && (
-            <p className="form-notice form-notice--error" role="alert">
-              Areas could not load. You can save the asset without an area.
-            </p>
-          )}
-          {formError && <p className="form-error" role="alert">{formError}</p>}
-
-          <div className="modal__actions">
+          <footer className="asset-create__footer">
             <button
               type="button"
               className="btn btn--ghost"
@@ -478,7 +541,7 @@ function NewAssetButton({
             >
               {create.isPending ? "Creating..." : "Create asset"}
             </button>
-          </div>
+          </footer>
         </form>
       </dialog>
     </>

@@ -16,6 +16,7 @@ import * as preferences from "@/lib/preferences";
 import type { Property } from "@/types/api";
 import InventoryPage from "./InventoryPage";
 import appSource from "../../App.tsx?raw";
+import inventoryCss from "@/styles/inventory.css?raw";
 import { installFetchRouteHandlers } from "@/test/helpers";
 
 const PROPERTIES: Property[] = [
@@ -363,6 +364,12 @@ describe("<InventoryPage>", () => {
     } finally {
       fake.restore();
     }
+  });
+
+  it("keeps new item controls on the design-system radius", () => {
+    expect(inventoryCss).toMatch(
+      /\.inv-create__field input,\n\.inv-create__field select \{[^}]*border-radius: 6px;/,
+    );
   });
 
   it("shows client validation near the new item form", async () => {

@@ -9,6 +9,7 @@ import * as preferences from "@/lib/preferences";
 import type { Asset, AssetType, Property } from "@/types/api";
 import AssetsPage from "./AssetsPage";
 import appSource from "../../App.tsx?raw";
+import managerPanelsCss from "@/styles/manager-panels.css?raw";
 import { jsonResponse } from "@/test/helpers";
 
 const originalShowModal = HTMLDialogElement.prototype.showModal;
@@ -317,38 +318,91 @@ describe("<AssetsPage>", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "+ New asset" }));
       const dialog = screen.getByRole("dialog", { name: "New asset" });
+      expect(dialog).toHaveClass("asset-create-dialog");
+      expect(
+        within(dialog).getByRole("heading", { name: "Basics and location" }),
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).getByRole("heading", { name: "Identity" }),
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).getByRole("heading", { name: "Purchase and warranty" }),
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).getByRole("heading", { name: "Guest visibility" }),
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).getByRole("heading", { name: "Notes" }),
+      ).toBeInTheDocument();
+      expect(dialog.querySelectorAll(".asset-create__grid")).toHaveLength(7);
+      expect(
+        within(dialog).getByLabelText("Make").closest(".asset-create__grid"),
+      ).toBe(
+        within(dialog)
+          .getByLabelText("Model")
+          .closest(".asset-create__grid"),
+      );
+      expect(
+        within(dialog)
+          .getByLabelText("Purchase price")
+          .closest(".asset-create__grid"),
+      ).toBe(
+        within(dialog)
+          .getByLabelText("Currency")
+          .closest(".asset-create__grid"),
+      );
+      expect(
+        within(dialog)
+          .getByRole("button", { name: "Create asset" })
+          .closest(".asset-create__footer"),
+      ).toBeInTheDocument();
       fireEvent.click(within(dialog).getByRole("button", { name: "Create asset" }));
 
+      const name = within(dialog).getByLabelText("Name");
       expect(await within(dialog).findByRole("alert")).toHaveTextContent(
         "Enter an asset name",
       );
+      expect(name).toHaveAttribute("aria-invalid", "true");
+      expect(name).toHaveAccessibleDescription(
+        "Enter an asset name before creating the asset.",
+      );
       expect(requests.some((request) => request.method === "POST")).toBe(false);
 
-      fireEvent.change(within(dialog).getByLabelText("Name"), {
+      fireEvent.change(name, {
         target: { value: "Back patio grill" },
       });
-      fireEvent.change(within(dialog).getByLabelText("Purchase price"), {
+      const purchasePrice = within(dialog).getByLabelText("Purchase price");
+      fireEvent.change(purchasePrice, {
         target: { value: "12.345" },
       });
       fireEvent.click(within(dialog).getByRole("button", { name: "Create asset" }));
       expect(await within(dialog).findByRole("alert")).toHaveTextContent(
         "up to two decimal places",
       );
+      expect(purchasePrice).toHaveAttribute("aria-invalid", "true");
+      expect(purchasePrice).toHaveAccessibleDescription(
+        "Purchase price must be zero or more with up to two decimal places.",
+      );
       expect(requests.some((request) => request.method === "POST")).toBe(false);
 
-      fireEvent.change(within(dialog).getByLabelText("Purchase price"), {
+      fireEvent.change(purchasePrice, {
         target: { value: "12.34" },
       });
-      fireEvent.change(within(dialog).getByLabelText("Expected lifespan years"), {
+      const expectedLifespan = within(dialog).getByLabelText("Expected lifespan years");
+      fireEvent.change(expectedLifespan, {
         target: { value: "1.5" },
       });
       fireEvent.click(within(dialog).getByRole("button", { name: "Create asset" }));
       expect(await within(dialog).findByRole("alert")).toHaveTextContent(
         "Expected lifespan must be at least one year",
       );
+      expect(expectedLifespan).toHaveAttribute("aria-invalid", "true");
+      expect(expectedLifespan).toHaveAccessibleDescription(
+        "Expected lifespan must be at least one year.",
+      );
       expect(requests.some((request) => request.method === "POST")).toBe(false);
 
-      fireEvent.change(within(dialog).getByLabelText("Expected lifespan years"), {
+      fireEvent.change(expectedLifespan, {
         target: { value: "2" },
       });
       await within(dialog).findByRole("option", { name: "Entry" });
@@ -358,7 +412,7 @@ describe("<AssetsPage>", () => {
       fireEvent.change(within(dialog).getByLabelText("Type"), {
         target: { value: "type_pump" },
       });
-      fireEvent.change(within(dialog).getByLabelText("Purchase price"), {
+      fireEvent.change(purchasePrice, {
         target: { value: "12.34" },
       });
       fireEvent.change(within(dialog).getByLabelText("Currency"), {
@@ -436,5 +490,18 @@ describe("<AssetsPage>", () => {
     } finally {
       restore();
     }
+  });
+
+  it("styles the new asset form with responsive grids and design-system control radius", () => {
+    expect(managerPanelsCss).toContain(".asset-create__grid");
+    expect(managerPanelsCss).toMatch(
+      /\.asset-create__field input,\n\.asset-create__field select,\n\.asset-create__field textarea \{[^}]*border-radius: 6px;/,
+    );
+    expect(managerPanelsCss).toMatch(
+      /\.asset-create__field input\[aria-invalid="true"\],[\s\S]*border-color: var\(--rust\);/,
+    );
+    expect(managerPanelsCss).toMatch(
+      /@media \(max-width: 560px\) \{[\s\S]*\.asset-create__grid \{\n    grid-template-columns: 1fr;/,
+    );
   });
 });
