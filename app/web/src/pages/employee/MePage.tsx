@@ -100,6 +100,10 @@ export default function MePage() {
           </button>
           <div>
             <h2 className="profile-card__name">{employee.name}</h2>
+            <p className="profile-card__intro">
+              Your personal profile and preferences. Workspace-wide defaults are managed
+              separately.
+            </p>
             <div className="profile-card__roles">
               {employee.roles.map((r) => (
                 <Chip key={r} tone="ghost" size="sm">{r}</Chip>

@@ -168,7 +168,8 @@ describe("<ManagerLayout> permission-resolved navigation", () => {
         expect(screen.getByRole("link", { name: /Permissions/i })).toBeInTheDocument();
         expect(screen.getByRole("link", { name: /Audit log/i })).toBeInTheDocument();
         expect(screen.getByRole("link", { name: /API tokens/i })).toBeInTheDocument();
-        expect(screen.getByRole("link", { name: /Settings/i })).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "My profile" })).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Workspace settings" })).toBeInTheDocument();
       },
       { timeout: 3000 },
     );

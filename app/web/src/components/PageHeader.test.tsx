@@ -110,7 +110,7 @@ describe("PageHeader NavHistory back", () => {
   it("uses the route parent link when there is no previous different path", () => {
     render(renderRoutes("/history?tab=expenses"));
 
-    const backLink = screen.getByRole("link", { name: "Back to Me" });
+    const backLink = screen.getByRole("link", { name: "Back to My profile" });
 
     expect(backLink).toHaveAttribute("href", "/me");
     expect(screen.getByTestId("can-go-back")).toHaveTextContent("no");

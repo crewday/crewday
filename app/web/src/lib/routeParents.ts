@@ -18,8 +18,8 @@ const RULES: Array<{ prefix: string; parent: ParentDescriptor }> = [
   { prefix: "/task/", parent: { to: "/today", label: "Today" } },
   { prefix: "/asset/scan", parent: { to: "/today", label: "Today" } },
   { prefix: "/asset/", parent: { to: "/assets", label: "Assets" } },
-  { prefix: "/issues/new", parent: { to: "/me", label: "Me" } },
-  { prefix: "/history", parent: { to: "/me", label: "Me" } },
+  { prefix: "/issues/new", parent: { to: "/me", label: "My profile" } },
+  { prefix: "/history", parent: { to: "/me", label: "My profile" } },
   // Manager / admin detail surfaces
   { prefix: "/property/", parent: { to: "/properties", label: "Properties" } },
   { prefix: "/user/", parent: { to: "/users", label: "Users" } },

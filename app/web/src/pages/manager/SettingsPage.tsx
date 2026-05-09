@@ -4,7 +4,6 @@ import { Link } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
-import AgentApprovalModePanel from "@/components/AgentApprovalModePanel";
 import AgentPreferencesPanel from "@/components/AgentPreferencesPanel";
 import { Chip, Loading, ProgressBar } from "@/components/common";
 import type {
@@ -246,7 +245,12 @@ export default function SettingsPage() {
     queryKey: qk.workspaceUsage(),
     queryFn: () => fetchJson<WorkspaceUsage>("/api/v1/workspace/usage"),
   });
-  const sub = "Workspace-wide configuration. Settings cascade from workspace to property to employee to task.";
+  const sub = (
+    <>
+      Workspace-wide configuration only. Personal profile, approval mode, and private agent
+      preferences live under <Link to="/me" className="link">My profile</Link>.
+    </>
+  );
 
   if (
     settingsQ.isPending ||
@@ -255,10 +259,10 @@ export default function SettingsPage() {
     empsQ.isPending ||
     usageQ.isPending
   ) {
-    return <DeskPage title="Settings" sub={sub}><Loading /></DeskPage>;
+    return <DeskPage title="Workspace settings" sub={sub}><Loading /></DeskPage>;
   }
   if (!settingsQ.data || !catalogQ.data || !propsQ.data || !empsQ.data || !usageQ.data) {
-    return <DeskPage title="Settings" sub={sub}>Failed to load.</DeskPage>;
+    return <DeskPage title="Workspace settings" sub={sub}>Failed to load.</DeskPage>;
   }
 
   const ws = settingsQ.data;
@@ -266,10 +270,7 @@ export default function SettingsPage() {
   const grouped = groupByNamespace(ws.defaults, catalog);
 
   return (
-    <DeskPage title="Settings" sub={sub}>
-      {/* Personal (your account) — agent approval mode is a per-user setting (§11). */}
-      <AgentApprovalModePanel variant="desktop" />
-
+    <DeskPage title="Workspace settings" sub={sub}>
       {/* §11 — Agent preferences (workspace layer). Soft guidance stacked
           into every composition-capability system prompt. */}
       <AgentPreferencesPanel
@@ -277,15 +278,6 @@ export default function SettingsPage() {
         title="Agent preferences — Workspace"
         subtitle="Stacked broadest-first with property and user preferences into every agent turn. CLAUDE.md-style free-form guidance; not a substitute for the structured settings cascade below."
       />
-
-      {/* Your personal layer also lives on this page for managers — workers
-          reach their own blob from the phone '/me' screen. */}
-      <AgentPreferencesPanel
-        scope="user"
-        title="Agent preferences — You"
-        subtitle="Private to you. Nobody else — not even an owner — can read or edit this text. Your chat agent sees it on every turn."
-      />
-
 
       {/* Workspace identity */}
       <section className="panel">

@@ -67,7 +67,7 @@ const BASE_NAV_ITEMS: SideNavItem[] = [
   { type: "link", to: "/today", matchPrefix: ["/today", "/task/"], label: "My Day", phoneHidden: true, icon: NAV_ICON(Sunrise) },
   { type: "link", to: "/schedule", label: "My Schedule", phoneHidden: true, icon: NAV_ICON(CalendarClock) },
   { type: "link", to: "/my/expenses", matchPrefix: "/my/expenses", label: "My Expenses", phoneHidden: true, icon: NAV_ICON(Euro) },
-  { type: "link", to: "/me", matchPrefix: ["/me", "/history"], label: "Me", phoneHidden: true, icon: NAV_ICON(UserCircle) },
+  { type: "link", to: "/me", matchPrefix: ["/me", "/history"], label: "My profile", phoneHidden: true, icon: NAV_ICON(UserCircle) },
   { type: "section", label: "OPERATE" },
   { type: "link", to: "/dashboard", label: "Dashboard", icon: NAV_ICON(LayoutDashboard) },
   { type: "link", to: "/properties", matchPrefix: "/propert", label: "Properties", icon: NAV_ICON(Home) },
@@ -93,7 +93,7 @@ const BASE_NAV_ITEMS: SideNavItem[] = [
   { type: "link", to: "/audit", label: "Audit log", icon: NAV_ICON(ScrollText) },
   { type: "link", to: "/webhooks", label: "Webhooks", icon: NAV_ICON(Webhook) },
   { type: "link", to: "/tokens", label: "API tokens", icon: NAV_ICON(KeyRound) },
-  { type: "link", to: "/settings", label: "Settings", icon: NAV_ICON(Settings) },
+  { type: "link", to: "/settings", label: "Workspace settings", icon: NAV_ICON(Settings) },
 ];
 
 // §14 "Administration link" — rendered only when the caller holds any

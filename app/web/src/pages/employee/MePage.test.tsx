@@ -138,6 +138,16 @@ function mePayload(): unknown {
 }
 
 describe("MePage", () => {
+  it("keeps user-owned settings on the personal profile page", async () => {
+    render(renderProfile());
+
+    expect(await screen.findByText("Mina Manager")).toBeInTheDocument();
+    expect(screen.getByText(/Your personal profile and preferences/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Appearance")).toBeInTheDocument();
+    expect(screen.getByLabelText("Agent approval mode")).toBeInTheDocument();
+    expect(screen.getByLabelText("My agent preferences")).toBeInTheDocument();
+  });
+
   it("navigates from the History profile card to History and browser back returns to Profile", async () => {
     render(renderProfile());
 
