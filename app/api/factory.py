@@ -675,7 +675,7 @@ def _mount_auth_routers(
     # alongside /auth/me because the switcher runs before a workspace
     # is picked.
     app.include_router(
-        me_module.build_me_workspaces_router(),
+        me_module.build_me_workspaces_router(capabilities=capabilities),
         prefix=bare_prefix,
     )
     # /me/tokens — identity-scoped personal-access-token CRUD (§03).

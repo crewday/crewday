@@ -764,6 +764,36 @@ GET    /api/v1/me/workspaces                     # cd-y5z3 — switcher payload 
                                                   # state). No PII in the payload —
                                                   # only workspace metadata + the
                                                   # caller's own role + last_seen_at.
+POST   /api/v1/me/workspaces                     # signed-in workspace creation
+                                                  # (§03 "Signed-in workspace
+                                                  # creation"). Requires a live
+                                                  # session cookie; PATs/delegated
+                                                  # tokens are not accepted on this
+                                                  # cookie-auth surface.
+                                                  #   Body: {slug: str, name: str}.
+                                                  #   The slug is normalized before
+                                                  #   validation by lowercasing and
+                                                  #   discarding characters outside
+                                                  #   `[a-z0-9-]`; `Villa Sud!`
+                                                  #   becomes `villasud`.
+                                                  #   201 {workspace_id,
+                                                  #       workspace_slug, redirect}
+                                                  #     where redirect is
+                                                  #     `/w/<workspace_slug>/today`.
+                                                  #   401 {"error":
+                                                  #       "session_required" |
+                                                  #       "session_invalid"}.
+                                                  #   422 {"error": "invalid_slug",
+                                                  #       "message": str} for still-
+                                                  #       invalid normalized slugs
+                                                  #       (too short, bad first/last
+                                                  #       char, consecutive hyphens).
+                                                  #   409 slug errors match
+                                                  #       /signup/start:
+                                                  #       slug_taken (+ suggestion),
+                                                  #       slug_reserved,
+                                                  #       slug_homoglyph_collision,
+                                                  #       slug_in_grace_period.
 
 # Self-service email change (§03 "Self-service email change", cd-601a).
 # Passkey session only; PATs / delegated / agent tokens are refused at

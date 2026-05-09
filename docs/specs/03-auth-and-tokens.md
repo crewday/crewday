@@ -248,6 +248,37 @@ at most **3 workspaces** lifetime on the SaaS deployment
 configurable by the SaaS operator; self-host operators override
 via env vars.
 
+### Signed-in workspace creation
+
+An authenticated user may create additional workspaces for the same
+account identity. This is separate from self-serve signup and from
+invite acceptance:
+
+- `POST /api/v1/me/workspaces` requires a live session cookie and
+  accepts `{slug, name}`. It does not send a magic link, start a
+  passkey ceremony, or insert a `users` row.
+- Slug handling is shared with signup. The client and server first
+  lowercase the entry and discard characters outside the current
+  slug alphabet (`a-z`, `0-9`, `-`); `Villa Sud!` therefore becomes
+  `villasud`. The normalized value is then validated against the
+  §02 regex, the no-consecutive-hyphen rule, reserved slugs, live
+  uniqueness, homoglyph collision guard, and slug-reservation grace
+  period.
+- On success the server creates the `workspace` row with the same
+  free-tier defaults, tight initial quota/ledger cap, workspace
+  settings defaults, system permission groups, owners membership,
+  manager role grant, `user_workspace` membership, asset catalog
+  seed, and bootstrap audit trail used by self-serve signup. The
+  existing user becomes the first owner/manager of the new
+  workspace.
+- The response carries `{workspace_id, workspace_slug, redirect}`;
+  `redirect` points to `/w/<workspace_slug>/today` so the SPA can
+  switch immediately.
+
+Invite acceptance remains the only join-existing-workspace flow. An
+invite link adds grants to the invited workspace after the
+click-to-accept card; it never routes through workspace creation.
+
 ### Additional users (invite → click-to-accept)
 
 Invitations are **click-to-accept**, uniformly — whether the

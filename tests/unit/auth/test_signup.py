@@ -67,7 +67,8 @@ from app.auth.webauthn import VerifiedRegistration
 from app.capabilities import Capabilities, DeploymentSettings, Features
 from app.config import Settings
 from app.domain.errors import CANONICAL_TYPE_BASE, DomainError
-from app.tenancy import InvalidSlug
+from app.tenancy import InvalidSlug, tenant_agnostic
+from app.tenancy.slug import normalise_slug
 
 _PINNED = datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)
 
@@ -523,6 +524,30 @@ class TestStartSignupHappy:
         assert len(mailer.sent) == 1
         assert mailer.sent[0].to == ["new@example.com"]
 
+    def test_slug_normalization_happens_before_length_validation(
+        self,
+        session: Session,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+        capabilities_enabled: Capabilities,
+    ) -> None:
+        signup.start_signup(
+            session,
+            email="longraw@example.com",
+            desired_slug="Villa" + "!" * 50 + "Sud",
+            ip="127.0.0.1",
+            mailer=mailer,
+            base_url="https://crew.day",
+            throttle=throttle,
+            capabilities=capabilities_enabled,
+            now=_PINNED,
+            settings=settings,
+        )
+
+        attempt = session.scalars(select(SignupAttempt)).one()
+        assert attempt.desired_slug == "villasud"
+
 
 class TestStartSignupGates:
     def test_signup_disabled_raises(
@@ -561,7 +586,7 @@ class TestStartSignupGates:
             signup.start_signup(
                 session,
                 email="x@example.com",
-                desired_slug="_invalid",
+                desired_slug="!!!",
                 ip="127.0.0.1",
                 mailer=mailer,
                 base_url="https://crew.day",
@@ -879,6 +904,25 @@ class TestRouterSlugTakenBody:
         body = r.json()
         assert body["error"] == "slug_taken"
         assert body["suggested_alternative"] == "villa-sud-2"
+
+    def test_signup_start_accepts_long_raw_slug_that_normalizes_valid(
+        self,
+        client: TestClient,
+        engine: Engine,
+    ) -> None:
+        r = client.post(
+            "/api/v1/signup/start",
+            json={
+                "email": "longraw@example.com",
+                "desired_slug": "Villa" + "!" * 50 + "Sud",
+            },
+        )
+        assert r.status_code == 202, r.text
+
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        with factory() as s:
+            attempt = s.scalars(select(SignupAttempt)).one()
+        assert attempt.desired_slug == "villasud"
 
 
 class TestStartSignupRetry:
@@ -1926,6 +1970,146 @@ class TestProvisionSeedsBudgetLedger:
         ).one()
         assert workspace.settings_json["workspace.default_country"] == "FR"
 
+
+class TestSignedInWorkspaceCreation:
+    def test_slug_normalization_discards_outside_slug_alphabet(self) -> None:
+        assert normalise_slug("Villa Sud!") == "villasud"
+        with pytest.raises(InvalidSlug):
+            normalise_slug("ab")
+        with pytest.raises(InvalidSlug):
+            normalise_slug("-villa")
+        with pytest.raises(InvalidSlug):
+            normalise_slug("villa--sud")
+
+    def test_existing_user_creates_workspace_without_duplicate_user(
+        self,
+        session: Session,
+        capabilities_enabled: Capabilities,
+    ) -> None:
+        user = User(
+            id="01HWAUSRADDWS000000000001",
+            email="owner@example.com",
+            email_lower="owner@example.com",
+            display_name="Owner One",
+            timezone="UTC",
+            created_at=_PINNED,
+        )
+        with tenant_agnostic():
+            session.add(user)
+            session.flush()
+
+        result = signup.create_additional_workspace(
+            session,
+            user=user,
+            slug="Villa Sud!",
+            name="Villa Sud",
+            capabilities=capabilities_enabled,
+            now=_PINNED,
+        )
+
+        assert result.user_id == user.id
+        assert result.slug == "villasud"
+        assert session.scalars(select(User)).all() == [user]
+
+        workspace = session.scalars(
+            select(Workspace).where(Workspace.id == result.workspace_id)
+        ).one()
+        assert workspace.slug == "villasud"
+        assert workspace.name == "Villa Sud"
+        assert workspace.quota_json["llm_budget_cents_30d"] == 50
+
+        memberships = session.scalars(
+            select(UserWorkspace).where(UserWorkspace.user_id == user.id)
+        ).all()
+        assert len(memberships) == 1
+        assert memberships[0].workspace_id == result.workspace_id
+
+        groups = session.scalars(
+            select(PermissionGroup).where(
+                PermissionGroup.workspace_id == result.workspace_id
+            )
+        ).all()
+        assert {group.slug for group in groups} == {
+            "owners",
+            "managers",
+            "all_workers",
+            "all_clients",
+        }
+        owners_group = next(group for group in groups if group.slug == "owners")
+        owner_members = session.scalars(
+            select(PermissionGroupMember).where(
+                PermissionGroupMember.group_id == owners_group.id
+            )
+        ).all()
+        assert [member.user_id for member in owner_members] == [user.id]
+        grants = session.scalars(
+            select(RoleGrant).where(RoleGrant.user_id == user.id)
+        ).all()
+        assert len(grants) == 1
+        assert grants[0].workspace_id == result.workspace_id
+        assert grants[0].grant_role == "manager"
+        assert session.scalars(select(PasskeyCredential)).all() == []
+        assert session.scalars(
+            select(BudgetLedger).where(BudgetLedger.workspace_id == result.workspace_id)
+        ).one()
+        assert session.scalars(
+            select(AuditLog).where(AuditLog.action == "workspace.created")
+        ).one()
+
+    def test_additional_workspace_uses_signup_slug_guards(
+        self,
+        session: Session,
+    ) -> None:
+        user = User(
+            id="01HWAUSRADDWS000000000002",
+            email="owner2@example.com",
+            email_lower="owner2@example.com",
+            display_name="Owner Two",
+            timezone="UTC",
+            created_at=_PINNED,
+        )
+        with tenant_agnostic():
+            session.add_all(
+                [
+                    user,
+                    Workspace(
+                        id="01HWAWSTADDWS00000000001",
+                        slug="micasa",
+                        name="Mi Casa",
+                        plan="free",
+                        quota_json={},
+                        settings_json={},
+                        created_at=_PINNED,
+                    ),
+                ]
+            )
+            session.flush()
+
+        with pytest.raises(signup.SlugReserved):
+            signup.create_additional_workspace(
+                session,
+                user=user,
+                slug="Admin!",
+                name="Admin",
+                now=_PINNED,
+            )
+        with pytest.raises(signup.SlugTaken):
+            signup.create_additional_workspace(
+                session,
+                user=user,
+                slug="Mi Casa!",
+                name="Duplicate",
+                now=_PINNED,
+            )
+        with pytest.raises(signup.SlugHomoglyphError):
+            signup.create_additional_workspace(
+                session,
+                user=user,
+                slug="rnicasa",
+                name="Lookalike",
+                now=_PINNED,
+            )
+
     def test_provision_budget_ledger_rolls_back_on_workspace_failure(
         self,
         session: Session,
@@ -2425,7 +2609,7 @@ class TestRouterStartErrors:
     def test_invalid_slug_returns_422(self, client: TestClient) -> None:
         r = client.post(
             "/api/v1/signup/start",
-            json={"email": "a@example.com", "desired_slug": "_Bad"},
+            json={"email": "a@example.com", "desired_slug": "!!!"},
         )
         assert r.status_code == 422
         assert r.json()["error"] == "invalid_slug"

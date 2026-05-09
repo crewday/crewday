@@ -35,6 +35,7 @@ __all__ = [
     "is_reserved",
     "normalise_for_collision",
     "normalise_slug",
+    "normalise_slug_input",
     "validate_slug",
 ]
 
@@ -144,15 +145,22 @@ def validate_slug(slug: str) -> None:
         raise InvalidSlug(f"slug {slug!r} is reserved")
 
 
+def normalise_slug_input(raw: str) -> str:
+    """Lowercase and discard chars outside the current slug alphabet."""
+    if not isinstance(raw, str):
+        raise InvalidSlug(f"slug must be str, got {type(raw).__name__}")
+    return "".join(
+        ch for ch in raw.strip().lower() if ch.isascii() and (ch.isalnum() or ch == "-")
+    )
+
+
 def normalise_slug(raw: str) -> str:
-    """Lowercase + strip ``raw`` and validate; return the canonical form.
+    """Normalise ``raw`` and validate; return the canonical form.
 
     Raises :class:`InvalidSlug` if the normalised form fails
     :func:`validate_slug`.
     """
-    if not isinstance(raw, str):
-        raise InvalidSlug(f"slug must be str, got {type(raw).__name__}")
-    normalised = raw.strip().lower()
+    normalised = normalise_slug_input(raw)
     validate_slug(normalised)
     return normalised
 

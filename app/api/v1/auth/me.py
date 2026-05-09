@@ -33,7 +33,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Cookie, Depends, Request, Response
+from fastapi import APIRouter, Cookie, Depends, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
@@ -50,10 +50,14 @@ from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.admin._owners import is_deployment_owner
 from app.api.deps import db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
-from app.api.v1.auth.errors import auth_not_found, auth_unauthorized
+from app.api.v1.auth.errors import auth_conflict, auth_not_found, auth_unauthorized
 from app.auth import session as auth_session
+from app.auth import signup
 from app.authz.deployment_admin import is_deployment_admin
-from app.tenancy import tenant_agnostic
+from app.capabilities import Capabilities
+from app.domain.errors import DomainError
+from app.domain.errors import Validation as DomainValidation
+from app.tenancy import InvalidSlug, tenant_agnostic
 from app.tenancy.current import get_current
 
 __all__ = [
@@ -207,6 +211,55 @@ class WorkspaceSwitcherEntry(BaseModel):
     current_role: str | None
     last_seen_at: str | None
     settings_override: dict[str, Any]
+
+
+class WorkspaceCreateBody(BaseModel):
+    """Request body for signed-in workspace creation."""
+
+    slug: str = Field(..., min_length=1, max_length=160)
+    name: str = Field(..., min_length=1, max_length=160)
+
+
+class WorkspaceCreateResponse(BaseModel):
+    """Response body for signed-in workspace creation."""
+
+    workspace_id: str
+    workspace_slug: str
+    redirect: str
+
+
+_CreateWorkspaceDomainError = (
+    InvalidSlug,
+    signup.SlugReserved,
+    signup.SlugTaken,
+    signup.SlugHomoglyphError,
+    signup.SlugInGracePeriod,
+    ValueError,
+)
+
+
+def _http_for_workspace_create(exc: Exception) -> DomainError:
+    if isinstance(exc, InvalidSlug):
+        message = str(exc)
+        return DomainValidation(
+            message,
+            extra={"error": "invalid_slug", "message": message},
+        )
+    if isinstance(exc, signup.SlugReserved):
+        return auth_conflict("slug_reserved")
+    if isinstance(exc, signup.SlugTaken):
+        return auth_conflict(
+            "slug_taken",
+            extra={"suggested_alternative": exc.suggested_alternative},
+        )
+    if isinstance(exc, signup.SlugHomoglyphError):
+        return auth_conflict(
+            "slug_homoglyph_collision",
+            extra={"colliding_slug": exc.colliding_slug},
+        )
+    if isinstance(exc, signup.SlugInGracePeriod):
+        return auth_conflict("slug_in_grace_period")
+    return DomainValidation(extra={"error": "invalid_workspace_name"})
 
 
 def _client_headers(request: Request) -> tuple[str, str]:
@@ -788,7 +841,10 @@ def build_me_router() -> APIRouter:
     return router
 
 
-def build_me_workspaces_router() -> APIRouter:
+def build_me_workspaces_router(
+    *,
+    capabilities: Capabilities | None = None,
+) -> APIRouter:
     """Return the router that serves ``GET /api/v1/me/workspaces``.
 
     Bare-host (tenant-agnostic) — the SPA hits this from the workspace
@@ -878,5 +934,58 @@ def build_me_workspaces_router() -> APIRouter:
             raise auth_unauthorized("session_invalid")
 
         return _load_switcher_entries(session, user_id=user.id)
+
+    @router.post(
+        "/workspaces",
+        status_code=status.HTTP_201_CREATED,
+        response_model=WorkspaceCreateResponse,
+        operation_id="auth.me.workspaces.create",
+        summary="Create another workspace for the authenticated user",
+        openapi_extra={
+            "x-cli": {
+                "group": "auth",
+                "verb": "workspace-create",
+                "summary": "Create another workspace for the current account",
+                "mutates": True,
+            },
+        },
+    )
+    def create_my_workspace(
+        body: WorkspaceCreateBody,
+        request: Request,
+        session: _Db,
+        session_cookie_primary: Annotated[
+            str | None,
+            Cookie(alias=auth_session.SESSION_COOKIE_NAME),
+        ] = None,
+        session_cookie_dev: Annotated[
+            str | None,
+            Cookie(alias="crewday_session"),
+        ] = None,
+    ) -> WorkspaceCreateResponse:
+        cookie_value = _session_cookie_value(
+            session_cookie_primary=session_cookie_primary,
+            session_cookie_dev=session_cookie_dev,
+        )
+        user, _session_row = _validated_session_user(
+            request,
+            session,
+            cookie_value=cookie_value,
+        )
+        try:
+            result = signup.create_additional_workspace(
+                session,
+                user=user,
+                slug=body.slug,
+                name=body.name,
+                capabilities=capabilities,
+            )
+        except _CreateWorkspaceDomainError as exc:
+            raise _http_for_workspace_create(exc) from exc
+        return WorkspaceCreateResponse(
+            workspace_id=result.workspace_id,
+            workspace_slug=result.slug,
+            redirect=f"/w/{result.slug}/today",
+        )
 
     return router

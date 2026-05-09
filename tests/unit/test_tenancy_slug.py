@@ -270,9 +270,8 @@ def test_normalise_slug_rejects_reserved_after_lowering() -> None:
         normalise_slug("  ADMIN  ")
 
 
-def test_normalise_slug_rejects_bad_pattern_after_lowering() -> None:
-    with pytest.raises(InvalidSlug, match="pattern"):
-        normalise_slug("  _FOO  ")
+def test_normalise_slug_discards_disallowed_chars_before_validation() -> None:
+    assert normalise_slug("  _FOO!  ") == "foo"
 
 
 def test_normalise_slug_rejects_empty_string() -> None:

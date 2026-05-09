@@ -90,6 +90,7 @@ from app.tenancy import (
     WorkspaceContext,
     is_homoglyph_collision,
     is_reserved,
+    normalise_slug_input,
     tenant_agnostic,
     validate_slug,
 )
@@ -99,6 +100,7 @@ from app.util.ulid import new_ulid
 __all__ = [
     "FALLBACK_CAP_CENTS",
     "CompletedSignup",
+    "CreatedWorkspace",
     "HomoglyphCollision",
     "SignupAttemptExpired",
     "SignupAttemptMissing",
@@ -111,6 +113,7 @@ __all__ = [
     "SlugTaken",
     "complete_signup",
     "consume_verify",
+    "create_additional_workspace",
     "provision_workspace_and_owner_seat",
     "prune_stale_signups",
     "resolve_signup_default_country",
@@ -317,6 +320,15 @@ class CompletedSignup:
     Drives the final redirect — the SPA takes ``slug`` and sends the
     browser to ``/w/<slug>/today``.
     """
+
+    user_id: str
+    workspace_id: str
+    slug: str
+
+
+@dataclass(frozen=True, slots=True)
+class CreatedWorkspace:
+    """Payload returned when an existing user creates another workspace."""
 
     user_id: str
     workspace_id: str
@@ -654,6 +666,33 @@ def _aware_utc(value: datetime) -> datetime:
     return value
 
 
+def _validate_available_workspace_slug(
+    session: Session, *, raw_slug: str, now: datetime
+) -> str:
+    """Normalise ``raw_slug`` and enforce the signup slug guard set."""
+    slug = normalise_slug_input(raw_slug)
+    if is_reserved(slug):
+        raise SlugReserved(f"slug {slug!r} is reserved")
+    validate_slug(slug)
+
+    existing_slugs = _existing_active_slugs(session)
+    if slug in existing_slugs:
+        raise SlugTaken(
+            slug,
+            suggested_alternative=_suggest_alternative_slug(
+                slug, existing_slugs=existing_slugs
+            ),
+        )
+
+    collision = is_homoglyph_collision(slug, existing_slugs)
+    if collision is not None:
+        raise SlugHomoglyphError(candidate=slug, colliding_slug=collision)
+
+    if _is_slug_in_grace_period(session, slug=slug, now=now):
+        raise SlugInGracePeriod(f"slug {slug!r} is in its 30-day grace period")
+    return slug
+
+
 # ---------------------------------------------------------------------------
 # start_signup
 # ---------------------------------------------------------------------------
@@ -721,36 +760,11 @@ def start_signup(
     resolved_now = now if now is not None else _now(clock)
     email_lower = canonicalise_email(email)
 
-    # Reserved list fires BEFORE pattern validation so the 409
-    # ``slug_reserved`` response is distinct from the 422
-    # ``invalid_slug`` one. :func:`validate_slug` itself also rejects
-    # reserved slugs, but via :class:`InvalidSlug` — we want a
-    # typed domain error here so the HTTP router maps it to the
-    # right symbol + status.
-    if is_reserved(desired_slug):
-        raise SlugReserved(f"slug {desired_slug!r} is reserved")
-    try:
-        validate_slug(desired_slug)
-    except InvalidSlug:
-        # Re-raise unchanged — the router maps :class:`InvalidSlug` to
-        # 422 ``invalid_slug`` directly, no repackaging needed.
-        raise
-
-    existing_slugs = _existing_active_slugs(session)
-    if desired_slug in existing_slugs:
-        raise SlugTaken(
-            desired_slug,
-            suggested_alternative=_suggest_alternative_slug(
-                desired_slug, existing_slugs=existing_slugs
-            ),
-        )
-
-    collision = is_homoglyph_collision(desired_slug, existing_slugs)
-    if collision is not None:
-        raise SlugHomoglyphError(candidate=desired_slug, colliding_slug=collision)
-
-    if _is_slug_in_grace_period(session, slug=desired_slug, now=resolved_now):
-        raise SlugInGracePeriod(f"slug {desired_slug!r} is in its 30-day grace period")
+    desired_slug = _validate_available_workspace_slug(
+        session,
+        raw_slug=desired_slug,
+        now=resolved_now,
+    )
 
     pepper = _pepper(settings)
     email_hash = _hash_with_pepper(email_lower, pepper)
@@ -966,17 +980,18 @@ def provision_workspace_and_owner_seat(
     default_country: str = _COUNTRY_FALLBACK,
     signup_ip: str | None = None,
     capabilities: Capabilities | None = None,
+    create_user: bool = True,
 ) -> WorkspaceContext:
-    """Create the workspace, first user, membership, four system groups.
+    """Create a workspace plus the owner seat and system scaffolding.
 
     Inserts — inside a single :func:`tenant_agnostic` scope (the
     tenancy anchor does not exist yet) — the rows every fresh-
     workspace path shares:
 
     1. :class:`Workspace` (plan=``free``, quota=``seed_free_tier_10pct()``).
-    2. :class:`User` (email case-folded already — callers MUST pass
-       ``email_lower``; seeded straight onto ``User.email`` so
-       ``canonicalise_email`` is a fixed-point).
+    2. :class:`User` when ``create_user=True`` (email case-folded
+       already — callers MUST pass ``email_lower``; seeded straight
+       onto ``User.email`` so ``canonicalise_email`` is a fixed-point).
     3. :class:`UserWorkspace` (source=``workspace_grant``).
     4. :func:`seed_owners_system_group` — creates the ``owners`` group,
        places ``user_id`` in it, emits the ``manager`` :class:`RoleGrant`
@@ -1023,11 +1038,14 @@ def provision_workspace_and_owner_seat(
     ``deployment_setting.llm_default_budget_cents_30d`` override takes
     effect on the very first workspace created after the admin mutation.
 
+    ``create_user=False`` is for signed-in workspace creation, where
+    the caller has already loaded the current ``User`` row and this
+    helper should only add the new workspace-side rows for that user.
+
     Shared between :func:`complete_signup` and
-    :mod:`scripts.dev_login` (cd-w1ia) so both pipe their greenfield
-    writes through exactly the same rows + audit shape; diverging code
-    paths would silently skew the governance-anchor invariant between
-    the production passkey flow and the dev-only escape hatch.
+    :func:`create_additional_workspace` (plus :mod:`scripts.dev_login`
+    for local development) so every greenfield workspace path shares
+    the same rows + audit shape.
 
     Transaction-neutral: the caller's UoW owns the commit boundary;
     this helper only ``session.flush()``es so subsequent reads inside
@@ -1097,16 +1115,17 @@ def provision_workspace_and_owner_seat(
         )
         session.flush()
 
-        user = User(
-            id=user_id,
-            email=email_lower,
-            email_lower=email_lower,
-            display_name=display_name,
-            timezone=timezone,
-            created_at=now,
-        )
-        session.add(user)
-        session.flush()
+        if create_user:
+            user = User(
+                id=user_id,
+                email=email_lower,
+                email_lower=email_lower,
+                display_name=display_name,
+                timezone=timezone,
+                created_at=now,
+            )
+            session.add(user)
+            session.flush()
 
         session.add(
             UserWorkspace(
@@ -1165,6 +1184,69 @@ def provision_workspace_and_owner_seat(
         )
         seed_asset_type_catalog(session, real_ctx, clock=clock)
     return real_ctx
+
+
+def create_additional_workspace(
+    session: Session,
+    *,
+    user: User,
+    slug: str,
+    name: str,
+    capabilities: Capabilities | None = None,
+    default_country: str = _COUNTRY_FALLBACK,
+    now: datetime | None = None,
+    clock: Clock | None = None,
+) -> CreatedWorkspace:
+    """Create a new workspace for an already-authenticated user.
+
+    This is the signed-in sibling of self-serve signup: it reuses the
+    signup slug guards and workspace bootstrap rows, but it does not
+    insert a ``users`` row or touch passkey registration state.
+    """
+    resolved_now = now if now is not None else _now(clock)
+    normalized_slug = _validate_available_workspace_slug(
+        session,
+        raw_slug=slug,
+        now=resolved_now,
+    )
+    workspace_name = name.strip()
+    if not workspace_name:
+        raise ValueError("workspace name is required")
+
+    workspace_id = new_ulid(clock=clock)
+    real_ctx = provision_workspace_and_owner_seat(
+        session,
+        workspace_id=workspace_id,
+        user_id=user.id,
+        slug=normalized_slug,
+        email_lower=user.email_lower,
+        display_name=user.display_name,
+        timezone=user.timezone or "UTC",
+        now=resolved_now,
+        clock=clock,
+        workspace_name=workspace_name,
+        capabilities=capabilities,
+        default_country=default_country,
+        create_user=False,
+    )
+    write_audit(
+        session,
+        real_ctx,
+        entity_kind="workspace",
+        entity_id=workspace_id,
+        action="workspace.created",
+        diff={
+            "slug": normalized_slug,
+            "name": workspace_name,
+            "created_by_user_id": user.id,
+        },
+        clock=clock,
+    )
+    return CreatedWorkspace(
+        user_id=user.id,
+        workspace_id=workspace_id,
+        slug=normalized_slug,
+    )
 
 
 # ---------------------------------------------------------------------------

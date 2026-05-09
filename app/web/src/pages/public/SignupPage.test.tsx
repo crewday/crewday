@@ -26,7 +26,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactElement } from "react";
-import SignupPage from "./SignupPage";
+import SignupPage, { normalizeWorkspaceSlugInput } from "./SignupPage";
 import { __resetApiProvidersForTests } from "@/lib/api";
 import { installFetchRoutes, type FakeResponse } from "@/test/helpers";
 
@@ -90,6 +90,14 @@ function installTurnstile(): {
 
 // ── Tests ─────────────────────────────────────────────────────────
 
+describe("normalizeWorkspaceSlugInput", () => {
+  it("lowercases and discards characters outside the slug alphabet", () => {
+    expect(normalizeWorkspaceSlugInput("Villa Sud!")).toBe("villasud");
+    expect(normalizeWorkspaceSlugInput("MIXED_case.123")).toBe("mixedcase123");
+    expect(normalizeWorkspaceSlugInput("villa--sud")).toBe("villa--sud");
+  });
+});
+
 describe("<SignupPage> — happy path (202)", () => {
   it("submits email + slug, then renders the 'check your email' confirmation", async () => {
     const { calls, restore } = installFetch({
@@ -103,7 +111,8 @@ describe("<SignupPage> — happy path (202)", () => {
       const email = screen.getByTestId("signup-email") as HTMLInputElement;
       const slug = screen.getByTestId("signup-slug") as HTMLInputElement;
       fireEvent.change(email, { target: { value: "maria@example.com" } });
-      fireEvent.change(slug, { target: { value: "Villa-Sud" } });
+      fireEvent.change(slug, { target: { value: "Villa Sud!" } });
+      expect(slug.value).toBe("villasud");
 
       await act(async () => {
         fireEvent.submit(email.closest("form")!);
@@ -114,10 +123,10 @@ describe("<SignupPage> — happy path (202)", () => {
       expect(calls).toHaveLength(1);
       expect(calls[0]!.init.method).toBe("POST");
       const sent = JSON.parse(calls[0]!.init.body as string) as Record<string, unknown>;
-      // Slug is lowercased before send; email is trimmed (no change here).
+      // Slug is normalized before send; email is trimmed (no change here).
       expect(sent).toEqual({
         email: "maria@example.com",
-        desired_slug: "villa-sud",
+        desired_slug: "villasud",
       });
 
       // Confirmation view replaces the form — `role="status"` for

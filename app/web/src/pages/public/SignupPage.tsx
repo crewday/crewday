@@ -79,6 +79,13 @@ declare global {
 const TURNSTILE_SCRIPT_ID = "crewday-turnstile-script";
 const TURNSTILE_SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
 
+export function normalizeWorkspaceSlugInput(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "");
+}
+
 export default function SignupPage(): ReactElement {
   const [email, setEmail] = useState("");
   const [slug, setSlug] = useState("");
@@ -127,7 +134,7 @@ export default function SignupPage(): ReactElement {
       if (inflightRef.current) return;
       if (mutation.isPending) return;
       const trimmedEmail = email.trim();
-      const trimmedSlug = slug.trim().toLowerCase();
+      const trimmedSlug = normalizeWorkspaceSlugInput(slug);
       if (!trimmedEmail || !trimmedSlug) return;
       inflightRef.current = true;
       mutation.mutate({
@@ -216,10 +223,10 @@ export default function SignupPage(): ReactElement {
             autoComplete="off"
             spellCheck={false}
             inputMode="url"
-            pattern="[a-z0-9][a-z0-9-]{1,38}[a-z0-9]"
+            pattern="[a-z][a-z0-9-]{1,38}[a-z0-9]"
             required
             value={slug}
-            onChange={(ev) => setSlug(ev.target.value)}
+            onChange={(ev) => setSlug(normalizeWorkspaceSlugInput(ev.target.value))}
             data-testid="signup-slug"
             aria-describedby="signup-slug-hint"
           />

@@ -42,6 +42,7 @@ from app.tenancy.slug import (
     is_reserved,
     normalise_for_collision,
     normalise_slug,
+    normalise_slug_input,
     validate_slug,
 )
 
@@ -66,6 +67,7 @@ __all__ = [
     "is_tenant_agnostic",
     "normalise_for_collision",
     "normalise_slug",
+    "normalise_slug_input",
     "register",
     "register_scope_through_join",
     "reset_current",

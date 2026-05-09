@@ -117,7 +117,7 @@ class SignupStartBody(BaseModel):
     """
 
     email: str = Field(..., min_length=3, max_length=320)
-    desired_slug: str = Field(..., min_length=3, max_length=40)
+    desired_slug: str = Field(..., min_length=1, max_length=160)
     captcha_token: str | None = None
 
 

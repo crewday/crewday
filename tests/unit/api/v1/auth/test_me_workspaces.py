@@ -27,14 +27,15 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import Response
 from pydantic import SecretStr
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 # Import every model-bearing package so :data:`Base.metadata` resolves
 # every FK the identity tables reference (mirrors test_me_avatar).
 from app.adapters.db import audit, authz, workspace  # noqa: F401
-from app.adapters.db.authz.models import RoleGrant
+from app.adapters.db.authz.models import PermissionGroup, RoleGrant
 from app.adapters.db.base import Base
+from app.adapters.db.identity.models import PasskeyCredential, User
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.deps import db_session as db_session_dep
@@ -289,6 +290,92 @@ class TestPayloadShape:
         r = client.get("/api/v1/me/workspaces")
         assert r.status_code == 200, r.text
         assert r.json() == []
+
+
+class TestCreateWorkspace:
+    def test_signed_in_user_can_create_workspace_without_new_user_or_passkey(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        user_id, _workspace_id = _seed_owner_workspace(
+            session_factory,
+            slug="first-home",
+            name="First Home",
+            email="owner@example.com",
+        )
+        cookie = _issue_cookie(session_factory, user_id=user_id, settings=settings)
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+        response = client.post(
+            "/api/v1/me/workspaces",
+            json={"slug": "Villa Sud!", "name": "Villa Sud"},
+        )
+
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["workspace_slug"] == "villasud"
+        assert body["redirect"] == "/w/villasud/today"
+
+        with session_factory() as s:
+            assert len(s.scalars(select(User)).all()) == 1
+            new_workspace = s.scalars(
+                select(Workspace).where(Workspace.slug == "villasud")
+            ).one()
+            assert new_workspace.id == body["workspace_id"]
+            assert new_workspace.name == "Villa Sud"
+            assert s.scalars(
+                select(UserWorkspace).where(
+                    UserWorkspace.user_id == user_id,
+                    UserWorkspace.workspace_id == new_workspace.id,
+                )
+            ).one()
+            assert {
+                group.slug
+                for group in s.scalars(
+                    select(PermissionGroup).where(
+                        PermissionGroup.workspace_id == new_workspace.id
+                    )
+                )
+            } == {"owners", "managers", "all_workers", "all_clients"}
+            assert s.scalars(select(PasskeyCredential)).all() == []
+
+    def test_create_workspace_reuses_signup_slug_errors(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        user_id, _workspace_id = _seed_owner_workspace(
+            session_factory,
+            slug="micasa",
+            name="Mi Casa",
+            email="owner@example.com",
+        )
+        cookie = _issue_cookie(session_factory, user_id=user_id, settings=settings)
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+        duplicate = client.post(
+            "/api/v1/me/workspaces",
+            json={"slug": "Mi Casa!", "name": "Duplicate"},
+        )
+        assert duplicate.status_code == 409, duplicate.text
+        assert duplicate.json()["error"] == "slug_taken"
+
+        reserved = client.post(
+            "/api/v1/me/workspaces",
+            json={"slug": "Admin!", "name": "Admin"},
+        )
+        assert reserved.status_code == 409, reserved.text
+        assert reserved.json()["error"] == "slug_reserved"
+
+        homoglyph = client.post(
+            "/api/v1/me/workspaces",
+            json={"slug": "rnicasa", "name": "Lookalike"},
+        )
+        assert homoglyph.status_code == 409, homoglyph.text
+        assert homoglyph.json()["error"] == "slug_homoglyph_collision"
 
 
 class TestIsolation:
