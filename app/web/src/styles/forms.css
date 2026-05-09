@@ -65,12 +65,17 @@
 }
 .form-field__requirement {
   display: inline-flex;
-  color: var(--ink-2);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   white-space: nowrap;
+}
+.form-field__requirement--required {
+  color: var(--moss);
+}
+.form-field__requirement--optional {
+  color: var(--ink-3);
 }
 
 /* Form controls share the same card look — white fill, card border and

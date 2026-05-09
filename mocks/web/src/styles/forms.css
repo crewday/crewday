@@ -50,6 +50,31 @@
 
 .form { display: flex; flex-direction: column; gap: var(--space-6); }
 .field { display: flex; flex-direction: column; gap: var(--space-2); font-size: 13px; color: var(--ink-2); }
+.form-field__label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-3);
+  row-gap: var(--space-1);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.form-field__requirement {
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.form-field__requirement--required {
+  color: var(--moss);
+}
+.form-field__requirement--optional {
+  color: var(--ink-3);
+}
 
 /* Form controls share the same card look — white fill, card border and
    radius — so text inputs, selects and textareas read as "slotted into
@@ -330,4 +355,3 @@
     margin-top: auto; flex-wrap: wrap; justify-content: space-between;
   }
 }
-
