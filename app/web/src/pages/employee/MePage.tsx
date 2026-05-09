@@ -10,10 +10,12 @@ import {
 } from "@/auth";
 import { runAuthenticatedPasskeyRegisterCeremony } from "@/auth/passkey-register";
 import { setUnauthenticated } from "@/auth/authStore";
+import { workspaceSlug } from "@/auth/roleLanding";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { fmtDate } from "@/lib/dates";
-import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
+import { workspaceRoute, workspaceRouteForPathname } from "@/lib/workspaceRoutes";
+import { useWorkspace } from "@/context/WorkspaceContext";
 import { Chip, Loading } from "@/components/common";
 import AgentApprovalModePanel from "@/components/AgentApprovalModePanel";
 import AgentPreferencesPanel from "@/components/AgentPreferencesPanel";
@@ -21,6 +23,7 @@ import AppearancePanel from "@/components/AppearancePanel";
 import AvatarEditor from "@/components/AvatarEditor";
 import ChatChannelsMeCard from "@/components/ChatChannelsMeCard";
 import PersonalTokensPanel from "@/components/PersonalTokensPanel";
+import WorkspacePickList from "@/components/WorkspacePickList";
 import type { Me } from "@/types/api";
 
 const LANG_LABEL: Record<string, string> = {
@@ -42,6 +45,7 @@ export default function MePage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const { workspaceId, setWorkspaceId } = useWorkspace();
 
   const me = useQuery({
     queryKey: qk.me(),
@@ -62,6 +66,7 @@ export default function MePage() {
   const { employee } = me.data;
   const langLabel = LANG_LABEL[employee.language] ?? employee.language;
   const registerPending = passkeyRegister.kind === "pending";
+  const availableWorkspaces = me.data.available_workspaces ?? [];
 
   async function onRegisterPasskey(): Promise<void> {
     if (registerPending) return;
@@ -83,6 +88,24 @@ export default function MePage() {
 
   return (
     <section className="me-page">
+      {availableWorkspaces.length > 1 && (
+        <section className="panel me-workspace-switch" aria-labelledby="me-workspace-switch-title">
+          <header className="panel__head">
+            <h2 id="me-workspace-switch-title">Workspaces</h2>
+          </header>
+          <WorkspacePickList
+            workspaces={availableWorkspaces}
+            activeWorkspaceSlug={workspaceId}
+            label="Switch workspace"
+            onPick={(workspace) => {
+              const slug = workspaceSlug(workspace);
+              setWorkspaceId(slug);
+              navigate(workspaceRoute(slug, "/me"));
+            }}
+          />
+        </section>
+      )}
+
       <section className="panel">
         <div className="profile-card">
           <button

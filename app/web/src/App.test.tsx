@@ -415,9 +415,16 @@ function renderAppAt(path: string, role: AppRole, grantRole?: WorkspaceGrantRole
   );
 }
 
-function renderAppWithUser(path: string, role: AppRole, user: AuthMe): void {
+function renderAppWithUser(
+  path: string,
+  role: AppRole,
+  user: AuthMe,
+  options: { workspaceCookie?: string | null } = {},
+): void {
   vi.spyOn(preferences, "readRoleCookie").mockReturnValue(role);
-  vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("ws_1");
+  vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue(
+    Object.hasOwn(options, "workspaceCookie") ? (options.workspaceCookie ?? null) : "ws_1",
+  );
   setAuthenticated(user);
 
   const queryClient = new QueryClient({
@@ -525,10 +532,10 @@ describe("App public root and protected deep links", () => {
 
   it("keeps authenticated workspace-prefixed protected links after setting the workspace", async () => {
     installPermissionAllowFetch();
-    renderAppAt("/w/acme/dashboard?tab=ops#x", "manager");
+    renderAppAt("/w/ws_1/dashboard?tab=ops#x", "manager");
 
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/dashboard?tab=ops#x");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_1/dashboard?tab=ops#x");
     });
     expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
   });
@@ -598,6 +605,36 @@ describe("App public root and protected deep links", () => {
       expect(screen.getByTestId("location")).toHaveTextContent("/select-workspace");
     });
     expect(await screen.findByRole("heading", { name: "Pick a workspace" })).toBeInTheDocument();
+  });
+
+  it("silently routes bare / to the remembered workspace canonical landing", async () => {
+    const user = {
+      ...multiWorkspaceAuthMe(),
+      current_workspace_id: "ws_2",
+    };
+
+    renderAppWithUser("/", "manager", user, { workspaceCookie: "stale-workspace" });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_2/today");
+    });
+    expect(await screen.findByTestId("today-page")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Pick a workspace" })).toBeNull();
+  });
+
+  it("shows the workspace picker on bare / when no remembered workspace is valid", async () => {
+    const user = {
+      ...multiWorkspaceAuthMe(),
+      current_workspace_id: null,
+    };
+
+    renderAppWithUser("/", "manager", user, { workspaceCookie: "stale-workspace" });
+
+    expect(await screen.findByRole("heading", { name: "Pick a workspace" })).toBeInTheDocument();
+    expect(screen.getByText("Acme")).toBeInTheDocument();
+    expect(screen.getByText("Second workspace")).toBeInTheDocument();
+    expect(screen.getByText("ws_1")).toBeInTheDocument();
+    expect(screen.getByText("ws_2")).toBeInTheDocument();
   });
 
   it.each([

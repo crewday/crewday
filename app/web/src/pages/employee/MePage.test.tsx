@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,8 +11,21 @@ import { NavHistoryProvider } from "@/context/NavHistoryContext";
 import HistoryPage from "./HistoryPage";
 import MePage from "./MePage";
 
+const workspaceMock = vi.hoisted(() => ({
+  workspaceId: "acme",
+  setWorkspaceId: vi.fn(),
+}));
+
 vi.mock("@/lib/api", () => ({
   fetchJson: vi.fn(),
+}));
+
+vi.mock("@/context/WorkspaceContext", () => ({
+  useWorkspace: () => ({
+    workspaceId: workspaceMock.workspaceId,
+    setWorkspaceId: workspaceMock.setWorkspaceId,
+    clearWorkspaceId: vi.fn(),
+  }),
 }));
 
 vi.mock("@/components/AppearancePanel", () => ({
@@ -40,6 +55,8 @@ vi.mock("@/components/PersonalTokensPanel", () => ({
 const fetchJsonMock = vi.mocked(fetchJson);
 
 beforeEach(() => {
+  workspaceMock.workspaceId = "acme";
+  workspaceMock.setWorkspaceId.mockReset();
   fetchJsonMock.mockImplementation(async (path: string) => {
     if (path === "/api/v1/me") return mePayload();
     if (path === "/api/v1/properties") return [];
@@ -73,8 +90,8 @@ function renderProfile(initial = "/w/acme/me"): ReactElement {
       <MemoryRouter initialEntries={[initial]}>
         <NavHistoryProvider>
           <Routes>
-            <Route path="/w/acme/me" element={<><MePage /><LocationProbe /><BackProbe /></>} />
-            <Route path="/w/acme/history" element={<><HistoryPage /><LocationProbe /><BackProbe /></>} />
+            <Route path="/w/:slug/me" element={<><MePage /><LocationProbe /><BackProbe /></>} />
+            <Route path="/w/:slug/history" element={<><HistoryPage /><LocationProbe /><BackProbe /></>} />
             <Route path="/login" element={<><span>Login</span><LocationProbe /></>} />
           </Routes>
         </NavHistoryProvider>
@@ -105,7 +122,7 @@ function BackProbe(): ReactElement {
   );
 }
 
-function mePayload(): unknown {
+function mePayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     role: "manager",
     theme: "system",
@@ -134,6 +151,7 @@ function mePayload(): unknown {
       started_on: "2025-03-12",
       language: "en",
     },
+    ...overrides,
   };
 }
 
@@ -146,6 +164,65 @@ describe("MePage", () => {
     expect(screen.getByLabelText("Appearance")).toBeInTheDocument();
     expect(screen.getByLabelText("Agent approval mode")).toBeInTheDocument();
     expect(screen.getByLabelText("My agent preferences")).toBeInTheDocument();
+  });
+
+  it("renders the mobile workspace switch list and navigates to selected /me", async () => {
+    fetchJsonMock.mockImplementation(async (path: string) => {
+      if (path === "/api/v1/me") {
+        return mePayload({
+          available_workspaces: [
+            {
+              workspace: {
+                id: "acme",
+                name: "Acme",
+                timezone: "UTC",
+                default_currency: "USD",
+                default_country: "US",
+                default_locale: "en",
+              },
+              grant_role: "manager",
+              binding_org_id: null,
+              source: "workspace_grant",
+            },
+            {
+              workspace: {
+                id: "beta",
+                name: "Beta",
+                timezone: "UTC",
+                default_currency: "USD",
+                default_country: "US",
+                default_locale: "en",
+              },
+              grant_role: "worker",
+              binding_org_id: null,
+              source: "workspace_grant",
+            },
+          ],
+        });
+      }
+      throw new Error("Unscripted fetch: " + path);
+    });
+
+    render(renderProfile());
+
+    expect(await screen.findByRole("heading", { name: "Workspaces" })).toBeInTheDocument();
+    expect(screen.getByText("acme")).toBeInTheDocument();
+    expect(screen.getByText("beta")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Switch to Beta, slug beta, role Worker/i }));
+
+    expect(workspaceMock.setWorkspaceId).toHaveBeenCalledWith("beta");
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/beta/me");
+    });
+  });
+
+  it("keeps the /me workspace switch list hidden at desktop widths", () => {
+    const shellCss = readFileSync(resolve(__dirname, "../../styles/shell.css"), "utf8");
+
+    expect(shellCss).toMatch(
+      /@media\s*\(min-width:\s*720px\)\s*{[\s\S]*\.me-workspace-switch\s*{\s*display:\s*none;\s*}/,
+    );
   });
 
   it("navigates from the History profile card to History and browser back returns to Profile", async () => {

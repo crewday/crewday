@@ -1,9 +1,11 @@
-import { Link, Outlet } from "react-router-dom";
+import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { Building2, ArrowRight } from "lucide-react";
 import { useAuth } from "./useAuth";
-import { landingForWorkspace } from "./roleLanding";
+import { landingForWorkspace, workspaceSlug } from "./roleLanding";
 import { useWorkspace } from "@/context/WorkspaceContext";
+import WorkspacePickList from "@/components/WorkspacePickList";
+import { workspaceRelativePathname, workspaceRoute, workspaceSlugFromRoutePath } from "@/lib/workspaceRoutes";
+import type { AvailableWorkspace } from "@/types/auth";
 
 // §14 "Workspace selector" — when the caller is authenticated but
 // hasn't picked a workspace yet (no `crewday_workspace` cookie set
@@ -39,7 +41,9 @@ export function WorkspaceGate({
 }) {
   // code-health: ignore[nloc] Workspace gate keeps single-workspace adoption, multi-workspace chooser, and no-access empty state in one guard.
   const { user, logout } = useAuth();
-  const { workspaceId, setWorkspaceId } = useWorkspace();
+  const { workspaceId, setWorkspaceId, clearWorkspaceId } = useWorkspace();
+  const location = useLocation();
+  const routeSlug = workspaceSlugFromRoutePath(location.pathname);
   // Focused on mount so keyboard users (and screen-reader users on a
   // JAWS / NVDA "forms mode" switch) land inside the dialog rather
   // than in the page chrome beneath. We target the first pickable
@@ -59,22 +63,36 @@ export function WorkspaceGate({
     [user?.available_workspaces],
   );
   const shouldForcePicker = forcePicker && available.length > 1;
+  const selectedWorkspaceSlug = useMemo(() => {
+    return activeWorkspaceSlug(available, {
+      workspaceId,
+    });
+  }, [available, workspaceId]);
+  const hasValidWorkspace = workspaceId !== null && selectedWorkspaceSlug !== null;
 
   useEffect(() => {
-    if (workspaceId !== null && !shouldForcePicker) return;
+    if (hasValidWorkspace && !shouldForcePicker) return;
     firstActionRef.current?.focus({ preventScroll: true });
-  }, [shouldForcePicker, workspaceId, user?.available_workspaces?.length, user?.is_deployment_admin]);
+  }, [hasValidWorkspace, shouldForcePicker, user?.available_workspaces?.length, user?.is_deployment_admin]);
 
   const onlySlug = useMemo(() => {
     if (available.length !== 1) return null;
     const w = available[0];
-    return w ? slugFor(w.workspace.id, w.workspace.name) : null;
+    return w ? workspaceSlug(w) : null;
   }, [available]);
   const currentSlug = useMemo(() => {
+    if (selectedWorkspaceSlug) return selectedWorkspaceSlug;
     return activeWorkspaceSlug(available, {
       workspaceId: user?.current_workspace_id ?? null,
     });
-  }, [available, user?.current_workspace_id]);
+  }, [available, selectedWorkspaceSlug, user?.current_workspace_id]);
+
+  useEffect(() => {
+    if (routeSlug) return;
+    if (workspaceId === null) return;
+    if (hasValidWorkspace) return;
+    clearWorkspaceId();
+  }, [clearWorkspaceId, hasValidWorkspace, routeSlug, workspaceId]);
 
   // Auto-adopt for single-workspace users. Runs as an effect so the
   // store update happens outside render (avoids the
@@ -83,10 +101,11 @@ export function WorkspaceGate({
   // the `WorkspaceContext`, and the next pass sees `workspaceId !== null`.
   useEffect(() => {
     if (shouldForcePicker) return;
-    if (workspaceId !== null) return;
+    if (routeSlug && !hasValidWorkspace) return;
+    if (hasValidWorkspace) return;
     if (!onlySlug) return;
     setWorkspaceId(onlySlug);
-  }, [shouldForcePicker, workspaceId, onlySlug, setWorkspaceId]);
+  }, [hasValidWorkspace, routeSlug, shouldForcePicker, onlySlug, setWorkspaceId]);
 
   // Server already picked a workspace for this session (cookie was
   // set by the login handler) — surface it without forcing the user
@@ -95,14 +114,32 @@ export function WorkspaceGate({
   // without a follow-up call.
   useEffect(() => {
     if (shouldForcePicker) return;
-    if (workspaceId !== null) return;
+    if (routeSlug && !hasValidWorkspace) return;
+    if (hasValidWorkspace) return;
     if (!currentSlug) return;
     setWorkspaceId(currentSlug);
-  }, [shouldForcePicker, workspaceId, currentSlug, setWorkspaceId]);
+  }, [currentSlug, hasValidWorkspace, routeSlug, shouldForcePicker, setWorkspaceId]);
 
-  if (workspaceId !== null && !shouldForcePicker) return <>{children ?? <Outlet />}</>;
+  if (hasValidWorkspace && !shouldForcePicker) return <>{children ?? <Outlet />}</>;
 
-  // From here we know `workspaceId === null`. Render the chooser
+  if (routeSlug) {
+    const targetSlug = currentSlug ?? onlySlug;
+    if (targetSlug && targetSlug !== routeSlug) {
+      return (
+        <Navigate
+          to={workspaceRoute(targetSlug, workspaceRelativePathname(location.pathname), {
+            search: location.search,
+            hash: location.hash,
+          })}
+          replace
+        />
+      );
+    }
+  }
+
+  if (!shouldForcePicker && (currentSlug || onlySlug)) return null;
+
+  // From here we know no valid workspace is selected. Render the chooser
   // (or the empty state) instead of the protected tree.
 
   if (available.length === 0) {
@@ -158,34 +195,15 @@ export function WorkspaceGate({
         <p className="auth-gate__sub">
           You have access to {available.length} workspaces. Choose one to continue.
         </p>
-        <ul className="auth-gate__list" role="list">
-          {available.map((w, idx) => {
-            const slug = slugFor(w.workspace.id, w.workspace.name);
-            return (
-              <li key={w.workspace.id} className="auth-gate__item">
-                <Link
-                  ref={idx === 0 ? setFirstAction : undefined}
-                  to={landingForWorkspace(w)}
-                  className="auth-gate__pick"
-                  onClick={() => setWorkspaceId(slug)}
-                >
-                  <span className="auth-gate__pick-icon" aria-hidden="true">
-                    <Building2 size={18} strokeWidth={1.6} />
-                  </span>
-                  <span className="auth-gate__pick-body">
-                    <span className="auth-gate__pick-name">{w.workspace.name}</span>
-                    {w.grant_role && (
-                      <span className="auth-gate__pick-role">{labelForRole(w.grant_role)}</span>
-                    )}
-                  </span>
-                  <span className="auth-gate__pick-chev" aria-hidden="true">
-                    <ArrowRight size={16} strokeWidth={1.6} />
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+        <WorkspacePickList
+          workspaces={available}
+          activeWorkspaceSlug={currentSlug}
+          className="auth-gate__list"
+          label="Available workspaces"
+          setFirstAction={setFirstAction}
+          toForWorkspace={landingForWorkspace}
+          onPick={(workspace) => setWorkspaceId(workspaceSlug(workspace))}
+        />
         <div className="auth-gate__actions">
           <button type="button" className="btn" onClick={() => { void logout(); }}>
             Sign out
@@ -196,42 +214,16 @@ export function WorkspaceGate({
   );
 }
 
-const ROLE_LABELS: Record<string, string> = {
-  manager: "Manager",
-  worker: "Worker",
-  client: "Client",
-  guest: "Guest",
-  admin: "Admin",
-};
-
-function labelForRole(role: string): string {
-  return ROLE_LABELS[role] ?? role;
-}
-
-/**
- * Resolve the URL-safe slug for a workspace. Current auth payloads
- * carry the slug in `workspace.id`; the helper keeps the call sites
- * explicit while the wire shape finishes settling.
- *
- * Exported for `WorkspaceGate.test.tsx`.
- */
-export function slugFor(id: string, _name: string): string {
-  return id;
-}
-
 function activeWorkspaceSlug(
-  available: Array<{
-    workspace_id?: string | null;
-    workspace: { id: string; name: string };
-  }>,
+  available: AvailableWorkspace[],
   current: { workspaceId: string | null },
 ): string | null {
   if (!current.workspaceId) return null;
   const match = available.find((w) => {
-    const slug = slugFor(w.workspace.id, w.workspace.name);
+    const slug = workspaceSlug(w);
     return w.workspace_id === current.workspaceId || slug === current.workspaceId;
   });
-  return match ? slugFor(match.workspace.id, match.workspace.name) : null;
+  return match ? workspaceSlug(match) : null;
 }
 
 export default WorkspaceGate;

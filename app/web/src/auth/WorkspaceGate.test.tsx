@@ -87,6 +87,8 @@ describe("<WorkspaceGate>", () => {
     expect(screen.getByText(/Pick a workspace/i)).toBeInTheDocument();
     expect(screen.getByText("Acme")).toBeInTheDocument();
     expect(screen.getByText("Beta Co")).toBeInTheDocument();
+    expect(screen.getByText("ws_a")).toBeInTheDocument();
+    expect(screen.getByText("ws_b")).toBeInTheDocument();
     // Children stay hidden until a slug is picked.
     expect(screen.queryByText("protected tree")).toBeNull();
   });
@@ -235,7 +237,7 @@ describe("<WorkspaceGate>", () => {
     // `role="dialog"` + `aria-modal="true"` alone don't trap focus;
     // the auto-focus is what keeps keyboard users from landing on
     // chrome behind the backdrop.
-    const firstPick = screen.getByText("Acme").closest("a");
+    const firstPick = screen.getByRole("link", { name: /Switch to Acme, slug ws_a, role Manager/i });
     expect(firstPick).toBeTruthy();
     expect(document.activeElement).toBe(firstPick);
   });

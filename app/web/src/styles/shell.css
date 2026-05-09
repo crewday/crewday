@@ -156,8 +156,10 @@
   display: flex; flex-direction: column; gap: 22px;
   padding: 16px 20px;
 }
+.me-workspace-switch { display: block; }
 @media (min-width: 720px) {
   .me-page { padding: 24px 0; }
+  .me-workspace-switch { display: none; }
 }
 
 /* Panels on /me wrap what used to be bespoke phone cards. Strip the
