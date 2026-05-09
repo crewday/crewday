@@ -575,7 +575,7 @@ describe("App public root and protected deep links", () => {
     ["/task/t1", "/w/ws_1/task/t1", "task-detail-page"],
     ["/my/expenses", "/w/ws_1/my/expenses", "my-expenses-page"],
     ["/me", "/w/ws_1/me", "me-page"],
-    ["/history?tab=chats", "/w/ws_1/history?tab=chats", "history-page"],
+    ["/history#chats", "/w/ws_1/history#chats", "history-page"],
     ["/issues/new", "/w/ws_1/issues/new", "issue-new-page"],
     ["/asset/a1", "/w/ws_1/asset/a1", "employee-asset-page"],
     ["/asset/scan", "/w/ws_1/asset/scan", "asset-scan-page"],

@@ -1,4 +1,5 @@
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { fetchJson } from "@/lib/api";
@@ -6,9 +7,9 @@ import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
 import { fmtDate, fmtDateTime } from "@/lib/dates";
 import { cap } from "@/lib/strings";
-import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import { Loading } from "@/components/common";
 import PageHeader from "@/components/PageHeader";
+import PageTabs, { type PageTab } from "@/components/PageTabs";
 import type { HistoryPagePayload, HistoryTab, Property } from "@/types/api";
 
 type Tab = HistoryTab;
@@ -20,8 +21,33 @@ const TABS: [HistoryTab, string][] = [
   ["leaves", "Leaves"],
 ];
 
-function isTab(v: string): v is Tab {
+const PAGE_TABS: PageTab[] = TABS.map(([key, label]) => ({
+  key,
+  label,
+  panelId: `history-${key}-panel`,
+}));
+
+function isTab(v: string | null): v is Tab {
   return v === "tasks" || v === "chats" || v === "expenses" || v === "leaves";
+}
+
+function tabFromHash(hash: string): Tab | null {
+  if (!hash) return null;
+  try {
+    const decoded = decodeURIComponent(hash.replace(/^#/, ""));
+    return isTab(decoded) ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
+function tabFromSearch(search: string): Tab | null {
+  const tab = new URLSearchParams(search).get("tab");
+  return isTab(tab) ? tab : null;
+}
+
+function tabFromLocation(location: { hash: string; search: string }): Tab {
+  return tabFromHash(location.hash) ?? tabFromSearch(location.search) ?? "tasks";
 }
 
 type HistoryQueries = {
@@ -40,9 +66,39 @@ type HistoryContentState = {
 };
 
 export default function HistoryPage() {
-  const [params] = useSearchParams();
-  const raw = params.get("tab") ?? "tasks";
-  const tab: Tab = isTab(raw) ? raw : "tasks";
+  const location = useLocation();
+  const navigate = useNavigate();
+  const routeTab = useMemo(() => tabFromLocation(location), [location]);
+  const [tab, setTab] = useState<Tab>(routeTab);
+
+  useEffect(() => {
+    setTab(routeTab);
+  }, [routeTab]);
+
+  useEffect(() => {
+    const queryTab = tabFromSearch(location.search);
+    if (!queryTab || tabFromHash(location.hash)) return;
+    const params = new URLSearchParams(location.search);
+    params.delete("tab");
+    const nextSearch = params.toString();
+    navigate(
+      {
+        pathname: location.pathname,
+        search: nextSearch ? `?${nextSearch}` : "",
+        hash: `#${queryTab}`,
+      },
+      { replace: true },
+    );
+  }, [location.hash, location.pathname, location.search, navigate]);
+
+  useEffect(() => {
+    const syncFromWindowHash = () => {
+      const hashTab = tabFromHash(window.location.hash);
+      if (hashTab) setTab(hashTab);
+    };
+    window.addEventListener("hashchange", syncFromWindowHash);
+    return () => window.removeEventListener("hashchange", syncFromWindowHash);
+  }, []);
 
   const queries: HistoryQueries = {
     tasks: useHistoryTabQuery("tasks", tab === "tasks"),
@@ -71,8 +127,19 @@ export default function HistoryPage() {
         sub="Everything already wrapped up — tasks, chats, expenses and leaves."
       />
       <section className="phone__section">
-        <HistoryTabs activeTab={tab} />
-        {activePanel}
+        <PageTabs
+          ariaLabel="History tabs"
+          tabs={PAGE_TABS}
+          hashBacked
+          defaultKey="tasks"
+          selectedKey={tab}
+          onSelect={(key) => {
+            if (isTab(key)) setTab(key);
+          }}
+        />
+        <div id={`history-${tab}-panel`} role="tabpanel">
+          {activePanel}
+        </div>
       </section>
     </>
   );
@@ -87,23 +154,6 @@ function useHistoryTabQuery<T extends HistoryTab>(tab: T, enabled: boolean) {
       lastPage.has_more ? (lastPage.next_cursor ?? undefined) : undefined,
     enabled,
   });
-}
-
-function HistoryTabs({ activeTab }: { activeTab: Tab }) {
-  const { pathname } = useLocation();
-  return (
-    <nav className="tabs" aria-label="History tabs">
-      {TABS.map(([key, label]) => (
-        <Link
-          key={key}
-          to={workspaceRouteForPathname(pathname, "/history?tab=" + key)}
-          className={"tab-link" + (activeTab === key ? " tab-link--active" : "")}
-        >
-          {label}
-        </Link>
-      ))}
-    </nav>
-  );
 }
 
 function TaskHistoryPanel({

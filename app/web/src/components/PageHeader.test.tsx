@@ -42,8 +42,8 @@ function renderRoutes(initial = "/w/acme/schedule"): ReactElement {
             element={
               <>
                 <PageHeader title="History" />
-                <Link to="/w/acme/history?tab=chats">Chats</Link>
-                <Link to="/w/acme/history?tab=expenses">Expenses</Link>
+                <Link to="/w/acme/history#chats">Chats</Link>
+                <Link to="/w/acme/history#expenses">Expenses</Link>
                 <LocationProbe />
                 <NavHistoryProbe />
               </>
@@ -120,7 +120,7 @@ describe("PageHeader NavHistory back", () => {
     });
   });
 
-  it("skips query-only same-path entries before going back", async () => {
+  it("skips hash-only same-path entries before going back", async () => {
     render(renderRoutes("/w/acme/me"));
 
     fireEvent.click(screen.getByRole("link", { name: "History" }));
@@ -130,12 +130,12 @@ describe("PageHeader NavHistory back", () => {
 
     fireEvent.click(screen.getByRole("link", { name: "Chats" }));
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/history?tab=chats");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/history#chats");
     });
 
     fireEvent.click(screen.getByRole("link", { name: "Expenses" }));
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/history?tab=expenses");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/history#expenses");
     });
     expect(screen.getByTestId("can-go-back")).toHaveTextContent("yes");
 
@@ -186,7 +186,7 @@ describe("PageHeader NavHistory back", () => {
   });
 
   it("uses the route parent link when there is no previous different path", () => {
-    render(renderRoutes("/w/acme/history?tab=expenses"));
+    render(renderRoutes("/w/acme/history#expenses"));
 
     const backLink = screen.getByRole("link", { name: "Back to My profile" });
 

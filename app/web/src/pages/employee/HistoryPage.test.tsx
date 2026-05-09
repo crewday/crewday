@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { BrowserRouter, MemoryRouter, useLocation } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchJson } from "@/lib/api";
 import HistoryPage from "./HistoryPage";
 
@@ -14,17 +14,40 @@ const fetchJsonMock = vi.mocked(fetchJson);
 
 beforeEach(() => {
   fetchJsonMock.mockReset();
+  window.history.replaceState(null, "", "/");
 });
 
-function renderHistory(initial = "/history?tab=tasks"): ReactElement {
+afterEach(() => {
+  window.history.replaceState(null, "", "/");
+});
+
+function renderHistory(initial = "/history#tasks"): ReactElement {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[initial]}>
         <HistoryPage />
+        <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>
   );
+}
+
+function renderBrowserHistory(initial = "/history#tasks"): ReactElement {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  window.history.replaceState(null, "", initial);
+  return (
+    <QueryClientProvider client={qc}>
+      <BrowserRouter>
+        <HistoryPage />
+      </BrowserRouter>
+    </QueryClientProvider>
+  );
+}
+
+function LocationProbe(): ReactElement {
+  const location = useLocation();
+  return <span data-testid="location">{location.pathname + location.search + location.hash}</span>;
 }
 
 function property(): unknown {
@@ -104,7 +127,7 @@ describe("HistoryPage", () => {
     });
   });
 
-  it("fetches and renders only the active tab stream", async () => {
+  it("fetches and renders only the active hash tab stream", async () => {
     fetchJsonMock.mockImplementation(async (path: string) => {
       if (path === "/api/v1/properties") return [property()];
       if (path === "/api/v1/history?tab=chats") {
@@ -124,11 +147,112 @@ describe("HistoryPage", () => {
       throw new Error("Unscripted fetch: " + path);
     });
 
-    render(renderHistory("/history?tab=chats"));
+    render(renderHistory("/history#chats"));
 
     expect(await screen.findByText("Closed concierge thread")).toBeInTheDocument();
     expect(screen.getByText("Guest question resolved.")).toBeInTheDocument();
     expect(fetchJsonMock).not.toHaveBeenCalledWith("/api/v1/history?tab=tasks");
     expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Chats" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("normalizes old query tab links to hash deeplinks", async () => {
+    fetchJsonMock.mockImplementation(async (path: string) => {
+      if (path === "/api/v1/properties") return [property()];
+      if (path === "/api/v1/history?tab=chats") {
+        return {
+          data: [
+            {
+              id: "chat_1",
+              title: "Archived chat",
+              last_at: "2026-04-28T10:00:00Z",
+              summary: "Resolved.",
+            },
+          ],
+          next_cursor: null,
+          has_more: false,
+        };
+      }
+      throw new Error("Unscripted fetch: " + path);
+    });
+
+    render(renderHistory("/history?tab=chats&from=legacy"));
+
+    expect(await screen.findByText("Archived chat")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/history?from=legacy#chats");
+    });
+    expect(fetchJsonMock).toHaveBeenCalledWith("/api/v1/history?tab=chats");
+  });
+
+  it("clicks update the hash and browser Back/Forward follows the selected panel", async () => {
+    fetchJsonMock.mockImplementation(async (path: string) => {
+      if (path === "/api/v1/properties") return [property()];
+      if (path === "/api/v1/history?tab=tasks") {
+        return { data: [task("task_1", "Completed task")], next_cursor: null, has_more: false };
+      }
+      if (path === "/api/v1/history?tab=chats") {
+        return {
+          data: [
+            {
+              id: "chat_1",
+              title: "Closed chat",
+              last_at: "2026-04-28T10:00:00Z",
+              summary: "Resolved.",
+            },
+          ],
+          next_cursor: null,
+          has_more: false,
+        };
+      }
+      if (path === "/api/v1/history?tab=expenses") {
+        return {
+          data: [
+            {
+              id: "expense_1",
+              vendor: "Stationery Shop",
+              total_amount_cents: 1299,
+              currency: "USD",
+              submitted_at: "2026-04-28",
+              purchased_at: null,
+              note_md: "Pens",
+              state: "reimbursed",
+            },
+          ],
+          next_cursor: null,
+          has_more: false,
+        };
+      }
+      throw new Error("Unscripted fetch: " + path);
+    });
+
+    render(renderBrowserHistory());
+
+    expect(await screen.findByText("Completed task")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Chats" }));
+    await waitFor(() => {
+      expect(window.location.hash).toBe("#chats");
+    });
+    expect(await screen.findByText("Closed chat")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Expenses" }));
+    await waitFor(() => {
+      expect(window.location.hash).toBe("#expenses");
+    });
+    expect(await screen.findByText("Stationery Shop · $12.99")).toBeInTheDocument();
+
+    window.history.back();
+    await waitFor(() => {
+      expect(window.location.hash).toBe("#chats");
+      expect(screen.getByRole("tab", { name: "Chats" })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(screen.getByText("Closed chat")).toBeInTheDocument();
+
+    window.history.forward();
+    await waitFor(() => {
+      expect(window.location.hash).toBe("#expenses");
+      expect(screen.getByRole("tab", { name: "Expenses" })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(screen.getByText("Stationery Shop · $12.99")).toBeInTheDocument();
   });
 });

@@ -69,8 +69,12 @@ beforeEach(() => {
     if (path === "/api/v1/history?tab=expenses") {
       return { data: [], next_cursor: null, has_more: false };
     }
+    if (path === "/api/v1/history?tab=leaves") {
+      return { data: [], next_cursor: null, has_more: false };
+    }
     throw new Error("Unscripted fetch: " + path);
   });
+  window.history.replaceState(null, "", "/");
 });
 
 afterEach(() => {
@@ -81,6 +85,7 @@ afterEach(() => {
     value: undefined,
     configurable: true,
   });
+  window.history.replaceState(null, "", "/");
 });
 
 function renderProfile(initial = "/w/acme/me"): ReactElement {
@@ -105,7 +110,7 @@ function LocationProbe(): ReactElement {
   const state = loc.state as { notice?: unknown } | null;
   return (
     <>
-      <span data-testid="location">{loc.pathname + loc.search}</span>
+      <span data-testid="location">{loc.pathname + loc.search + loc.hash}</span>
       {typeof state?.notice === "string" && (
         <span data-testid="location-notice">{state.notice}</span>
       )}
@@ -256,7 +261,7 @@ describe("MePage", () => {
     expect(screen.getByText("English")).toBeInTheDocument();
   });
 
-  it("PageHeader NavHistory back skips History query-only tab entries", async () => {
+  it("PageHeader NavHistory back skips History hash tab entries", async () => {
     render(renderProfile());
 
     expect(await screen.findByText("Mina Manager")).toBeInTheDocument();
@@ -266,14 +271,16 @@ describe("MePage", () => {
       expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/history");
     });
 
-    fireEvent.click(screen.getByRole("link", { name: "Chats" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Chats" }));
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/history?tab=chats");
+      expect(window.location.hash).toBe("#chats");
+      expect(screen.getByRole("tab", { name: "Chats" })).toHaveAttribute("aria-selected", "true");
     });
 
-    fireEvent.click(screen.getByRole("link", { name: "Expenses" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Expenses" }));
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/history?tab=expenses");
+      expect(window.location.hash).toBe("#expenses");
+      expect(screen.getByRole("tab", { name: "Expenses" })).toHaveAttribute("aria-selected", "true");
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
