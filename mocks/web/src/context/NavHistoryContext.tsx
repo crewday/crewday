@@ -19,17 +19,17 @@ import { useLocation, useNavigationType } from "react-router-dom";
 //   POP     → move to a known entry (browser back/forward, navigate(-1))
 //   REPLACE → replace current entry (Navigate replace, navigate(to, {replace: true}))
 //
-// Query-only same-path entries stay in the local stack so the header
-// can skip them in one browser-history pop instead of walking through
-// tabs or filters.
+// Query/hash-only same-path entries stay in the local stack so the
+// header can skip them instead of walking through tabs or filters.
 interface NavHistoryValue {
   canGoBack: boolean;
-  backDelta: number | null;
+  backTarget: string | null;
 }
 
 interface NavEntry {
   key: string;
   pathname: string;
+  href: string;
 }
 
 interface NavStack {
@@ -37,7 +37,7 @@ interface NavStack {
   index: number;
 }
 
-const Ctx = createContext<NavHistoryValue>({ canGoBack: false, backDelta: null });
+const Ctx = createContext<NavHistoryValue>({ canGoBack: false, backTarget: null });
 
 export function NavHistoryProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
@@ -63,16 +63,25 @@ export function NavHistoryProvider({ children }: { children: ReactNode }) {
         return { entries, index: current.index };
       }
 
-      const index = current.entries.findIndex((item) => item.key === entry.key);
-      if (index === -1 || index === current.index) return current;
+      const index = current.entries.findIndex(
+        (item) => item.key === entry.key && item.href === entry.href,
+      );
+      if (index === current.index) return current;
+      if (index === -1) {
+        const entries = [...current.entries];
+        const currentEntry = entries[current.index];
+        if (currentEntry?.pathname !== entry.pathname) return current;
+        entries[current.index] = entry;
+        return { entries, index: current.index };
+      }
       return { entries: current.entries, index };
     });
   }, [location, navType]);
 
-  const backDelta = useMemo(() => previousPathnameDelta(stack), [stack]);
+  const backTarget = useMemo(() => previousPathnameTarget(stack), [stack]);
 
   return (
-    <Ctx.Provider value={{ canGoBack: stack.index > 0, backDelta }}>
+    <Ctx.Provider value={{ canGoBack: stack.index > 0, backTarget }}>
       {children}
     </Ctx.Provider>
   );
@@ -83,16 +92,20 @@ export function useNavHistory(): NavHistoryValue {
 }
 
 function entryFromLocation(location: ReturnType<typeof useLocation>): NavEntry {
-  return { key: location.key, pathname: location.pathname };
+  return {
+    key: location.key,
+    pathname: location.pathname,
+    href: location.pathname + location.search + location.hash,
+  };
 }
 
-function previousPathnameDelta(stack: NavStack): number | null {
+function previousPathnameTarget(stack: NavStack): string | null {
   const current = stack.entries[stack.index];
   if (!current) return null;
 
   for (let index = stack.index - 1; index >= 0; index -= 1) {
     if (stack.entries[index]?.pathname !== current.pathname) {
-      return stack.index - index;
+      return stack.entries[index]?.href ?? null;
     }
   }
   return null;

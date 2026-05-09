@@ -33,7 +33,7 @@ export default function PageHeader({ title, sub, actions, overflow, back }: Prop
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const shellNav = useShellNav();
-  const { backDelta } = useNavHistory();
+  const { backTarget } = useNavHistory();
 
   const resolved: ParentDescriptor | null =
     back === false
@@ -46,30 +46,30 @@ export default function PageHeader({ title, sub, actions, overflow, back }: Prop
   // a sub-page, "take me back" is more useful than "open the drawer".
   const showHamburger = !resolved && Boolean(shellNav?.hasDrawer);
 
-  // When the user actually navigated here in-app, "back" should pop
-  // to the previous different pathname (so /schedule → /task/:id →
-  // back lands on /schedule, while /history tab changes do not walk
-  // through query-only entries). The static parent map only kicks in
-  // for cold-load deep links or when the caller passed an explicit
+  // When the user actually navigated here in-app, "back" should return
+  // to the previous different pathname (so /schedule -> /task/:id ->
+  // back lands on /schedule, while /history and hash tab changes do not
+  // walk through same-route entries). The static parent map only kicks
+  // in for cold-load deep links or when the caller passed an explicit
   // `back` override.
-  const historyBackDelta = resolved !== null && back === undefined ? backDelta : null;
+  const historyBackTarget = resolved !== null && back === undefined ? backTarget : null;
 
   const hasOverflow = Boolean(overflow && overflow.length > 0);
 
   return (
     <header className="page-topbar">
       <div className="page-topbar__leading">
-        {resolved && historyBackDelta !== null && (
+        {resolved && historyBackTarget !== null && (
           <button
             type="button"
-            onClick={() => navigate(-historyBackDelta)}
+            onClick={() => navigate(historyBackTarget, { replace: true })}
             className="page-topbar__icon-btn"
             aria-label="Back"
           >
             <ChevronLeft size={22} strokeWidth={2} aria-hidden="true" />
           </button>
         )}
-        {resolved && historyBackDelta === null && (
+        {resolved && historyBackTarget === null && (
           <Link
             to={resolved.to}
             className="page-topbar__icon-btn"

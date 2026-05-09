@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { BrowserRouter, Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { NavHistoryProvider, useNavHistory } from "@/context/NavHistoryContext";
 import PageHeader from "./PageHeader";
@@ -55,14 +55,53 @@ function renderRoutes(initial = "/schedule"): ReactElement {
   );
 }
 
+function renderBrowserRoutes(initial: string): ReactElement {
+  window.history.replaceState(null, "", initial);
+
+  return (
+    <BrowserRouter>
+      <NavHistoryProvider>
+        <Routes>
+          <Route
+            path="/employees"
+            element={
+              <>
+                <Link to="/employee/emp_1">View employee</Link>
+                <LocationProbe />
+              </>
+            }
+          />
+          <Route
+            path="/employee/:id"
+            element={
+              <>
+                <PageHeader title="Employee" />
+                <a href="#shifts">Shifts</a>
+                <a href="#payslips">Payslips</a>
+                <LocationProbe />
+                <NavHistoryProbe />
+              </>
+            }
+          />
+        </Routes>
+      </NavHistoryProvider>
+    </BrowserRouter>
+  );
+}
+
 function LocationProbe(): ReactElement {
   const location = useLocation();
-  return <span data-testid="location">{location.pathname + location.search}</span>;
+  return <span data-testid="location">{location.pathname + location.search + location.hash}</span>;
 }
 
 function NavHistoryProbe(): ReactElement {
-  const { canGoBack } = useNavHistory();
-  return <span data-testid="can-go-back">{canGoBack ? "yes" : "no"}</span>;
+  const { backTarget, canGoBack } = useNavHistory();
+  return (
+    <>
+      <span data-testid="can-go-back">{canGoBack ? "yes" : "no"}</span>
+      <span data-testid="back-target">{backTarget ?? ""}</span>
+    </>
+  );
 }
 
 describe("PageHeader NavHistory back", () => {
@@ -105,6 +144,45 @@ describe("PageHeader NavHistory back", () => {
     await waitFor(() => {
       expect(screen.getByTestId("location")).toHaveTextContent("/me");
     });
+  });
+
+  it("skips hash-only same-route browser entries before going back", async () => {
+    try {
+      const initialHistoryLength = window.history.length;
+      render(renderBrowserRoutes("/employees"));
+
+      fireEvent.click(screen.getByRole("link", { name: "View employee" }));
+      await waitFor(() => {
+        expect(screen.getByTestId("location")).toHaveTextContent("/employee/emp_1");
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("back-target")).toHaveTextContent("/employees");
+        expect(screen.getByRole("button", { name: "Back" })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole("link", { name: "Shifts" }));
+      await waitFor(() => {
+        expect(screen.getByTestId("location")).toHaveTextContent("/employee/emp_1#shifts");
+      });
+      expect(window.location.pathname + window.location.hash).toBe("/employee/emp_1#shifts");
+
+      fireEvent.click(screen.getByRole("link", { name: "Payslips" }));
+      await waitFor(() => {
+        expect(screen.getByTestId("location")).toHaveTextContent("/employee/emp_1#payslips");
+      });
+      expect(window.location.pathname + window.location.hash).toBe("/employee/emp_1#payslips");
+      expect(window.history.length).toBeGreaterThanOrEqual(initialHistoryLength + 3);
+      expect(screen.getByTestId("back-target")).toHaveTextContent("/employees");
+
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("location")).toHaveTextContent("/employees");
+      });
+      expect(window.location.pathname + window.location.hash).toBe("/employees");
+    } finally {
+      window.history.replaceState(null, "", "/");
+    }
   });
 
   it("uses the route parent link when there is no previous different path", () => {
