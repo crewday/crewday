@@ -1407,10 +1407,10 @@ export interface AssetType {
   category: AssetCategory;
   icon_name: string;
   default_actions: {
-    key: string;
+    kind: "service" | "repair" | "replace" | "inspect" | "read";
     label: string;
-    interval_days?: number;
-    estimated_duration_minutes?: number;
+    interval_days: number;
+    warn_before_days: number;
   }[];
   default_lifespan_years: number | null;
 }

@@ -20,10 +20,16 @@ const ASSET_TYPES: AssetType[] = [
     icon_name: "lock",
     default_actions: [
       {
-        key: "battery_check",
+        kind: "inspect",
         label: "Battery check",
         interval_days: 30,
-        estimated_duration_minutes: 10,
+        warn_before_days: 7,
+      },
+      {
+        kind: "inspect",
+        label: "Battery check",
+        interval_days: 30,
+        warn_before_days: 7,
       },
     ],
     default_lifespan_years: 5,
@@ -86,18 +92,20 @@ describe("<AssetTypesPage>", () => {
     // `/assets` and `/asset_types`. Match the wrapper + the AssetTypes
     // route presence rather than locking adjacency.
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="scope\.view" \/>}>\s*<Route element={<ManagerLayout \/>}>[\s\S]*?<Route path="\/asset_types" element={<AssetTypesPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="scope\.view" \/>}>\s*<Route element={<ManagerLayout \/>}>[\s\S]*?<Route path="asset_types" element={<AssetTypesPage \/>} \/>/,
     );
   });
 
   it("also wires the workspace-scoped asset type route", () => {
     expect(appSource).toContain(
-      '<Route path="/w/:slug/asset_types" element={<AssetTypesPage />} />',
+      '<Route path="/w/:slug" element={<WorkspaceRouteRoot />}>',
     );
+    expect(appSource).toContain('<Route path="asset_types" element={<AssetTypesPage />} />');
   });
 
   it("renders asset types from paginated API envelopes", async () => {
     const restore = installFetch();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
       render(<Harness />);
 
@@ -105,8 +113,10 @@ describe("<AssetTypesPage>", () => {
       expect(screen.getByText("Pool pump")).toBeInTheDocument();
       expect(screen.getByText("security")).toBeInTheDocument();
       expect(screen.getByText("Expected lifespan: 5 years")).toBeInTheDocument();
-      expect(screen.getByText("Battery check")).toBeInTheDocument();
-      expect(screen.getByText("every 30d")).toBeInTheDocument();
+      expect(screen.getAllByText("Battery check")).toHaveLength(2);
+      expect(screen.getAllByText("every 30d")).toHaveLength(2);
+      const consoleText = consoleError.mock.calls.flat().join("\n");
+      expect(consoleText).not.toContain('Each child in a list should have a unique "key" prop');
     } finally {
       restore();
     }

@@ -18,6 +18,29 @@ async function fetchList<T>(path: string): Promise<T[]> {
   return unwrapList(await fetchJson<T[] | ListEnvelope<T>>(path));
 }
 
+type DefaultAction = AssetType["default_actions"][number];
+
+function defaultActionKeyBase(action: DefaultAction): string {
+  return [
+    action.kind,
+    action.label,
+    action.interval_days,
+    action.warn_before_days,
+  ].join(":");
+}
+
+function defaultActionKey(
+  action: DefaultAction,
+  index: number,
+  actions: DefaultAction[],
+): string {
+  const base = defaultActionKeyBase(action);
+  const firstMatchingIndex = actions.findIndex(
+    (candidate) => defaultActionKeyBase(candidate) === base,
+  );
+  return firstMatchingIndex === index ? base : `${base}:${index}`;
+}
+
 export default function AssetTypesPage() {
   const typesQ = useQuery({
     queryKey: qk.assetTypes(),
@@ -54,8 +77,8 @@ export default function AssetTypesPage() {
             )}
             {at.default_actions.length > 0 && (
               <ul className="tpl-card__checklist">
-                {at.default_actions.map((da) => (
-                  <li key={da.key}>
+                {at.default_actions.map((da, index) => (
+                  <li key={defaultActionKey(da, index, at.default_actions)}>
                     <span>{da.label}</span>
                     {da.interval_days != null && (
                       <span className="muted"> every {da.interval_days}d</span>
