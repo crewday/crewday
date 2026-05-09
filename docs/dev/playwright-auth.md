@@ -26,9 +26,12 @@ exists only because of this loopback constraint.
      --output playwright
    ```
 
-   The wrapper uses host Python when the local environment is synced.
-   If imports are missing, it falls back to the running `app-api`
-   container, which already has the dev-auth gates configured.
+   The wrapper forces `CREWDAY_PROFILE=dev` for the login subprocess,
+   uses host Python when the local environment is synced, and falls
+   back to the running `app-api` container when host imports or
+   host-only dev auth config are missing. Do not add
+   `CREWDAY_PROFILE=dev` or `CREWDAY_ROOT_KEY` by hand unless you are
+   debugging the helper itself.
 
 2. Paste the JSON object straight into Playwright:
 

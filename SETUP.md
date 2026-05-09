@@ -122,7 +122,11 @@ Host-side login variant:
 CREWDAY_DEV_AUTH=1 ./scripts/dev-login.sh <email> <slug>
 ```
 
-This requires `uv sync` or `pip install -e .`.
+The wrapper forces the login subprocess into the dev profile and falls
+back to the running `app-api` container when host Python lacks app deps
+or host-only auth config. For browser checks, add
+`--output playwright` and inject the printed alias cookie into
+Playwright.
 
 ## Browser Checks
 
