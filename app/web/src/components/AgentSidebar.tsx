@@ -112,6 +112,7 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
     },
     onSettled: () => qc.invalidateQueries({ queryKey: logKey }),
   });
+  const showTyping = typing || sendMessage.isPending;
 
   const decideAction = useMutation({
     mutationFn: ({ id, decision }: { id: string; decision: "approve" | "deny" }) =>
@@ -129,7 +130,7 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
     const el = logRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [log.data?.length, typing]);
+  }, [log.data?.length, showTyping]);
 
   const toggle = useCallback(() => {
     setCollapsed((c) => {
@@ -182,7 +183,7 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
               </span>
             </div>
           ))}
-          {typing && (
+          {showTyping && (
             <div className="agent-msg agent-msg--agent agent-msg--typing">
               <span className="agent-msg__body">
                 <span className="chat-typing" aria-hidden="true">

@@ -144,7 +144,67 @@ describe("AgentSidebar", () => {
     }
   });
 
+  it("shows manager typing feedback while the send request is pending", async () => {
+    let resolveSend: (value: Response) => void = () => {};
+    const pendingSend = new Promise<Response>((resolve) => {
+      resolveSend = resolve;
+    });
+    const env = installFetchRouteHandlers([
+      {
+        path: "/w/crewday/api/v1/agent/manager/log",
+        respond: { body: [] },
+      },
+      {
+        path: "/w/crewday/api/v1/approvals",
+        respond: { body: [] },
+      },
+      {
+        path: "/w/crewday/api/v1/agent/manager/message",
+        method: "POST",
+        respond: () => pendingSend,
+      },
+    ]);
+
+    try {
+      renderWithProviders(
+        <MemoryRouter initialEntries={["/w/crewday/today"]}>
+          <AgentSidebar role="manager" />
+        </MemoryRouter>,
+        { queryClient: makeTestQueryClient() },
+      );
+
+      const input = screen.getByLabelText("Message agent");
+      fireEvent.change(input, { target: { value: "Can you summarize today's dashboard?" } });
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+      expect(
+        await screen.findByText("Can you summarize today's dashboard?"),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Agent is typing")).toBeInTheDocument();
+
+      resolveSend(
+        new Response(
+          JSON.stringify({
+            at: "2026-05-06T12:00:00Z",
+            kind: "user",
+            body: "Can you summarize today's dashboard?",
+          }),
+          { status: 201 },
+        ),
+      );
+      await waitFor(() => {
+        expect(screen.queryByText("Agent is typing")).not.toBeInTheDocument();
+      });
+    } finally {
+      env.restore();
+    }
+  });
+
   it("rolls back the optimistic user message when send fails", async () => {
+    let rejectSend: (value: Response) => void = () => {};
+    const failedSend = new Promise<Response>((resolve) => {
+      rejectSend = resolve;
+    });
     const env = installFetchRouteHandlers([
       {
         path: "/w/crewday/api/v1/agent/employee/log",
@@ -155,7 +215,7 @@ describe("AgentSidebar", () => {
       {
         path: "/w/crewday/api/v1/agent/employee/message",
         method: "POST",
-        respond: { status: 500, body: { detail: "send failed" } },
+        respond: () => failedSend,
       },
     ]);
 
@@ -173,9 +233,16 @@ describe("AgentSidebar", () => {
       fireEvent.change(input, { target: { value: "bbash browser smoke" } });
       fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
+      expect(await screen.findByText("bbash browser smoke")).toBeInTheDocument();
+      expect(screen.getByText("Agent is typing")).toBeInTheDocument();
+
+      rejectSend(
+        new Response(JSON.stringify({ detail: "send failed" }), { status: 500 }),
+      );
       await waitFor(() => {
         expect(screen.queryByText("bbash browser smoke")).not.toBeInTheDocument();
       });
+      expect(screen.queryByText("Agent is typing")).not.toBeInTheDocument();
       expect(screen.getByText("prior message")).toBeInTheDocument();
     } finally {
       env.restore();
