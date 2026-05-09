@@ -127,6 +127,7 @@ interface FetchRequest {
 interface InstallFetchOptions {
   createStatus?: number;
   createBody?: unknown;
+  documentUploadStatuses?: number[];
 }
 
 function parseRequestBody(body: BodyInit | null | undefined): unknown {
@@ -176,6 +177,7 @@ function installFetch(options: InstallFetchOptions = {}) {
   const original = globalThis.fetch;
   const assets = [...ASSETS];
   const requests: FetchRequest[] = [];
+  const documentUploadStatuses = [...(options.documentUploadStatuses ?? [])];
   const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const resolved = typeof url === "string" ? url : url.toString();
     const method = (init?.method ?? "GET").toUpperCase();
@@ -192,6 +194,40 @@ function installFetch(options: InstallFetchOptions = {}) {
       const asset = createdAsset(body as Record<string, unknown>);
       assets.push(asset);
       return jsonResponse(asset, 201);
+    }
+    if (path === "/w/acme/api/v1/assets/asset_grill/documents" && method === "POST") {
+      const uploadStatus = documentUploadStatuses.shift() ?? 201;
+      if (uploadStatus >= 300) {
+        return jsonResponse(
+          {
+            type: "https://crewday.dev/errors/upload_failed",
+            title: "Upload failed",
+            status: uploadStatus,
+            detail: "Document upload failed",
+          },
+          uploadStatus,
+        );
+      }
+      const form = body as FormData;
+      const file = form.get("file") as File;
+      return jsonResponse(
+        {
+          id: `doc_${requests.filter((request) => request.path.endsWith("/documents")).length}`,
+          asset_id: "asset_grill",
+          property_id: "prop_1",
+          kind: form.get("category"),
+          title: form.get("title"),
+          filename: file.name,
+          size_kb: 1,
+          uploaded_at: "2026-05-09T00:00:00Z",
+          expires_on: null,
+          amount_cents: null,
+          amount_currency: null,
+          extraction_status: "pending",
+          extracted_at: null,
+        },
+        201,
+      );
     }
     if (path === "/w/acme/api/v1/asset_types") {
       return jsonResponse({ data: ASSET_TYPES });
@@ -212,6 +248,29 @@ function installFetch(options: InstallFetchOptions = {}) {
       (globalThis as { fetch: typeof fetch }).fetch = original;
     },
   };
+}
+
+function selectDocuments(dialog: HTMLElement, files: File[]): void {
+  const input = within(dialog).getByLabelText(
+    /Upload or drop invoices, manuals, warranties/i,
+  ) as HTMLInputElement;
+  Object.defineProperty(input, "files", {
+    value: files,
+    configurable: true,
+  });
+  fireEvent.change(input);
+}
+
+function dropDocuments(dialog: HTMLElement, files: File[]): void {
+  fireEvent.drop(
+    within(dialog).getByLabelText(/Upload or drop invoices, manuals, warranties/i),
+    {
+      dataTransfer: {
+        files,
+        types: ["Files"],
+      },
+    },
+  );
 }
 
 function Harness({ initial = "/w/acme/assets" }: { initial?: string }) {
@@ -475,6 +534,149 @@ describe("<AssetsPage>", () => {
     }
   });
 
+  it("uploads queued documents after creating the asset", async () => {
+    const { requests, restore } = installFetch();
+    try {
+      render(<Harness />);
+      await screen.findByText("Front door lock");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New asset" }));
+      const dialog = screen.getByRole("dialog", { name: "New asset" });
+      fireEvent.change(within(dialog).getByLabelText("Name"), {
+        target: { value: "Back patio grill" },
+      });
+      selectDocuments(dialog, [
+        new File(["manual"], "grill-manual.pdf", { type: "application/pdf" }),
+        new File(["photo"], "serial-photo.jpg", { type: "image/jpeg" }),
+      ]);
+
+      expect(within(dialog).getByRole("heading", { name: "Documents" })).toBeInTheDocument();
+      expect(within(dialog).getByText("grill-manual.pdf")).toBeInTheDocument();
+      expect(within(dialog).getByText("serial-photo.jpg")).toBeInTheDocument();
+      const kindFields = within(dialog).getAllByLabelText("Kind");
+      const titleFields = within(dialog).getAllByLabelText("Title");
+      expect(
+        within(dialog)
+          .getAllByRole("option")
+          .map((option) => option.getAttribute("value"))
+          .filter(Boolean),
+      ).toEqual(expect.arrayContaining([
+        "manual",
+        "warranty",
+        "invoice",
+        "receipt",
+        "photo",
+        "certificate",
+        "contract",
+        "permit",
+        "insurance",
+        "other",
+      ]));
+      const manualKind = kindFields.at(0);
+      const photoKind = kindFields.at(1);
+      const manualTitle = titleFields.at(0);
+      if (!manualKind || !photoKind || !manualTitle) throw new Error("document fields missing");
+      expect(manualKind).toHaveValue("manual");
+      expect(photoKind).toHaveValue("photo");
+      fireEvent.change(manualTitle, {
+        target: { value: "Outdoor kitchen manual" },
+      });
+      fireEvent.change(photoKind, {
+        target: { value: "certificate" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create asset" }));
+
+      expect(await screen.findByText("Back patio grill")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name: "New asset" })).not.toBeInTheDocument();
+      });
+
+      const assetCreates = requests.filter(
+        (request) => request.path === "/w/acme/api/v1/assets" && request.method === "POST",
+      );
+      const uploads = requests.filter((request) =>
+        request.path === "/w/acme/api/v1/assets/asset_grill/documents",
+      );
+      expect(assetCreates).toHaveLength(1);
+      expect(uploads).toHaveLength(2);
+      const firstUpload = uploads.at(0);
+      const secondUpload = uploads.at(1);
+      if (!firstUpload || !secondUpload) throw new Error("upload requests missing");
+      const firstBody = firstUpload.body as FormData;
+      const secondBody = secondUpload.body as FormData;
+      expect(firstBody.get("category")).toBe("manual");
+      expect(firstBody.get("title")).toBe("Outdoor kitchen manual");
+      expect((firstBody.get("file") as File).name).toBe("grill-manual.pdf");
+      expect(secondBody.get("category")).toBe("certificate");
+      expect(secondBody.get("title")).toBe("serial-photo");
+      expect((secondBody.get("file") as File).name).toBe("serial-photo.jpg");
+    } finally {
+      restore();
+    }
+  });
+
+  it("accepts documents dropped onto the new asset upload area", async () => {
+    const { restore } = installFetch();
+    try {
+      render(<Harness />);
+      await screen.findByText("Front door lock");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New asset" }));
+      const dialog = screen.getByRole("dialog", { name: "New asset" });
+      dropDocuments(dialog, [
+        new File(["permit"], "deck-permit.pdf", { type: "application/pdf" }),
+      ]);
+
+      expect(within(dialog).getByText("deck-permit.pdf")).toBeInTheDocument();
+      expect(within(dialog).getByLabelText("Kind")).toHaveValue("permit");
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps failed document uploads queued without creating a duplicate asset", async () => {
+    const { requests, restore } = installFetch({ documentUploadStatuses: [500, 201] });
+    try {
+      render(<Harness />);
+      await screen.findByText("Front door lock");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New asset" }));
+      const dialog = screen.getByRole("dialog", { name: "New asset" });
+      fireEvent.change(within(dialog).getByLabelText("Name"), {
+        target: { value: "Back patio grill" },
+      });
+      selectDocuments(dialog, [
+        new File(["warranty"], "grill-warranty.pdf", { type: "application/pdf" }),
+      ]);
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create asset" }));
+
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+        "Asset created, but 1 document upload failed",
+      );
+      expect(within(dialog).getByRole("status")).toHaveTextContent("The asset was created");
+      expect(within(dialog).getByText("grill-warranty.pdf")).toBeInTheDocument();
+      expect(await screen.findByText("Back patio grill")).toBeInTheDocument();
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Retry document uploads" }));
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name: "New asset" })).not.toBeInTheDocument();
+      });
+
+      expect(
+        requests.filter(
+          (request) => request.path === "/w/acme/api/v1/assets" && request.method === "POST",
+        ),
+      ).toHaveLength(1);
+      expect(
+        requests.filter((request) =>
+          request.path === "/w/acme/api/v1/assets/asset_grill/documents",
+        ),
+      ).toHaveLength(2);
+    } finally {
+      restore();
+    }
+  });
+
   it("falls back to the first property when the URL property filter is stale", async () => {
     const { restore } = installFetch();
     try {
@@ -500,6 +702,8 @@ describe("<AssetsPage>", () => {
     expect(managerPanelsCss).toMatch(
       /\.asset-create__field input\[aria-invalid="true"\],[\s\S]*border-color: var\(--rust\);/,
     );
+    expect(managerPanelsCss).toContain(".asset-create__upload");
+    expect(managerPanelsCss).toContain(".asset-create__document");
     expect(managerPanelsCss).toMatch(
       /@media \(max-width: 560px\) \{[\s\S]*\.asset-create__grid \{\n    grid-template-columns: 1fr;/,
     );

@@ -635,6 +635,58 @@
   border-color: var(--rust);
   box-shadow: 0 0 0 3px rgba(154, 73, 43, 0.14);
 }
+.asset-create__upload {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 6px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.asset-create__upload input {
+  width: 100%;
+  min-width: 0;
+  color: var(--ink-2);
+}
+.asset-create__upload--active {
+  border-color: var(--moss);
+  background: var(--wash);
+  color: var(--ink);
+}
+.asset-create__documents {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.asset-create__document {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+}
+.asset-create__document-file {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.asset-create__document-file strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
 .asset-create__checkbox {
   align-self: flex-start;
 }

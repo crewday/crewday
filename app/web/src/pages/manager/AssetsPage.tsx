@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type DragEvent, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { ApiError, fetchJson, resolveApiPath } from "@/lib/api";
@@ -9,7 +9,15 @@ import { AssetIcon } from "@/components/AssetIcon";
 import { ASSET_CONDITION_TONE, ASSET_STATUS_TONE } from "@/lib/tones";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import { type ListEnvelope, unwrapList as unwrapEnvelope } from "@/lib/listResponse";
-import type { Asset, AssetCondition, AssetStatus, AssetType, Property } from "@/types/api";
+import type {
+  Asset,
+  AssetCondition,
+  AssetDocument,
+  AssetStatus,
+  AssetType,
+  DocumentKind,
+  Property,
+} from "@/types/api";
 
 function unwrapList<T>(payload: T[] | ListEnvelope<T>): T[] {
   return Array.isArray(payload) ? payload : payload.data;
@@ -46,6 +54,29 @@ interface AssetCreateBody {
   notes_md?: string;
 }
 
+interface QueuedAssetDocument {
+  localId: string;
+  file: File;
+  kind: DocumentKind;
+  title: string;
+}
+
+class AssetDocumentUploadError extends Error {
+  readonly asset: Asset;
+  readonly failedDocuments: QueuedAssetDocument[];
+
+  constructor(asset: Asset, failedDocuments: QueuedAssetDocument[]) {
+    super(
+      `Asset created, but ${failedDocuments.length} document upload${
+        failedDocuments.length === 1 ? "" : "s"
+      } failed.`,
+    );
+    this.name = "AssetDocumentUploadError";
+    this.asset = asset;
+    this.failedDocuments = failedDocuments;
+  }
+}
+
 const ASSET_CONDITIONS: { value: AssetCondition; label: string }[] = [
   { value: "new", label: "New" },
   { value: "good", label: "Good" },
@@ -59,6 +90,19 @@ const ASSET_STATUSES: { value: AssetStatus; label: string }[] = [
   { value: "in_repair", label: "In repair" },
   { value: "decommissioned", label: "Decommissioned" },
   { value: "disposed", label: "Disposed" },
+];
+
+const DOCUMENT_KINDS: { value: DocumentKind; label: string }[] = [
+  { value: "manual", label: "Manual" },
+  { value: "warranty", label: "Warranty" },
+  { value: "invoice", label: "Invoice" },
+  { value: "receipt", label: "Receipt" },
+  { value: "photo", label: "Photo" },
+  { value: "certificate", label: "Certificate" },
+  { value: "contract", label: "Contract" },
+  { value: "permit", label: "Permit" },
+  { value: "insurance", label: "Insurance" },
+  { value: "other", label: "Other" },
 ];
 
 function setSearchParam(
@@ -133,6 +177,10 @@ function NewAssetButton({
   const [guestVisible, setGuestVisible] = useState(false);
   const [guestInstructions, setGuestInstructions] = useState("");
   const [notes, setNotes] = useState("");
+  const [queuedDocuments, setQueuedDocuments] = useState<QueuedAssetDocument[]>([]);
+  const [documentDragActive, setDocumentDragActive] = useState(false);
+  const [createdAssetAfterUploadFailure, setCreatedAssetAfterUploadFailure] =
+    useState<Asset | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
   const areasQ = useQuery({
@@ -145,14 +193,33 @@ function NewAssetButton({
   });
 
   const create = useMutation({
-    mutationFn: (body: AssetCreateBody) =>
-      fetchJson<Asset>("/api/v1/assets", { method: "POST", body }),
-    onSuccess: async () => {
+    mutationFn: async (body: AssetCreateBody) => {
+      const asset =
+        createdAssetAfterUploadFailure ??
+        (await fetchJson<Asset>("/api/v1/assets", { method: "POST", body }));
+      if (queuedDocuments.length > 0) {
+        await uploadQueuedAssetDocuments(asset, queuedDocuments);
+      }
+      return asset;
+    },
+    onSuccess: async (asset) => {
       setFormError(null);
+      setCreatedAssetAfterUploadFailure(null);
       await queryClient.invalidateQueries({ queryKey: qk.assets() });
+      await queryClient.invalidateQueries({ queryKey: qk.documents() });
+      await queryClient.invalidateQueries({ queryKey: qk.asset(asset.id) });
       dialogRef.current?.close();
     },
     onError: (error) => {
+      if (error instanceof AssetDocumentUploadError) {
+        setCreatedAssetAfterUploadFailure(error.asset);
+        setQueuedDocuments(error.failedDocuments);
+        setFormError(assetDocumentUploadErrorMessage(error));
+        void queryClient.invalidateQueries({ queryKey: qk.assets() });
+        void queryClient.invalidateQueries({ queryKey: qk.documents() });
+        void queryClient.invalidateQueries({ queryKey: qk.asset(error.asset.id) });
+        return;
+      }
       setFormError(assetCreateErrorMessage(error));
     },
   });
@@ -179,6 +246,9 @@ function NewAssetButton({
     setGuestVisible(false);
     setGuestInstructions("");
     setNotes("");
+    setQueuedDocuments([]);
+    setDocumentDragActive(false);
+    setCreatedAssetAfterUploadFailure(null);
     setFormError(null);
     create.reset();
   }
@@ -227,6 +297,53 @@ function NewAssetButton({
     create.mutate(body);
   }
 
+  function addDocuments(files: FileList | null): void {
+    if (!files?.length) return;
+    setQueuedDocuments((current) => [
+      ...current,
+      ...Array.from(files).map((file) => ({
+        localId: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+        file,
+        kind: defaultDocumentKind(file),
+        title: defaultDocumentTitle(file),
+      })),
+    ]);
+    setFormError(null);
+  }
+
+  function handleDocumentDragOver(event: DragEvent<HTMLLabelElement>): void {
+    event.preventDefault();
+    if (event.dataTransfer.types.includes("Files")) {
+      setDocumentDragActive(true);
+      event.dataTransfer.dropEffect = "copy";
+    }
+  }
+
+  function handleDocumentDragLeave(): void {
+    setDocumentDragActive(false);
+  }
+
+  function handleDocumentDrop(event: DragEvent<HTMLLabelElement>): void {
+    event.preventDefault();
+    setDocumentDragActive(false);
+    addDocuments(event.dataTransfer.files);
+  }
+
+  function updateDocument(
+    localId: string,
+    patch: Partial<Pick<QueuedAssetDocument, "kind" | "title">>,
+  ): void {
+    setQueuedDocuments((current) =>
+      current.map((doc) => (doc.localId === localId ? { ...doc, ...patch } : doc)),
+    );
+    setFormError(null);
+  }
+
+  function removeDocument(localId: string): void {
+    setQueuedDocuments((current) => current.filter((doc) => doc.localId !== localId));
+    setFormError(null);
+  }
+
   const ready = Boolean(assetTypes && properties);
   const hasProperties = Boolean(properties?.length);
   const disabledReason = !ready
@@ -235,6 +352,15 @@ function NewAssetButton({
       ? "Add a property before creating an asset."
       : null;
   const formErrorId = formError ? "asset-create-error" : undefined;
+  const submitLabel = createdAssetAfterUploadFailure
+    ? create.isPending
+      ? "Uploading..."
+      : "Retry document uploads"
+    : create.isPending
+      ? queuedDocuments.length > 0
+        ? "Creating and uploading..."
+        : "Creating..."
+      : "Create asset";
   const nameInvalid = formError === "Enter an asset name before creating the asset.";
   const propertyInvalid = formError === "Choose a property for this asset.";
   const currencyInvalid = formError === "Use a three-letter currency code, such as USD.";
@@ -514,6 +640,86 @@ function NewAssetButton({
               </label>
             </section>
 
+            <section className="asset-create__section" aria-labelledby="asset-create-documents">
+              <h4 id="asset-create-documents" className="asset-create__section-title">
+                Documents
+              </h4>
+              <label
+                className={
+                  documentDragActive
+                    ? "asset-create__upload asset-create__upload--active"
+                    : "asset-create__upload"
+                }
+                onDragOver={handleDocumentDragOver}
+                onDragLeave={handleDocumentDragLeave}
+                onDrop={handleDocumentDrop}
+              >
+                <span>Upload or drop invoices, manuals, warranties, receipts, certificates, photos, or permits</span>
+                <input
+                  type="file"
+                  multiple
+                  onChange={(event) => {
+                    addDocuments(event.currentTarget.files);
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </label>
+              {createdAssetAfterUploadFailure ? (
+                <p className="form-notice form-notice--error" role="status">
+                  The asset was created. Retry the failed document uploads or close this form.
+                </p>
+              ) : null}
+              {queuedDocuments.length > 0 ? (
+                <div className="asset-create__documents" aria-label="Queued documents">
+                  {queuedDocuments.map((doc) => (
+                    <div className="asset-create__document" key={doc.localId}>
+                      <div className="asset-create__document-file">
+                        <strong>{doc.file.name}</strong>
+                        <span>{formatFileSize(doc.file.size)}</span>
+                      </div>
+                      <div className="asset-create__grid">
+                        <label className="field asset-create__field">
+                          <span>Kind</span>
+                          <select
+                            value={doc.kind}
+                            onChange={(event) =>
+                              updateDocument(doc.localId, {
+                                kind: event.target.value as DocumentKind,
+                              })
+                            }
+                          >
+                            {DOCUMENT_KINDS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field asset-create__field">
+                          <span>Title</span>
+                          <input
+                            required
+                            value={doc.title}
+                            onChange={(event) =>
+                              updateDocument(doc.localId, { title: event.target.value })
+                            }
+                          />
+                        </label>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        disabled={create.isPending}
+                        onClick={() => removeDocument(doc.localId)}
+                      >
+                        Remove document
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+
             {areasQ.isError && (
               <p className="form-notice form-notice--error" role="alert">
                 Areas could not load. You can save the asset without an area.
@@ -540,7 +746,7 @@ function NewAssetButton({
               className="btn btn--moss"
               disabled={create.isPending}
             >
-              {create.isPending ? "Creating..." : "Create asset"}
+              {submitLabel}
             </button>
           </footer>
         </form>
@@ -552,6 +758,60 @@ function NewAssetButton({
 function optionalText(value: string): string | undefined {
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+async function uploadQueuedAssetDocuments(
+  asset: Asset,
+  documents: QueuedAssetDocument[],
+): Promise<AssetDocument[]> {
+  const uploaded: AssetDocument[] = [];
+  const failedDocuments: QueuedAssetDocument[] = [];
+  for (const doc of documents) {
+    try {
+      uploaded.push(await uploadAssetDocument(asset.id, doc));
+    } catch {
+      failedDocuments.push(doc);
+    }
+  }
+  if (failedDocuments.length > 0) {
+    throw new AssetDocumentUploadError(asset, failedDocuments);
+  }
+  return uploaded;
+}
+
+function uploadAssetDocument(assetId: string, doc: QueuedAssetDocument): Promise<AssetDocument> {
+  const body = new FormData();
+  body.append("category", doc.kind);
+  body.append("title", optionalText(doc.title) ?? doc.file.name);
+  body.append("file", doc.file);
+  return fetchJson<AssetDocument>(`/api/v1/assets/${assetId}/documents`, {
+    method: "POST",
+    body,
+  });
+}
+
+function defaultDocumentKind(file: File): DocumentKind {
+  if (file.type.startsWith("image/")) return "photo";
+  const lowerName = file.name.toLowerCase();
+  if (lowerName.includes("manual")) return "manual";
+  if (lowerName.includes("warranty")) return "warranty";
+  if (lowerName.includes("invoice")) return "invoice";
+  if (lowerName.includes("receipt")) return "receipt";
+  if (lowerName.includes("certificate")) return "certificate";
+  if (lowerName.includes("contract")) return "contract";
+  if (lowerName.includes("permit")) return "permit";
+  if (lowerName.includes("insurance")) return "insurance";
+  return "other";
+}
+
+function defaultDocumentTitle(file: File): string {
+  return file.name.replace(/\.[^.]+$/, "").trim() || file.name;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function buildAssetCreateBody(input: {
@@ -646,6 +906,11 @@ function assetCreateErrorMessage(error: unknown): string {
   }
   if (error instanceof Error && error.message) return error.message;
   return "Could not create asset. Try again in a moment.";
+}
+
+function assetDocumentUploadErrorMessage(error: AssetDocumentUploadError): string {
+  const names = error.failedDocuments.map((doc) => doc.file.name).join(", ");
+  return `${error.message} Failed: ${names}. Retry the queued documents or close this form.`;
 }
 
 function assetFieldLabel(loc: readonly (string | number)[] | undefined): string | null {
