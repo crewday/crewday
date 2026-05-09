@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { __resetApiProvidersForTests } from "@/lib/api";
-import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
+import { qk, __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
 import * as preferences from "@/lib/preferences";
 import { installFetchRouteHandlers } from "@/test/helpers";
 import StaysPage from "./StaysPage";
@@ -69,6 +69,7 @@ function installFetch(options: {
   units?: unknown[];
   feeds?: unknown[];
   leaves?: unknown[];
+  leavesResponse?: unknown;
   employees?: unknown[];
   membershipRole?: "owner_workspace" | "managed_workspace" | "observer_workspace";
   shareGuestIdentity?: boolean;
@@ -110,7 +111,10 @@ function installFetch(options: {
       path: "/w/acme/api/v1/stays/reservations?limit=500",
       respond: { body: { data: reservations } },
     },
-    { path: "/w/acme/api/v1/user_leaves?approved=true&limit=500", respond: { body: { data: options.leaves ?? [] } } },
+    {
+      path: "/w/acme/api/v1/user_leaves?approved=true&limit=500",
+      respond: { body: options.leavesResponse ?? { data: options.leaves ?? [] } },
+    },
     { path: "/w/acme/api/v1/properties", respond: { body: [property] } },
     { path: "/w/acme/api/v1/employees", respond: { body: options.employees ?? [] } },
     { path: "/w/acme/api/v1/stays/ical-feeds", respond: { body: feeds } },
@@ -195,8 +199,8 @@ function installFetch(options: {
   ]);
 }
 
-function Harness() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function Harness({ queryClient }: { queryClient?: QueryClient } = {}) {
+  const qc = queryClient ?? new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
       <MemoryRouter>
@@ -302,6 +306,32 @@ describe("<StaysPage>", () => {
       expect(screen.getAllByText("Turnover").length).toBeGreaterThan(1);
       expect(screen.getByText("LL")).toBeInTheDocument();
       expect(screen.getByText(/Lina Leave · vacation/)).toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("renders the agenda when cached stay payload is missing leaves", async () => {
+    const fake = installFetch({ reservations: [existingReservation] });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(qk.stays(), { stays: [], closures: [] });
+    try {
+      render(<Harness queryClient={queryClient} />);
+
+      expect(await screen.findByText("Scroll up for past weeks")).toBeInTheDocument();
+      expect(document.querySelector(".stays-day__event--leave")).toBeNull();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("renders the agenda when the leaves fetch has no data array", async () => {
+    const fake = installFetch({ reservations: [existingReservation], leavesResponse: {} });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Scroll up for past weeks")).toBeInTheDocument();
+      expect(document.querySelector(".stays-day__event--leave")).toBeNull();
     } finally {
       fake.restore();
     }

@@ -208,15 +208,30 @@ function mapMembership(row: MembershipPayload): PropertyWorkspace {
   };
 }
 
+type StaysPayloadInput = Omit<StaysPayload, "leaves"> & { leaves?: unknown };
+
+function normalizeStaysPayload(payload: StaysPayloadInput): StaysPayload {
+  return {
+    ...payload,
+    leaves: Array.isArray(payload.leaves) ? payload.leaves : [],
+  };
+}
+
+function leafRowsFromEnvelope(envelope: unknown): LeaveListPayload[] {
+  if (typeof envelope !== "object" || envelope === null || !("data" in envelope)) return [];
+  const data = envelope.data;
+  return Array.isArray(data) ? (data as LeaveListPayload[]) : [];
+}
+
 async function fetchStaysPayload(): Promise<StaysPayload> {
   const [reservations, leaves] = await Promise.all([
     fetchJson<ListEnvelope<ReservationPayload>>("/api/v1/stays/reservations?limit=500"),
-    fetchJson<ListEnvelope<LeaveListPayload>>("/api/v1/user_leaves?approved=true&limit=500"),
+    fetchJson<unknown>("/api/v1/user_leaves?approved=true&limit=500"),
   ]);
   return {
     stays: reservations.data.map(mapReservation),
     closures: [],
-    leaves: leaves.data.map(mapLeave),
+    leaves: leafRowsFromEnvelope(leaves).map(mapLeave),
   };
 }
 
@@ -505,7 +520,8 @@ export default function StaysPage() {
     return <DeskPage title="Stays">Failed to load.</DeskPage>;
   }
 
-  const { stays } = dataQ.data;
+  const data = normalizeStaysPayload(dataQ.data);
+  const { stays } = data;
   const properties = propsQ.data;
   const units = unitQs.flatMap((query) => query.data ?? []);
   const memberships = membershipQs.flatMap((query) => query.data ?? []);
@@ -917,7 +933,7 @@ export default function StaysPage() {
         todayIso={todayIso}
         properties={properties}
         employees={empsQ.data}
-        payload={dataQ.data}
+        payload={data}
         guestNameForStay={guestNameForStay}
       />
     </DeskPage>
