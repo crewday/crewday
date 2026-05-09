@@ -27,6 +27,7 @@ def _settings(
     profile: Literal["prod", "dev"] = "prod",
     metrics_enabled: bool = True,
     metrics_allow_cidr: list[str] | None = None,
+    phase0_stub_enabled: bool = False,
 ) -> Settings:
     return Settings.model_construct(
         database_url="sqlite:///:memory:",
@@ -45,6 +46,7 @@ def _settings(
         vite_dev_url="http://127.0.0.1:5173",
         metrics_enabled=metrics_enabled,
         metrics_allow_cidr=metrics_allow_cidr or [],
+        phase0_stub_enabled=phase0_stub_enabled,
     )
 
 
@@ -118,9 +120,7 @@ class TestHttpMiddlewareUnderLoad:
         # Look for the route label literal in the body.
         assert 'route="/healthz"' not in resp.text
 
-    def test_workspace_id_label_carries_bound_context(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_workspace_id_label_carries_bound_context(self) -> None:
         """Regression for the cd-24tp self-review middleware-ordering bug.
 
         ``HttpMetricsMiddleware`` runs INSIDE
@@ -134,37 +134,26 @@ class TestHttpMiddlewareUnderLoad:
         workspace_id from a request header without setting up
         users / sessions / role grants — the stub is the
         documented escape hatch for tenancy-bound integration
-        tests. The tenancy middleware reads from the
-        :func:`~app.config.get_settings` lru_cached singleton, so
-        the stub gate is set via env var rather than through the
-        :class:`Settings` instance handed to :func:`create_app`.
+        tests. The factory stashes the explicit
+        :class:`Settings` instance on ``app.state``, and the tenancy
+        middleware reads that instance before falling back to the
+        process-level settings singleton.
         """
-        from app.config import get_settings
-
         ws_id = "01KQ3HF5QR6SX6PDC4XPGGDFC1"
-        # Phase-0 stub gate is read from get_settings() — flush its
-        # cache and set the env var so the singleton picks it up.
-        monkeypatch.setenv("CREWDAY_PHASE0_STUB_ENABLED", "1")
-        get_settings.cache_clear()
-        try:
-            client = _client(create_app(settings=_settings()))
-            # The Phase-0 stub resolves the workspace from a header,
-            # but the request must still hit a path that runs the
-            # tenancy middleware (i.e. NOT a SKIP_PATHS entry). Any
-            # ``/w/<slug>/api/v1/...`` path qualifies; the response
-            # status doesn't matter — we only need the metric bumped.
-            client.get(
-                "/w/ordering-test/api/v1/properties",
-                headers={
-                    "X-Test-Workspace-Id": ws_id,
-                    "X-Test-Actor-Id": "01KQ3HF5QR6SX6PDC4XPGGDFCA",
-                },
-            )
-            resp = client.get("/metrics")
-        finally:
-            # Clear so subsequent tests in the same process don't
-            # inherit a stub-enabled singleton.
-            get_settings.cache_clear()
+        client = _client(create_app(settings=_settings(phase0_stub_enabled=True)))
+        # The Phase-0 stub resolves the workspace from a header,
+        # but the request must still hit a path that runs the
+        # tenancy middleware (i.e. NOT a SKIP_PATHS entry). Any
+        # ``/w/<slug>/api/v1/...`` path qualifies; the response
+        # status doesn't matter — we only need the metric bumped.
+        client.get(
+            "/w/ordering-test/api/v1/properties",
+            headers={
+                "X-Test-Workspace-Id": ws_id,
+                "X-Test-Actor-Id": "01KQ3HF5QR6SX6PDC4XPGGDFCA",
+            },
+        )
+        resp = client.get("/metrics")
         body = resp.text
         # The bound workspace_id MUST appear on the HTTP counter.
         # Pre-fix bug: ``workspace_id=""`` would appear instead.
