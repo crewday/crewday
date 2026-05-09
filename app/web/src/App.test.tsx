@@ -15,6 +15,8 @@ import { installFetch, jsonResponse } from "@/test/helpers";
 import App from "./App";
 
 const mockRenders = vi.hoisted(() => ({
+  adminDashboardPage: vi.fn(),
+  adminLayout: vi.fn(),
   clientLayout: vi.fn(),
   clientPortfolioPage: vi.fn(),
   employeeLayout: vi.fn(),
@@ -106,6 +108,29 @@ vi.mock("@/layouts/ClientLayout", async () => {
   };
 });
 
+vi.mock("@/layouts/AdminLayout", async () => {
+  const { Outlet: RouterOutlet } = await vi.importActual<typeof import("react-router-dom")>(
+    "react-router-dom",
+  );
+  return {
+    default: function MockAdminLayout(): ReactElement {
+      mockRenders.adminLayout();
+      return (
+        <div data-testid="admin-layout">
+          <RouterOutlet />
+        </div>
+      );
+    },
+  };
+});
+
+vi.mock("@/pages/admin/DashboardPage", () => ({
+  default: function MockAdminDashboardPage(): ReactElement {
+    mockRenders.adminDashboardPage();
+    return <main data-testid="admin-dashboard">Admin dashboard</main>;
+  },
+}));
+
 vi.mock("@/pages/employee/ChatPage", () => ({
   default: function MockChatPage(): ReactElement {
     mockRenders.chatPage();
@@ -190,7 +215,7 @@ vi.mock("@/pages/public/SignupEnrollPage", () => ({
 }));
 
 type AppRole = "employee" | "manager" | "client";
-type WorkspaceGrantRole = "manager" | "worker" | "client";
+type WorkspaceGrantRole = "manager" | "worker" | "client" | "admin";
 const clientPortalRoutes = [
   "/portfolio",
   "/billable_hours",
@@ -238,7 +263,7 @@ function authMeFor(
 function installPermissionAllowFetch(): void {
   installFetch(({ url }) => {
     const parsed = new URL(url, "http://crewday.test");
-    if (parsed.pathname === "/w/ws_1/api/v1/permissions/resolved/self") {
+    if (/^\/w\/[^/]+\/api\/v1\/permissions\/resolved\/self$/.test(parsed.pathname)) {
       return jsonResponse({
         effect: "allow",
         source_layer: "default_allow",
@@ -252,7 +277,7 @@ function installPermissionAllowFetch(): void {
 
 function LocationProbe(): ReactElement {
   const location = useLocation();
-  return <span data-testid="location">{location.pathname + location.search}</span>;
+  return <span data-testid="location">{location.pathname + location.search + location.hash}</span>;
 }
 
 function renderAppAt(path: string, role: AppRole, grantRole?: WorkspaceGrantRole): void {
@@ -316,14 +341,19 @@ afterEach(() => {
 });
 
 describe("App public root and protected deep links", () => {
-  it("keeps authenticated / on the role home", async () => {
+  it.each([
+    ["employee", "worker", "/w/ws_1/today", "employee-layout"],
+    ["manager", "manager", "/w/ws_1/dashboard", "manager-dashboard"],
+    ["manager", "admin", "/w/ws_1/dashboard", "manager-dashboard"],
+    ["client", "client", "/w/ws_1/portfolio", "client-portfolio"],
+  ] as const)("routes authenticated / for %s/%s to %s", async (role, grantRole, expectedPath, testId) => {
     installPermissionAllowFetch();
-    renderAppAt("/", "manager");
+    renderAppAt("/", role, grantRole);
 
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
+      expect(screen.getByTestId("location")).toHaveTextContent(expectedPath);
     });
-    expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
+    expect(await screen.findByTestId(testId)).toBeInTheDocument();
   });
 
   it("sends logged-out bare protected links to /login with next", async () => {
@@ -344,24 +374,44 @@ describe("App public root and protected deep links", () => {
     });
   });
 
-  it("normalises authenticated workspace-prefixed protected links after setting the workspace", async () => {
+  it("keeps authenticated workspace-prefixed protected links after setting the workspace", async () => {
     installPermissionAllowFetch();
-    renderAppAt("/w/ws_1/dashboard", "manager");
+    renderAppAt("/w/acme/dashboard?tab=ops#x", "manager");
 
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/dashboard?tab=ops#x");
     });
     expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
   });
 
-  it("normalises authenticated workspace-prefixed aliases before specific protected routes render", async () => {
+  it("keeps authenticated workspace-prefixed aliases before specific protected routes render", async () => {
     installPermissionAllowFetch();
     renderAppAt("/w/ws_1/scheduler?view=day", "manager");
 
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/scheduler?view=day");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_1/scheduler?view=day");
     });
     expect(await screen.findByTestId("scheduler-page")).toBeInTheDocument();
+  });
+
+  it("redirects authenticated bare workspace paths to the active workspace prefix", async () => {
+    installPermissionAllowFetch();
+    renderAppAt("/dashboard?tab=ops#x", "manager");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_1/dashboard?tab=ops#x");
+    });
+    expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
+  });
+
+  it("keeps deployment admin routes on the bare host", async () => {
+    renderAppAt("/admin/dashboard", "manager");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/admin/dashboard");
+    });
+    expect(await screen.findByTestId("admin-dashboard")).toBeInTheDocument();
+    expect(mockRenders.adminLayout).toHaveBeenCalled();
   });
 
   it.each([
@@ -391,7 +441,7 @@ describe("App /chat role routing", () => {
     renderAppAt("/chat", "manager");
 
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/chat");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_1/chat");
     });
 
     expect(await screen.findByTestId("full-chat")).toBeInTheDocument();
@@ -406,7 +456,7 @@ describe("App /chat role routing", () => {
     renderAppAt("/", "employee", "manager");
 
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_1/dashboard");
     });
 
     expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
@@ -449,7 +499,7 @@ describe("App /chat role routing", () => {
     renderAppAt("/chat", "employee");
 
     expect(await screen.findByTestId("full-chat")).toBeInTheDocument();
-    expect(screen.getByTestId("location")).toHaveTextContent("/chat");
+    expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_1/chat");
     expect(mockRenders.employeeLayout).toHaveBeenCalled();
     expect(mockRenders.chatPage).toHaveBeenCalled();
     expect(mockRenders.managerLayout).not.toHaveBeenCalled();
@@ -464,7 +514,7 @@ describe("App client portal role routing", () => {
       renderAppAt(path, "manager");
 
       await waitFor(() => {
-        expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
+        expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_1/dashboard");
       });
 
       expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
@@ -479,7 +529,7 @@ describe("App client portal role routing", () => {
     renderAppAt("/portfolio", "client", "manager");
 
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_1/dashboard");
     });
 
     expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
@@ -492,7 +542,7 @@ describe("App client portal role routing", () => {
     renderAppAt("/portfolio", "client");
 
     expect(await screen.findByTestId("client-portfolio")).toBeInTheDocument();
-    expect(screen.getByTestId("location")).toHaveTextContent("/portfolio");
+    expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_1/portfolio");
     expect(mockRenders.clientLayout).toHaveBeenCalled();
     expect(mockRenders.clientPortfolioPage).toHaveBeenCalled();
     expect(mockRenders.managerLayout).not.toHaveBeenCalled();
@@ -502,7 +552,7 @@ describe("App client portal role routing", () => {
     renderAppAt("/portfolio", "manager", "client");
 
     expect(await screen.findByTestId("client-portfolio")).toBeInTheDocument();
-    expect(screen.getByTestId("location")).toHaveTextContent("/portfolio");
+    expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_1/portfolio");
     expect(mockRenders.clientLayout).toHaveBeenCalled();
     expect(mockRenders.clientPortfolioPage).toHaveBeenCalled();
     expect(mockRenders.managerLayout).not.toHaveBeenCalled();
@@ -515,7 +565,7 @@ describe("App manager API token routes", () => {
     renderAppAt("/api-tokens", "manager");
 
     expect(await screen.findByTestId("api-tokens-page")).toBeInTheDocument();
-    expect(screen.getByTestId("location")).toHaveTextContent("/api-tokens");
+    expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_1/api-tokens");
     expect(mockRenders.managerLayout).toHaveBeenCalled();
     expect(mockRenders.apiTokensPage).toHaveBeenCalled();
   });

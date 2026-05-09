@@ -23,6 +23,11 @@ export const ROLE_LANDING: Record<string, string> = {
   guest: "/",
 };
 
+export function landingForGrantRole(grantRole: string | null | undefined): string {
+  if (grantRole && ROLE_LANDING[grantRole]) return ROLE_LANDING[grantRole];
+  return "/dashboard";
+}
+
 /**
  * Pick the landing URL from the user's first available workspace
  * grant role. Returns `/` when no role signal is present —
@@ -31,7 +36,8 @@ export const ROLE_LANDING: Record<string, string> = {
  */
 export function pickRoleLanding(user: AuthMe | null): string {
   const first = user?.available_workspaces?.[0];
-  const role = first?.grant_role;
-  if (role && ROLE_LANDING[role]) return ROLE_LANDING[role];
+  if (first?.grant_role && ROLE_LANDING[first.grant_role]) {
+    return landingForGrantRole(first.grant_role);
+  }
   return "/";
 }
