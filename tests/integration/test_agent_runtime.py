@@ -219,17 +219,21 @@ class _CountingDispatcher:
 
 def _seed_workspace_and_user(session: Session) -> tuple[Workspace, User]:
     """Insert a workspace + delegating user."""
+    workspace_id = new_ulid()
+    user_id = new_ulid()
+    workspace_suffix = workspace_id.lower()[-10:]
+    user_suffix = user_id.lower()[-12:]
     workspace = Workspace(
-        id=new_ulid(),
-        slug=f"int-{new_ulid().lower()[:10]}",
+        id=workspace_id,
+        slug=f"int-{workspace_suffix}",
         name="Integration WS",
         plan="free",
         quota_json={},
         created_at=_PINNED,
     )
     user = User(
-        id=new_ulid(),
-        email=f"manager-{new_ulid().lower()[:8]}@example.com",
+        id=user_id,
+        email=f"manager-{user_suffix}@example.com",
         display_name="Manager",
         created_at=_PINNED,
     )
@@ -242,9 +246,10 @@ def _seed_workspace_and_user(session: Session) -> tuple[Workspace, User]:
 def _seed_llm_assignment(session: Session, *, workspace_id: str) -> None:
     """Seed a ``chat.manager`` assignment + the registry trio."""
     pm_id = new_ulid()
+    registry_suffix = workspace_id.lower()[-12:]
     provider = LlmProvider(
         id=new_ulid(),
-        name="fake-provider",
+        name=f"fake-provider-{registry_suffix}",
         provider_type="fake",
         timeout_s=60,
         requests_per_minute=60,
@@ -255,7 +260,7 @@ def _seed_llm_assignment(session: Session, *, workspace_id: str) -> None:
     )
     model = LlmModel(
         id=new_ulid(),
-        canonical_name="fake/integration-model",
+        canonical_name=f"fake/integration-model-{registry_suffix}",
         display_name="fake/integration-model",
         vendor="other",
         capabilities=["chat"],
