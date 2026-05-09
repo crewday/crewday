@@ -17,8 +17,11 @@ import App from "./App";
 const mockRenders = vi.hoisted(() => ({
   adminDashboardPage: vi.fn(),
   adminLayout: vi.fn(),
+  clientBillableHoursPage: vi.fn(),
+  clientInvoicesPage: vi.fn(),
   clientLayout: vi.fn(),
   clientPortfolioPage: vi.fn(),
+  clientQuotesPage: vi.fn(),
   employeeLayout: vi.fn(),
   agentFetches: false,
   agentSidebar: vi.fn(),
@@ -220,6 +223,27 @@ vi.mock("@/pages/client/PortfolioPage", () => ({
   },
 }));
 
+vi.mock("@/pages/client/BillableHoursPage", () => ({
+  default: function MockClientBillableHoursPage(): ReactElement {
+    mockRenders.clientBillableHoursPage();
+    return <main data-testid="client-billable-hours">Client billable hours</main>;
+  },
+}));
+
+vi.mock("@/pages/client/QuotesPage", () => ({
+  default: function MockClientQuotesPage(): ReactElement {
+    mockRenders.clientQuotesPage();
+    return <main data-testid="client-quotes">Client quotes</main>;
+  },
+}));
+
+vi.mock("@/pages/client/InvoicesPage", () => ({
+  default: function MockClientInvoicesPage(): ReactElement {
+    mockRenders.clientInvoicesPage();
+    return <main data-testid="client-invoices">Client invoices</main>;
+  },
+}));
+
 vi.mock("@/pages/public/LoginPage", () => ({
   default: function MockLoginPage(): ReactElement {
     return <main data-testid="login-page">Login</main>;
@@ -272,7 +296,7 @@ type AppRole = "employee" | "manager" | "client";
 type WorkspaceGrantRole = "manager" | "worker" | "client" | "admin";
 const clientPortalRoutes = [
   "/portfolio",
-  "/billable_hours",
+  "/billable-hours",
   "/quotes",
   "/invoices",
 ] as const;
@@ -597,6 +621,23 @@ describe("App client portal role routing", () => {
     },
   );
 
+  it.each(clientPortalRoutes)(
+    "redirects manager prefixed navigation away from the client portal shell at %s",
+    async (path) => {
+      installPermissionAllowFetch();
+      renderAppAt("/w/ws_1" + path, "manager");
+
+      await waitFor(() => {
+        expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_1/dashboard");
+      });
+
+      expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
+      expect(mockRenders.managerLayout).toHaveBeenCalled();
+      expect(mockRenders.clientLayout).not.toHaveBeenCalled();
+      expect(mockRenders.clientPortfolioPage).not.toHaveBeenCalled();
+    },
+  );
+
   it("redirects a stale client role cookie when the active workspace grant is manager", async () => {
     installPermissionAllowFetch();
     renderAppAt("/portfolio", "client", "manager");
@@ -619,6 +660,27 @@ describe("App client portal role routing", () => {
     expect(mockRenders.clientLayout).toHaveBeenCalled();
     expect(mockRenders.clientPortfolioPage).toHaveBeenCalled();
     expect(mockRenders.managerLayout).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["/w/ws_1/portfolio", "client-portfolio"],
+    ["/w/ws_1/billable-hours", "client-billable-hours"],
+    ["/w/ws_1/quotes", "client-quotes"],
+    ["/w/ws_1/invoices", "client-invoices"],
+  ])("renders client portal surface %s for client sessions", async (path, testId) => {
+    renderAppAt(path, "client");
+
+    expect(await screen.findByTestId(testId)).toBeInTheDocument();
+    expect(screen.getByTestId("location")).toHaveTextContent(path);
+    expect(mockRenders.clientLayout).toHaveBeenCalled();
+    expect(mockRenders.managerLayout).not.toHaveBeenCalled();
+  });
+
+  it("redirects the legacy billable_hours client URL to billable-hours", async () => {
+    renderAppAt("/w/ws_1/billable_hours", "client");
+
+    expect(await screen.findByTestId("client-billable-hours")).toBeInTheDocument();
+    expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_1/billable-hours");
   });
 
   it("uses the active client grant instead of a stale manager role cookie", async () => {

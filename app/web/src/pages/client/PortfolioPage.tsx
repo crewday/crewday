@@ -1,8 +1,9 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
 import { Chip, Loading } from "@/components/common";
 import type {
@@ -208,6 +209,7 @@ function fallbackProperty(row: ClientPortfolioRow): Property {
 
 export default function ClientPortfolioPage() {
   // code-health: ignore[ccn nloc] Portfolio route coordinates several promoted queries and keeps layout unchanged.
+  const { pathname } = useLocation();
   const meQ = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
   const enabled = meQ.data?.role === "client";
   const portfolioQ = useQuery({
@@ -320,7 +322,7 @@ export default function ClientPortfolioPage() {
             const stayNow = currentStay(propStays, me.today);
             return (
               <article key={p.id} className="prop-card">
-                <Link className="prop-card__link" to={"/property/" + p.id}>
+                <Link className="prop-card__link" to={workspaceRouteForPathname(pathname, "/property/" + p.id)}>
                   <div className={"prop-card__swatch prop-card__swatch--" + p.color}>
                     <span className="prop-card__kind">{p.kind.toUpperCase()}</span>
                   </div>

@@ -79,7 +79,7 @@ export const AUTHENTICATED_ROUTES = [
 
   // Client-portal pages.
   "/portfolio",
-  "/billable_hours",
+  "/billable-hours",
   "/quotes",
   "/invoices",
 

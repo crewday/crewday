@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -34,7 +34,7 @@ const NAV_ITEMS: SideNavItem[] = [
   { type: "section", label: "PORTFOLIO" },
   { type: "link", to: "/portfolio", label: "Properties", icon: NAV_ICON(Home) },
   { type: "link", to: "/scheduler", label: "Scheduler", icon: NAV_ICON(CalendarDays) },
-  { type: "link", to: "/billable_hours", label: "Billable hours", icon: NAV_ICON(Clock3) },
+  { type: "link", to: "/billable-hours", label: "Billable hours", icon: NAV_ICON(Clock3) },
   { type: "section", label: "BILLING" },
   { type: "link", to: "/quotes", label: "Quotes", icon: NAV_ICON(FileText) },
   { type: "link", to: "/invoices", label: "Invoices", icon: NAV_ICON(Receipt) },
@@ -73,10 +73,14 @@ export default function ClientLayout() {
     });
   }, []);
   const hasDrawer = hasDrawerItems(NAV_ITEMS);
-  const routedNavItems = NAV_ITEMS.map((item) =>
-    item.type === "link" && item.to === "/me"
-      ? { ...item, to: workspaceRouteForPathname(pathname, item.to) }
-      : item
+  const routedNavItems = useMemo(
+    () =>
+      NAV_ITEMS.map((item) =>
+        item.type === "link"
+          ? { ...item, to: workspaceRouteForPathname(pathname, item.to) }
+          : item,
+      ),
+    [pathname],
   );
   const toggleNav = useCallback(() => setNavOpen((v) => !v), []);
 

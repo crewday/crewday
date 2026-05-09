@@ -371,7 +371,8 @@ function workspaceRoutes({
 
       <Route element={<ClientPortalGuard />}>
         <Route path="portfolio" element={<ClientPortfolioPage />} />
-        <Route path="billable_hours" element={<ClientBillableHoursPage />} />
+        <Route path="billable-hours" element={<ClientBillableHoursPage />} />
+        <Route path="billable_hours" element={<LegacyWorkspaceRedirect to="/billable-hours" />} />
         <Route path="quotes" element={<ClientQuotesPage />} />
         <Route path="invoices" element={<ClientInvoicesPage />} />
       </Route>

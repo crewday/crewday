@@ -206,7 +206,7 @@ function Harness() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/w/acme/portfolio"]}>
         <WorkspaceProvider>
           <PortfolioPage />
         </WorkspaceProvider>
@@ -245,7 +245,7 @@ describe("<PortfolioPage>", () => {
       expect(screen.getByText("Billed to Luxe Guests")).toBeInTheDocument();
       expect(screen.getByText("Owner: Acme Agency")).toBeInTheDocument();
       expect(screen.getByText("Managed by Partner Ops")).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: /Villa Cliente/ })).toHaveAttribute("href", "/property/prop_1");
+      expect(screen.getByRole("link", { name: /Villa Cliente/ })).toHaveAttribute("href", "/w/acme/property/prop_1");
       expect(fake.calls).toContain("/w/acme/api/v1/properties/prop_1/share");
       expect(fake.calls).not.toContain("/w/acme/api/v1/properties/prop_other/share");
     } finally {
