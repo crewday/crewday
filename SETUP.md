@@ -81,6 +81,11 @@ container healthcheck can flip unhealthy when stale dev DB workspace rows make
 the LLM budget refresh tick log `OperationalError`, while `/readyz`, `/healthz`,
 and API routes still serve correctly.
 
+If `/healthz` itself times out, treat that as an app-loop availability problem,
+not a DB readiness failure. `scripts/agent-status.sh` exits non-zero for that
+case; collect `crewday-app-api` logs around the timeout before restarting so
+pool waits or blocking middleware can be fixed at the source.
+
 ## App Access
 
 Use loopback for agent-driven app work:

@@ -124,7 +124,7 @@ class _CheckResult:
 
 
 @router.get("/healthz", include_in_schema=False)
-def healthz() -> dict[str, str]:
+async def healthz() -> dict[str, str]:
     """Process liveness — unconditional 200.
 
     The ASGI server answering this path is the only signal. No DB,

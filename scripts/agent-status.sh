@@ -50,6 +50,7 @@ readyz="$(probe "$base_url/readyz")"
 healthz="$(probe "$base_url/healthz")"
 echo "endpoints: /readyz=${readyz} /healthz=${healthz}"
 [[ "$readyz" == "200" ]] || problems=$((problems + 1))
+[[ "$healthz" == "200" ]] || problems=$((problems + 1))
 
 # alembic prints the revision id on the last non-INFO line.
 extract_rev() {

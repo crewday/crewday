@@ -50,6 +50,7 @@ middleware stack grows.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -881,8 +882,11 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
         # 2) Scoped request — build the context or 404.
         settings = get_settings()
         try:
-            ctx, actor, outcome = self._resolve_context(
-                request, settings, correlation_id
+            ctx, actor, outcome = await asyncio.to_thread(
+                self._resolve_context,
+                request,
+                settings,
+                correlation_id,
             )
         except DelegatingUserArchived:
             # cd-et6y / §03 "Delegated tokens": the agent proved
@@ -1019,7 +1023,8 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
                     None,
                 )
                 if workspace_rejection is not_found_response:
-                    _record_token_request(
+                    await asyncio.to_thread(
+                        _record_token_request,
                         request,
                         actor=actor,
                         settings=settings,
@@ -1028,7 +1033,8 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
                     )
                     return not_found_response
                 downstream.headers[CORRELATION_ID_HEADER] = correlation_id
-                _record_token_request(
+                await asyncio.to_thread(
+                    _record_token_request,
                     request,
                     actor=actor,
                     settings=settings,
@@ -1036,7 +1042,8 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
                     correlation_id=correlation_id,
                 )
                 return downstream
-            _record_token_request(
+            await asyncio.to_thread(
+                _record_token_request,
                 request,
                 actor=actor,
                 settings=settings,
@@ -1073,7 +1080,8 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
             try:
                 response = await call_next(request)
             except Exception:
-                _record_token_request(
+                await asyncio.to_thread(
+                    _record_token_request,
                     request,
                     actor=actor,
                     settings=settings,
@@ -1087,7 +1095,8 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
             # served by the same worker task.
             reset_current(token)
         response.headers[CORRELATION_ID_HEADER] = correlation_id
-        _record_token_request(
+        await asyncio.to_thread(
+            _record_token_request,
             request,
             actor=actor,
             settings=settings,

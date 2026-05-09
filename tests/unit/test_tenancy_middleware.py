@@ -21,10 +21,14 @@ cross-tenant responses".
 
 from __future__ import annotations
 
+import asyncio
 import re
+import threading
+import time
 from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, datetime
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -284,6 +288,63 @@ def _build_app_with_w_catch_all() -> FastAPI:
 
 def _client(app: FastAPI | None = None) -> TestClient:
     return TestClient(app or _build_app(), raise_server_exceptions=False)
+
+
+@pytest.mark.asyncio
+async def test_healthz_stays_responsive_while_scoped_resolution_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+    real_settings: Settings,
+) -> None:
+    """Sync DB waits in scoped tenancy resolution must not pin the event loop."""
+    app = _build_app()
+    resolver_started = threading.Event()
+
+    def blocking_resolve(
+        self: WorkspaceContextMiddleware,
+        request: Request,
+        settings: Settings,
+        correlation_id: str,
+    ) -> tuple[WorkspaceContext, None, str]:
+        resolver_started.set()
+        time.sleep(0.5)
+        return (
+            WorkspaceContext(
+                workspace_id="ws-dev",
+                workspace_slug="dev",
+                actor_id="user-dev",
+                actor_kind="user",
+                actor_grant_role="owner",
+                actor_was_owner_member=True,
+                audit_correlation_id=correlation_id,
+            ),
+            None,
+            "resolved",
+        )
+
+    monkeypatch.setattr(
+        WorkspaceContextMiddleware,
+        "_resolve_context",
+        blocking_resolve,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as client:
+        started_at = time.perf_counter()
+        scoped = asyncio.create_task(client.get("/w/dev/api/v1/ping"))
+        assert await asyncio.to_thread(resolver_started.wait, 1.0)
+        assert time.perf_counter() - started_at < 0.25
+        assert not scoped.done()
+
+        health = await client.get("/healthz")
+        assert health.status_code == 200
+        assert health.json() == {"ok": True, "bound": False}
+
+        scoped_response = await scoped
+        assert scoped_response.status_code == 200
+        assert scoped_response.json()["bound"] is True
 
 
 # ---------------------------------------------------------------------------
