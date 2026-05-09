@@ -73,10 +73,10 @@ function Harness(): ReactElement {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={["/today"]}>
+      <MemoryRouter initialEntries={["/w/acme/today"]}>
         <Routes>
-          <Route path="/today" element={<><TodayPage /><LocationProbe /></>} />
-          <Route path="/task/:tid" element={<LocationProbe />} />
+          <Route path="/w/acme/today" element={<><TodayPage /><LocationProbe /></>} />
+          <Route path="/w/acme/task/:tid" element={<LocationProbe />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
@@ -373,7 +373,7 @@ describe("TodayPage", () => {
 
       fireEvent.click(await screen.findByRole("link", { name: /reset towels/i }));
 
-      expect(screen.getByTestId("location")).toHaveTextContent("/task/t1");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/task/t1");
       expect(env.calls.some((call) => call.url.endsWith("/api/v1/tasks/t1/complete"))).toBe(false);
       await expect(__listQueuedMutationsForTests()).resolves.toHaveLength(0);
     } finally {
@@ -735,7 +735,7 @@ describe("TodayPage", () => {
 
       fireEvent.click(await screen.findByRole("link", { name: /photograph minibar/i }));
 
-      expect(screen.getByTestId("location")).toHaveTextContent("/task/photo");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/task/photo");
       expect(env.calls.some((call) => call.url.endsWith("/api/v1/tasks/photo/complete"))).toBe(false);
       await expect(__listQueuedMutationsForTests()).resolves.toHaveLength(0);
     } finally {

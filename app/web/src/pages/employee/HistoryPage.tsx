@@ -1,4 +1,4 @@
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { fetchJson } from "@/lib/api";
@@ -6,6 +6,7 @@ import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
 import { fmtDate, fmtDateTime } from "@/lib/dates";
 import { cap } from "@/lib/strings";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import { Loading } from "@/components/common";
 import PageHeader from "@/components/PageHeader";
 import type { HistoryPagePayload, HistoryTab, Property } from "@/types/api";
@@ -89,12 +90,13 @@ function useHistoryTabQuery<T extends HistoryTab>(tab: T, enabled: boolean) {
 }
 
 function HistoryTabs({ activeTab }: { activeTab: Tab }) {
+  const { pathname } = useLocation();
   return (
     <nav className="tabs" aria-label="History tabs">
       {TABS.map(([key, label]) => (
         <Link
           key={key}
-          to={"/history?tab=" + key}
+          to={workspaceRouteForPathname(pathname, "/history?tab=" + key)}
           className={"tab-link" + (activeTab === key ? " tab-link--active" : "")}
         >
           {label}

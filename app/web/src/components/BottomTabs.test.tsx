@@ -8,14 +8,14 @@ import BottomTabs from "./BottomTabs";
 describe("<BottomTabs>", () => {
   it("keeps Chat as the phone full-screen chat route", () => {
     render(
-      <MemoryRouter initialEntries={["/chat"]}>
+      <MemoryRouter initialEntries={["/w/acme/chat"]}>
         <BottomTabs />
       </MemoryRouter>,
     );
 
     const nav = screen.getByRole("navigation", { name: "Bottom navigation" });
     const chat = within(nav).getByRole("link", { name: /Chat/i });
-    expect(chat).toHaveAttribute("href", "/chat");
+    expect(chat).toHaveAttribute("href", "/w/acme/chat");
     expect(chat).toHaveClass("tab--active");
   });
 

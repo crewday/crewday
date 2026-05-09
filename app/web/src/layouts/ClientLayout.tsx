@@ -14,6 +14,7 @@ import { ShellNavProvider } from "@/context/ShellNavContext";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { initialNavCollapsed, persistNavCollapsed } from "@/lib/preferences";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { Me, User } from "@/types/api";
 
 // §22 — client portal layout. A read-mostly shell with a narrower
@@ -72,6 +73,11 @@ export default function ClientLayout() {
     });
   }, []);
   const hasDrawer = hasDrawerItems(NAV_ITEMS);
+  const routedNavItems = NAV_ITEMS.map((item) =>
+    item.type === "link" && item.to === "/me"
+      ? { ...item, to: workspaceRouteForPathname(pathname, item.to) }
+      : item
+  );
   const toggleNav = useCallback(() => setNavOpen((v) => !v), []);
 
   useEffect(() => { setNavOpen(false); }, [pathname]);
@@ -98,7 +104,7 @@ export default function ClientLayout() {
         )}
 
         <SideNav
-          items={NAV_ITEMS}
+          items={routedNavItems}
           collapsed={navCollapsed}
           onToggleCollapsed={toggleNavCollapsed}
           footer={{

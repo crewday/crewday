@@ -5,22 +5,22 @@ import { describe, expect, it } from "vitest";
 import { NavHistoryProvider, useNavHistory } from "@/context/NavHistoryContext";
 import PageHeader from "./PageHeader";
 
-function renderRoutes(initial = "/schedule"): ReactElement {
+function renderRoutes(initial = "/w/acme/schedule"): ReactElement {
   return (
     <MemoryRouter initialEntries={[initial]}>
       <NavHistoryProvider>
         <Routes>
           <Route
-            path="/schedule"
+            path="/w/acme/schedule"
             element={
               <>
-                <Link to="/task/task_1">Open task</Link>
+                <Link to="/w/acme/task/task_1">Open task</Link>
                 <LocationProbe />
               </>
             }
           />
           <Route
-            path="/task/:id"
+            path="/w/acme/task/:id"
             element={
               <>
                 <PageHeader title="Task" />
@@ -29,21 +29,21 @@ function renderRoutes(initial = "/schedule"): ReactElement {
             }
           />
           <Route
-            path="/me"
+            path="/w/acme/me"
             element={
               <>
-                <Link to="/history">History</Link>
+                <Link to="/w/acme/history">History</Link>
                 <LocationProbe />
               </>
             }
           />
           <Route
-            path="/history"
+            path="/w/acme/history"
             element={
               <>
                 <PageHeader title="History" />
-                <Link to="/history?tab=chats">Chats</Link>
-                <Link to="/history?tab=expenses">Expenses</Link>
+                <Link to="/w/acme/history?tab=chats">Chats</Link>
+                <Link to="/w/acme/history?tab=expenses">Expenses</Link>
                 <LocationProbe />
                 <NavHistoryProbe />
               </>
@@ -63,16 +63,16 @@ function renderBrowserRoutes(initial: string): ReactElement {
       <NavHistoryProvider>
         <Routes>
           <Route
-            path="/employees"
+            path="/w/acme/employees"
             element={
               <>
-                <Link to="/employee/emp_1">View employee</Link>
+                <Link to="/w/acme/employee/emp_1">View employee</Link>
                 <LocationProbe />
               </>
             }
           />
           <Route
-            path="/employee/:id"
+            path="/w/acme/employee/:id"
             element={
               <>
                 <PageHeader title="Employee" />
@@ -110,87 +110,87 @@ describe("PageHeader NavHistory back", () => {
 
     fireEvent.click(screen.getByRole("link", { name: "Open task" }));
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/task/task_1");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/task/task_1");
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
 
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/schedule");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/schedule");
     });
   });
 
   it("skips query-only same-path entries before going back", async () => {
-    render(renderRoutes("/me"));
+    render(renderRoutes("/w/acme/me"));
 
     fireEvent.click(screen.getByRole("link", { name: "History" }));
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/history");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/history");
     });
 
     fireEvent.click(screen.getByRole("link", { name: "Chats" }));
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/history?tab=chats");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/history?tab=chats");
     });
 
     fireEvent.click(screen.getByRole("link", { name: "Expenses" }));
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/history?tab=expenses");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/history?tab=expenses");
     });
     expect(screen.getByTestId("can-go-back")).toHaveTextContent("yes");
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
 
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/me");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/me");
     });
   });
 
   it("skips hash-only same-route browser entries before going back", async () => {
     try {
       const initialHistoryLength = window.history.length;
-      render(renderBrowserRoutes("/employees"));
+      render(renderBrowserRoutes("/w/acme/employees"));
 
       fireEvent.click(screen.getByRole("link", { name: "View employee" }));
       await waitFor(() => {
-        expect(screen.getByTestId("location")).toHaveTextContent("/employee/emp_1");
+        expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/employee/emp_1");
       });
       await waitFor(() => {
-        expect(screen.getByTestId("back-target")).toHaveTextContent("/employees");
+        expect(screen.getByTestId("back-target")).toHaveTextContent("/w/acme/employees");
         expect(screen.getByRole("button", { name: "Back" })).toBeInTheDocument();
       });
 
       fireEvent.click(screen.getByRole("link", { name: "Shifts" }));
       await waitFor(() => {
-        expect(screen.getByTestId("location")).toHaveTextContent("/employee/emp_1#shifts");
+        expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/employee/emp_1#shifts");
       });
-      expect(window.location.pathname + window.location.hash).toBe("/employee/emp_1#shifts");
+      expect(window.location.pathname + window.location.hash).toBe("/w/acme/employee/emp_1#shifts");
 
       fireEvent.click(screen.getByRole("link", { name: "Payslips" }));
       await waitFor(() => {
-        expect(screen.getByTestId("location")).toHaveTextContent("/employee/emp_1#payslips");
+        expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/employee/emp_1#payslips");
       });
-      expect(window.location.pathname + window.location.hash).toBe("/employee/emp_1#payslips");
+      expect(window.location.pathname + window.location.hash).toBe("/w/acme/employee/emp_1#payslips");
       expect(window.history.length).toBeGreaterThanOrEqual(initialHistoryLength + 3);
-      expect(screen.getByTestId("back-target")).toHaveTextContent("/employees");
+      expect(screen.getByTestId("back-target")).toHaveTextContent("/w/acme/employees");
 
       fireEvent.click(screen.getByRole("button", { name: "Back" }));
 
       await waitFor(() => {
-        expect(screen.getByTestId("location")).toHaveTextContent("/employees");
+        expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/employees");
       });
-      expect(window.location.pathname + window.location.hash).toBe("/employees");
+      expect(window.location.pathname + window.location.hash).toBe("/w/acme/employees");
     } finally {
       window.history.replaceState(null, "", "/");
     }
   });
 
   it("uses the route parent link when there is no previous different path", () => {
-    render(renderRoutes("/history?tab=expenses"));
+    render(renderRoutes("/w/acme/history?tab=expenses"));
 
     const backLink = screen.getByRole("link", { name: "Back to My profile" });
 
-    expect(backLink).toHaveAttribute("href", "/me");
+    expect(backLink).toHaveAttribute("href", "/w/acme/me");
     expect(screen.getByTestId("can-go-back")).toHaveTextContent("no");
   });
 });

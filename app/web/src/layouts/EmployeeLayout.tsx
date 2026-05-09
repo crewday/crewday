@@ -13,6 +13,7 @@ import {
   initialNavCollapsed,
   persistNavCollapsed,
 } from "@/lib/preferences";
+import { workspaceRelativePathname, workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { Booking, Me } from "@/types/api";
 
 function roleLabel(role: string): string {
@@ -60,7 +61,8 @@ function fmtBookingHint(b: Booking | undefined): string {
 
 export default function EmployeeLayout() {
   const { pathname } = useLocation();
-  const isChat = pathname === "/chat";
+  const relativePathname = workspaceRelativePathname(pathname);
+  const isChat = relativePathname === "/chat";
   const pendingMutationCount = usePendingMutationCount();
   const { data } = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
   const bookingsQ = useQuery({
@@ -90,7 +92,7 @@ export default function EmployeeLayout() {
     ?? (data ? initialsOf(data.employee.name) : "·");
 
   const bookingHint = (
-    <NavLink to="/schedule" className="booking-hint">
+    <NavLink to={workspaceRouteForPathname(pathname, "/schedule")} className="booking-hint">
       {fmtBookingHint(myNext)}
     </NavLink>
   );
@@ -115,7 +117,11 @@ export default function EmployeeLayout() {
       data-nav-collapsed={navCollapsed ? "true" : "false"}
     >
       <SideNav
-        items={NAV_ITEMS}
+        items={NAV_ITEMS.map((item) =>
+          item.type === "link"
+            ? { ...item, to: workspaceRouteForPathname(pathname, item.to) }
+            : item
+        )}
         collapsed={navCollapsed}
         onToggleCollapsed={toggleNavCollapsed}
         action={navAction}

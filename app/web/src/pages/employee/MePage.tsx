@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil } from "lucide-react";
 import {
@@ -13,6 +13,7 @@ import { setUnauthenticated } from "@/auth/authStore";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { fmtDate } from "@/lib/dates";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import { Chip, Loading } from "@/components/common";
 import AgentApprovalModePanel from "@/components/AgentApprovalModePanel";
 import AgentPreferencesPanel from "@/components/AgentPreferencesPanel";
@@ -40,6 +41,7 @@ export default function MePage() {
   const [passkeyRegister, setPasskeyRegister] = useState<PasskeyRegisterState>({ kind: "idle" });
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
 
   const me = useQuery({
     queryKey: qk.me(),
@@ -210,7 +212,7 @@ export default function MePage() {
 
       <section className="panel">
         <header className="panel__head"><h2>History</h2></header>
-        <Link to="/history" className="stack-row">
+        <Link to={workspaceRouteForPathname(pathname, "/history")} className="stack-row">
           <div>
             <strong>Past tasks, chats, expenses, leaves</strong>
             <div className="stack-row__sub">Browse what's been wrapped up →</div>

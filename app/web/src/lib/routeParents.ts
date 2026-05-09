@@ -8,6 +8,8 @@
 // simple prefix strings; dynamic segments are implicit (everything
 // after the prefix is treated as the `id`).
 
+import { workspaceRelativePathname } from "@/lib/workspaceRoutes";
+
 export interface ParentDescriptor {
   to: string;
   label: string;
@@ -33,8 +35,9 @@ export function resolveParent(pathname: string): ParentDescriptor | null {
   // RULES only lists sub-page prefixes, never top-level tabs, so
   // `startsWith` alone correctly resolves both exact-path rules
   // (e.g. `/history`) and dynamic ones (e.g. `/task/`).
+  const relativePathname = workspaceRelativePathname(pathname);
   for (const { prefix, parent } of RULES) {
-    if (pathname.startsWith(prefix)) {
+    if (relativePathname.startsWith(prefix)) {
       return parent;
     }
   }

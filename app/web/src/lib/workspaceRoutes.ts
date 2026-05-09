@@ -46,3 +46,14 @@ export function workspaceSlugFromRoutePath(pathname: string): string | null {
     return match[1];
   }
 }
+
+export function workspaceRelativePathname(pathname: string): string {
+  const match = /^\/w\/[^/]+(?=\/|$)/.exec(pathname);
+  if (!match) return pathname;
+  const relative = pathname.slice(match[0].length);
+  return relative || "/";
+}
+
+export function workspaceRouteForPathname(pathname: string, routePath: string): string {
+  return workspaceRoute(workspaceSlugFromRoutePath(pathname), routePath);
+}

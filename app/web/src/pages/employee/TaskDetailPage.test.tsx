@@ -83,14 +83,14 @@ function emptyComments(): unknown {
   return { data: [], next_cursor: null, has_more: false };
 }
 
-function Harness({ initial = "/task/t1" }: { initial?: string }): ReactElement {
+function Harness({ initial = "/w/acme/task/t1" }: { initial?: string }): ReactElement {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[initial]}>
         <Routes>
-          <Route path="/task/:tid" element={<><TaskDetailPage /><LocationProbe /></>} />
-          <Route path="/today" element={<LocationProbe />} />
+          <Route path="/w/acme/task/:tid" element={<><TaskDetailPage /><LocationProbe /></>} />
+          <Route path="/w/acme/today" element={<LocationProbe />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
@@ -473,7 +473,7 @@ describe("TaskDetailPage", () => {
       render(<Harness />);
 
       expect(await screen.findByText("Task unavailable.")).toBeInTheDocument();
-      expect(screen.getByTestId("location")).toHaveTextContent("/task/t1");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/task/t1");
     } finally {
       env.restore();
     }

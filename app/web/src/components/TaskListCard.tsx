@@ -1,5 +1,6 @@
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Chip, Dot } from "@/components/common";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { Property, Task } from "@/types/api";
 
 // Compact split card used by the Today and Week task lists. Left side
@@ -16,6 +17,7 @@ export default function TaskListCard({
   showWeekday?: boolean;
   showStatus?: boolean;
 }) {
+  const { pathname } = useLocation();
   const when = formatWhen(task.scheduled_start, showWeekday);
   const metaBase = task.area
     ? `${task.area} · ${task.estimated_minutes} min`
@@ -27,7 +29,7 @@ export default function TaskListCard({
     (task.is_personal ? " task-card--personal" : "");
 
   return (
-    <Link to={"/task/" + task.id} className={cls}>
+    <Link to={workspaceRouteForPathname(pathname, "/task/" + task.id)} className={cls}>
       <div className="task-card__main">
         <div className="task-card__title task-card__title--sm">{task.title}</div>
         <div className="task-card__meta">{meta}</div>

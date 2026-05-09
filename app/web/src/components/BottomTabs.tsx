@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { CalendarDays, Euro, ListTodo, MessageSquareMore, User } from "lucide-react";
+import { workspaceRelativePathname, workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 
 // Phone-only bottom navigation, shared by EmployeeLayout and
 // ManagerLayout so both shells get the same row of 5 worker-style
@@ -33,6 +34,7 @@ const ME_PATHS = new Set(["/me", "/history"]);
 
 export default function BottomTabs() {
   const { pathname } = useLocation();
+  const relativePathname = workspaceRelativePathname(pathname);
   return (
     <nav className="phone__tabs" aria-label="Bottom navigation">
       {TABS.map((t) => {
@@ -41,14 +43,14 @@ export default function BottomTabs() {
           : null;
         const active =
           t.to === "/me"
-            ? ME_PATHS.has(pathname)
+            ? ME_PATHS.has(relativePathname)
             : prefixes
-              ? prefixes.some((p) => pathname.startsWith(p))
-              : pathname === t.to;
+              ? prefixes.some((p) => relativePathname.startsWith(p))
+              : relativePathname === t.to;
         return (
           <NavLink
             key={t.to}
-            to={t.to}
+            to={workspaceRouteForPathname(pathname, t.to)}
             className={"tab" + (active ? " tab--active" : "")}
           >
             <span className="tab__glyph" aria-hidden="true">{t.glyph}</span>

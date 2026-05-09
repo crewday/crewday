@@ -8,7 +8,8 @@
 // Kept in its own file so the chip styling + a11y attributes (which
 // are touched on every CSS change) don't bloat the timeline render.
 
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { SchedulerTaskView } from "@/types/api";
 import { timeOfTask } from "./lib/dateHelpers";
 
@@ -30,9 +31,10 @@ interface TaskChipLinkProps {
 
 export function TaskChipLink(props: TaskChipLinkProps) {
   const { task, tint, solid, idx, orphan, standalone, top } = props;
+  const { pathname } = useLocation();
   return (
     <Link
-      to={"/task/" + task.id}
+      to={workspaceRouteForPathname(pathname, "/task/" + task.id)}
       className={
         `schedule-day__chip schedule-day__chip--${task.status}`
         + (orphan ? " schedule-day__chip--orphan" : "")

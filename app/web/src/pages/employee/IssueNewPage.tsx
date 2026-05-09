@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -9,6 +9,7 @@ import PageHeader from "@/components/PageHeader";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import { useNavHistory } from "@/context/NavHistoryContext";
 import { cap } from "@/lib/strings";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { Issue, Property } from "@/types/api";
 
 type Category = "damage" | "broken" | "supplies" | "safety" | "other";
@@ -34,6 +35,7 @@ interface NewIssueBody {
 export default function IssueNewPage() {
   // code-health: ignore[nloc] Issue form is a single declarative workflow after shared query/offline helpers.
   const nav = useNavigate();
+  const { pathname } = useLocation();
   const { canGoBack } = useNavHistory();
   const qc = useQueryClient();
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -62,7 +64,7 @@ export default function IssueNewPage() {
       if (canGoBack) {
         nav(-1);
       } else {
-        nav("/me");
+        nav(workspaceRouteForPathname(pathname, "/me"));
       }
     },
     onError: (err: Error) => {
@@ -90,7 +92,7 @@ export default function IssueNewPage() {
       {header}
       <section className="phone__section">
         <p className="muted">
-          You can also report this in <Link to="/chat" className="issue-new__chat-link">Chat</Link> — it's usually faster.
+          You can also report this in <Link to={workspaceRouteForPathname(pathname, "/chat")} className="issue-new__chat-link">Chat</Link> — it's usually faster.
         </p>
         {submitError && <p className="muted" role="alert">{submitError}</p>}
 

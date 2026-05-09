@@ -18,10 +18,10 @@ function Harness(): ReactElement {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={["/issues/new"]}>
+      <MemoryRouter initialEntries={["/w/acme/issues/new"]}>
         <Routes>
-          <Route path="/issues/new" element={<><IssueNewPage /><LocationProbe /></>} />
-          <Route path="/me" element={<LocationProbe />} />
+          <Route path="/w/acme/issues/new" element={<><IssueNewPage /><LocationProbe /></>} />
+          <Route path="/w/acme/me" element={<LocationProbe />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
@@ -107,7 +107,7 @@ describe("IssueNewPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Send to manager" }));
 
-    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/me"));
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/me"));
     const submit = env.calls.find((call) => call.url.endsWith("/api/v1/issues"));
     expect(submit?.init.method).toBe("POST");
     expect((submit?.init.headers as Record<string, string>)["Content-Type"]).toBe("application/json");

@@ -138,6 +138,60 @@ vi.mock("@/pages/employee/ChatPage", () => ({
   },
 }));
 
+vi.mock("@/pages/employee/TodayPage", () => ({
+  default: function MockTodayPage(): ReactElement {
+    return <main data-testid="today-page">Today</main>;
+  },
+}));
+
+vi.mock("@/pages/employee/SchedulePage", () => ({
+  default: function MockSchedulePage(): ReactElement {
+    return <main data-testid="schedule-page">Schedule</main>;
+  },
+}));
+
+vi.mock("@/pages/employee/TaskDetailPage", () => ({
+  default: function MockTaskDetailPage(): ReactElement {
+    return <main data-testid="task-detail-page">Task</main>;
+  },
+}));
+
+vi.mock("@/pages/employee/MyExpensesPage", () => ({
+  default: function MockMyExpensesPage(): ReactElement {
+    return <main data-testid="my-expenses-page">My expenses</main>;
+  },
+}));
+
+vi.mock("@/pages/employee/MePage", () => ({
+  default: function MockMePage(): ReactElement {
+    return <main data-testid="me-page">Me</main>;
+  },
+}));
+
+vi.mock("@/pages/employee/HistoryPage", () => ({
+  default: function MockHistoryPage(): ReactElement {
+    return <main data-testid="history-page">History</main>;
+  },
+}));
+
+vi.mock("@/pages/employee/IssueNewPage", () => ({
+  default: function MockIssueNewPage(): ReactElement {
+    return <main data-testid="issue-new-page">New issue</main>;
+  },
+}));
+
+vi.mock("@/pages/employee/EmployeeAssetPage", () => ({
+  default: function MockEmployeeAssetPage(): ReactElement {
+    return <main data-testid="employee-asset-page">Asset</main>;
+  },
+}));
+
+vi.mock("@/pages/employee/AssetScanPage", () => ({
+  default: function MockAssetScanPage(): ReactElement {
+    return <main data-testid="asset-scan-page">Scan asset</main>;
+  },
+}));
+
 vi.mock("@/pages/manager/DashboardPage", () => ({
   default: function MockDashboardPage(): ReactElement {
     mockRenders.dashboardPage();
@@ -402,6 +456,25 @@ describe("App public root and protected deep links", () => {
       expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_1/dashboard?tab=ops#x");
     });
     expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["/today?view=now#top", "/w/ws_1/today?view=now#top", "today-page"],
+    ["/schedule", "/w/ws_1/schedule", "schedule-page"],
+    ["/task/t1", "/w/ws_1/task/t1", "task-detail-page"],
+    ["/my/expenses", "/w/ws_1/my/expenses", "my-expenses-page"],
+    ["/me", "/w/ws_1/me", "me-page"],
+    ["/history?tab=chats", "/w/ws_1/history?tab=chats", "history-page"],
+    ["/issues/new", "/w/ws_1/issues/new", "issue-new-page"],
+    ["/asset/a1", "/w/ws_1/asset/a1", "employee-asset-page"],
+    ["/asset/scan", "/w/ws_1/asset/scan", "asset-scan-page"],
+  ])("redirects authenticated bare worker/shared %s to %s", async (path, expectedPath, testId) => {
+    renderAppAt(path, "employee");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent(expectedPath);
+    });
+    expect(await screen.findByTestId(testId)).toBeInTheDocument();
   });
 
   it("keeps deployment admin routes on the bare host", async () => {

@@ -4,12 +4,13 @@
 // amend/decline actions and the request-leave / request-override /
 // propose-booking dialogs.
 
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useMemo } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { Booking, MySchedulePayload } from "@/types/api";
 import { DayTimeline } from "./DayTimeline";
 import { hoursLabel } from "./lib/availability";
@@ -38,6 +39,7 @@ interface DayDrawerProps {
 export function DayDrawer(props: DayDrawerProps) {
   // code-health: ignore[nloc] Drawer is declarative schedule section composition; mutations/helpers are already extracted.
   const { cell, data, onClose, onRequestLeave, onRequestOverride, onProposeBooking } = props;
+  const { pathname } = useLocation();
   const qc = useQueryClient();
 
   // §09 amend and decline. Self-amend above the threshold goes
@@ -313,7 +315,7 @@ export function DayDrawer(props: DayDrawerProps) {
                 {cell.tasks.map((t) => (
                   <li key={t.id}>
                     <Link
-                      to={"/task/" + t.id}
+                      to={workspaceRouteForPathname(pathname, "/task/" + t.id)}
                       className={"day-drawer__task day-drawer__task--" + t.status}
                       style={{ "--rota-tint": propertyColor(t.property_id, data) } as React.CSSProperties}
                     >

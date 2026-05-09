@@ -66,15 +66,15 @@ afterEach(() => {
   });
 });
 
-function renderProfile(initial = "/me"): ReactElement {
+function renderProfile(initial = "/w/acme/me"): ReactElement {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[initial]}>
         <NavHistoryProvider>
           <Routes>
-            <Route path="/me" element={<><MePage /><LocationProbe /><BackProbe /></>} />
-            <Route path="/history" element={<><HistoryPage /><LocationProbe /><BackProbe /></>} />
+            <Route path="/w/acme/me" element={<><MePage /><LocationProbe /><BackProbe /></>} />
+            <Route path="/w/acme/history" element={<><HistoryPage /><LocationProbe /><BackProbe /></>} />
             <Route path="/login" element={<><span>Login</span><LocationProbe /></>} />
           </Routes>
         </NavHistoryProvider>
@@ -165,7 +165,7 @@ describe("MePage", () => {
     fireEvent.click(historyAction);
 
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/history");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/history");
     });
     expect(screen.getByRole("heading", { name: "History" })).toBeInTheDocument();
     expect(fetchJsonMock).toHaveBeenCalledWith("/api/v1/history?tab=tasks");
@@ -173,7 +173,7 @@ describe("MePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Browser back" }));
 
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/me");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/me");
     });
     expect(screen.getAllByRole("button", { name: "Change" })).toHaveLength(2);
     expect(screen.getByText("English")).toBeInTheDocument();
@@ -186,23 +186,23 @@ describe("MePage", () => {
 
     fireEvent.click(screen.getByRole("link", { name: /Past tasks, chats, expenses, leaves/i }));
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/history");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/history");
     });
 
     fireEvent.click(screen.getByRole("link", { name: "Chats" }));
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/history?tab=chats");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/history?tab=chats");
     });
 
     fireEvent.click(screen.getByRole("link", { name: "Expenses" }));
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/history?tab=expenses");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/history?tab=expenses");
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
 
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/me");
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/me");
     });
   });
 

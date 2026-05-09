@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
 import AgentPreferencesPanel from "@/components/AgentPreferencesPanel";
 import { Chip, Loading, ProgressBar } from "@/components/common";
@@ -290,6 +291,7 @@ function OverrideSummary({ properties, employees }: { properties: Property[]; em
 
 export default function SettingsPage() {
   // code-health: ignore[nloc] Manager settings route keeps catalog grouping, drafts, and shared setting editor together.
+  const { pathname } = useLocation();
   const settingsQ = useQuery({
     queryKey: qk.settings(),
     queryFn: () => fetchJson<WorkspaceSettings>("/api/v1/settings"),
@@ -313,7 +315,7 @@ export default function SettingsPage() {
   const sub = (
     <>
       Workspace-wide configuration only. Personal profile, approval mode, and private agent
-      preferences live under <Link to="/me" className="link">My profile</Link>.
+      preferences live under <Link to={workspaceRouteForPathname(pathname, "/me")} className="link">My profile</Link>.
     </>
   );
 
@@ -411,7 +413,7 @@ export default function SettingsPage() {
         <p className="muted">
           WhatsApp runs on the deployment-default Meta account — every workspace on this
           deployment shares one phone number. That's what your workers link when they pair their
-          phone on <Link to="/me" className="link">/me → Chat channels</Link>.
+          phone on <Link to={workspaceRouteForPathname(pathname, "/me")} className="link">/me → Chat channels</Link>.
         </p>
         <p className="muted">
           No per-user preferences live here: a linked WhatsApp means agent reach-out is on for

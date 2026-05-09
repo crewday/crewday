@@ -1,8 +1,9 @@
 import { BrowserQRCodeReader, type IScannerControls } from "@zxing/browser";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 
 interface AssetScanResponse {
   id: string;
@@ -37,6 +38,7 @@ function scanText(status: ScanStatus): string {
 
 export default function AssetScanPage() {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const { token: routeToken } = useParams<{ token?: string }>();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const resolvingRef = useRef(false);
@@ -59,13 +61,13 @@ export default function AssetScanPage() {
       const asset = await fetchJson<AssetScanResponse>(
         "/api/v1/asset/scan/" + encodeURIComponent(token),
       );
-      navigate("/asset/" + asset.id);
+      navigate(workspaceRouteForPathname(pathname, "/asset/" + asset.id));
     } catch {
       resolvingRef.current = false;
       setStatus("manual");
       setNotice("This asset is not registered here.");
     }
-  }, [navigate]);
+  }, [navigate, pathname]);
 
   useEffect(() => {
     if (routeToken) {
@@ -177,7 +179,7 @@ export default function AssetScanPage() {
           </form>
         ) : null}
         {import.meta.env.DEV ? (
-          <Link to="/asset/a-villa-ac-bed" className="btn btn--ghost">
+          <Link to={workspaceRouteForPathname(pathname, "/asset/a-villa-ac-bed")} className="btn btn--ghost">
             Demo: open Villa Sud AC
           </Link>
         ) : null}

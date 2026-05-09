@@ -41,6 +41,7 @@ import {
   initialNavCollapsed,
   persistNavCollapsed,
 } from "@/lib/preferences";
+import { workspaceRelativePathname, workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { Me } from "@/types/api";
 import type { ResolvedPermission } from "@/types/auth";
 
@@ -132,6 +133,8 @@ const NAV_ACTIONS = new Map<string, string>([
   ["/settings", "scope.edit_settings"],
 ]);
 
+const SHARED_WORKER_ROUTES = new Set(["/today", "/schedule", "/my/expenses", "/me"]);
+
 // Drawer-bar visibility: only render the hamburger + mobile top bar
 // when there's at least one non-`phoneHidden` link to put inside the
 // drawer. Today's RBAC is implicit (workers have no manager-only
@@ -219,6 +222,7 @@ export default function ManagerLayout() {
   const { data } = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
   const collapsed = initialAgentCollapsed();
   const { pathname } = useLocation();
+  const relativePathname = workspaceRelativePathname(pathname);
   const [navOpen, setNavOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState<boolean>(() => initialNavCollapsed());
   const toggleNavCollapsed = useCallback(() => {
@@ -244,7 +248,12 @@ export default function ManagerLayout() {
   });
   const allowedActions = permissionQ.isPending ? null : permissionQ.data ?? new Set<string>();
   const filteredNavItems = filterNavItems(navItems, allowedActions);
-  const hasDrawer = hasDrawerItems(filteredNavItems);
+  const routedNavItems = filteredNavItems.map((item) =>
+    item.type === "link" && SHARED_WORKER_ROUTES.has(item.to)
+      ? { ...item, to: workspaceRouteForPathname(pathname, item.to) }
+      : item
+  );
+  const hasDrawer = hasDrawerItems(routedNavItems);
   const toggleNav = useCallback(() => setNavOpen((v) => !v), []);
 
   useEffect(() => {
@@ -263,7 +272,7 @@ export default function ManagerLayout() {
   return (
     <ShellNavProvider hasDrawer={hasDrawer} isOpen={navOpen} toggle={toggleNav}>
       <div
-        className={"desk" + (pathname === "/chat" ? " desk--chat" : "")}
+        className={"desk" + (relativePathname === "/chat" ? " desk--chat" : "")}
         data-agent-collapsed={collapsed ? "true" : "false"}
         data-nav-collapsed={navCollapsed ? "true" : "false"}
         data-nav-open={navOpen ? "true" : "false"}
@@ -278,7 +287,7 @@ export default function ManagerLayout() {
         )}
 
         <SideNav
-          items={filteredNavItems}
+          items={routedNavItems}
           collapsed={navCollapsed}
           onToggleCollapsed={toggleNavCollapsed}
           footer={{

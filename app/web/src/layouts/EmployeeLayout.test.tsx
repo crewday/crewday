@@ -87,7 +87,7 @@ function workspaceMe(): Me {
   };
 }
 
-function renderEmployeeLayout(path = "/today"): void {
+function renderEmployeeLayout(path = "/w/ws_1/today"): void {
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("ws_1");
   setAuthenticated(authMe());
   installFetch(({ url }) => {
@@ -107,8 +107,9 @@ function renderEmployeeLayout(path = "/today"): void {
         <WorkspaceProvider>
           <Routes>
             <Route element={<EmployeeLayout />}>
-              <Route path="/today" element={<main>Today</main>} />
-              <Route path="/chat" element={<main data-testid="chat-view">Chat</main>} />
+              <Route path="/w/ws_1/today" element={<main>Today</main>} />
+              <Route path="/w/ws_1/schedule" element={<main>Schedule</main>} />
+              <Route path="/w/ws_1/chat" element={<main data-testid="chat-view">Chat</main>} />
             </Route>
           </Routes>
         </WorkspaceProvider>
@@ -137,14 +138,23 @@ describe("<EmployeeLayout>", () => {
     renderEmployeeLayout();
 
     const bottomNav = screen.getByRole("navigation", { name: "Bottom navigation" });
-    expect(within(bottomNav).getByRole("link", { name: /Chat/i })).toHaveAttribute("href", "/chat");
+    expect(within(bottomNav).getByRole("link", { name: /Chat/i })).toHaveAttribute("href", "/w/ws_1/chat");
     expect(screen.getByTestId("agent-sidebar")).toHaveTextContent("agent:employee");
   });
 
   it("marks /chat as the full-screen phone chat surface", async () => {
-    renderEmployeeLayout("/chat");
+    renderEmployeeLayout("/w/ws_1/chat");
 
     expect(await screen.findByTestId("chat-view")).toBeInTheDocument();
     expect(screen.getByTestId("chat-view").closest(".phone")).toHaveClass("phone--chat");
+  });
+
+  it("marks exact-match employee side nav links active on prefixed routes", async () => {
+    renderEmployeeLayout("/w/ws_1/schedule");
+
+    const mainNav = screen.getByRole("complementary", { name: "Main navigation" });
+    const schedule = within(mainNav).getByRole("link", { name: "Schedule" });
+    expect(schedule).toHaveAttribute("href", "/w/ws_1/schedule");
+    expect(schedule).toHaveClass("nav-link--active");
   });
 });

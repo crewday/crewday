@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import WorkspaceSwitcher from "@/components/WorkspaceSwitcher";
+import { workspaceRelativePathname } from "@/lib/workspaceRoutes";
 
 // Shared sidebar used by both ManagerLayout (`.desk__nav` inside
 // `.desk`) and EmployeeLayout (`.desk__nav` inside `.phone`, revealed
@@ -154,10 +155,14 @@ interface NavItemProps {
 
 function NavItem({ to, matchPrefix, phoneHidden, icon, label, onClick }: NavItemProps) {
   const { pathname } = useLocation();
+  const relativePathname = workspaceRelativePathname(pathname);
+  const relativeTo = workspaceRelativePathname(to);
   const prefixes = matchPrefix
     ? Array.isArray(matchPrefix) ? matchPrefix : [matchPrefix]
     : null;
-  const active = prefixes ? prefixes.some((p) => pathname.startsWith(p)) : pathname === to;
+  const active = prefixes
+    ? prefixes.some((p) => relativePathname.startsWith(p))
+    : relativePathname === relativeTo;
   return (
     <NavLink
       to={to}

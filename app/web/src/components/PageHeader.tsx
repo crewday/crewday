@@ -4,6 +4,7 @@ import { ChevronLeft, Menu, MoreHorizontal } from "lucide-react";
 import { useShellNav } from "@/context/ShellNavContext";
 import { useNavHistory } from "@/context/NavHistoryContext";
 import { resolveParent, type ParentDescriptor } from "@/lib/routeParents";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 
 export interface PageHeaderOverflowItem {
   label: string;
@@ -71,7 +72,7 @@ export default function PageHeader({ title, sub, actions, overflow, back }: Prop
         )}
         {resolved && historyBackTarget === null && (
           <Link
-            to={resolved.to}
+            to={workspaceRouteForPathname(pathname, resolved.to)}
             className="page-topbar__icon-btn"
             aria-label={`Back to ${resolved.label}`}
           >

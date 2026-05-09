@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
@@ -8,6 +8,7 @@ import {
   subscribeOfflineQueueReplay,
 } from "@/lib/offlineQueue";
 import { qk } from "@/lib/queryKeys";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import { Camera, Check } from "lucide-react";
 import { Chip, EmptyState, Loading, ProgressBar } from "@/components/common";
 import PageHeader from "@/components/PageHeader";
@@ -189,6 +190,7 @@ function NowCard({
   completePending: boolean;
   onComplete: () => void;
 }) {
+  const { pathname } = useLocation();
   const doneSteps = task.checklist.filter((i) => i.done).length;
   const total = task.checklist.length;
   const pct = total > 0 ? Math.round((doneSteps / total) * 100) : 0;
@@ -222,7 +224,7 @@ function NowCard({
 
   if (task.photo_evidence === "required") {
     return (
-      <Link to={"/task/" + task.id} className={cls}>
+      <Link to={workspaceRouteForPathname(pathname, "/task/" + task.id)} className={cls}>
         {body}
         <div className="task-card__cta">{ctaLabel(task)} {"->"}</div>
       </Link>
@@ -231,7 +233,7 @@ function NowCard({
 
   return (
     <article className={cls}>
-      <Link to={"/task/" + task.id} className="task-card__body-link">
+      <Link to={workspaceRouteForPathname(pathname, "/task/" + task.id)} className="task-card__body-link">
         {body}
       </Link>
       <button

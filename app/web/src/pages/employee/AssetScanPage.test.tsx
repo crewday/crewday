@@ -31,7 +31,7 @@ interface HarnessProps {
   initial?: string;
 }
 
-function Harness({ initial = "/asset/scan" }: HarnessProps) {
+function Harness({ initial = "/w/acme/asset/scan" }: HarnessProps) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -40,9 +40,9 @@ function Harness({ initial = "/asset/scan" }: HarnessProps) {
       <MemoryRouter initialEntries={[initial]}>
         <WorkspaceProvider>
           <Routes>
-            <Route path="/asset/scan" element={<AssetScanPage />} />
-            <Route path="/asset/scan/:token" element={<AssetScanPage />} />
-            <Route path="/asset/:aid" element={<AssetRouteProbe />} />
+            <Route path="/w/acme/asset/scan" element={<AssetScanPage />} />
+            <Route path="/w/acme/asset/scan/:token" element={<AssetScanPage />} />
+            <Route path="/w/acme/asset/:aid" element={<AssetRouteProbe />} />
           </Routes>
         </WorkspaceProvider>
       </MemoryRouter>
@@ -176,7 +176,7 @@ describe("<AssetScanPage>", () => {
     }
   });
 
-  it("resolves direct /asset/scan/:token links without enabling demo data", async () => {
+  it("resolves direct /w/:slug/asset/scan/:token links without enabling demo data", async () => {
     const originalFetch = globalThis.fetch;
     const requests: string[] = [];
     (globalThis as { fetch: typeof fetch }).fetch = vi.fn(async (url: string | URL | Request) => {
@@ -184,7 +184,7 @@ describe("<AssetScanPage>", () => {
       return jsonResponse({ id: "asset_3" });
     }) as unknown as typeof fetch;
     try {
-      render(<Harness initial="/asset/scan/QR1234567890" />);
+      render(<Harness initial="/w/acme/asset/scan/QR1234567890" />);
       await screen.findByText("Opened asset_3");
       expect(zxing.decodeFromConstraints).not.toHaveBeenCalled();
       expect(requests).toEqual(["/w/acme/api/v1/asset/scan/QR1234567890"]);

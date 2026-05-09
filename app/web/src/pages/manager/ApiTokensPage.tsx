@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
 import { Loading } from "@/components/common";
 import TokenRevealPanel from "@/components/TokenRevealPanel";
@@ -23,6 +24,7 @@ import TokenAuditPanel from "./api-tokens/TokenAuditPanel";
 
 export default function ApiTokensPage() {
   const qc = useQueryClient();
+  const { pathname } = useLocation();
   // §12 cursor envelope (cd-msu2). The page renders a single page —
   // pagination UI lands as a follow-up; today's per-user/per-workspace
   // caps keep the corpus well below the default limit.
@@ -121,7 +123,7 @@ export default function ApiTokensPage() {
             </span>
             <span className="tokens-meta__divider" aria-hidden="true" />
             <span className="tokens-meta__hint">
-              personal tokens live on <Link to="/me">/me</Link>
+              personal tokens live on <Link to={workspaceRouteForPathname(pathname, "/me")}>/me</Link>
             </span>
           </div>
         </header>
