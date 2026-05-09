@@ -22,6 +22,7 @@ from app.adapters.db.identity.models import (
     PasskeyCredential,
     User,
 )
+from app.adapters.db.places.models import Property, PropertyWorkspace, Unit
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.admin.init import workspace_bootstrap
 from app.config import Settings
@@ -99,6 +100,29 @@ def test_workspace_bootstrap_creates_workspace_owner_and_cli_audit(
         owners_audit = db_session.scalar(
             select(AuditLog).where(AuditLog.action == "owners_bootstrapped")
         )
+        properties = db_session.scalars(
+            select(Property)
+            .join(PropertyWorkspace, PropertyWorkspace.property_id == Property.id)
+            .where(PropertyWorkspace.workspace_id == result.workspace_id)
+            .where(Property.deleted_at.is_(None))
+        ).all()
+        default_property = properties[0] if properties else None
+        property_workspace = (
+            db_session.get(
+                PropertyWorkspace, (default_property.id, result.workspace_id)
+            )
+            if default_property is not None
+            else None
+        )
+        units = (
+            db_session.scalars(
+                select(Unit)
+                .where(Unit.property_id == default_property.id)
+                .where(Unit.deleted_at.is_(None))
+            ).all()
+            if default_property is not None
+            else []
+        )
 
     assert workspace is not None
     assert workspace.slug == "ops-home"
@@ -123,6 +147,50 @@ def test_workspace_bootstrap_creates_workspace_owner_and_cli_audit(
     assert owners_audit is not None
     assert owners_audit.actor_kind == "system"
     assert owners_audit.via == "cli"
+    assert len(properties) == 1
+    assert default_property is not None
+    assert default_property.name == "Home"
+    assert default_property.kind == "residence"
+    assert default_property.timezone == workspace.default_timezone
+    assert default_property.default_currency == workspace.default_currency
+    assert default_property.country == "XX"
+    assert property_workspace is not None
+    assert property_workspace.membership_role == "owner_workspace"
+    assert property_workspace.status == "active"
+    assert len(units) == 1
+    assert units[0].name == "Home"
+    assert units[0].ordinal == 0
+
+
+def test_workspace_bootstrap_duplicate_slug_does_not_seed_second_property(
+    db_session: Session,
+) -> None:
+    result = workspace_bootstrap(
+        db_session,
+        settings=_settings(),
+        slug="ops-home",
+        name="Ops Home",
+        owner_email="owner@example.com",
+    )
+
+    with pytest.raises(ValueError, match="workspace slug 'ops-home' already exists"):
+        workspace_bootstrap(
+            db_session,
+            settings=_settings(),
+            slug="ops-home",
+            name="Ops Home Retry",
+            owner_email="owner@example.com",
+        )
+
+    with tenant_agnostic():
+        properties = db_session.scalars(
+            select(Property)
+            .join(PropertyWorkspace, PropertyWorkspace.property_id == Property.id)
+            .where(PropertyWorkspace.workspace_id == result.workspace_id)
+            .where(Property.deleted_at.is_(None))
+        ).all()
+
+    assert [property_row.name for property_row in properties] == ["Home"]
 
 
 def test_workspace_bootstrap_existing_owner_gets_non_destructive_invite_link(

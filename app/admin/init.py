@@ -36,6 +36,11 @@ from app.auth.magic_link import PendingMagicLink, request_link
 from app.capabilities import Capabilities, DeploymentSettings
 from app.config import Settings
 from app.domain.llm.budget import new_ledger_row
+from app.domain.places.property_service import (
+    AddressPayload,
+    PropertyCreate,
+    create_property,
+)
 from app.domain.plans import FREE_TIER_DEFAULTS, seed_free_tier_10pct, tight_cap_cents
 from app.fixtures.llm import seed_default_registry
 from app.tenancy import WorkspaceContext, tenant_agnostic
@@ -61,6 +66,8 @@ _INIT_MARKER_KEY: Final[str] = "admin_init_completed"
 _ROOT_KEY_GENERATED_MARKER_KEY: Final[str] = "admin_init_root_key_generated"
 _MAGIC_LINK_BASE_URL: Final[str] = "http://127.0.0.1:8000"
 _INVITE_TTL: Final[timedelta] = timedelta(hours=24)
+_DEFAULT_PROPERTY_NAME: Final[str] = "Home"
+_DEFAULT_PROPERTY_COUNTRY: Final[str] = "XX"
 _VALID_INVITE_ROLES: Final[frozenset[str]] = frozenset(
     {"owner", "manager", "worker", "client"}
 )
@@ -616,6 +623,30 @@ def workspace_bootstrap(
             session,
             user_id=owner.id,
             now=now,
+            clock=clock,
+        )
+        default_country = str(
+            workspace.settings_json.get(
+                "workspace.default_country",
+                _DEFAULT_PROPERTY_COUNTRY,
+            )
+        ).upper()
+        if len(default_country) != 2 or not default_country.isalpha():
+            default_country = _DEFAULT_PROPERTY_COUNTRY
+        create_property(
+            session,
+            ctx,
+            body=PropertyCreate(
+                name=_DEFAULT_PROPERTY_NAME,
+                kind="residence",
+                address=_DEFAULT_PROPERTY_NAME,
+                address_json=AddressPayload(country=default_country),
+                country=default_country,
+                locale=workspace.default_locale,
+                default_currency=workspace.default_currency,
+                timezone=workspace.default_timezone,
+                label=_DEFAULT_PROPERTY_NAME,
+            ),
             clock=clock,
         )
         seed_asset_type_catalog(session, ctx, clock=clock)

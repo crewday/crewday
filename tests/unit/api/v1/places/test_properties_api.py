@@ -26,13 +26,20 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace
+from app.admin.init import workspace_bootstrap
 from app.api.v1.places import _COLOR_PALETTE, _color_for, build_properties_router
+from app.config import Settings
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.ulid import new_ulid
-from tests.factories.identity import bootstrap_user, bootstrap_workspace
+from tests.factories.identity import (
+    bootstrap_user,
+    bootstrap_workspace,
+    build_workspace_context,
+)
 from tests.unit.api.v1.identity.conftest import build_client
 
 # ---------------------------------------------------------------------------
@@ -41,6 +48,15 @@ from tests.unit.api.v1.identity.conftest import build_client
 
 
 _PINNED = datetime(2026, 4, 24, 12, 0, 0, tzinfo=UTC)
+
+
+def _admin_settings() -> Settings:
+    return Settings.model_construct(
+        database_url="sqlite:///:memory:",
+        root_key=SecretStr("properties-api-workspace-bootstrap-root-key"),
+        public_url="https://ops.example.test",
+        demo_mode=False,
+    )
 
 
 def _client(ctx: WorkspaceContext, factory: sessionmaker[Session]) -> TestClient:
@@ -464,18 +480,62 @@ class TestEmptyRoster:
         self,
         owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
     ) -> None:
-        """The flat-array contract requires a true ``[]`` when nothing matches.
-
-        :func:`bootstrap_workspace` does NOT seed any property rows, so
-        the baseline owner ctx already exercises this branch — the
-        assertion pins it explicitly so a regression that returns
-        ``{}`` or ``{"data": []}`` is caught loudly.
-        """
+        """The flat-array contract requires a true ``[]`` when nothing matches."""
         ctx, factory, _ = owner_ctx
         client = _client(ctx, factory)
         resp = client.get("/properties")
         assert resp.status_code == 200, resp.text
         assert resp.json() == []
+
+
+class TestWorkspaceBootstrapDefaultProperty:
+    def test_admin_bootstrap_home_property_lists_updates_and_deletes(
+        self,
+        factory: sessionmaker[Session],
+    ) -> None:
+        """Admin workspace bootstrap seeds an editable default property."""
+        with factory() as s:
+            result = workspace_bootstrap(
+                s,
+                settings=_admin_settings(),
+                slug="ws-bootstrapped-home",
+                name="Bootstrapped Home",
+                owner_email="owner-bootstrap@example.com",
+            )
+            s.commit()
+
+        ctx = build_workspace_context(
+            workspace_id=result.workspace_id,
+            workspace_slug="ws-bootstrapped-home",
+            actor_id=result.user_id,
+            actor_kind="user",
+            actor_grant_role="manager",
+            actor_was_owner_member=True,
+        )
+        client = _client(ctx, factory)
+
+        list_resp = client.get("/properties")
+        assert list_resp.status_code == 200, list_resp.text
+        listed = list_resp.json()
+        assert [row["name"] for row in listed] == ["Home"]
+        property_id = listed[0]["id"]
+
+        update_resp = client.patch(
+            f"/properties/{property_id}",
+            json={
+                "name": "Main Home",
+                "kind": "residence",
+                "address": "Main Home",
+                "country": "US",
+                "timezone": "America/New_York",
+            },
+        )
+        assert update_resp.status_code == 200, update_resp.text
+        assert update_resp.json()["name"] == "Main Home"
+
+        delete_resp = client.delete(f"/properties/{property_id}")
+        assert delete_resp.status_code == 204, delete_resp.text
+        assert client.get("/properties").json() == []
 
 
 # ---------------------------------------------------------------------------
