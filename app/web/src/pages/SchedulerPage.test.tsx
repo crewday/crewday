@@ -123,9 +123,9 @@ afterEach(() => {
 });
 
 describe("<SchedulerPage>", () => {
-  it("wires the shared scheduler route and its workspace-scoped alias", () => {
-    expect(appSource).toContain('<Route path="/scheduler" element={<SchedulerPage />} />');
-    expect(appSource).toContain('<Route path="/w/:slug/scheduler" element={<SchedulerPage />} />');
+  it("wires the shared scheduler route inside the workspace tree", () => {
+    expect(appSource).toContain('<Route path="scheduler" element={<SchedulerPage />} />');
+    expect(appSource).toContain('<Route path="/w/:slug" element={<WorkspaceRouteRoot />}>');
   });
 
   it("loads the production calendar feed and renders the promoted grid", async () => {

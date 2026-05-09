@@ -68,6 +68,8 @@ function installFetch(options: {
   reservations?: unknown[];
   units?: unknown[];
   feeds?: unknown[];
+  leaves?: unknown[];
+  employees?: unknown[];
   membershipRole?: "owner_workspace" | "managed_workspace" | "observer_workspace";
   shareGuestIdentity?: boolean;
   createStay?: (body: unknown) => { status?: number; body?: unknown };
@@ -108,9 +110,9 @@ function installFetch(options: {
       path: "/w/acme/api/v1/stays/reservations?limit=500",
       respond: { body: { data: reservations } },
     },
-    { path: "/w/acme/api/v1/user_leaves?approved=true&limit=500", respond: { body: { data: [] } } },
+    { path: "/w/acme/api/v1/user_leaves?approved=true&limit=500", respond: { body: { data: options.leaves ?? [] } } },
     { path: "/w/acme/api/v1/properties", respond: { body: [property] } },
-    { path: "/w/acme/api/v1/employees", respond: { body: [] } },
+    { path: "/w/acme/api/v1/employees", respond: { body: options.employees ?? [] } },
     { path: "/w/acme/api/v1/stays/ical-feeds", respond: { body: feeds } },
     {
       path: "/w/acme/api/v1/properties/prop_1/units?limit=100",
@@ -210,6 +212,13 @@ beforeEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("acme");
+  Element.prototype.scrollIntoView = vi.fn();
+  class TestIntersectionObserver {
+    observe = vi.fn();
+    disconnect = vi.fn();
+    unobserve = vi.fn();
+  }
+  vi.stubGlobal("IntersectionObserver", TestIntersectionObserver);
   HTMLDialogElement.prototype.showModal = vi.fn(function showModal(this: HTMLDialogElement) {
     this.setAttribute("open", "");
   });
@@ -222,10 +231,82 @@ afterEach(() => {
   cleanup();
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe("<StaysPage>", () => {
+  it("renders stays in the shared infinite agenda instead of the old static April grid", async () => {
+    const fake = installFetch({ reservations: [existingReservation] });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Scroll up for past weeks")).toBeInTheDocument();
+      expect(screen.getByText("Keep scrolling for more")).toBeInTheDocument();
+      expect(screen.getByLabelText("Stays calendar legend")).toBeInTheDocument();
+      expect(screen.queryByText("April 2026 — calendar")).not.toBeInTheDocument();
+      expect(document.querySelector(".cal-wide")).toBeNull();
+      expect(document.querySelector(".schedule__monthbar")).not.toBeNull();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("labels stays, turnovers, and approved leave in the agenda", async () => {
+    const fake = installFetch({
+      reservations: [
+        {
+          ...existingReservation,
+          id: "res_current",
+          check_in: "2026-05-08T16:00:00Z",
+          check_out: "2026-05-09T10:00:00Z",
+          guest_name: "May Guest",
+        },
+      ],
+      leaves: [
+        {
+          id: "leave_1",
+          user_id: "usr_leave",
+          starts_on: "2026-05-09",
+          ends_on: "2026-05-09",
+          category: "vacation",
+          note_md: null,
+          approved_at: "2026-05-01T10:00:00Z",
+        },
+      ],
+      employees: [
+        {
+          id: "usr_leave",
+          name: "Lina Leave",
+          avatar_initials: "LL",
+          role: "Housekeeper",
+          email: "lina@example.com",
+          phone: null,
+          status: "active",
+          employment_type: "employee",
+          weekly_capacity_hours: null,
+          hourly_rate_cents: null,
+          overtime_rate_cents: null,
+          locale: "en-US",
+          timezone: "Europe/Paris",
+          hired_on: null,
+          notes_md: null,
+        },
+      ],
+    });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Scroll up for past weeks")).toBeInTheDocument();
+      expect(screen.getAllByText("May Guest").length).toBeGreaterThan(1);
+      expect(screen.getAllByText("Turnover").length).toBeGreaterThan(1);
+      expect(screen.getByText("LL")).toBeInTheDocument();
+      expect(screen.getByText(/Lina Leave · vacation/)).toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("creates a manual stay and renders overlap visibility", async () => {
     const fake = installFetch({ reservations: [existingReservation] });
     try {
@@ -246,6 +327,9 @@ describe("<StaysPage>", () => {
 
       fireEvent.change(within(dialog).getByLabelText("Check-in"), { target: { value: "2026-04-21" } });
       fireEvent.change(within(dialog).getByLabelText("Check-out"), { target: { value: "2026-04-23" } });
+      const reservationFetchesBeforeCreate = fake.requests.filter(
+        (request) => request.path === "/w/acme/api/v1/stays/reservations?limit=500",
+      ).length;
       fireEvent.click(within(dialog).getByRole("button", { name: "Create stay" }));
 
       await waitFor(() => expect(screen.getByText("Bea Guest")).toBeInTheDocument());
@@ -260,7 +344,9 @@ describe("<StaysPage>", () => {
         source: "manual",
       });
       await waitFor(() => {
-        expect(fake.requests.filter((request) => request.path === "/w/acme/api/v1/stays/reservations?limit=500")).toHaveLength(2);
+        expect(
+          fake.requests.filter((request) => request.path === "/w/acme/api/v1/stays/reservations?limit=500").length,
+        ).toBeGreaterThan(reservationFetchesBeforeCreate);
       });
     } finally {
       fake.restore();
@@ -317,6 +403,9 @@ describe("<StaysPage>", () => {
       fireEvent.change(within(dialog).getByLabelText("Feed URL"), {
         target: { value: "https://calendar.google.com/calendar/ical/abc.ics" },
       });
+      const feedFetchesBeforeCreate = fake.requests.filter(
+        (request) => request.path === "/w/acme/api/v1/stays/ical-feeds",
+      ).length;
       fireEvent.click(within(dialog).getByRole("button", { name: "Add feed" }));
 
       expect(await within(dialog).findByText(/Google Calendar parsed successfully/)).toBeInTheDocument();
@@ -328,7 +417,9 @@ describe("<StaysPage>", () => {
         url: "https://calendar.google.com/calendar/ical/abc.ics",
       });
       await waitFor(() => {
-        expect(fake.requests.filter((request) => request.path === "/w/acme/api/v1/stays/ical-feeds")).toHaveLength(3);
+        expect(
+          fake.requests.filter((request) => request.path === "/w/acme/api/v1/stays/ical-feeds").length,
+        ).toBeGreaterThan(feedFetchesBeforeCreate);
       });
     } finally {
       fake.restore();

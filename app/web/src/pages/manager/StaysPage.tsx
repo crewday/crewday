@@ -1,5 +1,5 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, type ReactElement, useRef, useState } from "react";
+import { type FormEvent, useMemo, useRef, useState } from "react";
 import { ApiError, fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
@@ -15,6 +15,9 @@ import type {
   Stay,
 } from "@/types/api";
 import type { AuthMe } from "@/auth/types";
+import { isoDate } from "@/pages/employee/schedule/lib/dateHelpers";
+import { useIsPhone } from "@/pages/employee/schedule/lib/useIsPhone";
+import { InfiniteStaysAgenda } from "./stays/InfiniteStaysAgenda";
 
 type IcalProvider = "airbnb" | "vrbo" | "booking" | "gcal" | "generic";
 type StaySource = Stay["source"];
@@ -87,8 +90,6 @@ const STAY_TONE: Record<Stay["status"], "sky" | "moss" | "ghost" | "rust" | "san
   checked_out: "ghost",
   cancelled: "rust",
 };
-
-const DOW = ["M", "T", "W", "T", "F", "S", "S"];
 
 const PROVIDERS: { value: IcalProvider; label: string }[] = [
   { value: "airbnb", label: "Airbnb" },
@@ -369,9 +370,12 @@ function describedBy(...ids: Array<string | false | null | undefined>): string |
 export default function StaysPage() {
   // code-health: ignore[nloc] Stays page is declarative reservation/closure composition over promoted route data.
   const { workspaceId } = useWorkspace();
+  const isPhone = useIsPhone();
   const queryClient = useQueryClient();
   const manualDialogRef = useRef<HTMLDialogElement | null>(null);
   const icalDialogRef = useRef<HTMLDialogElement | null>(null);
+  const today = useMemo(() => new Date(), []);
+  const todayIso = useMemo(() => isoDate(today), [today]);
   const [manualForm, setManualForm] = useState<ManualStayForm | null>(null);
   const [icalForm, setIcalForm] = useState<IcalForm | null>(null);
   const [manualNotice, setManualNotice] = useState<FormNotice | null>(null);
@@ -461,6 +465,7 @@ export default function StaysPage() {
         return current ? [feed, ...current] : [feed];
       });
       void queryClient.invalidateQueries({ queryKey: qk.icalFeeds() });
+      void queryClient.invalidateQueries({ queryKey: qk.stays() });
       setIcalNotice({
         tone: "success",
         text: feed.enabled
@@ -500,7 +505,7 @@ export default function StaysPage() {
     return <DeskPage title="Stays">Failed to load.</DeskPage>;
   }
 
-  const { stays, closures, leaves } = dataQ.data;
+  const { stays } = dataQ.data;
   const properties = propsQ.data;
   const units = unitQs.flatMap((query) => query.data ?? []);
   const memberships = membershipQs.flatMap((query) => query.data ?? []);
@@ -511,16 +516,9 @@ export default function StaysPage() {
     existing.push(unit);
     unitsByProperty.set(unit.property_id, existing);
   }
-  const empsById = new Map(empsQ.data.map((e) => [e.id, e]));
   const activeWorkspaceId = meQ.data.current_workspace_id
     ?? (workspaceId ? wsQ.data.find((workspace) => workspace.slug === workspaceId)?.workspace_id : null)
     ?? null;
-  const today = new Date();
-  const todayDay = today.getDate();
-
-  const days: number[] = [];
-  for (let d = 1; d <= 30; d += 1) days.push(d);
-
   function canSeeGuestIdentity(propertyId: string): boolean {
     const membership = memberships.find((entry) => {
       return entry.property_id === propertyId && entry.workspace_id === activeWorkspaceId;
@@ -871,129 +869,57 @@ export default function StaysPage() {
 
       <div className="panel">
         <header className="panel__head">
-          <h2>April 2026 — calendar</h2>
-          <div className="cal-legend">
-            <span className="cal-legend__item">
-              <span className="swatch-dot swatch-dot--moss" />Villa Sud
-            </span>
-            <span className="cal-legend__item">
-              <span className="swatch-dot swatch-dot--sky" />Apt 3B
-            </span>
-            <span className="cal-legend__item">
-              <span className="swatch-dot swatch-dot--rust" />Chalet Cœur
-            </span>
-            <span className="cal-legend__item">
-              <span className="swatch-dot swatch-dot--turnover" />Turnover
-            </span>
-            <span className="cal-legend__item">
-              <span className="swatch-dot swatch-dot--closed" />Closure
-            </span>
-            <span className="cal-legend__item">
-              <span className="swatch-dot swatch-dot--leave" />Leave
-            </span>
-          </div>
+          <h2>iCal feeds</h2>
+          <span className="muted">{feedsQ.data.length} connected</span>
         </header>
-
-        <div className="cal-wide">
-          <div className="cal-wide__headers">
-            <div className="cal-wide__corner">April</div>
-            {days.map((d) => {
-              const dow = DOW[(d - 1 + 2) % 7];
-              const cls =
-                "cal-wide__header" + (d === todayDay ? " cal-wide__header--today" : "");
+        <table className="table table--roomy">
+          <thead>
+            <tr>
+              <th>Provider</th>
+              <th>Property</th>
+              <th>Unit</th>
+              <th>Status</th>
+              <th>Last poll</th>
+              <th>Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            {feedsQ.data.map((feed) => {
+              const property = propsById.get(feed.property_id);
+              const unit = units.find((entry) => entry.id === feed.unit_id);
               return (
-                <div key={d} className={cls}>
-                  <span className="cal-wide__dow">{dow}</span>
-                  <span className="cal-wide__num">{d}</span>
-                </div>
+                <tr key={feed.id}>
+                  <td><strong>{providerLabel(feed.provider)}</strong></td>
+                  <td>{property ? <Chip tone={property.color} size="sm">{property.name}</Chip> : "—"}</td>
+                  <td>{unit?.name ?? "All units"}</td>
+                  <td>
+                    <Chip tone={feed.enabled ? "moss" : "sand"} size="sm">
+                      {feed.enabled ? "enabled" : "needs review"}
+                    </Chip>
+                  </td>
+                  <td className="mono">{feed.last_polled_at ? fmtAbbrevDate(feed.last_polled_at) : "—"}</td>
+                  <td className="mono">{feed.url_preview}</td>
+                </tr>
               );
             })}
-          </div>
-
-          {properties.map((p) => (
-            <div key={p.id} className="cal-wide__row">
-              <div className="cal-wide__label">
-                <Chip tone={p.color} size="sm">{p.name}</Chip>
-              </div>
-              {days.map((d) => (
-                <div key={d} className="cal-wide__cell">
-                  {stays.map((s) => {
-                    if (s.property_id !== p.id) return null;
-                    const ci = new Date(s.check_in).getDate();
-                    const co = new Date(s.check_out).getDate();
-                    const nodes: ReactElement[] = [];
-                    if (ci <= d && d <= co) {
-                      nodes.push(
-                        <span
-                          key={s.id + "-bar"}
-                          className={"cal-bar cal-bar--" + p.color}
-                          title={guestNameForStay(s) + " (" + s.source + ")"}
-                        >
-                          {d === ci ? guestNameForStay(s).split(" ")[0] : ""}
-                        </span>,
-                      );
-                    }
-                    if (co === d) {
-                      nodes.push(
-                        <span
-                          key={s.id + "-turn"}
-                          className="cal-bar cal-bar--turnover"
-                          title={"Turnover — " + guestNameForStay(s)}
-                        />,
-                      );
-                    }
-                    return nodes.length > 0 ? <>{nodes}</> : null;
-                  })}
-                  {closures.map((c) => {
-                    if (c.property_id !== p.id) return null;
-                    const cs = new Date(c.starts_on).getDate();
-                    const ce = new Date(c.ends_on).getDate();
-                    if (cs <= d && d <= ce) {
-                      return (
-                        <span
-                          key={c.id}
-                          className="cal-bar cal-bar--closed"
-                          title={"Closure: " + c.reason}
-                        />
-                      );
-                    }
-                    return null;
-                  })}
-                </div>
-              ))}
-            </div>
-          ))}
-
-          <div className="cal-wide__row cal-wide__row--leaves">
-            <div className="cal-wide__label">
-              <Chip tone="ghost" size="sm">Employee leave</Chip>
-            </div>
-            {days.map((d) => (
-              <div key={d} className="cal-wide__cell">
-                {leaves.map((lv) => {
-                  const start = new Date(lv.starts_on);
-                  if (start.getMonth() !== 3) return null;
-                  const ls = start.getDate();
-                  const le = new Date(lv.ends_on).getDate();
-                  if (ls <= d && d <= le) {
-                    const emp = empsById.get(lv.employee_id);
-                    return (
-                      <span
-                        key={lv.id}
-                        className="cal-bar cal-bar--leave"
-                        title={(emp ? emp.name : "") + " — " + lv.category}
-                      >
-                        {d === ls && emp ? emp.avatar_initials : ""}
-                      </span>
-                    );
-                  }
-                  return null;
-                })}
-              </div>
-            ))}
-          </div>
-        </div>
+            {feedsQ.data.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="muted">No iCal feeds connected yet.</td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
       </div>
+
+      <InfiniteStaysAgenda
+        variant={isPhone ? "phone" : "desktop"}
+        today={today}
+        todayIso={todayIso}
+        properties={properties}
+        employees={empsQ.data}
+        payload={dataQ.data}
+        guestNameForStay={guestNameForStay}
+      />
     </DeskPage>
   );
 }

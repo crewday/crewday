@@ -16,7 +16,11 @@ import {
   useState,
 } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import type { UseInfiniteQueryResult, InfiniteData } from "@tanstack/react-query";
+import type {
+  InfiniteData,
+  QueryKey,
+  UseInfiniteQueryResult,
+} from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import type { MySchedulePayload } from "@/types/api";
@@ -55,47 +59,89 @@ export interface UseInfiniteAgenda {
   scrollToToday: () => void;
 }
 
+export interface UseInfiniteAgendaOptions<Page, Merged, Cell extends { iso: string }> {
+  today: Date;
+  todayIso: string;
+  queryKey: (initialMondayIso: string) => QueryKey;
+  queryFn: (mondayIso: string) => Promise<Page>;
+  mergePages: (pages: Page[]) => Merged | null;
+  buildCells: (from: Date, days: number, merged: Merged) => Cell[];
+  dataAttribute?: string;
+}
+
+export interface UseInfiniteAgendaResult<Page, Merged, Cell extends { iso: string }> {
+  q: UseInfiniteQueryResult<InfiniteData<Page>, Error>;
+  merged: Merged | null;
+  cells: Cell[];
+  containerRef: (node: HTMLDivElement | null) => void;
+  topSentinelRef: (node: HTMLDivElement | null) => void;
+  bottomSentinelRef: (node: HTMLDivElement | null) => void;
+  monthLabel: string;
+  todayInView: boolean;
+  scrollToToday: () => void;
+}
+
 export function useInfiniteAgenda(
   today: Date,
   todayIso: string,
 ): UseInfiniteAgenda {
-  const initialMondayIso = useMemo(
-    () => isoDate(startOfIsoWeek(today)),
-    [today],
-  );
-
-  const q = useInfiniteQuery({
-    // Single key for the whole infinite stream so React Query keeps
-    // accumulated pages across re-renders. Mutations elsewhere
-    // invalidate the workspace-scoped `[..., "my-schedule", ...]`
-    // prefix via `qk.mySchedulePrefix()` and pick this one up too.
-    queryKey: qk.mySchedulePages(initialMondayIso),
-    initialPageParam: initialMondayIso,
-    queryFn: ({ pageParam }) => {
+  return useInfiniteAgendaCore<MySchedulePayload, MySchedulePayload, DayCell>({
+    today,
+    todayIso,
+    queryKey: qk.mySchedulePages,
+    queryFn: (pageParam) => {
       const fromIso = pageParam;
       const toIso = isoDate(addDays(parseIsoDate(pageParam), 6));
       return fetchJson<MySchedulePayload>(
         `/api/v1/me/schedule?from=${fromIso}&to=${toIso}`,
       );
     },
+    mergePages: mergeSchedulePages,
+    buildCells: (from, days, merged) => buildCells(from, days, merged),
+  });
+}
+
+export function useInfiniteAgendaCore<Page, Merged, Cell extends { iso: string }>(
+  options: UseInfiniteAgendaOptions<Page, Merged, Cell>,
+): UseInfiniteAgendaResult<Page, Merged, Cell> {
+  const {
+    today,
+    todayIso,
+    queryKey,
+    queryFn,
+    mergePages,
+    buildCells: buildPageCells,
+    dataAttribute = "scheduleIso",
+  } = options;
+  const initialMondayIso = useMemo(
+    () => isoDate(startOfIsoWeek(today)),
+    [today],
+  );
+  const dataSelector = dataAttribute.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`);
+
+  const q = useInfiniteQuery({
+    // Single key for the whole infinite stream so React Query keeps
+    // accumulated pages across re-renders. Mutations elsewhere
+    // invalidate the workspace-scoped `[..., "my-schedule", ...]`
+    // prefix via `qk.mySchedulePrefix()` and pick this one up too.
+    queryKey: queryKey(initialMondayIso),
+    initialPageParam: initialMondayIso,
+    queryFn: ({ pageParam }) => queryFn(pageParam),
     getNextPageParam: (_last, _all, lastParam) =>
       isoDate(addDays(parseIsoDate(lastParam), 7)),
     getPreviousPageParam: (_first, _all, firstParam) =>
       isoDate(addDays(parseIsoDate(firstParam), -7)),
   });
 
-  const merged = useMemo(
-    () => (q.data ? mergeSchedulePages(q.data.pages) : null),
-    [q.data],
-  );
+  const merged = useMemo(() => (q.data ? mergePages(q.data.pages) : null), [mergePages, q.data]);
 
   const firstParam = (q.data?.pageParams[0] as string | undefined) ?? initialMondayIso;
   const totalDays = (q.data?.pageParams.length ?? 1) * 7;
 
   const cells = useMemo(() => {
     if (!merged) return [];
-    return buildCells(parseIsoDate(firstParam), totalDays, merged);
-  }, [merged, firstParam, totalDays]);
+    return buildPageCells(parseIsoDate(firstParam), totalDays, merged);
+  }, [buildPageCells, merged, firstParam, totalDays]);
 
   // ── Scroll plumbing ────────────────────────────────────────────────
 
@@ -251,7 +297,7 @@ export function useInfiniteAgenda(
     if (settledRef.current) return;
     if (cells.length === 0) return;
     const node = (innerContainerRef.current ?? document).querySelector(
-      `[data-schedule-iso="${todayIso}"]`,
+      `[data-${dataSelector}="${todayIso}"]`,
     ) as HTMLElement | null;
     if (!node) return;
     const rect = node.getBoundingClientRect();
@@ -302,7 +348,7 @@ export function useInfiniteAgenda(
     const root = innerContainerRef.current;
     if (!root) return;
     const nodes = Array.from(
-      root.querySelectorAll<HTMLElement>("[data-schedule-iso]"),
+      root.querySelectorAll<HTMLElement>(`[data-${dataSelector}]`),
     );
     if (nodes.length === 0) return;
 
@@ -311,7 +357,7 @@ export function useInfiniteAgenda(
       (entries) => {
         let nextTodayInView: boolean | null = null;
         for (const e of entries) {
-          const iso = (e.target as HTMLElement).dataset.scheduleIso;
+          const iso = (e.target as HTMLElement).dataset[dataAttribute];
           if (!iso) continue;
           if (e.isIntersecting) intersecting.add(iso);
           else intersecting.delete(iso);
@@ -335,7 +381,7 @@ export function useInfiniteAgenda(
     );
     nodes.forEach((n) => obs.observe(n));
     return () => obs.disconnect();
-  }, [scrollRoot, cells, todayIso]);
+  }, [scrollRoot, cells, todayIso, dataAttribute, dataSelector]);
 
   const monthLabel = useMemo(() => {
     const d = parseIsoDate(topVisibleIso);
@@ -344,7 +390,7 @@ export function useInfiniteAgenda(
 
   const scrollToToday = useCallback(() => {
     const node = (innerContainerRef.current ?? document).querySelector(
-      `[data-schedule-iso="${todayIso}"]`,
+      `[data-${dataSelector}="${todayIso}"]`,
     ) as HTMLElement | null;
     if (!node) return;
     // The worker explicitly tapped Today — they want a deliberate,
@@ -352,7 +398,7 @@ export function useInfiniteAgenda(
     // doesn't snap them somewhere else mid-scroll.
     settledRef.current = true;
     node.scrollIntoView({ block: "start", behavior: "smooth" });
-  }, [todayIso]);
+  }, [dataSelector, todayIso]);
 
   return {
     q,

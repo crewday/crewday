@@ -239,9 +239,6 @@
   .doc-row { grid-template-columns: auto 1fr; gap: 8px; }
   .doc-row > :nth-child(n+3) { grid-column: 2 / -1; }
 
-  /* Wide horizontal calendar defaults to horizontal scroll; make sure
-     the first column stays visible. */
-  .cal-wide { overflow-x: auto; }
 }
 
 /* Extra-small phones (≤400): tighter spacing. The header title is
