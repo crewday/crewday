@@ -49,6 +49,7 @@ function makeTemplate(overrides: Partial<TaskTemplate> = {}): TaskTemplate {
 }
 
 const ROLES: WorkRole[] = [];
+const TASK_TEMPLATES_API_PATH = "/w/acme/api/v1/tasks/task_templates";
 
 interface FetchHarness {
   calls: FetchCall[];
@@ -69,9 +70,9 @@ function installFetch(opts: {
   const patchQueue: FakeResponse[] = [...(opts.patchResponses ?? [])];
   const env = installFetchRouteHandlers([
     {
-      path: "/w/acme/api/v1/task_templates",
+      path: TASK_TEMPLATES_API_PATH,
       respond: () => {
-      const next = listQueue.shift();
+        const next = listQueue.shift();
         return next ?? { body: { data: [initial], next_cursor: null, has_more: false } };
       },
     },
@@ -80,7 +81,7 @@ function installFetch(opts: {
       respond: { body: { data: ROLES, next_cursor: null, has_more: false } },
     },
     {
-      path: `/w/acme/api/v1/task_templates/${initial.id}`,
+      path: `${TASK_TEMPLATES_API_PATH}/${initial.id}`,
       method: "PATCH",
       respond: (request) => {
         const next = patchQueue.shift();
@@ -121,6 +122,10 @@ function patchedChecklistKeys(call: FetchCall): string[] {
     checklist_template_json: { key: string }[];
   };
   return body.checklist_template_json.map((c) => c.key);
+}
+
+function callPath(call: FetchCall): string {
+  return new URL(call.url, "http://crewday.test").pathname;
 }
 
 async function fireDrop(from: HTMLElement, to: HTMLElement): Promise<void> {
@@ -165,6 +170,21 @@ afterEach(() => {
 });
 
 describe("<TemplatesPage> checklist reorder", () => {
+  it("loads templates from the tasks-mounted API route", async () => {
+    const harness = installFetch();
+    const client = makeClient();
+    try {
+      render(<Harness client={client} />);
+      await screen.findByText("First step");
+
+      expect(harness.calls.some((c) => callPath(c) === TASK_TEMPLATES_API_PATH)).toBe(
+        true,
+      );
+    } finally {
+      harness.restore();
+    }
+  });
+
   it("reorders the React Query cache optimistically on drop", async () => {
     const harness = installFetch();
     const client = makeClient();
@@ -213,7 +233,9 @@ describe("<TemplatesPage> checklist reorder", () => {
         expect(patchCalls(harness.calls)).toHaveLength(1);
       });
 
-      const sent = patchedChecklistKeys(patchCalls(harness.calls)[0]!);
+      const patch = patchCalls(harness.calls)[0]!;
+      expect(callPath(patch)).toBe(`${TASK_TEMPLATES_API_PATH}/tpl_1`);
+      const sent = patchedChecklistKeys(patch);
       expect(sent).toEqual(["third", "first", "second"]);
     } finally {
       harness.restore();

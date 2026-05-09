@@ -41,6 +41,7 @@ const AREA_SCOPE_LABEL: Record<TaskTemplate["area_scope"], string> = {
 };
 
 const HINTS_MAX_CHARS = 140;
+const TASK_TEMPLATES_API_PATH = "/api/v1/tasks/task_templates";
 
 // Coalesce drag-storm reorders into a single PATCH per template. A
 // burst of moves (drag + drop, or several arrow-key nudges) lands one
@@ -74,7 +75,7 @@ export default function TemplatesPage() {
   const tplQ = useQuery({
     queryKey: qk.taskTemplates(),
     queryFn: () =>
-      fetchJson<ListEnvelope<TaskTemplate>>("/api/v1/task_templates"),
+      fetchJson<ListEnvelope<TaskTemplate>>(TASK_TEMPLATES_API_PATH),
   });
   const rolesQ = useQuery({
     queryKey: qk.workRoles(),
@@ -278,7 +279,7 @@ function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement | nul
     { previous: ListEnvelope<TaskTemplate> | undefined }
   >({
     mutationFn: (vars) =>
-      fetchJson<TaskTemplate>(`/api/v1/task_templates/${template.id}`, {
+      fetchJson<TaskTemplate>(`${TASK_TEMPLATES_API_PATH}/${template.id}`, {
         method: "PATCH",
         body: { ...templateUpdateBody(template), checklist_template_json: vars.next },
       }),
