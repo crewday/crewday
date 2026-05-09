@@ -5,6 +5,15 @@
   align-items: start;
 }
 .permissions__groups { padding: 0; }
+.permissions__pane-head {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.permissions__empty { padding: 0 16px 16px; }
 .permissions__group-list {
   list-style: none; margin: 0; padding: 0; max-height: 560px; overflow: auto;
 }
@@ -24,17 +33,23 @@
 }
 .permissions__resolver h4 { margin: 0 0 8px 0; font-size: 13px; color: var(--ink-2); }
 .permissions__resolver-fields {
-  display: flex; gap: 16px; flex-wrap: wrap;
+  display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end;
 }
-.permissions__resolver-fields .field { min-width: 220px; }
+.permissions__resolver-fields .field { flex: 1 1 220px; min-width: min(100%, 220px); }
 .permissions__resolver-result { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.permissions__privacy { max-width: 760px; }
 .permissions__privacy-choices {
   display: grid; gap: 8px;
   margin: 12px 0 0;
   padding: 0; border: 0;
 }
 .btn--active { background: var(--moss-wash); border-color: var(--moss); }
+
+@media (max-width: 720px) {
+  .permissions__section-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
 
 /* §11 — Agent approval mode picker (profile / settings). */
 .agent-mode-choices {

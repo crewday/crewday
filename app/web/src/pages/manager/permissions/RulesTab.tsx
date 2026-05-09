@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { Chip, Loading } from "@/components/common";
@@ -9,7 +10,7 @@ import type {
   PermissionGroup,
   PermissionRule,
 } from "@/types/api";
-import { useUsersIndex, useWorkspaces } from "./lib/usePermissionIndexes";
+import { useActiveWorkspaceScope, useUsersIndex } from "./lib/usePermissionIndexes";
 import RuleChip from "./RuleChip";
 import WhoCanDoThis from "./WhoCanDoThis";
 
@@ -20,15 +21,15 @@ interface ActionCatalogResponse {
 
 export default function RulesTab() {
   // code-health: ignore[ccn nloc] Permission rules tab is a compact editor for one rule list and its grant matrix.
-  const wss = useWorkspaces();
+  const activeWorkspace = useActiveWorkspaceScope();
   const users = useUsersIndex();
-  const [workspaceId, setWorkspaceId] = useState<string>("");
-  const effectiveWs = workspaceId || wss.data?.[0]?.workspace_id || "";
+  const effectiveWs = activeWorkspace.workspaceId;
 
   const catalog = useQuery({
     queryKey: qk.actionCatalog(),
     queryFn: () =>
       fetchJson<ActionCatalogResponse>("/api/v1/permissions/action_catalog"),
+    enabled: !!effectiveWs,
   });
 
   const rules = useQuery({
@@ -53,8 +54,36 @@ export default function RulesTab() {
     return Object.fromEntries((groups.data?.data ?? []).map((g) => [g.id, g]));
   }, [groups.data]);
 
-  if (wss.isPending || catalog.isPending || rules.isPending) return <Loading />;
-  if (!wss.data || !catalog.data || !rules.data) return <div>Failed to load.</div>;
+  if (
+    activeWorkspace.isPending ||
+    (effectiveWs && (catalog.isPending || rules.isPending))
+  ) return <Loading />;
+  if (activeWorkspace.isError) return <div>Failed to load active workspace.</div>;
+  if (!effectiveWs) {
+    return (
+      <>
+        <section className="panel">
+          <header className="panel__head permissions__section-head">
+            <div className="panel__head-stack">
+              <h2>Permission resolver</h2>
+              <p className="panel__sub">Preview a user, action, and scope before editing rules.</p>
+            </div>
+          </header>
+          <p className="muted permissions__empty">No active workspace selected.</p>
+        </section>
+        <section className="panel">
+          <header className="panel__head permissions__section-head">
+            <div className="panel__head-stack">
+              <h2>Rule matrix</h2>
+              <p className="panel__sub">Defaults, owner protections, and active workspace rules.</p>
+            </div>
+          </header>
+          <p className="muted">Pick a workspace from the shell to inspect rules.</p>
+        </section>
+      </>
+    );
+  }
+  if (!catalog.data || !rules.data) return <div>Failed to load.</div>;
 
   const ruleRows = rules.data.data;
   const catalogRows = catalog.data.entries;
@@ -68,17 +97,11 @@ export default function RulesTab() {
   return (
     <>
       <section className="panel">
-        <header className="panel__header">
-          <label className="field">
-            <span>Workspace</span>
-            <select value={effectiveWs} onChange={(e) => setWorkspaceId(e.target.value)}>
-              {wss.data.map((w) => (
-                <option key={w.workspace_id} value={w.workspace_id}>
-                  {w.name}
-                </option>
-              ))}
-            </select>
-          </label>
+        <header className="panel__head permissions__section-head">
+          <div className="panel__head-stack">
+            <h2>Permission resolver</h2>
+            <p className="panel__sub">Preview a user, action, and scope before editing rules.</p>
+          </div>
         </header>
 
         <WhoCanDoThis
@@ -90,6 +113,12 @@ export default function RulesTab() {
       </section>
 
       <section className="panel">
+        <header className="panel__head permissions__section-head">
+          <div className="panel__head-stack">
+            <h2>Rule matrix</h2>
+            <p className="panel__sub">Defaults, owner protections, and active workspace rules.</p>
+          </div>
+        </header>
         {ruleRows.length === 0 ? (
           <p className="muted">
             No rules on this workspace — defaults apply for every action below.
@@ -148,7 +177,9 @@ export default function RulesTab() {
                     {entry.root_only ? (
                       <span className="muted">—</span>
                     ) : (
-                      <button className="btn btn--ghost btn--sm">+ Rule</button>
+                      <button className="btn btn--ghost btn--sm">
+                        <Plus size={13} strokeWidth={2} /> Rule
+                      </button>
                     )}
                   </td>
                 </tr>

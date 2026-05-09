@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import FormField from "@/components/FormField";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { Chip, Loading } from "@/components/common";
@@ -24,6 +25,22 @@ export default function WhoCanDoThis({
   // code-health: ignore[nloc] Permission explanation panel is declarative render composition over computed rows.
   const [userId, setUserId] = useState<string>(users[0]?.id ?? "");
   const [actionKey, setActionKey] = useState<string>(actions[0]?.key ?? "");
+
+  useEffect(() => {
+    if (users.length === 0) {
+      if (userId) setUserId("");
+      return;
+    }
+    if (!users.some((u) => u.id === userId)) setUserId(users[0]?.id ?? "");
+  }, [userId, users]);
+
+  useEffect(() => {
+    if (actions.length === 0) {
+      if (actionKey) setActionKey("");
+      return;
+    }
+    if (!actions.some((a) => a.key === actionKey)) setActionKey(actions[0]?.key ?? "");
+  }, [actionKey, actions]);
 
   const resolved = useQuery({
     queryKey: qk.permissionResolved(userId, actionKey, scopeKind, scopeId),
@@ -51,8 +68,7 @@ export default function WhoCanDoThis({
     <div className="permissions__resolver">
       <h4>Who can do this?</h4>
       <div className="permissions__resolver-fields">
-        <label className="field">
-          <span>User</span>
+        <FormField label="User" requirement="required">
           <select value={userId} onChange={(e) => setUserId(e.target.value)}>
             {users.map((u) => (
               <option key={u.id} value={u.id}>
@@ -60,9 +76,8 @@ export default function WhoCanDoThis({
               </option>
             ))}
           </select>
-        </label>
-        <label className="field">
-          <span>Action</span>
+        </FormField>
+        <FormField label="Action" requirement="required">
           <select value={actionKey} onChange={(e) => setActionKey(e.target.value)}>
             {actions.map((a) => (
               <option key={a.key} value={a.key}>
@@ -70,7 +85,7 @@ export default function WhoCanDoThis({
               </option>
             ))}
           </select>
-        </label>
+        </FormField>
       </div>
       {resolved.isPending ? (
         <Loading />

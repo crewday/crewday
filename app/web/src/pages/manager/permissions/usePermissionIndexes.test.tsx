@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { renderHook } from "@testing-library/react";
 import { type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { WorkspaceProvider, useWorkspace } from "@/context/WorkspaceContext";
 import {
   __resetApiProvidersForTests,
   ApiError,
@@ -11,16 +12,28 @@ import {
 import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
 import GroupsTab from "./GroupsTab";
 import WhoCanDoThis from "./WhoCanDoThis";
-import { useUsersIndex } from "./lib/usePermissionIndexes";
+import { useActiveWorkspaceScope, useUsersIndex } from "./lib/usePermissionIndexes";
 import { jsonResponse } from "@/test/helpers";
 
 function queryWrapper(qc: QueryClient) {
   return ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    <QueryClientProvider client={qc}>
+      <WorkspaceProvider>{children}</WorkspaceProvider>
+    </QueryClientProvider>
+  );
+}
+
+function WorkspaceJump() {
+  const { setWorkspaceId } = useWorkspace();
+  return (
+    <button type="button" onClick={() => setWorkspaceId("beta")}>
+      Use Beta
+    </button>
   );
 }
 
 beforeEach(() => {
+  document.cookie = "crewday_workspace=acme; path=/";
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   registerWorkspaceSlugGetter(() => "acme");
@@ -28,9 +41,49 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  document.cookie = "crewday_workspace=; path=/; max-age=0";
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.restoreAllMocks();
+});
+
+describe("useActiveWorkspaceScope", () => {
+  it("maps the active workspace slug to the API workspace id", async () => {
+    const fetchSpy = vi.fn(async () =>
+      jsonResponse([
+        { workspace_id: "ws_beta", slug: "beta", name: "Beta" },
+        { workspace_id: "ws_acme", slug: "acme", name: "Acme" },
+      ]),
+    );
+    (globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch;
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    const { result } = renderHook(() => useActiveWorkspaceScope(), {
+      wrapper: queryWrapper(qc),
+    });
+
+    await waitFor(() => expect(result.current.workspaceId).toBe("ws_acme"));
+    expect(result.current.workspaceName).toBe("Acme");
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/v1/me/workspaces",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("does not fetch workspace metadata when no shell workspace is active", async () => {
+    document.cookie = "crewday_workspace=; path=/; max-age=0";
+    const fetchSpy = vi.fn();
+    (globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch;
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    const { result } = renderHook(() => useActiveWorkspaceScope(), {
+      wrapper: queryWrapper(qc),
+    });
+
+    expect(result.current.workspaceId).toBe("");
+    expect(result.current.isPending).toBe(false);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("useUsersIndex", () => {
@@ -200,7 +253,9 @@ describe("permissions user display", () => {
       const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
       render(
         <QueryClientProvider client={qc}>
-          <GroupsTab />
+          <WorkspaceProvider>
+            <GroupsTab />
+          </WorkspaceProvider>
         </QueryClientProvider>,
       );
 
@@ -210,5 +265,65 @@ describe("permissions user display", () => {
     } finally {
       (globalThis as { fetch: typeof fetch }).fetch = originalFetch;
     }
+  });
+
+  it("does not request previous-workspace group members after workspace changes", async () => {
+    const staleMemberUrls: string[] = [];
+    const fetchSpy = vi.fn(async (url: string | URL | Request) => {
+      const resolved = typeof url === "string" ? url : url.toString();
+      const parsed = new URL(resolved, "http://crewday.test");
+      if (parsed.pathname === "/api/v1/me/workspaces") {
+        return jsonResponse([
+          { workspace_id: "ws_acme", slug: "acme", name: "Acme" },
+          { workspace_id: "ws_beta", slug: "beta", name: "Beta" },
+        ]);
+      }
+      if (parsed.pathname === "/w/acme/api/v1/users" || parsed.pathname === "/w/beta/api/v1/users") {
+        return jsonResponse({ data: [], next_cursor: null, has_more: false });
+      }
+      if (parsed.pathname === "/w/acme/api/v1/permission_groups") {
+        return jsonResponse({
+          data: [{
+            id: "group_acme",
+            slug: "owners",
+            name: "Owners",
+            system: true,
+            group_kind: "system",
+            capabilities: {},
+            created_at: "2026-05-04T12:00:00Z",
+          }],
+          next_cursor: null,
+          has_more: false,
+        });
+      }
+      if (parsed.pathname === "/w/acme/api/v1/permission_groups/group_acme/members") {
+        return jsonResponse({ data: [], next_cursor: null, has_more: false });
+      }
+      if (parsed.pathname === "/w/beta/api/v1/permission_groups") {
+        return jsonResponse({ data: [], next_cursor: null, has_more: false });
+      }
+      if (parsed.pathname.includes("/group_acme/members")) {
+        staleMemberUrls.push(parsed.pathname);
+        return jsonResponse({ data: [], next_cursor: null, has_more: false });
+      }
+      throw new Error(`Unexpected fetch call: ${resolved}`);
+    });
+    (globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch;
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(
+      <QueryClientProvider client={qc}>
+        <WorkspaceProvider>
+          <WorkspaceJump />
+          <GroupsTab />
+        </WorkspaceProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findAllByText("Owners")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Use Beta" }));
+
+    expect(await screen.findByText("No groups.")).toBeInTheDocument();
+    expect(staleMemberUrls).toEqual([]);
   });
 });

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Trash2, UserPlus } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { Chip, Loading } from "@/components/common";
@@ -8,7 +9,7 @@ import type {
   PermissionGroup,
   PermissionGroupMember,
 } from "@/types/api";
-import { useUsersIndex, useWorkspaces } from "./lib/usePermissionIndexes";
+import { useActiveWorkspaceScope, useUsersIndex } from "./lib/usePermissionIndexes";
 
 // cd-c83ap restores the derived affordances removed in cd-5bz65 once
 // the production router started carrying `group_kind` again.
@@ -18,10 +19,9 @@ function isDerivedGroup(group: PermissionGroup): boolean {
 
 export default function GroupsTab() {
   // code-health: ignore[ccn nloc] Permission group editor keeps nested role/user grant controls in one table surface.
-  const wss = useWorkspaces();
+  const activeWorkspace = useActiveWorkspaceScope();
   const users = useUsersIndex();
-  const [workspaceId, setWorkspaceId] = useState<string>("");
-  const effectiveWs = workspaceId || wss.data?.[0]?.workspace_id || "";
+  const effectiveWs = activeWorkspace.workspaceId;
 
   const groups = useQuery({
     queryKey: qk.permissionGroups("workspace", effectiveWs),
@@ -33,7 +33,9 @@ export default function GroupsTab() {
   });
 
   const [selected, setSelected] = useState<string>("");
-  const selectedId = selected || groups.data?.data[0]?.id || "";
+  const selectedGroup =
+    groups.data?.data.find((g) => g.id === selected) ?? groups.data?.data[0];
+  const selectedId = selectedGroup?.id ?? "";
 
   const members = useQuery({
     queryKey: qk.permissionGroupMembers(selectedId),
@@ -44,27 +46,39 @@ export default function GroupsTab() {
     enabled: !!selectedId,
   });
 
-  if (wss.isPending || groups.isPending) return <Loading />;
-  if (!wss.data || !groups.data) return <div>Failed to load.</div>;
+  if (activeWorkspace.isPending || (effectiveWs && groups.isPending)) return <Loading />;
+  if (activeWorkspace.isError) return <div>Failed to load active workspace.</div>;
+  if (!effectiveWs) {
+    return (
+      <div className="permissions__split">
+        <section className="panel permissions__groups">
+          <header className="panel__head permissions__pane-head">
+            <div className="panel__head-stack">
+              <h2>Permission groups</h2>
+              <p className="panel__sub">Workspace-scoped groups and derived role memberships.</p>
+            </div>
+          </header>
+          <p className="muted permissions__empty">No active workspace selected.</p>
+        </section>
+        <section className="panel permissions__members">
+          <p className="muted">Pick a workspace from the shell to inspect group members.</p>
+        </section>
+      </div>
+    );
+  }
+  if (!groups.data) return <div>Failed to load.</div>;
 
   const groupRows = groups.data.data;
-  const selectedGroup = groupRows.find((g) => g.id === selectedId);
   const selectedIsDerived = selectedGroup ? isDerivedGroup(selectedGroup) : false;
 
   return (
     <div className="permissions__split">
       <section className="panel permissions__groups">
-        <header className="panel__header">
-          <label className="field">
-            <span>Workspace</span>
-            <select value={effectiveWs} onChange={(e) => setWorkspaceId(e.target.value)}>
-              {wss.data.map((w) => (
-                <option key={w.workspace_id} value={w.workspace_id}>
-                  {w.name}
-                </option>
-              ))}
-            </select>
-          </label>
+        <header className="panel__head permissions__pane-head">
+          <div className="panel__head-stack">
+            <h2>Permission groups</h2>
+            <p className="panel__sub">Workspace-scoped groups and derived role memberships.</p>
+          </div>
         </header>
         <ul className="permissions__group-list">
           {groupRows.map((g) => (
@@ -94,9 +108,11 @@ export default function GroupsTab() {
       <section className="panel permissions__members">
         {selectedGroup ? (
           <>
-            <header className="panel__header">
-              <h3>{selectedGroup.name}</h3>
-              <div className="muted mono">{selectedGroup.slug}</div>
+            <header className="panel__head">
+              <div className="panel__head-stack">
+                <h2>{selectedGroup.name}</h2>
+                <p className="panel__sub mono">{selectedGroup.slug}</p>
+              </div>
             </header>
             {members.isPending ? (
               <Loading />
@@ -136,7 +152,9 @@ export default function GroupsTab() {
                             {selectedIsDerived ? (
                               <span className="muted">read-only</span>
                             ) : (
-                              <button className="btn btn--ghost btn--sm">Remove</button>
+                              <button className="btn btn--ghost btn--sm">
+                                <Trash2 size={13} strokeWidth={2} /> Remove
+                              </button>
                             )}
                           </td>
                         </tr>
@@ -153,7 +171,9 @@ export default function GroupsTab() {
                 </table>
                 {selectedIsDerived ? null : (
                   <div className="panel__footer">
-                    <button className="btn btn--moss btn--sm">+ Add member</button>
+                    <button className="btn btn--moss btn--sm">
+                      <UserPlus size={13} strokeWidth={2} /> Add member
+                    </button>
                   </div>
                 )}
               </>
