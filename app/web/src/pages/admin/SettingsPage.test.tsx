@@ -482,6 +482,7 @@ describe("Admin SettingsPage", () => {
       RequireAuth: () => <Outlet />,
       RequirePermission: () => <Outlet />,
       WorkspaceGate: () => <Outlet />,
+      activeWorkspaceGrantRole: () => null,
       getAuthState: () => authState,
       subscribeAuth: () => () => undefined,
       useAuth: () => ({ user: null }),
