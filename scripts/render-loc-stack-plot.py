@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import tempfile
 from pathlib import Path
 
 import dateutil.parser
@@ -14,7 +15,14 @@ import numpy
 matplotlib.use("Agg")
 
 from git_of_theseus.utils import generate_n_colors
-from matplotlib import dates, pyplot, ticker
+from matplotlib import dates, font_manager, pyplot, ticker
+
+FONT_DIR = Path(__file__).resolve().parents[1] / "app/web/src/assets/fonts"
+CHART_FONT_FILES = {
+    "Fraunces": FONT_DIR / "fraunces-latin-standard-normal.woff2",
+    "Inter Tight": FONT_DIR / "inter-tight-latin-500-normal.woff2",
+    "Inter Tight Semibold": FONT_DIR / "inter-tight-latin-600-normal.woff2",
+}
 
 LABEL_NAMES = {
     "": "No extension",
@@ -80,6 +88,44 @@ FALLBACK_COLORS = [
     "#7A7442",
     "#8E9AAF",
 ]
+
+
+class RegisteredFonts:
+    def __init__(self) -> None:
+        self._tempdir: tempfile.TemporaryDirectory[str] | None = None
+        self.display = "DejaVu Sans"
+        self.body = "DejaVu Sans"
+        self.body_semibold = "DejaVu Sans"
+
+    def cleanup(self) -> None:
+        if self._tempdir is not None:
+            self._tempdir.cleanup()
+            self._tempdir = None
+
+
+def register_chart_fonts() -> RegisteredFonts:
+    fonts = RegisteredFonts()
+    try:
+        from fontTools.ttLib import TTFont
+    except ModuleNotFoundError:
+        return fonts
+
+    fonts._tempdir = tempfile.TemporaryDirectory()
+    font_names: dict[str, str] = {}
+    for label, source in CHART_FONT_FILES.items():
+        if not source.exists():
+            continue
+        target = Path(fonts._tempdir.name) / f"{source.stem}.ttf"
+        converted = TTFont(source)
+        converted.flavor = None
+        converted.save(target)
+        font_manager.fontManager.addfont(target)
+        font_names[label] = font_manager.FontProperties(fname=target).get_name()
+
+    fonts.display = font_names.get("Fraunces", fonts.display)
+    fonts.body = font_names.get("Inter Tight", fonts.body)
+    fonts.body_semibold = font_names.get("Inter Tight Semibold", fonts.body)
+    return fonts
 
 
 def strip_svg_trailing_whitespace(output_path: Path) -> None:
@@ -197,74 +243,100 @@ def render_stack_plot(
     ts = [dateutil.parser.parse(t) for t in data["ts"]]
     colors = series_colors(labels)
     displayed_labels = [display_label(label) for label in labels]
+    fonts = register_chart_fonts()
 
-    pyplot.style.use("default")
-    figure, axis = pyplot.subplots(figsize=(12, 6.4), dpi=144, layout="constrained")
-    axis.stackplot(
-        ts,
-        numpy.array(y),
-        labels=displayed_labels,
-        colors=colors,
-        linewidth=0.45,
-        edgecolor="#FFFCF5",
-        alpha=0.96,
-    )
-    legend_columns = 2 if len(displayed_labels) > 6 else 1
-    legend = axis.legend(
-        loc="upper left",
-        bbox_to_anchor=(0.012, 0.988),
-        borderaxespad=0,
-        frameon=True,
-        fancybox=True,
-        framealpha=0.92,
-        edgecolor="#D6CCB7",
-        facecolor="#FFFCF5",
-        fontsize=8.6,
-        title=legend_title,
-        title_fontsize=9.5,
-        labelspacing=0.42,
-        handlelength=1.45,
-        handletextpad=0.55,
-        borderpad=0.72,
-        columnspacing=1.0,
-        ncols=legend_columns,
-    )
-    legend.get_title().set_color("#524A3E")
-    for text in legend.get_texts():
-        text.set_color("#524A3E")
-    axis.set_title(title, loc="left", pad=13, fontsize=18, color="#1F1A14", weight=600)
-    axis.set_xlabel("")
-    axis.grid(axis="y", color="#E7E0D1", linewidth=0.9)
-    axis.grid(axis="x", visible=False)
-    axis.set_facecolor("#FAF7F2")
-    figure.patch.set_facecolor("#FAF7F2")
-    axis.spines[["top", "right", "left"]].set_visible(False)
-    axis.spines["bottom"].set_color("#D6CCB7")
-    axis.tick_params(axis="both", colors="#524A3E", labelsize=9, length=0, pad=7)
-    axis.xaxis.set_major_locator(dates.AutoDateLocator(minticks=4, maxticks=8))
-    span_days = (max(ts) - min(ts)).days if ts else 0
-    if span_days > 730:
-        date_format = "%Y"
-    elif span_days > 90:
-        date_format = "%b %Y"
-    else:
-        date_format = "%b %d"
-    axis.xaxis.set_major_formatter(dates.DateFormatter(date_format))
-    if normalize:
-        axis.set_ylabel("Share of lines of code (%)")
-        axis.set_ylim([0, 100])
-        axis.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=100))
-    else:
-        axis.set_ylabel("Lines of code")
-        axis.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
-        axis.margins(y=0.04)
-    axis.yaxis.label.set_color("#524A3E")
-    axis.yaxis.labelpad = 10
-    figure.savefig(
-        output_path, bbox_inches="tight", pad_inches=0.12, metadata={"Date": None}
-    )
-    pyplot.close(figure)
-    strip_svg_trailing_whitespace(output_path)
+    try:
+        pyplot.style.use("default")
+        pyplot.rcParams.update(
+            {
+                "font.family": fonts.body,
+                "font.sans-serif": [fonts.body, "DejaVu Sans"],
+                "svg.fonttype": "path",
+            }
+        )
+        figure, axis = pyplot.subplots(figsize=(12, 6.4), dpi=144, layout="constrained")
+        axis.stackplot(
+            ts,
+            numpy.array(y),
+            labels=displayed_labels,
+            colors=colors,
+            linewidth=0.45,
+            edgecolor="#FFFCF5",
+            alpha=0.96,
+        )
+        legend_columns = 2 if len(displayed_labels) > 6 else 1
+        legend = axis.legend(
+            loc="upper left",
+            bbox_to_anchor=(0.012, 0.988),
+            borderaxespad=0,
+            frameon=True,
+            fancybox=True,
+            framealpha=0.92,
+            edgecolor="#D6CCB7",
+            facecolor="#FFFCF5",
+            prop={"family": fonts.body, "size": 8.6, "weight": 500},
+            title=legend_title,
+            title_fontproperties={"family": fonts.body_semibold, "size": 9.5},
+            labelspacing=0.42,
+            handlelength=1.45,
+            handletextpad=0.55,
+            borderpad=0.72,
+            columnspacing=1.0,
+            ncols=legend_columns,
+        )
+        legend.get_title().set_color("#524A3E")
+        for text in legend.get_texts():
+            text.set_color("#524A3E")
+        axis.set_title(
+            title,
+            loc="left",
+            pad=13,
+            fontdict={
+                "family": fonts.display,
+                "fontsize": 19,
+                "fontweight": 600,
+                "color": "#1F1A14",
+            },
+        )
+        axis.set_xlabel("")
+        axis.grid(axis="y", color="#E7E0D1", linewidth=0.9)
+        axis.grid(axis="x", visible=False)
+        axis.set_facecolor("#FAF7F2")
+        figure.patch.set_facecolor("#FAF7F2")
+        axis.spines[["top", "right", "left"]].set_visible(False)
+        axis.spines["bottom"].set_color("#D6CCB7")
+        axis.tick_params(axis="both", colors="#524A3E", labelsize=9, length=0, pad=7)
+        axis.xaxis.set_major_locator(dates.AutoDateLocator(minticks=4, maxticks=8))
+        span_days = (max(ts) - min(ts)).days if ts else 0
+        if span_days > 730:
+            date_format = "%Y"
+        elif span_days > 90:
+            date_format = "%b %Y"
+        else:
+            date_format = "%b %d"
+        axis.xaxis.set_major_formatter(dates.DateFormatter(date_format))
+        if normalize:
+            axis.set_ylabel("Share of lines of code (%)")
+            axis.set_ylim([0, 100])
+            axis.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=100))
+        else:
+            axis.set_ylabel("Lines of code")
+            axis.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
+            axis.margins(y=0.04)
+        axis.yaxis.label.set_color("#524A3E")
+        axis.yaxis.label.set_fontfamily(fonts.body)
+        axis.yaxis.label.set_fontweight(500)
+        axis.yaxis.labelpad = 10
+        for tick_label in [*axis.get_xticklabels(), *axis.get_yticklabels()]:
+            tick_label.set_fontfamily(fonts.body)
+            tick_label.set_fontweight(500)
+        figure.savefig(
+            output_path, bbox_inches="tight", pad_inches=0.12, metadata={"Date": None}
+        )
+        pyplot.close(figure)
+        strip_svg_trailing_whitespace(output_path)
+    finally:
+        fonts.cleanup()
 
 
 def main() -> None:
