@@ -20,6 +20,7 @@
   padding: 10px 14px; border-bottom: 1px solid var(--line);
   cursor: pointer; display: flex; flex-direction: column; gap: 2px;
 }
+.permissions__group-list > .permissions__group-row:last-child { border-bottom: 0; }
 .permissions__group-row:hover { background: var(--ink-hover, rgba(0, 0, 0, 0.03)); }
 .permissions__group-row--active { background: var(--moss-wash); }
 .permissions__group-name { display: flex; gap: 6px; align-items: center; }
