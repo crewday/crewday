@@ -23,7 +23,7 @@ function WorkspaceJump() {
 function renderPage(hash = "", includeWorkspaceJump = false) {
   window.history.replaceState(null, "", `/permissions${hash}`);
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
+  return render(
     <QueryClientProvider client={qc}>
       <WorkspaceProvider>
         {includeWorkspaceJump ? <WorkspaceJump /> : null}
@@ -86,7 +86,7 @@ describe("Permissions privacy tab", () => {
     (globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch;
 
     renderPage();
-    fireEvent.click(screen.getByRole("link", { name: "Privacy" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(
       "No upstream PII consent selected",
@@ -102,7 +102,7 @@ describe("Permissions privacy tab", () => {
     expect(screen.getByRole("checkbox", { name: /Legal names/ })).toBeChecked();
   });
 
-  it("uses stable hash links for permissions tabs", async () => {
+  it("uses hash-backed in-page tabs without header ghost actions", async () => {
     const fetchSpy = vi.fn(async (url: string | URL | Request) => {
       const resolved = typeof url === "string" ? url : url.toString();
       const parsed = new URL(resolved, "http://crewday.test");
@@ -121,19 +121,44 @@ describe("Permissions privacy tab", () => {
       if (parsed.pathname === "/w/acme/api/v1/permission_rules") {
         return jsonResponse({ data: [], next_cursor: null, has_more: false });
       }
+      if (parsed.pathname === "/w/acme/api/v1/agent_preferences/workspace/upstream_pii_consent") {
+        return jsonResponse({
+          upstream_pii_consent: [],
+          available_tokens: ["legal_name", "email", "phone", "address"],
+        });
+      }
       throw new Error(`Unexpected fetch call: ${resolved}`);
     });
     (globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch;
 
-    renderPage();
+    const { container } = renderPage();
 
-    expect(screen.getByRole("link", { name: "Groups" })).toHaveAttribute("href", "#groups");
-    expect(screen.getByRole("link", { name: "Rules" })).toHaveAttribute("href", "#rules");
-    expect(screen.getByRole("link", { name: "Privacy" })).toHaveAttribute("href", "#privacy");
+    const tablist = screen.getByRole("tablist", { name: "Permissions sections" });
+    expect(screen.queryByRole("link", { name: "Groups" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Rules" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Privacy" })).not.toBeInTheDocument();
+    const ghostActionLabels = [...container.querySelectorAll(".btn.btn--ghost")].map((button) => button.textContent?.trim());
+    expect(ghostActionLabels).not.toContain("Groups");
+    expect(ghostActionLabels).not.toContain("Rules");
+    expect(ghostActionLabels).not.toContain("Privacy");
+    expect(screen.getByRole("tab", { name: "Groups" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Rules" })).toHaveAttribute("aria-selected", "false");
 
-    fireEvent.click(screen.getByRole("link", { name: "Rules" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Rules" }));
     expect(window.location.hash).toBe("#rules");
+    expect(window.location.pathname).toBe("/permissions");
     expect(await screen.findByRole("heading", { name: "Rule matrix" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Rules" })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
+    expect(window.location.hash).toBe("#privacy");
+    expect(window.location.pathname).toBe("/permissions");
+    expect(await screen.findByRole("heading", { name: "Privacy" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Groups" }));
+    expect(window.location.hash).toBe("#groups");
+    expect(window.location.pathname).toBe("/permissions");
+    expect(await screen.findByText("No groups.")).toBeInTheDocument();
   });
 
   it("deeplinks directly to the privacy tab", async () => {
@@ -153,7 +178,79 @@ describe("Permissions privacy tab", () => {
     renderPage("#privacy");
 
     expect(await screen.findByRole("heading", { name: "Privacy" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Privacy" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("tab", { name: "Privacy" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("deeplinks to groups and falls back to groups for an unknown hash", async () => {
+    const fetchSpy = vi.fn(async (url: string | URL | Request) => {
+      const resolved = typeof url === "string" ? url : url.toString();
+      const parsed = new URL(resolved, "http://crewday.test");
+      if (parsed.pathname === "/api/v1/me/workspaces") {
+        return jsonResponse([{ workspace_id: "ws_1", slug: "acme", name: "Acme" }]);
+      }
+      if (parsed.pathname === "/w/acme/api/v1/users") {
+        return jsonResponse({ data: [], next_cursor: null, has_more: false });
+      }
+      if (parsed.pathname === "/w/acme/api/v1/permission_groups") {
+        return jsonResponse({ data: [], next_cursor: null, has_more: false });
+      }
+      throw new Error(`Unexpected fetch call: ${resolved}`);
+    });
+    (globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch;
+
+    renderPage("#missing");
+
+    expect(await screen.findByText("No groups.")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Groups" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("updates selected tab when browser history moves across tab hashes", async () => {
+    const fetchSpy = vi.fn(async (url: string | URL | Request) => {
+      const resolved = typeof url === "string" ? url : url.toString();
+      const parsed = new URL(resolved, "http://crewday.test");
+      if (parsed.pathname === "/api/v1/me/workspaces") {
+        return jsonResponse([{ workspace_id: "ws_1", slug: "acme", name: "Acme" }]);
+      }
+      if (parsed.pathname === "/w/acme/api/v1/users") {
+        return jsonResponse({ data: [], next_cursor: null, has_more: false });
+      }
+      if (parsed.pathname === "/w/acme/api/v1/permission_groups") {
+        return jsonResponse({ data: [], next_cursor: null, has_more: false });
+      }
+      if (parsed.pathname === "/w/acme/api/v1/permissions/action_catalog") {
+        return jsonResponse({ entries: [], count: 0 });
+      }
+      if (parsed.pathname === "/w/acme/api/v1/permission_rules") {
+        return jsonResponse({ data: [], next_cursor: null, has_more: false });
+      }
+      if (parsed.pathname === "/w/acme/api/v1/agent_preferences/workspace/upstream_pii_consent") {
+        return jsonResponse({
+          upstream_pii_consent: [],
+          available_tokens: ["legal_name", "email", "phone", "address"],
+        });
+      }
+      throw new Error(`Unexpected fetch call: ${resolved}`);
+    });
+    (globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch;
+
+    renderPage("#groups");
+    await screen.findByText("No groups.");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Rules" }));
+    expect(await screen.findByRole("heading", { name: "Rule matrix" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
+    expect(await screen.findByRole("heading", { name: "Privacy" })).toBeInTheDocument();
+
+    window.history.back();
+    await waitFor(() => expect(window.location.hash).toBe("#rules"));
+    expect(await screen.findByRole("heading", { name: "Rule matrix" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Rules" })).toHaveAttribute("aria-selected", "true");
+
+    window.history.forward();
+    await waitFor(() => expect(window.location.hash).toBe("#privacy"));
+    expect(await screen.findByRole("heading", { name: "Privacy" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Privacy" })).toHaveAttribute("aria-selected", "true");
   });
 });
 

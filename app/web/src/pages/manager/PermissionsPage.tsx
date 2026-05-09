@@ -1,20 +1,27 @@
 import { useEffect, useState } from "react";
 import DeskPage from "@/components/DeskPage";
+import PageTabs, { type PageTab } from "@/components/PageTabs";
 import GroupsTab from "./permissions/GroupsTab";
 import PrivacyTab from "./permissions/PrivacyTab";
 import RulesTab from "./permissions/RulesTab";
 
 type Tab = "groups" | "rules" | "privacy";
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: "groups", label: "Groups" },
-  { key: "rules", label: "Rules" },
-  { key: "privacy", label: "Privacy" },
-];
+const TABS = [
+  { key: "groups", label: "Groups", panelId: "permissions-groups-panel" },
+  { key: "rules", label: "Rules", panelId: "permissions-rules-panel" },
+  { key: "privacy", label: "Privacy", panelId: "permissions-privacy-panel" },
+] satisfies Array<PageTab & { key: Tab }>;
 
 function tabFromHash(hash: string): Tab {
   const key = hash.replace(/^#/, "");
   return TABS.find((tab) => tab.key === key)?.key ?? "groups";
+}
+
+function renderTabPanel(tab: Tab) {
+  if (tab === "rules") return <RulesTab />;
+  if (tab === "privacy") return <PrivacyTab />;
+  return <GroupsTab />;
 }
 
 export default function PermissionsPage() {
@@ -26,9 +33,8 @@ export default function PermissionsPage() {
     return () => window.removeEventListener("hashchange", syncFromHash);
   }, []);
 
-  function selectTab(next: Tab): void {
-    setTab(next);
-    if (window.location.hash !== `#${next}`) window.location.hash = next;
+  function selectTab(next: string): void {
+    setTab(tabFromHash(`#${next}`));
   }
 
   const sub =
@@ -36,26 +42,18 @@ export default function PermissionsPage() {
     "Root-only actions (marked) stay with owners regardless of rules.";
 
   return (
-    <DeskPage
-      title="Permissions"
-      sub={sub}
-      actions={
-        <div className="permissions__tabs">
-          {TABS.map((item) => (
-            <a
-              key={item.key}
-              className={`btn btn--ghost ${tab === item.key ? "btn--active" : ""}`}
-              href={`#${item.key}`}
-              aria-current={tab === item.key ? "page" : undefined}
-              onClick={() => selectTab(item.key)}
-            >
-              {item.label}
-            </a>
-          ))}
-        </div>
-      }
-    >
-      {tab === "groups" ? <GroupsTab /> : tab === "rules" ? <RulesTab /> : <PrivacyTab />}
+    <DeskPage title="Permissions" sub={sub}>
+      <PageTabs
+        ariaLabel="Permissions sections"
+        tabs={TABS}
+        hashBacked
+        defaultKey="groups"
+        selectedKey={tab}
+        onSelect={selectTab}
+      />
+      <div id={`permissions-${tab}-panel`} role="tabpanel">
+        {renderTabPanel(tab)}
+      </div>
     </DeskPage>
   );
 }

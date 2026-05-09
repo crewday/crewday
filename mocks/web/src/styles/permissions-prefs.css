@@ -1,5 +1,4 @@
 /* ── Permissions admin surface (§14) ─────────────────────────────── */
-.permissions__tabs { display: inline-flex; gap: var(--space-2); }
 .permissions__split {
   display: grid; grid-template-columns: minmax(280px, 1fr) 2fr; gap: var(--space-8);
   align-items: start;
@@ -28,8 +27,6 @@
 }
 .permissions__resolver-fields .field { min-width: 220px; }
 .permissions__resolver-result { margin-top: var(--space-5); display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
-.btn--active { background: var(--moss-wash); border-color: var(--moss); }
-
 /* §11 — Agent approval mode picker (profile / settings). */
 .agent-mode-choices {
   display: grid; gap: var(--space-4);
@@ -270,4 +267,3 @@
   display: flex; gap: var(--space-6);
 }
 .me-chat-channels__times .me-chat-channels__field { flex: 1 1 0; }
-

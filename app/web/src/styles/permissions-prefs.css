@@ -1,5 +1,4 @@
 /* ── Permissions admin surface (§14) ─────────────────────────────── */
-.permissions__tabs { display: inline-flex; gap: 4px; }
 .permissions__split {
   display: grid; grid-template-columns: minmax(280px, 1fr) 2fr; gap: 16px;
   align-items: start;
@@ -42,8 +41,6 @@
   margin: 12px 0 0;
   padding: 0; border: 0;
 }
-.btn--active { background: var(--moss-wash); border-color: var(--moss); }
-
 @media (max-width: 720px) {
   .permissions__section-head {
     align-items: stretch;
