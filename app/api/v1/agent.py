@@ -212,6 +212,7 @@ def build_agent_router(
         )
         session.flush()
         payload = _message_payload(row)
+        session.commit()
         bus.publish(
             AgentMessageAppended(
                 workspace_id=ctx.workspace_id,
@@ -254,9 +255,25 @@ def build_agent_router(
                     workspace_id=ctx.workspace_id,
                 ),
             )
-        finally:
+        except Exception:
+            session.rollback()
             try:
-                token_factory.revoke_minted(ctx)
+                token_factory.revoke_minted(ctx, session=session)
+                session.commit()
+            except Exception:
+                session.rollback()
+                _log.exception(
+                    "agent.delegated_token_revoke_failed",
+                    extra={
+                        "workspace_id": ctx.workspace_id,
+                        "actor_id": ctx.actor_id,
+                        "scope": scope,
+                    },
+                )
+            raise
+        else:
+            try:
+                token_factory.revoke_minted(ctx, session=session)
             except Exception:
                 _log.exception(
                     "agent.delegated_token_revoke_failed",

@@ -18,9 +18,11 @@ can't observe (real Pydantic validation, tenant filter, audit row).
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -29,6 +31,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.adapters.db import session as db_session_module
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.identity.models import ApiToken, User
@@ -41,6 +44,7 @@ from app.adapters.db.llm.models import (
 )
 from app.adapters.db.messaging.models import ChatChannel, ChatMessage
 from app.adapters.db.places.models import Property, PropertyWorkspace
+from app.adapters.db.session import FilteredSession, make_engine
 from app.adapters.db.tasks.models import Occurrence
 from app.adapters.db.workspace.models import Workspace
 from app.adapters.llm.ports import LLMResponse, LLMUsage
@@ -373,6 +377,30 @@ def _build_agent_app(
     return app
 
 
+def _build_agent_app_with_default_db(
+    ctx: WorkspaceContext,
+    *,
+    llm: _ScriptedLLM,
+    clock: FrozenClock,
+    bus: EventBus,
+) -> FastAPI:
+    app = FastAPI()
+    app.include_router(tasks_router, prefix="/w/{slug}/api/v1")
+    app.include_router(
+        build_agent_router(clock=clock, event_bus=bus), prefix="/w/{slug}/api/v1"
+    )
+
+    def _ctx() -> WorkspaceContext:
+        return ctx
+
+    def _llm() -> _ScriptedLLM:
+        return llm
+
+    app.dependency_overrides[current_workspace_context] = _ctx
+    app.dependency_overrides[_get_llm_dep] = _llm
+    return app
+
+
 # ---------------------------------------------------------------------------
 # 1) Read endpoint round-trip — list_tasks
 # ---------------------------------------------------------------------------
@@ -520,6 +548,26 @@ class _ScriptedLLM:
     def chat(self, **kwargs: Any) -> LLMResponse:
         self.messages.append(list(kwargs["messages"]))
         return self.replies.pop(0)
+
+    def ocr(self, **_: Any) -> str:
+        raise NotImplementedError
+
+    def stream_chat(self, **_: Any) -> Iterator[str]:
+        raise NotImplementedError
+
+
+@dataclass(slots=True)
+class _FailingChatLLM:
+    """LLM client that fails after the runtime has minted its delegated token."""
+
+    messages: list[list[dict[str, Any]]] = field(default_factory=list)
+
+    def complete(self, **_: Any) -> LLMResponse:
+        raise NotImplementedError
+
+    def chat(self, **kwargs: Any) -> LLMResponse:
+        self.messages.append(list(kwargs["messages"]))
+        raise RuntimeError("llm transport failed")
 
     def ocr(self, **_: Any) -> str:
         raise NotImplementedError
@@ -739,6 +787,145 @@ def test_agent_message_endpoint_dispatches_live_tool_and_audits(
     assert token_row is not None
     assert token_row.kind == "delegated"
     assert token_row.revoked_at == _PINNED
+
+
+def test_agent_message_then_log_refetch_uses_sqlite_default_uow_without_locking(
+    engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    if engine.dialect.name != "sqlite":
+        pytest.skip("SQLite-specific post-send lock regression")
+
+    source_db = engine.url.database
+    if source_db is None:
+        pytest.skip("SQLite file database required")
+    db_path = tmp_path / "agent-refetch-lock.db"
+    shutil.copy2(source_db, db_path)
+    isolated_engine = make_engine(f"sqlite:///{db_path}")
+    factory = sessionmaker(
+        bind=isolated_engine,
+        expire_on_commit=False,
+        class_=FilteredSession,
+    )
+    monkeypatch.setattr(db_session_module, "_default_engine", isolated_engine)
+    monkeypatch.setattr(db_session_module, "_default_sessionmaker_", factory)
+
+    try:
+        with factory() as seed:
+            workspace, user = _seed_workspace_and_user(seed)
+            _seed_llm_assignment(seed, workspace_id=workspace.id)
+            _seed_budget_ledger(seed, workspace_id=workspace.id)
+            seed.commit()
+
+        ctx = WorkspaceContext(
+            workspace_id=workspace.id,
+            workspace_slug=workspace.slug,
+            actor_id=user.id,
+            actor_kind="user",
+            actor_grant_role="manager",
+            actor_was_owner_member=True,
+            audit_correlation_id=new_ulid(),
+        )
+        set_current(ctx)
+        bus = EventBus()
+        clock = FrozenClock(_PINNED)
+        attempts = 8
+        llm = _ScriptedLLM(
+            replies=[
+                LLMResponse(
+                    text=f"Reply {idx}",
+                    usage=LLMUsage(
+                        prompt_tokens=10,
+                        completion_tokens=3,
+                        total_tokens=13,
+                    ),
+                    model_id="fake/dispatcher-model",
+                    finish_reason="stop",
+                )
+                for idx in range(attempts)
+            ]
+        )
+        app = _build_agent_app_with_default_db(ctx, llm=llm, clock=clock, bus=bus)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        for idx in range(attempts):
+            response = client.post(
+                f"/w/{workspace.slug}/api/v1/agent/manager/message",
+                json={"body": f"Hello {idx}"},
+            )
+            assert response.status_code == 201, response.text
+
+            log_response = client.get(f"/w/{workspace.slug}/api/v1/agent/manager/log")
+            assert log_response.status_code == 200, log_response.text
+            bodies = [row["body"] for row in log_response.json()]
+            assert f"Hello {idx}" in bodies
+    finally:
+        isolated_engine.dispose()
+
+
+def test_agent_message_unexpected_turn_failure_revokes_default_uow_token(
+    engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    if engine.dialect.name != "sqlite":
+        pytest.skip("SQLite-specific default-UoW regression")
+
+    source_db = engine.url.database
+    if source_db is None:
+        pytest.skip("SQLite file database required")
+    db_path = tmp_path / "agent-turn-failure-token.db"
+    shutil.copy2(source_db, db_path)
+    isolated_engine = make_engine(f"sqlite:///{db_path}")
+    factory = sessionmaker(
+        bind=isolated_engine,
+        expire_on_commit=False,
+        class_=FilteredSession,
+    )
+    monkeypatch.setattr(db_session_module, "_default_engine", isolated_engine)
+    monkeypatch.setattr(db_session_module, "_default_sessionmaker_", factory)
+
+    try:
+        with factory() as seed:
+            workspace, user = _seed_workspace_and_user(seed)
+            _seed_llm_assignment(seed, workspace_id=workspace.id)
+            _seed_budget_ledger(seed, workspace_id=workspace.id)
+            seed.commit()
+
+        ctx = WorkspaceContext(
+            workspace_id=workspace.id,
+            workspace_slug=workspace.slug,
+            actor_id=user.id,
+            actor_kind="user",
+            actor_grant_role="manager",
+            actor_was_owner_member=True,
+            audit_correlation_id=new_ulid(),
+        )
+        set_current(ctx)
+        bus = EventBus()
+        clock = FrozenClock(_PINNED)
+        llm = _FailingChatLLM()
+        app = _build_agent_app_with_default_db(ctx, llm=llm, clock=clock, bus=bus)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        response = client.post(
+            f"/w/{workspace.slug}/api/v1/agent/manager/message",
+            json={"body": "Hello"},
+        )
+        assert response.status_code == 500, response.text
+
+        log_response = client.get(f"/w/{workspace.slug}/api/v1/agent/manager/log")
+        assert log_response.status_code == 200, log_response.text
+        assert [row["body"] for row in log_response.json()] == ["Hello"]
+
+        with factory() as check, tenant_agnostic():
+            token_rows = list(check.scalars(select(ApiToken)).all())
+        assert len(token_rows) == 1
+        assert token_rows[0].kind == "delegated"
+        assert token_rows[0].revoked_at is not None
+    finally:
+        isolated_engine.dispose()
 
 
 def test_agent_message_endpoint_surfaces_unassigned_capability_in_log(
