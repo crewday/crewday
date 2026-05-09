@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
@@ -6,6 +6,7 @@ import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import AgentPreferencesPanel from "@/components/AgentPreferencesPanel";
 import { Avatar, Chip, Loading } from "@/components/common";
+import PageTabs, { type PageTab } from "@/components/PageTabs";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import type {
   Asset,
@@ -638,16 +639,39 @@ function UnitsPanel({ propertyId, units }: { propertyId: string; units: Unit[] }
   );
 }
 
-type Tab = "overview" | "units" | "assets" | "sharing" | "settings";
+type Tab = "overview" | "areas" | "units" | "assets" | "sharing" | "settings";
+type PropertyPageTab = PageTab & { key: Tab };
+
+function propertyPanelId(tab: Tab): string {
+  return `property-${tab}-panel`;
+}
+
+function propertyTabs(showUnitsTab: boolean): PropertyPageTab[] {
+  const unitsTab: PropertyPageTab[] = showUnitsTab
+    ? [{ key: "units", label: "Units", panelId: propertyPanelId("units") }]
+    : [];
+  return [
+    { key: "overview", label: "Overview", panelId: propertyPanelId("overview") },
+    { key: "areas", label: "Areas", panelId: propertyPanelId("areas") },
+    ...unitsTab,
+    { key: "assets", label: "Assets", panelId: propertyPanelId("assets") },
+    { key: "sharing", label: "Sharing & client", panelId: propertyPanelId("sharing") },
+    { key: "settings", label: "Settings", panelId: propertyPanelId("settings") },
+  ];
+}
+
+function tabFromHash(hash: string, tabs: PropertyPageTab[]): Tab {
+  const key = hash.replace(/^#/, "");
+  return tabs.find((tab) => tab.key === key)?.key ?? "overview";
+}
 
 export default function PropertyDetailPage() {
   const { pid = "" } = useParams<{ pid: string }>();
-  const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [activeTab, setActiveTab] = useState<Tab>(() => tabFromHash(window.location.hash, propertyTabs(false)));
   const [unitsRevealed, setUnitsRevealed] = useState(false);
   const { workspaceId } = useWorkspace();
 
   useEffect(() => {
-    setActiveTab("overview");
     setUnitsRevealed(false);
   }, [pid]);
 
@@ -677,6 +701,20 @@ export default function PropertyDetailPage() {
     enabled: activeTab === "settings",
   });
   void workspaceId;  // forces re-render on switch via React state subscription
+  const units = unitsQ.data ?? [];
+  const showUnitsTab = units.length > 1 || unitsRevealed;
+  const tabs = useMemo(() => propertyTabs(showUnitsTab), [showUnitsTab]);
+
+  useEffect(() => {
+    const syncFromHash = () => setActiveTab(tabFromHash(window.location.hash, tabs));
+    syncFromHash();
+    window.addEventListener("hashchange", syncFromHash);
+    return () => window.removeEventListener("hashchange", syncFromHash);
+  }, [pid, tabs]);
+
+  function selectTab(next: string): void {
+    setActiveTab(tabFromHash(`#${next}`, tabs));
+  }
 
   if (detailQ.isPending || unitsQ.isPending || empsQ.isPending) {
     return <DeskPage title="Property"><Loading /></DeskPage>;
@@ -688,10 +726,9 @@ export default function PropertyDetailPage() {
   const { property, property_tasks, stays, assets, asset_documents: _asset_documents } = detailQ.data;
   void _asset_documents;
   const empsById = new Map(empsQ.data.map((e) => [e.id, e]));
-  const units = unitsQ.data;
-  const showUnitsTab = units.length > 1 || unitsRevealed;
   const openUnits = () => {
     setUnitsRevealed(true);
+    window.location.hash = "#units";
     setActiveTab("units");
   };
 
@@ -711,47 +748,27 @@ export default function PropertyDetailPage() {
       }
       overflow={[{ label: "New task", onSelect: () => undefined }]}
     >
-      <nav className="tabs tabs--h">
-        <a
-          className={"tab-link" + (activeTab === "overview" ? " tab-link--active" : "")}
-          onClick={() => setActiveTab("overview")}
-        >
-          Overview
-        </a>
-        <a className="tab-link">Areas</a>
-        <a className="tab-link">Stays</a>
-        {showUnitsTab && (
-          <a
-            className={"tab-link" + (activeTab === "units" ? " tab-link--active" : "")}
-            onClick={openUnits}
-          >
-            Units
-          </a>
-        )}
-        <a
-          className={"tab-link" + (activeTab === "assets" ? " tab-link--active" : "")}
-          onClick={() => setActiveTab("assets")}
-        >
-          Assets
-        </a>
-        <a className="tab-link">Instructions</a>
-        <a className="tab-link">Closures</a>
-        <a
-          className={"tab-link" + (activeTab === "sharing" ? " tab-link--active" : "")}
-          onClick={() => setActiveTab("sharing")}
-        >
-          Sharing &amp; client
-        </a>
-        <a
-          className={"tab-link" + (activeTab === "settings" ? " tab-link--active" : "")}
-          onClick={() => setActiveTab("settings")}
-        >
-          Settings
-        </a>
-      </nav>
+      <div className="property-tabs">
+        <PageTabs
+          ariaLabel="Property sections"
+          tabs={tabs}
+          hashBacked
+          defaultKey="overview"
+          selectedKey={activeTab}
+          onSelect={selectTab}
+          className="property-tabs__sections"
+        />
+        <nav className="property-tabs__links" aria-label="Related property pages">
+          <Link className="page-tabs__tab" to={"/stays?property_id=" + encodeURIComponent(property.id)}>Stays</Link>
+          <Link className="page-tabs__tab" to={"/instructions?property_id=" + encodeURIComponent(property.id)}>
+            Instructions
+          </Link>
+          <Link className="page-tabs__tab" to={"/property/" + property.id + "/closures"}>Closures</Link>
+        </nav>
+      </div>
 
       {activeTab === "overview" && (
-        <section className="grid grid--split">
+        <section id={propertyPanelId("overview")} className="grid grid--split" role="tabpanel">
           <div className="panel">
             <header className="panel__head"><h2>Upcoming stays</h2></header>
             <table className="table">
@@ -806,7 +823,7 @@ export default function PropertyDetailPage() {
       )}
 
       {activeTab === "settings" && (
-        <>
+        <div id={propertyPanelId("settings")} role="tabpanel">
           {(settingsQ.isPending || catalogQ.isPending) ? (
             <Loading />
           ) : settingsQ.data && catalogQ.data ? (
@@ -818,15 +835,17 @@ export default function PropertyDetailPage() {
           ) : (
             <p>Failed to load settings.</p>
           )}
-        </>
+        </div>
       )}
 
       {activeTab === "units" && showUnitsTab && (
-        <UnitsPanel propertyId={property.id} units={units} />
+        <div id={propertyPanelId("units")} role="tabpanel">
+          <UnitsPanel propertyId={property.id} units={units} />
+        </div>
       )}
 
       {activeTab === "assets" && (
-        <div className="panel">
+        <div id={propertyPanelId("assets")} className="panel" role="tabpanel">
           <header className="panel__head">
             <h2>Assets</h2>
             <span className="muted mono">{assets.length} tracked</span>
@@ -853,11 +872,36 @@ export default function PropertyDetailPage() {
         </div>
       )}
 
+      {activeTab === "areas" && (
+        <div id={propertyPanelId("areas")} className="panel" role="tabpanel">
+          <header className="panel__head">
+            <h2>Areas</h2>
+            <span className="muted mono">{property.areas.length} configured</span>
+          </header>
+          {property.areas.length === 0 ? (
+            <p className="muted">No areas configured for this property.</p>
+          ) : (
+            <table className="table">
+              <thead>
+                <tr><th>Area</th></tr>
+              </thead>
+              <tbody>
+                {property.areas.map((area) => (
+                  <tr key={area}><td>{area}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
       {activeTab === "sharing" && (
-        <SharingPanel
-          detail={detailQ.data}
-          meAvailable={meQ.data?.available_workspaces ?? []}
-        />
+        <div id={propertyPanelId("sharing")} role="tabpanel">
+          <SharingPanel
+            detail={detailQ.data}
+            meAvailable={meQ.data?.available_workspaces ?? []}
+          />
+        </div>
       )}
 
       <AgentPreferencesPanel

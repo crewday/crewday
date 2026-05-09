@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
@@ -6,6 +6,7 @@ import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import AgentPreferencesPanel from "@/components/AgentPreferencesPanel";
 import { Loading } from "@/components/common";
+import PageTabs, { type PageTab } from "@/components/PageTabs";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { AuthMe } from "@/auth/types";
@@ -27,15 +28,43 @@ import SharingPanel from "./property/SharingPanel";
 import { fetchPropertyDetail } from "./property/propertyDetailApi";
 import type { PropertyRecord, PropertyTab } from "./property/types";
 
+const PROPERTY_TABS = [
+  { key: "overview", label: "Overview", panelId: panelIdFor("overview") },
+  { key: "areas", label: "Areas", panelId: panelIdFor("areas") },
+  { key: "assets", label: "Assets", panelId: panelIdFor("assets") },
+  { key: "sharing", label: "Sharing & client", panelId: panelIdFor("sharing") },
+  { key: "settings", label: "Settings", panelId: panelIdFor("settings") },
+] satisfies Array<PageTab & { key: PropertyTab }>;
+
+function panelIdFor(tab: PropertyTab): string {
+  return `property-${tab}-panel`;
+}
+
+function tabFromHash(hash: string): PropertyTab {
+  const key = hash.replace(/^#/, "");
+  return PROPERTY_TABS.find((tab) => tab.key === key)?.key ?? "overview";
+}
+
 export default function PropertyDetailPage() {
   // code-health: ignore[nloc] Property detail route is a declarative shell around extracted detail sections.
   const { pid = "" } = useParams<{ pid: string }>();
   const { pathname } = useLocation();
-  const [activeTab, setActiveTab] = useState<PropertyTab>("overview");
+  const [activeTab, setActiveTab] = useState<PropertyTab>(() => tabFromHash(window.location.hash));
   const [editingProperty, setEditingProperty] = useState(false);
   const [propertySaveError, setPropertySaveError] = useState<string | null>(null);
   const { workspaceId } = useWorkspace();
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const syncFromHash = () => setActiveTab(tabFromHash(window.location.hash));
+    syncFromHash();
+    window.addEventListener("hashchange", syncFromHash);
+    return () => window.removeEventListener("hashchange", syncFromHash);
+  }, [pid]);
+
+  function selectTab(next: string): void {
+    setActiveTab(tabFromHash(`#${next}`));
+  }
 
   const meQ = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<AuthMe>("/api/v1/auth/me") });
   const detailQ = useQuery({
@@ -122,68 +151,52 @@ export default function PropertyDetailPage() {
         },
       ]}
     >
-      <nav className="tabs tabs--h" aria-label="Property sections">
-        <button
-          type="button"
-          className={"tab-link" + (activeTab === "overview" ? " tab-link--active" : "")}
-          aria-current={activeTab === "overview" ? "page" : undefined}
-          onClick={() => setActiveTab("overview")}
-        >
-          Overview
-        </button>
-        <button
-          type="button"
-          className={"tab-link" + (activeTab === "areas" ? " tab-link--active" : "")}
-          aria-current={activeTab === "areas" ? "page" : undefined}
-          onClick={() => setActiveTab("areas")}
-        >
-          Areas
-        </button>
-        <Link className="tab-link" to={workspaceRouteForPathname(pathname, "/stays?property_id=" + encodeURIComponent(property.id))}>
-          Stays
-        </Link>
-        <button
-          type="button"
-          className={"tab-link" + (activeTab === "assets" ? " tab-link--active" : "")}
-          aria-current={activeTab === "assets" ? "page" : undefined}
-          onClick={() => setActiveTab("assets")}
-        >
-          Assets
-        </button>
-        <Link className="tab-link" to={workspaceRouteForPathname(pathname, "/instructions?property_id=" + encodeURIComponent(property.id))}>
-          Instructions
-        </Link>
-        <Link className="tab-link" to={workspaceRouteForPathname(pathname, "/property/" + property.id + "/closures")}>
-          Closures
-        </Link>
-        <button
-          type="button"
-          className={"tab-link" + (activeTab === "sharing" ? " tab-link--active" : "")}
-          aria-current={activeTab === "sharing" ? "page" : undefined}
-          onClick={() => setActiveTab("sharing")}
-        >
-          Sharing &amp; client
-        </button>
-        <button
-          type="button"
-          className={"tab-link" + (activeTab === "settings" ? " tab-link--active" : "")}
-          aria-current={activeTab === "settings" ? "page" : undefined}
-          onClick={() => setActiveTab("settings")}
-        >
-          Settings
-        </button>
-      </nav>
+      <div className="property-tabs">
+        <PageTabs
+          ariaLabel="Property sections"
+          tabs={PROPERTY_TABS}
+          hashBacked
+          defaultKey="overview"
+          selectedKey={activeTab}
+          onSelect={selectTab}
+          className="property-tabs__sections"
+        />
+        <nav className="property-tabs__links" aria-label="Related property pages">
+          <Link
+            className="page-tabs__tab"
+            to={workspaceRouteForPathname(pathname, "/stays?property_id=" + encodeURIComponent(property.id))}
+          >
+            Stays
+          </Link>
+          <Link
+            className="page-tabs__tab"
+            to={workspaceRouteForPathname(pathname, "/instructions?property_id=" + encodeURIComponent(property.id))}
+          >
+            Instructions
+          </Link>
+          <Link
+            className="page-tabs__tab"
+            to={workspaceRouteForPathname(pathname, "/property/" + property.id + "/closures")}
+          >
+            Closures
+          </Link>
+        </nav>
+      </div>
 
       {activeTab === "overview" && (
-        <OverviewPanel detail={detail} employees={empsQ.data} />
+        <div id={panelIdFor("overview")} role="tabpanel">
+          <OverviewPanel detail={detail} employees={empsQ.data} />
+        </div>
       )}
 
       {activeTab === "areas" && (
-        <AreasPanel propertyId={property.id} />
+        <div id={panelIdFor("areas")} role="tabpanel">
+          <AreasPanel propertyId={property.id} />
+        </div>
       )}
 
       {activeTab === "settings" && (
-        <>
+        <div id={panelIdFor("settings")} role="tabpanel">
           {(settingsQ.isPending || catalogQ.isPending) ? (
             <Loading />
           ) : settingsQ.data && catalogQ.data ? (
@@ -195,18 +208,22 @@ export default function PropertyDetailPage() {
           ) : (
             <p>Failed to load settings.</p>
           )}
-        </>
+        </div>
       )}
 
       {activeTab === "assets" && (
-        <AssetsPanel detail={detail} />
+        <div id={panelIdFor("assets")} role="tabpanel">
+          <AssetsPanel detail={detail} />
+        </div>
       )}
 
       {activeTab === "sharing" && (
-        <SharingPanel
-          detail={detail}
-          meAvailable={meQ.data?.available_workspaces ?? []}
-        />
+        <div id={panelIdFor("sharing")} role="tabpanel">
+          <SharingPanel
+            detail={detail}
+            meAvailable={meQ.data?.available_workspaces ?? []}
+          />
+        </div>
       )}
 
       <AgentPreferencesPanel

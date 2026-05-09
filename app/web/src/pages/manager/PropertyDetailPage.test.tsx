@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { __resetApiProvidersForTests } from "@/lib/api";
 import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
@@ -173,7 +173,40 @@ function installFetch(options: InstallFetchOptions = {}) {
           client_org_id: property.client_org_id,
           owner_user_id: property.owner_user_id,
         },
+        {
+          id: "prop_2",
+          name: "Casa Azul",
+          city: "Lisbon",
+          timezone: "Europe/Lisbon",
+          color: "sky",
+          kind: "str",
+          areas: [],
+          evidence_policy: "inherit",
+          country: "PT",
+          locale: "pt-PT",
+          settings_override: {},
+          client_org_id: null,
+          owner_user_id: null,
+        },
       ]);
+    }
+    if (resolved === "/w/acme/api/v1/tasks?property_id=prop_2&limit=100") {
+      return jsonResponse({ data: [], next_cursor: null, has_more: false });
+    }
+    if (resolved === "/w/acme/api/v1/stays/reservations?property_id=prop_2&limit=100") {
+      return jsonResponse({ data: [], next_cursor: null, has_more: false });
+    }
+    if (resolved === "/w/acme/api/v1/properties/prop_2/share") {
+      return jsonResponse({ data: [], next_cursor: null, has_more: false });
+    }
+    if (resolved === "/w/acme/api/v1/properties/prop_2") {
+      return jsonResponse({
+        ...property,
+        id: "prop_2",
+        name: "Casa Azul",
+        client_org_id: null,
+        settings_override: {},
+      });
     }
     if (resolved === "/w/acme/api/v1/properties/prop_1") {
       if (method === "PATCH") {
@@ -405,7 +438,24 @@ function Harness({ initial = "/w/acme/property/prop_1" }: { initial?: string }) 
   );
 }
 
+function SwitchingHarness() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return (
+    <QueryClientProvider client={qc}>
+      <MemoryRouter initialEntries={["/w/acme/property/prop_1#settings"]}>
+        <WorkspaceProvider>
+          <Link to="/w/acme/property/prop_2">Next property</Link>
+          <Routes>
+            <Route path="/w/:slug/property/:pid" element={<PropertyDetailPage />} />
+          </Routes>
+        </WorkspaceProvider>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
 beforeEach(() => {
+  window.history.replaceState(null, "", "/");
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("acme");
@@ -419,6 +469,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  window.history.replaceState(null, "", "/");
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.restoreAllMocks();
@@ -521,7 +572,7 @@ describe("<PropertyDetailPage>", () => {
       render(<Harness />);
 
       expect(await screen.findByText("Tasks for this property")).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Areas" }));
+      fireEvent.click(screen.getByRole("tab", { name: "Areas" }));
       expect(await screen.findByText("Kitchen")).toBeInTheDocument();
       expect(screen.getByText("Terrace")).toBeInTheDocument();
 
@@ -599,19 +650,20 @@ describe("<PropertyDetailPage>", () => {
       render(<Harness />);
 
       expect(await screen.findByText("Tasks for this property")).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Areas" }));
+      fireEvent.click(screen.getByRole("tab", { name: "Areas" }));
       expect(await screen.findByRole("alert")).toHaveTextContent("You do not have permission to view areas.");
     } finally {
       loadFailure.restore();
     }
 
     cleanup();
+    window.history.replaceState(null, "", "/");
     const saveFailure = installFetch({ failAreaPost: true });
     try {
       render(<Harness />);
 
       expect(await screen.findByText("Tasks for this property")).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Areas" }));
+      fireEvent.click(screen.getByRole("tab", { name: "Areas" }));
       expect(await screen.findByText("Kitchen")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "New area" }));
       fireEvent.change(screen.getByLabelText("Name"), {
@@ -633,11 +685,22 @@ describe("<PropertyDetailPage>", () => {
       render(<Harness />);
 
       expect(await screen.findByText("Tasks for this property")).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Assets" }));
+      const settingsCallsBeforeSelection = fake.calls.filter((call) =>
+        call.url === "/w/acme/api/v1/settings" || call.url === "/w/acme/api/v1/settings/catalog"
+      );
+      expect(settingsCallsBeforeSelection).toHaveLength(0);
+
+      const tablist = screen.getByRole("tablist", { name: "Property sections" });
+      expect(tablist).toHaveClass("page-tabs");
+      fireEvent.click(screen.getByRole("tab", { name: "Assets" }));
+      expect(window.location.hash).toBe("#assets");
       expect(await screen.findByText("No assets tracked for this property.")).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Sharing & client" }));
+      expect(document.getElementById("property-assets-panel")).toHaveAttribute("role", "tabpanel");
+      fireEvent.click(screen.getByRole("tab", { name: "Sharing & client" }));
+      expect(window.location.hash).toBe("#sharing");
       expect(await screen.findByText("Billing client")).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+      fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
+      expect(window.location.hash).toBe("#settings");
       expect(await screen.findByText("Settings overrides")).toBeInTheDocument();
 
       expect(screen.getByRole("link", { name: "Stays" })).toHaveAttribute("href", "/w/acme/stays?property_id=prop_1");
@@ -650,6 +713,7 @@ describe("<PropertyDetailPage>", () => {
       });
 
       cleanup();
+      window.history.replaceState(null, "", "/");
       render(<Harness />);
       expect(await screen.findByText("Tasks for this property")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("link", { name: "Instructions" }));
@@ -658,12 +722,72 @@ describe("<PropertyDetailPage>", () => {
       });
 
       cleanup();
+      window.history.replaceState(null, "", "/");
       render(<Harness />);
       expect(await screen.findByText("Tasks for this property")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("link", { name: "Closures" }));
       await waitFor(() => {
         expect(screen.getByText("Closures route reached")).toBeInTheDocument();
       });
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("loads hash-backed property tabs directly and follows browser hash history", async () => {
+    const fake = installFetch();
+    try {
+      window.history.replaceState(null, "", "/w/acme/property/prop_1#assets");
+      render(<Harness initial="/w/acme/property/prop_1#assets" />);
+
+      expect(await screen.findByRole("heading", { name: "Villa Rosa" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Assets" })).toHaveAttribute("aria-selected", "true");
+      expect(await screen.findByText("No assets tracked for this property.")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("tab", { name: "Sharing & client" }));
+      expect(window.location.hash).toBe("#sharing");
+      expect(await screen.findByText("Billing client")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
+      expect(window.location.hash).toBe("#settings");
+      expect(await screen.findByText("Settings overrides")).toBeInTheDocument();
+
+      window.history.back();
+      await waitFor(() => expect(window.location.hash).toBe("#sharing"));
+      expect(screen.getByRole("tab", { name: "Sharing & client" })).toHaveAttribute("aria-selected", "true");
+
+      window.history.back();
+      await waitFor(() => expect(window.location.hash).toBe("#assets"));
+      expect(screen.getByRole("tab", { name: "Assets" })).toHaveAttribute("aria-selected", "true");
+
+      window.history.forward();
+      await waitFor(() => expect(window.location.hash).toBe("#sharing"));
+      expect(screen.getByRole("tab", { name: "Sharing & client" })).toHaveAttribute("aria-selected", "true");
+
+      expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/settings")).toBe(true);
+      expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/settings/catalog")).toBe(true);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("falls back to overview for absent or invalid hashes when the property id changes", async () => {
+    const fake = installFetch();
+    try {
+      window.history.replaceState(null, "", "/w/acme/property/prop_1#settings");
+      render(<SwitchingHarness />);
+
+      expect(await screen.findByText("Settings overrides")).toBeInTheDocument();
+      window.history.replaceState(null, "", "/w/acme/property/prop_2");
+      fireEvent.click(screen.getByRole("link", { name: "Next property" }));
+
+      expect(await screen.findByRole("heading", { name: "Casa Azul" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByText("Tasks for this property")).toBeInTheDocument();
+
+      window.history.replaceState(null, "", "/w/acme/property/prop_2#unknown");
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+      expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
     } finally {
       fake.restore();
     }

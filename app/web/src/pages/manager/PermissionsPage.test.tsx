@@ -133,7 +133,7 @@ describe("Permissions privacy tab", () => {
 
     const { container } = renderPage();
 
-    const tablist = screen.getByRole("tablist", { name: "Permissions sections" });
+    expect(screen.getByRole("tablist", { name: "Permissions sections" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Groups" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Rules" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Privacy" })).not.toBeInTheDocument();

@@ -57,3 +57,25 @@
 .page-tabs__tab--disabled:hover {
   color: var(--ink-4);
 }
+
+.property-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 16px;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--line);
+  scrollbar-width: thin;
+}
+
+.page-tabs.property-tabs__sections,
+.property-tabs__links {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  margin-bottom: 0;
+  overflow: visible;
+  border-bottom: 0;
+}
