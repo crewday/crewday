@@ -17,18 +17,23 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.requests import Request
 
 from app.adapters.db.audit.models import AuditLog
+from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.llm.models import LlmUsage
 from app.adapters.db.workspace.models import Workspace
+from app.api.admin.deps import _resolve_session_principal
 from app.api.transport import admin_sse
-from app.auth.session import SESSION_COOKIE_NAME
+from app.auth.session import SESSION_COOKIE_NAME, hash_cookie_value
 from app.config import Settings
 from app.tenancy import tenant_agnostic
 from app.util.ulid import new_ulid
 from tests.unit.api.admin._helpers import (
+    TEST_ACCEPT_LANGUAGE,
+    TEST_UA,
     build_client,
     engine_fixture,
     grant_deployment_admin,
@@ -69,6 +74,20 @@ def _admin_cookie(session_factory: sessionmaker[Session], settings: Settings) ->
         grant_deployment_admin(s, user_id=user_id)
         s.commit()
     return issue_session(session_factory, user_id=user_id, settings=settings)
+
+
+def _admin_request(path: str = "/admin/api/v1/usage/summary") -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": path,
+            "headers": [
+                (b"user-agent", TEST_UA.encode("ascii")),
+                (b"accept-language", TEST_ACCEPT_LANGUAGE.encode("ascii")),
+            ],
+        }
+    )
 
 
 def _add_llm_usage(
@@ -118,6 +137,47 @@ def _add_llm_usage(
         )
         s.commit()
     return inserted_id
+
+
+class TestAdminAuthAutoflush:
+    def test_session_grant_lookup_does_not_autoflush_dirty_last_seen(
+        self,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("app.auth.session.get_settings", lambda: settings)
+        with session_factory() as s:
+            user_id = seed_user(s, email="ada@example.com", display_name="Ada")
+            grant_deployment_admin(s, user_id=user_id)
+            s.commit()
+        cookie = issue_session(session_factory, user_id=user_id, settings=settings)
+
+        def _fail_on_dirty_session_flush(
+            db_session: Session,
+            flush_context: object,
+            instances: object | None,
+        ) -> None:
+            _ = flush_context, instances
+            if any(isinstance(row, SessionRow) for row in db_session.dirty):
+                raise AssertionError(
+                    "admin auth grant lookup autoflushed dirty session"
+                )
+
+        with session_factory() as s:
+            event.listen(s, "before_flush", _fail_on_dirty_session_flush)
+            try:
+                ctx = _resolve_session_principal(
+                    s,
+                    request=_admin_request(),
+                    cookie_value=cookie,
+                )
+                assert ctx is not None
+                assert ctx.user_id == user_id
+                assert any(isinstance(row, SessionRow) for row in s.dirty)
+            finally:
+                event.remove(s, "before_flush", _fail_on_dirty_session_flush)
+                s.rollback()
 
 
 class TestUsageSummary:
@@ -699,6 +759,24 @@ class TestUsageList:
             SESSION_COOKIE_NAME,
             issue_session(session_factory, user_id=user_id, settings=settings),
         )
+        resp = client.get("/admin/api/v1/usage")
+        assert resp.status_code == 404
+        assert resp.json().get("error") == "not_found"
+
+    def test_expired_admin_session_receives_404(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        cookie = _admin_cookie(session_factory, settings)
+        with session_factory() as s:
+            row = s.get(SessionRow, hash_cookie_value(cookie))
+            assert row is not None
+            row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+            s.commit()
+
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
         resp = client.get("/admin/api/v1/usage")
         assert resp.status_code == 404
         assert resp.json().get("error") == "not_found"

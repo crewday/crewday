@@ -167,7 +167,9 @@ def _resolve_session_principal(
         )
     except auth_session.SessionInvalid, auth_session.SessionExpired:
         return None
-    if not is_deployment_admin(session, user_id=user_id):
+    with session.no_autoflush:
+        is_admin = is_deployment_admin(session, user_id=user_id)
+    if not is_admin:
         return None
     # ``hash_cookie_value`` re-derives the session row's PK without a
     # second DB read — same idiom the workspace tenancy middleware
@@ -271,7 +273,9 @@ def _resolve_token_principal(
         delegating_user_id = verified.delegate_for_user_id
         if delegating_user_id is None:
             return None
-        if not is_deployment_admin(session, user_id=delegating_user_id):
+        with session.no_autoflush:
+            is_admin = is_deployment_admin(session, user_id=delegating_user_id)
+        if not is_admin:
             return None
         return DeploymentContext(
             principal=verified.key_id,
