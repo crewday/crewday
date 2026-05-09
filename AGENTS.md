@@ -16,6 +16,11 @@ recovery, Mailpit activation links, and quality helpers live in
 [`SETUP.md`](SETUP.md). Read it before bringing the stack up, resetting a
 dev DB, or onboarding a new developer agent.
 
+- **Keep the dev site up.** Do not stop, restart, or rebuild shared dev
+  website services unless the task requires it. Prefer hot reloads,
+  targeted process restarts, or other approaches that preserve the main
+  dev website; if downtime is unavoidable, keep it brief and say why.
+
 ## Ask first
 
 - **Ask before any non-obvious decision.** Use `AskUserQuestion` or
