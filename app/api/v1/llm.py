@@ -17,10 +17,14 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.identity.models import User
 from app.adapters.db.llm.models import AgentPreference, BudgetLedger
+from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.api.deps import current_workspace_context, db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.audit import write_audit
 from app.authz.dep import Permission
+from app.authz.enforce import PermissionDenied, require
+from app.authz.owners import is_owner_member
+from app.authz.places_visibility import visible_property_ids_for_user
 from app.domain.agent.preferences import (
     APPROVAL_MODES,
     CONSENT_TOKEN_ORDER,
@@ -56,7 +60,7 @@ class AgentPreferenceRead(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    scope_kind: Literal["workspace", "user"]
+    scope_kind: Literal["workspace", "property", "user"]
     scope_id: str
     body_md: str
     token_count: int
@@ -233,7 +237,7 @@ _WORKSPACE_USAGE_GET_OPENAPI = {
 
 
 def _empty_response(
-    *, scope_kind: Literal["workspace", "user"], scope_id: str
+    *, scope_kind: Literal["workspace", "property", "user"], scope_id: str
 ) -> AgentPreferenceRead:
     return AgentPreferenceRead(
         scope_kind=scope_kind,
@@ -330,6 +334,65 @@ def _consent_response(
 def _require_owner_manager(ctx: _Ctx) -> None:
     if ctx.actor_grant_role != "manager" or not ctx.actor_was_owner_member:
         raise Forbidden(extra={"error": "permission_denied"})
+
+
+def _property_is_live_in_workspace(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    property_id: str,
+) -> bool:
+    stmt = (
+        select(Property.id)
+        .join(PropertyWorkspace, PropertyWorkspace.property_id == Property.id)
+        .where(
+            Property.id == property_id,
+            Property.deleted_at.is_(None),
+            PropertyWorkspace.workspace_id == ctx.workspace_id,
+            PropertyWorkspace.status == "active",
+        )
+        .limit(1)
+    )
+    return session.scalar(stmt) is not None
+
+
+def _require_property_agent_pref_read(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    property_id: str,
+) -> None:
+    visible_ids = visible_property_ids_for_user(
+        session,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.actor_id,
+    )
+    if property_id in visible_ids:
+        return
+    if is_owner_member(
+        session, workspace_id=ctx.workspace_id, user_id=ctx.actor_id
+    ) and _property_is_live_in_workspace(session, ctx, property_id=property_id):
+        return
+    raise Forbidden(extra={"error": "permission_denied"})
+
+
+def _can_edit_property_agent_prefs(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    property_id: str,
+) -> bool:
+    try:
+        require(
+            session,
+            ctx,
+            action_key="agent_prefs.edit_property",
+            scope_kind="property",
+            scope_id=property_id,
+        )
+    except PermissionDenied:
+        return False
+    return True
 
 
 @router.get(
@@ -438,6 +501,104 @@ def put_workspace_agent_prefs(
     except (PreferenceContainsSecret, PreferenceTooLarge) as exc:
         raise _save_error(exc) from exc
     _publish_workspace_changed(ctx, changed_keys=("agent_preferences.workspace",))
+    return _to_response(row)
+
+
+@router.get(
+    "/agent_preferences/property/{property_id}",
+    response_model=AgentPreferenceRead,
+    operation_id="llm.agent_preferences.property.get",
+    summary="Read property agent preferences",
+    openapi_extra={
+        "x-cli": {
+            "group": "agent-prefs",
+            "verb": "show-property",
+            "summary": "Read property agent preferences",
+            "mutates": False,
+        },
+    },
+)
+def get_property_agent_prefs(
+    property_id: str,
+    ctx: _Ctx,
+    session: _Db,
+) -> AgentPreferenceRead:
+    _require_property_agent_pref_read(session, ctx, property_id=property_id)
+    row = read_preference(
+        session,
+        ctx,
+        scope_kind="property",
+        scope_id=property_id,
+    )
+    if row is None:
+        response = _empty_response(scope_kind="property", scope_id=property_id)
+    else:
+        response = _to_response(row)
+    response.writable = _can_edit_property_agent_prefs(
+        session,
+        ctx,
+        property_id=property_id,
+    )
+    return response
+
+
+@router.put(
+    "/agent_preferences/property/{property_id}",
+    response_model=AgentPreferenceRead,
+    operation_id="llm.agent_preferences.property.put",
+    summary="Update property agent preferences",
+    dependencies=[
+        Depends(
+            Permission(
+                "agent_prefs.edit_property",
+                scope_kind="property",
+                scope_id_from_path="property_id",
+            )
+        )
+    ],
+    openapi_extra={
+        "x-agent-confirm": {
+            "summary": "Update property agent preferences?",
+            "risk": "medium",
+            "fields_to_show": ["blocked_actions", "default_approval_mode"],
+            "verb": "Update property agent preferences",
+        },
+        "x-cli": {
+            "group": "agent-prefs",
+            "verb": "set-property",
+            "summary": "Update property agent preferences",
+            "mutates": True,
+        },
+    },
+)
+def put_property_agent_prefs(
+    property_id: str,
+    payload: WorkspaceAgentPreferenceUpdate,
+    ctx: _Ctx,
+    session: _Db,
+) -> AgentPreferenceRead:
+    _require_property_agent_pref_read(session, ctx, property_id=property_id)
+    if payload.default_approval_mode not in APPROVAL_MODES:
+        raise DomainValidation(extra={"error": "invalid_approval_mode"})
+    try:
+        row = save_preference(
+            session,
+            ctx,
+            scope_kind="property",
+            scope_id=property_id,
+            update=PreferenceUpdate(
+                body_md=payload.body_md,
+                blocked_actions=tuple(payload.blocked_actions),
+                default_approval_mode=payload.default_approval_mode,
+                change_note=payload.change_note,
+            ),
+            actor_user_id=ctx.actor_id,
+        )
+    except (PreferenceContainsSecret, PreferenceTooLarge) as exc:
+        raise _save_error(exc) from exc
+    _publish_workspace_changed(
+        ctx, changed_keys=(f"agent_preferences.property.{property_id}",)
+    )
     return _to_response(row)
 
 
@@ -711,6 +872,53 @@ def build_workspace_llm_router() -> APIRouter:
         summary="Update workspace upstream PII consent",
         openapi_extra=_WORKSPACE_PII_CONSENT_PUT_OPENAPI,
         dependencies=[Depends(_require_owner_manager)],
+    )
+    flat.add_api_route(
+        "/agent_preferences/property/{property_id}",
+        get_property_agent_prefs,
+        methods=["GET"],
+        response_model=AgentPreferenceRead,
+        operation_id="workspace.llm.agent_preferences.property.get",
+        summary="Read property agent preferences",
+        openapi_extra={
+            "x-cli": {
+                "group": "agent-prefs",
+                "verb": "show-property",
+                "summary": "Read property agent preferences",
+                "mutates": False,
+            },
+        },
+    )
+    flat.add_api_route(
+        "/agent_preferences/property/{property_id}",
+        put_property_agent_prefs,
+        methods=["PUT"],
+        response_model=AgentPreferenceRead,
+        operation_id="workspace.llm.agent_preferences.property.put",
+        summary="Update property agent preferences",
+        openapi_extra={
+            "x-agent-confirm": {
+                "summary": "Update property agent preferences?",
+                "risk": "medium",
+                "fields_to_show": ["blocked_actions", "default_approval_mode"],
+                "verb": "Update property agent preferences",
+            },
+            "x-cli": {
+                "group": "agent-prefs",
+                "verb": "set-property",
+                "summary": "Update property agent preferences",
+                "mutates": True,
+            },
+        },
+        dependencies=[
+            Depends(
+                Permission(
+                    "agent_prefs.edit_property",
+                    scope_kind="property",
+                    scope_id_from_path="property_id",
+                )
+            )
+        ],
     )
     flat.add_api_route(
         "/agent_preferences/me",
