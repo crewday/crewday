@@ -10,9 +10,9 @@ import { useLocation, useNavigationType } from "react-router-dom";
 
 // Tracks in-app navigations since the page first loaded. The header
 // back button uses this to choose between real browser back and the
-// static parent map (cold-load deep links). Without it, every /task/:id
-// back button goes to /today regardless of where the user came from —
-// see `routeParents.ts`.
+// static parent map (cold-load deep links). Without it, every
+// /w/<slug>/task/:id back button goes to /w/<slug>/today regardless
+// of where the user came from — see `routeParents.ts`.
 //
 // Counts:
 //   PUSH    → append (Link click, navigate(to))

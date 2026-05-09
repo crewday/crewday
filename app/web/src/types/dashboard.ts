@@ -1,5 +1,5 @@
-// crewday — JSON API types: aggregated payloads for /dashboard
-// and /history pages.
+// crewday — JSON API types: aggregated payloads for the workspace
+// dashboard and history pages.
 
 import type { Employee } from "./employee";
 import type { Task, Issue } from "./task";

@@ -270,11 +270,11 @@
   }
   .phone__section { padding: 16px 0; width: 100%; max-width: 880px; margin: 0 auto; }
   .phone__section--detail { padding-bottom: 32px; max-width: 880px; margin: 0 auto; }
-  /* Shared routes (/today, /week, /my/expenses, /schedule, /history,
-     /issues/new, /task/:tid) also mount inside .desk__main when a
-     manager views them. Drop the 880px cap there so they fill the
-     manager column like /me; the cap applies only to the .phone
-     (employee) shell. */
+  /* Shared workspace-relative routes (today, week, my/expenses,
+     schedule, history, issues/new, task/:tid) also mount inside
+     .desk__main when a manager views them. Drop the 880px cap there
+     so they fill the manager column like me; the cap applies only to
+     the .phone (employee) shell. */
   .desk__main .phone__section,
   .desk__main .phone__section--detail,
   .desk__main .phone__section--hero {

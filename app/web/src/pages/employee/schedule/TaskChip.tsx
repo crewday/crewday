@@ -1,9 +1,9 @@
-// Task chip rendered inside a `DayTimeline` block (`/schedule`,
+// Task chip rendered inside a `DayTimeline` block (`/w/<slug>/schedule`,
 // §14 "Schedule view"). A chip is a positioned <Link> pointing at
-// `/task/{id}`, styled by status modifier. Chips can render either
-// inside a property-tinted block (a booking or rota slot) or as
-// orphans pinned to the rota column when no parent block covers
-// their clock time.
+// `/w/<slug>/task/{id}`, styled by status modifier. Chips can render
+// either inside a property-tinted block (a booking or rota slot) or as
+// orphans pinned to the rota column when no parent block covers their
+// clock time.
 //
 // Kept in its own file so the chip styling + a11y attributes (which
 // are touched on every CSS change) don't bloat the timeline render.

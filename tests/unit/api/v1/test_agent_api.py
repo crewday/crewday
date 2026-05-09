@@ -402,7 +402,10 @@ def test_agent_log_endpoint_mounts_and_returns_agent_message_list(
         ("user", "Show my next shift", None),
         ("agent", "I can help.", None),
     }
-    assert {message["at"] for message in messages} == {"2026-04-29T12:00:00Z"}
+    assert [(message["kind"], message["at"]) for message in messages] == [
+        ("user", "2026-04-29T12:00:00Z"),
+        ("agent", "2026-04-29T12:00:00.000001Z"),
+    ]
 
 
 @pytest.mark.parametrize(

@@ -109,10 +109,10 @@ export default function AdminLayout() {
 
   if (denied) {
     // Bounce non-admins back to RoleHome (§14 "Admin shell"). The
-    // root `<RoleHome>` routes by grant role — managers to /dashboard,
-    // workers to /today, clients to /portfolio — so the user lands
-    // on a surface that matches their identity rather than on the
-    // admin chrome they have no business seeing. cd-28s7.
+    // root `<RoleHome>` routes by grant role into /w/<slug>/...
+    // (manager dashboard, worker today, client portfolio), so the
+    // user lands on a surface that matches their identity rather
+    // than on the admin chrome they have no business seeing. cd-28s7.
     return <Navigate to="/" replace />;
   }
 
@@ -165,7 +165,7 @@ export default function AdminLayout() {
             <button
               type="button"
               className="btn btn--ghost admin-backlink"
-              onClick={() => navigate("/")}
+              onClick={() => navigate("/select-workspace")}
             >
               ← Back to workspaces
             </button>

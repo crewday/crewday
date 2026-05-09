@@ -1,5 +1,5 @@
 /**
- * Canonical authenticated-routes manifest for the production SPA.
+ * Workspace-relative authenticated-routes manifest for the production SPA.
  *
  * This file is the single source of truth for the SPA's authenticated
  * sitemap. It is consumed by two surfaces:
@@ -13,6 +13,12 @@
  *    `dist/_surface.json` at test time and walks every authenticated
  *    route per `docs/specs/17-testing-quality.md` §"360 px viewport
  *    sitemap".
+ *
+ * Workspace routes are stored without `/w/<slug>` so the e2e walker
+ * can start from stable workspace-relative paths and let the
+ * authenticated app redirect them to the active seed workspace. The
+ * app's canonical emitted URLs still carry `/w/<slug>/...`; admin
+ * routes stay bare because the admin shell is deployment-scope.
  *
  * Note: this is distinct from `cli/crewday/_surface.json`, which
  * describes the HTTP / CLI surface — they are separate artefacts
@@ -30,9 +36,9 @@
  * - Routes with path parameters (`/task/:tid`, `/asset/:aid`,
  *   `/property/:pid`, `/employee/:eid`, etc.) are excluded for v1
  *   because the e2e walker has no seed data to satisfy the
- *   parameters. `/w/:slug/...` duplicates of parameter-free routes
- *   are likewise omitted because the parameter-free variant already
- *   exercises the same page.
+ *   parameters. Workspace entries are the route paths below
+ *   `/w/<slug>/`; the live app canonicalizes them to the active
+ *   workspace during the walk.
  *
  * The manifest is hand-maintained for v1. If drift becomes a
  * recurring problem, a follow-up Beads task can add an AST-based

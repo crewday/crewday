@@ -19,9 +19,9 @@
   overflow: hidden;
 }
 /* Paper grain overlay — reuses the existing --paper aesthetic so the
-   new cells share the planner feel with /me, /today, etc. 2% opacity
-   on light, lifted to 5% in dark mode so it stays perceptible against
-   the warmer card background. */
+   new cells share the planner feel with workspace pages such as me
+   and today. 2% opacity on light, lifted to 5% in dark mode so it
+   stays perceptible against the warmer card background. */
 .schedule-day::before {
   content: "";
   position: absolute;
@@ -671,4 +671,3 @@
   background: var(--rota-tint, var(--moss-soft));
   border: 1px solid var(--paper-3);
 }
-

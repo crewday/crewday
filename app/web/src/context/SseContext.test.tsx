@@ -132,8 +132,8 @@ function Switcher({ slug }: { slug: string | null }) {
   return null;
 }
 
-function CaptureWorkspaceKey({ keys }: { keys: readonly unknown[][] }) {
-  keys.push(qk.tasks());
+function CaptureWorkspaceKey({ keys }: { keys: unknown[][] }) {
+  keys.push([...qk.tasks()]);
   return null;
 }
 
@@ -171,7 +171,7 @@ describe("<SseProvider>", () => {
   it("uses the route slug before the stale workspace cookie on first render", () => {
     document.cookie = "crewday_workspace=old; path=/";
     window.history.replaceState(null, "", "/w/acme/today");
-    const keys: readonly unknown[][] = [];
+    const keys: unknown[][] = [];
 
     render(
       <Providers>
@@ -187,7 +187,7 @@ describe("<SseProvider>", () => {
 
   it("uses the new route slug synchronously when the visible workspace route changes", () => {
     window.history.replaceState(null, "", "/w/acme/today");
-    const keys: readonly unknown[][] = [];
+    const keys: unknown[][] = [];
 
     const { rerender } = render(
       <Providers>

@@ -171,8 +171,9 @@ on the next sign-in. When the caller is authenticated but is
 not a deployment admin (`is_deployment_admin === false` on
 the bare-host `/auth/me`, or `GET /admin/api/v1/me` 404s),
 `AdminLayout` redirects to `RoleHome` so they land on the
-surface that matches their identity (`/dashboard` for
-managers, `/today` for workers, `/portfolio` for clients).
+workspace-prefixed surface that matches their identity
+(`/w/<slug>/dashboard` for managers, `/w/<slug>/today` for workers,
+`/w/<slug>/portfolio` for clients).
 The same role check happens in `LoginPage`: a phishing-style
 `/login?next=/admin/...` aimed at an already-signed-in
 non-admin drops the `next` and falls back to the role landing
@@ -200,10 +201,11 @@ asset/<id>       chat
 ```
 
 The legacy routes `/week`, `/me/schedule`, `/bookings`, and
-`/shifts` all 302-redirect to `/schedule` (§06 "Schedule view"
-is the single canonical surface for "my time"). Deep-links,
-bookmarks, agent tool outputs, and CLI examples that still name
-any of those URLs continue to land on the right page. The
+`/shifts` under `/w/<slug>/` all 302-redirect to
+`/w/<slug>/schedule` (§06 "Schedule view" is the single canonical
+surface for "my time"). Deep-links, bookmarks, agent tool outputs,
+and CLI examples that still name any of those URLs continue to land
+on the right page. The
 standalone `/bookings` page is retired in v1 — booking rows
 surface as a section of the `/schedule` day drawer (below), so
 a worker never has to cross-reference two calendars to answer
@@ -211,10 +213,11 @@ a worker never has to cross-reference two calendars to answer
 
 The marketing-site demo picker (§site-01) emits only canonical
 workspace-relative paths from this route contract. It does not define
-demo-only SPA aliases: manager payroll starts at `/pay`, manager
-operations/client onboarding start at `/dashboard` and
-`/organizations`, and worker hours start at `/schedule` because
-bookings are the time record (§09).
+demo-only SPA aliases: manager payroll starts at `pay`, manager
+operations/client onboarding start at `dashboard` and
+`organizations`, and worker hours start at `schedule` because
+bookings are the time record (§09). The embedded app resolves those
+workspace-relative starts under `/w/<slug>/`.
 
 ### Worker-only (under /w/<slug>/)
 
@@ -298,7 +301,7 @@ and overlays three kinds of event:
   `property_work_role_assignment`) — the background band for the
   cell, coloured by property.
 - **Materialised tasks** at `scheduled_for_local` — cards inside
-  the slot they fall in, linking to `/task/<id>`.
+  the slot they fall in, linking to `/w/<slug>/task/<id>`.
 - **Stay lifecycle bundle markers** (§06) — badges on the day
   column, linking to the relevant unit/stay.
 
@@ -449,7 +452,7 @@ Both layouts drill into the same **day drawer** on click (mobile
 sheet, desktop side panel).
 
 **Day drawer.** Shows, for the focused date: rota slots
-(read-only), the day's tasks (each linking to `/task/<id>`,
+(read-only), the day's tasks (each linking to `/w/<slug>/task/<id>`,
 read-only — workers don't self-reassign), the day's **bookings**
 (per §09, with inline amend / decline / propose), availability
 summary (effective hours resolved through §06 "Availability
@@ -614,10 +617,11 @@ if they hold exactly one workspace grant).
 for users with two or more workspaces (resolved from
 `GET /api/v1/me/workspaces`, §12). It renders one card per
 workspace (name, slug, last-seen role) and a `Go →` button that
-navigates to `/w/<slug>/today` (worker) or `/w/<slug>/dashboard`
-(manager). Users with exactly one workspace skip this page and
-are redirected straight into it. A persistent "Switch workspace"
-link in the user menu re-opens the picker at any time.
+navigates to `/w/<slug>/today` (worker), `/w/<slug>/dashboard`
+(manager), or `/w/<slug>/portfolio` (client). Users with exactly one
+workspace skip this page and are redirected straight into it. A
+persistent "Switch workspace" link in the user menu re-opens the
+picker at any time.
 
 ### Desktop shell
 
@@ -652,10 +656,10 @@ placed before all operational sections:
 
 ```
 MY WORK
-  My Day       → /today
-  My Schedule  → /schedule
-  My Expenses  → /my/expenses
-  My History   → /history
+  My Day       → /w/<slug>/today
+  My Schedule  → /w/<slug>/schedule
+  My Expenses  → /w/<slug>/my/expenses
+  My History   → /w/<slug>/history
 ```
 
 These routes render under `ManagerLayout` (the shared-route rule
@@ -774,9 +778,9 @@ the platform must guarantee*.
   re-fetch via REST under the per-row authz path. No polling.
 - **Route-split bundles.** Worker and owner/manager entry points are
   separate. Shared routes (see route contract above) land in both
-  bundles. Only manager-only operational surfaces (`/dashboard`,
-  `/properties`, `/approvals`, `/permissions`, etc.) are excluded from
-  the worker bundle.
+  bundles. Only manager-only operational surfaces (`dashboard`,
+  `properties`, `approvals`, `permissions`, etc., under
+  `/w/<slug>/`) are excluded from the worker bundle.
 - **Inline approvals.** When `agent.action.pending` arrives for the
   current user, the chat surface (the right-hand `.desk__agent` rail
   on desktop/wide layouts for either role, or the full-screen `/chat`
@@ -902,10 +906,12 @@ surface.
 - **Back button from a route map.** `PageHeader` accepts a `back`
   prop, but sub-pages normally omit it — the component resolves the
   parent through `mocks/web/src/lib/routeParents.ts` and the matching
-  `app/web/src/lib/routeParents.ts` mirror (`/task/:id → /today`,
-  `/asset/:id → /assets`, `/instructions/:id → /instructions`,
-  `/property/:id → /properties`, `/user/:id → /users`, `/history →
-  /me`, etc.). The leading slot renders a left-chevron icon-button
+  `app/web/src/lib/routeParents.ts` mirror (`/w/<slug>/task/:id →
+  /w/<slug>/today`, `/w/<slug>/asset/:id → /w/<slug>/assets`,
+  `/w/<slug>/instructions/:id → /w/<slug>/instructions`,
+  `/w/<slug>/property/:id → /w/<slug>/properties`,
+  `/w/<slug>/user/:id → /w/<slug>/users`, `/w/<slug>/history →
+  /w/<slug>/me`, etc.). The leading slot renders a left-chevron icon-button
   (Lucide `ChevronLeft`, ≥44×44 tap target per Accessibility). This
   retires every `className="back-link"` inside page bodies; a page
   that wants a non-default parent passes `back={{ to, label }}`.
@@ -939,8 +945,8 @@ surface.
   empty the `⋯` button is not rendered.
 - **No app branding on inner pages.** The crew.day wordmark lives
   in the left-nav / drawer and on the public shell only. A user
-  on `/today` should see "Today", not "crew.day" above it — the
-  brand is set; the page identity is what needs the eye-time.
+  on `/w/<slug>/today` should see "Today", not "crew.day" above it
+  — the brand is set; the page identity is what needs the eye-time.
 
 ## Accessibility (v1 gate)
 
@@ -968,8 +974,8 @@ WCAG 2.2 AA. Concretely:
 
 - Today screen LCP < 1.5s on a 2019 mid-range Android over 4G from a
   nearby region.
-- Worker bundle on `/today`: < 170 KB gzipped.
-- Owner/manager bundle on `/dashboard`: < 220 KB gzipped.
+- Worker bundle on `/w/<slug>/today`: < 170 KB gzipped.
+- Owner/manager bundle on `/w/<slug>/dashboard`: < 220 KB gzipped.
 - Service worker install: < 1s on first visit.
 - Offline → online reconciliation: < 60s for 50 queued actions.
 
@@ -1123,14 +1129,14 @@ than adding to this list:
   are specified but unimplemented. Once wired, the SW registration
   must use `scope: '/w/<slug>/'` (see "PWA constraints" above).
 - **Workspace path prefix.** The spec canonicalises every
-  authenticated route as `/w/<slug>/<route>` (§01 "Workspace
-  addressing"). The current `mocks/web/src/App.tsx` route tree
-  is still single-workspace and unprefixed. Migration is
-  deliberately deferred to the first app-code phase (§19 Phase 1)
-  so the mock rewrite and the real routing middleware land in
-  lockstep. Deep-linking, NavLink construction, and
-  `fetchJson<T>` URL building will all gain a workspace-slug
-  parameter at that point.
+  authenticated workspace route as `/w/<slug>/<route>` (§01
+  "Workspace addressing"). Public/auth routes (`/login`,
+  `/signup`, `/recover`, `/accept/*`, `/guest/*`), the
+  authenticated bare-host workspace picker (`/select-workspace`),
+  and deployment admin routes (`/admin/*`) stay outside the
+  workspace prefix by design. Deep-linking, NavLink construction,
+  and `fetchJson<T>` URL building derive the active workspace slug
+  from the current `/w/<slug>/...` route.
 - **Self-serve signup.** `/signup`, `/signup/verify`, and
   `/select-workspace` are specified (§03) but not yet in the
   mocks. Same timing as the path-prefix migration above.

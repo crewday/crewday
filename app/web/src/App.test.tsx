@@ -338,6 +338,40 @@ function authMeFor(
   };
 }
 
+function multiWorkspaceAuthMe(): AuthMe {
+  return {
+    ...authMeFor("manager", "manager"),
+    available_workspaces: [
+      {
+        workspace: {
+          id: "ws_1",
+          name: "Acme",
+          timezone: "UTC",
+          default_currency: "USD",
+          default_country: "US",
+          default_locale: "en",
+        },
+        grant_role: "manager",
+        binding_org_id: null,
+        source: "workspace_grant",
+      },
+      {
+        workspace: {
+          id: "ws_2",
+          name: "Second workspace",
+          timezone: "UTC",
+          default_currency: "USD",
+          default_country: "US",
+          default_locale: "en",
+        },
+        grant_role: "worker",
+        binding_org_id: null,
+        source: "workspace_grant",
+      },
+    ],
+  };
+}
+
 function installPermissionAllowFetch(): void {
   installFetch(({ url }) => {
     const parsed = new URL(url, "http://crewday.test");
@@ -362,6 +396,29 @@ function renderAppAt(path: string, role: AppRole, grantRole?: WorkspaceGrantRole
   vi.spyOn(preferences, "readRoleCookie").mockReturnValue(role);
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("ws_1");
   setAuthenticated(authMeFor(role, grantRole));
+
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+
+  render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[path]}>
+        <RoleProvider>
+          <WorkspaceProvider>
+            <LocationProbe />
+            <App />
+          </WorkspaceProvider>
+        </RoleProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+function renderAppWithUser(path: string, role: AppRole, user: AuthMe): void {
+  vi.spyOn(preferences, "readRoleCookie").mockReturnValue(role);
+  vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("ws_1");
+  setAuthenticated(user);
 
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -434,6 +491,20 @@ describe("App public root and protected deep links", () => {
     expect(await screen.findByTestId(testId)).toBeInTheDocument();
   });
 
+  it.each([
+    ["employee", "worker", "/w/ws_1/today", "employee-layout"],
+    ["manager", "manager", "/w/ws_1/dashboard", "manager-dashboard"],
+    ["client", "client", "/w/ws_1/portfolio", "client-portfolio"],
+  ] as const)("keeps canonical workspace-prefixed %s role home at %s", async (role, grantRole, path, testId) => {
+    installPermissionAllowFetch();
+    renderAppAt(path, role, grantRole);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent(path);
+    });
+    expect(await screen.findByTestId(testId)).toBeInTheDocument();
+  });
+
   it("sends logged-out bare protected links to /login with next", async () => {
     renderUnauthenticatedAppAt("/dashboard");
 
@@ -482,6 +553,15 @@ describe("App public root and protected deep links", () => {
     expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
   });
 
+  it("redirects authenticated bare client role home to the active workspace prefix", async () => {
+    renderAppAt("/portfolio?view=all#top", "client");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_1/portfolio?view=all#top");
+    });
+    expect(await screen.findByTestId("client-portfolio")).toBeInTheDocument();
+  });
+
   it.each([
     ["/today?view=now#top", "/w/ws_1/today?view=now#top", "today-page"],
     ["/schedule", "/w/ws_1/schedule", "schedule-page"],
@@ -509,6 +589,15 @@ describe("App public root and protected deep links", () => {
     });
     expect(await screen.findByTestId("admin-dashboard")).toBeInTheDocument();
     expect(mockRenders.adminLayout).toHaveBeenCalled();
+  });
+
+  it("keeps the authenticated workspace picker on the bare host", async () => {
+    renderAppWithUser("/select-workspace", "manager", multiWorkspaceAuthMe());
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/select-workspace");
+    });
+    expect(await screen.findByRole("heading", { name: "Pick a workspace" })).toBeInTheDocument();
   });
 
   it.each([

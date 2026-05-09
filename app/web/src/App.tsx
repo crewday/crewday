@@ -105,10 +105,11 @@ function RoleHome() {
   );
 }
 
-// §14 — Shared routes (/today, /schedule, /my/expenses, etc.) render
-// under the viewer's role-appropriate shell. Manager / Employee /
-// Client each get their own layout; only `/me` is currently shared by
-// all three (every surface has a profile screen).
+// §14 — Shared workspace routes (today, schedule, my/expenses, etc.)
+// render under the viewer's role-appropriate shell below /w/:slug.
+// Manager / Employee / Client each get their own layout; only `me`
+// is currently shared by all three (every surface has a profile
+// screen).
 function Shell() {
   const { user } = useAuth();
   const { workspaceId } = useWorkspace();
@@ -178,6 +179,14 @@ function WorkspaceRouteRoot() {
   const { workspaceId } = useWorkspace();
   if (slug && workspaceId !== slug) return null;
   return <Outlet />;
+}
+
+function WorkspacePickerRoute() {
+  return (
+    <WorkspaceGate forcePicker>
+      <RoleHome />
+    </WorkspaceGate>
+  );
 }
 
 function workspaceRoutes({
@@ -443,6 +452,7 @@ export default function App() {
             the gate and redirect to the canonical `/w/:slug/*` URL. */}
         <Route element={<RequireAuth />}>
           <Route element={<WorkspacePathAdopter />}>
+            <Route path="/select-workspace" element={<WorkspacePickerRoute />} />
             <Route element={<WorkspaceGate />}>
               <Route path="/" element={<RoleHome />} />
               <Route path="/w/:slug" element={<WorkspaceRouteRoot />}>

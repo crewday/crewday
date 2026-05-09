@@ -15,8 +15,8 @@ import { useWorkspace } from "@/context/WorkspaceContext";
 //   1. Single workspace → adopt it silently. The user never sees the
 //      chooser; spec §14 explicitly says "users with exactly one
 //      workspace skip this page". We do the adoption here rather
-//      than at /select-workspace so a fresh user landing on /today
-//      via deep-link doesn't bounce through an extra screen.
+//      than at /select-workspace so a fresh user landing on a
+//      /w/<slug>/... deep-link doesn't bounce through an extra screen.
 //   2. Multiple workspaces → render the chooser as a modal-style
 //      surface above the protected tree. Selecting one writes the
 //      cookie via `setWorkspaceId`; the protected tree mounts on
@@ -30,7 +30,13 @@ import { useWorkspace } from "@/context/WorkspaceContext";
 // this component — they don't need a workspace. The router places
 // `<WorkspaceGate>` inside the protected branch only.
 
-export function WorkspaceGate({ children }: { children?: React.ReactNode }) {
+export function WorkspaceGate({
+  children,
+  forcePicker = false,
+}: {
+  children?: React.ReactNode;
+  forcePicker?: boolean;
+}) {
   // code-health: ignore[nloc] Workspace gate keeps single-workspace adoption, multi-workspace chooser, and no-access empty state in one guard.
   const { user, logout } = useAuth();
   const { workspaceId, setWorkspaceId } = useWorkspace();
@@ -47,15 +53,17 @@ export function WorkspaceGate({ children }: { children?: React.ReactNode }) {
   const setFirstAction = useCallback((node: HTMLElement | null): void => {
     firstActionRef.current = node;
   }, []);
-  useEffect(() => {
-    if (workspaceId !== null) return;
-    firstActionRef.current?.focus({ preventScroll: true });
-  }, [workspaceId, user?.available_workspaces?.length, user?.is_deployment_admin]);
 
   const available = useMemo(
     () => user?.available_workspaces ?? [],
     [user?.available_workspaces],
   );
+  const shouldForcePicker = forcePicker && available.length > 1;
+
+  useEffect(() => {
+    if (workspaceId !== null && !shouldForcePicker) return;
+    firstActionRef.current?.focus({ preventScroll: true });
+  }, [shouldForcePicker, workspaceId, user?.available_workspaces?.length, user?.is_deployment_admin]);
 
   const onlySlug = useMemo(() => {
     if (available.length !== 1) return null;
@@ -74,10 +82,11 @@ export function WorkspaceGate({ children }: { children?: React.ReactNode }) {
   // commits — `setWorkspaceId` triggers a synchronous re-render via
   // the `WorkspaceContext`, and the next pass sees `workspaceId !== null`.
   useEffect(() => {
+    if (shouldForcePicker) return;
     if (workspaceId !== null) return;
     if (!onlySlug) return;
     setWorkspaceId(onlySlug);
-  }, [workspaceId, onlySlug, setWorkspaceId]);
+  }, [shouldForcePicker, workspaceId, onlySlug, setWorkspaceId]);
 
   // Server already picked a workspace for this session (cookie was
   // set by the login handler) — surface it without forcing the user
@@ -85,12 +94,13 @@ export function WorkspaceGate({ children }: { children?: React.ReactNode }) {
   // `current_workspace_id` exactly so this no-op adoption can happen
   // without a follow-up call.
   useEffect(() => {
+    if (shouldForcePicker) return;
     if (workspaceId !== null) return;
     if (!currentSlug) return;
     setWorkspaceId(currentSlug);
-  }, [workspaceId, currentSlug, setWorkspaceId]);
+  }, [shouldForcePicker, workspaceId, currentSlug, setWorkspaceId]);
 
-  if (workspaceId !== null) return <>{children ?? <Outlet />}</>;
+  if (workspaceId !== null && !shouldForcePicker) return <>{children ?? <Outlet />}</>;
 
   // From here we know `workspaceId === null`. Render the chooser
   // (or the empty state) instead of the protected tree.

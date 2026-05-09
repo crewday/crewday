@@ -17,7 +17,7 @@ function siteDemoStartPaths(): string[] {
 }
 
 describe("site demo intent routes", () => {
-  it("use canonical app workspace routes, not undocumented demo aliases", () => {
+  it("use workspace-relative app routes, not undocumented demo aliases", () => {
     const appRoutes = new Set<string>(AUTHENTICATED_ROUTES);
     const starts = siteDemoStartPaths();
 

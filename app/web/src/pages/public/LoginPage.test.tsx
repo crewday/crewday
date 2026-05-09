@@ -205,7 +205,7 @@ describe("<LoginPage> — happy path", () => {
     }
   });
 
-  it("falls back to the role-appropriate landing when no ?next is provided (worker → /today)", async () => {
+  it("falls back to the prefixed worker landing when no ?next is provided", async () => {
     const { restore } = installFetch({
       "/api/v1/auth/me": [
         { status: 401, body: { detail: "no session" } },
@@ -251,7 +251,7 @@ describe("<LoginPage> — happy path", () => {
     }
   });
 
-  it("routes managers to /dashboard when no ?next is provided", async () => {
+  it("routes managers to the prefixed dashboard when no ?next is provided", async () => {
     const { restore } = installFetch({
       "/api/v1/auth/me": [
         { status: 401, body: { detail: "no session" } },
@@ -296,7 +296,7 @@ describe("<LoginPage> — happy path", () => {
     }
   });
 
-  it("routes clients to /portfolio when no ?next is provided", async () => {
+  it("routes clients to the prefixed portfolio when no ?next is provided", async () => {
     const { restore } = installFetch({
       "/api/v1/auth/me": [
         { status: 401, body: { detail: "no session" } },
@@ -902,7 +902,7 @@ describe("<LoginPage> — already-signed-in bounce", () => {
 });
 
 describe("<LoginPage> — admin-next role check (closes cd-28s7)", () => {
-  it("drops ?next=/admin/dashboard for a non-admin already-signed-in worker and lands on /today", async () => {
+  it("drops ?next=/admin/dashboard for a non-admin already-signed-in worker and lands on prefixed today", async () => {
     // Phishing surface: a crafted `/login?next=/admin/dashboard` would
     // otherwise honour `next` verbatim and bounce the worker onto the
     // admin shell. The role gate in `pickLanding` filters `/admin/*`
