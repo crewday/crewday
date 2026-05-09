@@ -11,6 +11,7 @@ import { qk } from "@/lib/queryKeys";
 import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import DeskPage from "@/components/DeskPage";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
+import FormField from "@/components/FormField";
 import { Chip, Loading } from "@/components/common";
 import type { Property } from "@/types/api";
 
@@ -542,10 +543,7 @@ function NewInventoryItemForm({
 
       <div className="inv-create__body">
         {properties.length > 1 && (
-          <label className="field inv-create__field">
-            <span className="inv-create__label">
-              Property <span className="inv-create__requirement">Required</span>
-            </span>
+          <FormField label="Property" requirement="required" className="inv-create__field">
             <select
               value={propertyId}
               onChange={(e) => setPropertyId(e.target.value)}
@@ -559,12 +557,9 @@ function NewInventoryItemForm({
                 </option>
               ))}
             </select>
-          </label>
+          </FormField>
         )}
-        <label className="field inv-create__field">
-          <span className="inv-create__label">
-            Name <span className="inv-create__requirement">Required</span>
-          </span>
+        <FormField label="Name" requirement="required" className="inv-create__field">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -572,12 +567,9 @@ function NewInventoryItemForm({
             aria-invalid={clientErr === "Name is required."}
             aria-describedby={errId}
           />
-        </label>
+        </FormField>
         <div className="inv-create__grid">
-          <label className="field inv-create__field">
-            <span className="inv-create__label">
-              Unit <span className="inv-create__requirement">Required</span>
-            </span>
+          <FormField label="Unit" requirement="required" className="inv-create__field">
             <input
               value={unit}
               onChange={(e) => setUnit(e.target.value)}
@@ -594,35 +586,26 @@ function NewInventoryItemForm({
               <option value="kg" />
               <option value="L" />
             </datalist>
-          </label>
-          <label className="field inv-create__field">
-            <span className="inv-create__label">
-              SKU <span className="inv-create__requirement">Optional</span>
-            </span>
+          </FormField>
+          <FormField label="SKU" requirement="optional" className="inv-create__field">
             <input
               value={sku}
               onChange={(e) => setSku(e.target.value)}
               aria-invalid={serverErr === "SKU already exists for this property."}
               aria-describedby={errId}
             />
-          </label>
+          </FormField>
         </div>
-        <label className="field inv-create__field">
-          <span className="inv-create__label">
-            Barcode <span className="inv-create__requirement">Optional</span>
-          </span>
+        <FormField label="Barcode" requirement="optional" className="inv-create__field">
           <input
             value={barcode}
             onChange={(e) => setBarcode(e.target.value)}
             aria-invalid={serverErr === "Barcode already exists for this property."}
             aria-describedby={errId}
           />
-        </label>
+        </FormField>
         <div className="inv-create__grid">
-          <label className="field inv-create__field">
-            <span className="inv-create__label">
-              Reorder point <span className="inv-create__requirement">Required</span>
-            </span>
+          <FormField label="Reorder point" requirement="required" className="inv-create__field">
             <input
               className="mono"
               type="number"
@@ -638,11 +621,8 @@ function NewInventoryItemForm({
               Items at or below this threshold are low stock and can trigger
               procurement work.
             </span>
-          </label>
-          <label className="field inv-create__field">
-            <span className="inv-create__label">
-              Reorder target <span className="inv-create__requirement">Optional</span>
-            </span>
+          </FormField>
+          <FormField label="Reorder target" requirement="optional" className="inv-create__field">
             <input
               className="mono"
               type="number"
@@ -660,7 +640,7 @@ function NewInventoryItemForm({
               Optional desired refill level; when provided, it must be at least
               the reorder point.
             </span>
-          </label>
+          </FormField>
         </div>
         {err && (
           <p id="inventory-create-error" className="form-error" role="alert">

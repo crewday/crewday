@@ -1,10 +1,12 @@
 import { useMemo } from "react";
+import type { FieldRequirement } from "@/components/FormField";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 
 interface TimezoneSelectProps {
   value: string;
   onChange: (value: string) => void;
   required?: boolean;
+  requirement?: FieldRequirement;
 }
 
 const FALLBACK_TIMEZONES = [
@@ -46,7 +48,12 @@ type IntlWithSupportedValues = typeof Intl & {
   supportedValuesOf?: (key: "timeZone") => string[];
 };
 
-export default function TimezoneSelect({ value, onChange, required = false }: TimezoneSelectProps) {
+export default function TimezoneSelect({
+  value,
+  onChange,
+  required = false,
+  requirement,
+}: TimezoneSelectProps) {
   const options = useMemo(timezoneOptions, []);
   return (
     <SearchableSelect
@@ -55,6 +62,7 @@ export default function TimezoneSelect({ value, onChange, required = false }: Ti
       options={options}
       onChange={onChange}
       required={required}
+      requirement={requirement}
       placeholder="Search timezone"
       noResultsLabel="No timezones found"
     />

@@ -437,8 +437,30 @@ describe("<PropertyDetailPage>", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Edit property" }));
       const dialog = await screen.findByRole("dialog", { name: "Edit property" });
-      expect(within(dialog).getByRole("combobox", { name: "Country" })).toHaveValue("Portugal");
-      expect(within(dialog).getByRole("combobox", { name: "Timezone" })).toHaveValue("Europe/Lisbon");
+      expect(within(dialog).getByRole("combobox", { name: /^Country\b/ })).toHaveValue("Portugal");
+      expect(within(dialog).getByRole("combobox", { name: /^Timezone\b/ })).toHaveValue("Europe/Lisbon");
+      for (const field of [
+        within(dialog).getByLabelText("Name Required"),
+        within(dialog).getByRole("combobox", { name: /^Country\b/ }),
+        within(dialog).getByRole("combobox", { name: /^Timezone\b/ }),
+      ]) {
+        expect(field).toBeRequired();
+      }
+      for (const field of [
+        within(dialog).getByLabelText("Kind Optional"),
+        within(dialog).getByLabelText("Address line 1 Optional"),
+        within(dialog).getByLabelText("Address line 2 Optional"),
+        within(dialog).getByLabelText("City Optional"),
+        within(dialog).getByLabelText("State / province Optional"),
+        within(dialog).getByLabelText("Postal code Optional"),
+        within(dialog).getByLabelText("Locale Optional"),
+        within(dialog).getByLabelText("Default currency Optional"),
+        within(dialog).getByLabelText("Notes Optional"),
+      ]) {
+        expect(field).not.toBeRequired();
+      }
+      expect(within(dialog).getAllByText("Required")).toHaveLength(3);
+      expect(within(dialog).getAllByText("Optional")).toHaveLength(9);
       expect(within(dialog).getByRole("option", {
         name: "Primary residence - no automatic area or stay lifecycle setup",
       })).toHaveValue("residence");
@@ -452,20 +474,20 @@ describe("<PropertyDetailPage>", () => {
         name: "Mixed use - seed turnover setup for guest, staff, and other stays",
       })).toHaveValue("mixed");
       expect(within(dialog).queryByRole("option", { name: "str" })).toBeNull();
-      fireEvent.change(within(dialog).getByLabelText("Name"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
         target: { value: "Villa Aurora" },
       });
-      fireEvent.change(within(dialog).getByLabelText("Kind"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Kind\b/), {
         target: { value: "mixed" },
       });
-      fireEvent.change(within(dialog).getByLabelText("City"), {
+      fireEvent.change(within(dialog).getByLabelText(/^City\b/), {
         target: { value: "Braga" },
       });
-      fireEvent.change(within(dialog).getByRole("combobox", { name: "Timezone" }), {
+      fireEvent.change(within(dialog).getByRole("combobox", { name: /^Timezone\b/ }), {
         target: { value: "Madrid" },
       });
       expect((await within(dialog).findAllByText("Europe/Madrid")).length).toBeGreaterThan(0);
-      fireEvent.keyDown(within(dialog).getByRole("combobox", { name: "Timezone" }), { key: "Enter" });
+      fireEvent.keyDown(within(dialog).getByRole("combobox", { name: /^Timezone\b/ }), { key: "Enter" });
       fireEvent.click(within(dialog).getByRole("button", { name: "Save property" }));
 
       expect(await screen.findByRole("heading", { name: "Villa Aurora" })).toBeInTheDocument();
@@ -556,7 +578,7 @@ describe("<PropertyDetailPage>", () => {
       expect(await screen.findByRole("heading", { name: "Villa Rosa" })).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Edit property" }));
       const dialog = await screen.findByRole("dialog", { name: "Edit property" });
-      fireEvent.change(within(dialog).getByLabelText("Name"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
         target: { value: "Villa Aurora" },
       });
       fireEvent.click(within(dialog).getByRole("button", { name: "Save property" }));

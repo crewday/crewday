@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import CountrySelect from "@/components/CountrySelect";
+import FormField from "@/components/FormField";
 import TimezoneSelect from "@/components/TimezoneSelect";
 import type { Property } from "@/types/api";
 import type { PropertyAddress, PropertyRecord } from "./types";
@@ -237,16 +238,14 @@ export default function PropertyEditDialog({
           {mode === "create" ? "Add property" : "Edit property"}
         </h3>
         <div className="form-grid form-grid--two">
-          <label className="field">
-            <span>Name</span>
+          <FormField label="Name" requirement="required">
             <input
               value={draft.name}
               onChange={(event) => setDraft({ ...draft, name: event.currentTarget.value })}
               required
             />
-          </label>
-          <label className="field">
-            <span>Kind</span>
+          </FormField>
+          <FormField label="Kind" requirement="optional">
             <select
               value={draft.kind}
               onChange={(event) =>
@@ -257,76 +256,70 @@ export default function PropertyEditDialog({
                 <option key={kind.value} value={kind.value}>{kind.label}</option>
               ))}
             </select>
-          </label>
-          <label className="field">
-            <span>Address line 1</span>
+          </FormField>
+          <FormField label="Address line 1" requirement="optional">
             <input
               value={draft.line1}
               onChange={(event) => setDraft({ ...draft, line1: event.currentTarget.value })}
             />
-          </label>
-          <label className="field">
-            <span>Address line 2</span>
+          </FormField>
+          <FormField label="Address line 2" requirement="optional">
             <input
               value={draft.line2}
               onChange={(event) => setDraft({ ...draft, line2: event.currentTarget.value })}
             />
-          </label>
-          <label className="field">
-            <span>City</span>
+          </FormField>
+          <FormField label="City" requirement="optional">
             <input
               value={draft.city}
               onChange={(event) => setDraft({ ...draft, city: event.currentTarget.value })}
             />
-          </label>
-          <label className="field">
-            <span>State / province</span>
+          </FormField>
+          <FormField label="State / province" requirement="optional">
             <input
               value={draft.state_province}
               onChange={(event) => setDraft({ ...draft, state_province: event.currentTarget.value })}
             />
-          </label>
-          <label className="field">
-            <span>Postal code</span>
+          </FormField>
+          <FormField label="Postal code" requirement="optional">
             <input
               value={draft.postal_code}
               onChange={(event) => setDraft({ ...draft, postal_code: event.currentTarget.value })}
             />
-          </label>
+          </FormField>
           <CountrySelect
             value={draft.country}
             onChange={(country) => setDraft({ ...draft, country })}
             required
+            requirement="required"
           />
           <TimezoneSelect
             value={draft.timezone}
             onChange={(timezone) => setDraft({ ...draft, timezone })}
             required
+            requirement="required"
           />
-          <label className="field">
-            <span>Locale</span>
+          <FormField label="Locale" requirement="optional">
             <input
               value={draft.locale}
               onChange={(event) => setDraft({ ...draft, locale: event.currentTarget.value })}
             />
-          </label>
-          <label className="field">
-            <span>Default currency</span>
+          </FormField>
+          <FormField label="Default currency" requirement="optional">
             <input
               value={draft.default_currency}
               onChange={(event) => setDraft({ ...draft, default_currency: event.currentTarget.value })}
               maxLength={3}
             />
-          </label>
+          </FormField>
         </div>
-        <label className="field">
-          <span>Notes</span>
+        <FormField label="Notes" requirement="optional">
           <textarea
             value={draft.property_notes_md}
             onChange={(event) => setDraft({ ...draft, property_notes_md: event.currentTarget.value })}
             rows={5}
           />
-        </label>
+        </FormField>
         {error && <p className="form-error" role="alert">{error}</p>}
         <div className="modal__actions">
           <button

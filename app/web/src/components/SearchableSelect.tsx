@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import FormField, { type FieldRequirement } from "@/components/FormField";
 
 export interface SearchableSelectOption {
   value: string;
@@ -12,6 +13,7 @@ interface SearchableSelectProps {
   options: readonly SearchableSelectOption[];
   onChange: (value: string) => void;
   required?: boolean;
+  requirement?: FieldRequirement;
   placeholder?: string;
   noResultsLabel?: string;
 }
@@ -24,6 +26,7 @@ export default function SearchableSelect({
   options,
   onChange,
   required = false,
+  requirement,
   placeholder = "Search...",
   noResultsLabel = "No matches",
 }: SearchableSelectProps) {
@@ -67,8 +70,11 @@ export default function SearchableSelect({
   }
 
   return (
-    <label className="field searchable-select">
-      <span>{label}</span>
+    <FormField
+      label={label}
+      requirement={requirement ?? (required ? "required" : "optional")}
+      className="searchable-select"
+    >
       <input
         ref={inputRef}
         id={fieldId}
@@ -133,7 +139,7 @@ export default function SearchableSelect({
           </ul>
         </div>
       )}
-    </label>
+    </FormField>
   );
 }
 

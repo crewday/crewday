@@ -1,10 +1,12 @@
 import { useMemo } from "react";
+import type { FieldRequirement } from "@/components/FormField";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 
 interface CountrySelectProps {
   value: string;
   onChange: (value: string) => void;
   required?: boolean;
+  requirement?: FieldRequirement;
 }
 
 const COUNTRY_CODES = [
@@ -34,7 +36,12 @@ type IntlWithDisplayNames = typeof Intl & {
   DisplayNames?: new (locales: string[], options: { type: "region" }) => RegionDisplayNames;
 };
 
-export default function CountrySelect({ value, onChange, required = false }: CountrySelectProps) {
+export default function CountrySelect({
+  value,
+  onChange,
+  required = false,
+  requirement,
+}: CountrySelectProps) {
   const options = useMemo(countryOptions, []);
   return (
     <SearchableSelect
@@ -43,6 +50,7 @@ export default function CountrySelect({ value, onChange, required = false }: Cou
       options={options}
       onChange={onChange}
       required={required}
+      requirement={requirement}
       placeholder="Search country"
       noResultsLabel="No countries found"
     />
