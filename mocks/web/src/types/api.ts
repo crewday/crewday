@@ -1188,6 +1188,13 @@ export interface AgentPreference {
   hard_cap: number;
 }
 
+export type UpstreamPiiConsentToken = "legal_name" | "email" | "phone" | "address";
+
+export interface WorkspaceUpstreamPiiConsent {
+  upstream_pii_consent: UpstreamPiiConsentToken[];
+  available_tokens: UpstreamPiiConsentToken[];
+}
+
 export interface AgentPreferenceRevision {
   revision_number: number;
   body_md: string;

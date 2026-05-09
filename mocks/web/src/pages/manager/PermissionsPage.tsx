@@ -2,18 +2,26 @@ import { useEffect, useState } from "react";
 import DeskPage from "@/components/DeskPage";
 import PageTabs, { type PageTab } from "@/components/PageTabs";
 import GroupsTab from "./permissions/GroupsTab";
+import PrivacyTab from "./permissions/PrivacyTab";
 import RulesTab from "./permissions/RulesTab";
 
-type Tab = "groups" | "rules";
+type Tab = "groups" | "rules" | "privacy";
 
 const TABS = [
   { key: "groups", label: "Groups", panelId: "permissions-groups-panel" },
   { key: "rules", label: "Rules", panelId: "permissions-rules-panel" },
+  { key: "privacy", label: "Privacy", panelId: "permissions-privacy-panel" },
 ] satisfies Array<PageTab & { key: Tab }>;
 
 function tabFromHash(hash: string): Tab {
   const key = hash.replace(/^#/, "");
   return TABS.find((tab) => tab.key === key)?.key ?? "groups";
+}
+
+function renderTabPanel(tab: Tab) {
+  if (tab === "rules") return <RulesTab />;
+  if (tab === "privacy") return <PrivacyTab />;
+  return <GroupsTab />;
 }
 
 export default function PermissionsPage() {
@@ -40,7 +48,7 @@ export default function PermissionsPage() {
         onSelect={(next) => setTab(tabFromHash(`#${next}`))}
       />
       <div id={`permissions-${tab}-panel`} role="tabpanel">
-        {tab === "groups" ? <GroupsTab /> : <RulesTab />}
+        {renderTabPanel(tab)}
       </div>
     </DeskPage>
   );

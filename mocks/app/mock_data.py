@@ -4139,6 +4139,14 @@ AGENT_PREFERENCES: dict[tuple[str, str], dict[str, Any]] = {
     },
 }
 
+UPSTREAM_PII_CONSENT_TOKENS: tuple[str, ...] = ("legal_name", "email", "phone", "address")
+
+WORKSPACE_UPSTREAM_PII_CONSENT: dict[str, list[str]] = {
+    "ws-bernard": [],
+    "ws-vincent": ["legal_name", "email"],
+    "ws-cleanco": ["phone"],
+}
+
 AGENT_PREFERENCE_REVISIONS: dict[tuple[str, str], list[dict[str, Any]]] = {
     ("workspace", "ws-bernard"): [
         {

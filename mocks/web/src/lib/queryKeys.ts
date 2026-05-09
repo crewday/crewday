@@ -133,6 +133,8 @@ export const qk = {
   chatChannelProviders: () => ["chat", "channels", "providers"] as const,
   agentPrefs: (scope: "workspace" | "property" | "me", id?: string) =>
     ["agent_preferences", scope, id ?? ""] as const,
+  agentUpstreamPiiConsent: () =>
+    ["agent_preferences", "workspace", "upstream_pii_consent"] as const,
   workspaceUsage: () => ["workspace", "usage"] as const,
   // §14 — /admin shell.
   adminMe: () => ["admin", "me"] as const,

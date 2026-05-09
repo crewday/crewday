@@ -634,6 +634,34 @@ async def api_agent_prefs_workspace_set(request: Request) -> Response:
     return await _save_pref(request, "workspace", md.DEFAULT_WORKSPACE_ID)
 
 
+def _upstream_pii_consent_envelope(workspace_id: str) -> dict[str, list[str]]:
+    return {
+        "upstream_pii_consent": list(md.WORKSPACE_UPSTREAM_PII_CONSENT.get(workspace_id, [])),
+        "available_tokens": list(md.UPSTREAM_PII_CONSENT_TOKENS),
+    }
+
+
+@app.get("/api/v1/agent_preferences/workspace/upstream_pii_consent")
+def api_workspace_upstream_pii_consent(request: Request) -> Response:
+    return ok(_upstream_pii_consent_envelope(current_workspace_id(request)))
+
+
+@app.put("/api/v1/agent_preferences/workspace/upstream_pii_consent")
+async def api_workspace_upstream_pii_consent_set(request: Request) -> Response:
+    body = await request.json()
+    raw_tokens = (body or {}).get("upstream_pii_consent")
+    if not isinstance(raw_tokens, list):
+        return ok({"detail": "upstream_pii_consent must be a list"}, status_code=422)
+    valid_tokens = set(md.UPSTREAM_PII_CONSENT_TOKENS)
+    tokens = [token for token in raw_tokens if isinstance(token, str)]
+    if len(tokens) != len(raw_tokens) or any(token not in valid_tokens for token in tokens):
+        return ok({"detail": "invalid upstream_pii_consent token"}, status_code=422)
+    ordered_tokens = [token for token in md.UPSTREAM_PII_CONSENT_TOKENS if token in set(tokens)]
+    workspace_id = current_workspace_id(request)
+    md.WORKSPACE_UPSTREAM_PII_CONSENT[workspace_id] = ordered_tokens
+    return ok(_upstream_pii_consent_envelope(workspace_id))
+
+
 @app.get("/api/v1/agent_preferences/property/{pid}")
 def api_agent_prefs_property(pid: str, request: Request) -> Response:
     md.property_by_id(pid)  # 404s via StopIteration if missing
