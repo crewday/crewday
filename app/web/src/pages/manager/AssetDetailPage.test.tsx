@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
@@ -168,10 +168,12 @@ beforeEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("acme");
+  window.history.replaceState(null, "", "/");
 });
 
 afterEach(() => {
   cleanup();
+  window.history.replaceState(null, "", "/");
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.restoreAllMocks();
@@ -180,7 +182,7 @@ afterEach(() => {
 describe("<AssetDetailPage>", () => {
   it("wraps manager asset detail routes in the scope-view permission guard before the manager shell", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="scope\.view" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/asset\/:aid" element={<AssetDetailPage \/>} \/>[\s\S]*?<Route path="\/w\/:slug\/asset\/:aid" element={<AssetDetailPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="scope\.view" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="asset\/:aid" element={<AssetDetailPage \/>} \/>/,
     );
   });
 
@@ -191,18 +193,92 @@ describe("<AssetDetailPage>", () => {
 
       expect(screen.getByText(/Loading/)).toBeInTheDocument();
       expect(await screen.findByText("Villa Rosa / Pump room")).toBeInTheDocument();
+      const tablist = screen.getByRole("tablist", { name: "Asset sections" });
+      expect(tablist).toHaveClass("page-tabs");
+      for (const label of ["Overview", "Actions", "Documents", "History"]) {
+        expect(within(tablist).getByRole("tab", { name: label })).toHaveClass("page-tabs__tab");
+      }
+      expect(within(tablist).getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
       expect(screen.getByRole("heading", { name: "Details" })).toBeInTheDocument();
       expect(screen.getByText("SN-123")).toBeInTheDocument();
       expect(screen.getByText("1299.00 EUR")).toBeInTheDocument();
       expect(screen.getByText("Clean filter")).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Overview" })).not.toBeInTheDocument();
 
-      fireEvent.click(screen.getByText("Documents"));
+      fireEvent.click(within(tablist).getByRole("tab", { name: "Documents" }));
+      expect(window.location.hash).toBe("#documents");
       expect(screen.getByText("Pump manual")).toBeInTheDocument();
       expect(screen.getByText("418 KB")).toBeInTheDocument();
 
-      fireEvent.click(screen.getByText("History"));
+      fireEvent.click(within(tablist).getByRole("tab", { name: "History" }));
+      expect(window.location.hash).toBe("#history");
       expect(screen.getByText("Pump monthly service")).toBeInTheDocument();
       expect(fake.requests[0]).toEqual({ url: "/w/acme/api/v1/assets/asset_1", method: "GET" });
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("selects asset sections from direct hashes with overview fallback", async () => {
+    const fake = installFetch();
+    try {
+      window.history.replaceState(null, "", "/asset/asset_1#actions");
+      render(<Harness />);
+
+      const tablist = await screen.findByRole("tablist", { name: "Asset sections" });
+      expect(within(tablist).getByRole("tab", { name: "Actions" })).toHaveAttribute("aria-selected", "true");
+      expect(document.getElementById("asset-actions-panel")).toHaveAttribute("role", "tabpanel");
+      expect(screen.getByRole("heading", { name: "Maintenance actions" })).toBeInTheDocument();
+
+      window.history.pushState(null, "", "/asset/asset_1#documents");
+      fireEvent(window, new HashChangeEvent("hashchange"));
+      await waitFor(() => {
+        expect(within(tablist).getByRole("tab", { name: "Documents" })).toHaveAttribute("aria-selected", "true");
+      });
+      expect(screen.getByText("Pump manual")).toBeInTheDocument();
+
+      window.history.pushState(null, "", "/asset/asset_1#history");
+      fireEvent(window, new HashChangeEvent("hashchange"));
+      await waitFor(() => {
+        expect(within(tablist).getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
+      });
+      expect(screen.getByText("Pump monthly service")).toBeInTheDocument();
+
+      window.history.pushState(null, "", "/asset/asset_1#missing");
+      fireEvent(window, new HashChangeEvent("hashchange"));
+      await waitFor(() => {
+        expect(within(tablist).getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+      });
+      expect(screen.getByRole("heading", { name: "Details" })).toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("follows Back and Forward through clicked asset section hashes", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      const tablist = await screen.findByRole("tablist", { name: "Asset sections" });
+      fireEvent.click(within(tablist).getByRole("tab", { name: "Actions" }));
+      fireEvent.click(within(tablist).getByRole("tab", { name: "Documents" }));
+      expect(window.location.hash).toBe("#documents");
+      expect(screen.getByText("Pump manual")).toBeInTheDocument();
+
+      window.history.back();
+      await waitFor(() => {
+        expect(window.location.hash).toBe("#actions");
+        expect(within(tablist).getByRole("tab", { name: "Actions" })).toHaveAttribute("aria-selected", "true");
+      });
+      expect(screen.getByRole("heading", { name: "Maintenance actions" })).toBeInTheDocument();
+
+      window.history.forward();
+      await waitFor(() => {
+        expect(window.location.hash).toBe("#documents");
+        expect(within(tablist).getByRole("tab", { name: "Documents" })).toHaveAttribute("aria-selected", "true");
+      });
+      expect(screen.getByText("Pump manual")).toBeInTheDocument();
     } finally {
       fake.restore();
     }

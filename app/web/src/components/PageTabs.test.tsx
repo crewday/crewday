@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import PageTabs, { type PageTab } from "./PageTabs";
 
 const TABS: PageTab[] = [
@@ -12,6 +12,10 @@ const TABS: PageTab[] = [
 function renderHashTabs(defaultKey = "overview") {
   return render(<PageTabs ariaLabel="Property sections" tabs={TABS} hashBacked defaultKey={defaultKey} />);
 }
+
+beforeEach(() => {
+  window.history.replaceState(null, "", "/");
+});
 
 afterEach(() => {
   window.history.replaceState(null, "", "/");
@@ -63,6 +67,26 @@ describe("<PageTabs>", () => {
     expect(window.location.hash).toBe("#billing");
     expect(onSelect).toHaveBeenCalledWith("billing");
     expect(screen.getByRole("tab", { name: "Billing" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("follows browser Back and Forward hash navigation", async () => {
+    renderHashTabs();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Billing" }));
+    expect(screen.getByRole("tab", { name: "Billing" })).toHaveAttribute("aria-selected", "true");
+
+    window.history.back();
+    await waitFor(() => {
+      expect(window.location.hash).toBe("#activity");
+      expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute("aria-selected", "true");
+    });
+
+    window.history.forward();
+    await waitFor(() => {
+      expect(window.location.hash).toBe("#billing");
+      expect(screen.getByRole("tab", { name: "Billing" })).toHaveAttribute("aria-selected", "true");
+    });
   });
 
   it("supports Left, Right, Home, and End keyboard navigation", () => {

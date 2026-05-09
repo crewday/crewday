@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import PageTabs, { type PageTab } from "@/components/PageTabs";
 import { Chip, Loading } from "@/components/common";
 import { AssetIcon } from "@/components/AssetIcon";
 import type {
@@ -75,10 +76,37 @@ function dueTone(iso: string | null): "moss" | "sand" | "rust" | "ghost" {
 
 type Tab = "overview" | "actions" | "documents" | "history";
 
+function panelIdFor(tab: Tab): string {
+  return `asset-${tab}-panel`;
+}
+
+const ASSET_TABS = [
+  { key: "overview", label: "Overview", panelId: panelIdFor("overview") },
+  { key: "actions", label: "Actions", panelId: panelIdFor("actions") },
+  { key: "documents", label: "Documents", panelId: panelIdFor("documents") },
+  { key: "history", label: "History", panelId: panelIdFor("history") },
+] satisfies Array<PageTab & { key: Tab }>;
+
+function tabFromHash(hash: string): Tab {
+  const key = hash.replace(/^#/, "");
+  return ASSET_TABS.find((tab) => tab.key === key)?.key ?? "overview";
+}
+
 export default function AssetDetailPage() {
   const { aid = "" } = useParams<{ aid: string }>();
-  const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [activeTab, setActiveTab] = useState<Tab>(() => tabFromHash(window.location.hash));
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const syncFromHash = () => setActiveTab(tabFromHash(window.location.hash));
+    syncFromHash();
+    window.addEventListener("hashchange", syncFromHash);
+    return () => window.removeEventListener("hashchange", syncFromHash);
+  }, []);
+
+  function selectTab(next: string): void {
+    setActiveTab(tabFromHash(`#${next}`));
+  }
 
   const detailQ = useQuery({
     queryKey: qk.asset(aid),
@@ -119,36 +147,45 @@ export default function AssetDetailPage() {
       sub={subText}
       actions={<button className="btn btn--ghost">Edit</button>}
     >
-      <nav className="tabs tabs--h">
-        {(["overview", "actions", "documents", "history"] as const).map((t) => (
-          <a
-            key={t}
-            className={"tab-link" + (activeTab === t ? " tab-link--active" : "")}
-            onClick={() => setActiveTab(t)}
-          >
-            {t.charAt(0).toUpperCase() + t.slice(1)}
-          </a>
-        ))}
-      </nav>
+      <PageTabs
+        ariaLabel="Asset sections"
+        tabs={ASSET_TABS}
+        hashBacked
+        defaultKey="overview"
+        selectedKey={activeTab}
+        onSelect={selectTab}
+      />
 
       {activeTab === "overview" && (
-        <OverviewTab
-          asset={asset}
-          assetType={asset_type}
-          sortedActions={sortedActions}
-        />
+        <div id={panelIdFor("overview")} role="tabpanel">
+          <OverviewTab
+            asset={asset}
+            assetType={asset_type}
+            sortedActions={sortedActions}
+          />
+        </div>
       )}
 
       {activeTab === "actions" && (
-        <ActionsTab
-          actions={sortedActions}
-          completeMut={completeMut}
-        />
+        <div id={panelIdFor("actions")} role="tabpanel">
+          <ActionsTab
+            actions={sortedActions}
+            completeMut={completeMut}
+          />
+        </div>
       )}
 
-      {activeTab === "documents" && <DocumentsTab documents={documents} />}
+      {activeTab === "documents" && (
+        <div id={panelIdFor("documents")} role="tabpanel">
+          <DocumentsTab documents={documents} />
+        </div>
+      )}
 
-      {activeTab === "history" && <HistoryTab tasks={linked_tasks} />}
+      {activeTab === "history" && (
+        <div id={panelIdFor("history")} role="tabpanel">
+          <HistoryTab tasks={linked_tasks} />
+        </div>
+      )}
     </DeskPage>
   );
 }
