@@ -353,14 +353,14 @@ export default function PropertiesPage() {
   }
   if (propsQ.data.length === 0) {
     return (
-      <DeskPage title="Properties">
+      <DeskPage title="Properties" actions={createPropertyAction}>
         <section className="empty-state" aria-labelledby="properties-empty-title">
           <h2 id="properties-empty-title">No properties visible</h2>
           <p>
             Properties added to this workspace or shared with it will appear here.
           </p>
           {canCreateProperty ? (
-            <button type="button" className="btn btn--moss" onClick={openCreateProperty}>Add property</button>
+            <p className="muted">Create the first property to start tracking stays, closures, and work areas.</p>
           ) : isCheckingCreatePermission ? (
             <p className="muted" role="status" aria-live="polite">Checking whether you can add a property.</p>
           ) : createPermissionLookupFailed ? (

@@ -317,7 +317,10 @@ describe("<PropertiesPage>", () => {
 
       expect(await screen.findByRole("heading", { name: "No properties visible" })).toBeInTheDocument();
       expect(screen.getByText("Properties added to this workspace or shared with it will appear here.")).toBeInTheDocument();
-      expect(await screen.findByRole("button", { name: "Add property" })).toBeInTheDocument();
+      const header = screen.getByRole("banner");
+      expect(await within(header).findByRole("button", { name: "+ Add property" })).toBeEnabled();
+      expect(screen.getByText("Create the first property to start tracking stays, closures, and work areas.")).toBeInTheDocument();
+      expect(within(screen.getByRole("region", { name: "No properties visible" })).queryByRole("button", { name: /Add property/ })).toBeNull();
       expect(screen.queryByRole("heading", { name: "Villa Rosa" })).toBeNull();
       expect(fake.calls).not.toContain("/w/acme/api/v1/properties/prop_1/share");
       expect(fake.calls).not.toContain("/w/acme/api/v1/stays/reservations?limit=500");
@@ -333,7 +336,8 @@ describe("<PropertiesPage>", () => {
     try {
       render(<Harness />);
 
-      fireEvent.click(await screen.findByRole("button", { name: "Add property" }));
+      expect(await screen.findByRole("heading", { name: "No properties visible" })).toBeInTheDocument();
+      fireEvent.click(await within(screen.getByRole("banner")).findByRole("button", { name: "+ Add property" }));
       const dialog = await screen.findByRole("dialog", { name: "Add property" });
       expect(within(dialog).getByRole("combobox", { name: /^Country\b/ })).toHaveValue("Portugal");
       expect(within(dialog).getByRole("combobox", { name: /^Timezone\b/ })).toHaveValue("Europe/Lisbon");
@@ -442,7 +446,8 @@ describe("<PropertiesPage>", () => {
       expect(
         await screen.findByText("Ask an owner or manager to add a property or share one with this workspace."),
       ).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Add property" })).toBeNull();
+      expect(within(screen.getByRole("banner")).queryByRole("button", { name: /Add property/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /Add property/ })).toBeNull();
       expect(screen.queryByText("Failed to load.")).toBeNull();
     } finally {
       fake.restore();
@@ -457,7 +462,8 @@ describe("<PropertiesPage>", () => {
       expect(await screen.findByRole("heading", { name: "No properties visible" })).toBeInTheDocument();
       expect(screen.getByRole("status")).toHaveTextContent("Checking whether you can add a property.");
       expect(screen.queryByText("Ask an owner or manager to add a property or share one with this workspace.")).toBeNull();
-      expect(screen.queryByRole("button", { name: "Add property" })).toBeNull();
+      expect(within(screen.getByRole("banner")).queryByRole("button", { name: /Add property/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /Add property/ })).toBeNull();
     } finally {
       fake.restore();
     }
