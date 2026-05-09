@@ -126,6 +126,7 @@ interface FetchRequest {
 }
 
 interface InstallFetchOptions {
+  assets?: Asset[];
   createStatus?: number;
   createBody?: unknown;
   documentUploadStatuses?: number[];
@@ -176,7 +177,7 @@ function createdAsset(body: Record<string, unknown>): Asset {
 
 function installFetch(options: InstallFetchOptions = {}) {
   const original = globalThis.fetch;
-  const assets = [...ASSETS];
+  const assets = [...(options.assets ?? ASSETS)];
   const requests: FetchRequest[] = [];
   const documentUploadStatuses = [...(options.documentUploadStatuses ?? [])];
   const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
@@ -326,6 +327,44 @@ describe("<AssetsPage>", () => {
       expect(within(table).queryByRole("link", { name: /Pool pump/ })).not.toBeInTheDocument();
       expect(within(table).getByText("Smart lock")).toBeInTheDocument();
       expect(screen.getAllByText("Villa Rosa").length).toBeGreaterThan(0);
+    } finally {
+      restore();
+    }
+  });
+
+  it("renders a reusable empty state when no assets exist", async () => {
+    const { restore } = installFetch({ assets: [] });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByRole("heading", { name: "No assets listed yet" })).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "Create an asset to track equipment, appliances, warranties, manuals, and QR labels.",
+        ),
+      ).toBeInTheDocument();
+      expect(document.querySelector(".empty-state")).toBeInTheDocument();
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
+  it("renders a filtered empty state when active filters have no matches", async () => {
+    const { restore } = installFetch();
+    try {
+      render(<Harness initial="/w/acme/assets?category=pool&property_id=prop_1" />);
+
+      expect(
+        await screen.findByRole("heading", { name: "No assets match these filters" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "Clear the active category or property filter to see the full asset list.",
+        ),
+      ).toBeInTheDocument();
+      expect(document.querySelector(".empty-state")).toBeInTheDocument();
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
     } finally {
       restore();
     }

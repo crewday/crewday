@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { fetchJson, resolveApiPath } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
-import { Chip, FilterChipGroup, Loading } from "@/components/common";
+import { Chip, EmptyState, FilterChipGroup, Loading } from "@/components/common";
 import { AssetIcon } from "@/components/AssetIcon";
 import { ASSET_CONDITION_TONE, ASSET_STATUS_TONE } from "@/lib/tones";
 import type { Asset, AssetType, Property } from "@/types/api";
@@ -114,6 +114,8 @@ export default function AssetsPage() {
     label: p.name,
     tone: p.color,
   }));
+  const noAssets = assetsQ.data.length === 0;
+  const noFilteredAssets = !noAssets && filtered.length === 0;
 
   return (
     <DeskPage title="Assets" sub={sub} actions={actions}>
@@ -134,41 +136,55 @@ export default function AssetsPage() {
           options={propertyOptions}
         />
 
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Asset</th>
-              <th>Type</th>
-              <th>Property</th>
-              <th>Area</th>
-              <th>Condition</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((a) => {
-              const at = a.asset_type_id ? typesById.get(a.asset_type_id) : null;
-              const prop = propsById.get(a.property_id);
-              const makeLine = [a.make, a.model].filter(Boolean).join(" ");
-              return (
-                <tr key={a.id}>
-                  <td>
-                    <Link to={"/asset/" + a.id} className="link asset-name-link">
-                      {at && <AssetIcon name={at.icon_name} />}
-                      <strong>{a.name}</strong>
-                    </Link>
-                    {makeLine && <span className="table__sub">{makeLine}</span>}
-                  </td>
-                  <td>{at?.name ?? <span className="muted">--</span>}</td>
-                  <td>{prop && <Chip tone={prop.color} size="sm">{prop.name}</Chip>}</td>
-                  <td>{a.area ?? <span className="muted">--</span>}</td>
-                  <td><Chip tone={ASSET_CONDITION_TONE[a.condition]} size="sm">{a.condition.replace("_", " ")}</Chip></td>
-                  <td><Chip tone={ASSET_STATUS_TONE[a.status]} size="sm">{a.status.replace("_", " ")}</Chip></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        {noAssets ? (
+          <EmptyState
+            title="No assets listed yet"
+            copy="Create an asset to track equipment, appliances, warranties, manuals, and QR labels."
+          />
+        ) : null}
+        {noFilteredAssets ? (
+          <EmptyState
+            title="No assets match these filters"
+            copy="Clear the active category or property filter to see the full asset list."
+          />
+        ) : null}
+        {filtered.length > 0 ? (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Type</th>
+                <th>Property</th>
+                <th>Area</th>
+                <th>Condition</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((a) => {
+                const at = a.asset_type_id ? typesById.get(a.asset_type_id) : null;
+                const prop = propsById.get(a.property_id);
+                const makeLine = [a.make, a.model].filter(Boolean).join(" ");
+                return (
+                  <tr key={a.id}>
+                    <td>
+                      <Link to={"/asset/" + a.id} className="link asset-name-link">
+                        {at && <AssetIcon name={at.icon_name} />}
+                        <strong>{a.name}</strong>
+                      </Link>
+                      {makeLine && <span className="table__sub">{makeLine}</span>}
+                    </td>
+                    <td>{at?.name ?? <span className="muted">--</span>}</td>
+                    <td>{prop && <Chip tone={prop.color} size="sm">{prop.name}</Chip>}</td>
+                    <td>{a.area ?? <span className="muted">--</span>}</td>
+                    <td><Chip tone={ASSET_CONDITION_TONE[a.condition]} size="sm">{a.condition.replace("_", " ")}</Chip></td>
+                    <td><Chip tone={ASSET_STATUS_TONE[a.status]} size="sm">{a.status.replace("_", " ")}</Chip></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : null}
       </section>
     </DeskPage>
   );
