@@ -31,6 +31,15 @@ LABEL_NAMES = {
     ".toml": "TOML",
     ".ts": "TypeScript",
     ".tsx": "React TSX",
+    "/": "Repo root",
+    "app/": "App",
+    "cli/": "CLI",
+    "deploy/": "Deploy",
+    "migrations/": "Migrations",
+    "mocks/": "Mocks",
+    "scripts/": "Scripts",
+    "site/": "Website",
+    "tests/": "Tests",
     "other": "Other",
 }
 
@@ -50,6 +59,11 @@ PREFERRED_COLORS = {
     ".pot": "#D19AB7",
     ".mo": "#8E9AAF",
     "": "#A0A6A8",
+    "App + website": "#356D9D",
+    "Tests": "#C44E52",
+    "Mocks": "#D98C2B",
+    "Supporting code": "#7F62B3",
+    "Other": "#D0D4D6",
     "other": "#D0D4D6",
 }
 
@@ -78,17 +92,70 @@ def series_colors(labels: list[str]) -> list[str]:
     return colors
 
 
+def parse_group(raw: str) -> tuple[str, list[str]]:
+    name, separator, members = raw.partition("=")
+    if not separator or not name or not members:
+        raise argparse.ArgumentTypeError(
+            'groups must use the form "Display label=source-a,source-b"'
+        )
+    return name, [member for member in members.split(",") if member]
+
+
+def apply_groups(
+    labels: list[str],
+    y: numpy.ndarray,
+    groups: list[tuple[str, list[str]]],
+) -> tuple[list[str], numpy.ndarray]:
+    if not groups:
+        return labels, y
+
+    label_indexes = {label: index for index, label in enumerate(labels)}
+    grouped_labels = []
+    grouped_rows = []
+    used_indexes: set[int] = set()
+
+    for group_label, members in groups:
+        missing = [member for member in members if member not in label_indexes]
+        if missing:
+            raise ValueError(
+                f"group {group_label!r} references unknown labels: {', '.join(missing)}"
+            )
+        indexes = [
+            label_indexes[member] for member in members if member in label_indexes
+        ]
+        grouped_labels.append(group_label)
+        grouped_rows.append(
+            numpy.sum(numpy.array([y[index] for index in indexes]), axis=0)
+        )
+        used_indexes.update(indexes)
+
+    remainder_indexes = [
+        index for index, _label in enumerate(labels) if index not in used_indexes
+    ]
+    if remainder_indexes:
+        grouped_labels.append("Other")
+        grouped_rows.append(
+            numpy.sum(numpy.array([y[index] for index in remainder_indexes]), axis=0)
+        )
+
+    return grouped_labels, numpy.array(grouped_rows)
+
+
 def render_stack_plot(
     input_path: Path,
     output_path: Path,
     max_n: int,
     normalize: bool,
+    title: str,
+    legend_title: str,
+    groups: list[tuple[str, list[str]]],
 ) -> None:
     with input_path.open() as input_file:
         data = json.load(input_file)
 
     y = numpy.array(data["y"])
     labels = data["labels"]
+    labels, y = apply_groups(labels, y, groups)
 
     if y.shape[0] > max_n:
         ranked = sorted(range(len(labels)), key=lambda j: max(y[j]), reverse=True)
@@ -96,7 +163,7 @@ def render_stack_plot(
         other_sum = numpy.sum(other_rows, axis=0)
         top_ranked = sorted(ranked[:max_n], key=lambda j: y[j][-1], reverse=True)
         y = numpy.array([y[j] for j in top_ranked] + [other_sum])
-        labels = [labels[j] for j in top_ranked] + ["other"]
+        labels = [labels[j] for j in top_ranked] + ["Other"]
 
     if normalize:
         totals = numpy.sum(y, axis=0)
@@ -126,10 +193,10 @@ def render_stack_plot(
         bbox_to_anchor=(1.01, 0.5),
         frameon=False,
         fontsize=9,
-        title="Language",
+        title=legend_title,
         title_fontsize=10,
     )
-    axis.set_title("Lines of code by language", loc="left", pad=14, fontsize=18)
+    axis.set_title(title, loc="left", pad=14, fontsize=18)
     axis.set_xlabel("")
     axis.grid(axis="y", color="#D7DEE2", linewidth=0.8)
     axis.grid(axis="x", visible=False)
@@ -181,6 +248,23 @@ def main() -> None:
         action="store_true",
         help="Normalize the plot to 100%%",
     )
+    parser.add_argument(
+        "--title",
+        default="Lines of code by language",
+        help="Chart title (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--legend-title",
+        default="Language",
+        help="Legend title (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--group",
+        action="append",
+        default=[],
+        type=parse_group,
+        help='Aggregate input labels, for example "Product=app/,site/"',
+    )
     parser.add_argument("input_path", type=Path)
     args = parser.parse_args()
 
@@ -189,6 +273,9 @@ def main() -> None:
         output_path=args.outfile,
         max_n=args.max_n,
         normalize=args.normalize,
+        title=args.title,
+        legend_title=args.legend_title,
+        groups=args.group,
     )
 
 

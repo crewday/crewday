@@ -135,6 +135,8 @@ full list and rationale):
 
 ![LOC by language over time](docs/loc-by-language.svg)
 
+![LOC by area over time](docs/loc-by-area.svg)
+
 _Updated via `scripts/update-loc-chart.sh`._
 
 ## License

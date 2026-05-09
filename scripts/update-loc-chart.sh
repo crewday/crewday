@@ -8,6 +8,7 @@
 # Outputs:
 #   .loc-stats/*.json        intermediate analysis data (gitignored)
 #   docs/loc-by-language.svg the chart embedded in README.md
+#   docs/loc-by-area.svg     app/website, tests, mocks, and supporting code
 #
 # Requires: git-of-theseus (pip install git-of-theseus), svgo (npm install -g svgo)
 
@@ -16,6 +17,7 @@ set -euo pipefail
 REPO_ROOT="${REPO_ROOT:-$(git -C "$(dirname "$0")/.." rev-parse --show-toplevel)}"
 STATS_DIR="$REPO_ROOT/.loc-stats"
 OUT_SVG="$REPO_ROOT/docs/loc-by-language.svg"
+AREA_OUT_SVG="$REPO_ROOT/docs/loc-by-area.svg"
 BRANCH="${BRANCH:-main}"
 INTERVAL="${INTERVAL:-86400}"
 
@@ -109,6 +111,17 @@ echo "Generating chart -> $OUT_SVG"
     --outfile "$OUT_SVG" \
     --max-n 10 \
     "$STATS_DIR/exts.json"
+
+echo "Generating app/test chart -> $AREA_OUT_SVG"
+"$PYTHON" "$REPO_ROOT/scripts/render-loc-stack-plot.py" \
+    --outfile "$AREA_OUT_SVG" \
+    --title "Lines of code by area" \
+    --legend-title "Area" \
+    --group "App + website=app/,site/" \
+    --group "Tests=tests/" \
+    --group "Mocks=mocks/" \
+    --group "Supporting code=/,cli/,deploy/,migrations/,scripts/" \
+    "$STATS_DIR/dirs.json"
 
 # SVGO="$(command -v svgo 2>/dev/null || true)"
 # if [ -n "$SVGO" ]; then
