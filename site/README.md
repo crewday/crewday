@@ -77,3 +77,22 @@ On the shared dev host the same compose file also joins Caddy to the
 external `traefik-proxy` network and registers `dev.crew.day` with the
 `badger@file` middleware. Pangolin needs a matching `dev.crew.day`
 resource. The app dev stack lives separately at `dev-app.crew.day`.
+
+## Local web hot reload
+
+Use the dev override when editing `site/web` source files:
+
+```bash
+docker compose -f site/docker-compose.yml -f site/docker-compose.dev.yml --profile dev up site-web-dev
+curl -i http://127.0.0.1:18081/
+```
+
+The dev override runs Astro dev from a bind mount of `site/web`, with
+container-local `node_modules` in a named volume. Source edits under
+`site/web/src` are visible after Astro rebuilds, without recreating the
+container or deleting `site-web-dist`. The host port is loopback-only and
+can be changed with `SITE_WEB_DEV_PORT=<port>`.
+
+Keep using `docker compose -f site/docker-compose.yml up --build` for
+the production-like static build path served by Caddy at
+`http://127.0.0.1:18080/`.

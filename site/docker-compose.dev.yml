@@ -1,0 +1,18 @@
+services:
+  site-web-dev:
+    image: node:24-alpine
+    working_dir: /src
+    command: sh -c "npm ci && npm run dev:docker"
+    profiles: ["dev"]
+    environment:
+      ASTRO_TELEMETRY_DISABLED: "1"
+      PUBLIC_CREWDAY_APP_ORIGIN: "${PUBLIC_CREWDAY_APP_ORIGIN:-https://dev-app.crew.day}"
+    ports:
+      - "127.0.0.1:${SITE_WEB_DEV_PORT:-18081}:4321"
+    volumes:
+      - ./web:/src
+      - site-web-dev-node-modules:/src/node_modules
+      - ../mocks/web/src/styles/tokens.css:/mocks/web/src/styles/tokens.css:ro
+
+volumes:
+  site-web-dev-node-modules:

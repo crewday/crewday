@@ -17,6 +17,11 @@ OpenClaw, etc.) operating on this repository.
   <http://127.0.0.1:8100> (same Vite container, paths 1:1). Point
   app `curl`, Playwright, and scripted verification there. The public
   dev site lives at <https://dev.crew.day> via `site/docker-compose.yml`.
+  For `site/web` source hot reload, use the loopback Astro dev override:
+  `docker compose -f site/docker-compose.yml -f site/docker-compose.dev.yml --profile dev up site-web-dev`,
+  then open <http://127.0.0.1:18081>. Keep
+  `docker compose -f site/docker-compose.yml up -d --build` for the
+  production-like static Caddy path at <http://127.0.0.1:18080>.
 - **Production**: not yet deployed. The production app code lives
   under `app/`; high-fidelity mocks remain under `mocks/`. See
   `docs/specs/19-roadmap.md`.

@@ -289,17 +289,20 @@ operator's collector on the internal Docker network only.
 ## Local development
 
 ```bash
-cd site/
-docker compose --profile dev up --build
+docker compose -f site/docker-compose.yml -f site/docker-compose.dev.yml --profile dev up site-web-dev
 ```
 
-- `site-web` dev profile runs `astro dev` on `127.0.0.1:4321`
-  with hot reload.
-- `site-api` dev profile runs `uvicorn site_api.main:app
-  --reload` on `127.0.0.1:8001`.
-- Caddy dev profile binds `127.0.0.1:8000` (not the Tailscale IP)
-  and fronts both so the URL scheme matches prod
-  (`http://127.0.0.1:8000/api/*` → api, everything else → web).
+- `site/docker-compose.dev.yml` adds the `site-web-dev` profile for
+  `site/web` editing. It bind-mounts `site/web`, keeps container-local
+  `node_modules` in a named volume, and runs Astro dev on
+  `http://127.0.0.1:18081/` by default. Override the loopback host port
+  with `SITE_WEB_DEV_PORT=<port>`.
+- `site-web-dev` binds `0.0.0.0:4321` inside the container so Docker can
+  publish it, but the host mapping is loopback-only:
+  `127.0.0.1:${SITE_WEB_DEV_PORT:-18081}:4321`.
+- The production-like static path remains
+  `docker compose -f site/docker-compose.yml up --build`, with Caddy
+  serving the built Astro output at `http://127.0.0.1:18080/`.
 - `SITE_APP_RPC_BASE_URL` defaults to `http://127.0.0.1:8100/_internal/feedback`
   in dev, pointing at the local app container (`mocks/docker-compose.yml`).
   The site appends `/moderate`, `/embed`, or `/cluster` per call —

@@ -8,6 +8,7 @@
     "build": "ASTRO_TELEMETRY_DISABLED=1 astro build",
     "check:design": "node scripts/check-design.mjs --check",
     "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev --host 127.0.0.1",
+    "dev:docker": "ASTRO_TELEMETRY_DISABLED=1 astro dev --host 0.0.0.0",
     "prebuild": "npm run check:design",
     "preview": "ASTRO_TELEMETRY_DISABLED=1 astro preview --host 127.0.0.1",
     "sync:design": "node scripts/check-design.mjs --write",
