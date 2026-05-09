@@ -8,10 +8,12 @@ updates:
     directory: "/mocks"
     schedule:
       interval: "weekly"
-      day: "monday"
+      day: "friday"
       time: "09:00"
       timezone: "Europe/Paris"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "deps(python)"
     labels:
@@ -27,10 +29,12 @@ updates:
     directory: "/mocks"
     schedule:
       interval: "weekly"
-      day: "monday"
+      day: "friday"
       time: "09:00"
       timezone: "Europe/Paris"
     open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "deps(docker)"
     labels:
@@ -46,10 +50,12 @@ updates:
     directory: "/mocks/web"
     schedule:
       interval: "weekly"
-      day: "monday"
+      day: "friday"
       time: "09:00"
       timezone: "Europe/Paris"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "deps(npm)"
     labels:
