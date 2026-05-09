@@ -1143,12 +1143,13 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
         with make_uow() as db_session:
             assert isinstance(db_session, DbSession)
             actor = resolve_actor(request, db_session, settings)
-            ctx = resolve_workspace(
-                path,
-                actor,
-                db_session,
-                audit_correlation_id=correlation_id,
-            )
+            with db_session.no_autoflush:
+                ctx = resolve_workspace(
+                    path,
+                    actor,
+                    db_session,
+                    audit_correlation_id=correlation_id,
+                )
             if ctx is None:
                 if actor is None:
                     return None, None, "anon_or_unresolved"

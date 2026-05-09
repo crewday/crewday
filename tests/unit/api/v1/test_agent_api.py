@@ -12,11 +12,15 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine
+from sqlalchemy import Engine, event, select
+from sqlalchemy.engine import Connection
+from sqlalchemy.engine.interfaces import ExecutionContext
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import JSONResponse
 
+from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.base import Base
+from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.identity.models import User, canonicalise_email
 from app.adapters.db.llm.models import (
     BudgetLedger,
@@ -33,16 +37,20 @@ from app.api.deps import get_llm as get_llm_dep
 from app.api.errors import _handle_domain_error
 from app.api.factory import create_app
 from app.api.v1.agent import build_agent_router, get_agent_token_factory
+from app.auth.session import SESSION_COOKIE_NAME, issue
 from app.config import Settings
 from app.domain.agent.runtime import DelegatedToken
 from app.domain.errors import DomainError
 from app.events.bus import EventBus
 from app.events.types import AgentMessageAppended, ChatMessageSent
 from app.tenancy import WorkspaceContext
+from app.tenancy.middleware import WorkspaceContextMiddleware
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
 
 _PINNED = datetime(2026, 4, 29, 12, 0, 0, tzinfo=UTC)
+_TEST_UA = "pytest-agent-api"
+_TEST_ACCEPT_LANGUAGE = "en"
 
 
 def _load_all_models() -> None:
@@ -280,6 +288,8 @@ def _settings() -> Settings:
     return Settings.model_construct(
         database_url="sqlite:///:memory:",
         root_key=SecretStr("unit-test-agent-root-key"),
+        session_owner_ttl_days=7,
+        session_user_ttl_days=30,
         bind_host="127.0.0.1",
         bind_port=8000,
         allow_public_bind=False,
@@ -418,3 +428,108 @@ def test_agent_scope_mismatch_returns_problem_json(
     assert response.status_code == 403
     assert response.headers["content-type"].startswith("application/problem+json")
     assert response.json()["error"] == "agent_scope_forbidden"
+
+
+def test_manager_log_workspace_resolution_defers_session_touch_autoflush(
+    api_engine: Engine,
+    factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace_id, user_id = _bootstrap(factory, role="manager")
+    settings = _settings()
+    with factory() as s:
+        s.add(
+            RoleGrant(
+                id=new_ulid(),
+                workspace_id=workspace_id,
+                user_id=user_id,
+                grant_role="manager",
+                scope_kind="workspace",
+                created_at=_PINNED,
+            )
+        )
+        issued = issue(
+            s,
+            user_id=user_id,
+            has_owner_grant=False,
+            ua=_TEST_UA,
+            ip="127.0.0.1",
+            accept_language=_TEST_ACCEPT_LANGUAGE,
+            settings=settings,
+            clock=FrozenClock(_PINNED),
+        )
+        s.commit()
+
+    statements: list[str] = []
+
+    @event.listens_for(api_engine, "before_cursor_execute")
+    def _record_sql(
+        _conn: Connection,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: ExecutionContext,
+        _executemany: bool,
+    ) -> None:
+        normalized = " ".join(statement.lower().split())
+        if (
+            normalized.startswith("update session")
+            or " from workspace " in normalized
+            or " from user_workspace " in normalized
+            or " from role_grant " in normalized
+        ):
+            statements.append(normalized)
+
+    monkeypatch.setattr(
+        "app.tenancy.middleware.make_uow",
+        lambda: UnitOfWorkImpl(session_factory=factory),
+    )
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "scheme": "https",
+            "server": ("testserver", 443),
+            "client": ("127.0.0.1", 1),
+            "root_path": "",
+            "path": "/w/agent-test/api/v1/agent/manager/log",
+            "raw_path": b"/w/agent-test/api/v1/agent/manager/log",
+            "query_string": b"",
+            "headers": [
+                (b"cookie", f"{SESSION_COOKIE_NAME}={issued.cookie_value}".encode()),
+                (b"user-agent", _TEST_UA.encode()),
+                (b"accept-language", _TEST_ACCEPT_LANGUAGE.encode()),
+            ],
+        }
+    )
+    middleware = WorkspaceContextMiddleware(app=FastAPI())
+
+    try:
+        ctx, actor, outcome = middleware._resolve_context(
+            request,
+            settings,
+            new_ulid(),
+        )
+    finally:
+        event.remove(api_engine, "before_cursor_execute", _record_sql)
+
+    assert ctx is not None
+    assert actor is not None
+    assert outcome == "resolved"
+    assert ctx.workspace_id == workspace_id
+    assert ctx.actor_grant_role == "manager"
+    first_session_touch = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("update session")
+    )
+    first_tenancy_read = next(
+        index
+        for index, statement in enumerate(statements)
+        if " from workspace " in statement or " from user_workspace " in statement
+    )
+    assert first_session_touch > first_tenancy_read
+    with factory() as s:
+        stored = s.scalar(select(SessionRow).where(SessionRow.id == issued.session_id))
+        assert stored is not None
+        assert stored.last_seen_at > _PINNED
