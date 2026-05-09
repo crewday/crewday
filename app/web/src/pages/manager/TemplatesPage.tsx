@@ -1,14 +1,15 @@
-import type { DragEvent, ReactElement } from "react";
+import type { DragEvent, FormEvent, ReactElement } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Camera, Globe, GripVertical, Hash, Map as MapIcon, Sparkles, Timer } from "lucide-react";
 
 import { Chip, Loading } from "@/components/common";
 import DeskPage from "@/components/DeskPage";
+import FormField from "@/components/FormField";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
-import type { ChecklistTemplateItem, TaskPriority, TaskTemplate } from "@/types/task";
+import type { ChecklistTemplateItem, PhotoEvidence, TaskPriority, TaskTemplate } from "@/types/task";
 import type { WorkRole } from "@/types/employee";
 
 // §08 — decimal qty formatter, trailing zeros trimmed. The wire shape
@@ -49,6 +50,24 @@ const TASK_TEMPLATES_API_PATH = "/api/v1/tasks/task_templates";
 // resets the timer so the server only sees the final order.
 const REORDER_DEBOUNCE_MS = 400;
 
+interface TaskTemplateCreateBody {
+  name: string;
+  description_md: string;
+  role_id: string | null;
+  duration_minutes: number;
+  property_scope: TaskTemplate["property_scope"];
+  listed_property_ids: string[];
+  area_scope: TaskTemplate["area_scope"];
+  listed_area_ids: string[];
+  checklist_template_json: ChecklistTemplateItem[];
+  photo_evidence: PhotoEvidence;
+  linked_instruction_ids: string[];
+  priority: TaskPriority;
+  auto_shift_from_occurrence: boolean;
+  inventory_consumption_json: Record<string, number>;
+  llm_hints_md: string | null;
+}
+
 function truncate(text: string, max: number): string {
   // code-health: ignore[nloc] Lizard misattributes the rest of this TSX module to this two-branch helper.
   if (text.length <= max) return text;
@@ -72,6 +91,9 @@ function plainPreview(md: string): string {
 }
 
 export default function TemplatesPage() {
+  const queryClient = useQueryClient();
+  const [creatingTemplate, setCreatingTemplate] = useState(false);
+  const createTemplateRef = useRef<HTMLDialogElement>(null);
   const tplQ = useQuery({
     queryKey: qk.taskTemplates(),
     queryFn: () =>
@@ -81,18 +103,76 @@ export default function TemplatesPage() {
     queryKey: qk.workRoles(),
     queryFn: () => fetchJson<ListEnvelope<WorkRole>>("/api/v1/work_roles"),
   });
+  const createTemplate = useMutation({
+    mutationFn: (body: TaskTemplateCreateBody) =>
+      fetchJson<TaskTemplate>(TASK_TEMPLATES_API_PATH, {
+        method: "POST",
+        body,
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: qk.taskTemplates() });
+      setCreatingTemplate(false);
+    },
+  });
+
+  useEffect(() => {
+    const dialog = createTemplateRef.current;
+    if (creatingTemplate && dialog && !dialog.open) dialog.showModal();
+    if (!creatingTemplate && dialog?.open) dialog.close();
+  }, [creatingTemplate]);
+
+  function openCreateTemplate(): void {
+    createTemplate.reset();
+    setCreatingTemplate(true);
+  }
+
+  function closeCreateTemplate(): void {
+    if (createTemplate.isPending) return;
+    createTemplate.reset();
+    setCreatingTemplate(false);
+  }
+
+  const createAction = (
+    <button type="button" className="btn btn--moss" onClick={openCreateTemplate}>
+      + New template
+    </button>
+  );
+  const createDialog = (
+    <dialog
+      ref={createTemplateRef}
+      className="modal modal--sheet"
+      aria-labelledby="template-create-title"
+      onClose={() => setCreatingTemplate(false)}
+    >
+      {creatingTemplate && (
+        <NewTemplateForm
+          roles={rolesQ.data?.data ?? []}
+          saving={createTemplate.isPending}
+          error={
+            createTemplate.error instanceof Error
+              ? createTemplate.error.message
+              : null
+          }
+          onClose={closeCreateTemplate}
+          onSubmit={(body) => createTemplate.mutate(body)}
+        />
+      )}
+    </dialog>
+  );
 
   if (tplQ.isPending || rolesQ.isPending) {
     return (
-      <DeskPage title="Task templates" actions={<button className="btn btn--moss">+ New template</button>}>
+      <DeskPage title="Task templates" actions={createAction}>
         <Loading />
+        {createDialog}
       </DeskPage>
     );
   }
   if (!tplQ.data || !rolesQ.data) {
     return (
-      <DeskPage title="Task templates" actions={<button className="btn btn--moss">+ New template</button>}>
+      <DeskPage title="Task templates" actions={createAction}>
         Failed to load.
+        {createDialog}
       </DeskPage>
     );
   }
@@ -104,8 +184,9 @@ export default function TemplatesPage() {
     <DeskPage
       title="Task templates"
       sub="Reusable definitions. Schedules materialize tasks from these. Edit once, update everywhere."
-      actions={<button className="btn btn--moss">+ New template</button>}
+      actions={createAction}
     >
+      {createDialog}
       <section className="grid grid--cards">
         {templates.map((tpl) => {
           const role = tpl.role_id ? rolesById.get(tpl.role_id) : undefined;
@@ -183,6 +264,170 @@ export default function TemplatesPage() {
         })}
       </section>
     </DeskPage>
+  );
+}
+
+function NewTemplateForm({
+  roles,
+  saving,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  roles: WorkRole[];
+  saving: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (body: TaskTemplateCreateBody) => void;
+}): ReactElement {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [roleId, setRoleId] = useState("");
+  const [durationMinutes, setDurationMinutes] = useState("30");
+  const [priority, setPriority] = useState<TaskPriority>("normal");
+  const [photoEvidence, setPhotoEvidence] = useState<PhotoEvidence>("disabled");
+  const [autoShift, setAutoShift] = useState(false);
+  const [llmHints, setLlmHints] = useState("");
+  const [clientError, setClientError] = useState<string | null>(null);
+
+  const visibleError = clientError ?? error;
+  const errorId = visibleError ? "template-create-error" : undefined;
+
+  function submit(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    const trimmedName = name.trim();
+    const minutes = Number.parseInt(durationMinutes, 10);
+    if (!trimmedName) {
+      setClientError("Name is required.");
+      return;
+    }
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 24 * 60) {
+      setClientError("Duration must be between 1 and 1440 minutes.");
+      return;
+    }
+    setClientError(null);
+    onSubmit({
+      name: trimmedName,
+      description_md: description.trim(),
+      role_id: roleId || null,
+      duration_minutes: minutes,
+      property_scope: "any",
+      listed_property_ids: [],
+      area_scope: "any",
+      listed_area_ids: [],
+      checklist_template_json: [],
+      photo_evidence: photoEvidence,
+      linked_instruction_ids: [],
+      priority,
+      auto_shift_from_occurrence: autoShift,
+      inventory_consumption_json: {},
+      llm_hints_md: llmHints.trim() || null,
+    });
+  }
+
+  return (
+    <form className="modal__body form" onSubmit={submit} noValidate>
+      <h3 id="template-create-title" className="modal__title">New template</h3>
+      <p className="modal__sub">
+        Create a reusable task definition. Property and area scope default to any.
+      </p>
+      <FormField label="Name" requirement="required">
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          required
+          maxLength={200}
+          aria-invalid={clientError === "Name is required."}
+          aria-describedby={errorId}
+        />
+      </FormField>
+      <FormField label="Description" requirement="optional">
+        <textarea
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+          rows={4}
+        />
+      </FormField>
+      <FormField label="Role" requirement="optional">
+        <select value={roleId} onChange={(event) => setRoleId(event.target.value)}>
+          <option value="">Any role</option>
+          {roles.map((role) => (
+            <option key={role.id} value={role.id}>{role.name}</option>
+          ))}
+        </select>
+      </FormField>
+      <div className="form-grid form-grid--two">
+        <FormField label="Duration" requirement="required">
+          <input
+            className="mono"
+            type="number"
+            min="1"
+            max="1440"
+            step="1"
+            value={durationMinutes}
+            onChange={(event) => setDurationMinutes(event.target.value)}
+            required
+            aria-invalid={clientError === "Duration must be between 1 and 1440 minutes."}
+            aria-describedby={errorId}
+          />
+        </FormField>
+        <FormField label="Priority" requirement="required">
+          <select
+            value={priority}
+            onChange={(event) => setPriority(event.target.value as TaskPriority)}
+          >
+            <option value="low">Low</option>
+            <option value="normal">Normal</option>
+            <option value="high">High</option>
+            <option value="urgent">Urgent</option>
+          </select>
+        </FormField>
+      </div>
+      <FormField label="Photo evidence" requirement="required">
+        <select
+          value={photoEvidence}
+          onChange={(event) => setPhotoEvidence(event.target.value as PhotoEvidence)}
+        >
+          <option value="disabled">Disabled</option>
+          <option value="optional">Optional</option>
+          <option value="required">Required</option>
+        </select>
+      </FormField>
+      <FormField label="LLM hints" requirement="optional">
+        <textarea
+          value={llmHints}
+          onChange={(event) => setLlmHints(event.target.value)}
+          rows={3}
+        />
+      </FormField>
+      <label className="checkbox checkbox--block">
+        <input
+          className="checkbox__input"
+          type="checkbox"
+          checked={autoShift}
+          onChange={(event) => setAutoShift(event.target.checked)}
+        />
+        <span className="checkbox__box" aria-hidden="true">
+          <svg className="checkbox__tick" viewBox="0 0 18 18">
+            <path d="M4 9.5l3 3 7-7" />
+          </svg>
+        </span>
+        <span className="checkbox__label">Start shift automatically from generated tasks</span>
+      </label>
+      {visibleError && (
+        <p id="template-create-error" className="form-error" role="alert">
+          {visibleError}
+        </p>
+      )}
+      <div className="modal__actions">
+        <button type="button" className="btn btn--ghost" onClick={onClose} disabled={saving}>
+          Cancel
+        </button>
+        <button type="submit" className="btn btn--moss" disabled={saving}>
+          Create template
+        </button>
+      </div>
+    </form>
   );
 }
 

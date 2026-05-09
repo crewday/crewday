@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactElement } from "react";
@@ -48,12 +48,25 @@ function makeTemplate(overrides: Partial<TaskTemplate> = {}): TaskTemplate {
   };
 }
 
-const ROLES: WorkRole[] = [];
+const ROLES: WorkRole[] = [
+  {
+    id: "role_1",
+    workspace_id: "ws_1",
+    key: "housekeeping",
+    name: "Housekeeping",
+    description_md: "",
+    default_settings_json: {},
+    icon_name: "Sparkles",
+    created_at: "2026-04-01T00:00:00Z",
+    deleted_at: null,
+  },
+];
 const TASK_TEMPLATES_API_PATH = "/w/acme/api/v1/tasks/task_templates";
 
 interface FetchHarness {
   calls: FetchCall[];
   patchQueue: FakeResponse[];
+  createQueue: FakeResponse[];
   listQueue: FakeResponse[];
   restore: () => void;
 }
@@ -61,6 +74,7 @@ interface FetchHarness {
 function installFetch(opts: {
   initialTemplate?: TaskTemplate;
   patchResponses?: FakeResponse[];
+  createResponses?: FakeResponse[];
 } = {}): FetchHarness {
   // code-health: ignore[nloc] Route fixtures stay local; shared fetch mechanics live in test/helpers.
   const initial = opts.initialTemplate ?? makeTemplate();
@@ -68,12 +82,21 @@ function installFetch(opts: {
     { body: { data: [initial], next_cursor: null, has_more: false } },
   ];
   const patchQueue: FakeResponse[] = [...(opts.patchResponses ?? [])];
+  const createQueue: FakeResponse[] = [...(opts.createResponses ?? [])];
   const env = installFetchRouteHandlers([
     {
       path: TASK_TEMPLATES_API_PATH,
       respond: () => {
         const next = listQueue.shift();
         return next ?? { body: { data: [initial], next_cursor: null, has_more: false } };
+      },
+    },
+    {
+      path: TASK_TEMPLATES_API_PATH,
+      method: "POST",
+      respond: (request) => {
+        const next = createQueue.shift();
+        return next ?? { status: 201, body: makeTemplate({ id: "tpl_created", ...(request.body as Partial<TaskTemplate>) }) };
       },
     },
     {
@@ -92,6 +115,7 @@ function installFetch(opts: {
   return {
     calls: env.calls,
     patchQueue,
+    createQueue,
     listQueue,
     restore: env.restore,
   };
@@ -115,6 +139,10 @@ function Harness({ client }: { client: QueryClient }): ReactElement {
 
 function patchCalls(calls: FetchCall[]): FetchCall[] {
   return calls.filter((c) => c.init.method === "PATCH");
+}
+
+function postCalls(calls: FetchCall[]): FetchCall[] {
+  return calls.filter((c) => c.init.method === "POST");
 }
 
 function patchedChecklistKeys(call: FetchCall): string[] {
@@ -159,6 +187,12 @@ beforeEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("acme");
+  HTMLDialogElement.prototype.showModal = function showModal() {
+    this.open = true;
+  };
+  HTMLDialogElement.prototype.close = function close() {
+    this.open = false;
+  };
 });
 
 afterEach(() => {
@@ -308,6 +342,121 @@ describe("<TemplatesPage> checklist reorder", () => {
         "first",
         "third",
       ]);
+    } finally {
+      harness.restore();
+    }
+  });
+});
+
+describe("<TemplatesPage> create flow", () => {
+  it("opens the new-template dialog from the header action", async () => {
+    const harness = installFetch();
+    const client = makeClient();
+    try {
+      render(<Harness client={client} />);
+      await screen.findByText("First step");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New template" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "New template" });
+      expect(within(dialog).getByLabelText(/^Name\b/)).toBeInTheDocument();
+      expect(within(dialog).getByLabelText(/^Duration\b/)).toHaveValue(30);
+      expect(within(dialog).getByLabelText(/^Role\b/)).toHaveValue("");
+      expect(within(dialog).getByRole("option", { name: "Housekeeping" })).toBeInTheDocument();
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("cancels without creating a template", async () => {
+    const harness = installFetch();
+    const client = makeClient();
+    try {
+      render(<Harness client={client} />);
+      await screen.findByText("First step");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New template" }));
+      const dialog = await screen.findByRole("dialog", { name: "New template" });
+      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
+        target: { value: "Evening reset" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name: "New template" })).not.toBeInTheDocument();
+      });
+      expect(postCalls(harness.calls)).toHaveLength(0);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("posts a valid template and invalidates task templates on success", async () => {
+    const harness = installFetch();
+    const client = makeClient();
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+    try {
+      render(<Harness client={client} />);
+      await screen.findByText("First step");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New template" }));
+      const dialog = await screen.findByRole("dialog", { name: "New template" });
+      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
+        target: { value: "Evening reset" },
+      });
+      fireEvent.change(within(dialog).getByLabelText(/^Description\b/), {
+        target: { value: "Close down common areas." },
+      });
+      fireEvent.change(within(dialog).getByLabelText(/^Role\b/), {
+        target: { value: "role_1" },
+      });
+      fireEvent.change(within(dialog).getByLabelText(/^Duration\b/), {
+        target: { value: "45" },
+      });
+      fireEvent.change(within(dialog).getByLabelText(/^Priority\b/), {
+        target: { value: "high" },
+      });
+      fireEvent.change(within(dialog).getByLabelText(/^Photo evidence\b/), {
+        target: { value: "optional" },
+      });
+      fireEvent.change(within(dialog).getByLabelText(/^LLM hints\b/), {
+        target: { value: "Nightly closing checklist." },
+      });
+      fireEvent.click(
+        within(dialog).getByRole("checkbox", {
+          name: "Start shift automatically from generated tasks",
+        }),
+      );
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create template" }));
+
+      await waitFor(() => {
+        expect(postCalls(harness.calls)).toHaveLength(1);
+      });
+      const post = postCalls(harness.calls)[0]!;
+      expect(callPath(post)).toBe(TASK_TEMPLATES_API_PATH);
+      expect(JSON.parse(String(post.init.body))).toEqual({
+        name: "Evening reset",
+        description_md: "Close down common areas.",
+        role_id: "role_1",
+        duration_minutes: 45,
+        property_scope: "any",
+        listed_property_ids: [],
+        area_scope: "any",
+        listed_area_ids: [],
+        checklist_template_json: [],
+        photo_evidence: "optional",
+        linked_instruction_ids: [],
+        priority: "high",
+        auto_shift_from_occurrence: true,
+        inventory_consumption_json: {},
+        llm_hints_md: "Nightly closing checklist.",
+      });
+      await waitFor(() => {
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: qk.taskTemplates() });
+      });
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name: "New template" })).not.toBeInTheDocument();
+      });
     } finally {
       harness.restore();
     }
