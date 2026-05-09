@@ -9,7 +9,13 @@ import * as preferences from "@/lib/preferences";
 import PropertyClosuresPage from "./PropertyClosuresPage";
 import { installFetchRouteHandlers } from "@/test/helpers";
 
-function installFetch({ failClosures = false }: { failClosures?: boolean } = {}) {
+function installFetch({
+  failClosures = false,
+  missingProperty = false,
+}: {
+  failClosures?: boolean;
+  missingProperty?: boolean;
+} = {}) {
   // code-health: ignore[nloc] Route fixtures stay local; shared fetch mechanics live in test/helpers.
   const env = installFetchRouteHandlers([
     {
@@ -57,7 +63,7 @@ function installFetch({ failClosures = false }: { failClosures?: boolean } = {})
     {
       path: "/w/acme/api/v1/properties",
       respond: {
-        body: [{
+        body: missingProperty ? [] : [{
           id: "prop_1",
           name: "Villa Rosa",
           city: "Porto",
@@ -77,7 +83,7 @@ function installFetch({ failClosures = false }: { failClosures?: boolean } = {})
     {
       path: "/w/acme/api/v1/properties/prop_1",
       respond: {
-        body: {
+        body: missingProperty ? { id: "prop_1" } : {
           id: "prop_1",
           name: "Villa Rosa",
           kind: "str",
@@ -239,6 +245,19 @@ describe("<PropertyClosuresPage>", () => {
 
       expect(await screen.findByText("Failed to load.")).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "Villa Rosa — closures" })).toBeNull();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("renders failure copy when the property payload is missing", async () => {
+    const fake = installFetch({ missingProperty: true });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Failed to load.")).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Villa Rosa — closures" })).toBeNull();
+      expect(fake.calls).toContain("/w/acme/api/v1/property_closures?property_id=prop_1&limit=100");
     } finally {
       fake.restore();
     }

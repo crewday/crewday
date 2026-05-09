@@ -15,7 +15,7 @@ import {
 } from "./property/lib/propertyDetailMappers";
 
 interface ClosuresPayload {
-  property: Property;
+  property: Property | null;
   closures: PropertyClosure[];
   stays: Stay[];
 }
@@ -60,6 +60,21 @@ function mapClosure(row: ClosurePayload): PropertyClosure {
   };
 }
 
+function isPropertyDetailRow(value: unknown): value is PropertyDetailRow {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.id === "string"
+    && typeof row.name === "string"
+    && typeof row.kind === "string"
+    && typeof row.country === "string"
+    && typeof row.timezone === "string"
+    && (typeof row.locale === "string" || row.locale === null)
+    && (typeof row.client_org_id === "string" || row.client_org_id === null)
+    && (typeof row.owner_user_id === "string" || row.owner_user_id === null)
+  );
+}
+
 interface ClosureFormState {
   id: string | null;
   starts_on: string;
@@ -97,7 +112,7 @@ function closureBody(form: ClosureFormState, propertyId: string) {
 async function fetchClosuresPayload(pid: string): Promise<ClosuresPayload> {
   const [properties, propertyRow, closures, reservations] = await Promise.all([
     fetchJson<Property[]>("/api/v1/properties"),
-    fetchJson<PropertyDetailRow>("/api/v1/properties/" + pid),
+    fetchJson<unknown>("/api/v1/properties/" + pid),
     fetchJson<ListEnvelope<ClosurePayload>>(
       "/api/v1/property_closures?property_id=" + encodeURIComponent(pid) + "&limit=100",
     ),
@@ -105,8 +120,10 @@ async function fetchClosuresPayload(pid: string): Promise<ClosuresPayload> {
       "/api/v1/stays/reservations?property_id=" + encodeURIComponent(pid) + "&limit=100",
     ),
   ]);
+  const property = properties.find((p) => p.id === pid)
+    ?? (isPropertyDetailRow(propertyRow) ? fallbackProperty(propertyRow) : null);
   return {
-    property: properties.find((p) => p.id === pid) ?? fallbackProperty(propertyRow),
+    property,
     closures: closures.data.map(mapClosure),
     stays: reservations.data.map(mapReservation),
   };
@@ -178,7 +195,7 @@ export default function PropertyClosuresPage() {
   if (dataQ.isPending || meQ.isPending) {
     return <DeskPage title="Closures"><Loading /></DeskPage>;
   }
-  if (!dataQ.data || !meQ.data) {
+  if (!dataQ.data || !meQ.data || !dataQ.data.property) {
     return <DeskPage title="Closures">Failed to load.</DeskPage>;
   }
 
