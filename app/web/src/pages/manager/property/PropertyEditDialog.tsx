@@ -233,19 +233,27 @@ export default function PropertyEditDialog({
       }}
       onClose={onClose}
     >
-      <form className="modal__body form" onSubmit={submit}>
+      <form className="modal__body form property-edit-dialog" onSubmit={submit}>
         <h3 id="property-edit-dialog-title" className="modal__title">
           {mode === "create" ? "Add property" : "Edit property"}
         </h3>
         <div className="form-grid form-grid--two">
-          <FormField label="Name" requirement="required">
+          <FormField
+            label="Name"
+            requirement="required"
+            className="property-edit-dialog__identity-field"
+          >
             <input
               value={draft.name}
               onChange={(event) => setDraft({ ...draft, name: event.currentTarget.value })}
               required
             />
           </FormField>
-          <FormField label="Kind" requirement="optional">
+          <FormField
+            label="Kind"
+            requirement="optional"
+            className="property-edit-dialog__identity-field"
+          >
             <select
               value={draft.kind}
               onChange={(event) =>

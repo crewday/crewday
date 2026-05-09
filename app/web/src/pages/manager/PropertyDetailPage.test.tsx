@@ -519,6 +519,16 @@ describe("<PropertyDetailPage>", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Edit property" }));
       const dialog = await screen.findByRole("dialog", { name: "Edit property" });
+      expect(dialog.querySelector("form")).toHaveClass("property-edit-dialog");
+      expect(within(dialog).getByLabelText("Name Required").closest("label")).toHaveClass(
+        "property-edit-dialog__identity-field",
+      );
+      expect(within(dialog).getByLabelText("Kind Optional").closest("label")).toHaveClass(
+        "property-edit-dialog__identity-field",
+      );
+      expect(within(dialog).getByLabelText("Address line 1 Optional").closest("label")).not.toHaveClass(
+        "property-edit-dialog__identity-field",
+      );
       expect(within(dialog).getByRole("combobox", { name: /^Country\b/ })).toHaveValue("Portugal");
       expect(within(dialog).getByRole("combobox", { name: /^Timezone\b/ })).toHaveValue("Europe/Lisbon");
       for (const field of [

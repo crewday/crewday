@@ -14,6 +14,23 @@
 .form-grid--two { grid-template-columns: 1fr 1fr; }
 @media (max-width: 720px) { .form-grid--two { grid-template-columns: 1fr; } }
 
+.property-edit-dialog .form-grid--two {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+@media (max-width: 720px) {
+  .property-edit-dialog .form-grid--two { grid-template-columns: minmax(0, 1fr); }
+}
+.property-edit-dialog .field {
+  min-width: 0;
+}
+.property-edit-dialog .field input,
+.property-edit-dialog .field select,
+.property-edit-dialog .field textarea {
+  width: 100%;
+  min-width: 0;
+}
+.property-edit-dialog__identity-field { grid-column: 1 / -1; }
+
 .form-row {
   display: flex; flex-direction: column; gap: 6px;
 }

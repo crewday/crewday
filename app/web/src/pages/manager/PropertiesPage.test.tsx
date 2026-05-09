@@ -339,6 +339,16 @@ describe("<PropertiesPage>", () => {
       expect(await screen.findByRole("heading", { name: "No properties visible" })).toBeInTheDocument();
       fireEvent.click(await within(screen.getByRole("banner")).findByRole("button", { name: "+ Add property" }));
       const dialog = await screen.findByRole("dialog", { name: "Add property" });
+      expect(dialog.querySelector("form")).toHaveClass("property-edit-dialog");
+      expect(within(dialog).getByLabelText("Name Required").closest("label")).toHaveClass(
+        "property-edit-dialog__identity-field",
+      );
+      expect(within(dialog).getByLabelText("Kind Optional").closest("label")).toHaveClass(
+        "property-edit-dialog__identity-field",
+      );
+      expect(within(dialog).getByLabelText("Address line 1 Optional").closest("label")).not.toHaveClass(
+        "property-edit-dialog__identity-field",
+      );
       expect(within(dialog).getByRole("combobox", { name: /^Country\b/ })).toHaveValue("Portugal");
       expect(within(dialog).getByRole("combobox", { name: /^Timezone\b/ })).toHaveValue("Europe/Lisbon");
       expect(within(dialog).getByLabelText(/^Locale\b/)).toHaveValue("pt-PT");
