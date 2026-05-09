@@ -7,9 +7,9 @@
       {
         "aaguid": "bada5566-a7aa-401f-bd96-45619a55120d",
         "backup_eligible": true,
-        "credential_id_b64": "Q00roAr8qyAXmaprKrGWG2M84Qekx1tC-ol8bxjjIUfk5aiIfYAolYnttT3-2NcEZTa_y60SC0-HWQ",
+        "credential_id_b64": "oxkBVVj6CX4uK6BK8qYTjZo0CWUWtyTVghaIABrPbC4OJsJxvU6KzkAckgNY43o",
         "label": null,
-        "public_key_b64": "pQECAyYgASFYIFtj_oH3lIChmf40NKUmHtFKM8JUSWjYlqld1EbRZkENIlggnfsg7i72odaDsDTSX70WHqTEfKUdECxC_89ocCwnBv8",
+        "public_key_b64": "pQECAyYgASFYIL_I5BI6cSiXkMAD6A3nz7gNdYIRerVHYjnXx5PTNk65Ilgg3cLPLD9O2djCsXc2YTcT5Xnq7qPub-NZPhIMXy2E09c",
         "sign_count": 0,
         "transports": "internal,hybrid"
       }
@@ -17,8 +17,8 @@
     "timezone": "Asia/Dubai"
   },
   "workspace": {
-    "name": "crewday",
+    "name": "smoke",
     "role": "manager",
-    "slug": "crewday"
+    "slug": "smoke"
   }
 }

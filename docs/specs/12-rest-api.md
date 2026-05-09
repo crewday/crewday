@@ -403,11 +403,11 @@ workspace-scoped; §01, §03):
 POST   /api/v1/signup/start                      # kick off the SaaS self-serve flow.
                                                  #   Body: {email: str (3-320 chars), desired_slug: str
                                                  #     (3-40 chars), captcha_token?: str}.
-                                                 #     `captcha_token` is optional on the wire so self-host
-                                                 #     deployments with `capabilities.captcha_required=false`
-                                                 #     can omit it; required deployments reject an absent
-                                                 #     token with 422 `captcha_required` (§15 "Self-serve
-                                                 #     abuse mitigations").
+                                                 #     `captcha_token` is optional on the wire so deployments
+                                                 #     with `capabilities.captcha_required=false` can omit it;
+                                                 #     deployments that opt into CAPTCHA reject an absent token
+                                                 #     with 422 `captcha_required` (§15 "Self-serve abuse
+                                                 #     mitigations").
                                                  #   202 {"status": "accepted"} — opaque body so the response
                                                  #     leaks nothing about whether the email already exists
                                                  #     (the enumeration guard). Slug-related errors still

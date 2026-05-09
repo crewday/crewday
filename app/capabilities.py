@@ -105,13 +105,11 @@ class DeploymentSettings:
     # $5.00 default cap per workspace per 30d; seeds new ``quota_json``.
     llm_default_budget_cents_30d: int = 500
     # CAPTCHA gate on self-serve signup (§15 "Self-serve abuse
-    # mitigations"; cd-055). Default ``True`` on the SaaS deployment
-    # `crew.day`; operators disable for self-host by writing
-    # ``deployment_setting.captcha_required = false``. The verifier
-    # lives in :mod:`app.auth.signup_abuse`; the Turnstile server
-    # secret comes from :attr:`app.config.Settings.captcha_turnstile_secret`
-    # and falls through to an offline test-mode when unset.
-    captcha_required: bool = True
+    # mitigations"; cd-055). Default off: deployments must not require
+    # a CAPTCHA unless the CAPTCHA provider is configured and the
+    # operator explicitly enables the gate. The verifier lives in
+    # :mod:`app.auth.signup_abuse`.
+    captcha_required: bool = False
     # Marketplace is intentionally deferred in v1 (§25). The settings
     # exist now so future routes and workers have one stable gate.
     marketplace_enabled: bool = False

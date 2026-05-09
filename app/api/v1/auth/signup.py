@@ -109,11 +109,11 @@ _SUSPICIOUS_IP_WINDOW = timedelta(hours=1)
 class SignupStartBody(BaseModel):
     """Request body for ``POST /signup/start``.
 
-    ``captcha_token`` is optional on the wire so self-host
-    deployments with ``capabilities.captcha_required=false`` can
-    omit it entirely. When the deployment requires a CAPTCHA the
-    abuse gate rejects an unset token with ``422 captcha_required``
-    (§15 "Self-serve abuse mitigations"; cd-055).
+    ``captcha_token`` is optional on the wire so deployments with
+    ``capabilities.captcha_required=false`` can omit it entirely.
+    When an operator enables CAPTCHA, the abuse gate rejects an unset
+    token with ``422 captcha_required`` (§15 "Self-serve abuse
+    mitigations"; cd-055).
     """
 
     email: str = Field(..., min_length=3, max_length=320)

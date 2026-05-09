@@ -59,6 +59,7 @@ def test_admin_init_is_idempotent_and_does_not_store_generated_root_key(
     assert rows["admin_init_root_key_generated"] is True
     assert generated not in {str(value) for value in rows.values()}
     assert rows["signup_enabled"] is True
+    assert rows["captcha_required"] is False
     assert len(audits) == 1
     assert audits[0].actor_kind == "system"
     assert audits[0].via == "cli"

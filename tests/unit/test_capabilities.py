@@ -183,9 +183,7 @@ class TestProbeWithoutSession:
         assert caps.settings.signup_throttle_overrides == {}
         assert caps.settings.require_passkey_attestation is False
         assert caps.settings.llm_default_budget_cents_30d == 500
-        # cd-055: captcha_required defaults on (SaaS default); operators
-        # toggle off via deployment_setting for self-host.
-        assert caps.settings.captcha_required is True
+        assert caps.settings.captcha_required is False
         assert caps.settings.marketplace_enabled is False
         assert caps.settings.platform_fee_default_bps == 1000
         assert caps.settings.platform_fee_currency_policy == "match_source"

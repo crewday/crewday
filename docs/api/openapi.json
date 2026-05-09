@@ -21847,7 +21847,7 @@
         "type": "object"
       },
       "SignupStartBody": {
-        "description": "Request body for ``POST /signup/start``.\n\n``captcha_token`` is optional on the wire so self-host\ndeployments with ``capabilities.captcha_required=false`` can\nomit it entirely. When the deployment requires a CAPTCHA the\nabuse gate rejects an unset token with ``422 captcha_required``\n(\u00a715 \"Self-serve abuse mitigations\"; cd-055).",
+        "description": "Request body for ``POST /signup/start``.\n\n``captcha_token`` is optional on the wire so deployments with\n``capabilities.captcha_required=false`` can omit it entirely.\nWhen an operator enables CAPTCHA, the abuse gate rejects an unset\ntoken with ``422 captcha_required`` (\u00a715 \"Self-serve abuse\nmitigations\"; cd-055).",
         "properties": {
           "captcha_token": {
             "anyOf": [

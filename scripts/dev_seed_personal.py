@@ -3,17 +3,38 @@
 
 Companion to :mod:`scripts.dev_login`. After a SQLite reset, ``apply``
 re-creates the rows your physical authenticator needs to log into
-``https://dev.crew.day`` without re-tapping a fresh registration:
+``https://dev-app.crew.day`` without re-tapping a fresh registration:
 
-1. Sign up once at ``https://dev.crew.day/signup`` (signup is on by
+1. Bring the dev stack up and confirm it advertises the current app
+   domain:
+
+   ``./scripts/dev-stack-up.sh``
+
+   The normal dev stack sets ``CREWDAY_PUBLIC_URL=https://dev-app.crew.day``
+   and ``CREWDAY_WEBAUTHN_RP_ID=dev-app.crew.day``. If the app domain
+   changes, credentials captured for the old RP ID cannot be migrated;
+   delete or ignore the old seed, re-register on the new domain, then
+   capture again.
+2. If you are recovering from an RP ID/domain change, reset only the
+   disposable dev app database first. Do not apply the old seed before
+   re-registering: the old passkey rows are scoped to the retired RP ID,
+   and seeding the user/workspace rows can block same-email signup.
+   If ``capture`` later says the new workspace slug does not exist, this
+   is the first thing to check: the signup likely never completed against
+   a clean dev DB.
+
+   ``docker compose -f mocks/docker-compose.yml down -v``
+
+   ``./scripts/dev-stack-up.sh``
+3. Sign up once at ``https://dev-app.crew.day/signup`` (signup is on by
    default; the login page just doesn't link to it). Register your
    passkey through the normal ceremony — it binds to
-   ``rp_id="dev.crew.day"``.
-2. ``python -m scripts.dev_seed_personal capture --email <e> --workspace <slug>``
+   ``rp_id="dev-app.crew.day"``.
+4. ``python -m scripts.dev_seed_personal capture --email <e> --workspace <slug>``
    writes :data:`SEED_FILE` (``scripts/dev_seed_personal.json``)
    carrying the user, workspace, and every ``passkey_credential`` row.
    Public material only — the private key never leaves your device.
-3. After every DB reset: ``python -m scripts.dev_seed_personal apply``.
+5. After every DB reset: ``python -m scripts.dev_seed_personal apply``.
    Idempotent. (Re)creates the user, workspace + four system groups +
    owners seat + workspace ``manager`` grant + LLM budget ledger,
    grants deployment admin (``RoleGrant scope_kind='deployment'`` +

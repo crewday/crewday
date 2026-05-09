@@ -14,6 +14,9 @@
 # only public material (credential id + COSE public key + AAGUID) —
 # the private key never leaves your authenticator. Commit the file so
 # every dev box belonging to you can re-hydrate identically.
+# If the dev app WebAuthn domain changes, old credentials are invalid
+# for the new RP ID; reset the disposable dev DB, sign up on the new
+# app domain, then ``capture`` a fresh seed.
 
 set -euo pipefail
 

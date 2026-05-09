@@ -106,12 +106,12 @@ class TestRefreshSettings:
         caps.refresh_settings(db_session)
         assert caps.settings.signup_throttle_overrides == {"per_email_per_day": 5}
 
-    def test_captcha_required_false_override(self, db_session: Session) -> None:
-        """cd-055: operators disable the CAPTCHA gate on self-host."""
-        _add(db_session, "captcha_required", False)
+    def test_captcha_required_true_override(self, db_session: Session) -> None:
+        """Operators opt into the CAPTCHA gate after configuring a provider."""
+        _add(db_session, "captcha_required", True)
         caps = _empty_capabilities()
         caps.refresh_settings(db_session)
-        assert caps.settings.captcha_required is False
+        assert caps.settings.captcha_required is True
 
     def test_marketplace_settings_update(self, db_session: Session) -> None:
         _add(db_session, "marketplace_enabled", True)

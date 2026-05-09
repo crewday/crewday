@@ -9,30 +9,12 @@ OpenClaw, etc.) operating on this repository.
 > and [`docs/specs/13-cli.md`](docs/specs/13-cli.md). This file is for
 > agents writing code in the repo.
 
-## Environments
+## Setup
 
-- **Dev app**: <https://dev-app.crew.day> is gated by Pangolin badger
-  forward-auth and is the user's remote app entry point. Agents on
-  this host can't pass badger and must use the loopback equivalent
-  <http://127.0.0.1:8100> (same Vite container, paths 1:1). Point
-  app `curl`, Playwright, and scripted verification there. The public
-  dev site lives at <https://dev.crew.day> via `site/docker-compose.yml`.
-  For `site/web` source hot reload, use the loopback Astro dev override:
-  `docker compose -f site/docker-compose.yml -f site/docker-compose.dev.yml --profile dev up site-web-dev`,
-  then open <http://127.0.0.1:18081>. Keep
-  `docker compose -f site/docker-compose.yml up -d --build` for the
-  production-like static Caddy path at <http://127.0.0.1:18080>.
-- **Production**: not yet deployed. The production app code lives
-  under `app/`; high-fidelity mocks remain under `mocks/`. See
-  `docs/specs/19-roadmap.md`.
-- **Bring the dev stack up**: `./scripts/dev-stack-up.sh` (wraps
-  `docker compose -f mocks/docker-compose.yml up -d --build`, waits
-  for `/readyz`, and surfaces migration / heartbeat / root-key drift
-  loudly with a one-line remediation hint). The raw compose command
-  still works if you want to skip the drift gate.
-- **Never bind to the public interface.** Use `127.0.0.1` or the
-  `tailscale0` interface only — a misbound port is a blocker bug.
-  See `docs/specs/16`.
+Developer-agent setup, dev-stack access, loopback URLs, passkey seed
+recovery, Mailpit activation links, and quality helpers live in
+[`SETUP.md`](SETUP.md). Read it before bringing the stack up, resetting a
+dev DB, or onboarding a new developer agent.
 
 ## Ask first
 
@@ -122,98 +104,11 @@ Treat accuracy as the success metric, not user approval:
   `bd update <id> --claim`; skip Beads if no issue fits or the tool is
   unavailable.
 
-## Dev verification helpers
-
-Use these when the task needs a running app, API smoke, or UI smoke.
-
-**Default to the wrappers** — they cache + refresh the dev session and
-replace several tool calls per check:
-
-- `./scripts/agent-status.sh` — compose health, `/readyz`, `/healthz`,
-  alembic current vs head, git branch + dirty count. Exit 0 when the
-  stack is ready. Run first when a smoke fails.
-  - Trust the `endpoints:` line over the compose `stack:` line. The
-    `app-api` container's Docker healthcheck flips to `unhealthy`
-    when the LLM budget refresh tick logs `OperationalError` per
-    workspace (dev DB has stale workspace rows that the refresh
-    can't read), but `/readyz` + `/healthz` keep returning 200 and
-    every API path keeps serving — don't chase a fake outage.
-- `./scripts/agent-curl.sh <ws> <METHOD> <path> [body]` — authenticated
-  curl against `http://127.0.0.1:8100`. Caches the cookie per
-  workspace+email, auto-refreshes on stale sessions, pretty-prints JSON,
-  writes `[<status> <METHOD> <path>]` to stderr, exits non-zero on
-  4xx/5xx. Path is appended verbatim — include `/w/<slug>/api/v1/...`.
-  ```bash
-  ./scripts/agent-curl.sh dev GET  /w/dev/api/v1/employees
-  ./scripts/agent-curl.sh dev POST /w/dev/api/v1/tasks '{"title":"smoke"}'
-  ```
-- `./scripts/agent-code-health.py` — lizard-backed digest of the worst
-  per-function offenders by cyclomatic complexity, function length, and
-  parameter count, plus token-based duplicate code blocks. Defaults
-  scan `app/` + `app/web/src/`; pass paths to narrow. Not a gate
-  (always exits 0 on success) — used to find batches of refactor
-  targets. Override thresholds via `CCN_THRESHOLD` / `NLOC_THRESHOLD`
-  / `PARAM_THRESHOLD`. Use `--json-out <path>` for the complete
-  machine-readable report; follow-up refactor tasks should prove zero
-  unsuppressed findings in their target area by checking
-  `.summary.<category>.unsuppressed == 0` for the relevant categories.
-  Suppressions are inline `code-health: ignore[ccn] <reason>` comments
-  inside the target function or `code-health: ignore[duplicate] <reason>`
-  inside a duplicate block; the reason is required and remains visible
-  in JSON output.
-  ```bash
-  ./scripts/agent-code-health.py                   # default scan
-  ./scripts/agent-code-health.py app/domain/tasks  # specific subtree
-  ./scripts/agent-code-health.py --no-dup --top 20
-  ./scripts/agent-code-health.py --json-out /tmp/code-health.json
-  ```
-
-Reach for the primitives below when you need the raw cookie (Playwright,
-multi-step scripts) or the wrappers misbehave.
-
-- Bring the stack up with:
-  ```bash
-  ./scripts/dev-stack-up.sh
-  ```
-  (`docker compose -f mocks/docker-compose.yml up -d --build` is the
-  raw equivalent; the wrapper adds a `/readyz` drift gate that names
-  the failing check and prints a remediation hint instead of letting
-  the next test session inherit a stale alembic head.)
-- Use the loopback app, not `dev-app.crew.day`: `http://127.0.0.1:8100`.
-- Create a dev session inside the compose stack:
-  ```bash
-  docker compose -f mocks/docker-compose.yml exec app-api \
-    python -m scripts.dev_login --email me@dev.local --workspace smoke
-  ```
-  Stdout is `__Host-crewday_session=<value>`. Feed it to
-  `curl -b "$cookie" http://127.0.0.1:8100/w/smoke/api/v1/...`.
-- **Playwright on loopback needs an alias cookie**, not the curl one
-  (`__Host-` prefix requires `Secure`, which browsers refuse on
-  plain-HTTP). See [`docs/dev/playwright-auth.md`](docs/dev/playwright-auth.md)
-  for the `--output playwright` recipe and the e2e helper that wraps it.
-- Host-side login variant:
-  ```bash
-  CREWDAY_DEV_AUTH=1 ./scripts/dev-login.sh <email> <slug>
-  ```
-  Requires `uv sync` or `pip install -e .`.
-- **Personal passkey re-seed.** After a DB reset, run
-  `./scripts/dev-seed-personal.sh apply` to rehydrate your user +
-  workspace + passkey rows from `scripts/dev_seed_personal.json` so
-  your physical authenticator still works at `https://dev-app.crew.day`.
-  See the script docstrings for `capture` and other flags.
-- If `dev_login`, `/readyz`, or a smoke request fails with a missing
-  column/table, run:
-  ```bash
-  docker compose -f mocks/docker-compose.yml exec app-api alembic upgrade head
-  ```
-  If the disposable dev DB is still broken, reset only the dev app volume.
-  Do not reset any non-dev database.
-
 ## Keep this file fresh
 
 Treat `AGENTS.md` / `CLAUDE.md` (same file; `CLAUDE.md` is a symlink
-for Claude compatibility), `.claude/skills/`, and `.claude/agents/` as
-living instructions. Update them in the same turn when:
+for Claude compatibility), `SETUP.md`, `.claude/skills/`, and
+`.claude/agents/` as living instructions. Update them in the same turn when:
 
 - An instruction was wrong, stale, or missing and cost you a retry.
 - A skill's procedure failed or produced the wrong output shape.
