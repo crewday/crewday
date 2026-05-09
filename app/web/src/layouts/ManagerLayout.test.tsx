@@ -15,6 +15,25 @@ import type { Me } from "@/types/api";
 import PageHeader from "@/components/PageHeader";
 import ManagerLayout from "./ManagerLayout";
 
+const EXPECTED_NAV_ACTIONS = [
+  "employees.read",
+  "properties.read",
+  "stays.read",
+  "tasks.create",
+  "availability_overrides.view_others",
+  "scope.view",
+  "instructions.edit",
+  "assets.manage_documents",
+  "approvals.read",
+  "leaves.view_others",
+  "expenses.approve",
+  "payroll.view_other",
+  "permissions.edit_rules",
+  "audit_log.view",
+  "scope.edit_settings",
+  "api_tokens.manage",
+];
+
 vi.mock("@/components/AgentSidebar", () => ({
   default: function MockAgentSidebar({ role }: { role: string }): ReactElement {
     return <aside data-testid="agent-sidebar">agent:{role}</aside>;
@@ -127,6 +146,65 @@ function renderManagerLayout(allowed: Set<string>, initialPath = "/dashboard"): 
   return permissionProbes;
 }
 
+function renderManagerLayoutWithDeferredPermissions(allowed: Set<string>): {
+  permissionProbes: string[];
+  resolvePermissions: () => void;
+} {
+  const permissionProbes: string[] = [];
+  const pendingPermissions: Array<{
+    actionKey: string;
+    resolve: (response: Response) => void;
+  }> = [];
+  vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("ws_1");
+  setAuthenticated(authMe());
+  installFetch(({ url }) => {
+    const parsed = new URL(url, "http://crewday.test");
+    if (parsed.pathname === "/w/ws_1/api/v1/me") {
+      return jsonResponse(workspaceMe());
+    }
+    if (parsed.pathname === "/w/ws_1/api/v1/permissions/resolved/self") {
+      const actionKey = parsed.searchParams.get("action_key") ?? "";
+      permissionProbes.push(actionKey);
+      return new Promise<Response>((resolve) => {
+        pendingPermissions.push({ actionKey, resolve });
+      });
+    }
+    throw new Error(`Unscripted fetch: ${url}`);
+  });
+
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+
+  render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={["/dashboard"]}>
+        <WorkspaceProvider>
+          <Routes>
+            <Route element={<ManagerLayout />}>
+              <Route path="/dashboard" element={<main><PageHeader title="Dashboard" /></main>} />
+            </Route>
+          </Routes>
+        </WorkspaceProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+
+  return {
+    permissionProbes,
+    resolvePermissions: () => {
+      for (const pending of pendingPermissions) {
+        pending.resolve(jsonResponse({
+          effect: allowed.has(pending.actionKey) ? "allow" : "deny",
+          source_layer: "test",
+          source_rule_id: null,
+          matched_groups: allowed.has(pending.actionKey) ? ["managers"] : [],
+        }));
+      }
+    },
+  };
+}
+
 beforeEach(() => {
   __resetAuthStoreForTests();
   __resetApiProvidersForTests();
@@ -217,23 +295,25 @@ describe("<ManagerLayout> permission-resolved navigation", () => {
 
     const unique = new Set(probes);
     expect(probes).toHaveLength(unique.size);
-    expect(probes).toEqual([
+    expect(probes).toEqual(EXPECTED_NAV_ACTIONS);
+  });
+
+  it("starts manager nav permission probes together instead of waiting for each response", async () => {
+    const { permissionProbes, resolvePermissions } = renderManagerLayoutWithDeferredPermissions(new Set([
       "employees.read",
-      "properties.read",
-      "stays.read",
-      "tasks.create",
-      "availability_overrides.view_others",
-      "scope.view",
-      "instructions.edit",
-      "assets.manage_documents",
-      "approvals.read",
-      "leaves.view_others",
-      "expenses.approve",
-      "payroll.view_other",
       "permissions.edit_rules",
-      "audit_log.view",
-      "scope.edit_settings",
-      "api_tokens.manage",
-    ]);
+    ]));
+
+    await waitFor(() => {
+      expect(permissionProbes).toEqual(EXPECTED_NAV_ACTIONS);
+    });
+
+    resolvePermissions();
+
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: /Dashboard/i })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: /Permissions/i })).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /API tokens/i })).toBeNull();
+    });
   });
 });

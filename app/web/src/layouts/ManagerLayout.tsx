@@ -187,29 +187,12 @@ function filterNavItems(items: SideNavItem[], allowedActions: Set<string> | null
   return pruneEmptySections(visible);
 }
 
-function delayPermissionProbe(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const id = window.setTimeout(resolve, ms);
-    signal.addEventListener(
-      "abort",
-      () => {
-        window.clearTimeout(id);
-        reject(signal.reason);
-      },
-      { once: true },
-    );
-  });
-}
-
 async function resolveAllowedNavActions(
   actionKeys: string[],
   scopeId: string,
   signal: AbortSignal,
 ): Promise<Set<string>> {
-  const allowed = new Set<string>();
-  for (const [index, actionKey] of actionKeys.entries()) {
-    if (signal.aborted) break;
-    if (index > 0) await delayPermissionProbe(75, signal);
+  const results = await Promise.all(actionKeys.map(async (actionKey) => {
     const params = new URLSearchParams({
       action_key: actionKey,
       scope_kind: "workspace",
@@ -220,14 +203,15 @@ async function resolveAllowedNavActions(
         `/api/v1/permissions/resolved/self?${params}`,
         { signal },
       );
-      if (permission.effect === "allow") allowed.add(actionKey);
+      return permission.effect === "allow" ? actionKey : null;
     } catch {
-      if (signal.aborted) break;
+      if (signal.aborted) throw signal.reason;
       // A failed nav hint must not widen access. Direct routes still
       // enforce the same action through RequirePermission.
+      return null;
     }
-  }
-  return allowed;
+  }));
+  return new Set(results.filter((actionKey): actionKey is string => actionKey !== null));
 }
 
 export default function ManagerLayout() {
