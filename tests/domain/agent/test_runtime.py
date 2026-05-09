@@ -1014,15 +1014,15 @@ def test_budget_exceeded_returns_error_no_llm_call_row(
     # No llm_usage row written.
     usage_count = db_session.scalar(select(func.count()).select_from(LlmUsage))
     assert usage_count == 0
-    # No chat reply (the API layer surfaces the error to the user;
-    # the runtime stays silent on the chat surface to avoid a
-    # double-toast pattern).
-    chat_count = db_session.scalar(select(func.count()).select_from(ChatMessage))
-    assert chat_count == 0
+    # Friendly fallback reply landed in the same chat surface.
+    chat_row = db_session.get(ChatMessage, outcome.chat_message_id)
+    assert chat_row is not None
+    assert "budget" in chat_row.body_md.lower()
 
     # Started + finished(error) on the wire.
     assert captured_events.names() == [
         "agent.turn.started",
+        "agent.message.appended",
         "agent.turn.finished",
     ]
     finished = captured_events.events[-1]

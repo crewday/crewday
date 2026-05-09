@@ -23,15 +23,16 @@ Per turn:
    state without polling.
 2. Resolve the capability via
    :func:`~app.domain.llm.router.resolve_primary` (cd-k0qf) —
-   ``CapabilityUnassignedError`` short-circuits to
-   ``outcome=error``.
+   ``CapabilityUnassignedError`` writes a neutral chat fallback when
+   there is a thread, then short-circuits to ``outcome=error``.
 3. Mint (or accept) a delegated token for ``ctx.actor_id`` so the
    tool dispatcher acts as the delegating user. The token's label
    becomes the ``agent_label`` denormalised onto every audit row
    the turn writes.
 4. Pre-flight the workspace 30-day budget envelope (cd-irng). If
    the call would overshoot, refuse — ``outcome=error`` with code
-   ``budget_exceeded``; no LLM call leaves the client; no
+   ``budget_exceeded``; a neutral chat fallback is written when
+   there is a thread, no LLM call leaves the client, and no
    ``llm_usage`` row is written.
 5. Loop up to ``max_iterations`` (default 8) and ``wall_clock_timeout_s``
    (default 60s):
@@ -276,9 +277,9 @@ class TurnOutcome:
     * ``action`` — an approval row landed; ``approval_request_id``
       points at the inserted row.
     * ``error`` — the runtime raised (capability unassigned, budget
-      refused, transport failure). Neither id is populated; the
-      caller surfaces the error to the chat thread itself
-      (a friendly message + a re-try affordance).
+      refused, transport failure). If the turn has a chat thread,
+      ``chat_message_id`` points at the friendly fallback row so the
+      same surface observes the failure.
     * ``timeout`` — the iteration cap or wall-clock cap fired. The
       runtime wrote a friendly fallback :class:`ChatMessage` so the
       user always sees a response; ``chat_message_id`` carries the
@@ -651,6 +652,18 @@ _TIMEOUT_REPLY_TEXT: Final[str] = (
     "I couldn't finish that request in the time I have for one turn — "
     "the conversation may be too large or the work may need more steps. "
     "Try breaking the request into smaller pieces."
+)
+_CAPABILITY_UNASSIGNED_REPLY_TEXT: Final[str] = (
+    "The agent is not configured for this workspace yet. Ask an admin "
+    "to assign a chat model, then try again."
+)
+_BUDGET_EXCEEDED_REPLY_TEXT: Final[str] = (
+    "The agent cannot reply right now because the workspace LLM budget "
+    "is exhausted. Ask an admin to review usage, then try again."
+)
+_GENERIC_ERROR_REPLY_TEXT: Final[str] = (
+    "The agent cannot reply right now. Try again later or ask an admin "
+    "to check agent settings."
 )
 
 
@@ -1090,15 +1103,38 @@ def _finish_error(
     error_code: str,
     error_message: str,
 ) -> TurnOutcome:
+    notifications = run.agent_message_notifications
+    chat_message_id = _write_chat_reply(
+        run.session,
+        ctx=run.ctx,
+        thread_id=run.thread_id,
+        body_md=_error_reply_text(error_code),
+        scope=run.scope,
+        event_bus=run.bus,
+        correlation_id=run.correlation_id,
+        clock=run.clock,
+        agent_message_notification_sink=notifications.sink,
+        agent_message_recipient_user_id=notifications.recipient_user_id,
+        agent_message_delivery_is_fallback=notifications.delivery_is_fallback,
+    )
     return _finish_turn(
         run,
         _TurnTerminal(
             outcome="error",
             ended_at=run.clock.now(),
+            chat_message_id=chat_message_id,
             error_code=error_code,
             error_message=error_message,
         ),
     )
+
+
+def _error_reply_text(error_code: str) -> str:
+    if error_code == "capability_unassigned":
+        return _CAPABILITY_UNASSIGNED_REPLY_TEXT
+    if error_code == "budget_exceeded":
+        return _BUDGET_EXCEEDED_REPLY_TEXT
+    return _GENERIC_ERROR_REPLY_TEXT
 
 
 def _finish_turn(run: _TurnRun, terminal: _TurnTerminal) -> TurnOutcome:
@@ -1696,6 +1732,12 @@ def _insert_chat_reply_row(
     body_md: str,
     clock: Clock,
 ) -> ChatMessage:
+    created_at = _next_chat_reply_created_at(
+        session,
+        workspace_id=ctx.workspace_id,
+        thread_id=thread_id,
+        clock=clock,
+    )
     row = ChatMessage(
         id=new_ulid(clock=clock),
         workspace_id=ctx.workspace_id,
@@ -1705,11 +1747,33 @@ def _insert_chat_reply_row(
         body_md=body_md,
         attachments_json=[],
         dispatched_to_agent_at=None,
-        created_at=clock.now(),
+        created_at=created_at,
     )
     session.add(row)
     session.flush()
     return row
+
+
+def _next_chat_reply_created_at(
+    session: Session,
+    *,
+    workspace_id: str,
+    thread_id: str,
+    clock: Clock,
+) -> datetime:
+    created_at = clock.now()
+    latest = session.scalar(
+        select(ChatMessage.created_at)
+        .where(
+            ChatMessage.workspace_id == workspace_id,
+            ChatMessage.channel_id == thread_id,
+        )
+        .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
+        .limit(1)
+    )
+    if latest is not None and latest >= created_at:
+        return latest + timedelta(microseconds=1)
+    return created_at
 
 
 def _publish_chat_reply_appended(

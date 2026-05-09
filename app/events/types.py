@@ -1883,8 +1883,8 @@ class AgentTurnFinished(Event):
       picks this up via ``agent.action.pending`` (cd-9ghv) and
       renders the approval card.
     * ``error`` — the runtime raised (capability unassigned, budget
-      exceeded, transport failure after retries). The SPA renders
-      a friendly error toast.
+      exceeded, transport failure after retries). Chat-backed turns
+      also write a friendly fallback row for the same surface.
     * ``timeout`` — the iteration cap or wall-clock cap fired.
       A friendly "the request was too large" reply is also written
       as a chat-message row, so a subscriber that only watches

@@ -39,7 +39,7 @@ from app.adapters.db.llm.models import (
     LlmProvider,
     LlmProviderModel,
 )
-from app.adapters.db.messaging.models import ChatChannel
+from app.adapters.db.messaging.models import ChatChannel, ChatMessage
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.tasks.models import Occurrence
 from app.adapters.db.workspace.models import Workspace
@@ -58,6 +58,7 @@ from app.domain.agent.runtime import (
     run_turn,
 )
 from app.events.bus import EventBus
+from app.events.types import AgentMessageAppended, AgentTurnFinished, AgentTurnStarted
 from app.tenancy import WorkspaceContext, registry, tenant_agnostic
 from app.tenancy.current import reset_current, set_current
 from app.tenancy.orm_filter import install_tenant_filter
@@ -738,3 +739,71 @@ def test_agent_message_endpoint_dispatches_live_tool_and_audits(
     assert token_row is not None
     assert token_row.kind == "delegated"
     assert token_row.revoked_at == _PINNED
+
+
+def test_agent_message_endpoint_surfaces_unassigned_capability_in_log(
+    db_session: Session,
+) -> None:
+    workspace, user = _seed_workspace_and_user(db_session)
+    ctx = WorkspaceContext(
+        workspace_id=workspace.id,
+        workspace_slug=workspace.slug,
+        actor_id=user.id,
+        actor_kind="user",
+        actor_grant_role="manager",
+        actor_was_owner_member=True,
+        audit_correlation_id=new_ulid(),
+    )
+    set_current(ctx)
+    bus = EventBus()
+    events: list[object] = []
+    bus.subscribe(AgentTurnStarted)(events.append)
+    bus.subscribe(AgentMessageAppended)(events.append)
+    bus.subscribe(AgentTurnFinished)(events.append)
+    clock = FrozenClock(_PINNED)
+    llm = _ScriptedLLM(replies=[])
+    app = _build_agent_app(db_session, ctx, llm=llm, clock=clock, bus=bus)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    response = client.post(
+        f"/w/{workspace.slug}/api/v1/agent/manager/message",
+        json={"body": "Hello"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["kind"] == "user"
+    assert response.json()["body"] == "Hello"
+    assert llm.messages == []
+
+    log_response = client.get(f"/w/{workspace.slug}/api/v1/agent/manager/log")
+    assert log_response.status_code == 200, log_response.text
+    rows = log_response.json()
+    assert [row["kind"] for row in rows] == ["user", "agent"]
+    assert rows[0]["body"] == "Hello"
+    assert "not configured" in rows[1]["body"]
+    assert "assign a chat model" in rows[1]["body"]
+
+    db_rows = list(
+        db_session.scalars(
+            select(ChatMessage).order_by(
+                ChatMessage.created_at.asc(), ChatMessage.id.asc()
+            )
+        ).all()
+    )
+    assert [(row.author_label, row.body_md) for row in db_rows] == [
+        ("Manager", "Hello"),
+        ("agent", rows[1]["body"]),
+    ]
+
+    assert [type(event).name for event in events] == [
+        "agent.message.appended",
+        "agent.turn.started",
+        "agent.message.appended",
+        "agent.turn.finished",
+    ]
+    started = events[1]
+    finished = events[3]
+    assert isinstance(started, AgentTurnStarted)
+    assert isinstance(finished, AgentTurnFinished)
+    assert started.correlation_id == finished.correlation_id
+    assert finished.outcome == "error"

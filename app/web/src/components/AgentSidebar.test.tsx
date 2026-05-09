@@ -200,6 +200,64 @@ describe("AgentSidebar", () => {
     }
   });
 
+  it("renders a manager runtime fallback from the refreshed log", async () => {
+    const sentAt = "2026-05-06T12:00:00Z";
+    const fallbackAt = "2026-05-06T12:00:01Z";
+    let messages: Array<{ at: string; kind: "user" | "agent"; body: string }> = [];
+    const env = installFetchRouteHandlers([
+      {
+        path: "/w/crewday/api/v1/agent/manager/log",
+        respond: () => ({ body: messages }),
+      },
+      {
+        path: "/w/crewday/api/v1/approvals",
+        respond: { body: [] },
+      },
+      {
+        path: "/w/crewday/api/v1/agent/manager/message",
+        method: "POST",
+        respond: () => {
+          const userMessage = { at: sentAt, kind: "user" as const, body: "Hello" };
+          messages = [
+            userMessage,
+            {
+              at: fallbackAt,
+              kind: "agent" as const,
+              body: "The agent is not configured for this workspace yet. Ask an admin to assign a chat model, then try again.",
+            },
+          ];
+          return {
+            status: 201,
+            body: userMessage,
+          };
+        },
+      },
+    ]);
+
+    try {
+      renderWithProviders(
+        <MemoryRouter initialEntries={["/w/crewday/dashboard"]}>
+          <AgentSidebar role="manager" />
+        </MemoryRouter>,
+        { queryClient: makeTestQueryClient() },
+      );
+
+      const input = screen.getByLabelText("Message agent");
+      fireEvent.change(input, { target: { value: "Hello" } });
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+      expect(await screen.findByText("Hello")).toBeInTheDocument();
+      expect(
+        await screen.findByText(
+          "The agent is not configured for this workspace yet. Ask an admin to assign a chat model, then try again.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Agent is typing")).not.toBeInTheDocument();
+    } finally {
+      env.restore();
+    }
+  });
+
   it("rolls back the optimistic user message when send fails", async () => {
     let rejectSend: (value: Response) => void = () => {};
     const failedSend = new Promise<Response>((resolve) => {
