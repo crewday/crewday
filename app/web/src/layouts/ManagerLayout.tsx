@@ -279,7 +279,7 @@ export default function ManagerLayout() {
   return (
     <ShellNavProvider hasDrawer={hasDrawer} isOpen={navOpen} toggle={toggleNav}>
       <div
-        className="desk"
+        className={"desk" + (pathname === "/chat" ? " desk--chat" : "")}
         data-agent-collapsed={collapsed ? "true" : "false"}
         data-nav-collapsed={navCollapsed ? "true" : "false"}
         data-nav-open={navOpen ? "true" : "false"}
@@ -298,7 +298,7 @@ export default function ManagerLayout() {
           collapsed={navCollapsed}
           onToggleCollapsed={toggleNavCollapsed}
           footer={{
-            initials: "EB",
+            initials: data?.employee.avatar_initials ?? "EB",
             name: data?.manager_name ?? "Élodie Bernard",
             role: "Manager",
           }}

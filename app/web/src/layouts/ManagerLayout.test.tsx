@@ -84,7 +84,7 @@ function workspaceMe(): Me {
   };
 }
 
-function renderManagerLayout(allowed: Set<string>): string[] {
+function renderManagerLayout(allowed: Set<string>, initialPath = "/dashboard"): string[] {
   const permissionProbes: string[] = [];
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("ws_1");
   setAuthenticated(authMe());
@@ -112,11 +112,12 @@ function renderManagerLayout(allowed: Set<string>): string[] {
 
   render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/dashboard"]}>
+      <MemoryRouter initialEntries={[initialPath]}>
         <WorkspaceProvider>
           <Routes>
             <Route element={<ManagerLayout />}>
               <Route path="/dashboard" element={<main><PageHeader title="Dashboard" /></main>} />
+              <Route path="/chat" element={<main data-testid="chat-view">Chat</main>} />
             </Route>
           </Routes>
         </WorkspaceProvider>
@@ -193,6 +194,14 @@ describe("<ManagerLayout> permission-resolved navigation", () => {
     expect(within(bottomNav).getByRole("link", { name: /Chat/i })).toBeInTheDocument();
     expect(within(bottomNav).getByRole("link", { name: /Expenses/i })).toBeInTheDocument();
     expect(within(bottomNav).getByRole("link", { name: /Me/i })).toBeInTheDocument();
+  });
+
+  it("marks the manager shell as a full-screen chat surface on /chat", async () => {
+    renderManagerLayout(new Set(), "/chat");
+
+    expect(await screen.findByTestId("chat-view")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-view").closest(".desk")).toHaveClass("desk--chat");
+    expect(screen.getByTestId("agent-sidebar")).toHaveTextContent("agent:manager");
   });
 
   it("probes only unique action keys required by workspace nav links", async () => {

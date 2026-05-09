@@ -109,7 +109,7 @@ vi.mock("@/layouts/ClientLayout", async () => {
 vi.mock("@/pages/employee/ChatPage", () => ({
   default: function MockChatPage(): ReactElement {
     mockRenders.chatPage();
-    return <main data-testid="worker-chat">Worker operations agent</main>;
+    return <main data-testid="full-chat">Operations agent</main>;
   },
 }));
 
@@ -386,19 +386,19 @@ describe("App public root and protected deep links", () => {
 });
 
 describe("App /chat role routing", () => {
-  it("redirects manager direct navigation away from worker full-screen chat", async () => {
+  it("keeps manager /chat on the full-screen agent route in the manager shell", async () => {
     installPermissionAllowFetch();
     renderAppAt("/chat", "manager");
 
     await waitFor(() => {
-      expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
+      expect(screen.getByTestId("location")).toHaveTextContent("/chat");
     });
 
-    expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
+    expect(await screen.findByTestId("full-chat")).toBeInTheDocument();
     expect(mockRenders.managerLayout).toHaveBeenCalled();
     expect(mockRenders.employeeLayout).not.toHaveBeenCalled();
-    expect(mockRenders.chatPage).not.toHaveBeenCalled();
-    expect(screen.queryByTestId("worker-chat")).toBeNull();
+    expect(mockRenders.chatPage).toHaveBeenCalled();
+    expect(mockRenders.agentSidebar).toHaveBeenCalledWith("manager");
   });
 
   it("uses the active manager grant instead of a stale employee role cookie", async () => {
@@ -448,7 +448,7 @@ describe("App /chat role routing", () => {
   it("keeps worker /chat on the full-screen operations agent route", async () => {
     renderAppAt("/chat", "employee");
 
-    expect(await screen.findByTestId("worker-chat")).toBeInTheDocument();
+    expect(await screen.findByTestId("full-chat")).toBeInTheDocument();
     expect(screen.getByTestId("location")).toHaveTextContent("/chat");
     expect(mockRenders.employeeLayout).toHaveBeenCalled();
     expect(mockRenders.chatPage).toHaveBeenCalled();

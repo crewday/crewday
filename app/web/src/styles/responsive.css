@@ -82,6 +82,13 @@
     min-height: 0;
     width: 100%;
   }
+  .desk--chat .desk__main {
+    padding: 0;
+    overflow: hidden;
+  }
+  .desk--chat .chat-screen {
+    margin-bottom: 0;
+  }
 
   /* §14 "Page header" — sticky compact bar on phone. Padded for the
      iOS notch via env(safe-area-inset-top) and rendered as a solid

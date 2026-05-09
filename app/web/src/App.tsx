@@ -159,7 +159,6 @@ export default function App() {
   const { workspaceId } = useWorkspace();
   const grantRole = activeWorkspaceGrantRole(user, workspaceId);
   const isManagerSurface = grantRole === "manager" || grantRole === "admin";
-  const isWorkerSurface = grantRole === "worker";
 
   return (
     <Routes>
@@ -233,6 +232,7 @@ export default function App() {
               <Route path="/task/:tid" element={<TaskDetailPage />} />
               <Route path="/my/expenses" element={<MyExpensesPage />} />
               <Route path="/me" element={<MePage />} />
+              <Route path="/chat" element={<ChatPage />} />
               <Route path="/scheduler" element={<SchedulerPage />} />
               <Route path="/w/:slug/scheduler" element={<SchedulerPage />} />
               {/* Legacy /bookings and /shifts URLs — spec §14 collapses
@@ -248,18 +248,7 @@ export default function App() {
               )}
             </Route>
 
-            {/* /chat is the worker mobile full-screen chat entry; on
-                desktop both shells use AgentSidebar instead. Non-worker
-                direct hits return to RoleHome so managers land back in
-                the manager shell. */}
-            {isWorkerSurface ? (
-              <Route element={<EmployeeLayout />}>
-                <Route path="/chat" element={<ChatPage />} />
-              </Route>
-            ) : (
-              <Route path="/chat" element={<Navigate to="/" replace />} />
-            )}
-            {isWorkerSurface ? (
+            {grantRole === "worker" ? (
               <Route element={<EmployeeLayout />}>
                 <Route path="/asset/scan" element={<AssetScanPage />} />
                 <Route path="/asset/scan/:token" element={<AssetScanPage />} />

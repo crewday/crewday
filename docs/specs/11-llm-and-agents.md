@@ -81,11 +81,13 @@ inheriting that user's full permissions. They share plumbing (client,
 redaction, audit, approval) but differ in whose authority they carry.
 
 Both agents are reached through the in-app chat surfaces that ship in
-v1: on desktop, the right-hand `.desk__agent` sidebar (shared between
-the worker and owner/manager shells, see §14 "Desktop shell"); on
-mobile, a bottom-bar entry — the worker shell's `Chat` tab navigates
-to the full-screen `/chat` page, and the manager shell's
-`.desk__bottom-dock` opens `.desk__agent` as an off-canvas drawer.
+v1. The presentation is based on available screen real estate, not on
+manager-vs-worker role branching: on desktop/wide layouts, the
+right-hand `.desk__agent` sidebar is shared between the worker and
+owner/manager shells (see §14 "Desktop shell"); on phone/narrow
+layouts, the bottom-bar `Chat` entry navigates to the full-screen
+`/chat` page. The full-screen page selects the current user's
+role-appropriate agent endpoints from the signed-in workspace session.
 §23 keeps the off-app gateway design on the shelf for later, but
 external channels are not enabled in shipped v1. The agent code path
 is therefore channel-agnostic in principle, but the only live
@@ -95,13 +97,13 @@ transports are the web surfaces above.
 
 Lives in the right sidebar (`.desk__agent`) of the owner/manager
 desktop shell (§14) — the same shared component that the worker
-desktop shell mounts on its right edge. The sidebar is mounted once
-at the `ManagerLayout` level as a sibling of `<Outlet />`, so it
+desktop shell mounts on its right edge. On phone/narrow layouts, the
+bottom `Chat` entry opens the full-screen `/chat` page with manager
+agent scope. The sidebar is mounted once at the `ManagerLayout` level
+as a sibling of `<Outlet />`, so it
 survives client-side route changes — the chat log scroll position,
 the composer draft, and the `EventSource` subscription all persist
-across navigation. On mobile, the manager shell renders a single
-bottom dock button (`.desk__bottom-dock`) that opens the same sidebar
-as an off-canvas right drawer. New agent messages are delivered via
+across navigation. New agent messages are delivered via
 the SSE event `agent.message.appended`, so every connected tab sees
 them without polling. Its tool surface is **the full CLI + REST surface available
 to the delegating user** — every command the owner or manager can
@@ -139,9 +141,10 @@ the agent.
 
 ### Worker-side agent
 
-On mobile, lives behind the `Chat` tab in the worker PWA footer
-(§14), which navigates to the full-screen `/chat` page. On desktop,
-lives in the right-hand `.desk__agent` rail of the worker shell —
+On phone/narrow layouts, lives behind the `Chat` tab in the bottom
+bar (§14), which navigates to the full-screen `/chat` page with
+employee agent scope. On desktop, lives in the right-hand
+`.desk__agent` rail of the worker shell —
 the same shared component that the manager shell mounts (§14
 "Desktop shell"); a `role` prop on `AgentSidebar` selects the
 per-role agent log/message endpoints
@@ -1724,15 +1727,16 @@ triggered it. The agent's HTTP request carries an
 
 | value                 | channel                                                |
 |-----------------------|--------------------------------------------------------|
-| `web_owner_sidebar`   | Owner/manager web client — `.desk__agent` (desktop) or its mobile bottom-dock drawer (§14 "Desktop shell") |
-| `web_worker_chat`     | Worker web client — `.desk__agent` (desktop) or full-screen `/chat` (mobile, opened from the bottom-nav `Chat` tab) (§14) |
+| `web_owner_sidebar`   | Owner/manager web client — `.desk__agent` on desktop/wide layouts or full-screen `/chat` on phone/narrow layouts (§14 "Desktop shell") |
+| `web_worker_chat`     | Worker web client — `.desk__agent` on desktop/wide layouts or full-screen `/chat` on phone/narrow layouts (§14) |
 | `web_admin_sidebar`   | Deployment-admin web client — `.desk__agent` on the `/admin` shell (§14 "Admin shell"). `for_user_id` is the admin caller; pending cards show only in their `/admin` chat, not in any workspace's `/approvals` desk (the deployment has no `/approvals`). |
 | `offapp_whatsapp`     | Reserved for a future WhatsApp adapter (§23, deferred) |
 | *absent*              | `desk_only` — approval appears only in `/approvals`    |
 
 Channel values are role-scoped, not viewport-scoped: a single SPA
 bundle ships per role, and the chat surface picks its presentation
-(desktop sidebar vs. mobile drawer / full-screen) from CSS. The SSE
+(desktop sidebar vs. phone full-screen for workspace shells, with
+admin-specific mobile chrome on `/admin`) from CSS. The SSE
 socket and the `agent.action.pending` payload are identical across
 the two presentations.
 
@@ -2024,7 +2028,8 @@ UI defaults to 90 days, accepts any future date.
 
 For users whose workspace / work-engagement settings enable chat.
 
-- Available as a bottom-nav chat bubble on the PWA.
+- Available through the bottom-nav `Chat` entry on phone/narrow
+  layouts and through `.desk__agent` on desktop/wide layouts.
 - Tools exposed to the assistant (subset of the REST API, scoped to
   the current user):
     - `get_tasks_today()`, `mark_task_done(task_id)`,

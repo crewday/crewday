@@ -196,7 +196,7 @@ below are relative to `/w/<slug>/`.
 ```
 today            schedule         task/<id>
 my/expenses      me               history          issues/new
-asset/<id>
+asset/<id>       chat
 ```
 
 The legacy routes `/week`, `/me/schedule`, `/bookings`, and
@@ -219,17 +219,19 @@ bookings are the time record (§09).
 ### Worker-only (under /w/<slug>/)
 
 ```
-chat             asset/scan       kb
+asset/scan       kb
 ```
 
 Footer bottom-nav: `Today · Schedule · Chat · My Expenses · Me`. Chat is
 first-class, **not** a floating action button. The bottom-nav `Chat`
-tab is the **mobile** entry to the agent — it navigates to the
-full-screen `/chat` page. On desktop (≥720px) the worker shell drops
-the bottom-nav (the shared `<SideNav />` takes over) and the agent
-moves to the right-hand `.desk__agent` rail (§14 "Desktop shell")
-shared with the manager layout, so `Chat` is no longer listed in the
-left-nav. Booked hours (per §09) live on `/schedule`: the day
+tab is the **phone/narrow** entry to the agent for every workspace
+shell that shows the bottom bar — it navigates to the full-screen
+shared `/chat` page. The page derives its employee or manager agent
+scope from the signed-in workspace session. On desktop (≥720px) the
+bottom-nav is absent (the shared `<SideNav />` takes over) and the
+agent moves to the right-hand `.desk__agent` rail (§14 "Desktop shell"),
+so `Chat` is no longer listed in the left-nav. Booked hours (per §09)
+live on `/schedule`: the day
 drawer surfaces the day's bookings with inline **amend**
 (overrun / underrun reason), **decline** (future bookings only),
 and — from an otherwise empty day — **propose ad-hoc booking**.
@@ -640,10 +642,10 @@ agent-first invariant (§11) — any verb reachable in `.desk__nav` or
 `.desk__main` must also be requestable in `.desk__agent`.
 
 On mobile (`< 720px`) `.desk__agent` collapses out of the grid in
-both layouts. The worker shell exposes the agent through the
-bottom-nav `Chat` tab → full-screen `/chat`; the manager shell
-exposes it through a single bottom dock button (`.desk__bottom-dock`)
-that opens `.desk__agent` as an off-canvas right drawer.
+both layouts. Any shell that shows the bottom navigation exposes the
+agent through the `Chat` tab, which navigates to the full-screen
+`/chat` page. On desktop/wide layouts, the bottom `Chat` control is
+absent and chat remains in the persistent `.desk__agent` rail.
 
 The **MY WORK** group is the first section in the manager left-nav,
 placed before all operational sections:
@@ -687,10 +689,10 @@ a different product. What differs:
   Admin-side gated actions land inline in the admin chat
   (channel `web_admin_sidebar`, §11) — the deployment has no
   committee.
-- **Mobile.** Same pattern as the manager shell: hamburger drawer
-  for nav, bottom-dock button opens the agent as an off-canvas
-  right drawer. The `/admin` surface is not PWA-installed — it
-  is low-frequency operator tooling, not day-job UI.
+- **Mobile.** The admin shell is not PWA-installed and does not use
+  the workspace bottom tab bar. It keeps a hamburger drawer for nav
+  and may expose the admin agent as a compact drawer; the workspace
+  `/chat` phone route is not part of `/admin`.
 
 ## Implementation contracts
 
@@ -777,15 +779,15 @@ the platform must guarantee*.
   the worker bundle.
 - **Inline approvals.** When `agent.action.pending` arrives for the
   current user, the chat surface (the right-hand `.desk__agent` rail
-  on desktop for either role, the off-canvas drawer on manager mobile,
-  or the full-screen `/chat` page on worker mobile) renders a
+  on desktop/wide layouts for either role, or the full-screen `/chat`
+  page on phone/narrow layouts) renders a
   confirmation card whose buttons call `/approvals/{id}/{decision}` —
   shared with the `/approvals` desk. Full flow and card-copy source in
   §11.
 - **Agent turn indicator.** While an `agent.turn.started` is
   outstanding for the active thread (§11 "Agent turn lifecycle"),
-  every chat surface — the shared `.desk__agent` rail, the manager
-  mobile drawer, the worker full-screen `/chat`, and the
+  every chat surface — the shared `.desk__agent` rail, the
+  full-screen `/chat` page, and the
   task-scoped chat under `/tasks/{id}/chat` — renders a single
   non-interactive "typing" bubble in the log: three animated dots
   styled as a `chat-msg--typing` / `agent-msg--typing` variant of
@@ -925,8 +927,8 @@ surface.
 - **Opt-out for immersive / identity-rooted surfaces.** A page may
   skip `PageHeader` entirely when the content itself establishes
   identity and a compact bar would only steal vertical real estate.
-  In v1 that means `/chat` (full-screen conversation; the bottom
-  tab is the navigational label) and `/me` (opens on a large avatar
+  In v1 that means `/chat` (full-screen conversation on phone/narrow
+  layouts; the bottom tab is the navigational label) and `/me` (opens on a large avatar
   + name card that reads as the title). Any new opt-out must be
   justified in the PR — the default is "has a header".
 - **Overflow menu.** `overflow` is an array of `{ label, icon?,
@@ -1041,9 +1043,11 @@ Guarantees this repo makes to the wrapper:
 - **Responsive down to 360 px wide.** Every authenticated route —
   worker and manager alike — is usable at `min-width: 360px` on a
   touch device, with tap targets ≥ 44×44 CSS pixels (Accessibility
-  gate above). The manager shell collapses `.desk__nav` to a
-  hamburger and `.desk__agent` to a bottom-dock drawer below
-  720 px; this has to remain true under any future layout change.
+  gate above). Below 720 px, `.desk__agent` is removed from the
+  inline grid and chat moves to the full-screen `/chat` route opened
+  by the bottom `Chat` control; the manager shell also collapses
+  `.desk__nav` to a hamburger. This has to remain true under any
+  future layout change.
   The release playbook (§17) verifies the full authenticated
   sitemap at a 360 px Playwright viewport.
 - **No User-Agent gating.** The server never rejects a request
