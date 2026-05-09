@@ -1,0 +1,63 @@
+---
+import SiteShell from "@/components/SiteShell.astro";
+import { ArrowRight } from "@/icons";
+import { suggestCopy } from "@/content/en/pages";
+---
+
+<SiteShell title={suggestCopy.title} description={suggestCopy.description}>
+  <div class="landing-frame landing-secondary">
+    <section class="landing-hero landing-hero--secondary suggest-hero" aria-labelledby="suggest-title">
+      <div class="landing-hero__copy">
+        <p class="landing-kicker">{suggestCopy.eyebrow}</p>
+        <h1 id="suggest-title">{suggestCopy.heading}</h1>
+        <p class="landing-hero__summary">{suggestCopy.intro}</p>
+        <div class="landing-actions">
+          <a class="landing-button landing-button--primary" href={suggestCopy.loginCta.href}>
+            <span>{suggestCopy.loginCta.label}</span>
+            <ArrowRight size={18} strokeWidth={1.75} aria-hidden="true" />
+          </a>
+        </div>
+      </div>
+
+      <aside class="suggest-panel" aria-label={suggestCopy.formPanel.ariaLabel}>
+        <p class="suggest-panel__label">{suggestCopy.formPanel.label}</p>
+        <h2>{suggestCopy.formPanel.heading}</h2>
+        <p>{suggestCopy.formPanel.body}</p>
+        <a href={suggestCopy.loginCta.href}>{suggestCopy.loginCta.label}</a>
+      </aside>
+    </section>
+
+    <section class="landing-bands landing-bands--compact" aria-label={suggestCopy.explainer.ariaLabel}>
+      {
+        suggestCopy.sections.map((section, index) => (
+          <article class="landing-band landing-band--story">
+            <div class="landing-band__numeral">{index + 1}</div>
+            <div class="landing-band__body">
+              <span class="landing-tag">{section.eyebrow}</span>
+              <h2>{section.heading}</h2>
+              <p>{section.body}</p>
+            </div>
+          </article>
+        ))
+      }
+    </section>
+
+    <section class="suggest-board" aria-labelledby="suggest-board-title">
+      <div class="suggest-board__heading">
+        <p class="landing-kicker">{suggestCopy.board.eyebrow}</p>
+        <h2 id="suggest-board-title">{suggestCopy.board.heading}</h2>
+      </div>
+      <div class="suggest-board__list">
+        {
+          suggestCopy.clusters.map((cluster) => (
+            <article class="suggest-cluster">
+              <p>{cluster.meta}</p>
+              <h3>{cluster.title}</h3>
+              <span>{cluster.body}</span>
+            </article>
+          ))
+        }
+      </div>
+    </section>
+  </div>
+</SiteShell>

@@ -10,6 +10,16 @@ interface Props {
 }
 
 const { navAriaLabel, navLinks } = Astro.props;
+const currentPath = Astro.url.pathname.replace(/\/$/u, "") || "/";
+
+function isCurrentLink(href: string): boolean {
+  if (href.startsWith("#")) {
+    return false;
+  }
+
+  const linkPath = href.replace(/\/$/u, "") || "/";
+  return linkPath === currentPath;
+}
 ---
 
 <header class="landing-masthead" aria-label={homeCopy.masthead.ariaLabel}>
@@ -22,7 +32,13 @@ const { navAriaLabel, navLinks } = Astro.props;
   </p>
   <div class="landing-masthead__links">
     <nav class="landing-masthead__nav" aria-label={navAriaLabel}>
-      {navLinks.map((link) => <a href={link.href}>{link.label}</a>)}
+      {
+        navLinks.map((link) => (
+          <a href={link.href} aria-current={isCurrentLink(link.href) ? "page" : undefined}>
+            {link.label}
+          </a>
+        ))
+      }
     </nav>
     <nav class="landing-masthead__account" aria-label={siteCopy.header.accountLabel}>
       <a class="landing-masthead__login" href={appLinks.login.href}>{appLinks.login.label}</a>

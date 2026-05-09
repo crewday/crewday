@@ -20,6 +20,7 @@ export type PersonaPageCopy = {
   primaryCta: LinkAction;
   secondaryCta: LinkAction;
   sections: readonly ContentSection[];
+  ledger: readonly [string, string, string, string];
   tryIt: {
     label: string;
   };
@@ -53,6 +54,7 @@ export const personaPages = {
         body: "The operations agent can call the same tools the interface uses, so requests become traceable commands instead of detached chat advice.",
       },
     ],
+    ledger: ["Stay due", "Cleaner assigned", "Owner note", "Agent drafted"],
     tryIt: {
       label: "Owner demo picker",
     },
@@ -84,6 +86,7 @@ export const personaPages = {
         body: "Completed tasks, shift records, and pay views share the same operating model, keeping payroll review grounded in what happened.",
       },
     ],
+    ledger: ["Three arrivals", "Five shifts", "Payroll ready", "Client view"],
     tryIt: {
       label: "Agency demo picker",
     },
@@ -115,6 +118,7 @@ export const personaPages = {
         body: "Workers can see hours and schedule context from the same system that assigned and completed the work.",
       },
     ],
+    ledger: ["Shift open", "Next task", "Photo proof", "Hours saved"],
     tryIt: {
       label: "Housekeeper demo picker",
     },
@@ -173,7 +177,68 @@ export const pricingCopy = {
     {
       eyebrow: "Feedback",
       heading: "The suggestion box is the contact path in the roadmap.",
-      body: "The public suggestion surface ships after the landing pages. Until that route exists, this page does not pretend there is a working contact form.",
+      body: "The public suggestion surface is the contact path while managed pricing is still being shaped, with authenticated submit and vote controls kept behind the app handshake.",
+    },
+  ],
+} as const;
+
+export const suggestCopy = {
+  title: "Suggestion box | crew.day",
+  description:
+    "Read the public crew.day suggestion board, see grouped feedback themes, and sign in through the app to submit or vote.",
+  eyebrow: "Suggestion box",
+  heading: "A public board for the work people keep asking us to fix.",
+  intro:
+    "Browse the grouped themes openly. Submitting and voting stay tied to a signed-in crew.day workspace, so the board gets signal without anonymous spam.",
+  loginCta: {
+    label: "Log in to submit or vote",
+    href: `${appLinks.login.href}?return=%2Ffeedback-redirect`,
+  },
+  formPanel: {
+    ariaLabel: "Submit an idea",
+    label: "Submit",
+    heading: "Sign in through your workspace.",
+    body: "Public visitors can read the board. Submissions and votes unlock after the app redirects you back with a short-lived feedback token.",
+  },
+  explainer: {
+    ariaLabel: "How the suggestion box works",
+  },
+  board: {
+    eyebrow: "Public board",
+    heading: "Grouped themes, not private submissions.",
+  },
+  sections: [
+    {
+      eyebrow: "Read",
+      heading: "Public themes stay visible.",
+      body: "The board shows clustered ideas instead of raw submissions, so prospects and users can see what is active without exposing private workspace detail.",
+    },
+    {
+      eyebrow: "Submit",
+      heading: "Feedback starts in the app.",
+      body: "Signed-in users arrive with a short-lived token from their workspace. The site sees only pseudonymous hashes, never email addresses or workspace names.",
+    },
+    {
+      eyebrow: "Act",
+      heading: "Operator replies land on the cluster.",
+      body: "Each visible cluster can move from new to acknowledged, planned, in progress, shipped, or declined as the roadmap changes.",
+    },
+  ],
+  clusters: [
+    {
+      title: "Make recurring turnovers easier to review before publishing.",
+      meta: "42 submissions · acknowledged",
+      body: "Managers want the agent to draft repeatable turnover plans and still leave a clear approval point before staff see the work.",
+    },
+    {
+      title: "Give workers a cleaner view of proof photos and shift hours.",
+      meta: "27 submissions · planned",
+      body: "Housekeepers keep asking for fewer taps around evidence, completion notes, and the daily hour record.",
+    },
+    {
+      title: "Expose managed-hosting pricing as soon as it exists.",
+      meta: "18 submissions · new",
+      body: "Small agencies want to compare self-hosting with a hosted option before they move operational data into the product.",
     },
   ],
 } as const;

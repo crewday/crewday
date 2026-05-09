@@ -14,44 +14,45 @@ const { fixedPersona, page } = Astro.props;
 ---
 
 <SiteShell title={page.title} description={page.description}>
-  <div class="landing-frame persona-page">
-    <section class="page-hero page-hero--split" aria-labelledby="page-title">
-      <div class="page-hero__copy">
-        <p class="eyebrow">{page.eyebrow}</p>
+  <div class="landing-frame landing-secondary">
+    <section class="landing-hero landing-hero--secondary" aria-labelledby="page-title">
+      <div class="landing-hero__copy">
+        <p class="landing-kicker">{page.eyebrow}</p>
         <h1 id="page-title">{page.heading}</h1>
-        <p class="page-hero__intro">{page.intro}</p>
-        <div class="action-row">
-          <a class="button button--primary" href={page.primaryCta.href}>{page.primaryCta.label}</a>
-          <a class="button button--secondary" href={page.secondaryCta.href}>
+        <p class="landing-hero__summary">{page.intro}</p>
+        <div class="landing-actions">
+          <a class="landing-button landing-button--primary" href={page.primaryCta.href}>{page.primaryCta.label}</a>
+          <a class="landing-button landing-button--secondary" href={page.secondaryCta.href}>
             <span>{page.secondaryCta.label}</span>
             <ArrowRight size={17} strokeWidth={1.75} aria-hidden="true" />
           </a>
         </div>
       </div>
-      <div class="persona-ledger" aria-hidden="true">
-        <span></span>
-        <span></span>
-        <span></span>
-        <span></span>
+      <div class="landing-ledger" aria-hidden="true">
+        <span>{page.ledger[0]}</span>
+        <span>{page.ledger[1]}</span>
+        <span>{page.ledger[2]}</span>
+        <span>{page.ledger[3]}</span>
       </div>
     </section>
 
-    <section class="section-band" aria-label={page.eyebrow}>
-      <div class="section-grid section-grid--three">
-        {
-          page.sections.map((section) => (
-            <article class="story-card">
-              {section.eyebrow && <p class="eyebrow">{section.eyebrow}</p>}
+    <section class="landing-bands landing-bands--compact" aria-label={page.eyebrow}>
+      {
+        page.sections.map((section, index) => (
+          <article class="landing-band landing-band--story">
+            <div class="landing-band__numeral">{index + 1}</div>
+            <div class="landing-band__body">
+              {section.eyebrow && <span class="landing-tag">{section.eyebrow}</span>}
               <h2>{section.heading}</h2>
               <p>{section.body}</p>
-            </article>
-          ))
-        }
-      </div>
-    </section>
-
-    <section id="try-it" class="try-it-section" aria-label={page.tryIt.label}>
-      <ScenarioPicker fixedPersona={fixedPersona} client:load />
+            </div>
+          </article>
+        ))
+      }
     </section>
   </div>
+
+  <section id="try-it" class="landing-compose" aria-label={page.tryIt.label}>
+    <ScenarioPicker fixedPersona={fixedPersona} client:load />
+  </section>
 </SiteShell>

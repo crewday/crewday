@@ -18,38 +18,41 @@ const { title, description, eyebrow, heading, intro, sections, primaryCta, secon
 ---
 
 <SiteShell title={title} description={description}>
-  <div class="landing-frame content-page">
-    <section class="page-hero" aria-labelledby="page-title">
-      <p class="eyebrow">{eyebrow}</p>
-      <h1 id="page-title">{heading}</h1>
-      <p class="page-hero__intro">{intro}</p>
-      {
-        (primaryCta || secondaryCta) && (
-          <div class="action-row">
-            {primaryCta && <a class="button button--primary" href={primaryCta.href}>{primaryCta.label}</a>}
-            {secondaryCta && (
-              <a class="button button--secondary" href={secondaryCta.href}>
-                <span>{secondaryCta.label}</span>
-                <ArrowRight size={17} strokeWidth={1.75} aria-hidden="true" />
-              </a>
-            )}
-          </div>
-        )
-      }
-    </section>
-
-    <section class="section-band" aria-label={eyebrow}>
-      <div class="content-stack">
+  <div class="landing-frame landing-secondary">
+    <section class="landing-hero landing-hero--secondary landing-hero--plain" aria-labelledby="page-title">
+      <div class="landing-hero__copy">
+        <p class="landing-kicker">{eyebrow}</p>
+        <h1 id="page-title">{heading}</h1>
+        <p class="landing-hero__summary">{intro}</p>
         {
-          sections.map((section) => (
-            <article class="story-card story-card--wide">
-              {section.eyebrow && <p class="eyebrow">{section.eyebrow}</p>}
-              <h2>{section.heading}</h2>
-              <p>{section.body}</p>
-            </article>
-          ))
+          (primaryCta || secondaryCta) && (
+            <div class="landing-actions">
+              {primaryCta && <a class="landing-button landing-button--primary" href={primaryCta.href}>{primaryCta.label}</a>}
+              {secondaryCta && (
+                <a class="landing-button landing-button--secondary" href={secondaryCta.href}>
+                  <span>{secondaryCta.label}</span>
+                  <ArrowRight size={17} strokeWidth={1.75} aria-hidden="true" />
+                </a>
+              )}
+            </div>
+          )
         }
       </div>
+    </section>
+
+    <section class="landing-bands landing-bands--compact" aria-label={eyebrow}>
+      {
+        sections.map((section, index) => (
+          <article class="landing-band landing-band--story">
+            <div class="landing-band__numeral">{index + 1}</div>
+            <div class="landing-band__body">
+              {section.eyebrow && <span class="landing-tag">{section.eyebrow}</span>}
+              <h2>{section.heading}</h2>
+              <p>{section.body}</p>
+            </div>
+          </article>
+        ))
+      }
     </section>
   </div>
 </SiteShell>
