@@ -81,12 +81,15 @@ Trust the `endpoints:` line over the compose `stack:` line. A transient
 and API routes. Recurring `llm.budget.refresh.workspace_failed` warnings for
 idle zero-spend dev workspaces are not expected; if they continue after a code
 change, first check whether WatchFiles is waiting for open connections to drain
-before the app process reloads.
+before the app process reloads. The dev app runs uvicorn with a bounded
+graceful shutdown timeout so long-lived `/events` streams do not keep the old
+worker and its scheduler alive indefinitely during source reload.
 
 If `/healthz` itself times out, treat that as an app-loop availability problem,
 not a DB readiness failure. `scripts/agent-status.sh` exits non-zero for that
-case; collect `crewday-app-api` logs around the timeout before restarting so
-pool waits or blocking middleware can be fixed at the source.
+case and reports whether a recent WatchFiles reload is blocked on old
+connections; collect `crewday-app-api` logs around the timeout before
+restarting so pool waits or blocking middleware can be fixed at the source.
 
 ## App Access
 

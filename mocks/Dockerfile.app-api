@@ -94,7 +94,7 @@ chown -R 10001:10001 /data
 # migrations across the app and worker entrypoints.
 su -s /bin/sh crewday -c 'cd /app && python -m app.deploy.migrate'
 
-exec su -s /bin/sh crewday -c 'exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app'
+exec su -s /bin/sh crewday -c 'exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app --timeout-graceful-shutdown 5'
 ENTRYPOINT
 
 EXPOSE 8000
