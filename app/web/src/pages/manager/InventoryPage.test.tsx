@@ -294,14 +294,72 @@ describe("<InventoryPage>", () => {
 
       const dialog = await screen.findByRole("dialog", { name: "Create item" });
       expect(within(dialog).getByRole("heading", { name: "Create item" })).toBeInTheDocument();
-      expect(within(dialog).getByLabelText("Property")).toHaveValue("prop_1");
+      expect(within(dialog).getByLabelText(/^Property\b/)).toHaveValue("prop_1");
       expect(within(dialog).getByRole("option", { name: "Casa Azul" })).toBeInTheDocument();
-      expect(within(dialog).getByLabelText("Name")).toBeInTheDocument();
-      expect(within(dialog).getByLabelText("Unit")).toHaveValue("each");
-      expect(within(dialog).getByLabelText("SKU")).toBeInTheDocument();
-      expect(within(dialog).getByLabelText("Barcode")).toBeInTheDocument();
-      expect(within(dialog).getByLabelText("Reorder point")).toHaveValue(0);
-      expect(within(dialog).getByLabelText("Reorder target")).toBeInTheDocument();
+      expect(within(dialog).getByLabelText(/^Name\b/)).toBeInTheDocument();
+      expect(within(dialog).getByLabelText(/^Unit\b/)).toHaveValue("each");
+      expect(within(dialog).getByLabelText(/^SKU\b/)).toBeInTheDocument();
+      expect(within(dialog).getByLabelText(/^Barcode\b/)).toBeInTheDocument();
+      expect(within(dialog).getByLabelText(/^Reorder point\b/)).toHaveValue(0);
+      expect(within(dialog).getByLabelText(/^Reorder target\b/)).toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("marks required and optional new item fields and describes reorder controls", async () => {
+    const fake = installFetch([...ITEMS], [PROPERTIES[0]!, SECOND_PROPERTY]);
+    try {
+      render(<Harness />);
+      await screen.findByText("Paper towels");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Create item" });
+      const requiredFields = [
+        within(dialog).getByLabelText(/^Property\b/),
+        within(dialog).getByLabelText(/^Name\b/),
+        within(dialog).getByLabelText(/^Unit\b/),
+        within(dialog).getByLabelText(/^Reorder point\b/),
+      ];
+      const optionalFields = [
+        within(dialog).getByLabelText(/^SKU\b/),
+        within(dialog).getByLabelText(/^Barcode\b/),
+        within(dialog).getByLabelText(/^Reorder target\b/),
+      ];
+      const reorderPoint = within(dialog).getByLabelText(/^Reorder point\b/);
+      const reorderTarget = within(dialog).getByLabelText(/^Reorder target\b/);
+      const reorderPointHelp = within(dialog).getByText(
+        "Items at or below this threshold are low stock and can trigger procurement work.",
+      );
+      const reorderTargetHelp = within(dialog).getByText(
+        "Optional desired refill level; when provided, it must be at least the reorder point.",
+      );
+
+      for (const field of requiredFields) {
+        expect(field).toBeRequired();
+      }
+      for (const field of optionalFields) {
+        expect(field).not.toBeRequired();
+      }
+      expect(within(dialog).getAllByText("Required")).toHaveLength(4);
+      expect(within(dialog).getAllByText("Optional")).toHaveLength(3);
+      expect(reorderPointHelp).toBeVisible();
+      expect(reorderTargetHelp).toBeVisible();
+      expect(reorderPoint).toHaveAttribute(
+        "aria-describedby",
+        reorderPointHelp.id,
+      );
+      expect(reorderTarget).toHaveAttribute(
+        "aria-describedby",
+        reorderTargetHelp.id,
+      );
+      expect(reorderPoint).toHaveAccessibleDescription(
+        "Items at or below this threshold are low stock and can trigger procurement work.",
+      );
+      expect(reorderTarget).toHaveAccessibleDescription(
+        "Optional desired refill level; when provided, it must be at least the reorder point.",
+      );
     } finally {
       fake.restore();
     }
@@ -317,7 +375,11 @@ describe("<InventoryPage>", () => {
       const dialog = await screen.findByRole("dialog", { name: "Create item" });
       fireEvent.click(within(dialog).getByRole("button", { name: "Create item" }));
 
-      expect(await within(dialog).findByText("Name is required.")).toBeInTheDocument();
+      const name = within(dialog).getByLabelText(/^Name\b/);
+      const alert = await within(dialog).findByRole("alert");
+
+      expect(alert).toHaveTextContent("Name is required.");
+      expect(name).toHaveAccessibleDescription("Name is required.");
       expect(
         fake.requests.some((r) => r.method === "POST" && r.path.includes("/inventory/properties/")),
       ).toBe(false);
@@ -335,22 +397,22 @@ describe("<InventoryPage>", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
       const dialog = await screen.findByRole("dialog", { name: "Create item" });
-      fireEvent.change(within(dialog).getByLabelText("Name"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
         target: { value: "Dish soap" },
       });
-      fireEvent.change(within(dialog).getByLabelText("Unit"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Unit\b/), {
         target: { value: "bottle" },
       });
-      fireEvent.change(within(dialog).getByLabelText("SKU"), {
+      fireEvent.change(within(dialog).getByLabelText(/^SKU\b/), {
         target: { value: "DS-1" },
       });
-      fireEvent.change(within(dialog).getByLabelText("Barcode"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Barcode\b/), {
         target: { value: "0123456789012" },
       });
-      fireEvent.change(within(dialog).getByLabelText("Reorder point"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Reorder point\b/), {
         target: { value: "4" },
       });
-      fireEvent.change(within(dialog).getByLabelText("Reorder target"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Reorder target\b/), {
         target: { value: "8" },
       });
       fireEvent.click(within(dialog).getByRole("button", { name: "Create item" }));
@@ -393,10 +455,10 @@ describe("<InventoryPage>", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
       const dialog = await screen.findByRole("dialog", { name: "Create item" });
-      fireEvent.change(within(dialog).getByLabelText("Property"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Property\b/), {
         target: { value: "prop_2" },
       });
-      fireEvent.change(within(dialog).getByLabelText("Name"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
         target: { value: "Olive oil" },
       });
       fireEvent.click(within(dialog).getByRole("button", { name: "Create item" }));
@@ -434,14 +496,16 @@ describe("<InventoryPage>", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
       const dialog = await screen.findByRole("dialog", { name: "Create item" });
-      fireEvent.change(within(dialog).getByLabelText("Name"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
         target: { value: "Duplicate towels" },
       });
       fireEvent.click(within(dialog).getByRole("button", { name: "Create item" }));
 
-      expect(
-        await within(dialog).findByText("SKU already exists for this property."),
-      ).toBeInTheDocument();
+      const sku = within(dialog).getByLabelText(/^SKU\b/);
+      const alert = await within(dialog).findByRole("alert");
+
+      expect(alert).toHaveTextContent("SKU already exists for this property.");
+      expect(sku).toHaveAccessibleDescription("SKU already exists for this property.");
       expect(screen.getByRole("dialog", { name: "Create item" })).toBeInTheDocument();
     } finally {
       fake.restore();

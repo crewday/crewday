@@ -468,6 +468,13 @@ function NewInventoryItemForm({
 
   const err = clientErr ?? serverErr;
   const errId = err ? "inventory-create-error" : undefined;
+  const reorderPointHelpId = "inventory-create-reorder-point-help";
+  const reorderTargetHelpId = "inventory-create-reorder-target-help";
+
+  function describedBy(...ids: (string | undefined)[]): string | undefined {
+    const present = ids.filter((id): id is string => id !== undefined);
+    return present.length > 0 ? present.join(" ") : undefined;
+  }
 
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -536,7 +543,9 @@ function NewInventoryItemForm({
       <div className="inv-create__body">
         {properties.length > 1 && (
           <label className="field inv-create__field">
-            <span>Property</span>
+            <span className="inv-create__label">
+              Property <span className="inv-create__requirement">Required</span>
+            </span>
             <select
               value={propertyId}
               onChange={(e) => setPropertyId(e.target.value)}
@@ -553,7 +562,9 @@ function NewInventoryItemForm({
           </label>
         )}
         <label className="field inv-create__field">
-          <span>Name</span>
+          <span className="inv-create__label">
+            Name <span className="inv-create__requirement">Required</span>
+          </span>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -564,7 +575,9 @@ function NewInventoryItemForm({
         </label>
         <div className="inv-create__grid">
           <label className="field inv-create__field">
-            <span>Unit</span>
+            <span className="inv-create__label">
+              Unit <span className="inv-create__requirement">Required</span>
+            </span>
             <input
               value={unit}
               onChange={(e) => setUnit(e.target.value)}
@@ -583,7 +596,9 @@ function NewInventoryItemForm({
             </datalist>
           </label>
           <label className="field inv-create__field">
-            <span>SKU</span>
+            <span className="inv-create__label">
+              SKU <span className="inv-create__requirement">Optional</span>
+            </span>
             <input
               value={sku}
               onChange={(e) => setSku(e.target.value)}
@@ -593,7 +608,9 @@ function NewInventoryItemForm({
           </label>
         </div>
         <label className="field inv-create__field">
-          <span>Barcode</span>
+          <span className="inv-create__label">
+            Barcode <span className="inv-create__requirement">Optional</span>
+          </span>
           <input
             value={barcode}
             onChange={(e) => setBarcode(e.target.value)}
@@ -603,7 +620,9 @@ function NewInventoryItemForm({
         </label>
         <div className="inv-create__grid">
           <label className="field inv-create__field">
-            <span>Reorder point</span>
+            <span className="inv-create__label">
+              Reorder point <span className="inv-create__requirement">Required</span>
+            </span>
             <input
               className="mono"
               type="number"
@@ -613,11 +632,17 @@ function NewInventoryItemForm({
               onChange={(e) => setReorderPoint(e.target.value)}
               required
               aria-invalid={clientErr === "Reorder point must be zero or more."}
-              aria-describedby={errId}
+              aria-describedby={describedBy(reorderPointHelpId, errId)}
             />
+            <span id={reorderPointHelpId} className="inv-create__help">
+              Items at or below this threshold are low stock and can trigger
+              procurement work.
+            </span>
           </label>
           <label className="field inv-create__field">
-            <span>Reorder target</span>
+            <span className="inv-create__label">
+              Reorder target <span className="inv-create__requirement">Optional</span>
+            </span>
             <input
               className="mono"
               type="number"
@@ -629,8 +654,12 @@ function NewInventoryItemForm({
                 clientErr === "Reorder target must be zero or more." ||
                 clientErr === "Reorder target must be at least the reorder point."
               }
-              aria-describedby={errId}
+              aria-describedby={describedBy(reorderTargetHelpId, errId)}
             />
+            <span id={reorderTargetHelpId} className="inv-create__help">
+              Optional desired refill level; when provided, it must be at least
+              the reorder point.
+            </span>
           </label>
         </div>
         {err && (
