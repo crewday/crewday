@@ -16,12 +16,21 @@ import type {
 
 const NAMESPACE_LABELS: Record<string, string> = {
   evidence: "Evidence",
+  bookings: "Bookings",
   time: "Time tracking",
   pay: "Pay",
   retention: "Retention",
   scheduling: "Scheduling",
   tasks: "Tasks",
+  inventory: "Inventory",
+  expenses: "Expenses",
+  chat: "Chat",
+  voice: "Voice",
+  notifications: "Notifications",
+  assets: "Assets",
   auth: "Authentication",
+  ical: "iCal",
+  webhook: "Webhooks",
 };
 
 function groupByNamespace(
@@ -43,6 +52,54 @@ function draftFromValue(value: unknown): string {
   if (typeof value === "number") return String(value);
   if (typeof value === "string") return value;
   return "";
+}
+
+const SCOPE_LABELS: Record<string, string> = {
+  W: "workspace",
+  P: "property",
+  U: "unit",
+  WE: "work engagement",
+  T: "task",
+  E: "employee",
+  workspace: "workspace",
+};
+
+const ENUM_LABELS: Record<string, Record<string, string>> = {
+  "evidence.policy": {
+    require: "Required",
+    optional: "Optional",
+    forbid: "Forbidden",
+  },
+  "bookings.pay_basis": {
+    scheduled: "Scheduled time",
+    actual: "Actual worked time",
+  },
+  "pay.frequency": {
+    weekly: "Weekly",
+    fortnightly: "Fortnightly",
+    monthly: "Monthly",
+  },
+  "pay.week_start": {
+    monday: "Monday",
+    sunday: "Sunday",
+  },
+};
+
+function enumOptionLabel(def: SettingDefinition, option: string): string {
+  const label = ENUM_LABELS[def.key]?.[option];
+  if (label) return label;
+  return option
+    .replaceAll("_", " ")
+    .split(" ")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function scopeLabel(scope: string): string {
+  return scope
+    .split("/")
+    .map((part) => SCOPE_LABELS[part] ?? part)
+    .join(", ");
 }
 
 function parseDraft(def: SettingDefinition, draft: string): unknown {
@@ -100,7 +157,13 @@ function SettingEditor({
 
   return (
     <div className="settings-editor">
-      <dt title={def.description}>{def.label}</dt>
+      <dt>
+        <span className="settings-editor__label">{def.label}</span>
+        <span className="settings-editor__help">{def.description}</span>
+        <span className="settings-editor__scope">
+          Can be overridden at: {scopeLabel(def.override_scope)}
+        </span>
+      </dt>
       <dd>
         <form
           className="settings-editor__form"
@@ -112,27 +175,30 @@ function SettingEditor({
           <div className="settings-editor__control">
             {def.type === "bool" ? (
               <select
+                className="settings-editor__input"
                 aria-label={def.label}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 disabled={saving}
               >
-                <option value="true">yes</option>
-                <option value="false">no</option>
+                <option value="true">Yes</option>
+                <option value="false">No</option>
               </select>
             ) : def.type === "enum" ? (
               <select
+                className="settings-editor__input"
                 aria-label={def.label}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 disabled={saving}
               >
                 {(def.enum_values ?? []).map((option) => (
-                  <option key={option} value={option}>{option}</option>
+                  <option key={option} value={option}>{enumOptionLabel(def, option)}</option>
                 ))}
               </select>
             ) : (
               <input
+                className="settings-editor__input"
                 aria-label={def.label}
                 type="number"
                 value={draft}
@@ -140,7 +206,6 @@ function SettingEditor({
                 disabled={saving}
               />
             )}
-            <span className="muted setting-scope">{def.override_scope}</span>
           </div>
           <div className="settings-editor__actions">
             <button
