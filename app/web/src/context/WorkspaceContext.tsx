@@ -3,6 +3,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { clearWorkspaceCookie, persistWorkspace, readWorkspaceCookie } from "@/lib/preferences";
 import { registerWorkspaceSlugGetter } from "@/lib/api";
 import { registerQueryKeyWorkspaceGetter } from "@/lib/queryKeys";
+import { drainOfflineQueue } from "@/lib/offlineQueue";
+import { registerWorkspaceServiceWorker } from "@/lib/pwa";
+import { workspaceSlugFromRoutePath } from "@/lib/workspaceRoutes";
 
 // §02 — active workspace context. Server is authoritative via the
 // `crewday_workspace` cookie; this hook mirrors it so the UI can
@@ -31,8 +34,20 @@ export function clearActiveWorkspaceForRecovery(): void {
   recoveryClearWorkspace?.();
 }
 
+function initialWorkspaceSlug(): string | null {
+  if (typeof window === "undefined") return readWorkspaceCookie();
+  return workspaceSlugFromRoutePath(window.location.pathname) ?? readWorkspaceCookie();
+}
+
+function routeWorkspaceSlug(): string | null {
+  if (typeof window === "undefined") return null;
+  return workspaceSlugFromRoutePath(window.location.pathname);
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [workspaceId, setWorkspaceIdState] = useState<string | null>(() => readWorkspaceCookie());
+  const [workspaceId, setWorkspaceIdState] = useState<string | null>(() => initialWorkspaceSlug());
+  const routeWorkspaceId = routeWorkspaceSlug();
+  const effectiveWorkspaceId = routeWorkspaceId ?? workspaceId;
   const queryClient = useQueryClient();
 
   // Keep a ref the module-scope getters read from, so a slug switch is
@@ -42,8 +57,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // `useQuery({ queryKey: qk.*() })` and every `fetchJson` call below
   // this provider reads the correct slug, including on the very first
   // mount when the cookie already resolves to a tenant.
-  const slugRef = useRef<string | null>(workspaceId);
-  slugRef.current = workspaceId;
+  const slugRef = useRef<string | null>(effectiveWorkspaceId);
+  slugRef.current = effectiveWorkspaceId;
 
   // Register synchronously (not in `useEffect`) so children mounting
   // below this provider see the getter *before* their render fires
@@ -82,9 +97,26 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, [clearWorkspaceId]);
 
+  useEffect(() => {
+    if (!routeWorkspaceId || routeWorkspaceId === workspaceId) return;
+    setWorkspaceIdState(routeWorkspaceId);
+    queryClient.invalidateQueries();
+  }, [queryClient, routeWorkspaceId, workspaceId]);
+
+  useEffect(() => {
+    if (!effectiveWorkspaceId || routeWorkspaceId !== effectiveWorkspaceId) return;
+    persistWorkspace(effectiveWorkspaceId);
+    void drainOfflineQueue({ workspaceSlug: effectiveWorkspaceId }).catch((err: unknown) => {
+      console.debug("Workspace offline queue drain skipped", err);
+    });
+    void registerWorkspaceServiceWorker(effectiveWorkspaceId).catch((err: unknown) => {
+      console.debug("Workspace service worker registration skipped", err);
+    });
+  }, [effectiveWorkspaceId, routeWorkspaceId]);
+
   const value = useMemo(
-    () => ({ workspaceId, setWorkspaceId, clearWorkspaceId }),
-    [workspaceId, setWorkspaceId, clearWorkspaceId],
+    () => ({ workspaceId: effectiveWorkspaceId, setWorkspaceId, clearWorkspaceId }),
+    [effectiveWorkspaceId, setWorkspaceId, clearWorkspaceId],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

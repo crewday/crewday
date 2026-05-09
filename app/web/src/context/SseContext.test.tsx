@@ -6,6 +6,7 @@ import { WorkspaceProvider, useWorkspace } from "@/context/WorkspaceContext";
 import { type ReactNode, useEffect, useState } from "react";
 import { __resetAuthStoreForTests, setAuthenticated, setUnauthenticated } from "@/auth";
 import type { AuthMe } from "@/auth";
+import { qk } from "@/lib/queryKeys";
 
 const TEST_USER: AuthMe = {
   user_id: "01HZ_TEST",
@@ -85,6 +86,7 @@ beforeEach(() => {
   __resetAuthStoreForTests();
   setAuthenticated(TEST_USER);
   document.cookie = "crewday_workspace=; path=/; max-age=0";
+  window.history.replaceState(null, "", "/");
 });
 
 afterEach(() => {
@@ -130,6 +132,11 @@ function Switcher({ slug }: { slug: string | null }) {
   return null;
 }
 
+function CaptureWorkspaceKey({ keys }: { keys: readonly unknown[][] }) {
+  keys.push(qk.tasks());
+  return null;
+}
+
 describe("<SseProvider>", () => {
   it("waits for a workspace slug when no workspace is selected", () => {
     render(
@@ -159,6 +166,49 @@ describe("<SseProvider>", () => {
     const scoped = created.find((e) => e.url === "/w/acme/events");
     expect(scoped).toBeDefined();
     expect(scoped!.withCredentials).toBe(true);
+  });
+
+  it("uses the route slug before the stale workspace cookie on first render", () => {
+    document.cookie = "crewday_workspace=old; path=/";
+    window.history.replaceState(null, "", "/w/acme/today");
+    const keys: readonly unknown[][] = [];
+
+    render(
+      <Providers>
+        <CaptureWorkspaceKey keys={keys} />
+      </Providers>,
+    );
+
+    expect(keys[0]).toEqual(["w", "acme", "tasks"]);
+    expect(created).toHaveLength(1);
+    expect(created[0]?.url).toBe("/w/acme/events");
+    expect(created.some((e) => e.url === "/w/old/events")).toBe(false);
+  });
+
+  it("uses the new route slug synchronously when the visible workspace route changes", () => {
+    window.history.replaceState(null, "", "/w/acme/today");
+    const keys: readonly unknown[][] = [];
+
+    const { rerender } = render(
+      <Providers>
+        <CaptureWorkspaceKey keys={keys} />
+      </Providers>,
+    );
+    expect(keys[0]).toEqual(["w", "acme", "tasks"]);
+    expect(created[0]?.url).toBe("/w/acme/events");
+
+    act(() => {
+      window.history.replaceState(null, "", "/w/beta/today");
+      rerender(
+        <Providers>
+          <CaptureWorkspaceKey keys={keys} />
+        </Providers>,
+      );
+    });
+
+    expect(keys[1]).toEqual(["w", "beta", "tasks"]);
+    expect(created.some((e) => e.url === "/w/beta/events")).toBe(true);
+    expect(created[0]!.closed).toBe(true);
   });
 
   it("closes the stream on unmount", () => {

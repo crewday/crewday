@@ -84,7 +84,7 @@ import {
   useAuth,
 } from "@/auth";
 import { landingForGrantRole } from "@/auth/roleLanding";
-import { workspaceRoute } from "@/lib/workspaceRoutes";
+import { workspaceRoute, workspaceSlugFromRoutePath } from "@/lib/workspaceRoutes";
 
 const STYLEGUIDE_ENABLED =
   import.meta.env.DEV ||
@@ -132,9 +132,7 @@ function WorkspacePathAdopter() {
   const location = useLocation();
   const { workspaceId, setWorkspaceId } = useWorkspace();
   const slug = useMemo(() => {
-    const match = /^\/w\/([^/]+)(\/.*)?$/.exec(location.pathname);
-    if (!match) return null;
-    return match[1] ? decodeURIComponent(match[1]) : null;
+    return workspaceSlugFromRoutePath(location.pathname);
   }, [location.pathname]);
 
   useEffect(() => {

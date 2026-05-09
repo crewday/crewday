@@ -44,6 +44,7 @@ export interface DrainOfflineQueueResult {
 interface DrainOfflineQueueOptions {
   now?: () => number;
   scheduleRetry?: boolean;
+  workspaceSlug?: string | null;
 }
 
 type CountSubscriber = (count: number) => void;
@@ -211,7 +212,8 @@ async function drainOfflineQueueOnce(
   if (!isBrowserOnline()) return result;
 
   const now = options.now ?? Date.now;
-  const entries = await listEntries();
+  const workspaceSlug = options.workspaceSlug ?? getActiveWorkspaceSlug();
+  const entries = await listEntries({ workspaceSlug });
   for (const entry of entries) {
     const currentTime = now();
     if (entry.nextAttemptAt > currentTime) break;
@@ -377,7 +379,7 @@ async function scheduleNextDueDrain(): Promise<void> {
   retryTimer = null;
   if (!isBrowserOnline()) return;
 
-  const entries = await listEntries();
+  const entries = await listEntries({ workspaceSlug: getActiveWorkspaceSlug() });
   const nextAttemptAt = entries
     .filter((entry) => entry.nextAttemptAt > Date.now())
     .sort((a, b) => a.nextAttemptAt - b.nextAttemptAt)[0]?.nextAttemptAt;

@@ -117,6 +117,7 @@ export default defineConfig({
     // HMR updates. `main.tsx` also unregisters any SW left over from
     // an earlier baked-dist build.
     VitePWA({
+      injectRegister: false,
       registerType: "autoUpdate",
       strategies: "generateSW",
       workbox: {

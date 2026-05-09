@@ -125,6 +125,41 @@ describe("offline queue", () => {
     await expect(pendingMutationCount("beta")).resolves.toBe(1);
   });
 
+  it("drains only the active workspace by default", async () => {
+    let activeSlug: string | null = "acme";
+    registerWorkspaceSlugGetter(() => activeSlug);
+    await enqueueMutation({
+      id: "acme-q1",
+      kind: "decision",
+      method: "POST",
+      path: "/api/v1/tasks/t1/approve",
+      createdAt: 100,
+    });
+    activeSlug = "beta";
+    await enqueueMutation({
+      id: "beta-q1",
+      kind: "decision",
+      method: "POST",
+      path: "/api/v1/tasks/t2/approve",
+      createdAt: 101,
+    });
+
+    activeSlug = "acme";
+    const { calls, restore } = installFetch([{ status: 204 }]);
+    try {
+      const result = await drainOfflineQueue({ now: () => 200, scheduleRetry: false });
+
+      expect(result).toEqual({ attempted: 1, succeeded: 1, failed: 0 });
+      expect(calls.map((call) => call.url)).toEqual([
+        "/w/acme/api/v1/tasks/t1/approve",
+      ]);
+      await expect(pendingMutationCount("acme")).resolves.toBe(0);
+      await expect(pendingMutationCount("beta")).resolves.toBe(1);
+    } finally {
+      restore();
+    }
+  });
+
   it("replays due entries FIFO, sends the stored idempotency key, and removes successes", async () => {
     registerWorkspaceSlugGetter(() => "acme");
     await enqueueMutation({

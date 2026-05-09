@@ -36,3 +36,13 @@ export function workspaceRoute(
   const pathname = parsed.pathname === "/" ? "" : parsed.pathname;
   return `/w/${slug}${pathname}${search}${hash}`;
 }
+
+export function workspaceSlugFromRoutePath(pathname: string): string | null {
+  const match = /^\/w\/([^/]+)(?:\/|$)/.exec(pathname);
+  if (!match?.[1]) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
