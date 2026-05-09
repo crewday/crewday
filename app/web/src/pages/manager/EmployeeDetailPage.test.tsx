@@ -244,32 +244,49 @@ afterEach(() => {
 });
 
 describe("<EmployeeDetailPage>", () => {
-  it("renders all canonical employee tabs as stable hash links", async () => {
+  it("renders canonical employee sections with shared hash-backed page tabs", async () => {
     const fake = installFetch();
     try {
+      window.location.hash = "#passkeys";
       render(<Harness />);
 
       expect(await screen.findByText("Maya Santos")).toBeInTheDocument();
-      for (const [label, hash] of [
-        ["Overview", "#overview"],
-        ["Shifts", "#shifts"],
-        ["Payslips", "#payslips"],
-        ["Leaves", "#leaves"],
-        ["Policies", "#policies"],
-        ["Settings", "#settings"],
-        ["Passkeys", "#passkeys"],
-      ]) {
-        expect(screen.getByRole("link", { name: label }).getAttribute("href")).toBe(hash);
+      const tablist = screen.getByRole("tablist", { name: "Employee sections" });
+      expect(tablist).toHaveClass("page-tabs");
+      for (const label of ["Overview", "Shifts", "Payslips", "Leaves", "Policies", "Settings", "Passkeys"]) {
+        expect(within(tablist).getByRole("tab", { name: label })).toHaveClass("page-tabs__tab");
       }
-      expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
+      expect(within(tablist).getByRole("tab", { name: "Passkeys" })).toHaveAttribute("aria-selected", "true");
+      expect(within(tablist).getByRole("tab", { name: "Passkeys" })).toHaveAttribute(
+        "aria-controls",
+        "employee-passkeys-panel",
+      );
+      expect(document.getElementById("employee-passkeys-panel")).toHaveAttribute("role", "tabpanel");
+      expect(screen.queryByRole("link", { name: "Overview" })).not.toBeInTheDocument();
 
-      window.location.hash = "#passkeys";
-      window.dispatchEvent(new Event("hashchange"));
+      fireEvent.click(within(tablist).getByRole("tab", { name: "Payslips" }));
+      expect(window.location.hash).toBe("#payslips");
       await waitFor(() => {
-        expect(screen.getByRole("link", { name: "Passkeys" })).toHaveAttribute("aria-current", "page");
+        expect(within(tablist).getByRole("tab", { name: "Payslips" })).toHaveAttribute("aria-selected", "true");
       });
       expect(fake.calls).not.toContainEqual({
         url: "/w/acme/api/v1/employees/emp_1/settings",
+        method: "GET",
+      });
+      expect(fake.calls).not.toContainEqual({
+        url: "/w/acme/api/v1/settings/catalog",
+        method: "GET",
+      });
+
+      fireEvent.click(within(tablist).getByRole("tab", { name: "Settings" }));
+      expect(window.location.hash).toBe("#settings");
+      expect(await screen.findByText("Settings overrides")).toBeInTheDocument();
+      expect(fake.calls).toContainEqual({
+        url: "/w/acme/api/v1/employees/emp_1/settings",
+        method: "GET",
+      });
+      expect(fake.calls).toContainEqual({
+        url: "/w/acme/api/v1/settings/catalog",
         method: "GET",
       });
     } finally {
@@ -284,7 +301,7 @@ describe("<EmployeeDetailPage>", () => {
       render(<Harness />);
 
       expect(await screen.findByText("Settings overrides")).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+      expect(screen.getByRole("tab", { name: "Settings" })).toHaveAttribute("aria-selected", "true");
       expect(fake.calls).toContainEqual({
         url: "/w/acme/api/v1/employees/emp_1/settings",
         method: "GET",
@@ -293,7 +310,7 @@ describe("<EmployeeDetailPage>", () => {
       window.location.hash = "#payslips";
       window.dispatchEvent(new HashChangeEvent("hashchange"));
       await waitFor(() => {
-        expect(screen.getByRole("link", { name: "Payslips" })).toHaveAttribute("aria-current", "page");
+        expect(screen.getByRole("tab", { name: "Payslips" })).toHaveAttribute("aria-selected", "true");
       });
     } finally {
       fake.restore();

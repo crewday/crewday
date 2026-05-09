@@ -7,6 +7,7 @@ import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
 import { fmtDate, fmtDateTime } from "@/lib/dates";
 import DeskPage from "@/components/DeskPage";
+import PageTabs, { type PageTab } from "@/components/PageTabs";
 import { Chip, Loading } from "@/components/common";
 import type {
   Employee,
@@ -209,17 +210,21 @@ function SettingsOverridePanel({
   );
 }
 
-const EMPLOYEE_TABS = [
-  { key: "overview", label: "Overview" },
-  { key: "shifts", label: "Shifts" },
-  { key: "payslips", label: "Payslips" },
-  { key: "leaves", label: "Leaves" },
-  { key: "policies", label: "Policies" },
-  { key: "settings", label: "Settings" },
-  { key: "passkeys", label: "Passkeys" },
-] as const;
+type Tab = "overview" | "shifts" | "payslips" | "leaves" | "policies" | "settings" | "passkeys";
 
-type Tab = (typeof EMPLOYEE_TABS)[number]["key"];
+function panelIdFor(tab: Tab): string {
+  return `employee-${tab}-panel`;
+}
+
+const EMPLOYEE_TABS = [
+  { key: "overview", label: "Overview", panelId: panelIdFor("overview") },
+  { key: "shifts", label: "Shifts", panelId: panelIdFor("shifts") },
+  { key: "payslips", label: "Payslips", panelId: panelIdFor("payslips") },
+  { key: "leaves", label: "Leaves", panelId: panelIdFor("leaves") },
+  { key: "policies", label: "Policies", panelId: panelIdFor("policies") },
+  { key: "settings", label: "Settings", panelId: panelIdFor("settings") },
+  { key: "passkeys", label: "Passkeys", panelId: panelIdFor("passkeys") },
+] satisfies Array<PageTab & { key: Tab }>;
 
 function tabFromHash(hash: string): Tab {
   // code-health: ignore[nloc] Tiny hash mapper is misattributed by lizard across the surrounding TSX module.
@@ -241,6 +246,10 @@ export default function EmployeeDetailPage() {
     window.addEventListener("hashchange", syncFromHash);
     return () => window.removeEventListener("hashchange", syncFromHash);
   }, []);
+
+  function selectTab(next: string): void {
+    setActiveTab(tabFromHash(`#${next}`));
+  }
 
   const detailQ = useQuery({
     queryKey: qk.employee(eid),
@@ -357,19 +366,14 @@ export default function EmployeeDetailPage() {
         },
       ]}
     >
-      <nav className="tabs tabs--h">
-        {EMPLOYEE_TABS.map((tab) => (
-          <a
-            key={tab.key}
-            href={"#" + tab.key}
-            className={"tab-link" + (activeTab === tab.key ? " tab-link--active" : "")}
-            aria-current={activeTab === tab.key ? "page" : undefined}
-            onClick={() => setActiveTab(tab.key)}
-          >
-            {tab.label}
-          </a>
-        ))}
-      </nav>
+      <PageTabs
+        ariaLabel="Employee sections"
+        tabs={EMPLOYEE_TABS}
+        hashBacked
+        defaultKey="overview"
+        selectedKey={activeTab}
+        onSelect={selectTab}
+      />
 
       <dialog
         ref={roleDialogRef}
@@ -436,7 +440,7 @@ export default function EmployeeDetailPage() {
       </dialog>
 
       {activeTab === "overview" && (
-        <section className="grid grid--split">
+        <section id={panelIdFor("overview")} className="grid grid--split" role="tabpanel">
           <div className="panel">
             <header className="panel__head"><h2>Tasks</h2></header>
             <ul className="task-list task-list--desk">
@@ -483,7 +487,7 @@ export default function EmployeeDetailPage() {
       )}
 
       {activeTab === "settings" && (
-        <>
+        <div id={panelIdFor("settings")} role="tabpanel">
           {(settingsQ.isPending || catalogQ.isPending) ? (
             <Loading />
           ) : settingsQ.data && catalogQ.data ? (
@@ -495,8 +499,10 @@ export default function EmployeeDetailPage() {
           ) : (
             <p>Failed to load settings.</p>
           )}
-        </>
+        </div>
       )}
+
+      {!["overview", "settings"].includes(activeTab) && <div id={panelIdFor(activeTab)} role="tabpanel" />}
     </DeskPage>
   );
 }
