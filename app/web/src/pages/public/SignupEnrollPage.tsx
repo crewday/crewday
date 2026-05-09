@@ -63,6 +63,7 @@ export default function SignupEnrollPage(): ReactElement {
       return "UTC";
     }
   }, []);
+  const browserCountry = useMemo(readBrowserLocaleCountry, []);
 
   const [displayName, setDisplayName] = useState("");
   const [enroll, setEnroll] = useState<EnrollState>({ kind: "idle" });
@@ -82,7 +83,12 @@ export default function SignupEnrollPage(): ReactElement {
       inflightRef.current = true;
       setEnroll({ kind: "creating" });
       try {
-        await runSignupEnrollCeremony(handoff.signupSessionId, trimmedName, browserTimezone);
+        await runSignupEnrollCeremony(
+          handoff.signupSessionId,
+          trimmedName,
+          browserTimezone,
+          browserCountry,
+        );
         // Signup finish does NOT stamp a cookie — run the regular
         // passkey login to actually authenticate. The user just
         // verified on the same device, so the platform authenticator
@@ -99,7 +105,7 @@ export default function SignupEnrollPage(): ReactElement {
         inflightRef.current = false;
       }
     },
-    [handoff, displayName, browserTimezone, loginWithPasskey],
+    [handoff, displayName, browserTimezone, browserCountry, loginWithPasskey],
   );
 
   // Post-success redirect. Wait for `isAuthenticated` to flip true
@@ -188,6 +194,27 @@ function NoHandoffView(): ReactElement {
       </div>
     </SignupEnrollShell>
   );
+}
+
+function readBrowserLocaleCountry(): string | null {
+  const languages = navigator.languages.length > 0
+    ? navigator.languages
+    : [navigator.language];
+  for (const language of languages) {
+    const country = countryFromLocale(language);
+    if (country) return country;
+  }
+  return null;
+}
+
+function countryFromLocale(value: string): string | null {
+  const parts = value.trim().replace("_", "-").split("-");
+  for (const part of parts.slice(1)) {
+    if (/^[a-z]{2}$/i.test(part) && part.toUpperCase() !== "XX") {
+      return part.toUpperCase();
+    }
+  }
+  return null;
 }
 
 function SignupEnrollForm({

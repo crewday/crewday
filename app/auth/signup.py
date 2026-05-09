@@ -53,6 +53,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
+from babel.core import get_global
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
@@ -112,6 +113,7 @@ __all__ = [
     "consume_verify",
     "provision_workspace_and_owner_seat",
     "prune_stale_signups",
+    "resolve_signup_default_country",
     "start_signup",
 ]
 
@@ -140,6 +142,37 @@ _ORPHAN_CUTOFF: Final[timedelta] = timedelta(hours=1)
 # nonce row hash the same email with the same subkey, so abuse
 # correlation joins without a re-derivation.
 _HKDF_PURPOSE: Final[str] = "magic-link"
+_COUNTRY_FALLBACK: Final[str] = "XX"
+_WORKSPACE_DEFAULT_COUNTRY_KEY: Final[str] = "workspace.default_country"
+_NON_ISO_TERRITORIES: Final[frozenset[str]] = frozenset(
+    {
+        "AC",
+        "BU",
+        "CP",
+        "CS",
+        "DD",
+        "DG",
+        "EA",
+        "EU",
+        "IC",
+        "SU",
+        "TA",
+        "TP",
+        "XK",
+        "YD",
+        "YU",
+        "ZR",
+        "ZZ",
+    }
+)
+_ISO_3166_ALPHA2: Final[frozenset[str]] = frozenset(
+    code
+    for code in get_global("territory_currencies")
+    if isinstance(code, str)
+    and len(code) == 2
+    and code.isalpha()
+    and code not in _NON_ISO_TERRITORIES
+)
 
 
 # Default cap (US cents) seeded onto the :class:`BudgetLedger` row when
@@ -299,6 +332,73 @@ SignupCompletionState = str  # one of: "expired" | "not_verified" | "already_com
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def resolve_signup_default_country(
+    *,
+    cf_ip_country: str | None,
+    locale_country: str | None,
+    accept_language: str | None,
+) -> str:
+    """Resolve the workspace country seeded during self-serve signup."""
+    cf_country = _normalise_country_signal(cf_ip_country)
+    if cf_country is not None:
+        return cf_country
+
+    browser_country = _normalise_country_signal(locale_country)
+    if browser_country is not None:
+        return browser_country
+
+    for language in _accept_language_tags(accept_language):
+        language_country = _country_from_locale_tag(language)
+        if language_country is not None:
+            return language_country
+    return _COUNTRY_FALLBACK
+
+
+def _normalise_country_signal(value: str | None) -> str | None:
+    if value is None:
+        return None
+    country = value.strip().upper()
+    if country == _COUNTRY_FALLBACK:
+        return None
+    if country in _ISO_3166_ALPHA2:
+        return country
+    return None
+
+
+def _country_from_locale_tag(value: str) -> str | None:
+    tag = value.strip().replace("_", "-")
+    if not tag:
+        return None
+    for subtag in tag.split("-")[1:]:
+        country = _normalise_country_signal(subtag)
+        if country is not None:
+            return country
+    return None
+
+
+def _accept_language_tags(value: str | None) -> list[str]:
+    if not value:
+        return []
+    weighted: list[tuple[float, int, str]] = []
+    for index, raw_item in enumerate(value.split(",")):
+        item = raw_item.strip()
+        if not item:
+            continue
+        tag, *params = [part.strip() for part in item.split(";")]
+        quality = 1.0
+        for param in params:
+            if not param.startswith("q="):
+                continue
+            try:
+                quality = float(param.removeprefix("q="))
+            except ValueError:
+                quality = 0.0
+        if tag and quality > 0:
+            weighted.append((quality, index, tag))
+    weighted.sort(key=lambda entry: (-entry[0], entry[1]))
+    return [tag for _, _, tag in weighted]
 
 
 def _now(clock: Clock | None) -> datetime:
@@ -863,6 +963,7 @@ def provision_workspace_and_owner_seat(
     now: datetime,
     clock: Clock | None = None,
     workspace_name: str | None = None,
+    default_country: str = _COUNTRY_FALLBACK,
     signup_ip: str | None = None,
     capabilities: Capabilities | None = None,
 ) -> WorkspaceContext:
@@ -909,6 +1010,11 @@ def provision_workspace_and_owner_seat(
     ``workspace_name`` defaults to ``slug`` — matches signup's current
     behaviour (the UI's workspace picker needs *something* readable on
     day 1). Callers that want a distinct display name override.
+
+    ``default_country`` is persisted into ``settings_json`` so the
+    property-create flow inherits a real workspace default when signup
+    has a reliable country signal. ``XX`` is the explicit unknown
+    fallback.
 
     ``capabilities`` is optional so the dev-login path and direct
     test-harness callers that don't already hold one can use the
@@ -959,6 +1065,12 @@ def provision_workspace_and_owner_seat(
             name=workspace_name if workspace_name is not None else slug,
             plan="free",
             quota_json=seed_free_tier_10pct(),
+            settings_json={
+                _WORKSPACE_DEFAULT_COUNTRY_KEY: _normalise_country_signal(
+                    default_country
+                )
+                or _COUNTRY_FALLBACK
+            },
             created_at=now,
             signup_ip=signup_ip,
             signup_ip_key=normalize_signup_ip_key(signup_ip),
@@ -1070,6 +1182,7 @@ def complete_signup(
     passkey_payload: dict[str, Any],
     ip: str,
     capabilities: Capabilities | None = None,
+    default_country: str = _COUNTRY_FALLBACK,
     now: datetime | None = None,
     settings: Settings | None = None,
     clock: Clock | None = None,
@@ -1139,6 +1252,7 @@ def complete_signup(
         now=resolved_now,
         clock=clock,
         capabilities=capabilities,
+        default_country=default_country,
         signup_ip=attempt.signup_ip,
     )
 

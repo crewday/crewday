@@ -250,6 +250,9 @@ describe("<SignupEnrollPage> — happy path", () => {
       ],
     });
     const creds = installCredentials({});
+    const languagesSpy = vi
+      .spyOn(globalThis.navigator, "languages", "get")
+      .mockReturnValue(["en-US", "fr-FR"]);
 
     try {
       render(
@@ -316,7 +319,9 @@ describe("<SignupEnrollPage> — happy path", () => {
       expect(body.signup_session_id).toBe("ss_villa");
       expect(body.challenge_id).toBe("ch_signup");
       expect(typeof body.timezone).toBe("string");
+      expect(body.locale_country).toBe("US");
     } finally {
+      languagesSpy.mockRestore();
       restore();
     }
   });

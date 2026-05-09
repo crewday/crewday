@@ -168,6 +168,7 @@ class PasskeyFinishBody(BaseModel):
     challenge_id: str
     display_name: str = Field(..., min_length=1, max_length=160)
     timezone: str = Field(..., min_length=1, max_length=80)
+    locale_country: str | None = None
     credential: dict[str, Any]
 
 
@@ -806,6 +807,11 @@ def build_signup_router(
                 passkey_payload=body.credential,
                 ip=_client_ip(request),
                 capabilities=capabilities,
+                default_country=signup.resolve_signup_default_country(
+                    cf_ip_country=request.headers.get("cf-ipcountry"),
+                    locale_country=body.locale_country,
+                    accept_language=request.headers.get("accept-language"),
+                ),
                 settings=cfg,
             )
         except _CompleteDomainError as exc:

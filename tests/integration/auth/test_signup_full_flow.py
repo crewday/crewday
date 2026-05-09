@@ -301,11 +301,16 @@ class TestSignupFullFlow:
         # 4. Passkey finish — lands the whole workspace + user + passkey.
         r = client.post(
             "/api/v1/signup/passkey/finish",
+            headers={
+                "CF-IPCountry": "NZ",
+                "Accept-Language": "fr-FR,fr;q=0.9",
+            },
             json={
                 "signup_session_id": signup_session_id,
                 "challenge_id": challenge_id,
                 "display_name": "Integration Owner",
                 "timezone": "Pacific/Auckland",
+                "locale_country": "FR",
                 "credential": {
                     "id": "stub",
                     "rawId": "stub",
@@ -326,6 +331,7 @@ class TestSignupFullFlow:
                 select(Workspace).where(Workspace.slug == "integration-ws")
             ).one()
             assert workspace.plan == "free"
+            assert workspace.settings_json["workspace.default_country"] == "NZ"
             # Tight initial caps — 10% of free-tier.
             assert workspace.quota_json["llm_budget_cents_30d"] == 50
 

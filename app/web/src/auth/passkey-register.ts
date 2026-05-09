@@ -233,6 +233,7 @@ export async function finishSignupEnroll(
   challengeId: string,
   displayName: string,
   timezone: string,
+  localeCountry: string | null,
   credential: PasskeyRegisterCredential,
 ): Promise<SignupFinishResponse> {
   return fetchJson<SignupFinishResponse>("/api/v1/signup/passkey/finish", {
@@ -242,6 +243,7 @@ export async function finishSignupEnroll(
       challenge_id: challengeId,
       display_name: displayName,
       timezone,
+      locale_country: localeCountry,
       credential,
     },
   });
@@ -440,6 +442,7 @@ export async function runSignupEnrollCeremony(
   signupSessionId: string,
   displayName: string,
   timezone: string,
+  localeCountry: string | null,
   options: { signal?: AbortSignal } = {},
 ): Promise<SignupFinishResponse> {
   return runRegisterCeremony(
@@ -450,6 +453,7 @@ export async function runSignupEnrollCeremony(
         challengeId,
         displayName,
         timezone,
+        localeCountry,
         credential,
       ),
     options.signal,

@@ -98,6 +98,58 @@ class TestVerifyBodyTokenLength:
         assert errors[0]["type"] == "string_too_short"
 
 
+class TestResolveSignupDefaultCountry:
+    def test_prefers_cloudflare_country_over_locale_signals(self) -> None:
+        assert (
+            _real_signup_module.resolve_signup_default_country(
+                cf_ip_country="nz",
+                locale_country="FR",
+                accept_language="pt-BR,fr-FR;q=0.9",
+            )
+            == "NZ"
+        )
+
+    def test_uses_locale_country_when_cloudflare_is_unknown(self) -> None:
+        assert (
+            _real_signup_module.resolve_signup_default_country(
+                cf_ip_country="XX",
+                locale_country="br",
+                accept_language="fr-FR",
+            )
+            == "BR"
+        )
+
+    def test_uses_accept_language_region_when_browser_country_missing(self) -> None:
+        assert (
+            _real_signup_module.resolve_signup_default_country(
+                cf_ip_country=None,
+                locale_country=None,
+                accept_language="en;q=0.9, fr-CA;q=0.8",
+            )
+            == "CA"
+        )
+
+    def test_ignores_invalid_alpha2_browser_country(self) -> None:
+        assert (
+            _real_signup_module.resolve_signup_default_country(
+                cf_ip_country=None,
+                locale_country="XK",
+                accept_language="pt-BR",
+            )
+            == "BR"
+        )
+
+    def test_falls_back_to_xx_when_no_reliable_signal_exists(self) -> None:
+        assert (
+            _real_signup_module.resolve_signup_default_country(
+                cf_ip_country="T1",
+                locale_country="XX",
+                accept_language="en, es-419;q=0.9",
+            )
+            == "XX"
+        )
+
+
 # cd-9slq reshaped :func:`app.auth.signup.start_signup` to return a
 # :class:`PendingDispatch` whose :meth:`deliver` fires the deferred
 # magic-link send post-commit. Production callers (the signup HTTP
@@ -1805,6 +1857,7 @@ class TestProvisionSeedsBudgetLedger:
         workspace = session.scalars(
             select(Workspace).where(Workspace.id == workspace_id)
         ).one()
+        assert workspace.settings_json["workspace.default_country"] == "XX"
         assert workspace.quota_json["llm_budget_cents_30d"] == ledger.cap_cents
         assert ledger.spent_cents == 0
         # 30-day rolling window; :func:`_window_bounds(now)` returns
@@ -1851,6 +1904,27 @@ class TestProvisionSeedsBudgetLedger:
         # 10-cent full cap → 1-cent tight cap (floored).
         assert ledger.cap_cents == 1
         assert ledger.spent_cents == 0
+
+    def test_provision_seeds_resolved_workspace_country(self, session: Session) -> None:
+        workspace_id = "01HWAWSTUBI00000000000CTRY"
+        user_id = "01HWAUSRTUBI000000000CTRYU"
+
+        signup.provision_workspace_and_owner_seat(
+            session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            slug="tubi-country",
+            email_lower="country@example.com",
+            display_name="Country",
+            timezone="UTC",
+            default_country="fr",
+            now=_PINNED,
+        )
+
+        workspace = session.scalars(
+            select(Workspace).where(Workspace.id == workspace_id)
+        ).one()
+        assert workspace.settings_json["workspace.default_country"] == "FR"
 
     def test_provision_budget_ledger_rolls_back_on_workspace_failure(
         self,
