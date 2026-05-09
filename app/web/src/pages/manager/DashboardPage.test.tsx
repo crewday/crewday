@@ -137,7 +137,7 @@ function Harness() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/w/acme/dashboard"]}>
         <WorkspaceProvider>
           <DashboardPage />
         </WorkspaceProvider>
@@ -172,6 +172,12 @@ describe("<DashboardPage>", () => {
       render(<Harness />);
 
       fireEvent.click(await screen.findByRole("button", { name: "+ New task" }));
+      expect(screen.getByRole("link", { name: /By property/ })).toHaveAttribute("href", "/w/acme/properties");
+      const allLinks = screen.getAllByRole("link", { name: /All/ });
+      expect(allLinks.map((link) => link.getAttribute("href"))).toEqual([
+        "/w/acme/approvals",
+        "/w/acme/leaves",
+      ]);
       expect(await screen.findByRole("heading", { name: "New task" })).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "More actions" }));

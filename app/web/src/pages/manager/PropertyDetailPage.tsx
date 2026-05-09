@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import AgentPreferencesPanel from "@/components/AgentPreferencesPanel";
 import { Loading } from "@/components/common";
 import { useWorkspace } from "@/context/WorkspaceContext";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { AuthMe } from "@/auth/types";
 import type {
   Employee,
@@ -29,6 +30,7 @@ import type { PropertyRecord, PropertyTab } from "./property/types";
 export default function PropertyDetailPage() {
   // code-health: ignore[nloc] Property detail route is a declarative shell around extracted detail sections.
   const { pid = "" } = useParams<{ pid: string }>();
+  const { pathname } = useLocation();
   const [activeTab, setActiveTab] = useState<PropertyTab>("overview");
   const [editingProperty, setEditingProperty] = useState(false);
   const [propertySaveError, setPropertySaveError] = useState<string | null>(null);
@@ -137,7 +139,7 @@ export default function PropertyDetailPage() {
         >
           Areas
         </button>
-        <Link className="tab-link" to={"/stays?property_id=" + encodeURIComponent(property.id)}>
+        <Link className="tab-link" to={workspaceRouteForPathname(pathname, "/stays?property_id=" + encodeURIComponent(property.id))}>
           Stays
         </Link>
         <button
@@ -148,10 +150,10 @@ export default function PropertyDetailPage() {
         >
           Assets
         </button>
-        <Link className="tab-link" to={"/instructions?property_id=" + encodeURIComponent(property.id)}>
+        <Link className="tab-link" to={workspaceRouteForPathname(pathname, "/instructions?property_id=" + encodeURIComponent(property.id))}>
           Instructions
         </Link>
-        <Link className="tab-link" to={"/property/" + property.id + "/closures"}>
+        <Link className="tab-link" to={workspaceRouteForPathname(pathname, "/property/" + property.id + "/closures")}>
           Closures
         </Link>
         <button

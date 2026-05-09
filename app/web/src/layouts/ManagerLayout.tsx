@@ -133,8 +133,6 @@ const NAV_ACTIONS = new Map<string, string>([
   ["/settings", "scope.edit_settings"],
 ]);
 
-const SHARED_WORKER_ROUTES = new Set(["/today", "/schedule", "/my/expenses", "/me"]);
-
 // Drawer-bar visibility: only render the hamburger + mobile top bar
 // when there's at least one non-`phoneHidden` link to put inside the
 // drawer. Today's RBAC is implicit (workers have no manager-only
@@ -249,7 +247,7 @@ export default function ManagerLayout() {
   const allowedActions = permissionQ.isPending ? null : permissionQ.data ?? new Set<string>();
   const filteredNavItems = filterNavItems(navItems, allowedActions);
   const routedNavItems = filteredNavItems.map((item) =>
-    item.type === "link" && SHARED_WORKER_ROUTES.has(item.to)
+    item.type === "link" && !item.to.startsWith("/admin")
       ? { ...item, to: workspaceRouteForPathname(pathname, item.to) }
       : item
   );

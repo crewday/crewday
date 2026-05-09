@@ -1,12 +1,13 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { ApiError, fetchJson, resolveApiPath } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import { Checkbox, Chip, FilterChipGroup, Loading } from "@/components/common";
 import { AssetIcon } from "@/components/AssetIcon";
 import { ASSET_CONDITION_TONE, ASSET_STATUS_TONE } from "@/lib/tones";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import { type ListEnvelope, unwrapList as unwrapEnvelope } from "@/lib/listResponse";
 import type { Asset, AssetCondition, AssetStatus, AssetType, Property } from "@/types/api";
 
@@ -662,6 +663,7 @@ function assetFieldLabel(loc: readonly (string | number)[] | undefined): string 
 
 export default function AssetsPage() {
   // code-health: ignore[nloc] Assets page is query plus filterable card/table composition with shared controls.
+  const { pathname } = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeCategory = searchParams.get("category") ?? "";
   const activeProperty = searchParams.get("property_id") ?? "";
@@ -757,7 +759,7 @@ export default function AssetsPage() {
               return (
                 <tr key={a.id}>
                   <td>
-                    <Link to={"/asset/" + a.id} className="link asset-name-link">
+                    <Link to={workspaceRouteForPathname(pathname, "/asset/" + a.id)} className="link asset-name-link">
                       {at && <AssetIcon name={at.icon_name} />}
                       <strong>{a.name}</strong>
                     </Link>

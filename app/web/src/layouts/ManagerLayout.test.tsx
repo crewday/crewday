@@ -103,7 +103,7 @@ function workspaceMe(): Me {
   };
 }
 
-function renderManagerLayout(allowed: Set<string>, initialPath = "/dashboard"): string[] {
+function renderManagerLayout(allowed: Set<string>, initialPath = "/w/ws_1/dashboard"): string[] {
   const permissionProbes: string[] = [];
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("ws_1");
   setAuthenticated(authMe());
@@ -135,8 +135,8 @@ function renderManagerLayout(allowed: Set<string>, initialPath = "/dashboard"): 
         <WorkspaceProvider>
           <Routes>
             <Route element={<ManagerLayout />}>
-              <Route path="/dashboard" element={<main><PageHeader title="Dashboard" /></main>} />
-              <Route path="/chat" element={<main data-testid="chat-view">Chat</main>} />
+              <Route path="/w/ws_1/dashboard" element={<main><PageHeader title="Dashboard" /></main>} />
+              <Route path="/w/ws_1/chat" element={<main data-testid="chat-view">Chat</main>} />
             </Route>
           </Routes>
         </WorkspaceProvider>
@@ -178,11 +178,11 @@ function renderManagerLayoutWithDeferredPermissions(allowed: Set<string>): {
 
   render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/dashboard"]}>
+      <MemoryRouter initialEntries={["/w/ws_1/dashboard"]}>
         <WorkspaceProvider>
           <Routes>
             <Route element={<ManagerLayout />}>
-              <Route path="/dashboard" element={<main><PageHeader title="Dashboard" /></main>} />
+              <Route path="/w/ws_1/dashboard" element={<main><PageHeader title="Dashboard" /></main>} />
             </Route>
           </Routes>
         </WorkspaceProvider>
@@ -251,6 +251,9 @@ describe("<ManagerLayout> permission-resolved navigation", () => {
       },
       { timeout: 3000 },
     );
+    expect(screen.getByRole("link", { name: /Dashboard/i })).toHaveAttribute("href", "/w/ws_1/dashboard");
+    expect(screen.getByRole("link", { name: /API tokens/i })).toHaveAttribute("href", "/w/ws_1/tokens");
+    expect(screen.getByRole("link", { name: "My profile" })).toHaveAttribute("href", "/w/ws_1/me");
     expect(screen.getByRole("button", { name: "Open menu" })).toBeInTheDocument();
     expect(screen.getByTestId("agent-sidebar")).toHaveTextContent("agent:manager");
   });
@@ -276,7 +279,7 @@ describe("<ManagerLayout> permission-resolved navigation", () => {
   });
 
   it("marks the manager shell as a full-screen chat surface on /chat", async () => {
-    renderManagerLayout(new Set(), "/chat");
+    renderManagerLayout(new Set(), "/w/ws_1/chat");
 
     expect(await screen.findByTestId("chat-view")).toBeInTheDocument();
     expect(screen.getByTestId("chat-view").closest(".desk")).toHaveClass("desk--chat");

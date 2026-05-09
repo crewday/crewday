@@ -81,7 +81,7 @@ function renderEmployees(routes: FetchRoute[] = []) {
   ]);
   const view = render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/w/acme/employees"]}>
         <EmployeesPage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -141,6 +141,10 @@ describe("<EmployeesPage> invite action", () => {
       },
     ]);
 
+    expect(await screen.findByRole("link", { name: "Mina Manager" })).toHaveAttribute(
+      "href",
+      "/w/acme/employee/emp_1",
+    );
     fireEvent.click(await screen.findByRole("button", { name: "+ Invite employee" }));
     const dialog = screen.getByRole("dialog", { name: "Invite employee" });
     fireEvent.change(within(dialog).getByLabelText("Full name"), {

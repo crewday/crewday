@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
 import { Chip, EmptyState, FilterChipGroup, Loading } from "@/components/common";
 import type {
@@ -206,6 +207,7 @@ function ExtractionDisclosure({ doc }: { doc: AssetDocument }) {
 }
 
 export default function DocumentsPage() {
+  const { pathname } = useLocation();
   const [activeKind, setActiveKind] = useState<DocumentKind | "">("");
   const [activeProperty, setActiveProperty] = useState<string>("");
 
@@ -248,8 +250,8 @@ export default function DocumentsPage() {
               asset for manuals, warranties, and invoices.
             </p>
             <p>
-              <Link className="btn btn--moss" to="/assets">Open assets</Link>{" "}
-              <Link className="btn btn--ghost" to="/properties">Open properties</Link>
+              <Link className="btn btn--moss" to={workspaceRouteForPathname(pathname, "/assets")}>Open assets</Link>{" "}
+              <Link className="btn btn--ghost" to={workspaceRouteForPathname(pathname, "/properties")}>Open properties</Link>
             </p>
           </EmptyState>
         </section>

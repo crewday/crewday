@@ -96,14 +96,14 @@ function installFetch({ failLeaves = false }: { failLeaves?: boolean } = {}) {
   };
 }
 
-function Harness({ initialPath = "/employee/emp_1/leaves" }: { initialPath?: string }) {
+function Harness({ initialPath = "/w/acme/employee/emp_1/leaves" }: { initialPath?: string }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[initialPath]}>
         <WorkspaceProvider>
           <Routes>
-            <Route path="/employee/:eid/leaves" element={<EmployeeLeavesPage />} />
+            <Route path="/w/:slug/employee/:eid/leaves" element={<EmployeeLeavesPage />} />
             <Route path="/w/:slug/user/:eid/leaves" element={<EmployeeLeavesPage />} />
           </Routes>
         </WorkspaceProvider>
@@ -134,6 +134,10 @@ describe("<EmployeeLeavesPage>", () => {
       expect(await screen.findByText("Maya Santos — leave ledger")).toBeInTheDocument();
       expect(screen.getByText("Family trip")).toBeInTheDocument();
       expect(screen.getByText("Checkup")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: /Back to profile/ })).toHaveAttribute(
+        "href",
+        "/w/acme/employee/emp_1",
+      );
       expect(screen.getByText("Pending")).toBeInTheDocument();
       expect(screen.getByText("Approved")).toBeInTheDocument();
       expect(fake.calls).toContainEqual({

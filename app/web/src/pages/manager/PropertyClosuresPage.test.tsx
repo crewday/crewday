@@ -185,10 +185,10 @@ function Harness() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={["/property/prop_1/closures"]}>
+      <MemoryRouter initialEntries={["/w/acme/property/prop_1/closures"]}>
         <WorkspaceProvider>
           <Routes>
-            <Route path="/property/:pid/closures" element={<PropertyClosuresPage />} />
+            <Route path="/w/:slug/property/:pid/closures" element={<PropertyClosuresPage />} />
           </Routes>
         </WorkspaceProvider>
       </MemoryRouter>
@@ -224,7 +224,7 @@ describe("<PropertyClosuresPage>", () => {
       render(<Harness />);
 
       expect(await screen.findByRole("heading", { name: "Villa Rosa — closures" })).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: /Back to property/ })).toHaveAttribute("href", "/property/prop_1");
+      expect(screen.getByRole("link", { name: /Back to property/ })).toHaveAttribute("href", "/w/acme/property/prop_1");
       expect(screen.getByRole("button", { name: "+ Add closure" })).toBeInTheDocument();
       expect(screen.getByText("10 Apr → 12 Apr")).toBeInTheDocument();
       expect(screen.getAllByText("renovation").length).toBeGreaterThan(0);

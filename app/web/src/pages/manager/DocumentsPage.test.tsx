@@ -164,7 +164,7 @@ function Harness() {
   });
   return (
     <QueryClientProvider client={qc}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/w/acme/documents"]}>
         <WorkspaceProvider>
           <DocumentsPage />
         </WorkspaceProvider>
@@ -189,7 +189,7 @@ afterEach(() => {
 describe("<DocumentsPage>", () => {
   it("wraps the real documents route in the document-management permission guard", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="assets\.manage_documents" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/documents" element={<DocumentsPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="assets\.manage_documents" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="documents" element={<DocumentsPage \/>} \/>/,
     );
   });
 
@@ -221,8 +221,8 @@ describe("<DocumentsPage>", () => {
       render(<Harness />);
       expect(await screen.findByRole("heading", { name: "No documents listed yet" })).toBeInTheDocument();
       expect(screen.getByText(/Documents are attached from the property or asset they belong to/)).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Open assets" })).toHaveAttribute("href", "/assets");
-      expect(screen.getByRole("link", { name: "Open properties" })).toHaveAttribute("href", "/properties");
+      expect(screen.getByRole("link", { name: "Open assets" })).toHaveAttribute("href", "/w/acme/assets");
+      expect(screen.getByRole("link", { name: "Open properties" })).toHaveAttribute("href", "/w/acme/properties");
       expect(screen.queryByRole("columnheader", { name: "Title" })).toBeNull();
       expect(fake.calls).toEqual(
         expect.arrayContaining([

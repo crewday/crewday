@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import { Avatar, Chip, Loading } from "@/components/common";
 import { fmtTime } from "@/lib/dates";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { Booking, Employee, Me, Property } from "@/types/api";
 
 interface InviteEmployeeRequest {
@@ -26,6 +27,7 @@ interface InviteEmployeeResponse {
 }
 
 export default function EmployeesPage() {
+  const { pathname } = useLocation();
   const empsQ = useQuery({
     queryKey: qk.employees(),
     queryFn: () => fetchJson<Employee[]>("/api/v1/employees"),
@@ -81,7 +83,7 @@ export default function EmployeesPage() {
               <tr key={e.id}>
                 <td><Avatar url={e.avatar_url} initials={e.avatar_initials} size="md" alt={e.name} /></td>
                 <td>
-                  <Link className="link" to={"/employee/" + e.id}>{e.name}</Link>
+                  <Link className="link" to={workspaceRouteForPathname(pathname, "/employee/" + e.id)}>{e.name}</Link>
                 </td>
                 <td>
                   {e.roles.map((r) => (
@@ -114,7 +116,7 @@ export default function EmployeesPage() {
                   })()}
                 </td>
                 <td>
-                  <Link className="link link--muted" to={"/employee/" + e.id}>View →</Link>
+                  <Link className="link link--muted" to={workspaceRouteForPathname(pathname, "/employee/" + e.id)}>View →</Link>
                 </td>
               </tr>
             ))}

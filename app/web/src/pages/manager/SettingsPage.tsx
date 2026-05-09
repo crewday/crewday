@@ -233,6 +233,7 @@ function SettingEditor({
 }
 
 function OverrideSummary({ properties, employees }: { properties: Property[]; employees: Employee[] }) {
+  const { pathname } = useLocation();
   const propsWithOverrides = properties.filter((p) => Object.keys(p.settings_override).length > 0);
   const empsWithOverrides = employees.filter((e) => Object.keys(e.settings_override).length > 0);
 
@@ -255,7 +256,7 @@ function OverrideSummary({ properties, employees }: { properties: Property[]; em
           <ul className="settings-list">
             {propsWithOverrides.map((p) => (
               <li key={p.id}>
-                <Link to={`/property/${p.id}`} className="link">
+                <Link to={workspaceRouteForPathname(pathname, "/property/" + p.id)} className="link">
                   <strong>{p.name}</strong>
                 </Link>{" "}
                 <Chip tone={p.color} size="sm">
@@ -273,7 +274,7 @@ function OverrideSummary({ properties, employees }: { properties: Property[]; em
           <ul className="settings-list">
             {empsWithOverrides.map((e) => (
               <li key={e.id}>
-                <Link to={`/employee/${e.id}`} className="link">
+                <Link to={workspaceRouteForPathname(pathname, "/employee/" + e.id)} className="link">
                   <strong>{e.name}</strong>
                 </Link>{" "}
                 <Chip tone="sky" size="sm">

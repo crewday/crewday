@@ -1,9 +1,10 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
 import { Chip, Loading } from "@/components/common";
 import type { Me, Property, PropertyClosure, Stay } from "@/types/api";
@@ -132,6 +133,7 @@ async function fetchClosuresPayload(pid: string): Promise<ClosuresPayload> {
 export default function PropertyClosuresPage() {
   // code-health: ignore[nloc] Closure page keeps filter state, create form, and table actions on one promoted route.
   const { pid = "" } = useParams<{ pid: string }>();
+  const { pathname } = useLocation();
   const queryClient = useQueryClient();
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const [form, setForm] = useState<ClosureFormState>(() => emptyForm("2026-04-01"));
@@ -212,7 +214,7 @@ export default function PropertyClosuresPage() {
       title={property.name + " — closures"}
       sub={
         <>
-          <Link to={"/property/" + property.id} className="link">← Back to property</Link>{" "}
+          <Link to={workspaceRouteForPathname(pathname, "/property/" + property.id)} className="link">← Back to property</Link>{" "}
           · iCal "Not available" / "Blocked" events upsert here automatically.
         </>
       }

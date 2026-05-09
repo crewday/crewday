@@ -1,8 +1,9 @@
 import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import { useDecideMutation } from "@/lib/useDecideMutation";
 import DeskPage from "@/components/DeskPage";
 import NewTaskButton from "@/components/NewTaskModal";
@@ -36,6 +37,7 @@ interface BroadcastSendResponse {
 }
 
 export default function DashboardPage() {
+  const { pathname } = useLocation();
   const d = useQuery({ queryKey: qk.dashboard(), queryFn: () => fetchJson<Dashboard>("/api/v1/dashboard") });
   const me = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
   const qc = useQueryClient();
@@ -292,7 +294,7 @@ export default function DashboardPage() {
       </section>
 
       <section className="grid grid--split">
-        <Panel title="Today's tasks" right={<Link className="link" to="/properties">By property →</Link>}>
+        <Panel title="Today's tasks" right={<Link className="link" to={workspaceRouteForPathname(pathname, "/properties")}>By property →</Link>}>
           <table className="table">
             <thead>
               <tr>
@@ -319,7 +321,7 @@ export default function DashboardPage() {
           </table>
         </Panel>
 
-        <Panel title="Agent approvals" right={<Link className="link" to="/approvals">All →</Link>}>
+        <Panel title="Agent approvals" right={<Link className="link" to={workspaceRouteForPathname(pathname, "/approvals")}>All →</Link>}>
           <ul className="approval-list">
             {pending_approvals.map((a) => (
               <li key={a.id} className={"approval approval--" + a.risk}>
@@ -373,7 +375,7 @@ export default function DashboardPage() {
           </ul>
         </Panel>
 
-        <Panel title="Pending leaves" right={<Link className="link" to="/leaves">All →</Link>}>
+        <Panel title="Pending leaves" right={<Link className="link" to={workspaceRouteForPathname(pathname, "/leaves")}>All →</Link>}>
           <ul className="task-list task-list--desk">
             {pending_leaves.length === 0 && (
               <li className="empty-state empty-state--quiet">No pending leave requests.</li>

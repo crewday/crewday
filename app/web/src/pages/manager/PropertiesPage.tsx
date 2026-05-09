@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import { useWorkspace } from "@/context/WorkspaceContext";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
 import { Chip, Loading } from "@/components/common";
 import type { AuthMe } from "@/auth/types";
@@ -233,6 +234,7 @@ function createDraftFromWorkspaceDefaults(me: AuthMe | undefined, workspaceSlug:
 }
 
 export default function PropertiesPage() {
+  const { pathname } = useLocation();
   // code-health: ignore[ccn nloc] Properties route composes query mapping, selected card state, and promoted table layout.
   const { workspaceId } = useWorkspace();
   const queryClient = useQueryClient();
@@ -429,7 +431,7 @@ export default function PropertiesPage() {
           const clientOrg = p.client_org_id ? orgById.get(p.client_org_id) : undefined;
           return (
             <article key={p.id} className="prop-card">
-              <Link className="prop-card__link" to={"/property/" + p.id}>
+              <Link className="prop-card__link" to={workspaceRouteForPathname(pathname, "/property/" + p.id)}>
                 <div className={"prop-card__swatch prop-card__swatch--" + p.color}>
                   <span className="prop-card__kind">{p.kind.toUpperCase()}</span>
                 </div>
@@ -474,8 +476,8 @@ export default function PropertiesPage() {
                 </div>
               </Link>
               <div className="prop-card__footer">
-                <Link to={"/property/" + p.id} className="link">Overview</Link>
-                <Link to={"/property/" + p.id + "/closures"} className="link link--muted">
+                <Link to={workspaceRouteForPathname(pathname, "/property/" + p.id)} className="link">Overview</Link>
+                <Link to={workspaceRouteForPathname(pathname, "/property/" + p.id + "/closures")} className="link link--muted">
                   Closures →
                 </Link>
               </div>

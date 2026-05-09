@@ -146,9 +146,9 @@ function Harness({ queryClient = makeQueryClient() }: { queryClient?: QueryClien
   return (
     <QueryClientProvider client={queryClient}>
       <WorkspaceProvider>
-        <MemoryRouter initialEntries={["/instructions/ins_1"]}>
+        <MemoryRouter initialEntries={["/w/acme/instructions/ins_1"]}>
           <Routes>
-            <Route path="/instructions/:iid" element={<InstructionDetailPage />} />
+            <Route path="/w/:slug/instructions/:iid" element={<InstructionDetailPage />} />
           </Routes>
         </MemoryRouter>
       </WorkspaceProvider>

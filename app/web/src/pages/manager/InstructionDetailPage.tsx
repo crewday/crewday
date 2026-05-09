@@ -1,9 +1,10 @@
 import { Fragment, type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import DeskPage from "@/components/DeskPage";
 import { Chip, Loading } from "@/components/common";
@@ -123,6 +124,7 @@ function canSubmitPatch(patch: InstructionPatch): boolean {
 export default function InstructionDetailPage() {
   // code-health: ignore[ccn] Instruction detail route coordinates read/ack/comment mutations around one promoted detail layout.
   const { iid } = useParams<{ iid: string }>();
+  const { pathname } = useLocation();
   const queryClient = useQueryClient();
   const editDialogRef = useRef<HTMLDialogElement>(null);
   const [editing, setEditing] = useState(false);
@@ -215,7 +217,7 @@ export default function InstructionDetailPage() {
 
   const sub = (
     <>
-      <Link to="/instructions" className="link">← All instructions</Link>{" "}·{" "}
+      <Link to={workspaceRouteForPathname(pathname, "/instructions")} className="link">← All instructions</Link>{" "}·{" "}
       <Chip tone={INSTRUCTION_SCOPE_TONE[i.scope]} size="sm">{scopeLabel}</Chip>
     </>
   );

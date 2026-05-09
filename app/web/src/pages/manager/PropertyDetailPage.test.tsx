@@ -387,17 +387,17 @@ function installFetch(options: InstallFetchOptions = {}) {
   };
 }
 
-function Harness({ initial = "/property/prop_1" }: { initial?: string }) {
+function Harness({ initial = "/w/acme/property/prop_1" }: { initial?: string }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[initial]}>
         <WorkspaceProvider>
           <Routes>
-            <Route path="/property/:pid" element={<PropertyDetailPage />} />
-            <Route path="/stays" element={<div>Stays route reached</div>} />
-            <Route path="/instructions" element={<div>Instructions route reached</div>} />
-            <Route path="/property/:pid/closures" element={<div>Closures route reached</div>} />
+            <Route path="/w/:slug/property/:pid" element={<PropertyDetailPage />} />
+            <Route path="/w/:slug/stays" element={<div>Stays route reached</div>} />
+            <Route path="/w/:slug/instructions" element={<div>Instructions route reached</div>} />
+            <Route path="/w/:slug/property/:pid/closures" element={<div>Closures route reached</div>} />
           </Routes>
         </WorkspaceProvider>
       </MemoryRouter>
@@ -640,9 +640,9 @@ describe("<PropertyDetailPage>", () => {
       fireEvent.click(screen.getByRole("button", { name: "Settings" }));
       expect(await screen.findByText("Settings overrides")).toBeInTheDocument();
 
-      expect(screen.getByRole("link", { name: "Stays" })).toHaveAttribute("href", "/stays?property_id=prop_1");
-      expect(screen.getByRole("link", { name: "Instructions" })).toHaveAttribute("href", "/instructions?property_id=prop_1");
-      expect(screen.getByRole("link", { name: "Closures" })).toHaveAttribute("href", "/property/prop_1/closures");
+      expect(screen.getByRole("link", { name: "Stays" })).toHaveAttribute("href", "/w/acme/stays?property_id=prop_1");
+      expect(screen.getByRole("link", { name: "Instructions" })).toHaveAttribute("href", "/w/acme/instructions?property_id=prop_1");
+      expect(screen.getByRole("link", { name: "Closures" })).toHaveAttribute("href", "/w/acme/property/prop_1/closures");
 
       fireEvent.click(screen.getByRole("link", { name: "Stays" }));
       await waitFor(() => {

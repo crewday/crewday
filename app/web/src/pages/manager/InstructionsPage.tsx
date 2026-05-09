@@ -1,9 +1,10 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
 import { Chip, Loading } from "@/components/common";
 import { INSTRUCTION_SCOPE_TONE } from "@/lib/tones";
@@ -97,6 +98,7 @@ function canSubmitCreate(draft: InstructionCreateDraft): boolean {
 }
 
 export default function InstructionsPage() {
+  const { pathname } = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const createDialogRef = useRef<HTMLDialogElement>(null);
@@ -138,7 +140,7 @@ export default function InstructionsPage() {
       queryClient.setQueryData(qk.instruction(instruction.id), instruction);
       void queryClient.invalidateQueries({ queryKey: qk.instructions() });
       setCreating(false);
-      navigate("/instructions/" + instruction.id);
+      navigate(workspaceRouteForPathname(pathname, "/instructions/" + instruction.id));
     },
   });
 
@@ -343,7 +345,7 @@ export default function InstructionsPage() {
         <ul className="kb-list">
           {instructions.map((i) => (
             <li key={i.id} className="kb-item">
-              <Link to={"/instructions/" + i.id} className="kb-item__main">
+              <Link to={workspaceRouteForPathname(pathname, "/instructions/" + i.id)} className="kb-item__main">
                 <div className="kb-item__head">
                   <h3 className="kb-item__title">{i.title}</h3>
                   <Chip tone={INSTRUCTION_SCOPE_TONE[i.scope]} size="sm">{scopeLabel(i)}</Chip>

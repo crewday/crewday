@@ -138,10 +138,10 @@ function renderInstructions(routes: FetchRoute[] = []) {
   const view = render(
     <QueryClientProvider client={queryClient}>
       <WorkspaceProvider>
-        <MemoryRouter initialEntries={["/instructions"]}>
+        <MemoryRouter initialEntries={["/w/acme/instructions"]}>
           <Routes>
-            <Route path="/instructions" element={<InstructionsPage />} />
-            <Route path="/instructions/:iid" element={<DetailRoute />} />
+            <Route path="/w/:slug/instructions" element={<InstructionsPage />} />
+            <Route path="/w/:slug/instructions/:iid" element={<DetailRoute />} />
           </Routes>
         </MemoryRouter>
       </WorkspaceProvider>

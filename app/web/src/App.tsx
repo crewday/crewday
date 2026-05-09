@@ -322,6 +322,8 @@ function workspaceRoutes({
         <Route element={<ManagerLayout />}>
           <Route path="employees" element={<EmployeesPage />} />
           <Route path="employee/:eid" element={<EmployeeDetailPage />} />
+          <Route path="users" element={<EmployeesPage />} />
+          <Route path="user/:eid" element={<EmployeeDetailPage />} />
         </Route>
       </Route>
 

@@ -54,7 +54,7 @@ function renderSettings(): ReactElement {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={["/settings"]}>
+      <MemoryRouter initialEntries={["/w/acme/settings"]}>
         <NavHistoryProvider>
           <SettingsPage />
         </NavHistoryProvider>
@@ -69,7 +69,7 @@ describe("SettingsPage", () => {
 
     expect(screen.getByRole("heading", { name: "Workspace settings" })).toBeInTheDocument();
     expect(screen.getByText(/Workspace-wide configuration only/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "My profile" })).toHaveAttribute("href", "/me");
+    expect(screen.getByRole("link", { name: "My profile" })).toHaveAttribute("href", "/w/acme/me");
 
     const workspacePrefs = await screen.findByLabelText("Agent preferences — Workspace");
     expect(workspacePrefs).toBeInTheDocument();

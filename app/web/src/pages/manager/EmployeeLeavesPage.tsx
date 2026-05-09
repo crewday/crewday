@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
 import { Chip, Loading } from "@/components/common";
 import type { Employee, Leave } from "@/types/api";
@@ -26,6 +27,7 @@ function inclusiveDays(startIso: string, endIso: string): number {
 
 export default function EmployeeLeavesPage() {
   const { eid = "" } = useParams<{ eid: string }>();
+  const { pathname } = useLocation();
   const dataQ = useQuery({
     queryKey: qk.employeeLeaves(eid),
     queryFn: () => fetchJson<LeavesPayload>("/api/v1/employees/" + eid + "/leaves"),
@@ -41,7 +43,7 @@ export default function EmployeeLeavesPage() {
     <DeskPage
       title={subject.name + " — leave ledger"}
       sub={
-        <Link to={"/employee/" + subject.id} className="link">
+        <Link to={workspaceRouteForPathname(pathname, "/employee/" + subject.id)} className="link">
           ← Back to profile
         </Link>
       }

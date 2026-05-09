@@ -214,7 +214,7 @@ function installFetch(options: InstallFetchOptions = {}) {
   };
 }
 
-function Harness({ initial = "/assets" }: { initial?: string }) {
+function Harness({ initial = "/w/acme/assets" }: { initial?: string }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
@@ -252,14 +252,14 @@ afterEach(() => {
 describe("<AssetsPage>", () => {
   it("wraps the assets routes in the scope-view permission guard", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="scope\.view" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/assets" element={<AssetsPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="scope\.view" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="assets" element={<AssetsPage \/>} \/>/,
     );
   });
 
   it("renders assets from paginated API envelopes and filters from the URL", async () => {
     const { restore } = installFetch();
     try {
-      render(<Harness initial="/assets?category=security" />);
+      render(<Harness initial="/w/acme/assets?category=security" />);
 
       expect(await screen.findByText("Front door lock")).toBeInTheDocument();
       const table = screen.getByRole("table");
@@ -275,7 +275,7 @@ describe("<AssetsPage>", () => {
     const { restore } = installFetch();
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     try {
-      render(<Harness initial="/assets?category=security&property_id=prop_1" />);
+      render(<Harness initial="/w/acme/assets?category=security&property_id=prop_1" />);
       await screen.findByText("Front door lock");
 
       fireEvent.click(screen.getByRole("button", { name: "Print QR labels" }));
@@ -478,7 +478,7 @@ describe("<AssetsPage>", () => {
   it("falls back to the first property when the URL property filter is stale", async () => {
     const { restore } = installFetch();
     try {
-      render(<Harness initial="/assets?property_id=missing_property" />);
+      render(<Harness initial="/w/acme/assets?property_id=missing_property" />);
 
       await waitFor(() =>
         expect(screen.getByRole("button", { name: "+ New asset" })).toBeEnabled(),
