@@ -1,5 +1,16 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import DateTime from "@/components/DateTime";
+import FormField from "@/components/FormField";
 import { Chip } from "@/components/common";
-import type { LlmPromptTemplate } from "@/types";
+import { ApiError, fetchJson } from "@/lib/api";
+import { qk } from "@/lib/queryKeys";
+import type {
+  LlmPromptRevision,
+  LlmPromptTemplate,
+  LlmPromptTemplateDetail,
+} from "@/types";
 
 interface PromptLibraryDrawerProps {
   prompts: LlmPromptTemplate[];
@@ -10,6 +21,12 @@ export default function PromptLibraryDrawer({
   prompts,
   onClose,
 }: PromptLibraryDrawerProps) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedPrompt = useMemo(
+    () => prompts.find((prompt) => prompt.id === selectedId) ?? null,
+    [prompts, selectedId],
+  );
+
   return (
     <div
       className="llm-prompt-drawer-backdrop"
@@ -30,21 +47,27 @@ export default function PromptLibraryDrawer({
         <ul className="llm-prompt-list">
           {prompts.map((p) => (
             <li key={p.id} className="llm-prompt-list__item">
-              <div className="llm-prompt-list__head">
-                <code className="inline-code">{p.capability}</code>
-                <span className="llm-prompt-list__name">{p.name}</span>
-                <span className="llm-prompt-list__ver mono muted">v{p.version}</span>
-                {p.is_customised ? (
-                  <Chip tone="sand" size="sm">
-                    customised
-                  </Chip>
-                ) : (
-                  <Chip tone="ghost" size="sm">
-                    default
-                  </Chip>
-                )}
-              </div>
-              <p className="llm-prompt-list__preview">{p.preview}</p>
+              <button
+                type="button"
+                className="llm-prompt-list__button"
+                onClick={() => setSelectedId(p.id)}
+              >
+                <span className="llm-prompt-list__head">
+                  <code className="inline-code">{p.capability}</code>
+                  <span className="llm-prompt-list__name">{p.name}</span>
+                  <span className="llm-prompt-list__ver mono muted">v{p.version}</span>
+                  {p.is_customised ? (
+                    <Chip tone="sand" size="sm">
+                      customised
+                    </Chip>
+                  ) : (
+                    <Chip tone="ghost" size="sm">
+                      default
+                    </Chip>
+                  )}
+                </span>
+                <span className="llm-prompt-list__preview">{p.preview}</span>
+              </button>
               <footer className="llm-prompt-list__foot muted">
                 <span>
                   {p.revisions_count} revision
@@ -55,7 +78,215 @@ export default function PromptLibraryDrawer({
             </li>
           ))}
         </ul>
+        {selectedPrompt ? (
+          <PromptEditorDialog
+            prompt={selectedPrompt}
+            onClose={() => setSelectedId(null)}
+          />
+        ) : null}
       </aside>
     </div>
+  );
+}
+
+interface PromptEditorDialogProps {
+  prompt: LlmPromptTemplate;
+  onClose: () => void;
+}
+
+interface PromptPayload {
+  template: string;
+  notes: string | null;
+}
+
+function promptErrorCopy(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    return error.detail ?? error.title ?? error.message ?? fallback;
+  }
+  return error instanceof Error ? error.message : fallback;
+}
+
+function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
+  // code-health: ignore[ccn nloc] Lizard misattributes the prompt editor TSX body to the preceding error-copy helper.
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const qc = useQueryClient();
+  const [template, setTemplate] = useState("");
+  const [notes, setNotes] = useState("");
+  const [clientErr, setClientErr] = useState<string | null>(null);
+  const [serverErr, setServerErr] = useState<string | null>(null);
+  const detailQ = useQuery({
+    queryKey: [...qk.adminLlmPrompts(), "detail", prompt.id],
+    queryFn: () =>
+      fetchJson<LlmPromptTemplateDetail>(`/admin/api/v1/llm/prompts/${prompt.id}`),
+  });
+  const revisionsQ = useQuery({
+    queryKey: [...qk.adminLlmPrompts(), "revisions", prompt.id],
+    queryFn: () =>
+      fetchJson<LlmPromptRevision[]>(
+        `/admin/api/v1/llm/prompts/${prompt.id}/revisions`,
+      ),
+  });
+
+  useEffect(() => {
+    const element = dialogRef.current;
+    if (element && !element.open) element.showModal();
+  }, []);
+
+  useEffect(() => {
+    if (!detailQ.data) return;
+    setTemplate(detailQ.data.template);
+    setNotes(detailQ.data.notes ?? "");
+  }, [detailQ.data]);
+
+  const invalidate = async () => {
+    await qc.invalidateQueries({ queryKey: qk.adminLlmPrompts() });
+  };
+  const save = useMutation({
+    mutationFn: (body: PromptPayload) =>
+      fetchJson<LlmPromptTemplateDetail>(`/admin/api/v1/llm/prompts/${prompt.id}`, {
+        method: "PUT",
+        body,
+      }),
+    onSuccess: async (updated) => {
+      setTemplate(updated.template);
+      setNotes(updated.notes ?? "");
+      setClientErr(null);
+      setServerErr(null);
+      await invalidate();
+    },
+    onError: (error: Error) => setServerErr(promptErrorCopy(error, "Prompt save failed.")),
+  });
+  const reset = useMutation({
+    mutationFn: () =>
+      fetchJson<LlmPromptTemplateDetail>(
+        `/admin/api/v1/llm/prompts/${prompt.id}/reset-to-default`,
+        { method: "POST" },
+      ),
+    onSuccess: async (updated) => {
+      setTemplate(updated.template);
+      setNotes(updated.notes ?? "");
+      setClientErr(null);
+      setServerErr(null);
+      await invalidate();
+    },
+    onError: (error: Error) => setServerErr(promptErrorCopy(error, "Prompt reset failed.")),
+  });
+
+  const detail = detailQ.data;
+  const err = clientErr ?? serverErr;
+  const errId = err ? "llm-prompt-error" : undefined;
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!template.trim()) return setClientErr("Prompt body is required.");
+    setClientErr(null);
+    setServerErr(null);
+    save.mutate({ template, notes: notes.trim() ? notes.trim() : null });
+  }
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="modal modal--sheet llm-registry-dialog llm-prompt-dialog"
+      aria-labelledby="llm-prompt-editor-title"
+      onClose={onClose}
+    >
+      <form className="llm-registry-form" onSubmit={submit} noValidate>
+        <header className="llm-registry-form__head">
+          <div>
+            <p className="llm-registry-form__eyebrow">Prompt template</p>
+            <h3 id="llm-prompt-editor-title" className="llm-registry-form__title">
+              {prompt.name}
+            </h3>
+          </div>
+          <button
+            type="button"
+            className="llm-registry-form__close"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+        <div className="llm-registry-form__body">
+          <div className="llm-prompt-dialog__meta">
+            <code className="inline-code">{prompt.capability}</code>
+            <span>v{detail?.version ?? prompt.version}</span>
+            <span>hash {detail?.default_hash ?? prompt.default_hash}</span>
+            <span>
+              Updated{" "}
+              <DateTime value={detail?.updated_at ?? prompt.updated_at} showTime empty="—" />
+            </span>
+            {(detail?.is_customised ?? prompt.is_customised) ? (
+              <Chip tone="sand" size="sm">
+                customised
+              </Chip>
+            ) : (
+              <Chip tone="ghost" size="sm">
+                default
+              </Chip>
+            )}
+          </div>
+          {detailQ.isPending ? <p className="muted">Loading prompt body…</p> : null}
+          {detailQ.isError ? <p className="form-error">Prompt body failed to load.</p> : null}
+          <FormField label="Active template body" requirement="required" className="llm-registry-form__field">
+            <textarea
+              value={template}
+              onChange={(e) => setTemplate(e.target.value)}
+              rows={14}
+              required
+              aria-invalid={clientErr === "Prompt body is required."}
+              aria-describedby={errId}
+            />
+          </FormField>
+          <FormField label="Notes" requirement="optional" className="llm-registry-form__field">
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+          </FormField>
+          <section className="llm-prompt-revisions" aria-label="Prompt revision history">
+            <h4>Revision history</h4>
+            {revisionsQ.isPending ? <p className="muted">Loading revisions…</p> : null}
+            {revisionsQ.isError ? <p className="form-error">Revisions failed to load.</p> : null}
+            {revisionsQ.data?.length === 0 ? (
+              <p className="muted">No previous revisions.</p>
+            ) : null}
+            {revisionsQ.data?.map((revision) => (
+              <article key={revision.id} className="llm-prompt-revision">
+                <header>
+                  <strong>v{revision.version}</strong>
+                  <DateTime value={revision.created_at} showTime className="mono muted" />
+                </header>
+                <p>{revision.body.slice(0, 180)}</p>
+                {revision.notes ? <p className="muted">{revision.notes}</p> : null}
+              </article>
+            ))}
+          </section>
+          {err ? (
+            <p id={errId} className="form-error">
+              {err}
+            </p>
+          ) : null}
+        </div>
+        <footer className="llm-registry-form__footer">
+          <button
+            type="button"
+            className="btn btn--rust"
+            onClick={() => reset.mutate()}
+            disabled={reset.isPending || save.isPending}
+          >
+            {reset.isPending ? "Resetting…" : "Reset to default"}
+          </button>
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="btn btn--moss"
+            disabled={save.isPending || reset.isPending}
+          >
+            {save.isPending ? "Saving…" : "Save prompt"}
+          </button>
+        </footer>
+      </form>
+    </dialog>
   );
 }

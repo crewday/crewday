@@ -143,6 +143,21 @@ export interface LlmPromptTemplate {
   preview: string;
 }
 
+export interface LlmPromptTemplateDetail extends LlmPromptTemplate {
+  template: string;
+  notes: string | null;
+}
+
+export interface LlmPromptRevision {
+  id: string;
+  template_id: string;
+  version: number;
+  body: string;
+  notes: string | null;
+  created_at: string;
+  created_by_user_id: string | null;
+}
+
 export interface LlmGraphPayload {
   providers: LlmProvider[];
   models: LlmModel[];

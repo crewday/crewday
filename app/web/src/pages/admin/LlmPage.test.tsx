@@ -169,7 +169,17 @@ describe("Admin LlmPage", () => {
         {
           body: {
             started_at: "2026-04-30T12:01:00Z",
-            deltas: [],
+            deltas: [
+              {
+                provider_model_id: "pm_gemma",
+                api_model_id: "google/gemma-4-31b-it",
+                input_before: 0.15,
+                input_after: 0.12,
+                output_before: 0.2,
+                output_after: 0.18,
+                status: "updated",
+              },
+            ],
             updated: 1,
             skipped: 2,
             errors: 0,
@@ -181,11 +191,152 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
       await findOpenRouterProvider();
 
-      openOverflowItem("Sync pricing");
+      const pricingPanel = screen.getByText("Provider-model pricing").closest(".panel");
+      if (!(pricingPanel instanceof HTMLElement)) throw new Error("pricing panel not found");
+      fireEvent.click(within(pricingPanel).getByRole("button", { name: "Sync pricing" }));
 
       expect(await screen.findByText("Pricing sync:")).toBeInTheDocument();
-      expect(screen.getByText(/1 updated/)).toBeInTheDocument();
+      expect(within(pricingPanel).getByText(/Last result: 1 updated, 2 skipped, 0 errors/)).toBeInTheDocument();
+      expect(
+        within(pricingPanel).getByLabelText("Pricing sync deltas"),
+      ).toHaveTextContent("google/gemma-4-31b-it");
       expect(fetcher.calls.some((call) => call.url === "/admin/api/v1/llm/sync-pricing")).toBe(true);
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("edits, reloads revisions, and resets prompt templates from the prompt dialog", async () => {
+    const initialDetail = {
+      ...prompts[0],
+      template: "You are the manager assistant.",
+      notes: "Current production prompt.",
+    };
+    const savedDetail = {
+      ...initialDetail,
+      version: 4,
+      is_customised: true,
+      template: "You are the manager assistant.\nKeep answers terse.",
+      notes: "Terse mode.",
+      revisions_count: 3,
+    };
+    const resetDetail = {
+      ...initialDetail,
+      version: 5,
+      is_customised: false,
+      revisions_count: 4,
+      notes: null,
+    };
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/prompts": [
+        { body: prompts },
+        { body: [{ ...prompts[0], version: 4, is_customised: true, revisions_count: 3 }] },
+        { body: [{ ...prompts[0], version: 5, is_customised: false, revisions_count: 4 }] },
+        { body: prompts },
+      ],
+      "/admin/api/v1/llm/prompts/prompt_chat_manager": [
+        { body: initialDetail },
+        { body: savedDetail },
+        { body: savedDetail },
+        { body: resetDetail },
+      ],
+      "/admin/api/v1/llm/prompts/prompt_chat_manager/reset-to-default": [
+        { body: resetDetail },
+      ],
+      "/admin/api/v1/llm/prompts/prompt_chat_manager/revisions": [
+        {
+          body: [
+            {
+              id: "rev_2",
+              template_id: "prompt_chat_manager",
+              version: 2,
+              body: "Previous manager assistant prompt.",
+              notes: "Before edit.",
+              created_at: "2026-04-29T12:00:00Z",
+              created_by_user_id: "user_admin",
+            },
+          ],
+        },
+        {
+          body: [
+            {
+              id: "rev_3",
+              template_id: "prompt_chat_manager",
+              version: 3,
+              body: "You are the manager assistant.",
+              notes: "Current production prompt.",
+              created_at: "2026-04-30T12:00:00Z",
+              created_by_user_id: "user_admin",
+            },
+          ],
+        },
+        {
+          body: [
+            {
+              id: "rev_4",
+              template_id: "prompt_chat_manager",
+              version: 4,
+              body: "You are the manager assistant.\nKeep answers terse.",
+              notes: "Terse mode.",
+              created_at: "2026-04-30T12:05:00Z",
+              created_by_user_id: "user_admin",
+            },
+          ],
+        },
+      ],
+    });
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      openOverflowItem("Prompts");
+      const drawer = await screen.findByText("Prompt library");
+      const promptDrawer = drawer.closest(".llm-prompt-drawer");
+      if (!(promptDrawer instanceof HTMLElement)) throw new Error("prompt drawer not found");
+      fireEvent.click(within(promptDrawer).getByRole("button", { name: /Manager chat/ }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Manager chat" });
+      expect(await within(dialog).findByLabelText(/Active template body/)).toHaveValue(
+        "You are the manager assistant.",
+      );
+      expect(within(dialog).getByText("Revision history")).toBeInTheDocument();
+      expect(await within(dialog).findByText("Previous manager assistant prompt.")).toBeInTheDocument();
+
+      fireEvent.change(within(dialog).getByLabelText(/Active template body/), {
+        target: { value: "You are the manager assistant.\nKeep answers terse." },
+      });
+      fireEvent.change(within(dialog).getByLabelText(/Notes/), {
+        target: { value: "Terse mode." },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save prompt" }));
+
+      await waitFor(() => {
+        const saveCall = fetcher.calls.find(
+          (call) =>
+            call.url === "/admin/api/v1/llm/prompts/prompt_chat_manager" &&
+            call.init.method === "PUT",
+        );
+        expect(saveCall).toBeDefined();
+        expect(jsonBody(saveCall!)).toEqual({
+          template: "You are the manager assistant.\nKeep answers terse.",
+          notes: "Terse mode.",
+        });
+      });
+
+      expect(await within(dialog).findByText("v4")).toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Reset to default" }));
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url ===
+                "/admin/api/v1/llm/prompts/prompt_chat_manager/reset-to-default" &&
+              call.init.method === "POST",
+          ),
+        ).toBe(true);
+      });
+      expect(await within(dialog).findByText("v5")).toBeInTheDocument();
     } finally {
       fetcher.restore();
     }

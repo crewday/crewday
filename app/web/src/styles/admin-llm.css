@@ -375,8 +375,22 @@
 .llm-prompt-list__item {
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 10px 12px;
   background: var(--card);
+}
+.llm-prompt-list__button {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 10px 12px 0;
+  cursor: pointer;
+}
+.llm-prompt-list__button:focus-visible {
+  outline: 3px solid var(--moss-softer);
+  outline-offset: 2px;
+  border-radius: 8px;
 }
 .llm-prompt-list__head {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
@@ -385,13 +399,86 @@
 .llm-prompt-list__name { font-weight: 600; color: var(--ink-1); font-size: 13.5px; }
 .llm-prompt-list__ver { font-size: 11.5px; }
 .llm-prompt-list__preview {
+  display: block;
   margin: 0;
   font-size: 12.5px; color: var(--ink-2);
   line-height: 1.45;
 }
 .llm-prompt-list__foot {
-  margin-top: 8px;
+  margin: 8px 12px 10px;
   display: flex; gap: 12px; font-size: 11.5px;
+}
+.llm-prompt-dialog.modal--sheet[open] {
+  width: min(760px, calc(100vw - 24px));
+}
+.llm-prompt-dialog__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.llm-prompt-revisions {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.llm-prompt-revisions h4 {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink);
+}
+.llm-prompt-revision {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: var(--card);
+}
+.llm-prompt-revision header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+.llm-prompt-revision p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.llm-pricing-panel__head {
+  align-items: flex-start;
+  gap: 12px;
+}
+.llm-pricing-sync {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 0 0 12px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.llm-pricing-deltas {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.llm-pricing-delta {
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink-2);
+  font-size: 12px;
 }
 
 .llm-registry-dialog.modal--sheet[open],

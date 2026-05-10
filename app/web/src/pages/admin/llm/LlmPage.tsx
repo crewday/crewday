@@ -286,7 +286,15 @@ export default function AdminLlmPage() {
         />
       </div>
 
-      <ProviderModelPricing graph={graph} indexes={indexes} />
+      <ProviderModelPricing
+        graph={graph}
+        indexes={indexes}
+        syncResult={syncResult}
+        isSyncing={syncMut.isPending}
+        onSync={() => {
+          if (!syncMut.isPending) syncMut.mutate();
+        }}
+      />
       <RecentCalls calls={calls} />
 
       {promptsOpen ? (
