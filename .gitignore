@@ -29,6 +29,9 @@ coverage.xml
 
 # Claude / tooling scratch
 .claude/scheduled_tasks.lock
+.agents/local
+.agents/local/
+docker-compose.override.yml
 
 # Playwright MCP screenshots (but keep README)
 .playwright-mcp/

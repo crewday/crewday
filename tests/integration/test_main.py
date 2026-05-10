@@ -250,10 +250,10 @@ class TestSpaProdMountAgainstRealDist:
         assert resp.status_code == 404
         assert resp.headers["content-type"].startswith("application/problem+json")
 
-    def test_dev_compose_routes_app_to_dev_app_host_and_public_site(
+    def test_dev_compose_defaults_to_loopback_and_generic_private_host_label(
         self,
     ) -> None:
-        """The dev app lives on dev-app and sends logged-out root to the site."""
+        """The public dev compose is portable without private hostnames."""
         compose = yaml.safe_load(
             Path("docker-compose.dev.yml").read_text(encoding="utf-8")
         )
@@ -262,26 +262,35 @@ class TestSpaProdMountAgainstRealDist:
         web_env = compose["services"]["web-dev"]["environment"]
         labels = set(app_api["labels"])
 
-        assert app_env["CREWDAY_PUBLIC_URL"] == "https://dev-app.crew.day"
-        assert app_env["CREWDAY_PUBLIC_SITE_URL"] == (
-            "${CREWDAY_PUBLIC_SITE_URL:-https://dev.crew.day}"
+        assert app_env["CREWDAY_PUBLIC_URL"] == (
+            "${CREWDAY_PUBLIC_URL:-http://127.0.0.1:${CREWDAY_APP_HOST_PORT:-8100}}"
         )
-        assert app_env["CREWDAY_WEBAUTHN_RP_ID"] == "dev-app.crew.day"
+        assert app_env["CREWDAY_PUBLIC_SITE_URL"] == (
+            "${CREWDAY_PUBLIC_SITE_URL:-http://127.0.0.1:${SITE_HTTP_PORT:-18080}}"
+        )
+        assert app_env["CREWDAY_WEBAUTHN_RP_ID"] == (
+            "${CREWDAY_WEBAUTHN_RP_ID:-127.0.0.1}"
+        )
         assert web_env["VITE_CREWDAY_PUBLIC_SITE_URL"] == (
-            "${CREWDAY_PUBLIC_SITE_URL:-https://dev.crew.day}"
+            "${CREWDAY_PUBLIC_SITE_URL:-http://127.0.0.1:${SITE_HTTP_PORT:-18080}}"
         )
         assert "https://crew.day" not in app_env["CREWDAY_PUBLIC_SITE_URL"]
         assert "https://crew.day" not in web_env["VITE_CREWDAY_PUBLIC_SITE_URL"]
-        assert (
-            "traefik.http.routers.crewday-dev-app.rule=Host(`dev-app.crew.day`)"
-            in labels
+        app_host_label = (
+            "traefik.http.routers.crewday-dev-app.rule="
+            "Host(`${CREWDAY_DEV_APP_HOST:-crewday-app.localhost}`)"
         )
-        assert "traefik.http.routers.crewday-dev-app.middlewares=badger@file" in labels
+        app_middlewares_label = (
+            "traefik.http.routers.crewday-dev-app.middlewares="
+            "${CREWDAY_TRAEFIK_MIDDLEWARES:-}"
+        )
+        assert app_middlewares_label in labels
+        assert app_host_label in labels
 
-    def test_site_compose_routes_public_dev_host_through_badger(
+    def test_site_compose_defaults_to_loopback_and_generic_private_host_label(
         self,
     ) -> None:
-        """The public dev hostname is owned by the isolated site stack."""
+        """The public site compose is portable without private hostnames."""
         compose = yaml.safe_load(
             Path("site/docker-compose.yml").read_text(encoding="utf-8")
         )
@@ -292,15 +301,20 @@ class TestSpaProdMountAgainstRealDist:
 
         assert site_web_build["context"] == ".."
         assert site_web_build["dockerfile"] == "site/web/Dockerfile"
-        assert site_web_build["args"]["PUBLIC_CREWDAY_APP_ORIGIN"] == (
-            "${PUBLIC_CREWDAY_APP_ORIGIN:-https://dev-app.crew.day}"
+        public_app_origin = "${PUBLIC_CREWDAY_APP_ORIGIN:-http://127.0.0.1:${CREWDAY_APP_HOST_PORT:-8100}}"
+        site_host_label = (
+            "traefik.http.routers.crewday-dev-site.rule="
+            "Host(`${CREWDAY_DEV_SITE_HOST:-crewday-site.localhost}`)"
         )
+        site_middlewares_label = (
+            "traefik.http.routers.crewday-dev-site.middlewares="
+            "${CREWDAY_TRAEFIK_MIDDLEWARES:-}"
+        )
+        assert site_web_build["args"]["PUBLIC_CREWDAY_APP_ORIGIN"] == public_app_origin
         assert (
             site_api_env["SITE_PUBLIC_URL"]
-            == "${SITE_PUBLIC_URL:-https://dev.crew.day}"
+            == "${SITE_PUBLIC_URL:-http://127.0.0.1:${SITE_HTTP_PORT:-18080}}"
         )
         assert "traefik-proxy" in caddy["networks"]
-        assert (
-            "traefik.http.routers.crewday-dev-site.rule=Host(`dev.crew.day`)" in labels
-        )
-        assert "traefik.http.routers.crewday-dev-site.middlewares=badger@file" in labels
+        assert site_middlewares_label in labels
+        assert site_host_label in labels

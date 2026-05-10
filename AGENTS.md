@@ -3,6 +3,14 @@
 Working rules for coding agents (Claude Code, Codex, Cursor, Hermes,
 OpenClaw, etc.) operating on this repository.
 
+<!--
+Optional private/local context include for harnesses that support @-file
+expansion. If the file is absent, or the harness treats this as plain text,
+continue with the public instructions below and read the Local Operator
+Context section manually.
+-->
+@.agents/local/AGENTS.local.md
+
 > **Operating the running system as an LLM agent** (acting on behalf of
 > the household manager)? This file is not for you — see
 > [`docs/specs/11-llm-and-agents.md`](docs/specs/11-llm-and-agents.md)
@@ -11,24 +19,41 @@ OpenClaw, etc.) operating on this repository.
 
 ## Setup
 
-Developer-agent setup, dev-stack access, loopback URLs, passkey seed
-recovery, Mailpit activation links, and quality helpers live in
+Developer-agent setup, dev-stack access, loopback URLs, optional local
+operator context, passkey seed recovery, Mailpit activation links, and
+quality helpers live in
 [`SETUP.md`](SETUP.md). Read it before bringing the stack up, resetting a
 dev DB, or onboarding a new developer agent.
 
-- **Use loopback for dev URLs from this host.** The user's
-  `https://dev-app.crew.day/` is the same running dev app container that
-  agents reach at `http://127.0.0.1:8100/`; the user's
-  `https://dev.crew.day/` is the same dev public-site container that
-  agents reach at `http://127.0.0.1:18080/` (or Vite at
-  `http://127.0.0.1:18081/`). The public hostnames are remote-entry URLs
-  protected by Pangolin/badger auth, which agents on this host cannot
-  bypass. For curl, Playwright, smoke checks, and debugging, translate
-  the path to the loopback URL instead of opening the public hostname.
+- **Use loopback for dev URLs from this host.** The default app dev stack
+  is published at `http://127.0.0.1:8100/`. If a maintainer has private
+  remote-entry hostnames, VPN routes, or auth-gated URLs, translate them
+  through the optional local context before using curl, Playwright, smoke
+  checks, or debugging tools.
 - **Keep the dev site up.** Do not stop, restart, or rebuild shared dev
   website services unless the task requires it. Prefer hot reloads,
   targeted process restarts, or other approaches that preserve the main
   dev website; if downtime is unavoidable, keep it brief and say why.
+
+## Local Operator Context
+
+This repository supports optional machine- or operator-specific context
+without making it part of the open-source project contract.
+
+If present, read these files after this public `AGENTS.md`:
+
+- `.agents/local/AGENTS.local.md`
+- `.agents/local/SETUP.local.md`
+
+Harnesses that support `@` file expansion may inline
+`.agents/local/AGENTS.local.md` automatically from the include near the top of
+this file. Harnesses that do not support that syntax should treat the include
+line as a readable pointer and load the file manually when it exists.
+
+Local context may document private dev hostnames, loopback translations,
+compose overrides, seed data locations, and operator workflow notes. It must
+not redefine project-wide quality rules, silently weaken tests, or change the
+public behavior expected by contributors.
 
 ## Ask first
 

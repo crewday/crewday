@@ -6,7 +6,7 @@ services:
     profiles: ["dev"]
     environment:
       ASTRO_TELEMETRY_DISABLED: "1"
-      PUBLIC_CREWDAY_APP_ORIGIN: "${PUBLIC_CREWDAY_APP_ORIGIN:-https://dev-app.crew.day}"
+      PUBLIC_CREWDAY_APP_ORIGIN: "${PUBLIC_CREWDAY_APP_ORIGIN:-http://127.0.0.1:${CREWDAY_APP_HOST_PORT:-8100}}"
     ports:
       - "127.0.0.1:${SITE_WEB_DEV_PORT:-18081}:4321"
     volumes:

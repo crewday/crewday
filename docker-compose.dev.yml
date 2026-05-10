@@ -1,15 +1,17 @@
-# crewday app — dev stack at https://dev-app.crew.day (and the loopback
-# equivalent http://127.0.0.1:8100 for local smoke).
+# crewday app dev stack. The default local front door is
+# http://127.0.0.1:8100. Maintainers may also expose the stack through
+# private hostnames by setting CREWDAY_DEV_APP_HOST / CREWDAY_DEV_SITE_HOST
+# in a gitignored docker-compose.override.yml or shell environment.
 #
 # Topology (cd-g1cy — flipped from cd-sgpl so the FastAPI dev Vite
 # proxy / WS HMR seam is exercised by every real-browser request):
 #
-#   https://dev-app.crew.day/          → app-api (FastAPI)
+#   http://127.0.0.1:8100/            → app-api (FastAPI)
 #                                         ├─ /api, /events, …  →  real routers
 #                                         └─ everything else   →  proxied to
 #                                                                 web-dev:5173
 #                                                                 (HTTP + WS HMR)
-#   https://dev-app.crew.day/mocks/    → mocks-web-dev  (mocks/web Vite)
+#   http://127.0.0.1:8100/mocks/      → mocks-web-dev  (mocks/web Vite)
 #                                         └─ proxies /api, /events, …
 #                                            to mocks-api (disposable stub)
 #
@@ -27,9 +29,9 @@
 #                    under the named volume ``crewday-app-data:/data``.
 #                    Bind-mounts the repo's ``app/`` so ``uvicorn
 #                    --reload`` picks up .py edits; runs ``alembic
-#                    upgrade head`` on boot. Published on 127.0.0.1:8100
-#                    and joined to ``traefik-proxy`` for external access
-#                    via dev-app.crew.day.
+#                    upgrade head`` on boot. Published on the configured
+#                    loopback host port and optionally joined to
+#                    ``traefik-proxy`` for external private access.
 #   web-dev        — Vite dev server for ``app/web/`` (the production
 #                    SPA). Container-only — only ``app-api`` reaches it
 #                    over the compose network at ``http://web-dev:5173``.
@@ -43,13 +45,11 @@
 #                    host bindings use 1026/8026 to avoid shared-box
 #                    conflicts.
 #
-# Pangolin needs corresponding resource entries for dev-app.crew.day
-# and dev.crew.day (the public site stack in site/docker-compose.yml)
-# (add via the Pangolin dashboard once) — until that's set, requests
-# hit badger's forward-auth and land on the login flow. The bind
-# guard rule (§15, §16, root AGENTS.md) still applies: no port is
-# published on the public interface 217.182.203.57; Traefik owns
-# 80/443 and terminates externally.
+# If you expose private maintainer hostnames through a reverse proxy,
+# document the concrete resource names and auth behavior in
+# .agents/local/SETUP.local.md. The bind guard rule (§15, §16, root
+# AGENTS.md) still applies: no app port is published on a public
+# interface; Traefik owns 80/443 and terminates externally.
 
 name: "crewday-mocks"
 
@@ -59,8 +59,8 @@ services:
   # edits live (``uvicorn --reload``); ``alembic upgrade head`` runs
   # in the entrypoint so a fresh DB file is always at the current
   # schema head. The host-facing front door for the dev stack:
-  # published on ``127.0.0.1:8100`` and joined to ``traefik-proxy``
-  # so ``dev-app.crew.day`` lands here too. The dev profile turns on the
+  # published on loopback and joined to ``traefik-proxy`` so an optional
+  # private maintainer hostname can land here too. The dev profile turns on the
   # in-process Vite reverse proxy (``app/api/proxy.py``) so any
   # request that isn't an API / SSE path is forwarded to the
   # ``web-dev`` Vite container — HTTP for module loads, WebSocket
@@ -98,9 +98,9 @@ services:
       CREWDAY_ALLOW_PUBLIC_BIND: "1"
       CREWDAY_PROFILE: "dev"
       CREWDAY_VITE_DEV_URL: "http://web-dev:5173"
-      CREWDAY_PUBLIC_URL: "https://dev-app.crew.day"
-      CREWDAY_PUBLIC_SITE_URL: "${CREWDAY_PUBLIC_SITE_URL:-https://dev.crew.day}"
-      CREWDAY_WEBAUTHN_RP_ID: "dev-app.crew.day"
+      CREWDAY_PUBLIC_URL: "${CREWDAY_PUBLIC_URL:-http://127.0.0.1:${CREWDAY_APP_HOST_PORT:-8100}}"
+      CREWDAY_PUBLIC_SITE_URL: "${CREWDAY_PUBLIC_SITE_URL:-http://127.0.0.1:${SITE_HTTP_PORT:-18080}}"
+      CREWDAY_WEBAUTHN_RP_ID: "${CREWDAY_WEBAUTHN_RP_ID:-127.0.0.1}"
       # DEV-ONLY signing secret — 64 hex chars (256 bits). NEVER a
       # production value; the compose file is world-readable in the
       # repo. Every prod deployment generates its own via the recipe
@@ -115,7 +115,7 @@ services:
       # isn't up (port-conflict etc.) doesn't block the app from booting.
       CREWDAY_SMTP_HOST: "mailpit"
       CREWDAY_SMTP_PORT: "1025"
-      CREWDAY_SMTP_FROM: "crew.day dev <no-reply@dev.crew.day>"
+      CREWDAY_SMTP_FROM: "${CREWDAY_SMTP_FROM:-crew.day dev <no-reply@localhost>}"
       CREWDAY_SMTP_USE_TLS: "0"
       # Dev-stack only; see scripts/dev-login.sh (cd-w1ia).
       CREWDAY_DEV_AUTH: "1"
@@ -135,7 +135,7 @@ services:
       # publishing to the public interface. Host port 8100 (chosen for
       # historical parity with the previous Vite-front-door layout)
       # forwards to the FastAPI container's :8000.
-      - "127.0.0.1:8100:8000"
+      - "127.0.0.1:${CREWDAY_APP_HOST_PORT:-8100}:8000"
     healthcheck:
       test:
         - "CMD"
@@ -154,10 +154,10 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-proxy"
-      - "traefik.http.routers.crewday-dev-app.rule=Host(`dev-app.crew.day`)"
+      - "traefik.http.routers.crewday-dev-app.rule=Host(`${CREWDAY_DEV_APP_HOST:-crewday-app.localhost}`)"
       - "traefik.http.routers.crewday-dev-app.entrypoints=websecure"
       - "traefik.http.routers.crewday-dev-app.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.crewday-dev-app.middlewares=badger@file"
+      - "traefik.http.routers.crewday-dev-app.middlewares=${CREWDAY_TRAEFIK_MIDDLEWARES:-}"
       - "traefik.http.routers.crewday-dev-app.service=crewday-dev-app"
       # FastAPI's container-side port. The dev profile's Vite proxy
       # forwards SPA routes onward to ``web-dev:5173``; Traefik never
@@ -191,7 +191,7 @@ services:
       # (``cd app/web && npm run dev``) and in case a future debug
       # session re-publishes Vite on the host.
       VITE_BACKEND_URL: "http://app-api:8000"
-      VITE_CREWDAY_PUBLIC_SITE_URL: "${CREWDAY_PUBLIC_SITE_URL:-https://dev.crew.day}"
+      VITE_CREWDAY_PUBLIC_SITE_URL: "${CREWDAY_PUBLIC_SITE_URL:-http://127.0.0.1:${SITE_HTTP_PORT:-18080}}"
       # ``/mocks/*`` requests reach FastAPI first; FastAPI's Vite proxy
       # forwards them to this same Vite container, which in turn
       # ``server.proxy``-fans out to ``mocks-web-dev`` through this
@@ -238,7 +238,7 @@ services:
       - default
 
   # Front-end HMR for the mocks SPA under ``mocks/web/``, served at
-  # ``https://dev-app.crew.day/mocks/`` so the operator can compare the
+  # ``/mocks/`` so the operator can compare the
   # production app against the mocks page-for-page. No host port —
   # Traefik only. ``--base /mocks/`` tells Vite to emit asset URLs
   # prefixed with the same path so no StripPrefix middleware is
@@ -272,11 +272,11 @@ services:
       # when both routers share the same host. Traefik defaults to
       # longest-rule-wins but two routers on the same host need an
       # explicit priority to be deterministic.
-      - "traefik.http.routers.crewday-dev-mocks.rule=Host(`dev-app.crew.day`) && PathPrefix(`/mocks`)"
+      - "traefik.http.routers.crewday-dev-mocks.rule=Host(`${CREWDAY_DEV_APP_HOST:-crewday-app.localhost}`) && PathPrefix(`/mocks`)"
       - "traefik.http.routers.crewday-dev-mocks.priority=100"
       - "traefik.http.routers.crewday-dev-mocks.entrypoints=websecure"
       - "traefik.http.routers.crewday-dev-mocks.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.crewday-dev-mocks.middlewares=badger@file"
+      - "traefik.http.routers.crewday-dev-mocks.middlewares=${CREWDAY_TRAEFIK_MIDDLEWARES:-}"
       - "traefik.http.routers.crewday-dev-mocks.service=crewday-dev-mocks"
       - "traefik.http.services.crewday-dev-mocks.loadbalancer.server.port=5173"
 
@@ -296,13 +296,13 @@ services:
     ports:
       # Host bindings for inspection from the host only — app-api
       # reaches mailpit over the compose network by hostname, so these
-      # are optional. 1025/8025 → 1026/8026 on the host because sibling
-      # projects commonly squat the default Mailpit ports on the shared
-      # dev box; keeping the container-side ports at 1025/8025 means
+      # are optional. The default host mapping uses 1026/8026 to avoid
+      # common conflicts with another Mailpit on 1025/8025; keeping the
+      # container-side ports at 1025/8025 means
       # CREWDAY_SMTP_HOST=mailpit / _PORT=1025 in app-api and the
       # internal UI at http://mailpit:8025 stay unchanged.
-      - "127.0.0.1:1026:1025"
-      - "127.0.0.1:8026:8025"
+      - "127.0.0.1:${CREWDAY_MAILPIT_SMTP_HOST_PORT:-1026}:1025"
+      - "127.0.0.1:${CREWDAY_MAILPIT_UI_HOST_PORT:-8026}:8025"
     networks:
       - default
 

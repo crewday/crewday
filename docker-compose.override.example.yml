@@ -1,0 +1,24 @@
+# Optional local compose overrides.
+#
+# Copy the relevant values into gitignored docker-compose.override.yml, or set
+# them in your shell environment before running docker compose. Do not put
+# maintainer-only hostnames, private proxy labels, or secrets in tracked compose
+# files.
+
+services:
+  app-api:
+    environment:
+      CREWDAY_PUBLIC_URL: "https://${CREWDAY_DEV_APP_HOST:-app-dev.example.test}"
+      CREWDAY_PUBLIC_SITE_URL: "https://${CREWDAY_DEV_SITE_HOST:-site-dev.example.test}"
+      CREWDAY_WEBAUTHN_RP_ID: "${CREWDAY_DEV_APP_HOST:-app-dev.example.test}"
+    labels:
+      - "traefik.http.routers.crewday-dev-app.middlewares=${CREWDAY_TRAEFIK_MIDDLEWARES:-forward-auth@file}"
+
+  web-dev:
+    environment:
+      VITE_CREWDAY_PUBLIC_SITE_URL: "https://${CREWDAY_DEV_SITE_HOST:-site-dev.example.test}"
+
+  mailpit:
+    ports:
+      - "127.0.0.1:${CREWDAY_MAILPIT_SMTP_HOST_PORT:-1026}:1025"
+      - "127.0.0.1:${CREWDAY_MAILPIT_UI_HOST_PORT:-8026}:8025"

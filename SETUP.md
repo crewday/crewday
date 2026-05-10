@@ -9,25 +9,50 @@ workspace; those live in `docs/specs/11-llm-and-agents.md` and
 
 ## Surfaces
 
-- **Dev app**: `https://dev-app.crew.day`
-  - Remote browser entry point.
-  - Gated by Pangolin badger forward-auth.
-  - Agents on this host cannot pass badger; use the loopback equivalent
-    `http://127.0.0.1:8100`.
-  - The loopback and public app paths are 1:1.
-- **Dev marketing site**: `https://dev.crew.day`
+- **Dev app**: `http://127.0.0.1:8100`
+  - Default loopback entry point for agent-driven smoke checks, curl, and
+    Playwright.
+  - Maintainer-specific public or VPN entry points belong in optional local
+    context, not in this public setup guide.
+- **Dev marketing site**
   - Served by `site/docker-compose.yml`.
-  - Production-like local static Caddy path:
-    `http://127.0.0.1:18080`.
-  - Source hot reload path:
-    `http://127.0.0.1:18081`.
+  - Default production-like local static Caddy path: `http://127.0.0.1:18080`.
+  - Default source hot reload path: `http://127.0.0.1:18081`.
 - **Production**: not deployed yet.
   - Production app code lives under `app/`.
   - High-fidelity mocks remain under `mocks/`.
   - See `docs/specs/19-roadmap.md`.
 
 Never bind a new service to the public interface. Use `127.0.0.1` or
-`tailscale0` only. A public misbind is a blocker bug; see `docs/specs/16`.
+another explicitly private interface only. A public misbind is a blocker bug;
+see `docs/specs/16`.
+
+## Optional Local Context
+
+Public setup instructions are intentionally portable. Maintainers who need
+private hostnames, auth-gated remote entry points, shared dev-box port notes,
+seed-account details, or personal compose overrides should keep them outside
+the public repo.
+
+This repo recognizes the following optional, gitignored files:
+
+```text
+.agents/local/AGENTS.local.md
+.agents/local/SETUP.local.md
+docker-compose.override.yml
+```
+
+The recommended private layout is a companion repository with one subdirectory
+per public project, then a symlink from `.agents/local` to that project's
+private context directory. For this repo, the local path would be:
+
+```text
+/home/ubuntu/git/dev-context/crewday
+```
+
+If your harness supports `@` file expansion, `AGENTS.md` points at
+`.agents/local/AGENTS.local.md` so the private context can be inserted
+automatically. If it does not, read the file manually when it exists.
 
 ## Prerequisites
 
@@ -54,7 +79,8 @@ Do not install ad hoc Python packages outside the project dependency files.
 3. Run `git status --short` and preserve unrelated dirty files.
 4. Bring the dev stack up with `./scripts/dev-stack-up.sh` when the task needs
    the app.
-5. Use `http://127.0.0.1:8100` for app automation and smoke checks.
+5. Use `http://127.0.0.1:8100` for app automation and smoke checks unless
+   optional local context maps another maintainer URL to loopback.
 6. Use the narrowest quality gates that prove the change before handoff.
 
 ## First Boot
@@ -104,8 +130,8 @@ Use loopback for agent-driven app work:
 http://127.0.0.1:8100
 ```
 
-Do not use `https://dev-app.crew.day` from this host for scripted checks; badger
-forward-auth blocks agents.
+Do not use maintainer-specific public hostnames for scripted checks unless
+optional local context says they are directly reachable from this host.
 
 For authenticated API smoke checks, prefer:
 
@@ -155,10 +181,11 @@ Close the browser after checks.
 
 ## Personal Passkey Seed
 
-The checked-in personal seed is for the current shared dev operator account.
-Developer agents should not assume it is their own credential. New developers
-who need physical-passkey access should register their own passkey and capture
-their own seed only when the project owner asks them to.
+The dev seed helper can preserve a developer's own disposable passkey-backed
+account across local DB resets. Developer agents should not assume a checked-in
+seed belongs to them or to any particular maintainer. New developers who need
+physical-passkey access should register their own passkey and capture their own
+seed only when the project owner asks them to.
 
 The personal seed file is:
 
@@ -193,10 +220,10 @@ docker compose -f docker-compose.dev.yml down -v
 ./scripts/dev-stack-up.sh
 ```
 
-Then sign up in the browser at:
+Then sign up in the browser at the configured app URL, for example:
 
 ```text
-https://dev-app.crew.day/signup
+http://127.0.0.1:8100/signup
 ```
 
 Use the intended email and workspace slug, complete the activation link, and
@@ -218,16 +245,17 @@ resets, make sure `owner.deployment_admin` is `true` in the seed.
 
 ## Signup Activation Links
 
-In the dev stack, signup mail should land in Mailpit:
+In the dev stack, signup mail should land in Mailpit. The default host UI/API
+port is remapped to avoid common local conflicts:
 
 ```text
-http://127.0.0.1:8025
+http://127.0.0.1:8026
 ```
 
 The API endpoint is:
 
 ```bash
-curl -fsS http://127.0.0.1:8025/api/v1/messages
+curl -fsS http://127.0.0.1:8026/api/v1/messages
 ```
 
 If Mailpit is empty but a signup attempt exists, inspect the DB before asking
