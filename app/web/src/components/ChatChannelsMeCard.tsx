@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageSquare, Unlink } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import DateTime from "@/components/DateTime";
 import { Chip, Loading } from "@/components/common";
 import type { ChatChannelBinding, Me } from "@/types/api";
 
@@ -14,13 +15,6 @@ import type { ChatChannelBinding, Me } from "@/types/api";
 // reach out) or does not (agent is web-only). Quiet-hours are
 // handled by the OS, not the app. Revoked bindings are hidden — the
 // user starts a fresh link ceremony if they want one back.
-
-function fmt(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-GB", {
-    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
-  });
-}
 
 export default function ChatChannelsMeCard({ me }: { me: Me }) {
   // code-health: ignore[nloc] Profile chat-channel card keeps link, verify, unlink, and current binding state in one user-facing panel.
@@ -159,7 +153,7 @@ export default function ChatChannelsMeCard({ me }: { me: Me }) {
                   {b.state === "active" && (
                     <span>
                       <span className="entry-card__meta-label">Last used</span>
-                      {fmt(b.last_message_at)}
+                      <DateTime value={b.last_message_at} showTime empty="—" />
                     </span>
                   )}
                 </div>

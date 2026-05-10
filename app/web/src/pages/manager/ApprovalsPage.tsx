@@ -3,8 +3,8 @@ import { fetchApprovals } from "@/lib/approvals";
 import { qk } from "@/lib/queryKeys";
 import { useDecideMutation } from "@/lib/useDecideMutation";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, EmptyState, Loading } from "@/components/common";
-import { fmtTime } from "@/lib/dates";
 import { APPROVAL_RISK_TONE } from "@/lib/tones";
 import type { ApprovalRequest } from "@/types/api";
 
@@ -39,7 +39,9 @@ export default function ApprovalsPage() {
               <div className="approval__head">
                 <Chip tone="ghost" size="sm">{a.agent}</Chip>
                 <Chip tone={APPROVAL_RISK_TONE[a.risk]} size="sm">{a.risk} risk</Chip>
-                <span className="approval__time">requested {fmtTime(a.requested_at)}</span>
+                <span className="approval__time">
+                  requested <DateTime value={a.requested_at} showTime />
+                </span>
               </div>
               <div className="approval__title"><strong>{a.action}</strong> — {a.target}</div>
               <p className="approval__reason">{a.reason}</p>

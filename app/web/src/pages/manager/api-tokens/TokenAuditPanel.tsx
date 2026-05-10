@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
-import { fmtDateTime } from "@/lib/dates";
+import DateTime from "@/components/DateTime";
 import { Loading } from "@/components/common";
 import type { ApiTokenAuditEntry } from "@/types/api";
 
@@ -75,7 +75,7 @@ export default function TokenAuditPanel({ tokenId, onClose }: TokenAuditPanelPro
           <tbody>
             {(auditQ.data ?? []).map((a) => (
               <tr key={a.correlation_id + a.at + a.action + (a.path ?? "")}>
-                <td className="tokens-audit__when">{fmtDateTime(a.at)}</td>
+                <td><DateTime value={a.at} showTime className="tokens-audit__when" /></td>
                 <td>{renderAction(a)}</td>
                 <td className="tokens-audit__actor">{a.actor_id}</td>
                 <td className="tokens-audit__cid">{a.correlation_id}</td>

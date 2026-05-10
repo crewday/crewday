@@ -162,14 +162,6 @@ export function fmtDate(
   );
 }
 
-export function fmtTime(iso: string, locale = LEGACY_LOCALE): string {
-  return formatTime(new Date(iso), locale);
-}
-
-export function fmtDateTime(iso: string, locale = LEGACY_LOCALE): string {
-  return fmtDate(iso, locale) + " \u00b7 " + fmtTime(iso, locale);
-}
-
 function formatTime(date: Date, locale: string, timeZone?: string): string {
   return dateTimeFormat(locale, {
     hour: "2-digit",

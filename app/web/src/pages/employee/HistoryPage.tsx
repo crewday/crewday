@@ -5,8 +5,9 @@ import type { ReactNode } from "react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
-import { fmtDate, fmtDateTime } from "@/lib/dates";
+import { fmtDate } from "@/lib/dates";
 import { cap } from "@/lib/strings";
+import DateTime from "@/components/DateTime";
 import { Loading } from "@/components/common";
 import PageHeader from "@/components/PageHeader";
 import PageTabs, { type PageTab } from "@/components/PageTabs";
@@ -266,7 +267,8 @@ function TaskHistory({
               <div>
                 <strong>{t.title}</strong>
                 <div className="stack-row__sub">
-                  {prop ? prop.name : t.property_id} · {fmtDateTime(t.scheduled_start)}
+                  {prop ? prop.name : t.property_id} ·{" "}
+                  <DateTime value={t.scheduled_start} showTime />
                 </div>
               </div>
               <span className={"chip chip--sm chip--" + (t.status === "completed" ? "moss" : "rust")}>

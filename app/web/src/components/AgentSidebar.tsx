@@ -8,6 +8,7 @@ import { qk } from "@/lib/queryKeys";
 import { initialAgentCollapsed, persistAgentCollapsed } from "@/lib/preferences";
 import { useAgentTyping } from "@/lib/agentTyping";
 import ChatComposer from "@/components/chat/ChatComposer";
+import DateTime from "@/components/DateTime";
 import type { AgentAction, AgentMessage, AgentTurnScope, Role } from "@/types/api";
 
 // CRITICAL: AgentSidebar MUST mount as a SIBLING of <Outlet /> in
@@ -178,9 +179,7 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
           {log.data?.map((msg, i) => (
             <div key={i} className={"agent-msg agent-msg--" + msg.kind}>
               <span className="agent-msg__body">{msg.body}</span>
-              <span className="agent-msg__time">
-                {new Date(msg.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-              </span>
+              <DateTime value={msg.at} showTime className="agent-msg__time" />
             </div>
           ))}
           {showTyping && (

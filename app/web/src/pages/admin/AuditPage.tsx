@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk, type AdminAuditFilter } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, FilterChipGroup, Loading } from "@/components/common";
 import { displayAuditRow } from "@/pages/admin/auditRows";
 import type { AdminAuditListResponse, AuditEntry } from "@/types/api";
@@ -235,7 +236,7 @@ export default function AdminAuditPage() {
             <tbody>
               {rows.map((row, idx) => (
                 <tr key={idx}>
-                  <td className="mono">{new Date(row.at).toLocaleString()}</td>
+                  <td><DateTime value={row.at} showTime className="mono" /></td>
                   <td>
                     <Chip tone={ACTOR_TONE[row.actor_kind]} size="sm">{row.actor_kind}</Chip>{" "}
                     {row.actor}

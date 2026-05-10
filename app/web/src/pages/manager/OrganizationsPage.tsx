@@ -4,6 +4,7 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, Loading } from "@/components/common";
 import { formatMoney } from "@/lib/money";
 import type {
@@ -368,7 +369,7 @@ function OrganizationDetail({
                   <td><Chip size="sm" tone="rust">we owe</Chip></td>
                   <td className="table__mono">{formatMoney(v.total_cents, v.currency)}</td>
                   <td><Chip size="sm" tone={v.status === "paid" ? "moss" : v.status === "approved" ? "sky" : "ghost"}>{v.status}</Chip></td>
-                  <td className="table__mono">{v.billed_at}</td>
+                  <td><DateTime value={v.billed_at} showTime className="table__mono" /></td>
                 </tr>
               ))}
               {detail.vendor_invoices_billed_from
@@ -379,7 +380,7 @@ function OrganizationDetail({
                     <td><Chip size="sm" tone="moss">they owe</Chip></td>
                     <td className="table__mono">{formatMoney(v.total_cents, v.currency)}</td>
                     <td><Chip size="sm" tone={v.status === "paid" ? "moss" : "ghost"}>{v.status}</Chip></td>
-                    <td className="table__mono">{v.billed_at}</td>
+                    <td><DateTime value={v.billed_at} showTime className="table__mono" /></td>
                   </tr>
                 ))}
             </tbody>

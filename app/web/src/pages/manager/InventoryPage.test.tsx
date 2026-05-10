@@ -241,8 +241,17 @@ afterEach(() => {
 
 describe("<InventoryPage>", () => {
   it("wraps the inventory route in the scope-view permission guard", () => {
-    expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="scope\.view" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/assets" element={<AssetsPage \/>} \/>\s*<Route path="\/inventory" element={<InventoryPage \/>} \/>/,
+    const guardStart = appSource.indexOf(
+      '<Route element={<RequirePermission actionKey="scope.view" />}>',
+    );
+    expect(guardStart).toBeGreaterThan(-1);
+    const nextGuard = appSource.indexOf(
+      '<Route element={<RequirePermission actionKey="employees.read" />}>',
+      guardStart,
+    );
+    expect(nextGuard).toBeGreaterThan(guardStart);
+    expect(appSource.slice(guardStart, nextGuard)).toContain(
+      '<Route path="inventory" element={<InventoryPage />} />',
     );
   });
 

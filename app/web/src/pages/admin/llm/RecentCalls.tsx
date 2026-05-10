@@ -1,3 +1,4 @@
+import DateTime from "@/components/DateTime";
 import { Chip } from "@/components/common";
 import { formatMoney } from "@/lib/money";
 import type { LLMCall } from "@/types";
@@ -7,14 +8,6 @@ const CALL_STATUS_TONE: Record<LLMCall["status"], "moss" | "rust" | "sand"> = {
   error: "rust",
   redacted_block: "sand",
 };
-
-function hms(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
 
 interface RecentCallsProps {
   calls: LLMCall[];
@@ -42,7 +35,7 @@ export default function RecentCalls({ calls }: RecentCallsProps) {
         <tbody>
           {calls.map((c, idx) => (
             <tr key={idx}>
-              <td className="mono">{hms(c.at)}</td>
+              <td><DateTime value={c.at} showTime className="mono" /></td>
               <td>
                 <code className="inline-code">{c.capability}</code>
               </td>

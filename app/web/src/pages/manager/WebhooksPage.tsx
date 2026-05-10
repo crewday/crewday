@@ -4,15 +4,9 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, Loading } from "@/components/common";
 import type { Webhook, WebhookDelivery } from "@/types/api";
-
-function fmt(iso: string): string {
-  // code-health: ignore[nloc] Tiny date formatter is over-counted by lizard after TSX parsing.
-  return new Date(iso).toLocaleString("en-GB", {
-    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
-  });
-}
 
 function isOkStatus(status: string | number | null): boolean {
   if (typeof status === "number") return status >= 200 && status < 300;
@@ -177,7 +171,7 @@ export default function WebhooksPage() {
                       <Chip key={e} tone="ghost" size="sm">{e}</Chip>
                     ))}
                   </td>
-                  <td className="mono">{w.last_delivery_at ? fmt(w.last_delivery_at) : "never"}</td>
+                  <td><DateTime value={w.last_delivery_at} showTime className="mono" empty="never" /></td>
                   <td>
                     {!w.active ? (
                       <Chip tone="ghost" size="sm">disabled</Chip>
@@ -398,7 +392,7 @@ function DeliveryLogDrawer({
                     </td>
                     <td className="mono">{delivery.attempt}</td>
                     <td className="mono">{deliveryResponseText(delivery)}</td>
-                    <td className="mono">{fmt(delivery.created_at)}</td>
+                    <td><DateTime value={delivery.created_at} showTime className="mono" /></td>
                   </tr>
                 ))}
               </tbody>

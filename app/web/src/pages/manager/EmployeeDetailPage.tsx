@@ -5,8 +5,8 @@ import { ApiError, fetchJson } from "@/lib/api";
 import type { ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
-import { fmtDate, fmtDateTime } from "@/lib/dates";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import PageTabs, { type PageTab } from "@/components/PageTabs";
 import { Chip, Loading } from "@/components/common";
 import type {
@@ -449,7 +449,7 @@ export default function EmployeeDetailPage() {
                 return (
                   <li key={t.id} className="task-row">
                     <span className="task-row__time table__mono">
-                      {fmtDateTime(t.scheduled_start)}
+                      <DateTime value={t.scheduled_start} showTime />
                     </span>
                     <span className="task-row__title">
                       <strong>{t.title}</strong>
@@ -472,7 +472,7 @@ export default function EmployeeDetailPage() {
                     <strong>{x.vendor}</strong>
                     <span className="expense-row__note">{x.note_md}</span>
                     <span className="expense-row__time">
-                      {x.submitted_at !== null ? fmtDate(x.submitted_at) : "draft"}
+                      <DateTime value={x.submitted_at} showTime empty="draft" />
                     </span>
                   </div>
                   <div className="expense-row__side">

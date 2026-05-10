@@ -216,8 +216,9 @@ describe("<OrganizationsPage>", () => {
       expect(await screen.findByRole("alert")).toHaveTextContent("Access denied");
       expect(screen.queryByText("manager shell")).toBeNull();
       expect(screen.queryByText("organizations route body")).toBeNull();
-      expect(calls[0]).toContain("action_key=scope.view");
-      expect(calls[0]).not.toContain("organizations.edit");
+      const permissionCall = calls.find((call) => call.includes("/permissions/resolved/self?"));
+      expect(permissionCall).toContain("action_key=scope.view");
+      expect(permissionCall).not.toContain("organizations.edit");
     } finally {
       (globalThis as { fetch: typeof fetch }).fetch = originalFetch;
       vi.doUnmock("@/lib/preferences");

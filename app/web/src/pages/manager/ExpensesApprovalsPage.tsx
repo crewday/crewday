@@ -9,8 +9,8 @@ import {
 } from "@/lib/expenses";
 import { useDecideMutation } from "@/lib/useDecideMutation";
 import { formatMoney } from "@/lib/money";
-import { fmtDateTime } from "@/lib/dates";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Camera } from "lucide-react";
 import { Chip, Loading, StatCard } from "@/components/common";
 import { EXPENSE_STATUS_TONE } from "@/lib/tones";
@@ -408,14 +408,14 @@ export default function ExpensesApprovalsPage() {
             // discriminated state literal — guard inline so the chip
             // shows a sensible fallback if the server ever returns a
             // misaligned row (e.g. a draft slipped past the filter).
-            const submittedLabel =
-              x.submitted_at !== null ? fmtDateTime(x.submitted_at) : "draft";
             return (
               <li key={x.id} className={cls}>
                 <div className="approval__head">
                   <strong>{x.vendor}</strong>
                   <Chip tone="ghost" size="sm">{x.work_engagement_id}</Chip>
-                  <span className="approval__time">submitted {submittedLabel}</span>
+                  <span className="approval__time">
+                    submitted <DateTime value={x.submitted_at} showTime empty="draft" />
+                  </span>
                 </div>
 
                 <div className="expense-approval__grid">
@@ -494,14 +494,12 @@ export default function ExpensesApprovalsPage() {
               // map look-up stays type-safe without a non-null
               // fallback branch.
               const state = x.state as Exclude<ExpenseStatus, "draft" | "submitted">;
-              const submittedLabel =
-                x.submitted_at !== null ? fmtDateTime(x.submitted_at) : "—";
               return (
                 <tr key={x.id}>
                   <td className="mono">{x.work_engagement_id}</td>
                   <td>{x.vendor}<div className="table__sub">{x.note_md}</div></td>
                   <td className="mono">{formatMoney(x.total_amount_cents, x.currency)}</td>
-                  <td className="mono">{submittedLabel}</td>
+                  <td><DateTime value={x.submitted_at} showTime className="mono" empty="—" /></td>
                   <td><Chip tone={EXPENSE_STATUS_TONE[state]} size="sm">{x.state}</Chip></td>
                 </tr>
               );

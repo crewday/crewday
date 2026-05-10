@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Checkbox, Chip, Loading } from "@/components/common";
 import type {
   AdminDeploymentSetting,
@@ -30,11 +31,6 @@ function displayStub(value: unknown): string {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return "";
   const stub = (value as { display_stub?: unknown }).display_stub;
   return typeof stub === "string" ? stub : "";
-}
-
-function displayDate(value: string): string {
-  if (!value) return "default";
-  return new Date(value).toLocaleString();
 }
 
 function parseSettingDraft(row: AdminDeploymentSetting, draft: SettingDraft): ParsedSetting {
@@ -425,7 +421,7 @@ export default function AdminSettingsPage() {
                     )}
                   </td>
                   <td className="mono muted">
-                    {displayDate(row.updated_at)}
+                    <DateTime value={row.updated_at} showTime empty="default" />
                     <div className="table__sub">{row.updated_by || "registry default"}</div>
                   </td>
                 </tr>

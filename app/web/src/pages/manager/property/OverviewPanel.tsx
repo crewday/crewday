@@ -1,7 +1,8 @@
 import { ClipboardList, CalendarClock } from "lucide-react";
+import DateTime from "@/components/DateTime";
 import { Avatar, Chip, EmptyState } from "@/components/common";
 import type { Employee, TaskStatus } from "@/types/api";
-import { fmtDayMon, fmtDayMonTime } from "./lib/propertyFormatters";
+import { fmtDayMon } from "./lib/propertyFormatters";
 import type { PropertyDetail } from "./types";
 
 const STATUS_TONE: Record<TaskStatus, "moss" | "sky" | "ghost" | "rust"> = {
@@ -66,7 +67,7 @@ export default function OverviewPanel({
               return (
                 <li key={t.id} className="task-row">
                   <span className="task-row__time table__mono">
-                    {fmtDayMonTime(t.scheduled_start)}
+                    <DateTime value={t.scheduled_start} showTime />
                   </span>
                   <span className="task-row__title">
                     <strong>{t.title}</strong>

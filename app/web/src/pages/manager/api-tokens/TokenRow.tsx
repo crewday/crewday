@@ -1,5 +1,5 @@
 import { RotateCw, ScrollText, Trash2 } from "lucide-react";
-import { fmtDateTime } from "@/lib/dates";
+import DateTime from "@/components/DateTime";
 import type { ApiToken } from "@/types/api";
 import { STATUS_LABEL, statusOf } from "./lib/tokenStatus";
 
@@ -50,13 +50,13 @@ export default function TokenRow({
       </td>
       <td>
         <div className="tokens-time">
-          <span>{fmtDateTime(t.created_at)}</span>
+          <DateTime value={t.created_at} showTime />
         </div>
       </td>
       <td>
         {t.expires_at ? (
           <div className="tokens-time">
-            <span>{fmtDateTime(t.expires_at)}</span>
+            <DateTime value={t.expires_at} showTime />
           </div>
         ) : (
           <span className="tokens-time--absent">never</span>
@@ -65,7 +65,7 @@ export default function TokenRow({
       <td>
         {t.last_used_at ? (
           <div className="tokens-time">
-            <span>{fmtDateTime(t.last_used_at)}</span>
+            <DateTime value={t.last_used_at} showTime />
           </div>
         ) : (
           <span className="tokens-time--absent">never</span>

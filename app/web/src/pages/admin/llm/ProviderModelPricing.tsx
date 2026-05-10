@@ -1,14 +1,7 @@
+import DateTime from "@/components/DateTime";
 import { Chip } from "@/components/common";
 import type { LlmGraphPayload } from "@/types";
 import type { LlmIndexes } from "./lib/llmIndexes";
-
-function hms(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
 
 interface ProviderModelPricingProps {
   graph: LlmGraphPayload;
@@ -53,8 +46,8 @@ export default function ProviderModelPricing({
                 <td className="mono">{pm.api_model_id}</td>
                 <td className="mono">${pm.input_cost_per_million.toFixed(3)}</td>
                 <td className="mono">${pm.output_cost_per_million.toFixed(3)}</td>
-                <td className="mono muted">
-                  {pm.price_last_synced_at ? hms(pm.price_last_synced_at) : "—"}
+                <td>
+                  <DateTime value={pm.price_last_synced_at} showTime className="mono muted" empty="—" />
                 </td>
                 <td>
                   {pinned ? (

@@ -4,19 +4,13 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { useAuth } from "@/auth";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, Loading } from "@/components/common";
 import type {
   ChatChannelBinding,
   ChatChannelKind,
   ChatGatewayProvider,
 } from "@/types/api";
-
-function fmt(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-GB", {
-    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
-  });
-}
 
 function channelLabel(kind: ChatChannelKind): string {
   switch (kind) {
@@ -128,7 +122,7 @@ export default function ChatChannelsPage() {
                   </Chip>
                 </td>
                 <td className="mono">{p.display_stub}</td>
-                <td className="mono">{fmt(p.last_webhook_at)}</td>
+                <td><DateTime value={p.last_webhook_at} showTime className="mono" empty="—" /></td>
                 <td>
                   {p.templates.length === 0
                     ? <span className="muted">—</span>
@@ -167,8 +161,8 @@ export default function ChatChannelsPage() {
                 <td>
                   <Chip tone={stateTone(b.state)} size="sm">{b.state}</Chip>
                 </td>
-                <td className="mono">{fmt(b.verified_at)}</td>
-                <td className="mono">{fmt(b.last_message_at)}</td>
+                <td><DateTime value={b.verified_at} showTime className="mono" empty="—" /></td>
+                <td><DateTime value={b.last_message_at} showTime className="mono" empty="—" /></td>
                 <td>
                   {b.state !== "revoked" && b.user_id === currentUserId && (
                     <button

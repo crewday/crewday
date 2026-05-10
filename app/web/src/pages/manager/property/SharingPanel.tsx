@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import DateTime from "@/components/DateTime";
 import { Chip } from "@/components/common";
 import type { AvailableWorkspace, PropertyWorkspace } from "@/types/api";
-import { fmtDayMon } from "./lib/propertyFormatters";
 import type { PropertyDetail } from "./types";
 
 const MEMBERSHIP_LABEL: Record<string, string> = {
@@ -138,7 +138,7 @@ export default function SharingPanel({
                     {MEMBERSHIP_LABEL[m.membership_role] ?? m.membership_role}
                   </Chip>
                 </td>
-                <td className="table__mono">{fmtDayMon(m.added_at)}</td>
+                <td><DateTime value={m.added_at} showTime className="table__mono" /></td>
                 <td>
                   {canRevoke && (
                     <button

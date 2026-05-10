@@ -11,10 +11,10 @@ import { qk } from "@/lib/queryKeys";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import { Camera, Check } from "lucide-react";
 import { Chip, EmptyState, Loading, ProgressBar } from "@/components/common";
+import DateTime from "@/components/DateTime";
 import PageHeader from "@/components/PageHeader";
 import TaskListCard from "@/components/TaskListCard";
 import NewTaskButton from "@/components/NewTaskModal";
-import { fmtTime } from "@/lib/dates";
 import { cap } from "@/lib/strings";
 import type { Me, Property, Task } from "@/types/api";
 import {
@@ -209,7 +209,9 @@ function NowCard({
         {task.photo_evidence === "required" && (
           <Chip tone="sand"><Camera size={12} strokeWidth={1.8} aria-hidden="true" /> photo required</Chip>
         )}
-        <span className="task-card__when">{fmtTime(task.scheduled_start)} · {task.estimated_minutes} min</span>
+        <span className="task-card__when">
+          <DateTime value={task.scheduled_start} showTime /> · {task.estimated_minutes} min
+        </span>
       </div>
       <h3 className="task-card__title">{task.title}</h3>
       {task.area && <div className="task-card__meta">{task.area}</div>}

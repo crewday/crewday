@@ -5,6 +5,7 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, EmptyState, FilterChipGroup, Loading } from "@/components/common";
 import type {
   Asset,
@@ -176,7 +177,7 @@ function ExtractionDisclosure({ doc }: { doc: AssetDocument }) {
               </div>
               <div>
                 <dt>Extracted</dt>
-                <dd>{fmtDate(extractionQ.data.extracted_at)}</dd>
+                <dd><DateTime value={extractionQ.data.extracted_at} showTime /></dd>
               </div>
             </dl>
             {extractionQ.data.has_secret_marker ? (

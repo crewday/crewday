@@ -7,6 +7,7 @@ import { qk } from "@/lib/queryKeys";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, Loading } from "@/components/common";
 import { INSTRUCTION_SCOPE_TONE } from "@/lib/tones";
 import type { Instruction, Property } from "@/types/api";
@@ -58,16 +59,6 @@ const EMPTY_PATCH: InstructionPatch = {
   tags: [],
   change_note: "",
 };
-
-function fmtSaved(iso: string): string {
-  return new Date(iso).toLocaleString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 // Mock body is plain text with newlines; render with <br> between lines.
 // Real Markdown rendering will land when the spec calls for it.
@@ -263,7 +254,9 @@ export default function InstructionDetailPage() {
               <Chip key={t} tone="ghost" size="sm">#{t}</Chip>
             ))}
           </div>
-          <div className="mono muted">Revision {i.version} · saved {fmtSaved(i.updated_at)}</div>
+          <div className="mono muted">
+            Revision {i.version} · saved <DateTime value={i.updated_at} showTime />
+          </div>
         </footer>
       </article>
 
@@ -431,7 +424,7 @@ export default function InstructionDetailPage() {
               {versionsQ.data?.map((version) => (
                 <section key={version.id} className="day-drawer__section">
                   <h3 className="day-drawer__section-title">
-                    Revision {version.version} · {fmtSaved(version.created_at)}
+                    Revision {version.version} · <DateTime value={version.created_at} showTime />
                   </h3>
                   {version.change_note && <p className="day-drawer__muted">{version.change_note}</p>}
                   <div className="kb-body">{renderBody(version.body_md)}</div>

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, Loading } from "@/components/common";
 import { ApiError, fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
@@ -49,10 +50,6 @@ function isPendingApprovalResponse(value: unknown): value is PendingApprovalResp
     (value as { status?: unknown }).status === "pending_approval" &&
     typeof (value as { approval_request_id?: unknown }).approval_request_id === "string"
   );
-}
-
-function decidedLabel(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleDateString() : "-";
 }
 
 function statusTone(status: string): "moss" | "rust" | "sky" | "sand" {
@@ -174,7 +171,9 @@ export default function ClientQuotesPage() {
                         {statusLabel(visibleStatus)}
                       </Chip>
                     </td>
-                    <td className="table__mono muted">{decidedLabel(quote.decided_at)}</td>
+                    <td>
+                      <DateTime value={quote.decided_at} showTime className="table__mono muted" empty="-" />
+                    </td>
                     <td>
                       {quote.status === "sent" && !pendingApprovalId && (
                         <div className="row-actions">

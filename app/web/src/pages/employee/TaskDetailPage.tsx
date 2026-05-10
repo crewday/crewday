@@ -8,8 +8,8 @@ import { Chip, EmptyState, Loading } from "@/components/common";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import ChatLog from "@/components/chat/ChatLog";
 import ChatComposer from "@/components/chat/ChatComposer";
+import DateTime from "@/components/DateTime";
 import PageHeader from "@/components/PageHeader";
-import { fmtTime } from "@/lib/dates";
 import type {
   AgentMessage,
   Property,
@@ -397,7 +397,7 @@ export default function TaskDetailPage() {
             </Chip>
           </div>
           <div className="task-detail__meta">
-            {task.scheduled_start ? fmtTime(task.scheduled_start) : "Time TBD"} · est. {task.estimated_minutes} min
+            <DateTime value={task.scheduled_start} showTime empty="Time TBD" /> · est. {task.estimated_minutes} min
           </div>
         </header>
 

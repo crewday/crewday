@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, Loading } from "@/components/common";
 import type {
   AdminSignupSignal,
@@ -66,7 +67,7 @@ export default function AdminSignupsPage() {
               const count = detailCount(signal);
               return (
                 <tr key={signal.event_id}>
-                  <td className="mono">{new Date(signal.occurred_at).toLocaleString()}</td>
+                  <td><DateTime value={signal.occurred_at} showTime className="mono" /></td>
                   <td>
                     <Chip tone={KIND_TONE[signal.kind]} size="sm">
                       {KIND_LABEL[signal.kind]}

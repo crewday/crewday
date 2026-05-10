@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Checkbox, Chip, Loading } from "@/components/common";
 import type {
   AdminGrantResponse,
@@ -93,7 +94,7 @@ export default function AdminAdminsPage() {
                     ? <Chip tone="moss" size="sm">owner</Chip>
                     : <Chip tone="sky" size="sm">admin</Chip>}
                 </td>
-                <td className="mono muted">{m.granted_at}</td>
+                <td><DateTime value={m.granted_at} showTime className="mono muted" /></td>
                 <td className="muted">{m.granted_by}</td>
                 <td>
                   <button

@@ -11,6 +11,7 @@ import { qk } from "@/lib/queryKeys";
 import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import DeskPage from "@/components/DeskPage";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
+import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
 import { Chip, Loading } from "@/components/common";
 import type { Property } from "@/types/api";
@@ -175,20 +176,6 @@ function fmtQty(n: number): string {
   if (!Number.isFinite(n)) return String(n);
   const s = n.toFixed(3);
   return s.replace(/\.?0+$/, "");
-}
-
-// Human-ish relative timestamp. "just now" / "3h ago" / "Apr 12".
-function fmtWhen(iso: string): string {
-  const d = new Date(iso);
-  const now = Date.now();
-  const diffMin = Math.round((now - d.getTime()) / 60_000);
-  if (diffMin < 1) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.round(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.round(diffHr / 24);
-  if (diffDay < 7) return `${diffDay}d ago`;
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function errorCopy(error: Error, fallback: string): string {
@@ -1069,12 +1056,7 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
                         <span className="inv-history__reason">
                           {REASON_LABEL[m.reason]}
                         </span>
-                        <time
-                          className="inv-history__when mono"
-                          dateTime={m.occurred_at}
-                        >
-                          {fmtWhen(m.occurred_at)}
-                        </time>
+                        <DateTime value={m.occurred_at} className="inv-history__when mono" />
                       </div>
                       <div
                         className={`inv-history__delta mono inv-history__delta--${tone}`}
