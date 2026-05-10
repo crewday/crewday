@@ -120,12 +120,13 @@ export default function AdminLlmPage() {
 
   const hasActive = active !== null;
   const { graphRef, providerRefs, modelRefs, rungRefs, edges, canvas, setRef } =
-    useLlmGraphEdges(graph, indexes);
+    useLlmGraphEdges(graph, indexes, active);
 
   const edgeIsHighlighted = (e: EdgeLayout): boolean => {
     if (!active) return false;
     if (active.column === "provider") return e.providerId === active.id;
     if (active.column === "model") return e.modelId === active.id;
+    if (active.column === "providerModel") return e.providerModelId === active.id;
     if (active.column === "assignment") {
       return (
         e.assignmentId === active.id ||
@@ -145,6 +146,7 @@ export default function AdminLlmPage() {
     const set = {
       provider: highlighted.providers,
       model: highlighted.models,
+      providerModel: highlighted.providerModels,
       assignment: highlighted.assignments,
       capability: highlighted.capabilities,
     }[col];
@@ -247,15 +249,15 @@ export default function AdminLlmPage() {
           })}
         </svg>
 
-        <div className="llm-graph__col-header">
+        <div className="llm-graph__col-header llm-graph__col-header--providers">
           <span className="llm-graph__col-title">Providers</span>
           <span className="llm-graph__col-count">{graph.providers.length}</span>
         </div>
-        <div className="llm-graph__col-header">
+        <div className="llm-graph__col-header llm-graph__col-header--models">
           <span className="llm-graph__col-title">Models</span>
           <span className="llm-graph__col-count">{graph.models.length}</span>
         </div>
-        <div className="llm-graph__col-header">
+        <div className="llm-graph__col-header llm-graph__col-header--assignments">
           <span className="llm-graph__col-title">Assignments</span>
           <span className="llm-graph__col-count">{graph.totals.capability_count}</span>
         </div>
@@ -276,11 +278,13 @@ export default function AdminLlmPage() {
           nodeClass={nodeClass}
           setModelRef={setRef(modelRefs)}
           onModelClick={writeAssignmentToModel}
+          indexes={indexes}
         />
         <AssignmentColumn
           capabilities={graph.capabilities}
           indexes={indexes}
           selection={selection}
+          active={active}
           setHover={setHover}
           setSelection={setSelection}
           nodeClass={nodeClass}

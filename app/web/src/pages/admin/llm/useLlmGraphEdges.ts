@@ -1,24 +1,22 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { LlmGraphPayload } from "@/types";
 import type { LlmIndexes } from "./lib/llmIndexes";
-import type { EdgeLayout } from "./types";
+import type { EdgeLayout, Selection } from "./types";
 
 export function useLlmGraphEdges(
   graph: LlmGraphPayload | undefined,
   indexes: LlmIndexes | null,
+  active: Selection | null,
 ) {
   const graphRef = useRef<HTMLDivElement | null>(null);
   const providerRefs = useRef<Map<string, HTMLElement>>(new Map());
   const modelRefs = useRef<Map<string, HTMLElement>>(new Map());
   const rungRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const frameRef = useRef<number | null>(null);
   const [edges, setEdges] = useState<EdgeLayout[]>([]);
   const [canvas, setCanvas] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
-  const setRef = (map: typeof providerRefs) => (id: string) => (el: HTMLElement | null) => {
-    if (el) map.current.set(id, el);
-    else map.current.delete(id);
-  };
 
-  const recomputeEdges = () => {
+  const recomputeEdges = useCallback(() => {
     const host = graphRef.current;
     if (!host || !graph || !indexes) return;
     const hostBox = host.getBoundingClientRect();
@@ -72,28 +70,52 @@ export function useLlmGraphEdges(
       });
     }
     setEdges(next);
-  };
+  }, [graph, indexes]);
+
+  const requestRecompute = useCallback(() => {
+    if (frameRef.current !== null) window.cancelAnimationFrame(frameRef.current);
+    frameRef.current = window.requestAnimationFrame(() => {
+      frameRef.current = null;
+      recomputeEdges();
+    });
+  }, [recomputeEdges]);
+
+  const setRef = useCallback(
+    (map: typeof providerRefs) => (id: string) => (el: HTMLElement | null) => {
+      if (el) map.current.set(id, el);
+      else map.current.delete(id);
+      requestRecompute();
+    },
+    [requestRecompute],
+  );
 
   useLayoutEffect(() => {
-    recomputeEdges();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph]);
+    requestRecompute();
+  }, [active, graph, requestRecompute]);
 
   useEffect(() => {
     if (!graphRef.current) return;
-    const ro = new ResizeObserver(() => recomputeEdges());
-    ro.observe(graphRef.current);
-    const onWinResize = () => recomputeEdges();
-    const onScroll = () => recomputeEdges();
+    const ro = new ResizeObserver(() => requestRecompute());
+    const observeAll = () => {
+      const host = graphRef.current;
+      if (host) ro.observe(host);
+      for (const node of providerRefs.current.values()) ro.observe(node);
+      for (const node of modelRefs.current.values()) ro.observe(node);
+      for (const node of rungRefs.current.values()) ro.observe(node);
+    };
+    observeAll();
+    const onWinResize = () => requestRecompute();
+    const onScroll = () => requestRecompute();
     window.addEventListener("resize", onWinResize);
     window.addEventListener("scroll", onScroll, true);
+    requestRecompute();
     return () => {
+      if (frameRef.current !== null) window.cancelAnimationFrame(frameRef.current);
       ro.disconnect();
       window.removeEventListener("resize", onWinResize);
       window.removeEventListener("scroll", onScroll, true);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph]);
+  }, [graph, indexes, requestRecompute]);
 
   return {
     graphRef,

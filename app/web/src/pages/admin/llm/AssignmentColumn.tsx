@@ -1,6 +1,7 @@
 import { Chip } from "@/components/common";
 import type { LlmCapabilityEntry } from "@/types";
 import CapabilityChain from "./CapabilityChain";
+import LlmUsageTotals from "./LlmUsageTotals";
 import type { LlmIndexes } from "./lib/llmIndexes";
 import type {
   ElementRefSetter,
@@ -14,6 +15,7 @@ interface AssignmentColumnProps {
   capabilities: LlmCapabilityEntry[];
   indexes: LlmIndexes;
   selection: Selection | null;
+  active: Selection | null;
   setHover: SelectionSetter;
   setSelection: SelectionSetter;
   nodeClass: NodeClass;
@@ -33,6 +35,7 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
     capabilities,
     indexes,
     selection,
+    active,
     setHover,
     setSelection,
     nodeClass,
@@ -42,14 +45,13 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
     onChangeInheritance,
     onRemoveInheritance,
   } = props;
-
   const roots = capabilities.filter((cap) => {
     const hasChain = (indexes.assignmentsByCapability.get(cap.key) ?? []).length > 0;
     return hasChain || !indexes.inheritanceByChild.has(cap.key);
   });
 
   return (
-    <div className="llm-graph__col">
+    <div className="llm-graph__col llm-graph__col--assignments">
       {roots.map((cap) => {
         const chain = indexes.assignmentsByCapability.get(cap.key) ?? [];
         const inheritsFrom = indexes.inheritanceByChild.get(cap.key);
@@ -67,44 +69,60 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
             className={nodeClass("capability", cap.key)}
             onMouseEnter={() => setHover({ column: "capability", id: cap.key })}
             onMouseLeave={() => setHover(null)}
-            onClick={() =>
-              setSelection(
-                selection?.column === "capability" && selection.id === cap.key
-                  ? null
-                  : { column: "capability", id: cap.key },
-              )
-            }
           >
-            <header className="llm-graph-node__head">
-              <code className="llm-graph-node__name inline-code">{cap.key}</code>
-              {isUnassigned ? (
-                <Chip tone="rust" size="sm">
-                  unassigned
-                </Chip>
-              ) : inheritedMissing.length && isInheriting ? (
-                <Chip tone="rust" size="sm">
-                  inherited model lacks {inheritedMissing.join(", ")}
-                </Chip>
-              ) : isInheriting ? (
-                <Chip tone="sand" size="sm">
-                  inherits
-                </Chip>
-              ) : (
-                <Chip tone="moss" size="sm">
-                  {chain.length} rung{chain.length === 1 ? "" : "s"}
-                </Chip>
-              )}
-            </header>
-            <div className="llm-graph-node__meta">{cap.description}</div>
-            {isInheriting ? (
-              <div className="llm-graph-node__inherits">
-                {hasExplicitInheritance ? "explicitly inherits" : "defaults"} to{" "}
-                <code className="inline-code">{inheritsFrom}</code>
+            <button
+              type="button"
+              className="llm-graph-node__button"
+              aria-label={`${cap.key} capability, ${cap.calls_30d.toLocaleString()} calls in 30 days`}
+              onFocus={() => setHover({ column: "capability", id: cap.key })}
+              onBlur={() => setHover(null)}
+              onClick={() =>
+                setSelection(
+                  selection?.column === "capability" && selection.id === cap.key
+                    ? null
+                    : { column: "capability", id: cap.key },
+                )
+              }
+            >
+              <header className="llm-graph-node__head">
+                <code className="llm-graph-node__name inline-code">{cap.key}</code>
+                {isUnassigned ? (
+                  <Chip tone="rust" size="sm">
+                    unassigned
+                  </Chip>
+                ) : inheritedMissing.length && isInheriting ? (
+                  <Chip tone="rust" size="sm">
+                    inherited model lacks {inheritedMissing.join(", ")}
+                  </Chip>
+                ) : isInheriting ? (
+                  <Chip tone="sand" size="sm">
+                    inherits
+                  </Chip>
+                ) : (
+                  <Chip tone="moss" size="sm">
+                    {chain.length} rung{chain.length === 1 ? "" : "s"}
+                  </Chip>
+                )}
+              </header>
+              <div className="llm-graph-node__meta">{cap.description}</div>
+              {isInheriting ? (
+                <div className="llm-graph-node__inherits">
+                  {hasExplicitInheritance ? "explicitly inherits" : "defaults"} to{" "}
+                  <code className="inline-code">{inheritsFrom}</code>
+                </div>
+              ) : null}
+              <div className="llm-capability-total">
+                <LlmUsageTotals spendUsd={cap.spend_usd_30d} calls={cap.calls_30d} />
+                <span className="llm-capability-total__breakout">
+                  direct {cap.direct_calls_30d.toLocaleString()} · inherited{" "}
+                  {cap.inherited_calls_30d.toLocaleString()}
+                </span>
               </div>
-            ) : null}
+            </button>
             <CapabilityChain
               chain={chain}
               indexes={indexes}
+              active={active}
               hasActive={hasActive}
               highlighted={highlighted}
               setHover={setHover}
@@ -120,11 +138,17 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
                   const parentOptions = capabilities.filter(
                     (candidate) => candidate.key !== child.key,
                   );
+                  const childActive =
+                    active?.column === "capability" && active.id === child.key;
+                  const childLinked = highlighted.capabilities.has(child.key);
                   return (
                     <div
                       key={child.key}
                       className={[
                         "llm-graph-node__child",
+                        childActive ? "is-active" : "",
+                        childLinked && !childActive ? "is-linked" : "",
+                        hasActive && !childLinked ? "is-dim" : "",
                         missing.length ? "is-error" : "",
                       ]
                         .filter(Boolean)
@@ -133,10 +157,7 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
                         e.stopPropagation();
                         setHover({ column: "capability", id: child.key });
                       }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelection({ column: "capability", id: child.key });
-                      }}
+                      onMouseLeave={() => setHover(null)}
                       title={
                         missing.length
                           ? `Inherited model lacks ${missing.join(", ")}`
@@ -146,12 +167,23 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
                       <button
                         className="llm-graph-node__child-main"
                         type="button"
+                        aria-label={`${child.key} inherited capability, ${child.calls_30d.toLocaleString()} calls in 30 days`}
+                        onFocus={(e) => {
+                          e.stopPropagation();
+                          setHover({ column: "capability", id: child.key });
+                        }}
+                        onBlur={() => setHover(null)}
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelection({ column: "capability", id: child.key });
                         }}
                       >
                         <code className="inline-code">{child.key}</code>
+                        <LlmUsageTotals
+                          spendUsd={child.spend_usd_30d}
+                          calls={child.calls_30d}
+                          label="child 30d"
+                        />
                       </button>
                       <Chip tone={missing.length ? "rust" : "sand"} size="sm">
                         {isExplicit

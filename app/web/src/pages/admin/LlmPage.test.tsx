@@ -97,6 +97,14 @@ function chatManagerRung(): HTMLElement {
   return rung;
 }
 
+function modelButton(name: string): HTMLElement {
+  return screen.getByRole("button", { name: new RegExp(`${name} model`) });
+}
+
+async function findOpenRouterProvider(): Promise<HTMLElement> {
+  return screen.findByRole("button", { name: /^OpenRouter provider,/ });
+}
+
 beforeEach(() => {
   class TestResizeObserver {
     observe(): void {}
@@ -124,7 +132,7 @@ describe("Admin LlmPage", () => {
     try {
       render(<Harness />);
 
-      expect(await screen.findByText("OpenRouter")).toBeInTheDocument();
+      expect(await findOpenRouterProvider()).toBeInTheDocument();
       expect(screen.getByText("LLM graph")).toBeInTheDocument();
       expect(screen.getByText("Gemma 4 31B IT")).toBeInTheDocument();
       expect(screen.getAllByText("voice.transcribe").length).toBeGreaterThan(0);
@@ -157,7 +165,7 @@ describe("Admin LlmPage", () => {
     });
     try {
       render(<Harness />);
-      await screen.findByText("OpenRouter");
+      await findOpenRouterProvider();
 
       openOverflowItem("Sync pricing");
 
@@ -182,13 +190,13 @@ describe("Admin LlmPage", () => {
     });
     try {
       render(<Harness />);
-      await screen.findByText("OpenRouter");
+      await findOpenRouterProvider();
 
       fireEvent.click(chatManagerRung());
 
       const modelCard = screen.getByText("Fast Chat").closest("article");
       if (!(modelCard instanceof HTMLElement)) throw new Error("model card not found");
-      fireEvent.click(modelCard);
+      fireEvent.click(modelButton("Fast Chat"));
 
       await waitFor(() => {
         expect(
@@ -216,13 +224,13 @@ describe("Admin LlmPage", () => {
     const fetcher = installPageFetch();
     try {
       render(<Harness />);
-      await screen.findByText("OpenRouter");
+      await findOpenRouterProvider();
 
       fireEvent.click(chatManagerRung());
 
       const modelCard = screen.getByText("Text Only").closest("article");
       if (!(modelCard instanceof HTMLElement)) throw new Error("model card not found");
-      fireEvent.click(modelCard);
+      fireEvent.click(modelButton("Text Only"));
 
       expect(
         fetcher.calls.some(
@@ -232,6 +240,99 @@ describe("Admin LlmPage", () => {
         ),
       ).toBe(false);
       expect(modelCard).toHaveClass("is-active");
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("renders graph rollup cost totals on cards and subcards", async () => {
+    const costGraph = {
+      ...graph,
+      providers: [{ ...graph.providers[0], spend_usd_30d: 2.5, calls_30d: 31 }],
+      models: [
+        { ...graph.models[0], spend_usd_30d: 1.75, calls_30d: 21 },
+        ...graph.models.slice(1),
+      ],
+      provider_models: [
+        { ...graph.provider_models[0], spend_usd_30d: 1.5, calls_30d: 19 },
+        ...graph.provider_models.slice(1),
+      ],
+      capabilities: [
+        graph.capabilities[0],
+        {
+          ...graph.capabilities[1],
+          spend_usd_30d: 3.25,
+          calls_30d: 41,
+          direct_calls_30d: 30,
+          inherited_calls_30d: 11,
+        },
+        {
+          ...graph.capabilities[2],
+          spend_usd_30d: 0.75,
+          calls_30d: 5,
+        },
+      ],
+      assignments: [
+        graph.assignments[0],
+        {
+          ...graph.assignments[1],
+          spend_usd_30d: 4.5,
+          calls_30d: 52,
+          direct_calls_30d: 40,
+          inherited_calls_30d: 12,
+        },
+      ],
+    };
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/graph": [
+        { body: costGraph },
+        { body: costGraph },
+        { body: costGraph },
+      ],
+    });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByLabelText("30d 31 calls")).toHaveTextContent("$2.50");
+      expect(screen.getByLabelText("30d 21 calls")).toHaveTextContent("$1.75");
+      expect(screen.getByLabelText("pm 30d 19 calls")).toHaveTextContent("$1.50");
+      expect(screen.getByLabelText("30d 41 calls")).toHaveTextContent("$3.25");
+      expect(screen.getByLabelText("30d 52 calls")).toHaveTextContent("$4.50");
+      expect(screen.getByText("direct 40 · inherited 12")).toBeInTheDocument();
+      expect(screen.getByLabelText("child 30d 5 calls")).toHaveTextContent("$0.75");
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("emphasizes hovered graph paths and preserves clicked selection", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      const gemmaProviderModel = screen.getByRole("button", {
+        name: /OpenRouter provider model for Gemma 4 31B IT/,
+      });
+      const gemmaCard = screen.getByText("Gemma 4 31B IT").closest("article");
+      const textOnlyCard = screen.getByText("Text Only").closest("article");
+      if (!(gemmaCard instanceof HTMLElement) || !(textOnlyCard instanceof HTMLElement)) {
+        throw new Error("model cards not found");
+      }
+
+      fireEvent.mouseEnter(gemmaProviderModel);
+
+      expect(gemmaProviderModel).toHaveClass("is-active");
+      expect(gemmaCard).toHaveClass("is-linked");
+      expect(chatManagerRung()).toHaveClass("is-linked");
+      expect(textOnlyCard).toHaveClass("is-dim");
+
+      fireEvent.mouseLeave(gemmaProviderModel);
+      fireEvent.click(chatManagerRung());
+
+      expect(chatManagerRung()).toHaveClass("is-active");
+      expect(gemmaCard).toHaveClass("is-linked");
+      expect(textOnlyCard).toHaveClass("is-dim");
     } finally {
       fetcher.restore();
     }
@@ -267,7 +368,7 @@ describe("Admin LlmPage", () => {
     });
     try {
       render(<Harness />);
-      await screen.findByText("OpenRouter");
+      await findOpenRouterProvider();
       expect(screen.getByText("invalid implicit")).toBeInTheDocument();
 
       fireEvent.change(

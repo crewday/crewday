@@ -52,6 +52,17 @@ export function buildHighlighted(
         capabilities.add(a.capability);
       }
     }
+  } else if (active.column === "providerModel") {
+    providerModels.add(active.id);
+    const pm = indexes.pmById.get(active.id);
+    if (pm) {
+      providers.add(pm.provider_id);
+      models.add(pm.model_id);
+      for (const a of reachableAssignmentsByPm.get(pm.id) ?? []) {
+        assignments.add(a.id);
+        capabilities.add(a.capability);
+      }
+    }
   } else if (active.column === "assignment") {
     assignments.add(active.id);
     const a = graph.assignments.find((x) => x.id === active.id);

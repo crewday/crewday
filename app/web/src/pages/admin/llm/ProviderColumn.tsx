@@ -1,5 +1,6 @@
 import { Chip } from "@/components/common";
 import type { LlmProvider } from "@/types";
+import LlmUsageTotals from "./LlmUsageTotals";
 import type { ElementRefSetter, NodeClass, Selection, SelectionSetter } from "./types";
 
 interface ProviderColumnProps {
@@ -16,14 +17,17 @@ export default function ProviderColumn(props: ProviderColumnProps) {
     props;
 
   return (
-    <div className="llm-graph__col">
+    <div className="llm-graph__col llm-graph__col--providers">
       {providers.map((p) => (
-        <article
+        <button
           key={p.id}
+          type="button"
           ref={setProviderRef(p.id)}
           className={nodeClass("provider", p.id)}
           onMouseEnter={() => setHover({ column: "provider", id: p.id })}
           onMouseLeave={() => setHover(null)}
+          onFocus={() => setHover({ column: "provider", id: p.id })}
+          onBlur={() => setHover(null)}
           onClick={() =>
             setSelection(
               selection?.column === "provider" && selection.id === p.id
@@ -31,6 +35,7 @@ export default function ProviderColumn(props: ProviderColumnProps) {
                 : { column: "provider", id: p.id },
             )
           }
+          aria-label={`${p.name} provider, ${p.calls_30d.toLocaleString()} calls in 30 days`}
         >
           <header className="llm-graph-node__head">
             <span className="llm-graph-node__name">{p.name}</span>
@@ -63,7 +68,8 @@ export default function ProviderColumn(props: ProviderColumnProps) {
               </Chip>
             )}
           </footer>
-        </article>
+          <LlmUsageTotals spendUsd={p.spend_usd_30d} calls={p.calls_30d} />
+        </button>
       ))}
     </div>
   );

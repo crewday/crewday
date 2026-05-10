@@ -1,6 +1,6 @@
 import type { LlmAssignment } from "@/types";
 
-export type Column = "provider" | "model" | "assignment" | "capability";
+export type Column = "provider" | "model" | "providerModel" | "assignment" | "capability";
 
 export interface Selection {
   column: Column;

@@ -1,5 +1,7 @@
 import { Chip } from "@/components/common";
 import type { LlmModel } from "@/types";
+import LlmUsageTotals from "./LlmUsageTotals";
+import type { LlmIndexes } from "./lib/llmIndexes";
 import type { ElementRefSetter, NodeClass, Selection, SelectionSetter } from "./types";
 
 const CAPABILITY_TAG_LABEL: Record<string, string> = {
@@ -20,6 +22,7 @@ interface ModelColumnProps {
   nodeClass: NodeClass;
   setModelRef: ElementRefSetter;
   onModelClick: (modelId: string) => boolean;
+  indexes: LlmIndexes;
 }
 
 export default function ModelColumn(props: ModelColumnProps) {
@@ -31,49 +34,106 @@ export default function ModelColumn(props: ModelColumnProps) {
     nodeClass,
     setModelRef,
     onModelClick,
+    indexes,
   } = props;
 
   return (
-    <div className="llm-graph__col">
-      {models.map((m) => (
-        <article
-          key={m.id}
-          ref={setModelRef(m.id)}
-          className={nodeClass("model", m.id)}
-          onMouseEnter={() => setHover({ column: "model", id: m.id })}
-          onMouseLeave={() => setHover(null)}
-          onClick={() => {
-            if (onModelClick(m.id)) return;
-            setSelection(
-              selection?.column === "model" && selection.id === m.id
-                ? null
-                : { column: "model", id: m.id },
-            );
-          }}
-        >
-          <header className="llm-graph-node__head">
-            <span className="llm-graph-node__name">{m.display_name}</span>
-            <span className="llm-graph-node__vendor">{m.vendor}</span>
-          </header>
-          <div className="llm-graph-node__meta mono">{m.canonical_name}</div>
-          <div className="llm-graph-node__tags">
-            {m.capabilities.map((tag) => (
-              <Chip key={tag} tone="ghost" size="sm">
-                {CAPABILITY_TAG_LABEL[tag] ?? tag}
-              </Chip>
-            ))}
-          </div>
-          <footer className="llm-graph-node__foot">
-            <span>
-              {m.provider_model_count} provider
-              {m.provider_model_count === 1 ? "" : "s"}
-            </span>
-            {m.context_window ? (
-              <span className="muted">{(m.context_window / 1000).toFixed(0)}k ctx</span>
+    <div className="llm-graph__col llm-graph__col--models">
+      {models.map((m) => {
+        const providerModels = indexes.providerModelsByModelId.get(m.id) ?? [];
+        return (
+          <article key={m.id} className={nodeClass("model", m.id)}>
+            <button
+              type="button"
+              ref={setModelRef(m.id)}
+              className="llm-graph-node__button"
+              onMouseEnter={() => setHover({ column: "model", id: m.id })}
+              onMouseLeave={() => setHover(null)}
+              onFocus={() => setHover({ column: "model", id: m.id })}
+              onBlur={() => setHover(null)}
+              onClick={() => {
+                if (onModelClick(m.id)) return;
+                setSelection(
+                  selection?.column === "model" && selection.id === m.id
+                    ? null
+                    : { column: "model", id: m.id },
+                );
+              }}
+              aria-label={`${m.display_name} model, ${m.calls_30d.toLocaleString()} calls in 30 days`}
+            >
+              <header className="llm-graph-node__head">
+                <span className="llm-graph-node__name">{m.display_name}</span>
+                <span className="llm-graph-node__vendor">{m.vendor}</span>
+              </header>
+              <div className="llm-graph-node__meta mono">{m.canonical_name}</div>
+              <div className="llm-graph-node__tags">
+                {m.capabilities.map((tag) => (
+                  <Chip key={tag} tone="ghost" size="sm">
+                    {CAPABILITY_TAG_LABEL[tag] ?? tag}
+                  </Chip>
+                ))}
+              </div>
+              <footer className="llm-graph-node__foot">
+                <span>
+                  {m.provider_model_count} provider
+                  {m.provider_model_count === 1 ? "" : "s"}
+                </span>
+                {m.context_window ? (
+                  <span className="muted">
+                    {(m.context_window / 1000).toFixed(0)}k ctx
+                  </span>
+                ) : null}
+              </footer>
+              <LlmUsageTotals spendUsd={m.spend_usd_30d} calls={m.calls_30d} />
+            </button>
+            {providerModels.length ? (
+              <div
+                className="llm-provider-model-list"
+                aria-label={`${m.display_name} provider models`}
+              >
+                {providerModels.map((pm) => {
+                  const provider = indexes.providersById.get(pm.provider_id);
+                  return (
+                    <button
+                      key={pm.id}
+                      type="button"
+                      className={nodeClass("providerModel", pm.id)}
+                      onMouseEnter={(event) => {
+                        event.stopPropagation();
+                        setHover({ column: "providerModel", id: pm.id });
+                      }}
+                      onMouseLeave={() => setHover(null)}
+                      onFocus={(event) => {
+                        event.stopPropagation();
+                        setHover({ column: "providerModel", id: pm.id });
+                      }}
+                      onBlur={() => setHover(null)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSelection(
+                          selection?.column === "providerModel" && selection.id === pm.id
+                            ? null
+                            : { column: "providerModel", id: pm.id },
+                        );
+                      }}
+                      aria-label={`${provider?.name ?? "Unknown provider"} provider model for ${m.display_name}, ${pm.calls_30d.toLocaleString()} calls in 30 days`}
+                    >
+                      <span className="llm-provider-model-list__name">
+                        {provider?.name ?? "Unknown provider"}
+                      </span>
+                      <LlmUsageTotals
+                        spendUsd={pm.spend_usd_30d}
+                        calls={pm.calls_30d}
+                        label="pm 30d"
+                      />
+                    </button>
+                  );
+                })}
+              </div>
             ) : null}
-          </footer>
-        </article>
-      ))}
+          </article>
+        );
+      })}
     </div>
   );
 }

@@ -47,16 +47,24 @@
 
 .llm-graph-node {
   position: relative;
+  display: block;
+  width: 100%;
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--paper);
+  color: var(--ink);
   cursor: pointer;
+  font: inherit;
+  text-align: left;
   transition: opacity 120ms ease, border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
 }
-.llm-graph-node:hover {
+.llm-graph-node:hover,
+.llm-graph-node:focus-visible,
+.llm-graph-node__button:focus-visible {
   border-color: var(--moss);
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02), 0 0 0 1px var(--moss-soft) inset;
+  box-shadow: 0 0 0 2px var(--moss-soft), 0 0 0 1px var(--moss) inset;
+  outline: 0;
 }
 .llm-graph-node.is-linked {
   border-color: var(--moss);
@@ -68,18 +76,31 @@
   box-shadow: 0 0 0 2px var(--moss) inset;
 }
 .llm-graph-node.is-dim { opacity: 0.35; }
+.llm-graph-node__button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
 
 .llm-graph-node__head {
   display: flex; align-items: center; gap: 8px; justify-content: space-between;
   margin-bottom: 4px;
 }
 .llm-graph-node__name {
-  font-weight: 600; color: var(--ink-1); font-size: 14.5px;
-  word-break: break-word;
+  min-width: 0;
+  font-weight: 600; color: var(--ink); font-size: 14.5px;
+  overflow-wrap: anywhere;
 }
 .llm-graph-node__vendor {
   font-size: 11.5px; color: var(--ink-3);
   padding: 1px 7px; border-radius: 999px; background: var(--card); border: 1px solid var(--line);
+  white-space: nowrap;
 }
 .llm-graph-node__type {
   font-size: 12px; color: var(--ink-2);
@@ -97,7 +118,7 @@
   display: flex; flex-wrap: wrap; gap: 4px;
 }
 .llm-graph-node__foot {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
   gap: 8px; margin-top: 10px;
   font-size: 12px; color: var(--ink-2);
 }
@@ -128,7 +149,10 @@
   text-align: left;
 }
 .llm-graph-node__child-main {
+  display: grid;
   min-width: 0;
+  max-width: 100%;
+  gap: 4px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -141,13 +165,18 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
+.llm-graph-node__child-main .llm-usage-total {
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+}
 .llm-graph-node__inherit-select {
   min-width: 0;
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--ink-1);
+  background: var(--card);
+  color: var(--ink);
   font: inherit;
   font-size: 12px;
   padding: 4px 6px;
@@ -164,11 +193,85 @@
 }
 .llm-graph-node__child:hover {
   border-color: var(--moss);
-  color: var(--ink-1);
+  color: var(--ink);
 }
+.llm-graph-node__child:focus-within {
+  border-color: var(--moss);
+  box-shadow: 0 0 0 2px var(--moss-soft);
+}
+.llm-graph-node__child.is-linked {
+  border-color: var(--moss);
+  background: var(--moss-softer);
+}
+.llm-graph-node__child.is-active {
+  border-color: var(--moss);
+  background: var(--moss-soft);
+  box-shadow: 0 0 0 1px var(--moss) inset;
+}
+.llm-graph-node__child.is-dim { opacity: 0.4; }
 .llm-graph-node__child.is-error {
   border-color: var(--rust);
   background: var(--rust-soft);
+}
+.llm-capability-total,
+.llm-provider-model-list {
+  margin-top: 10px;
+}
+.llm-capability-total {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.llm-capability-total__breakout,
+.llm-graph-chain__usage-breakout {
+  color: var(--ink-3);
+  font-size: 11.5px;
+}
+.llm-provider-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.llm-provider-model-list .llm-graph-node {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--card);
+}
+.llm-provider-model-list__name {
+  min-width: 0;
+  color: var(--ink-2);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.llm-usage-total {
+  display: inline-grid;
+  grid-template-columns: auto auto auto;
+  align-items: baseline;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card-raised);
+  color: var(--ink-2);
+  font-size: 11.5px;
+}
+.llm-usage-total__label {
+  color: var(--ink-3);
+}
+.llm-usage-total__money {
+  color: var(--ink);
+}
+.llm-usage-total__calls {
+  color: var(--ink-2);
+  white-space: nowrap;
 }
 
 /* Assignment chain nested inside a capability node. */
@@ -176,24 +279,47 @@
   list-style: none; margin: 10px 0 0; padding: 0;
   display: flex; flex-direction: column; gap: 4px;
 }
+.llm-graph-chain__item {
+  margin: 0;
+  padding: 0;
+}
 .llm-graph-chain__rung {
   display: grid;
-  grid-template-columns: 22px 1fr auto auto;
+  grid-template-columns: 22px minmax(0, 1fr) auto minmax(108px, auto);
   align-items: center;
   gap: 8px;
+  width: 100%;
   padding: 6px 8px;
   border: 1px dashed var(--line);
   border-radius: 6px;
   background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
   font-size: 12.5px;
+  text-align: left;
   transition: opacity 120ms ease, border-color 120ms ease, background 120ms ease;
 }
-.llm-graph-chain__rung:hover {
+.llm-graph-chain__rung:hover,
+.llm-graph-chain__rung:focus-visible {
   border-color: var(--moss);
   border-style: solid;
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--moss-soft);
 }
 .llm-graph-chain__rung.is-primary {
   border-style: solid;
+}
+.llm-graph-chain__rung.is-linked {
+  border-color: var(--moss);
+  border-style: solid;
+  background: var(--moss-softer);
+}
+.llm-graph-chain__rung.is-active {
+  border-color: var(--moss);
+  border-style: solid;
+  background: var(--moss-soft);
+  box-shadow: 0 0 0 2px var(--moss) inset;
 }
 .llm-graph-chain__rung.is-dim { opacity: 0.4; }
 .llm-graph-chain__rung.is-error {
@@ -211,9 +337,13 @@
 .llm-graph-chain__rung.is-primary .llm-graph-chain__prio {
   color: #fff; background: var(--moss); border-color: var(--moss);
 }
-.llm-graph-chain__model { word-break: break-all; }
+.llm-graph-chain__model { overflow-wrap: anywhere; }
 .llm-graph-chain__provider { font-size: 11.5px; white-space: nowrap; }
-.llm-graph-chain__spend { font-size: 11.5px; color: var(--ink-2); white-space: nowrap; }
+.llm-graph-chain__usage {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+}
 
 /* Prompt-library slide-over. */
 .llm-prompt-drawer-backdrop {
@@ -271,6 +401,35 @@
     gap: 18px;
   }
   .llm-graph__col-header { padding-top: 12px; }
+  .llm-graph__col-header--providers { order: 1; }
+  .llm-graph__col--providers { order: 2; }
+  .llm-graph__col-header--models { order: 3; }
+  .llm-graph__col--models { order: 4; }
+  .llm-graph__col-header--assignments { order: 5; }
+  .llm-graph__col--assignments { order: 6; }
+  .llm-graph__edges { display: none; }
+  .llm-graph-chain__rung {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+  .llm-graph-node__child {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .llm-graph-chain__provider,
+  .llm-graph-chain__usage {
+    grid-column: 2;
+    justify-self: start;
+  }
+  .llm-graph-node__child-main,
+  .llm-graph-node__child > .chip,
+  .llm-graph-node__inherit-select,
+  .llm-graph-node__inherit-remove {
+    grid-column: 1;
+    justify-self: start;
+  }
+  .llm-provider-model-list .llm-graph-node,
+  .llm-usage-total {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* SVG edge layer that connects providers → models → assignment rungs.
