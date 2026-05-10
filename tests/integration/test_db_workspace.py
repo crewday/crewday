@@ -138,11 +138,21 @@ class TestMigrationShape:
             # cd-1i7s — anti-abuse signup IP audit columns.
             "signup_ip",
             "signup_ip_key",
+            # cd-hb7cx — owner-requested workspace deletion schedule.
+            "delete_requested_at",
+            "purge_after",
         }
         assert set(cols) == expected
         # Only tombstone / onboarding timestamps + signup-IP audit
         # columns are nullable; all other columns carry NOT NULL.
-        nullable = {"owner_onboarded_at", "archived_at", "signup_ip", "signup_ip_key"}
+        nullable = {
+            "owner_onboarded_at",
+            "archived_at",
+            "signup_ip",
+            "signup_ip_key",
+            "delete_requested_at",
+            "purge_after",
+        }
         for name in nullable:
             assert cols[name]["nullable"] is True, f"{name} must be nullable"
         for name in expected - nullable:
@@ -171,6 +181,7 @@ class TestMigrationShape:
             "verification_state"
         ]
         assert indexes["ix_workspace_archived_at"]["column_names"] == ["archived_at"]
+        assert indexes["ix_workspace_purge_after"]["column_names"] == ["purge_after"]
 
     def test_workspace_verification_state_check_is_present(
         self, engine: Engine
