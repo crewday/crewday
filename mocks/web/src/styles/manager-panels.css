@@ -324,7 +324,10 @@
   display: flex; justify-content: center; flex-wrap: wrap;
   gap: var(--space-4); margin-top: var(--space-8);
 }
-.empty-state--compact { padding: var(--space-9); }
+.empty-state--compact {
+  background: transparent; border: 0; box-shadow: none;
+  padding: var(--space-8) var(--space-6);
+}
 .empty-state--quiet {
   background: transparent; border: 0; box-shadow: none;
   padding: var(--space-5) var(--space-0);
