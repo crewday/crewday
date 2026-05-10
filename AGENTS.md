@@ -1,14 +1,7 @@
 # AGENTS.md
 
-Working rules for coding agents (Claude Code, Codex, Cursor, Hermes,
-OpenClaw, etc.) operating on this repository.
+Working rules for coding agents operating on this repository.
 
-<!--
-Optional private/local context include for harnesses that support @-file
-expansion. If the file is absent, or the harness treats this as plain text,
-continue with the public instructions below and read the Local Operator
-Context section manually.
--->
 @.agents/local/AGENTS.local.md
 
 > **Operating the running system as an LLM agent** (acting on behalf of
@@ -236,6 +229,13 @@ update in your wrap-up.
   `python -m scripts.regen_openapi` (see its docstring for the
   stable-formatting choices). Use `make openapi-check` in CI / before
   pushing to fail when `docs/api/openapi.json` has drifted.
+- **Apply new migrations to running local containers.** After creating
+  or editing an Alembic migration, upgrade every relevant running local
+  DB-backed dev container before testing or handoff so the maintainer's
+  stack is not left behind the code. For the default app stack, run:
+  `docker compose -f docker-compose.dev.yml exec app-api alembic upgrade head`.
+  If another local container owns the migrated database, apply the
+  equivalent upgrade there too.
 - **Modern CLI tools**: `rg` over `grep`, `fd` over `find`, `sd` over
   `sed`.
 - **Quality gate wrapper.** Run `./scripts/agent-quality.sh` to apply
