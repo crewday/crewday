@@ -708,6 +708,9 @@ describe("<EmployeeDetailPage>", () => {
       const editRoles = screen.getByRole("button", { name: "Edit roles" });
       expect(editRoles).toBeEnabled();
       expect(screen.queryByText("Role editing is not implemented yet.")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: /Message/ })).not.toBeInTheDocument();
+      expect(screen.queryByText("Direct manager-to-worker messaging is not part of v1.")).not.toBeInTheDocument();
 
       fireEvent.click(editRoles);
       const dialog = await screen.findByRole("dialog", { name: "Edit work roles" });
@@ -735,9 +738,9 @@ describe("<EmployeeDetailPage>", () => {
         },
       });
 
-      fireEvent.click(screen.getByRole("button", { name: "More actions" }));
-      expect(screen.getByRole("menuitem", { name: /Message/ })).toBeDisabled();
-      expect(screen.getByText("Direct manager-to-worker messaging is not part of v1.")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: /Message/ })).not.toBeInTheDocument();
+      expect(screen.queryByText("Direct manager-to-worker messaging is not part of v1.")).not.toBeInTheDocument();
     } finally {
       fake.restore();
     }

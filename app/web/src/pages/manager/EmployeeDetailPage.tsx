@@ -389,13 +389,6 @@ export default function EmployeeDetailPage() {
           Edit roles
         </button>
       }
-      overflow={[
-        {
-          label: "Message",
-          onSelect: () => undefined,
-          disabledReason: "Direct manager-to-worker messaging is not part of v1.",
-        },
-      ]}
     >
       <PageTabs
         ariaLabel="Employee sections"
