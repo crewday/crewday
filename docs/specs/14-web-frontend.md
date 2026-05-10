@@ -289,8 +289,11 @@ Hash navigation selects the active tab on first load and while the
 page is open. `#settings` is the employee-scoped settings override
 surface. `#leaves` fetches `GET /api/v1/employees/{id}/leaves` and
 renders the employee leave ledger with loading, empty, row, and access
-states. The remaining non-overview tabs are reserved chrome until
-their own page bodies land.
+states. `#payslips` fetches `GET /api/v1/payroll/payslips`, filters
+rows to the selected employee/user id from the route detail subject,
+and renders payroll loading, empty, row, and access/error states. The
+remaining non-overview tabs are reserved chrome until their own page
+bodies land.
 
 The employee detail overflow menu does not include a `Message` action
 in v1. Direct manager-to-worker messaging remains absent; managers who

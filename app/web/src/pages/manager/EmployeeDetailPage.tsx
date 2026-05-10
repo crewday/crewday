@@ -2,10 +2,14 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarOff, ClipboardList, ReceiptText } from "lucide-react";
 import { useParams } from "react-router-dom";
-import { ApiError, fetchJson } from "@/lib/api";
+import { ApiError, fetchJson, openApiDownload } from "@/lib/api";
 import type { ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
+import {
+  type PayrollPayslipListPayload,
+  mapPayrollPayslip,
+} from "@/lib/payrollPayslips";
 import { ForbiddenPanel } from "@/auth/RequirePermission";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
@@ -101,6 +105,13 @@ const EXPENSE_TONE: Record<ExpenseStatus, "sand" | "moss" | "rust" | "sky" | "gh
   approved: "moss",
   rejected: "rust",
   reimbursed: "sky",
+};
+
+const PAYSLIP_TONE: Record<PaySlip["status"], "sand" | "sky" | "moss" | "rust"> = {
+  draft: "sand",
+  issued: "sky",
+  paid: "moss",
+  voided: "rust",
 };
 
 function formatValue(value: unknown): string {
@@ -313,6 +324,12 @@ export default function EmployeeDetailPage() {
     enabled: eid !== "" && activeTab === "leaves",
     retry: false,
   });
+  const payslipsQ = useQuery({
+    queryKey: qk.payslips(),
+    queryFn: () => fetchJson<PayrollPayslipListPayload>("/api/v1/payroll/payslips"),
+    enabled: eid !== "" && activeTab === "payslips",
+    retry: false,
+  });
 
   if (detailQ.isPending || propsQ.isPending) {
     return <DeskPage title="Employee"><Loading /></DeskPage>;
@@ -323,6 +340,9 @@ export default function EmployeeDetailPage() {
 
   const { subject, subject_tasks, subject_expenses } = detailQ.data;
   const propsById = new Map(propsQ.data.map((p) => [p.id, p]));
+  const employeePayslips = (payslipsQ.data?.data ?? [])
+    .filter((p) => p.user_id === subject.id)
+    .map(mapPayrollPayslip);
   const roleRows = workRolesQ.data ?? [];
   const currentLinks = userWorkRolesQ.data ?? [];
   const currentRoleIds = new Set(currentLinks.map((link) => link.work_role_id));
@@ -587,7 +607,68 @@ export default function EmployeeDetailPage() {
         </div>
       )}
 
-      {!["overview", "settings", "leaves"].includes(activeTab) && <div id={panelIdFor(activeTab)} role="tabpanel" />}
+      {activeTab === "payslips" && (
+        <div id={panelIdFor("payslips")} role="tabpanel">
+          {payslipsQ.isPending ? (
+            <Loading />
+          ) : payslipsQ.error instanceof ApiError && payslipsQ.error.status === 403 ? (
+            <ForbiddenPanel detail="You do not have permission to view this employee's payslips." />
+          ) : payslipsQ.isError || !payslipsQ.data ? (
+            <p>Failed to load payslips.</p>
+          ) : (
+            <div className="panel">
+              <header className="panel__head"><h2>Payslips</h2></header>
+              {employeePayslips.length === 0 ? (
+                <EmptyState
+                  icon={ReceiptText}
+                  title="No payslips on file"
+                  copy="Draft, issued, and paid payslips for this employee will appear here."
+                  variant="compact"
+                />
+              ) : (
+                <table className="table table--roomy">
+                  <thead>
+                    <tr>
+                      <th>Pay period</th>
+                      <th>Hours</th>
+                      <th>Overtime</th>
+                      <th>Gross</th>
+                      <th>Net</th>
+                      <th>Status</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {employeePayslips.map((p) => (
+                      <tr key={p.id}>
+                        <td className="mono">{p.pay_period_id}</td>
+                        <td className="mono">{p.hours} h</td>
+                        <td className="mono">{p.overtime} h</td>
+                        <td className="mono">{formatMoney(p.gross_cents, p.currency)}</td>
+                        <td className="mono"><strong>{formatMoney(p.net_cents, p.currency)}</strong></td>
+                        <td><Chip tone={PAYSLIP_TONE[p.status]} size="sm">{p.status}</Chip></td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn--sm btn--ghost"
+                            onClick={() => openApiDownload(`/api/v1/payroll/payslips/${p.id}/pdf`)}
+                          >
+                            Preview PDF
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {!["overview", "settings", "leaves", "payslips"].includes(activeTab) && (
+        <div id={panelIdFor(activeTab)} role="tabpanel" />
+      )}
     </DeskPage>
   );
 }

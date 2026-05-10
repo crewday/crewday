@@ -3,36 +3,18 @@ import { useRef, useState, type FormEvent } from "react";
 import { ApiError, fetchJson, openApiDownload } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
+import {
+  type PayPageSlip,
+  type PayrollPayslipListPayload,
+  mapPayrollPayslip,
+} from "@/lib/payrollPayslips";
 import DeskPage from "@/components/DeskPage";
 import { Avatar, Chip, Loading, StatCard } from "@/components/common";
 import type { Employee, PaySlip, PendingReimbursement } from "@/types/api";
 
-type PayPageSlip = PaySlip & { pay_period_id: string };
-
 interface PayPayload {
   current: PayPageSlip[];
   previous: PayPageSlip[];
-}
-
-interface MoneyPayload {
-  cents: number;
-  currency: string;
-}
-
-interface PayrollPayslipPayload {
-  id: string;
-  pay_period_id: string;
-  user_id: string;
-  currency: string;
-  shift_hours_decimal: number | string;
-  overtime_hours_decimal: number | string;
-  gross: MoneyPayload;
-  net: MoneyPayload;
-  status: string;
-}
-
-interface PayrollPayslipListPayload {
-  data: PayrollPayslipPayload[];
 }
 
 interface PayPeriodPayload {
@@ -71,34 +53,8 @@ function sumNet(xs: PayPageSlip[]): number {
   return xs.reduce((acc, p) => acc + p.net_cents, 0);
 }
 
-function normalizeStatus(status: string): PaySlip["status"] {
-  if (status === "draft" || status === "issued" || status === "paid" || status === "voided") {
-    return status;
-  }
-  return "draft";
-}
-
-function mapPayslip(p: PayrollPayslipPayload): PayPageSlip {
-  return {
-    id: p.id,
-    pay_period_id: p.pay_period_id,
-    employee_id: p.user_id,
-    period_starts: "",
-    period_ends: "",
-    gross_cents: p.gross.cents,
-    reimbursements_cents: 0,
-    net_cents: p.net.cents,
-    status: normalizeStatus(p.status),
-    hours: Number(p.shift_hours_decimal),
-    overtime: Number(p.overtime_hours_decimal),
-    currency: p.currency,
-    locale: "en",
-    jurisdiction: "",
-  };
-}
-
 function mapPayPayload(payload: PayrollPayslipListPayload): PayPayload {
-  const payslips = payload.data.map(mapPayslip);
+  const payslips = payload.data.map(mapPayrollPayslip);
   const periodIds = Array.from(new Set(payslips.map((p) => p.pay_period_id)));
   const currentPeriodId =
     periodIds.find((periodId) =>
@@ -162,8 +118,8 @@ export default function PayPage() {
   const [closeBlocker, setCloseBlocker] = useState<string | null>(null);
   const payQ = useQuery({
     queryKey: qk.payslips(),
-    queryFn: () =>
-      fetchJson<PayrollPayslipListPayload>("/api/v1/payroll/payslips").then(mapPayPayload),
+    queryFn: () => fetchJson<PayrollPayslipListPayload>("/api/v1/payroll/payslips"),
+    select: mapPayPayload,
   });
   const periodsQueryKey = qk.payPeriods();
   const periodsQ = useQuery({

@@ -24,10 +24,13 @@ interface TestUserWorkRole {
 function installFetch(options: {
   failRoleDelete?: boolean;
   failLeavesStatus?: number;
+  failPayslipsStatus?: number;
   failRoleList?: boolean;
   failRoleSave?: boolean;
   leaves?: unknown[];
   leavesDelay?: Promise<void>;
+  payslips?: unknown[];
+  payslipsDelay?: Promise<void>;
   subjectExpenses?: unknown[];
   subjectTasks?: unknown[];
 } = {}) {
@@ -162,6 +165,13 @@ function installFetch(options: {
         },
         leaves: options.leaves ?? [],
       });
+    }
+    if (path === "/w/acme/api/v1/payroll/payslips") {
+      if (options.payslipsDelay) await options.payslipsDelay;
+      if (options.failPayslipsStatus) {
+        return jsonResponse({ detail: "Payroll is unavailable." }, options.failPayslipsStatus);
+      }
+      return jsonResponse({ data: options.payslips ?? [] });
     }
     if (path === "/w/acme/api/v1/work_roles") {
       if (options.failRoleList) {
@@ -376,6 +386,11 @@ describe("<EmployeeDetailPage>", () => {
       await waitFor(() => {
         expect(within(tablist).getByRole("tab", { name: "Payslips" })).toHaveAttribute("aria-selected", "true");
       });
+      expect(await screen.findByRole("heading", { name: "No payslips on file" })).toBeVisible();
+      expect(fake.calls).toContainEqual({
+        url: "/w/acme/api/v1/payroll/payslips",
+        method: "GET",
+      });
       expect(fake.calls).not.toContainEqual({
         url: "/w/acme/api/v1/employees/emp_1/settings",
         method: "GET",
@@ -419,8 +434,129 @@ describe("<EmployeeDetailPage>", () => {
       await waitFor(() => {
         expect(screen.getByRole("tab", { name: "Payslips" })).toHaveAttribute("aria-selected", "true");
       });
+      expect(await screen.findByRole("heading", { name: "No payslips on file" })).toBeVisible();
     } finally {
       fake.restore();
+    }
+  });
+
+  it("shows Payslips tab loading while payroll data is pending", async () => {
+    let releasePayslips: () => void = () => undefined;
+    const payslipsDelay = new Promise<void>((resolve) => {
+      releasePayslips = resolve;
+    });
+    const fake = installFetch({ payslipsDelay });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Maya Santos")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "Payslips" }));
+
+      const payslipsPanel = document.getElementById("employee-payslips-panel");
+      expect(payslipsPanel).not.toBeNull();
+      expect(await within(payslipsPanel as HTMLElement).findByText("Loading…")).toBeVisible();
+      releasePayslips();
+      expect(await screen.findByRole("heading", { name: "No payslips on file" })).toBeVisible();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("renders an empty Payslips tab state", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Maya Santos")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "Payslips" }));
+
+      expect(await screen.findByRole("heading", { name: "No payslips on file" })).toBeVisible();
+      expect(screen.getByText("Draft, issued, and paid payslips for this employee will appear here.")).toBeVisible();
+      expect(fake.calls).toContainEqual({
+        url: "/w/acme/api/v1/payroll/payslips",
+        method: "GET",
+      });
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("renders Payslips tab rows only for the selected employee", async () => {
+    const fake = installFetch({
+      payslips: [
+        {
+          id: "slip_selected",
+          pay_period_id: "period_2026_04",
+          user_id: "emp_1",
+          currency: "EUR",
+          shift_hours_decimal: "32",
+          overtime_hours_decimal: "2",
+          gross: { cents: 90000, currency: "EUR" },
+          expense_reimbursements: { cents: 1200, currency: "EUR" },
+          net: { cents: 78000, currency: "EUR" },
+          status: "issued",
+        },
+        {
+          id: "slip_other",
+          pay_period_id: "period_2026_04",
+          user_id: "emp_2",
+          currency: "EUR",
+          shift_hours_decimal: "40",
+          overtime_hours_decimal: "0",
+          gross: { cents: 100000, currency: "EUR" },
+          expense_reimbursements: { cents: 0, currency: "EUR" },
+          net: { cents: 86000, currency: "EUR" },
+          status: "paid",
+        },
+      ],
+    });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Maya Santos")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "Payslips" }));
+
+      expect(await screen.findByText("period_2026_04")).toBeInTheDocument();
+      expect(screen.getByText("32 h")).toBeInTheDocument();
+      expect(screen.getByText("2 h")).toBeInTheDocument();
+      expect(screen.getByText("€900.00")).toBeInTheDocument();
+      expect(screen.getByText("€780.00")).toBeInTheDocument();
+      expect(screen.getByText("issued")).toBeInTheDocument();
+      expect(screen.queryByText("40 h")).not.toBeInTheDocument();
+      expect(screen.queryByText("paid")).not.toBeInTheDocument();
+      expect(screen.queryByText("No payslips on file")).not.toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("renders visible Payslips tab access and error states", async () => {
+    const forbidden = installFetch({ failPayslipsStatus: 403 });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Maya Santos")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "Payslips" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Access denied");
+      expect(screen.getByText("You do not have permission to view this employee's payslips.")).toBeVisible();
+    } finally {
+      forbidden.restore();
+    }
+
+    cleanup();
+    window.location.hash = "";
+
+    const failure = installFetch({ failPayslipsStatus: 500 });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Maya Santos")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "Payslips" }));
+
+      expect(await screen.findByText("Failed to load payslips.")).toBeVisible();
+    } finally {
+      failure.restore();
     }
   });
 

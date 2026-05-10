@@ -20,6 +20,7 @@ function payslipPayload(status = "draft") {
     shift_hours_decimal: "32",
     overtime_hours_decimal: "0",
     gross: { cents: 80000, currency: "EUR" },
+    expense_reimbursements: { cents: 500, currency: "EUR" },
     net: { cents: 70000, currency: "EUR" },
     status,
   };
@@ -181,6 +182,7 @@ describe("<PayPage>", () => {
       expect(screen.getByRole("button", { name: "Close period" })).toBeDisabled();
       expect(screen.getByText("No open payroll period is available.")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Preview PDF" })).toBeEnabled();
+      expect(screen.getByText("€5.00")).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "More actions" }));
       fireEvent.click(screen.getByRole("menuitem", { name: /Export CSV/ }));
