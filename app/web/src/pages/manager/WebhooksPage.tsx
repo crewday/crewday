@@ -9,6 +9,7 @@ import { Chip, Loading } from "@/components/common";
 import type { Webhook, WebhookDelivery } from "@/types/api";
 
 function isOkStatus(status: string | number | null): boolean {
+  // code-health: ignore[ccn nloc] Two-branch delivery status helper is over-counted by lizard after TSX parser recovery.
   if (typeof status === "number") return status >= 200 && status < 300;
   return status === "succeeded" || status === "success";
 }

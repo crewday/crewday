@@ -47,6 +47,7 @@ const STATUS_TONE: Record<PaySlip["status"], "sand" | "sky" | "moss" | "rust"> =
 };
 
 function sumGross(xs: PayPageSlip[]): number {
+  // code-health: ignore[ccn nloc] One-line aggregate is over-counted by lizard after TSX parser recovery.
   return xs.reduce((acc, p) => acc + p.gross_cents, 0);
 }
 function sumNet(xs: PayPageSlip[]): number {

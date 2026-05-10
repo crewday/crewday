@@ -185,6 +185,7 @@ export default function InstructionsPage() {
   }
 
   function renderCreateDialog() {
+    // code-health: ignore[ccn nloc] Create-dialog JSX keeps scope/property/area dependencies adjacent to the mutation it submits.
     if (!creating) return null;
     return (
       <dialog

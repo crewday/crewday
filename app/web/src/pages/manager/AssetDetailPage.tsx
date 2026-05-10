@@ -89,6 +89,7 @@ const ASSET_TABS = [
 ] satisfies Array<PageTab & { key: Tab }>;
 
 function tabFromHash(hash: string): Tab {
+  // code-health: ignore[nloc] Tiny hash mapper is over-counted by lizard after the surrounding TSX route parse.
   const key = hash.replace(/^#/, "");
   return ASSET_TABS.find((tab) => tab.key === key)?.key ?? "overview";
 }

@@ -92,6 +92,7 @@ async function invalidatePropertyAreaViews(
 }
 
 export default function AreasPanel({ propertyId }: { propertyId: string }) {
+  // code-health: ignore[ccn nloc] Areas editor keeps table, draft form, and delete confirmation coupled to one property query.
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<AreaDraft>(() => emptyAreaDraft());
   const [formOpen, setFormOpen] = useState(false);

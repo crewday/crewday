@@ -215,6 +215,7 @@ function scopeLabel(scope: string): string {
 }
 
 function parseDraft(def: SettingDefinition, draft: string): unknown {
+  // code-health: ignore[ccn] Tiny type switch is over-counted by lizard after TSX parser recovery.
   if (def.type === "bool") return draft === "true";
   if (def.type === "int") return Number(draft);
   return draft;

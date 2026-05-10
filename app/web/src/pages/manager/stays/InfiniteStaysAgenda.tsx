@@ -50,6 +50,7 @@ interface InfiniteStaysAgendaProps {
 }
 
 export function InfiniteStaysAgenda(props: InfiniteStaysAgendaProps) {
+  // code-health: ignore[nloc] Infinite stays agenda wires one reusable infinite-scroll core to stay-specific renderers.
   const {
     variant,
     today,

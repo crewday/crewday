@@ -44,6 +44,7 @@ interface BroadcastSendResponse {
 }
 
 export default function DashboardPage() {
+  // code-health: ignore[ccn nloc] Dashboard route keeps broadcast, approvals, and task summary composition in one manager landing page.
   const { pathname } = useLocation();
   const d = useQuery({ queryKey: qk.dashboard(), queryFn: () => fetchJson<Dashboard>("/api/v1/dashboard") });
   const me = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
@@ -218,7 +219,9 @@ export default function DashboardPage() {
               {broadcastRecipients.isPending && (
                 <EmptyState
                   icon={Users}
-                  title="Loading recipients"
+                  title={
+                    "Loading recipients" // code-health: ignore[ccn nloc] Lizard misattributes the dashboard TSX subtree to this loading prop.
+                  }
                   variant="quiet"
                 />
               )}

@@ -173,6 +173,7 @@ const REASON_TONE: Record<
 // `2` stays `2`, `0.300` becomes `0.3`. Shared across the drawer,
 // templates page, and task detail panel.
 function fmtQty(n: number): string {
+  // code-health: ignore[ccn] Decimal quantity formatter is over-counted by lizard after TSX parser recovery.
   if (!Number.isFinite(n)) return String(n);
   const s = n.toFixed(3);
   return s.replace(/\.?0+$/, "");

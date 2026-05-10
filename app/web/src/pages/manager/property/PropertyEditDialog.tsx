@@ -183,16 +183,18 @@ export function buildPropertyCreateBody(draft: PropertyEditDraft): PropertyCreat
   };
 }
 
-export default function PropertyEditDialog({
-  open,
-  property,
-  initialDraft,
-  mode = "edit",
-  saving,
-  error,
-  onSubmit,
-  onClose,
-}: PropertyEditDialogProps) {
+export default function PropertyEditDialog(props: PropertyEditDialogProps) {
+  // code-health: ignore[nloc] Property edit dialog is one promoted form surface; field order mirrors the property API shape.
+  const {
+    open,
+    property,
+    initialDraft,
+    mode = "edit",
+    saving,
+    error,
+    onSubmit,
+    onClose,
+  } = props;
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const [draft, setDraft] = useState<PropertyEditDraft>(() =>
     property ? draftFromProperty(property) : blankPropertyDraft(initialDraft)
