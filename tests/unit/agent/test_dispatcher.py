@@ -9,12 +9,15 @@ factory makes each branch a one-liner.
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import pytest
 from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Query
 
-from app.agent.dispatcher import OpenAPIToolDispatcher
+from app.agent.dispatcher import (
+    OpenAPIToolDispatcher,
+    resolve_workspace_policy_always_gated_tools,
+)
 from app.authz import PermissionDenied
 from app.authz.dep import Permission
 from app.domain.agent.runtime import DelegatedToken, ToolCall
@@ -127,6 +130,18 @@ def _token() -> DelegatedToken:
 
 def _x_cli(group: str, verb: str) -> dict[str, object]:
     return {"group": group, "verb": verb, "mutates": verb not in {"list", "show"}}
+
+
+def _workspace_ctx() -> WorkspaceContext:
+    return WorkspaceContext(
+        workspace_id="ws_001",
+        workspace_slug="ws",
+        actor_id="usr_001",
+        actor_kind="user",
+        actor_grant_role="owner",
+        actor_was_owner_member=True,
+        audit_correlation_id="corr_001",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -499,9 +514,80 @@ def test_is_gated_workspace_policy_beats_annotation() -> None:
     )
     decision = disp.is_gated(ToolCall(id="c1", name="items.create", input={}))
     assert decision.gated is True
-    assert decision.pre_approval_source == "workspace_policy"
+    assert decision.pre_approval_source == "workspace_always"
     assert decision.card_risk == "medium"
     assert "items.create" in decision.card_summary
+
+
+def test_policy_resolver_maps_live_authz_actions_to_mutating_tools() -> None:
+    app = FastAPI()
+    router = APIRouter()
+    pay_gate = Depends(Permission("vendor_invoices.mark_paid", scope_kind="workspace"))
+
+    @router.post(
+        "/w/{slug}/api/v1/billing/vendor-invoices/{invoice_id}/paid",
+        dependencies=[pay_gate],
+        operation_id="billing.vendor_invoices.mark_paid",
+        openapi_extra={"x-cli": _x_cli("vendor-invoices", "mark-paid")},
+    )
+    def mark_paid(slug: str, invoice_id: str) -> dict[str, str]:
+        return {"slug": slug, "invoice_id": invoice_id}
+
+    app.include_router(router)
+
+    gated = resolve_workspace_policy_always_gated_tools(
+        app,
+        session=cast(Any, object()),
+        ctx=_workspace_ctx(),
+    )
+
+    assert "billing.vendor_invoices.mark_paid" in gated
+
+
+def test_policy_resolver_never_projects_read_only_tools() -> None:
+    app = FastAPI()
+    router = APIRouter()
+
+    @router.get(
+        "/w/{slug}/api/v1/payout-destinations",
+        operation_id="payout_destination.create",
+        openapi_extra={"x-cli": _x_cli("payout-destinations", "list")},
+    )
+    def suspicious_read(slug: str) -> dict[str, str]:
+        return {"slug": slug}
+
+    app.include_router(router)
+
+    gated = resolve_workspace_policy_always_gated_tools(
+        app,
+        session=cast(Any, object()),
+        ctx=_workspace_ctx(),
+    )
+
+    assert "payout_destination.create" not in gated
+
+
+def test_policy_resolver_does_not_gate_unknown_policy_aliases() -> None:
+    app = FastAPI()
+    router = APIRouter()
+
+    @router.post(
+        "/w/{slug}/api/v1/invoices/{invoice_id}/paid",
+        operation_id="billing.vendor_invoices.mark_paid_typo",
+        openapi_extra={"x-cli": _x_cli("vendor-invoices", "mark-paid")},
+    )
+    def typo(slug: str, invoice_id: str) -> dict[str, str]:
+        return {"slug": slug, "invoice_id": invoice_id}
+
+    app.include_router(router)
+
+    gated = resolve_workspace_policy_always_gated_tools(
+        app,
+        session=cast(Any, object()),
+        ctx=_workspace_ctx(),
+    )
+
+    assert gated == frozenset()
 
 
 # ---------------------------------------------------------------------------

@@ -24,7 +24,10 @@ from app.adapters.db.messaging.models import ChatChannel, ChatMessage
 from app.adapters.db.messaging.repositories import SqlAlchemyEmailDeliveryRepository
 from app.adapters.llm.ports import LLMClient
 from app.adapters.mail.null import NullMailer
-from app.agent.dispatcher import make_default_dispatcher
+from app.agent.dispatcher import (
+    make_default_dispatcher,
+    resolve_workspace_policy_always_gated_tools,
+)
 from app.agent.tokens import DelegatedTokenFactory
 from app.api.deps import current_workspace_context, db_session, get_llm
 from app.audit import write_audit
@@ -241,7 +244,11 @@ def build_agent_router(
                 tool_dispatcher=make_default_dispatcher(
                     request.app,
                     ctx.workspace_slug,
-                    always_gated_tools=frozenset(),
+                    always_gated_tools=resolve_workspace_policy_always_gated_tools(
+                        request.app,
+                        session=session,
+                        ctx=ctx,
+                    ),
                     session=session,
                     ctx=ctx,
                 ),

@@ -43,6 +43,10 @@ from app.auth.magic_link import (
 )
 from app.authz.dep import Permission
 from app.config import Settings
+from app.domain.agent.policy import (
+    WORKSPACE_ALWAYS_GATED_ACTIONS,
+    WORKSPACE_CONFIGURABLE_APPROVAL_ACTIONS,
+)
 from app.domain.errors import (
     BadRequest,
     Conflict,
@@ -530,18 +534,8 @@ _CATALOG: tuple[SettingDefinitionResponse, ...] = (
 )
 
 _CATALOG_BY_KEY = {item.key: item for item in _CATALOG}
-_ALWAYS_GATED_ACTIONS = [
-    "payout_destination.change_default",
-    "vendor_invoice.pay",
-    "workspace.archive",
-    "permission_group.membership.change",
-]
-_CONFIGURABLE_APPROVAL_ACTIONS = [
-    "expenses.create",
-    "tasks.complete",
-    "inventory.adjust",
-    "booking.amend",
-]
+_ALWAYS_GATED_ACTIONS = sorted(WORKSPACE_ALWAYS_GATED_ACTIONS)
+_CONFIGURABLE_APPROVAL_ACTIONS = sorted(WORKSPACE_CONFIGURABLE_APPROVAL_ACTIONS)
 _DANGER_ZONE = [
     "Export",
     "Archive",

@@ -37,6 +37,7 @@ from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.identity.models import ApiToken, ApiTokenRequestLog, User
 from app.adapters.db.llm.models import (
+    ApprovalRequest,
     BudgetLedger,
     LlmAssignment,
     LlmModel,
@@ -1175,7 +1176,7 @@ def test_agent_message_endpoint_dispatches_live_tool_and_audits(
     assert token_row.revoked_at == _PINNED
 
 
-def test_agent_message_endpoint_dispatches_properties_list_through_real_api(
+def test_agent_message_endpoint_ungated_properties_list_dispatches_through_real_api(
     engine: Engine,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1284,6 +1285,7 @@ def test_agent_message_endpoint_dispatches_properties_list_through_real_api(
         with factory() as check, tenant_agnostic():
             token_rows = list(check.scalars(select(ApiToken)).all())
             request_logs = list(check.scalars(select(ApiTokenRequestLog)).all())
+            approvals = list(check.scalars(select(ApprovalRequest)).all())
         delegated = [row for row in token_rows if row.kind == "delegated"]
         assert len(delegated) == 1
         assert delegated[0].delegate_for_user_id == user.id
@@ -1298,6 +1300,130 @@ def test_agent_message_endpoint_dispatches_properties_list_through_real_api(
             delegated_request_logs[0].path == f"/w/{workspace.slug}/api/v1/properties"
         )
         assert delegated_request_logs[0].status == 200
+
+        assert approvals == []
+    finally:
+        isolated_engine.dispose()
+
+
+def test_agent_message_endpoint_policy_gated_tool_writes_approval_without_dispatch(
+    engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    if engine.dialect.name != "sqlite":
+        pytest.skip("SQLite-specific nested dispatcher regression")
+
+    source_db = engine.url.database
+    if source_db is None:
+        pytest.skip("SQLite file database required")
+    db_path = tmp_path / "agent-policy-gated.db"
+    shutil.copy2(source_db, db_path)
+    isolated_engine = make_engine(f"sqlite:///{db_path}")
+    factory = sessionmaker(
+        bind=isolated_engine,
+        expire_on_commit=False,
+        class_=FilteredSession,
+    )
+    monkeypatch.setattr(db_session_module, "_default_engine", isolated_engine)
+    monkeypatch.setattr(db_session_module, "_default_sessionmaker_", factory)
+    settings = _test_settings(f"sqlite:///{db_path}")
+
+    try:
+        turn_now = datetime.now(UTC)
+        with factory() as seed:
+            workspace, user = _seed_workspace_and_user(seed)
+            _seed_llm_assignment(seed, workspace_id=workspace.id)
+            _seed_budget_ledger(seed, workspace_id=workspace.id)
+            issued = issue(
+                seed,
+                user_id=user.id,
+                workspace_id=workspace.id,
+                has_owner_grant=True,
+                ua="pytest-agent-dispatcher",
+                ip="127.0.0.1",
+                accept_language="en",
+                now=turn_now,
+                settings=settings,
+            )
+            seed.commit()
+
+        bus = EventBus()
+        clock = FrozenClock(turn_now)
+        llm = _ScriptedLLM(
+            replies=[
+                LLMResponse(
+                    text=(
+                        '<tool_call name="payout_destination.change_default" '
+                        'input=\'{"destination_id":"pd_001"}\'/>'
+                    ),
+                    usage=LLMUsage(
+                        prompt_tokens=20,
+                        completion_tokens=8,
+                        total_tokens=28,
+                    ),
+                    model_id="fake/dispatcher-model",
+                    finish_reason="tool_calls",
+                )
+            ]
+        )
+        app = _build_agent_app_with_real_tenancy(
+            llm=llm,
+            clock=clock,
+            bus=bus,
+            settings=settings,
+        )
+
+        @app.post(
+            "/w/{slug}/api/v1/payout-policy-test",
+            operation_id="payout_destination.change_default",
+            openapi_extra={
+                "x-cli": {
+                    "group": "payout-destinations",
+                    "verb": "change-default",
+                    "mutates": True,
+                }
+            },
+        )
+        def _policy_gated_route() -> dict[str, object]:
+            raise AssertionError("policy-gated tool should not dispatch")
+
+        client = TestClient(app, raise_server_exceptions=False)
+        headers = {
+            "cookie": f"{SESSION_COOKIE_NAME}={issued.cookie_value}",
+            "user-agent": "pytest-agent-dispatcher",
+            "accept-language": "en",
+        }
+
+        response = client.post(
+            f"/w/{workspace.slug}/api/v1/agent/manager/message",
+            json={"body": "Change the default payout destination."},
+            headers=headers,
+        )
+
+        assert response.status_code == 201, response.text
+        assert llm.replies == []
+
+        with factory() as check, tenant_agnostic():
+            approvals = list(check.scalars(select(ApprovalRequest)).all())
+            token_rows = list(check.scalars(select(ApiToken)).all())
+            request_logs = list(check.scalars(select(ApiTokenRequestLog)).all())
+
+        assert len(approvals) == 1
+        approval = approvals[0]
+        assert approval.status == "pending"
+        assert approval.for_user_id == user.id
+        assert approval.inline_channel == "web_owner_sidebar"
+        action = approval.action_json
+        assert isinstance(action, dict)
+        assert action["tool_name"] == "payout_destination.change_default"
+        assert action["tool_input"] == {"destination_id": "pd_001"}
+        assert action["pre_approval_source"] == "workspace_always"
+
+        delegated = [row for row in token_rows if row.kind == "delegated"]
+        assert len(delegated) == 1
+        assert delegated[0].revoked_at is not None
+        assert [row for row in request_logs if row.token_id == delegated[0].id] == []
     finally:
         isolated_engine.dispose()
 

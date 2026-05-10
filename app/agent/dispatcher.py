@@ -62,6 +62,10 @@ from app.authz import (
     require,
 )
 from app.authz.places_visibility import visible_property_ids_for_user
+from app.domain.agent.policy import (
+    WORKSPACE_ALWAYS_GATED_ACTIONS,
+    tool_aliases_for_policy_action,
+)
 from app.domain.agent.runtime import (
     DelegatedToken,
     GateDecision,
@@ -73,6 +77,7 @@ from app.tenancy import WorkspaceContext
 __all__ = [
     "OpenAPIToolDispatcher",
     "make_default_dispatcher",
+    "resolve_workspace_policy_always_gated_tools",
 ]
 
 
@@ -727,7 +732,7 @@ class OpenAPIToolDispatcher:
                 gated=True,
                 card_summary=f"{call.name} requires confirmation.",
                 card_risk="medium",
-                pre_approval_source="workspace_policy",
+                pre_approval_source="workspace_always",
             )
 
         annotation = entry.operation.get("x-agent-confirm")
@@ -962,3 +967,62 @@ def make_default_dispatcher(
         session=session,
         ctx=ctx,
     )
+
+
+def resolve_workspace_policy_always_gated_tools(
+    app: FastAPI,
+    *,
+    session: Session,
+    ctx: WorkspaceContext,
+) -> frozenset[str]:
+    """Resolve the current workspace policy into dispatcher tool names.
+
+    v1 has a static workspace approval-policy catalog rather than persisted
+    policy rows. The resolver still takes ``session`` and ``ctx`` so the call
+    site is already scoped to the current workspace turn, and so a later
+    per-workspace source can replace :func:`_workspace_always_gated_actions`
+    without changing the embedded-agent route.
+    """
+    schema = app.openapi()
+    paths = schema.get("paths") if isinstance(schema, Mapping) else None
+    if not isinstance(paths, Mapping):
+        return frozenset()
+
+    index = _build_index(paths)
+    permission_index = _build_permission_index(app)
+    actions = _workspace_always_gated_actions(session, ctx)
+    gated: set[str] = set()
+
+    for action_key in actions:
+        _add_policy_tool_if_agent_callable(gated, index, action_key)
+        for alias in tool_aliases_for_policy_action(action_key):
+            _add_policy_tool_if_agent_callable(gated, index, alias)
+
+    for op_id, requirements in permission_index.items():
+        if any(requirement.action_key in actions for requirement in requirements):
+            _add_policy_tool_if_agent_callable(gated, index, op_id)
+
+    return frozenset(gated)
+
+
+def _workspace_always_gated_actions(
+    session: Session,
+    ctx: WorkspaceContext,
+) -> frozenset[str]:
+    _ = (session, ctx)
+    return WORKSPACE_ALWAYS_GATED_ACTIONS
+
+
+def _add_policy_tool_if_agent_callable(
+    out: set[str],
+    index: Mapping[str, _OperationEntry],
+    op_id: str,
+) -> None:
+    entry = index.get(op_id)
+    if entry is None:
+        return
+    if entry.method not in _MUTATING_METHODS:
+        return
+    if _workspace_agent_rejection(entry) is not None:
+        return
+    out.add(op_id)
