@@ -482,6 +482,35 @@ def _test_settings(database_url: str) -> Settings:
     )
 
 
+def _new_delegated_tokens(
+    token_rows: list[ApiToken],
+    *,
+    existing_token_ids: set[str],
+) -> list[ApiToken]:
+    return [
+        row
+        for row in token_rows
+        if row.kind == "delegated" and row.id not in existing_token_ids
+    ]
+
+
+def _assert_manager_chat_delegated_token(
+    token: ApiToken,
+    *,
+    workspace_id: str,
+    user_id: str,
+    expires_at: datetime,
+) -> None:
+    assert token.kind == "delegated"
+    assert token.user_id == user_id
+    assert token.workspace_id == workspace_id
+    assert token.delegate_for_user_id == user_id
+    assert token.subject_user_id is None
+    assert token.label == "manager-chat-agent"
+    assert token.scope_json == {}
+    assert token.expires_at == expires_at
+
+
 def _build_agent_app_with_real_tenancy(
     *,
     llm: _ScriptedLLM,
@@ -1218,6 +1247,12 @@ def test_agent_message_endpoint_ungated_properties_list_dispatches_through_real_
                 settings=settings,
             )
             seed.commit()
+        with factory() as check, tenant_agnostic():
+            existing_delegated_token_ids = set(
+                check.scalars(
+                    select(ApiToken.id).where(ApiToken.kind == "delegated")
+                ).all()
+            )
 
         bus = EventBus()
         clock = FrozenClock(turn_now)
@@ -1286,9 +1321,17 @@ def test_agent_message_endpoint_ungated_properties_list_dispatches_through_real_
             token_rows = list(check.scalars(select(ApiToken)).all())
             request_logs = list(check.scalars(select(ApiTokenRequestLog)).all())
             approvals = list(check.scalars(select(ApprovalRequest)).all())
-        delegated = [row for row in token_rows if row.kind == "delegated"]
+        delegated = _new_delegated_tokens(
+            token_rows,
+            existing_token_ids=existing_delegated_token_ids,
+        )
         assert len(delegated) == 1
-        assert delegated[0].delegate_for_user_id == user.id
+        _assert_manager_chat_delegated_token(
+            delegated[0],
+            workspace_id=workspace.id,
+            user_id=user.id,
+            expires_at=turn_now + timedelta(minutes=10),
+        )
         assert delegated[0].revoked_at is not None
         assert delegated[0].revoked_at >= turn_now
         delegated_request_logs = [
@@ -1347,6 +1390,12 @@ def test_agent_message_endpoint_policy_gated_tool_writes_approval_without_dispat
                 settings=settings,
             )
             seed.commit()
+        with factory() as check, tenant_agnostic():
+            existing_delegated_token_ids = set(
+                check.scalars(
+                    select(ApiToken.id).where(ApiToken.kind == "delegated")
+                ).all()
+            )
 
         bus = EventBus()
         clock = FrozenClock(turn_now)
@@ -1420,8 +1469,17 @@ def test_agent_message_endpoint_policy_gated_tool_writes_approval_without_dispat
         assert action["tool_input"] == {"destination_id": "pd_001"}
         assert action["pre_approval_source"] == "workspace_always"
 
-        delegated = [row for row in token_rows if row.kind == "delegated"]
+        delegated = _new_delegated_tokens(
+            token_rows,
+            existing_token_ids=existing_delegated_token_ids,
+        )
         assert len(delegated) == 1
+        _assert_manager_chat_delegated_token(
+            delegated[0],
+            workspace_id=workspace.id,
+            user_id=user.id,
+            expires_at=turn_now + timedelta(minutes=10),
+        )
         assert delegated[0].revoked_at is not None
         assert [row for row in request_logs if row.token_id == delegated[0].id] == []
     finally:
