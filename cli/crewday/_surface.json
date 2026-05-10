@@ -13586,6 +13586,32 @@
     "body_schema_ref": null,
     "group": "work_roles",
     "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/work_roles/{work_role_id}"
+    },
+    "idempotent": true,
+    "name": "delete",
+    "operation_id": "work_roles.delete",
+    "path_params": [
+      {
+        "name": "work_role_id",
+        "required": true,
+        "schema": {
+          "title": "Work Role Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Soft-delete a work role",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "work_roles",
+    "http": {
       "method": "GET",
       "path": "/w/{slug}/api/v1/work_roles"
     },

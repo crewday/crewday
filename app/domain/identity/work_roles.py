@@ -17,12 +17,8 @@ Public surface:
   and ``name``.
 * **Service functions** — :func:`list_work_roles` (cursor-paginated),
   :func:`get_work_role`, :func:`create_work_role`,
-  :func:`update_work_role`. Soft-delete is deferred to
-  :func:`delete_work_role` which stamps ``deleted_at`` and writes
-  the ``work_role.deleted`` audit row, though the v1 spec §12 does
-  not expose a ``DELETE /work_roles/{id}`` endpoint yet — the helper
-  is kept here so a later task can wire it without reshaping the
-  module.
+  :func:`update_work_role`, :func:`delete_work_role`. Soft-delete
+  stamps ``deleted_at`` and writes the ``work_role.deleted`` audit row.
 * **Errors** — :class:`WorkRoleNotFound` (404-equivalent),
   :class:`WorkRoleKeyConflict` (422-equivalent, fired on duplicate
   ``(workspace_id, key)``).
@@ -73,6 +69,7 @@ __all__ = [
     "WorkRoleUpdate",
     "WorkRoleView",
     "create_work_role",
+    "delete_work_role",
     "get_work_role",
     "list_work_roles",
     "update_work_role",
@@ -477,4 +474,36 @@ def update_work_role(
         clock=resolved_clock,
     )
     _ = now  # reserved for a future ``updated_at`` column (§02 ticket)
+    return _row_to_view(row)
+
+
+def delete_work_role(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    work_role_id: str,
+    clock: Clock | None = None,
+) -> WorkRoleView:
+    """Soft-delete a live work-role row.
+
+    The lookup hides rows outside the caller's workspace and rows that
+    already carry ``deleted_at``, collapsing missing, cross-tenant, and
+    already-deleted ids into :class:`WorkRoleNotFound`.
+    """
+    resolved_clock = clock if clock is not None else SystemClock()
+    now = resolved_clock.now()
+
+    row = _load_row(session, ctx, work_role_id=work_role_id)
+    row.deleted_at = now
+    session.flush()
+
+    write_audit(
+        session,
+        ctx,
+        entity_kind="work_role",
+        entity_id=row.id,
+        action="work_role.deleted",
+        diff={"deleted_at": now.isoformat()},
+        clock=resolved_clock,
+    )
     return _row_to_view(row)

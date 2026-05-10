@@ -7,12 +7,7 @@ v1 surface:
 * ``GET /work_roles`` — cursor-paginated list of live work roles.
 * ``POST /work_roles`` — create a new work role.
 * ``PATCH /work_roles/{id}`` — partial update.
-
-The spec §12 "Users / work roles / settings" does not expose a
-``DELETE`` endpoint for work roles today (soft-delete is reserved
-for a later lifecycle story that needs a resolution path for the
-user_work_role rows still pointing at the role). The DTO + service
-pair is ready for it whenever that lands.
+* ``DELETE /work_roles/{id}`` — soft-delete a work role.
 
 Every route tagged ``identity`` (§01 context map) + ``work_roles``
 (finer-grained filter). Mutations gate on ``work_roles.manage`` at
@@ -29,7 +24,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -51,6 +46,7 @@ from app.domain.identity.work_roles import (
     WorkRoleUpdate,
     WorkRoleView,
     create_work_role,
+    delete_work_role,
     list_work_roles,
     update_work_role,
 )
@@ -278,6 +274,25 @@ def build_work_roles_router() -> APIRouter:
         except WorkRoleKeyConflict as exc:
             raise _http_for_key_conflict(exc) from exc
         return _view_to_response(view)
+
+    @api.delete(
+        "/{work_role_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        operation_id="work_roles.delete",
+        summary="Soft-delete a work role",
+        dependencies=[manage_gate],
+    )
+    def delete(
+        work_role_id: str,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> Response:
+        """Stamp ``deleted_at``; ``user_work_role`` rows stay intact."""
+        try:
+            delete_work_role(session, ctx, work_role_id=work_role_id)
+        except WorkRoleNotFound as exc:
+            raise _http_for_not_found() from exc
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     return api
 

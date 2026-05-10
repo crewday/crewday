@@ -412,6 +412,7 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.identity.work_engagements.seed_pending_work_engagement",
         "app.domain.identity.work_engagements.update_work_engagement",
         "app.domain.identity.work_roles.create_work_role",
+        "app.domain.identity.work_roles.delete_work_role",
         "app.domain.identity.work_roles.get_work_role",
         "app.domain.identity.work_roles.list_work_roles",
         "app.domain.identity.work_roles.update_work_role",
