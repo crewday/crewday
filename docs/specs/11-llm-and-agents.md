@@ -252,6 +252,17 @@ render a "working on it" state without polling:
   server is responsible for pairing; a `started` without a
   `finished` is a bug.
 
+Any agent-authored user-visible failure or fallback reply includes a
+copyable `Error ID: <id>` line. For the workspace and task runtimes the
+id is the turn `correlation_id` carried by the matching
+`agent.turn.started`, `agent.message.appended`, and
+`agent.turn.finished` events. For the admin chat runtime the id is the
+request correlation id stamped on the admin SSE payloads. The id is
+safe to show to users: it is an opaque observability handle, not a stack
+trace, provider payload, tool response, token, secret, or exception
+message. Successful replies and approval/action cards do not include an
+error id.
+
 Both events route the existing `/events` (or `/admin/events`) stream
 and are scoped to the delegating user the same way
 `agent.message.appended` is. Web clients use them to render an

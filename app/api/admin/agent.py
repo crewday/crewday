@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -22,6 +23,7 @@ from app.api.admin.deps import current_deployment_admin_principal
 from app.api.admin.settings import preview_deployment_setting_for_agent
 from app.api.deps import db_session
 from app.api.transport import admin_sse
+from app.api.transport.correlation_id import request_correlation_id
 from app.domain.agent.runtime import (
     DelegatedToken,
     ToolCall,
@@ -68,6 +70,8 @@ _ADMIN_RUNTIME_FALLBACK_REPLY = (
     "is not configured or did not return a supported action. Your message was "
     "recorded, and no admin action was approved or executed."
 )
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,14 +277,24 @@ def build_admin_agent_router() -> APIRouter:
                 created_at=created_at,
             )
         except Exception as exc:
-            _publish_admin_turn_finished(
+            error = "admin_agent_runtime_error"
+            _log_admin_agent_failure(
                 request,
-                ctx,
-                created_at,
-                outcome="error",
-                error="admin_agent_runtime_error",
+                ctx=ctx,
+                event="admin_agent.runtime.unexpected_failure",
+                error=error,
+                page_context=page,
+                exception_type=type(exc).__name__,
             )
-            raise _admin_agent_unavailable("admin_agent_runtime_error") from exc
+            return _record_admin_fallback_turn(
+                request,
+                ctx=ctx,
+                session=session,
+                body=body.body,
+                page_context=page,
+                error=error,
+                created_at=created_at,
+            )
         row = _record_admin_user_message(
             request,
             ctx=ctx,
@@ -301,14 +315,23 @@ def build_admin_agent_router() -> APIRouter:
                 requested_at=row.created_at,
             )
         except ServiceUnavailable as exc:
-            _publish_admin_turn_finished(
+            error = str(exc.extra.get("error", "admin_agent_runtime_unwired"))
+            _log_admin_agent_failure(
                 request,
-                ctx,
-                row.created_at,
-                outcome="error",
-                error=str(exc.extra.get("error", "admin_agent_runtime_unwired")),
+                ctx=ctx,
+                event="admin_agent.runtime.action_failed",
+                error=error,
+                page_context=page,
             )
-            raise
+            _record_admin_runtime_fallback(
+                request,
+                ctx=ctx,
+                session=session,
+                page_context=page,
+                user_message=row,
+                error=error,
+            )
+            return payload
         _publish_admin_action_pending(request, ctx, action)
         _publish_admin_turn_finished(request, ctx, row.created_at, outcome="action")
         return payload
@@ -758,11 +781,19 @@ def _record_admin_runtime_fallback(
     user_message: AdminAgentMessageRow,
     error: str,
 ) -> AdminAgentMessageRow:
+    error_id = request_correlation_id(request)
+    _log_admin_agent_failure(
+        request,
+        ctx=ctx,
+        event="admin_agent.runtime.fallback_reply",
+        error=error,
+        page_context=page_context,
+    )
     fallback = AdminAgentMessageRow(
         id=new_ulid(),
         admin_user_id=ctx.user_id,
         kind="agent",
-        body_md=_ADMIN_RUNTIME_FALLBACK_REPLY,
+        body_md=_admin_runtime_fallback_reply(error_id),
         page_context=page_context,
         author_label="agent",
         created_at=_now_utc(),
@@ -796,6 +827,38 @@ def _record_admin_runtime_fallback(
         error=error,
     )
     return fallback
+
+
+def _admin_runtime_fallback_reply(error_id: str) -> str:
+    return f"{_ADMIN_RUNTIME_FALLBACK_REPLY}\n\nError ID: {error_id}"
+
+
+def _log_admin_agent_failure(
+    request: Request,
+    *,
+    ctx: DeploymentContext,
+    event: str,
+    error: str,
+    page_context: str,
+    exception_type: str | None = None,
+) -> None:
+    error_id = request_correlation_id(request)
+    extra: dict[str, object] = {
+        "event": event,
+        "error_id": error_id,
+        "turn_correlation_id": error_id,
+        "actor_id": ctx.user_id,
+        "scope": "admin",
+        "thread_id": None,
+        "agent_label": "admin-chat-agent",
+        "capability": _ADMIN_AGENT_CAPABILITY,
+        "error_code": error,
+        "page_context_present": bool(page_context),
+    }
+    if exception_type is not None:
+        extra["exception_type"] = exception_type
+    level = logging.ERROR if exception_type is not None else logging.WARNING
+    _log.log(level, event, extra=extra)
 
 
 def _get_action_by_idempotency_key(

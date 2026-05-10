@@ -22,6 +22,7 @@ Covers each acceptance criterion on the Beads ticket:
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from datetime import timedelta
 
@@ -163,6 +164,7 @@ def test_no_tool_turn_emits_started_finished_and_one_chat_message(
     chat_row = db_session.get(ChatMessage, outcome.chat_message_id)
     assert chat_row is not None
     assert chat_row.body_md == "Hello back!"
+    assert "Error ID:" not in chat_row.body_md
     assert chat_row.author_label == "agent"
     assert chat_row.author_user_id == ctx.actor_id
 
@@ -970,6 +972,8 @@ def test_budget_exceeded_returns_error_no_llm_call_row(
     bus: EventBus,
     captured_events: CapturedEvents,
     clock: FrozenClock,
+    caplog: pytest.LogCaptureFixture,
+    allow_propagated_log_capture: Callable[..., None],
 ) -> None:
     workspace = seed_workspace(db_session)
     user_id = seed_user(db_session)
@@ -990,22 +994,24 @@ def test_budget_exceeded_returns_error_no_llm_call_row(
     llm = ScriptedLLMClient(replies=[make_text_response("This should never run")])
     pricing = {"paid/model": (1_000_000, 1_000_000)}  # 1 cent per token
 
-    outcome = run_turn(
-        ctx,
-        session=db_session,
-        scope="manager",
-        thread_id=channel_id,
-        user_message="Hi",
-        trigger="event",
-        llm_client=llm,
-        tool_dispatcher=FakeToolDispatcher(),
-        token_factory=FakeTokenFactory(),
-        agent_label=_AGENT_LABEL,
-        capability=_CAPABILITY,
-        pricing=pricing,
-        event_bus=bus,
-        clock=clock,
-    )
+    allow_propagated_log_capture("app.domain.agent.runtime")
+    with caplog.at_level(logging.WARNING, logger="app.domain.agent.runtime"):
+        outcome = run_turn(
+            ctx,
+            session=db_session,
+            scope="manager",
+            thread_id=channel_id,
+            user_message="Hi",
+            trigger="event",
+            llm_client=llm,
+            tool_dispatcher=FakeToolDispatcher(),
+            token_factory=FakeTokenFactory(),
+            agent_label=_AGENT_LABEL,
+            capability=_CAPABILITY,
+            pricing=pricing,
+            event_bus=bus,
+            clock=clock,
+        )
 
     assert outcome.outcome == "error"
     assert outcome.error_code == "budget_exceeded"
@@ -1018,6 +1024,13 @@ def test_budget_exceeded_returns_error_no_llm_call_row(
     chat_row = db_session.get(ChatMessage, outcome.chat_message_id)
     assert chat_row is not None
     assert "budget" in chat_row.body_md.lower()
+    assert f"Error ID: {outcome.correlation_id}" in chat_row.body_md
+    assert any(
+        record.message == "agent.runtime.error_reply"
+        and getattr(record, "error_id", None) == outcome.correlation_id
+        and getattr(record, "error_code", None) == "budget_exceeded"
+        for record in caplog.records
+    )
 
     # Started + finished(error) on the wire.
     assert captured_events.names() == [
@@ -1028,6 +1041,67 @@ def test_budget_exceeded_returns_error_no_llm_call_row(
     finished = captured_events.events[-1]
     assert isinstance(finished, AgentTurnFinished)
     assert finished.outcome == "error"
+
+
+def test_unexpected_llm_failure_logs_id_and_returns_safe_fallback(
+    db_session: Session,
+    bus: EventBus,
+    captured_events: CapturedEvents,
+    clock: FrozenClock,
+    caplog: pytest.LogCaptureFixture,
+    allow_propagated_log_capture: Callable[..., None],
+) -> None:
+    _ws, ctx, channel_id = _bind_and_seed(db_session)
+
+    class _FailingLLM(ScriptedLLMClient):
+        def chat(self, **kwargs: object) -> LLMResponse:
+            self.chat_calls += 1
+            raise RuntimeError("provider payload contained secret@example.com")
+
+    llm = _FailingLLM()
+
+    allow_propagated_log_capture("app.domain.agent.runtime")
+    with caplog.at_level(logging.ERROR, logger="app.domain.agent.runtime"):
+        outcome = run_turn(
+            ctx,
+            session=db_session,
+            scope="manager",
+            thread_id=channel_id,
+            user_message="Hi",
+            trigger="event",
+            llm_client=llm,
+            tool_dispatcher=FakeToolDispatcher(),
+            token_factory=FakeTokenFactory(),
+            agent_label=_AGENT_LABEL,
+            capability=_CAPABILITY,
+            event_bus=bus,
+            clock=clock,
+        )
+
+    assert outcome.outcome == "error"
+    assert outcome.error_code == "agent_runtime_error"
+    chat_row = db_session.get(ChatMessage, outcome.chat_message_id)
+    assert chat_row is not None
+    assert "cannot reply right now" in chat_row.body_md
+    assert f"Error ID: {outcome.correlation_id}" in chat_row.body_md
+    assert "secret@example.com" not in chat_row.body_md
+    assert captured_events.names() == [
+        "agent.turn.started",
+        "agent.message.appended",
+        "agent.turn.finished",
+    ]
+    finished = captured_events.events[-1]
+    assert isinstance(finished, AgentTurnFinished)
+    assert finished.correlation_id == outcome.correlation_id
+    assert finished.outcome == "error"
+    assert any(
+        record.message == "agent.runtime.unexpected_failure"
+        and getattr(record, "error_id", None) == outcome.correlation_id
+        and getattr(record, "turn_correlation_id", None) == outcome.correlation_id
+        and getattr(record, "exception_type", None) == "RuntimeError"
+        and "secret@example.com" not in record.getMessage()
+        for record in caplog.records
+    )
 
 
 # ---------------------------------------------------------------------------

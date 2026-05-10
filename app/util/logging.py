@@ -325,6 +325,9 @@ class JsonFormatter(logging.Formatter):
         for attr, value in record.__dict__.items():
             if attr in _RESERVED_RECORD_ATTRS or attr.startswith("_"):
                 continue
+            if attr == "workspace_id" and "workspace_id" not in payload:
+                payload["workspace_id"] = _json_safe(value)
+                continue
             out_key = f"_{attr}" if attr in _RESERVED_OUTPUT_KEYS else attr
             payload[out_key] = _json_safe(value)
 

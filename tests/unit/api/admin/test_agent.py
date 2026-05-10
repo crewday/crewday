@@ -186,16 +186,15 @@ def _assert_admin_runtime_fallback_write(
         ).all()
         actions = session.scalars(select(AdminAgentAction)).all()
         approvals = session.scalars(select(ApprovalRequest)).all()
-    assert [(message.kind, message.body_md) for message in messages] == [
-        ("user", user_body),
-        (
-            "agent",
-            "The admin agent cannot propose an action right now because its chat "
-            "runtime is not configured or did not return a supported action. "
-            "Your message was recorded, and no admin action was approved or "
-            "executed.",
-        ),
-    ]
+    assert len(messages) == 2
+    assert (messages[0].kind, messages[0].body_md) == ("user", user_body)
+    assert messages[1].kind == "agent"
+    assert (
+        "The admin agent cannot propose an action right now because its chat "
+        "runtime is not configured or did not return a supported action."
+        in messages[1].body_md
+    )
+    assert "Error ID:" in messages[1].body_md
     assert actions == []
     assert approvals == []
 
@@ -510,7 +509,7 @@ class TestAdminAgent:
         assert resp.json()["error"] == "admin_agent_action_proposal_invalid"
         _assert_no_agent_writes(session_factory)
 
-    def test_message_when_action_producer_errors_fails_closed_without_writes(
+    def test_message_when_action_producer_errors_records_user_and_fallback(
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
@@ -524,9 +523,13 @@ class TestAdminAgent:
             json={"body": "raise root llm budget"},
         )
 
-        assert resp.status_code == 503
-        assert resp.json()["error"] == "admin_agent_runtime_error"
-        _assert_no_agent_writes(session_factory)
+        assert resp.status_code == 201
+        assert resp.json()["kind"] == "user"
+        assert resp.json()["body"] == "raise root llm budget"
+        _assert_admin_runtime_fallback_write(
+            session_factory,
+            user_body="raise root llm budget",
+        )
 
     def test_runtime_producer_model_unavailable_records_user_and_fallback(
         self,

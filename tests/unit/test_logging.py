@@ -167,6 +167,14 @@ class TestJsonOutput:
         assert line["logger"] == "crewday.test"
         assert line["level"] == "INFO"
 
+    def test_extra_workspace_id_is_canonical_without_bound_context(
+        self, configured_logger: logging.Logger, stream: io.StringIO
+    ) -> None:
+        configured_logger.info("agent runtime", extra={"workspace_id": "ws_123"})
+        line = _lines(stream)[0]
+        assert line["workspace_id"] == "ws_123"
+        assert "_workspace_id" not in line
+
 
 class TestRedactionKeys:
     def test_token_key_is_redacted(

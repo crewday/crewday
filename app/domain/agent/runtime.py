@@ -636,14 +636,22 @@ def _run_turn_impl(run: _TurnRun) -> TurnOutcome:
     _validate_turn_start(run)
     _publish_turn_started(run)
 
-    model_pick = _resolve_model_or_error(run)
-    if isinstance(model_pick, TurnOutcome):
-        return model_pick
-    budget_error = _check_budget_or_error(run, model_pick)
-    if budget_error is not None:
-        return budget_error
+    try:
+        model_pick = _resolve_model_or_error(run)
+        if isinstance(model_pick, TurnOutcome):
+            return model_pick
+        budget_error = _check_budget_or_error(run, model_pick)
+        if budget_error is not None:
+            return budget_error
 
-    return _run_active_turn(_prepare_active_turn(run, model_pick))
+        return _run_active_turn(_prepare_active_turn(run, model_pick))
+    except Exception as exc:
+        _log_unexpected_turn_failure(run, exc)
+        return _finish_error(
+            run,
+            error_code="agent_runtime_error",
+            error_message="Unexpected agent runtime failure.",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1083,12 +1091,18 @@ def _publish_action_pending(
 
 def _finish_timeout(turn: _ActiveTurn) -> TurnOutcome:
     run = turn.run
+    _log_turn_failure(
+        run,
+        event="agent.runtime.timeout_reply",
+        error_code="timeout",
+        level=logging.WARNING,
+    )
     notifications = run.agent_message_notifications
     chat_message_id = _write_chat_reply(
         run.session,
         ctx=run.ctx,
         thread_id=run.thread_id,
-        body_md=_TIMEOUT_REPLY_TEXT,
+        body_md=_reply_with_error_id(_TIMEOUT_REPLY_TEXT, run.correlation_id),
         scope=run.scope,
         event_bus=run.bus,
         correlation_id=run.correlation_id,
@@ -1115,12 +1129,18 @@ def _finish_error(
     error_code: str,
     error_message: str,
 ) -> TurnOutcome:
+    _log_turn_failure(
+        run,
+        event="agent.runtime.error_reply",
+        error_code=error_code,
+        level=logging.WARNING,
+    )
     notifications = run.agent_message_notifications
     chat_message_id = _write_chat_reply(
         run.session,
         ctx=run.ctx,
         thread_id=run.thread_id,
-        body_md=_error_reply_text(error_code),
+        body_md=_reply_with_error_id(_error_reply_text(error_code), run.correlation_id),
         scope=run.scope,
         event_bus=run.bus,
         correlation_id=run.correlation_id,
@@ -1147,6 +1167,45 @@ def _error_reply_text(error_code: str) -> str:
     if error_code == "budget_exceeded":
         return _BUDGET_EXCEEDED_REPLY_TEXT
     return _GENERIC_ERROR_REPLY_TEXT
+
+
+def _reply_with_error_id(body_md: str, error_id: str) -> str:
+    return f"{body_md}\n\nError ID: {error_id}"
+
+
+def _log_unexpected_turn_failure(run: _TurnRun, exc: Exception) -> None:
+    _log_turn_failure(
+        run,
+        event="agent.runtime.unexpected_failure",
+        error_code="agent_runtime_error",
+        level=logging.ERROR,
+        exception_type=type(exc).__name__,
+    )
+
+
+def _log_turn_failure(
+    run: _TurnRun,
+    *,
+    event: str,
+    error_code: str,
+    level: int,
+    exception_type: str | None = None,
+) -> None:
+    extra: dict[str, object] = {
+        "event": event,
+        "error_id": run.correlation_id,
+        "turn_correlation_id": run.correlation_id,
+        "workspace_id": run.ctx.workspace_id,
+        "actor_id": run.ctx.actor_id,
+        "scope": run.scope,
+        "thread_id": run.thread_id,
+        "agent_label": run.agent_label,
+        "capability": run.capability,
+        "error_code": error_code,
+    }
+    if exception_type is not None:
+        extra["exception_type"] = exception_type
+    _log.log(level, event, extra=extra)
 
 
 def _finish_turn(run: _TurnRun, terminal: _TurnTerminal) -> TurnOutcome:

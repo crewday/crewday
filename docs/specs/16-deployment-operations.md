@@ -855,6 +855,15 @@ A full env reference lives in `deploy/.env.example`.
   `workspace_id` (sourced from the active `WorkspaceContext` —
   bare-host requests omit it), `actor_*`, `token_id`, `path`,
   `status`, `duration_ms`.
+- Agent-authored user-visible failure/fallback replies include
+  `Error ID: <id>`. Operators search Docker/stdout JSON logs for that
+  value in `error_id` (and, for agent turns, `turn_correlation_id`) to
+  find the matching `agent.runtime.*` or `admin_agent.runtime.*`
+  structured record. These records include safe non-PII context such as
+  scope, actor id, workspace id when applicable, thread id, capability,
+  agent label, and error code; they do not include stack traces,
+  provider payloads, raw tool responses, secrets, tokens, or internal
+  exception text in user-visible copy.
 - The `X-Request-Id` HTTP header is honoured on inbound (must
   parse as a UUID — non-UUID strings are rejected to close the
   log-injection vector) and echoed on every response so a
