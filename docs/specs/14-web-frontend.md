@@ -262,6 +262,25 @@ tokens                         settings
 kb
 ```
 
+The manager `/settings` page contains a workspace **Danger zone**
+section for owners. It offers exactly three current workspace
+lifecycle actions:
+
+- **Export** downloads the full workspace export artifact produced
+  by `POST /w/<slug>/api/v1/admin/workspace/export`.
+- **Archive** makes the workspace inactive via
+  `POST /w/<slug>/api/v1/admin/workspace/archive`; archived
+  workspaces are absent from normal workspace selection, default
+  landing, and active multi-workspace decisions.
+- **Delete** schedules active deletion via
+  `POST /w/<slug>/api/v1/admin/workspace/delete`; the workspace is
+  archived immediately and purged only after the 14-day archived
+  grace period.
+
+Restore is not shown in the v1 danger zone. It remains a deferred
+future flow for replacing a whole workspace or creating a new
+workspace from an export artifact (§16 "Restore").
+
 The manager employee detail page (`/w/<slug>/employee/<id>`, also
 linked from legacy `/user/<id>` copy) has seven canonical tabs, and
 each tab is a stable hash deep link: `#overview`, `#shifts`,
@@ -271,11 +290,11 @@ page is open. `#settings` is the employee-scoped settings override
 surface; the other non-overview tabs are reserved chrome until their
 own page bodies land.
 
-No workspace-admin SPA pages exist in v1. The
+No separate workspace-admin SPA pages exist in v1. The
 `/w/<slug>/api/v1/admin/*` tree (OpenAPI tag `workspace_admin`,
-CLI group `workspace-admin` per §13) is a reserved seat for
-future per-workspace security or health views — when the first
-one lands, add it to the list above. The deployment-scope
+CLI group `workspace-admin` per §13) backs owner-facing workspace
+lifecycle actions from `/settings`; future per-workspace security
+or health views can also land there. The deployment-scope
 signup-abuse feed at `/admin/signups` (§15 "Self-serve abuse
 mitigations") is **not** part of this list: it lives in the
 "Admin (bare host, deployment-admin grant only)" tree above

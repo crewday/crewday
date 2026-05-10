@@ -673,16 +673,59 @@ registry at every request, not cached at boot.
   cross-region replication for the operator's chosen
   durability tier.
 - **Per-tenant export** (tenant self-serve): workspace owner can
-  request a full export via `POST /w/<slug>/api/v1/admin/export`,
-  returning a signed URL to a ZIP of the tenant's rows +
-  uploads. Used for GDPR data portability (§15).
+  request a full export via
+  `POST /w/<slug>/api/v1/admin/workspace/export`, returning a
+  signed URL to a ZIP of the tenant's rows + uploads. Used for
+  GDPR data portability (§15).
+
+### Workspace danger zone
+
+The owner-facing workspace settings danger zone exposes exactly
+three current actions: **Export**, **Archive**, and **Delete**.
+Restore is deliberately absent from the shipped UI until the import
+semantics below are implemented.
+
+- **Export** creates one portable workspace artifact through
+  `POST /w/<slug>/api/v1/admin/workspace/export`. The preferred
+  artifact is a ZIP containing all workspace-owned rows plus
+  uploaded files. A JSON-only artifact is acceptable only if it
+  captures every workspace row and every upload reference needed to
+  reconstruct the workspace without a second data source.
+- **Archive** marks the workspace inactive through
+  `POST /w/<slug>/api/v1/admin/workspace/archive`. Archived
+  workspaces keep their rows and slug, but they are excluded from
+  normal workspace selection, default landing decisions, and any
+  "user belongs to multiple workspaces" branch that should consider
+  only active workspaces. Archive is reversible by a future
+  restore/unarchive flow until a separate deletion schedule reaches
+  its purge time.
+- **Delete** schedules deletion through
+  `POST /w/<slug>/api/v1/admin/workspace/delete`. The workspace is
+  archived immediately, then remains in a 14-day archived grace
+  period before the active deletion job purges it. During that
+  grace period the slug remains unavailable because the workspace
+  row still owns it. The 14-day deletion grace is separate from
+  the 30-day slug-reservation grace that starts only after actual
+  purge (§03).
+
+### Restore (deferred)
+
+Restore is a future workspace-level operation, not a current danger
+zone action. The intended shape is either replace an entire
+workspace from an uploaded export artifact or create a new
+workspace from that artifact. Same-deployment restore may remap
+permissions when stable identifiers match. Cross-deployment restore
+must not silently grant permissions that cannot be proven
+equivalent; unmappable permissions are skipped or held for explicit
+owner review.
 
 ### Migration off SaaS (tenant self-rescue)
 
-A tenant may at any time download their export and re-import into
-a self-host instance via `crewday admin import <path>` (runs on
-Recipe A or Recipe B). The import assigns a new workspace row and
-remaps `workspace_id` — the slug is preserved unless it collides.
+A tenant may at any time download their export. Re-import remains
+deferred with Restore: when implemented for Recipe A or Recipe B,
+the import assigns a new workspace row and remaps `workspace_id`;
+the slug is preserved unless it collides, and permission mappings
+follow the Restore constraints above.
 
 ## Bootstrap
 

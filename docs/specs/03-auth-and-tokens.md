@@ -169,20 +169,22 @@ because no workspace exists yet:
    over admitting a look-alike — and operators who want either
    slug should pick the one taken first.
 
-   **Grace period.** On workspace archive (`archived_at IS NOT NULL`)
-   or hard delete, the slug is
-   copied to a `slug_reservation` row (§02) with a **30-day**
-   hold before any other signup may claim it. Attempts inside
-   the window return `409 slug_in_grace_period` with the
-   `reserved_until` value in the error body. The
+   **Grace period.** Workspace deletion and slug reservation are
+   separate clocks. Owner-initiated delete first archives the
+   workspace for a **14-day** grace period (§16); during that
+   period the slug is unavailable because the archived workspace
+   row still owns it. Only after actual purge / hard delete is the
+   slug copied to a `slug_reservation` row (§02) with a **30-day**
+   hold before another signup may claim it. Attempts inside the
+   slug-reservation window return `409 slug_in_grace_period` with
+   the `reserved_until` value in the error body. The
    `slug_reservation` row carries `previous_workspace_id` (for
    audit), `reserved_until` (the reservation's expiry), and
    `reason` (`archived | hard_deleted | system_reserved |
    homoglyph_guard`) — see §02 for the full schema. The signup
-   worker prunes expired rows during `signup_gc`. A manager who
-   archives a workspace by mistake can recover the slug within
-   the window via `crewday admin workspace unarchive`, which
-   clears the reservation atomically.
+   worker prunes expired rows during `signup_gc`. An archived
+   workspace keeps its slug if it is recovered by a future
+   restore/unarchive flow before any scheduled purge runs.
 2. **Magic-link verification.** Visitor clicks the link. The SPA
    posts the token to `POST /signup/verify`, which only flips the
    `signup_attempt`'s `verified_at` and writes

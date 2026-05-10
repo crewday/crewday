@@ -558,7 +558,7 @@ intentionally separate groups with different security models.
 |---------------------------|------------------------------------|------------------------------------------|-----------------------------------|
 | `crewday admin`           | **no HTTP** — runs in-process      | shell access to the container            | the operator on the host          |
 | `crewday deploy`          | HTTP → `/admin/api/v1/*`           | passkey session or deployment-scoped token | any deployment admin, from anywhere |
-| `crewday workspace-admin` | HTTP → `/w/<slug>/api/v1/admin/*`  | workspace passkey session or workspace-scoped token; future routes will gate on `admin.view` (§05 action catalog) | any workspace owner / manager with the bit |
+| `crewday workspace-admin` | HTTP → `/w/<slug>/api/v1/admin/*`  | workspace passkey session or workspace-scoped token; danger-zone lifecycle routes require owner authority, and future routes gate on the relevant `admin.*` bit (§05 action catalog) | any workspace owner / manager with the bit |
 
 `crewday admin` keeps its existing host-CLI-only verb list
 (`init`, `user invite`, `workspace bootstrap`, `recover`,
@@ -591,16 +591,19 @@ the audit row is tagged.
 
 `crewday workspace-admin` is the workspace-scoped HTTP admin
 group. Its routes mount under `/w/<slug>/api/v1/admin/*` and
-target the OpenAPI tag `workspace_admin`. The group is the
-reserved seat for workspace-level security and health views that
-don't fit any single bounded context; pre-workspace signup-abuse
-signals do **not** live here — cd-1h7k resolved `/admin/signups`
-as a deployment-admin surface, since pre-verification signals
-have no workspace to scope to (see §15 "Self-serve abuse
-mitigations"). v1 ships no verbs in this group yet; the first
-verb lands with the next workspace-admin route. The group is
-selected by the global `--workspace <slug>` flag (§12 "Workspace
-slug in the CLI") like any other workspace-scoped group.
+target the OpenAPI tag `workspace_admin`. v1 verbs cover the
+owner-facing workspace danger zone: export, archive, and delete
+map to `/w/<slug>/api/v1/admin/workspace/export`,
+`/w/<slug>/api/v1/admin/workspace/archive`, and
+`/w/<slug>/api/v1/admin/workspace/delete` (§16). The group also
+remains the reserved seat for future workspace-level security and
+health views that don't fit any single bounded context;
+pre-workspace signup-abuse signals do **not** live here — cd-1h7k
+resolved `/admin/signups` as a deployment-admin surface, since
+pre-verification signals have no workspace to scope to (see §15
+"Self-serve abuse mitigations"). The group is selected by the
+global `--workspace <slug>` flag (§12 "Workspace slug in the CLI")
+like any other workspace-scoped group.
 
 Naming convention reminder: per §12 "`operationId` convention",
 operation ids are dotted and underscored (`workspace_admin.*`);
