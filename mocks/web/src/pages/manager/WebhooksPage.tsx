@@ -2,14 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, Loading } from "@/components/common";
 import type { Webhook } from "@/types/api";
-
-function fmt(iso: string): string {
-  return new Date(iso).toLocaleString("en-GB", {
-    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
-  });
-}
 
 export default function WebhooksPage() {
   const q = useQuery({
@@ -43,7 +38,7 @@ export default function WebhooksPage() {
                       <Chip key={e} tone="ghost" size="sm">{e}</Chip>
                     ))}
                   </td>
-                  <td className="mono">{fmt(w.last_delivery_at)}</td>
+                  <td><DateTime value={w.last_delivery_at} showTime className="mono" /></td>
                   <td>
                     {!w.active ? (
                       <Chip tone="ghost" size="sm">disabled</Chip>

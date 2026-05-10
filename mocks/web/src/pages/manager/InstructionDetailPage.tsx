@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, Loading } from "@/components/common";
 import type { Instruction, Property } from "@/types/api";
 
@@ -12,13 +13,6 @@ const SCOPE_TONE: Record<Instruction["scope"], "sky" | "moss" | "sand"> = {
   property: "moss",
   area: "sand",
 };
-
-function fmtSaved(iso: string): string {
-  return new Date(iso).toLocaleString("en-GB", {
-    day: "2-digit", month: "short", year: "numeric",
-    hour: "2-digit", minute: "2-digit",
-  });
-}
 
 // Mock body is plain text with newlines; render with <br> between lines.
 // Real Markdown rendering will land when the spec calls for it.
@@ -83,7 +77,7 @@ export default function InstructionDetailPage() {
               <Chip key={t} tone="ghost" size="sm">#{t}</Chip>
             ))}
           </div>
-          <div className="mono muted">Revision {i.version} · saved {fmtSaved(i.updated_at)}</div>
+          <div className="mono muted">Revision {i.version} · saved <DateTime value={i.updated_at} showTime /></div>
         </footer>
       </article>
 

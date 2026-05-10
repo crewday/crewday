@@ -4,6 +4,7 @@ import { ShieldAlert } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import {
   Chip,
   EmptyState,
@@ -50,21 +51,6 @@ const KIND_OPTIONS: { value: KindFilter; label: string; tone: "rust" | "sand" | 
   { value: "repeat_email", label: KIND_LABEL.repeat_email, tone: "sand" },
   { value: "quota_near_breach", label: KIND_LABEL.quota_near_breach, tone: "sky" },
 ];
-
-function hms(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-function dayMon(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-  });
-}
 
 function shortHash(value: string | null): string {
   if (!value) return "—";
@@ -172,10 +158,7 @@ export default function SignupsPage() {
             <tbody>
               {filtered.map((row) => (
                 <tr key={row.event_id}>
-                  <td className="mono">
-                    {hms(row.occurred_at)}
-                    <div className="table__sub">{dayMon(row.occurred_at)}</div>
-                  </td>
+                  <td><DateTime value={row.occurred_at} showTime className="mono" /></td>
                   <td>
                     <Chip tone={kindTone(row.kind)} size="sm">
                       {kindLabel(row.kind)}

@@ -5,6 +5,7 @@ import { qk } from "@/lib/queryKeys";
 import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import { formatMoney } from "@/lib/money";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, Loading, StatCard } from "@/components/common";
 import type {
   LLMCall,
@@ -36,14 +37,6 @@ const CALL_STATUS_TONE: Record<LLMCall["status"], "moss" | "rust" | "sand"> = {
   error: "rust",
   redacted_block: "sand",
 };
-
-function hms(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
 
 export default function AdminLlmPage() {
   const graphQ = useQuery({
@@ -699,7 +692,7 @@ export default function AdminLlmPage() {
                   <td className="mono">${pm.input_cost_per_million.toFixed(3)}</td>
                   <td className="mono">${pm.output_cost_per_million.toFixed(3)}</td>
                   <td className="mono muted">
-                    {pm.price_last_synced_at ? hms(pm.price_last_synced_at) : "—"}
+                    <DateTime value={pm.price_last_synced_at} showTime className="mono muted" empty="—" />
                   </td>
                   <td>
                     {pinned ? (
@@ -743,7 +736,7 @@ export default function AdminLlmPage() {
           <tbody>
             {calls.map((c, idx) => (
               <tr key={idx}>
-                <td className="mono">{hms(c.at)}</td>
+                <td><DateTime value={c.at} showTime className="mono" /></td>
                 <td>
                   <code className="inline-code">{c.capability}</code>
                 </td>

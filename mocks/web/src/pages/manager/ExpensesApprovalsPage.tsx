@@ -3,7 +3,7 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { useDecideMutation } from "@/lib/useDecideMutation";
 import { formatMoney } from "@/lib/money";
-import { fmtDateTime } from "@/lib/dates";
+import DateTime from "@/components/DateTime";
 import DeskPage from "@/components/DeskPage";
 import { Camera } from "lucide-react";
 import { Avatar, Chip, Loading, StatCard } from "@/components/common";
@@ -109,7 +109,7 @@ export default function ExpensesApprovalsPage() {
                   ) : (
                     <Chip tone="ghost" size="sm">manual entry</Chip>
                   )}
-                  <span className="approval__time">submitted {fmtDateTime(x.submitted_at)}</span>
+                  <span className="approval__time">submitted <DateTime value={x.submitted_at} showTime empty="draft" /></span>
                 </div>
 
                 <div className="expense-approval__grid">
@@ -179,7 +179,7 @@ export default function ExpensesApprovalsPage() {
                   </td>
                   <td>{x.merchant}<div className="table__sub">{x.note}</div></td>
                   <td className="mono">{formatMoney(x.amount_cents, x.currency)}</td>
-                  <td className="mono">{fmtDateTime(x.submitted_at)}</td>
+                  <td><DateTime value={x.submitted_at} showTime className="mono" empty="—" /></td>
                   <td><Chip tone={EXPENSE_STATUS_TONE[status]} size="sm">{x.status}</Chip></td>
                 </tr>
               );

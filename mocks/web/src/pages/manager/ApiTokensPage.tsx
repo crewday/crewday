@@ -4,8 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, RotateCw, ScrollText, Trash2 } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
-import { fmtDateTime } from "@/lib/dates";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Loading } from "@/components/common";
 import TokenRevealPanel from "@/components/TokenRevealPanel";
 import type {
@@ -402,14 +402,14 @@ export default function ApiTokensPage() {
                     </td>
                     <td>
                       <div className="tokens-time">
-                        <span>{fmtDateTime(t.created_at)}</span>
+                        <DateTime value={t.created_at} showTime />
                         <span className="tokens-time__sub">by {t.created_by_display}</span>
                       </div>
                     </td>
                     <td>
                       {t.expires_at ? (
                         <div className="tokens-time">
-                          <span>{fmtDateTime(t.expires_at)}</span>
+                          <DateTime value={t.expires_at} showTime />
                         </div>
                       ) : (
                         <span className="tokens-time--absent">never</span>
@@ -418,7 +418,7 @@ export default function ApiTokensPage() {
                     <td>
                       {t.last_used_at ? (
                         <div className="tokens-time">
-                          <span>{fmtDateTime(t.last_used_at)}</span>
+                          <DateTime value={t.last_used_at} showTime />
                           <span className="tokens-time__ip">{t.last_used_ip}</span>
                         </div>
                       ) : (
@@ -506,7 +506,7 @@ export default function ApiTokensPage() {
                 <tbody>
                   {(auditQ.data ?? []).map((a) => (
                     <tr key={a.correlation_id + a.at}>
-                      <td className="tokens-audit__when">{fmtDateTime(a.at)}</td>
+                      <td><DateTime value={a.at} showTime className="tokens-audit__when" /></td>
                       <td>
                         <span className="tokens-audit__method">{a.method}</span>
                       </td>

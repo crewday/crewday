@@ -6,6 +6,7 @@ import { fetchJson, withBase } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { initialAgentCollapsed, persistAgentCollapsed } from "@/lib/preferences";
 import { useAgentTyping } from "@/lib/agentTyping";
+import DateTime from "@/components/DateTime";
 import ChatComposer from "@/components/chat/ChatComposer";
 import type { AgentAction, AgentMessage, AgentTurnScope, Role } from "@/types/api";
 
@@ -179,9 +180,7 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
           {log.data?.map((msg, i) => (
             <div key={i} className={"agent-msg agent-msg--" + msg.kind}>
               <span className="agent-msg__body">{msg.body}</span>
-              <span className="agent-msg__time">
-                {new Date(msg.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-              </span>
+              <DateTime value={msg.at} showTime className="agent-msg__time" />
             </div>
           ))}
           {typing && (

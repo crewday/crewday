@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Checkbox, Chip, Loading } from "@/components/common";
 import type {
   AdminDeploymentSetting,
@@ -169,7 +170,7 @@ export default function AdminSettingsPage() {
         </div>
         <footer className="panel__foot">
           <span className="muted">
-            Last edited {new Date(s.updated_at).toLocaleString()} by {s.updated_by}.
+            Last edited <DateTime value={s.updated_at} showTime /> by {s.updated_by}.
           </span>
           <div className="inline-actions">
             <button
@@ -243,7 +244,7 @@ export default function AdminSettingsPage() {
                     )}
                   </td>
                   <td className="mono muted">
-                    {new Date(r.updated_at).toLocaleString()}
+                    <DateTime value={r.updated_at} showTime />
                     <div className="table__sub">{r.updated_by}</div>
                   </td>
                 </tr>

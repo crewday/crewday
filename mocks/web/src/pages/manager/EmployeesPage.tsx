@@ -3,8 +3,8 @@ import { Link } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Avatar, Chip, Loading } from "@/components/common";
-import { fmtTime } from "@/lib/dates";
 import type { Booking, Employee, Property } from "@/types/api";
 
 export default function EmployeesPage() {
@@ -88,7 +88,7 @@ export default function EmployeesPage() {
                         new Date(b.scheduled_end).getTime() >= now,
                     );
                     return active ? (
-                      <Chip tone="moss" size="sm">Booked · until {fmtTime(active.scheduled_end)}</Chip>
+                      <Chip tone="moss" size="sm">Booked · until <DateTime value={active.scheduled_end} showTime /></Chip>
                     ) : (
                       <Chip tone="ghost" size="sm">Free</Chip>
                     );

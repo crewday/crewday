@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, Loading } from "@/components/common";
 import { formatMoney } from "@/lib/money";
 import type { Me, Property, Quote, WorkOrder } from "@/types/api";
@@ -95,7 +96,7 @@ export default function ClientQuotesPage() {
                         {q.status}
                       </Chip>
                     </td>
-                    <td className="table__mono muted">{q.decided_at ? new Date(q.decided_at).toLocaleDateString() : "—"}</td>
+                    <td><DateTime value={q.decided_at} showTime className="table__mono muted" empty="—" /></td>
                     <td>
                       {q.status === "submitted" && (
                         <div className="row-actions">

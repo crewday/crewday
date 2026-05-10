@@ -4,7 +4,7 @@ import { useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
-import { fmtDate, fmtDateTime } from "@/lib/dates";
+import DateTime from "@/components/DateTime";
 import DeskPage from "@/components/DeskPage";
 import PageTabs, { type PageTab } from "@/components/PageTabs";
 import { Chip, Loading } from "@/components/common";
@@ -204,7 +204,7 @@ export default function EmployeeDetailPage() {
                 return (
                   <li key={t.id} className="task-row">
                     <span className="task-row__time table__mono">
-                      {fmtDateTime(t.scheduled_start)}
+                      <DateTime value={t.scheduled_start} showTime />
                     </span>
                     <span className="task-row__title">
                       <strong>{t.title}</strong>
@@ -226,7 +226,7 @@ export default function EmployeeDetailPage() {
                   <div className="expense-row__main">
                     <strong>{x.merchant}</strong>
                     <span className="expense-row__note">{x.note}</span>
-                    <span className="expense-row__time">{fmtDate(x.submitted_at)}</span>
+                    <DateTime value={x.submitted_at} showTime className="expense-row__time" empty="draft" />
                   </div>
                   <div className="expense-row__side">
                     <span className="expense-row__amount">{formatMoney(x.amount_cents, x.currency)}</span>

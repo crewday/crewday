@@ -4,6 +4,7 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, Loading, ProgressBar, StatCard } from "@/components/common";
 import { displayAuditRow } from "@/pages/admin/auditRows";
 import type {
@@ -132,7 +133,7 @@ export default function AdminDashboardPage() {
           <tbody>
             {audit.map((row, idx) => (
               <tr key={idx}>
-                <td className="mono">{new Date(row.at).toLocaleString()}</td>
+                <td><DateTime value={row.at} showTime className="mono" /></td>
                 <td>{row.actor}</td>
                 <td><code className="inline-code">{row.action}</code></td>
                 <td className="mono">{row.target}</td>

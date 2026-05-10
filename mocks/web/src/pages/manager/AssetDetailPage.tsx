@@ -4,6 +4,7 @@ import { useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import PageTabs, { type PageTab } from "@/components/PageTabs";
 import { Chip, Loading } from "@/components/common";
 import { AssetIcon } from "@/components/AssetIcon";
@@ -292,7 +293,7 @@ function ActionsTab({
             {ac.interval_days != null && (
               <span className="action-row__interval">every {ac.interval_days}d</span>
             )}
-            <span className="muted mono">{fmtDate(ac.last_performed_at)}</span>
+            <DateTime value={ac.last_performed_at} showTime className="muted mono" empty="—" />
             <Chip tone={dueTone(ac.next_due_on)} size="sm">{fmtDate(ac.next_due_on)}</Chip>
             <button
               className="btn btn--sm btn--moss"
@@ -345,7 +346,7 @@ function HistoryTab({ tasks }: { tasks: Task[] }) {
                   <Chip tone={TASK_STATUS_TONE[t.status]} size="sm">{t.status}</Chip>
                 </div>
                 <div className="kb-item__meta">
-                  <span className="mono muted">{fmtDate(t.scheduled_start)}</span>
+                  <DateTime value={t.scheduled_start} showTime className="mono muted" />
                 </div>
               </div>
             </li>

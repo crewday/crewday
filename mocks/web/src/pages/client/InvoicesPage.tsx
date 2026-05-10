@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, Loading } from "@/components/common";
 import { formatMoney } from "@/lib/money";
 import type { Me, Property, VendorInvoice } from "@/types/api";
@@ -86,7 +87,7 @@ export default function ClientInvoicesPage() {
                       {v.status}
                     </Chip>
                   </td>
-                  <td className="table__mono">{v.billed_at}</td>
+                  <td><DateTime value={v.billed_at} showTime className="table__mono" /></td>
                   <td className="table__mono muted">{v.due_on ?? "—"}</td>
                   <td>
                     {v.proof_of_payment_file_ids.length > 0 ? (
@@ -98,9 +99,11 @@ export default function ClientInvoicesPage() {
                     )}
                   </td>
                   <td className="table__mono muted">
-                    {v.reminder_last_sent_at
-                      ? `last ${v.reminder_last_sent_at.slice(0, 10)}`
-                      : "—"}
+                    {v.reminder_last_sent_at ? (
+                      <>last <DateTime value={v.reminder_last_sent_at} showTime /></>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                   <td>
                     {["approved", "submitted"].includes(v.status) ? (

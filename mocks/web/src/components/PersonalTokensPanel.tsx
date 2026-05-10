@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, KeyRound, Trash2 } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
-import { fmtDateTime } from "@/lib/dates";
+import DateTime from "@/components/DateTime";
 import { Loading } from "@/components/common";
 import TokenRevealPanel from "@/components/TokenRevealPanel";
 import type { ApiToken, ApiTokenCreated } from "@/types/api";
@@ -244,16 +244,16 @@ export default function PersonalTokensPanel() {
                 <div className="entry-card__meta">
                   <span>
                     <span className="entry-card__meta-label">Created</span>
-                    {fmtDateTime(t.created_at)}
+                    <DateTime value={t.created_at} showTime />
                   </span>
                   <span>
                     <span className="entry-card__meta-label">Last used</span>
-                    {t.last_used_at ? fmtDateTime(t.last_used_at) : "never"}
+                    <DateTime value={t.last_used_at} showTime empty="never" />
                   </span>
                   {t.expires_at && (
                     <span>
                       <span className="entry-card__meta-label">Expires</span>
-                      {fmtDateTime(t.expires_at)}
+                      <DateTime value={t.expires_at} showTime />
                     </span>
                   )}
                 </div>

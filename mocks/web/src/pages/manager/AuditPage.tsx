@@ -2,18 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, Loading } from "@/components/common";
 import { ACTOR_KIND_TONE, GRANT_ROLE_TONE } from "@/lib/tones";
 import type { AuditEntry } from "@/types/api";
-
-function hms(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], {
-    hour: "2-digit", minute: "2-digit", second: "2-digit",
-  });
-}
-function dayMon(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
-}
 
 export default function AuditPage() {
   const q = useQuery({
@@ -56,10 +48,7 @@ export default function AuditPage() {
           <tbody>
             {entries.map((e, idx) => (
               <tr key={idx}>
-                <td className="mono">
-                  {hms(e.at)}
-                  <div className="table__sub">{dayMon(e.at)}</div>
-                </td>
+                <td><DateTime value={e.at} showTime className="mono" /></td>
                 <td>
                   <Chip tone={ACTOR_KIND_TONE[e.actor_kind]} size="sm">{e.actor_kind}</Chip>{" "}
                   {e.actor_grant_role ? (

@@ -4,6 +4,7 @@ import { Copy, Check, MessageSquare } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, Loading, StatCard } from "@/components/common";
 import type {
   AdminChatOverrideRow,
@@ -88,7 +89,7 @@ function ProviderPanel({ p }: { p: AdminChatProvider }) {
               <td>{c.label}<div className="table__sub mono">{c.field}</div></td>
               <td className="mono">{c.display_stub}</td>
               <td className="mono muted">
-                {c.updated_at ? new Date(c.updated_at).toLocaleString() : "—"}
+                <DateTime value={c.updated_at} showTime empty="—" />
                 <div className="table__sub">{c.updated_by ?? ""}</div>
               </td>
               <td>
@@ -122,7 +123,7 @@ function ProviderPanel({ p }: { p: AdminChatProvider }) {
                     ) : null}
                   </td>
                   <td className="mono muted">
-                    {t.last_sync_at ? new Date(t.last_sync_at).toLocaleString() : "—"}
+                    <DateTime value={t.last_sync_at} showTime empty="—" />
                   </td>
                   <td>
                     <button type="button" className="btn btn--ghost btn--sm" disabled>Resync</button>
@@ -256,7 +257,7 @@ export default function AdminChatGatewayPage() {
                     <td className="mono">{o.channel_kind}</td>
                     <td className="mono">{o.phone_display}</td>
                     <td><Chip tone={STATUS_TONE[o.status]} size="sm">{o.status.replace("_", " ")}</Chip></td>
-                    <td className="mono muted">{o.created_at}</td>
+                    <td><DateTime value={o.created_at} showTime className="mono muted" /></td>
                     <td className="muted">{o.reason ?? "—"}</td>
                   </tr>
                 ))}

@@ -3,8 +3,8 @@ import { Link } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Avatar, Chip, Loading, Panel, StatCard } from "@/components/common";
-import { fmtTime } from "@/lib/dates";
 import {
   APPROVAL_RISK_TONE,
   ISSUE_SEVERITY_TONE,
@@ -87,7 +87,7 @@ export default function DashboardPage() {
                 const emp = empsById.get(t.assignee_id);
                 return (
                   <tr key={t.id}>
-                    <td className="mono">{fmtTime(t.scheduled_start)}</td>
+                    <td><DateTime value={t.scheduled_start} showTime className="mono" /></td>
                     <td><strong>{t.title}</strong><div className="table__sub">{t.area}</div></td>
                     <td>{prop && <Chip tone={prop.color} size="sm">{prop.name}</Chip>}</td>
                     <td>

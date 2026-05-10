@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
+import DateTime from "@/components/DateTime";
 import type {
   AgentPreference,
   AgentPreferenceScope,
@@ -187,9 +188,11 @@ export default function AgentPreferencesPanel({
               {hardOver ? " — over hard cap" : softOver ? " — over soft cap" : ""}
             </span>
             <span className="muted">
-              {pref.updated_at
-                ? `Last saved ${new Date(pref.updated_at).toLocaleString()}`
-                : "Never saved."}
+              {pref.updated_at ? (
+                <>Last saved <DateTime value={pref.updated_at} showTime /></>
+              ) : (
+                "Never saved."
+              )}
             </span>
           </div>
           {dirty && (
@@ -219,7 +222,7 @@ export default function AgentPreferencesPanel({
             or <code className="inline-code">GET /api/v1/agent_preferences/
               {scope === "user" ? "me" : scope + (scopeId ? "/" + scopeId : "")}</code>.
             {pref.updated_at && (
-              <> Last updated {new Date(pref.updated_at).toLocaleDateString()}
+              <> Last updated <DateTime value={pref.updated_at} />
                 {" "}({pref.token_count} tokens).</>
             )}
           </p>

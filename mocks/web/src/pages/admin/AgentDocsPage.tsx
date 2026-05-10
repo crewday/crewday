@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, Loading } from "@/components/common";
 import type { AgentDoc, AgentDocSummary } from "@/types/api";
 
@@ -75,9 +76,7 @@ export default function AdminAgentDocsPage() {
                       <Chip key={r} tone="ghost" size="sm">{r}</Chip>
                     ))}
                   </td>
-                  <td className="muted">
-                    {new Date(d.updated_at).toLocaleDateString()}
-                  </td>
+                  <td><DateTime value={d.updated_at} className="muted" /></td>
                 </tr>
               ))}
             </tbody>

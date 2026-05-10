@@ -3,13 +3,10 @@ import { Link } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, Loading } from "@/components/common";
 import { INSTRUCTION_SCOPE_TONE } from "@/lib/tones";
 import type { Instruction, Property } from "@/types/api";
-
-function fmtUpdated(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
-}
 
 function preview(body: string): string {
   return body.length > 180 ? body.slice(0, 180) + "…" : body;
@@ -70,7 +67,7 @@ export default function InstructionsPage() {
                   {i.tags.map((t) => (
                     <Chip key={t} tone="ghost" size="sm">#{t}</Chip>
                   ))}
-                  <span className="mono muted">v{i.version} · updated {fmtUpdated(i.updated_at)}</span>
+                  <span className="mono muted">v{i.version} · updated <DateTime value={i.updated_at} /></span>
                 </div>
               </Link>
             </li>

@@ -6,6 +6,7 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import AgentPreferencesPanel from "@/components/AgentPreferencesPanel";
+import DateTime from "@/components/DateTime";
 import { Avatar, Chip, EmptyState, Loading } from "@/components/common";
 import PageTabs, { type PageTab } from "@/components/PageTabs";
 import { useWorkspace } from "@/context/WorkspaceContext";
@@ -72,13 +73,6 @@ const MEMBERSHIP_TONE: Record<string, "moss" | "sky" | "ghost"> = {
 
 function fmtDayMon(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
-}
-
-function fmtDayMonTime(iso: string): string {
-  const d = new Date(iso);
-  const date = d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
-  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return date + " · " + time;
 }
 
 function formatValue(value: unknown): string {
@@ -270,7 +264,7 @@ function SharingPanel({
                     {MEMBERSHIP_LABEL[m.membership_role] ?? m.membership_role}
                   </Chip>
                 </td>
-                <td className="table__mono">{fmtDayMon(m.added_at)}</td>
+                <td><DateTime value={m.added_at} showTime className="table__mono" /></td>
                 <td>
                   {canRevoke && (
                     <button
@@ -809,9 +803,7 @@ export default function PropertyDetailPage() {
                   const emp = empsById.get(t.assignee_id);
                   return (
                     <li key={t.id} className="task-row">
-                      <span className="task-row__time table__mono">
-                        {fmtDayMonTime(t.scheduled_start)}
-                      </span>
+                      <DateTime value={t.scheduled_start} showTime className="task-row__time table__mono" />
                       <span className="task-row__title">
                         <strong>{t.title}</strong>
                         <span className="task-row__area">{t.area}</span>

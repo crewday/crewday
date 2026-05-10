@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import DateTime from "@/components/DateTime";
 import { Chip, Dot } from "@/components/common";
 import type { Property, Task } from "@/types/api";
 
@@ -8,7 +9,6 @@ import type { Property, Task } from "@/types/api";
 export default function TaskListCard({
   task,
   property,
-  showWeekday = false,
   showStatus = false,
 }: {
   task: Task;
@@ -16,7 +16,6 @@ export default function TaskListCard({
   showWeekday?: boolean;
   showStatus?: boolean;
 }) {
-  const when = formatWhen(task.scheduled_start, showWeekday);
   const metaBase = task.area
     ? `${task.area} · ${task.estimated_minutes} min`
     : `${task.estimated_minutes} min`;
@@ -33,7 +32,7 @@ export default function TaskListCard({
         <div className="task-card__meta">{meta}</div>
       </div>
       <div className="task-card__aside">
-        <span className="task-card__when">{when}</span>
+        <DateTime value={task.scheduled_start} showTime className="task-card__when" />
         {property ? (
           <Chip tone={property.color} size="sm">{property.name}</Chip>
         ) : task.is_personal ? (
@@ -44,12 +43,4 @@ export default function TaskListCard({
       </div>
     </Link>
   );
-}
-
-function formatWhen(iso: string, withWeekday: boolean): string {
-  const d = new Date(iso);
-  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  if (!withWeekday) return time;
-  const day = d.toLocaleDateString([], { weekday: "short" });
-  return day + " " + time;
 }

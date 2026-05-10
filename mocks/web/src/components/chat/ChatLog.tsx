@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { fmtTime } from "@/lib/dates";
+import DateTime from "@/components/DateTime";
 import type { AgentMessage } from "@/types/api";
 
 type ActionDecision = "approve" | "details";
@@ -64,14 +64,14 @@ export default function ChatLog({
                   </button>
                 </div>
               )}
-              <span className="chat-msg__time">{fmtTime(m.at)}</span>
+              <DateTime value={m.at} showTime className="chat-msg__time" />
             </div>
           );
         }
         return (
           <div key={idx} className={"chat-msg chat-msg--" + m.kind}>
             <span className="chat-msg__body">{m.body}</span>
-            <span className="chat-msg__time">{fmtTime(m.at)}</span>
+            <DateTime value={m.at} showTime className="chat-msg__time" />
           </div>
         );
       })}
