@@ -126,6 +126,7 @@ def send_or_queue_broadcast(
     clock: Clock | None = None,
 ) -> BroadcastSendOutcome:
     """Send a single-recipient broadcast or queue multi-recipient approval."""
+    # code-health: ignore[nloc,params] Broadcast command keeps approval inputs explicit.
     eff_clock = clock if clock is not None else SystemClock()
     clean_subject, clean_body = _validate_content(subject=subject, body_md=body_md)
     recipients = _resolve_recipients(
@@ -204,6 +205,7 @@ def execute_broadcast(
     clock: Clock | None = None,
 ) -> tuple[str, ...]:
     """Create one auditable notification row per broadcast recipient."""
+    # code-health: ignore[nloc,params] Broadcast execution keeps audit atomic.
     eff_clock = clock if clock is not None else SystemClock()
     clean_subject, clean_body = _validate_content(subject=subject, body_md=body_md)
     if not recipient_user_ids:

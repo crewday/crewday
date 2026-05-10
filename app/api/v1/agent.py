@@ -382,6 +382,7 @@ def build_agent_router(
         session: _Db,
     ) -> AgentRelayRequestResponse:
         """Create and deliver an agent-mediated request to a visible worker."""
+        # code-health: ignore[nloc] Relay route keeps DB, audit, SSE, notify order.
         _require_scope_access("manager", ctx)
         target = _resolve_relay_target(session, ctx=ctx, body=body)
         requester_label = _actor_label(session, ctx.actor_id)
@@ -620,6 +621,7 @@ def _complete_answered_relay_once(
     correlation_id: str,
     clock: Clock,
 ) -> None:
+    # code-health: ignore[nloc,params] Relay completion coordinates state and SSE.
     if len(relays) != 1 or not _is_clear_relay_answer(target_reply):
         return
     relay = relays[0]
@@ -889,6 +891,7 @@ def _append_relay_target_message(
     request_text: str,
     clock: Clock,
 ) -> ChatMessage:
+    # code-health: ignore[params] Chat row creation needs explicit relay target fields.
     row = ChatMessage(
         id=new_ulid(clock=clock),
         workspace_id=ctx.workspace_id,

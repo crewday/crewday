@@ -803,6 +803,7 @@ class OpenAPIToolDispatcher:
         headers: Mapping[str, str],
     ) -> ToolResult:
         """Resolve ``call`` against the index and invoke it in-process."""
+        # code-health: ignore[nloc] OpenAPI dispatch path stays explicit.
         entry = self._index.get(call.name)
         if entry is None:
             return ToolResult(

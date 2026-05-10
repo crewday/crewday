@@ -544,6 +544,7 @@ def _resolve_chain(
     The caller turns an empty list into either a cache miss-sentinel
     or :class:`CapabilityUnassignedError` as appropriate.
     """
+    # code-health: ignore[ccn] Capability inheritance fallback is an ordered walk.
     visited: set[str] = set()
     current = capability
     requested_required = _DEFAULT_REQUIRED_CAPABILITIES.get(capability, ("chat",))

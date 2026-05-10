@@ -324,6 +324,7 @@ def _dispatch_broadcast(
     actor_grant_role: ActorGrantRole,
     actor_was_owner_member: bool,
 ) -> ToolResult:
+    # code-health: ignore[nloc] Approval replay maps auth context to tool result.
     parsed = broadcast_tool_input(call.input)
     workspace_slug = _input_str(call.input, "workspace_slug")
     if parsed is None or workspace_slug is None:

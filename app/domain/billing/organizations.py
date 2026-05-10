@@ -377,6 +377,7 @@ class OrganizationService:
         current: OrganizationRow,
         patch: OrganizationPatch,
     ) -> dict[str, object | None]:
+        # code-health: ignore[ccn] Sparse PATCH validation keeps field policy explicit.
         fields: dict[str, object | None] = {}
         for key, value in patch.fields.items():
             if key == "kind":

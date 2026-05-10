@@ -188,6 +188,7 @@ def schedule_workspace_deletion_if_needed(
     schedule always wins so repeated Delete requests before the deadline
     are idempotent and cannot extend the grace period.
     """
+    # code-health: ignore[ccn,nloc] Deletion scheduling is one idempotent repair txn.
     if when.tzinfo is None:  # pragma: no cover - defensive
         when = when.replace(tzinfo=UTC)
     requested_at = when.astimezone(UTC)

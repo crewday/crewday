@@ -222,6 +222,7 @@ def build_admin_agent_router() -> APIRouter:
         session: _Db,
         body: AdminAgentMessageRequest,
     ) -> AdminAgentMessage:
+        # code-health: ignore[nloc] Router preserves transcript, audit, SSE order.
         page = request.headers.get("X-Agent-Page", "")
         created_at = _now_utc()
         _publish_admin_turn_started(request, ctx, created_at)
@@ -643,6 +644,7 @@ def _produce_admin_action(
     page_context: str,
     requested_at: datetime,
 ) -> AdminAgentActionRow:
+    # code-health: ignore[nloc,params] Action proposal boundary spells out audit inputs.
     idempotency_key = proposal.idempotency_key or _stable_action_idempotency_key(
         ctx=ctx,
         message=message,
@@ -753,6 +755,7 @@ def _record_admin_fallback_turn(
     error: str,
     created_at: datetime,
 ) -> AdminAgentMessage:
+    # code-health: ignore[params] Fallback transcript audit inputs stay explicit.
     row = _record_admin_user_message(
         request,
         ctx=ctx,

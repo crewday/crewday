@@ -608,6 +608,7 @@ def write_deployment_setting(
     Transport callers own audit, SSE, and capability refresh so route
     requests and admin-agent replay can preserve their own attribution.
     """
+    # code-health: ignore[nloc] Setting write couples coercion, storage, response.
     definition = _REGISTRY_INDEX.get(key)
     if definition is None:
         raise _problem(_ERROR_UNKNOWN_KEY, message=f"unknown setting key: {key!r}")

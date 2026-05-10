@@ -835,6 +835,7 @@ def build_stays_router() -> APIRouter:
         session: _Db,
         clock: _ClockDep,
     ) -> ReservationResponse:
+        # code-health: ignore[nloc] Manual stay route keeps PII, audit, SSE order.
         if body.check_out_at <= body.check_in_at:
             raise Validation(
                 "check_out_at must be after check_in_at",

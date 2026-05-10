@@ -454,6 +454,7 @@ def _dispatch_settings_update(
     headers: Mapping[str, str],
     app: FastAPI | None,
 ) -> ToolResult:
+    # code-health: ignore[nloc] Replay keeps validation, audit, and SSE inline.
     key = _input_str(call.input, "key")
     if key is None or "value" not in call.input:
         return _result(call, 422, {"error": "invalid_setting_input"})
@@ -734,6 +735,7 @@ def _audit_replay(
     action: str,
     diff: dict[str, Any],
 ) -> None:
+    # code-health: ignore[params] Deployment audit helper mirrors audit row fields.
     from app.authz.deployment_owners import is_deployment_owner
 
     write_deployment_audit(

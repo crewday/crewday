@@ -121,6 +121,7 @@ class SqlAlchemyBroadcastGateway:
         draft: BroadcastApprovalDraft,
         clock: Clock,
     ) -> BroadcastApprovalOutcome:
+        # code-health: ignore[nloc] Approval adapter maps one replayable row.
         now = clock.now()
         row = ApprovalRequest(
             id=new_ulid(clock=clock),

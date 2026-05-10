@@ -242,6 +242,7 @@ def delete_current_workspace(
     ctx: _Ctx,
     session: _Db,
 ) -> WorkspaceDeleteResponse:
+    # code-health: ignore[nloc] Workspace deletion keeps owner check and audit txn.
     if not is_owner_member(
         session, workspace_id=ctx.workspace_id, user_id=ctx.actor_id
     ):

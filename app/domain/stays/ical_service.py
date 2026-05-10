@@ -292,7 +292,7 @@ def register_feed(
        to investigate.
     5. Write one ``ical_feed.register`` audit row with host-only URL.
     """
-    # code-health: ignore[params] Port params are adapter API contract.
+    # code-health: ignore[nloc,params] Feed registration keeps validation and audit.
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
     try:

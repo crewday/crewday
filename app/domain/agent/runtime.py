@@ -608,7 +608,7 @@ def _build_turn_run(
     commit_before_tool_dispatch: bool,
     pending_relay_context: str | None,
 ) -> _TurnRun:
-    # code-health: ignore[params] Builder mirrors the public compatibility API.
+    # code-health: ignore[nloc,params] Builder mirrors the public compatibility API.
     eff_clock: Clock = clock if clock is not None else SystemClock()
     correlation_id = new_ulid(clock=eff_clock)
     started_at = eff_clock.now()

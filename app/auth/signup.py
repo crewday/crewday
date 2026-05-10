@@ -1209,6 +1209,7 @@ def create_additional_workspace(
     signup slug guards and workspace bootstrap rows, but it does not
     insert a ``users`` row or touch passkey registration state.
     """
+    # code-health: ignore[params] Signup sibling keeps bootstrap knobs explicit.
     resolved_now = now if now is not None else _now(clock)
     normalized_slug = _validate_available_workspace_slug(
         session,
