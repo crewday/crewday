@@ -12,10 +12,13 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 import pytest
-from fastapi import APIRouter, Body, FastAPI, Header, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Query
 
 from app.agent.dispatcher import OpenAPIToolDispatcher
+from app.authz import PermissionDenied
+from app.authz.dep import Permission
 from app.domain.agent.runtime import DelegatedToken, ToolCall
+from app.tenancy import WorkspaceContext
 
 
 def _build_app() -> FastAPI:
@@ -157,6 +160,48 @@ def test_index_skips_non_operation_keys() -> None:
     }
     disp = OpenAPIToolDispatcher(app=FastAPI(), openapi=schema, workspace_slug="ws")
     assert disp.operation_ids == frozenset({"x.read"})
+
+
+def test_catalog_filter_uses_fastapi_generated_operation_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = FastAPI()
+    router = APIRouter()
+    manager_gate = Depends(Permission("audit_log.view", scope_kind="workspace"))
+
+    @router.get(
+        "/w/{slug}/api/v1/manager-only",
+        dependencies=[manager_gate],
+        openapi_extra={"x-cli": _x_cli("manager", "show")},
+    )
+    def manager_only(slug: str) -> dict[str, str]:
+        return {"slug": slug}
+
+    app.include_router(router)
+    schema = app.openapi()
+    op_id = schema["paths"]["/w/{slug}/api/v1/manager-only"]["get"]["operationId"]
+
+    def deny(*_args: object, **_kwargs: object) -> None:
+        raise PermissionDenied("denied")
+
+    monkeypatch.setattr("app.agent.dispatcher.require", deny)
+    dispatcher = OpenAPIToolDispatcher(
+        app=app,
+        openapi=schema,
+        workspace_slug="ws",
+        session=object(),
+        ctx=WorkspaceContext(
+            workspace_id="ws_001",
+            workspace_slug="ws",
+            actor_id="usr_001",
+            actor_kind="user",
+            actor_grant_role="worker",
+            actor_was_owner_member=False,
+            audit_correlation_id="corr_001",
+        ),
+    )
+
+    assert op_id not in {tool["name"] for tool in dispatcher.tools}
 
 
 def test_tools_catalog_is_deterministic_and_omits_injected_slug() -> None:

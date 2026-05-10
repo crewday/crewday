@@ -32,10 +32,11 @@ The dispatcher carries two responsibilities:
   headers; the dispatcher folds the token onto an
   ``Authorization: Bearer …`` header and invokes the FastAPI route.
 
-The module deliberately does **not** wire itself into the production
-agent call site (no edit to ``app/api/v1/agent.py``) — that follow-up
-lives on its own Beads task so the dispatcher contract can be
-reviewed and tested in isolation first.
+The production agent endpoint builds this dispatcher per request so
+the tool catalog can be filtered against the delegating user's current
+workspace grants before the runtime sends it to the model. Dispatch
+itself still goes through the same FastAPI route dependencies and
+domain checks as any other delegated-token request.
 """
 
 from __future__ import annotations
@@ -47,15 +48,27 @@ from dataclasses import dataclass
 from typing import Any, Final, Literal
 
 from fastapi import FastAPI
+from fastapi.dependencies.models import Dependant
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from app.adapters.llm.ports import Tool
+from app.authz import (
+    ApprovalRequired,
+    InvalidScope,
+    PermissionDenied,
+    UnknownActionKey,
+    require,
+)
+from app.authz.places_visibility import visible_property_ids_for_user
 from app.domain.agent.runtime import (
     DelegatedToken,
     GateDecision,
     ToolCall,
     ToolResult,
 )
+from app.tenancy import WorkspaceContext
 
 __all__ = [
     "OpenAPIToolDispatcher",
@@ -92,6 +105,13 @@ class _OperationEntry:
     method: str
     path: str
     operation: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class _PermissionRequirement:
+    action_key: str
+    scope_kind: str
+    scope_id_from_path: str | None
 
 
 def _build_index(
@@ -131,6 +151,47 @@ def _build_index(
                 operation=operation,
             )
     return index
+
+
+def _build_permission_index(
+    app: FastAPI,
+) -> dict[str, tuple[_PermissionRequirement, ...]]:
+    """Map operation ids to permission dependencies declared on routes."""
+    out: dict[str, tuple[_PermissionRequirement, ...]] = {}
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        op_id = route.operation_id or route.unique_id
+        requirements = tuple(_iter_permission_requirements(route.dependant))
+        if requirements:
+            out[op_id] = requirements
+    return out
+
+
+def _iter_permission_requirements(
+    dependant: Dependant,
+) -> tuple[_PermissionRequirement, ...]:
+    requirements: list[_PermissionRequirement] = []
+    raw = getattr(dependant.call, "__crewday_permission__", None)
+    if raw is not None:
+        action_key = getattr(raw, "action_key", None)
+        scope_kind = getattr(raw, "scope_kind", None)
+        scope_id_from_path = getattr(raw, "scope_id_from_path", None)
+        if isinstance(action_key, str) and isinstance(scope_kind, str):
+            requirements.append(
+                _PermissionRequirement(
+                    action_key=action_key,
+                    scope_kind=scope_kind,
+                    scope_id_from_path=(
+                        scope_id_from_path
+                        if isinstance(scope_id_from_path, str)
+                        else None
+                    ),
+                )
+            )
+    for child in dependant.dependencies:
+        requirements.extend(_iter_permission_requirements(child))
+    return tuple(requirements)
 
 
 def _build_tool_catalog(
@@ -535,6 +596,31 @@ def _confirm_metadata(
     return None
 
 
+def _permission_allows(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    action_key: str,
+    scope_kind: str,
+    scope_id: str,
+) -> bool:
+    try:
+        require(
+            session,
+            ctx,
+            action_key=action_key,
+            scope_kind=scope_kind,
+            scope_id=scope_id,
+        )
+    except PermissionDenied:
+        return False
+    except ApprovalRequired:
+        return True
+    except InvalidScope, UnknownActionKey:
+        return False
+    return True
+
+
 class OpenAPIToolDispatcher:
     """In-process :class:`ToolDispatcher` backed by a FastAPI app.
 
@@ -569,15 +655,20 @@ class OpenAPIToolDispatcher:
         openapi: Mapping[str, Any] | Callable[[], Mapping[str, Any]],
         workspace_slug: str,
         always_gated_tools: AbstractSet[str] = frozenset(),
+        session: Session | None = None,
+        ctx: WorkspaceContext | None = None,
     ) -> None:
         self._app = app
         self._workspace_slug = workspace_slug
         self._always_gated_tools = frozenset(always_gated_tools)
+        self._session = session
+        self._ctx = ctx
         schema = openapi() if callable(openapi) else openapi
         paths = schema.get("paths") if isinstance(schema, Mapping) else None
         if not isinstance(paths, Mapping):
             paths = {}
         self._index = _build_index(paths)
+        self._permission_index = _build_permission_index(app)
         components = schema.get("components") if isinstance(schema, Mapping) else None
         if not isinstance(components, Mapping):
             components = {}
@@ -601,12 +692,21 @@ class OpenAPIToolDispatcher:
     @property
     def operation_ids(self) -> frozenset[str]:
         """Return the advertised workspace-agent tool names."""
-        return self._tool_names
+        return frozenset(
+            tool["name"] for tool in self.tools if isinstance(tool.get("name"), str)
+        )
 
     @property
     def tools(self) -> tuple[Tool, ...]:
         """Return the workspace-agent OpenAPI operations as tool schemas."""
-        return self._tools
+        if self._session is None or self._ctx is None:
+            return self._tools
+        return tuple(
+            tool
+            for tool in self._tools
+            if isinstance(tool.get("name"), str)
+            and self._is_tool_authorized_for_catalog(tool["name"])
+        )
 
     # -- ToolDispatcher Protocol --------------------------------------
 
@@ -732,6 +832,54 @@ class OpenAPIToolDispatcher:
 
     # -- internals -----------------------------------------------------
 
+    def _is_tool_authorized_for_catalog(self, op_id: str) -> bool:
+        """Return whether the current actor may attempt ``op_id``.
+
+        The answer is recomputed from the current DB session each time
+        :attr:`tools` is read. This is intentionally advisory only:
+        dispatch still invokes the real route, where dependencies and
+        domain-level checks remain authoritative.
+        """
+        requirements = self._permission_index.get(op_id, ())
+        if not requirements:
+            return True
+        return all(
+            self._is_requirement_authorized_for_catalog(requirement)
+            for requirement in requirements
+        )
+
+    def _is_requirement_authorized_for_catalog(
+        self,
+        requirement: _PermissionRequirement,
+    ) -> bool:
+        if self._session is None or self._ctx is None:
+            return True
+        if requirement.scope_kind == "workspace":
+            return _permission_allows(
+                self._session,
+                self._ctx,
+                action_key=requirement.action_key,
+                scope_kind="workspace",
+                scope_id=self._ctx.workspace_id,
+            )
+        if requirement.scope_kind == "property":
+            property_ids = visible_property_ids_for_user(
+                self._session,
+                workspace_id=self._ctx.workspace_id,
+                user_id=self._ctx.actor_id,
+            )
+            return any(
+                _permission_allows(
+                    self._session,
+                    self._ctx,
+                    action_key=requirement.action_key,
+                    scope_kind="property",
+                    scope_id=property_id,
+                )
+                for property_id in property_ids
+            )
+        return False
+
     def _get_client(self) -> TestClient:
         """Return the cached :class:`TestClient`, building it if needed.
 
@@ -795,6 +943,8 @@ def make_default_dispatcher(
     workspace_slug: str,
     *,
     always_gated_tools: AbstractSet[str] = frozenset(),
+    session: Session | None = None,
+    ctx: WorkspaceContext | None = None,
 ) -> OpenAPIToolDispatcher:
     """Build a dispatcher against ``app``'s live OpenAPI surface.
 
@@ -809,4 +959,6 @@ def make_default_dispatcher(
         openapi=app.openapi,
         workspace_slug=workspace_slug,
         always_gated_tools=always_gated_tools,
+        session=session,
+        ctx=ctx,
     )

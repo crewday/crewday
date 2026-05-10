@@ -24,6 +24,7 @@ underlying rule semantics.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
@@ -41,7 +42,23 @@ from app.authz.enforce import (
 )
 from app.tenancy import WorkspaceContext
 
-__all__ = ["Permission"]
+__all__ = ["Permission", "PermissionDependencyMetadata"]
+
+
+@dataclass(frozen=True, slots=True)
+class PermissionDependencyMetadata:
+    """Authz gate metadata attached to router dependency callables.
+
+    FastAPI keeps dependency callables on the route graph after
+    registration. The embedded-agent dispatcher reads this metadata to
+    decide which OpenAPI tools are worth advertising for the current
+    delegating user; the dependency itself remains the runtime
+    enforcement layer.
+    """
+
+    action_key: str
+    scope_kind: str
+    scope_id_from_path: str | None
 
 
 def _deny_to_http(action_key: str) -> HTTPException:
@@ -70,6 +87,13 @@ def _misuse_to_http(error: str, action_key: str, detail: str) -> HTTPException:
         status_code=422,
         detail={"error": error, "action_key": action_key, "message": detail},
     )
+
+
+def _attach_permission_metadata(
+    dep: Callable[..., None],
+    metadata: PermissionDependencyMetadata,
+) -> None:
+    vars(dep)["__crewday_permission__"] = metadata
 
 
 def Permission(
@@ -183,4 +207,12 @@ def Permission(
             # raises one or the other, never both).
             raise mint_and_envelope_for_http(request, session, ctx, exc) from exc
 
+    _attach_permission_metadata(
+        _dep,
+        PermissionDependencyMetadata(
+            action_key=action_key,
+            scope_kind=scope_kind,
+            scope_id_from_path=scope_id_from_path,
+        ),
+    )
     return _dep

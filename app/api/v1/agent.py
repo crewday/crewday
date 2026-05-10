@@ -242,6 +242,8 @@ def build_agent_router(
                     request.app,
                     ctx.workspace_slug,
                     always_gated_tools=frozenset(),
+                    session=session,
+                    ctx=ctx,
                 ),
                 token_factory=token_factory,
                 agent_label=_SCOPE_AGENT_LABEL[scope],

@@ -55,6 +55,7 @@ from app.api.deps import current_workspace_context
 from app.api.deps import db_session as _db_session_dep
 from app.api.deps import get_llm as _get_llm_dep
 from app.api.v1.agent import build_agent_router, get_agent_token_factory
+from app.api.v1.permissions import build_permissions_router
 from app.api.v1.places import build_properties_router
 from app.api.v1.tasks import router as tasks_router
 from app.auth import tokens as tokens_module
@@ -186,6 +187,25 @@ def _seed_workspace_and_user(session: Session) -> tuple[Workspace, User]:
     with tenant_agnostic():
         session.add(grant)
         session.flush()
+    return workspace, user
+
+
+def _seed_workspace_and_user_with_role(
+    session: Session,
+    *,
+    grant_role: str,
+) -> tuple[Workspace, User]:
+    workspace, user = _seed_workspace_and_user(session)
+    with tenant_agnostic():
+        grant = session.scalars(
+            select(RoleGrant).where(
+                RoleGrant.workspace_id == workspace.id,
+                RoleGrant.user_id == user.id,
+            )
+        ).one()
+        grant.grant_role = grant_role
+        session.flush()
+    user.display_name = grant_role.title()
     return workspace, user
 
 
@@ -353,6 +373,22 @@ def _build_app(session: Session, ctx: WorkspaceContext) -> FastAPI:
     """Mount the tasks router with the seeded session + ctx pinned."""
     app = FastAPI()
     app.include_router(tasks_router, prefix="/w/{slug}/api/v1")
+
+    def _session() -> Iterator[Session]:
+        yield session
+
+    def _ctx() -> WorkspaceContext:
+        return ctx
+
+    app.dependency_overrides[_db_session_dep] = _session
+    app.dependency_overrides[current_workspace_context] = _ctx
+    return app
+
+
+def _build_properties_app(session: Session, ctx: WorkspaceContext) -> FastAPI:
+    app = FastAPI()
+    app.include_router(build_properties_router(), prefix="/w/{slug}/api/v1")
+    app.include_router(build_permissions_router(), prefix="/w/{slug}/api/v1")
 
     def _session() -> Iterator[Session]:
         yield session
@@ -610,6 +646,172 @@ def test_dispatcher_tools_catalog_uses_cli_backed_workspace_agent_surface() -> N
 
     assert "properties.list" in tool_names
     assert "agent.message.create" not in tool_names
+
+
+def test_dispatcher_tools_catalog_filters_by_current_authorization(
+    db_session: Session,
+) -> None:
+    workspace, manager = _seed_workspace_and_user(db_session)
+    property_id = _seed_property(db_session, workspace_id=workspace.id)
+    manager_ctx = WorkspaceContext(
+        workspace_id=workspace.id,
+        workspace_slug=workspace.slug,
+        actor_id=manager.id,
+        actor_kind="user",
+        actor_grant_role="manager",
+        actor_was_owner_member=True,
+        audit_correlation_id=new_ulid(),
+    )
+    set_current(manager_ctx)
+    app = _build_properties_app(db_session, manager_ctx)
+    manager_dispatcher = make_default_dispatcher(
+        app,
+        workspace_slug=workspace.slug,
+        session=db_session,
+        ctx=manager_ctx,
+    )
+
+    manager_tool_names = {tool["name"] for tool in manager_dispatcher.tools}
+    assert "properties.list" in manager_tool_names
+    assert "permissions.resolved" in manager_tool_names
+
+    worker = User(
+        id=new_ulid(),
+        email=f"worker-{workspace.id.lower()[-8:]}@example.com",
+        display_name="Worker",
+        created_at=_PINNED,
+    )
+    with tenant_agnostic():
+        db_session.add(worker)
+        db_session.flush()
+        db_session.add(
+            UserWorkspace(
+                user_id=worker.id,
+                workspace_id=workspace.id,
+                source="workspace_grant",
+                added_at=_PINNED,
+            )
+        )
+        db_session.add(
+            RoleGrant(
+                id=new_ulid(),
+                workspace_id=workspace.id,
+                user_id=worker.id,
+                grant_role="worker",
+                scope_property_id=property_id,
+                created_at=_PINNED,
+                created_by_user_id=manager.id,
+            )
+        )
+        db_session.flush()
+    worker_ctx = WorkspaceContext(
+        workspace_id=workspace.id,
+        workspace_slug=workspace.slug,
+        actor_id=worker.id,
+        actor_kind="user",
+        actor_grant_role="worker",
+        actor_was_owner_member=False,
+        audit_correlation_id=new_ulid(),
+    )
+    set_current(worker_ctx)
+    worker_dispatcher = make_default_dispatcher(
+        app,
+        workspace_slug=workspace.slug,
+        session=db_session,
+        ctx=worker_ctx,
+    )
+
+    worker_tool_names = {tool["name"] for tool in worker_dispatcher.tools}
+    assert "properties.list" in worker_tool_names
+    assert "permissions.resolved" not in worker_tool_names
+
+
+def test_dispatcher_tools_catalog_recomputes_authorization_from_current_grants(
+    db_session: Session,
+) -> None:
+    workspace, manager = _seed_workspace_and_user(db_session)
+    ctx = WorkspaceContext(
+        workspace_id=workspace.id,
+        workspace_slug=workspace.slug,
+        actor_id=manager.id,
+        actor_kind="user",
+        actor_grant_role="manager",
+        actor_was_owner_member=False,
+        audit_correlation_id=new_ulid(),
+    )
+    set_current(ctx)
+    app = _build_properties_app(db_session, ctx)
+    dispatcher = make_default_dispatcher(
+        app,
+        workspace_slug=workspace.slug,
+        session=db_session,
+        ctx=ctx,
+    )
+
+    assert "permissions.resolved" in {tool["name"] for tool in dispatcher.tools}
+
+    with tenant_agnostic():
+        grant = db_session.scalars(
+            select(RoleGrant).where(
+                RoleGrant.workspace_id == workspace.id,
+                RoleGrant.user_id == manager.id,
+            )
+        ).one()
+        grant.revoked_at = _PINNED + timedelta(minutes=1)
+        grant.revoked_by_user_id = manager.id
+        db_session.flush()
+
+    assert "permissions.resolved" not in {tool["name"] for tool in dispatcher.tools}
+
+
+def test_dispatcher_authorization_still_rejects_direct_unauthorized_tool_call(
+    db_session: Session,
+) -> None:
+    workspace, worker = _seed_workspace_and_user_with_role(
+        db_session,
+        grant_role="worker",
+    )
+    ctx = WorkspaceContext(
+        workspace_id=workspace.id,
+        workspace_slug=workspace.slug,
+        actor_id=worker.id,
+        actor_kind="user",
+        actor_grant_role="worker",
+        actor_was_owner_member=False,
+        audit_correlation_id=new_ulid(),
+    )
+    set_current(ctx)
+    app = _build_properties_app(db_session, ctx)
+    dispatcher = make_default_dispatcher(
+        app,
+        workspace_slug=workspace.slug,
+        session=db_session,
+        ctx=ctx,
+    )
+
+    result = dispatcher.dispatch(
+        ToolCall(
+            id="c-authz",
+            name="permissions.resolved",
+            input={
+                "user_id": worker.id,
+                "action_key": "properties.read",
+                "scope_kind": "workspace",
+                "scope_id": workspace.id,
+            },
+        ),
+        token=DelegatedToken(plaintext="mip_FAKEKEY_FAKESECRET", token_id="tok"),
+        headers={},
+    )
+
+    assert result.status_code == 403
+    assert result.mutated is False
+    assert result.body == {
+        "detail": {
+            "error": "permission_denied",
+            "action_key": "audit_log.view",
+        }
+    }
 
 
 def test_dispatcher_rejects_non_agent_operation_even_when_operation_id_is_known(
