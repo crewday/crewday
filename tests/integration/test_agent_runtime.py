@@ -211,6 +211,9 @@ class _CountingDispatcher:
             mutated=True,
         )
 
+    def activity_label_for(self, call: ToolCall) -> str:
+        return call.name.replace(".", " ").capitalize()
+
 
 # ---------------------------------------------------------------------------
 # The end-to-end scenario

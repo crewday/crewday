@@ -167,6 +167,9 @@ from app.events.types import (
     AgentActionPending,
     AgentMessageAppended,
     AgentMessagePayload,
+    AgentToolFinished,
+    AgentToolStarted,
+    AgentToolStatus,
     AgentTurnFinished,
     AgentTurnOutcome,
     AgentTurnScope,
@@ -465,6 +468,10 @@ class ToolDispatcher(Protocol):
         headers: Mapping[str, str],
     ) -> ToolResult:
         """Execute ``call`` and return its :class:`ToolResult`."""
+        ...
+
+    def activity_label_for(self, call: ToolCall) -> str:
+        """Return the safe user-facing process label for ``call``."""
         ...
 
 
@@ -772,6 +779,60 @@ def _publish_turn_started(run: _TurnRun) -> None:
     )
 
 
+def _activity_label_for(dispatcher: ToolDispatcher, tool_call: ToolCall) -> str:
+    label = dispatcher.activity_label_for(tool_call)
+    return label.strip() or "Working"
+
+
+def _tool_task_id(run: _TurnRun) -> str | None:
+    return run.thread_id if run.scope == "task" else None
+
+
+def _publish_tool_started(
+    run: _TurnRun,
+    tool_call: ToolCall,
+    label: str,
+) -> None:
+    run.bus.publish(
+        AgentToolStarted(
+            workspace_id=run.ctx.workspace_id,
+            actor_id=run.ctx.actor_id,
+            actor_user_id=run.ctx.actor_id,
+            correlation_id=run.correlation_id,
+            occurred_at=run.clock.now(),
+            scope=run.scope,
+            task_id=_tool_task_id(run),
+            thread_id=run.thread_id,
+            tool_call_id=tool_call.id,
+            label=label,
+        )
+    )
+
+
+def _publish_tool_finished(
+    run: _TurnRun,
+    tool_call: ToolCall,
+    label: str,
+    *,
+    status: AgentToolStatus,
+) -> None:
+    run.bus.publish(
+        AgentToolFinished(
+            workspace_id=run.ctx.workspace_id,
+            actor_id=run.ctx.actor_id,
+            actor_user_id=run.ctx.actor_id,
+            correlation_id=run.correlation_id,
+            occurred_at=run.clock.now(),
+            scope=run.scope,
+            task_id=_tool_task_id(run),
+            thread_id=run.thread_id,
+            tool_call_id=tool_call.id,
+            label=label,
+            status=status,
+        )
+    )
+
+
 def _resolve_model_or_error(run: _TurnRun) -> ModelPick | TurnOutcome:
     try:
         return resolve_primary(
@@ -929,8 +990,11 @@ def _handle_tool_call(
     turn: _ActiveTurn,
     tool_call: ToolCall,
 ) -> TurnOutcome | None:
+    label = _activity_label_for(turn.run.tool_dispatcher, tool_call)
+    _publish_tool_started(turn.run, tool_call, label)
     if is_action_blocked(turn.preferences, tool_call.name):
         _append_result(turn, _blocked_tool_result(tool_call), tool_call)
+        _publish_tool_finished(turn.run, tool_call, label, status="blocked")
         return None
 
     builtin_result = _dispatch_builtin_read_tool(
@@ -941,13 +1005,21 @@ def _handle_tool_call(
     )
     if builtin_result is not None:
         _append_result(turn, builtin_result, tool_call)
+        _publish_tool_finished(turn.run, tool_call, label, status="completed")
         return None
 
     decision = turn.run.tool_dispatcher.is_gated(tool_call)
     if decision.gated:
-        return _finish_approval_required(turn, tool_call, decision)
+        outcome = _finish_approval_required(turn, tool_call, decision)
+        _publish_tool_finished(
+            turn.run,
+            tool_call,
+            label,
+            status="approval_required",
+        )
+        return outcome
 
-    _dispatch_allowed_tool(turn, tool_call)
+    _dispatch_allowed_tool(turn, tool_call, label)
     return None
 
 
@@ -960,18 +1032,26 @@ def _blocked_tool_result(tool_call: ToolCall) -> ToolResult:
     )
 
 
-def _dispatch_allowed_tool(turn: _ActiveTurn, tool_call: ToolCall) -> None:
+def _dispatch_allowed_tool(
+    turn: _ActiveTurn,
+    tool_call: ToolCall,
+    label: str,
+) -> None:
     run = turn.run
     if run.commit_before_tool_dispatch:
         # Embedded HTTP dispatch opens a nested request with its own UoW.
         # Release prior telemetry writes first so SQLite does not hold a
         # write lock while the delegated-token middleware verifies the call.
         run.session.commit()
-    result = run.tool_dispatcher.dispatch(
-        tool_call,
-        token=turn.token,
-        headers=turn.headers,
-    )
+    try:
+        result = run.tool_dispatcher.dispatch(
+            tool_call,
+            token=turn.token,
+            headers=turn.headers,
+        )
+    except Exception:
+        _publish_tool_finished(run, tool_call, label, status="error")
+        raise
     if result.mutated:
         _audit_tool_call(
             run.session,
@@ -985,6 +1065,8 @@ def _dispatch_allowed_tool(turn: _ActiveTurn, tool_call: ToolCall) -> None:
             clock=run.clock,
         )
     _append_result(turn, result, tool_call)
+    status: AgentToolStatus = "completed" if result.status_code < 400 else "error"
+    _publish_tool_finished(run, tool_call, label, status=status)
 
 
 def _append_result(

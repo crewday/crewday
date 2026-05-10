@@ -252,6 +252,26 @@ render a "working on it" state without polling:
   server is responsible for pairing; a `started` without a
   `finished` is a bug.
 
+During a turn, the runtime may also emit user-scoped coarse tool
+activity events so the embedded chat can show a harmless process line
+while the model waits on a command:
+
+- `agent.tool.started` — published before a runtime-owned read tool or
+  delegated OpenAPI tool begins. Payload:
+  `{ scope, task_id?, thread_id?, tool_call_id, label }`.
+- `agent.tool.finished` — published after the tool result is appended
+  to the runtime history or after the turn branches into approval or
+  error handling. Payload adds `{ status }`, where `status` is one of
+  `completed | approval_required | blocked | error`.
+
+The `label` is server-resolved, not model-supplied. For OpenAPI tools,
+`OpenAPIToolDispatcher` resolves it from metadata in this order:
+`x-cli.agent_status`, `x-cli.summary`, OpenAPI `summary`, humanized
+`x-cli.group` + `x-cli.verb`, then humanized `operationId`. OpenAPI
+`description` is intentionally not used for live activity text. These
+events never carry tool inputs, tool outputs, raw errors, prompts,
+provider text, or chain-of-thought.
+
 Any agent-authored user-visible failure or fallback reply includes a
 copyable `Error ID: <id>` line. For the workspace and task runtimes the
 id is the turn `correlation_id` carried by the matching

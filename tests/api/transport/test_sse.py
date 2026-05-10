@@ -1353,6 +1353,8 @@ DEFAULT_ROLE_EVENTS_ALLOWLIST: frozenset[str] = frozenset(
         # indicator. cd-nyvm.
         "agent.turn.started",
         "agent.turn.finished",
+        "agent.tool.started",
+        "agent.tool.finished",
         # ``agent.message.appended`` carries rendered chat text, so
         # it relies on the same ``user_scoped=True`` narrowing as the
         # turn indicator and is only delivered to the delegating

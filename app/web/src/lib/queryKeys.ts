@@ -148,11 +148,11 @@ export const qk = {
   agentTaskChat: (tid: string) => [...ws(), "agent", "task", tid, "log"] as const,
   agentApprovalMode: () => [...ws(), "me", "agent_approval_mode"] as const,
   payPeriods: () => [...ws(), "pay-periods"] as const,
-  // §14 "Agent turn indicator" — whether a turn is currently in
-  // flight for the given scope. Cache value is `true`/`false`. The
-  // SSE dispatcher flips it on the §11 `agent.turn.{started,finished}`
-  // pair; the task scope is keyed per task id so two open task chats
-  // don't share a single indicator.
+  // §14 "Agent turn indicator" — turn/activity state for the given
+  // scope. The SSE dispatcher flips `typing` on the §11
+  // `agent.turn.{started,finished}` pair and adds a safe coarse
+  // activity label from `agent.tool.*`; the task scope is keyed per
+  // task id so two open task chats don't share one indicator.
   agentTyping: (scope: "employee" | "manager" | "admin" | "task", taskId?: string) =>
     scope === "admin"
       ? (["admin", "agent", "typing"] as const)

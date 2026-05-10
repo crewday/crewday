@@ -306,6 +306,79 @@ def test_tools_catalog_uses_summary_then_operation_id_fallback() -> None:
     assert [tool["description"] for tool in disp.tools] == ["Read A.", "b.read"]
 
 
+def test_activity_label_resolver_uses_safe_metadata_order() -> None:
+    schema = _schema_with(
+        {
+            "path": "/w/{slug}/api/v1/agent-status",
+            "method": "get",
+            "operationId": "inventory.checkLowStock",
+            "description": "Verbose route description that must not be live UI.",
+            "summary": "OpenAPI summary",
+            "x-cli": {
+                **_x_cli("inventory", "check"),
+                "summary": "CLI summary",
+                "agent_status": "Checking inventory",
+            },
+        },
+        {
+            "path": "/w/{slug}/api/v1/cli-summary",
+            "method": "get",
+            "operationId": "tasks.list",
+            "description": "Verbose task route description.",
+            "summary": "OpenAPI task summary",
+            "x-cli": {**_x_cli("tasks", "list"), "summary": "Checking tasks"},
+        },
+        {
+            "path": "/w/{slug}/api/v1/openapi-summary",
+            "method": "get",
+            "operationId": "assets.show",
+            "description": "Verbose asset route description.",
+            "summary": "Looking up asset",
+            "x-cli": _x_cli("assets", "show"),
+        },
+        {
+            "path": "/w/{slug}/api/v1/group-verb",
+            "method": "get",
+            "operationId": "messages.archive",
+            "description": "Verbose message route description.",
+            "x-cli": _x_cli("chat-messages", "search_archive"),
+        },
+        {
+            "path": "/w/{slug}/api/v1/op-id",
+            "method": "get",
+            "operationId": "workOrders.acceptQuote",
+        },
+    )
+    disp = OpenAPIToolDispatcher(app=FastAPI(), openapi=schema, workspace_slug="ws")
+
+    assert (
+        disp.activity_label_for(
+            ToolCall(id="call_1", name="inventory.checkLowStock", input={})
+        )
+        == "Checking inventory"
+    )
+    assert (
+        disp.activity_label_for(ToolCall(id="call_2", name="tasks.list", input={}))
+        == "Checking tasks"
+    )
+    assert (
+        disp.activity_label_for(ToolCall(id="call_3", name="assets.show", input={}))
+        == "Looking up asset"
+    )
+    assert (
+        disp.activity_label_for(
+            ToolCall(id="call_4", name="messages.archive", input={})
+        )
+        == "Search archive Chat messages"
+    )
+    assert (
+        disp.activity_label_for(
+            ToolCall(id="call_5", name="workOrders.acceptQuote", input={})
+        )
+        == "Work orders accept quote"
+    )
+
+
 def test_tools_catalog_advertises_template_vars_and_resolves_body_refs() -> None:
     schema = {
         "openapi": "3.1.0",

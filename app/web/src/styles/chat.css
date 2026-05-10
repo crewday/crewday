@@ -111,6 +111,24 @@
   margin-top: 2px; text-align: right;
   font-family: "JetBrains Mono", monospace;
 }
+.chat-activity,
+.agent-activity {
+  align-self: flex-start;
+  max-width: 78%;
+  color: var(--ink-3);
+  font-size: 11px;
+  line-height: 1.25;
+  font-family: "JetBrains Mono", monospace;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+.chat-activity {
+  margin: 2px 0 -2px 4px;
+}
+.agent-activity {
+  margin: 2px 0 -3px 4px;
+  max-width: 86%;
+}
 
 /* §14 "Agent turn indicator" — WhatsApp-style three-dot bubble shown
  * while an agent turn is in flight. Shares paint with .chat-msg--agent

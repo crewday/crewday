@@ -42,6 +42,7 @@ domain checks as any other delegated-token request.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Mapping
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
@@ -96,6 +97,9 @@ _MUTATING_METHODS: Final[frozenset[str]] = frozenset({"POST", "PATCH", "PUT", "D
 # trips a few downstream validators — keep it simple).
 _BODY_METHODS: Final[frozenset[str]] = frozenset({"POST", "PATCH", "PUT"})
 _WORKSPACE_API_ROOT: Final[str] = "/w/{slug}/api/v1"
+_WORD_BOUNDARY_RE: Final[re.Pattern[str]] = re.compile(
+    r"[_\-.]+|(?<=[a-z0-9])(?=[A-Z])"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,6 +269,43 @@ def _is_workspace_api_path(path: str) -> bool:
 def _tool_description(op_id: str, operation: Mapping[str, Any]) -> str:
     raw = operation.get("description") or operation.get("summary")
     return raw if isinstance(raw, str) and raw.strip() else op_id
+
+
+def _tool_activity_label(op_id: str, operation: Mapping[str, Any]) -> str:
+    x_cli = operation.get("x-cli")
+    if isinstance(x_cli, Mapping):
+        for key in ("agent_status", "summary"):
+            raw = x_cli.get(key)
+            if isinstance(raw, str) and raw.strip():
+                return raw.strip()
+
+    raw_summary = operation.get("summary")
+    if isinstance(raw_summary, str) and raw_summary.strip():
+        return raw_summary.strip()
+
+    if isinstance(x_cli, Mapping):
+        group = x_cli.get("group")
+        verb = x_cli.get("verb")
+        if (
+            isinstance(group, str)
+            and group.strip()
+            and isinstance(verb, str)
+            and verb.strip()
+        ):
+            return f"{_humanize_identifier(verb)} {_humanize_identifier(group)}"
+
+    return _humanize_identifier(op_id)
+
+
+def _humanize_identifier(value: str) -> str:
+    words = [
+        piece
+        for piece in _WORD_BOUNDARY_RE.sub(" ", value).split()
+        if piece and piece.lower() not in {"api", "v1"}
+    ]
+    if not words:
+        return "Working"
+    return " ".join(words).capitalize()
 
 
 def _tool_input_schema(
@@ -834,6 +875,13 @@ class OpenAPIToolDispatcher:
             body=body_obj,
             mutated=mutated,
         )
+
+    def activity_label_for(self, call: ToolCall) -> str:
+        """Return the safe user-facing process label for ``call``."""
+        entry = self._index.get(call.name)
+        if entry is None:
+            return _humanize_identifier(call.name)
+        return _tool_activity_label(call.name, entry.operation)
 
     # -- internals -----------------------------------------------------
 

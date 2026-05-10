@@ -73,6 +73,8 @@ export type EventKind =
   | "agent.message.appended"
   | "agent.turn.started"
   | "agent.turn.finished"
+  | "agent.tool.started"
+  | "agent.tool.finished"
   | "agent.action.pending"
   | "agent.settings.changed"
   // Tasks (§06).
@@ -229,19 +231,31 @@ export interface SseEvent {
 const TYPING_TIMEOUT_MS = 60_000;
 const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+export interface AgentActivityState {
+  typing: boolean;
+  label?: string;
+  status?: "completed" | "approval_required" | "blocked" | "error";
+}
+
 function typingKeySignature(scope: AgentTurnScope, taskId?: string): string {
   return scope === "task" && taskId ? `task:${taskId}` : scope;
 }
 
+function isTypingValue(value: AgentActivityState | boolean | undefined): boolean {
+  return typeof value === "object" ? value.typing === true : value === true;
+}
+
 function startTyping(qc: QueryClient, scope: AgentTurnScope, taskId?: string): void {
   const sig = typingKeySignature(scope, taskId);
-  qc.setQueryData<boolean>(qk.agentTyping(scope, taskId), true);
+  qc.setQueryData<AgentActivityState>(qk.agentTyping(scope, taskId), { typing: true });
   const prev = typingTimers.get(sig);
   if (prev) clearTimeout(prev);
   typingTimers.set(
     sig,
     setTimeout(() => {
-      qc.setQueryData<boolean>(qk.agentTyping(scope, taskId), false);
+      qc.setQueryData<AgentActivityState>(qk.agentTyping(scope, taskId), {
+        typing: false,
+      });
       typingTimers.delete(sig);
     }, TYPING_TIMEOUT_MS),
   );
@@ -254,7 +268,32 @@ function stopTyping(qc: QueryClient, scope: AgentTurnScope, taskId?: string): vo
     clearTimeout(prev);
     typingTimers.delete(sig);
   }
-  qc.setQueryData<boolean>(qk.agentTyping(scope, taskId), false);
+  qc.setQueryData<AgentActivityState | boolean>(qk.agentTyping(scope, taskId), (prev) => ({
+    typing: false,
+    label: typeof prev === "object" ? prev.label : undefined,
+    status: typeof prev === "object" ? prev.status : undefined,
+  }));
+}
+
+function startToolActivity(
+  qc: QueryClient,
+  payload: AgentToolStartedPayload,
+): void {
+  qc.setQueryData<AgentActivityState | boolean>(qk.agentTyping(payload.scope, payload.task_id), (prev) => ({
+    typing: isTypingValue(prev),
+    label: payload.label,
+  }));
+}
+
+function finishToolActivity(
+  qc: QueryClient,
+  payload: AgentToolFinishedPayload,
+): void {
+  qc.setQueryData<AgentActivityState | boolean>(qk.agentTyping(payload.scope, payload.task_id), (prev) => ({
+    typing: isTypingValue(prev),
+    label: payload.label,
+    status: payload.status,
+  }));
 }
 
 /**
@@ -267,9 +306,11 @@ export function clearAllTyping(qc: QueryClient): void {
     clearTimeout(handle);
     const [prefix, taskId] = sig.split(":");
     if (prefix === "task" && taskId) {
-      qc.setQueryData<boolean>(qk.agentTyping("task", taskId), false);
+      qc.setQueryData<AgentActivityState>(qk.agentTyping("task", taskId), {
+        typing: false,
+      });
     } else if (prefix === "employee" || prefix === "manager" || prefix === "admin") {
-      qc.setQueryData<boolean>(qk.agentTyping(prefix), false);
+      qc.setQueryData<AgentActivityState>(qk.agentTyping(prefix), { typing: false });
     }
   }
   typingTimers.clear();
@@ -365,6 +406,16 @@ interface AgentTurnFinishedPayload {
   task_id?: string;
   finished_at?: string;
   outcome: "replied" | "action" | "error" | "timeout";
+}
+
+interface AgentToolStartedPayload {
+  scope: AgentTurnScope;
+  task_id?: string;
+  label: string;
+}
+
+interface AgentToolFinishedPayload extends AgentToolStartedPayload {
+  status: "completed" | "approval_required" | "blocked" | "error";
 }
 
 interface AgentActionPendingPayload {
@@ -540,6 +591,16 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
   "agent.turn.finished": (event, qc) => {
     const payload = event.data as unknown as AgentTurnFinishedPayload;
     stopTyping(qc, payload.scope, payload.task_id);
+  },
+
+  "agent.tool.started": (event, qc) => {
+    const payload = event.data as unknown as AgentToolStartedPayload;
+    startToolActivity(qc, payload);
+  },
+
+  "agent.tool.finished": (event, qc) => {
+    const payload = event.data as unknown as AgentToolFinishedPayload;
+    finishToolActivity(qc, payload);
   },
 
   "agent.action.pending": (event, qc) => {

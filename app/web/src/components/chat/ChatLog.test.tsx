@@ -81,4 +81,36 @@ describe("ChatLog", () => {
     expect(screen.getByText(/<img src=x onerror=alert\(1\)>/u)).toBeInTheDocument();
     expect(screen.getByText("jump")).toBeInTheDocument();
   });
+
+  it("renders activity above the running indicator and final agent bubble", () => {
+    const { rerender } = render(
+      <ChatLog
+        messages={[]}
+        typing
+        activity={{ typing: true, label: "Checking tasks" }}
+      />,
+    );
+
+    expect(screen.getAllByText("Checking tasks")).toHaveLength(2);
+    expect(screen.getByRole("status")).toHaveTextContent("Checking tasks");
+    expect(screen.getByText("Agent is typing")).toBeInTheDocument();
+
+    rerender(
+      <ChatLog
+        messages={[
+          {
+            at: "2026-05-10T10:00:00Z",
+            kind: "agent",
+            body: "Done.",
+          },
+        ]}
+        activity={{ typing: false, label: "Checking tasks", status: "completed" }}
+      />,
+    );
+
+    const activity = screen.getByText("Checking tasks");
+    const reply = screen.getByText("Done.");
+    expect(activity.compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
 });

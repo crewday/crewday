@@ -1,6 +1,7 @@
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import DateTime from "@/components/DateTime";
 import ChatMessageBody from "@/components/chat/ChatMessageBody";
+import type { AgentActivityState } from "@/lib/sse";
 import type { AgentMessage } from "@/types/api";
 
 type ActionDecision = "approve" | "details";
@@ -15,6 +16,7 @@ export interface ChatLogProps {
   /** §14 "Agent turn indicator" — when true, renders a WhatsApp-style
    *  typing pill (three animated dots) at the tail of the log. */
   typing?: boolean;
+  activity?: AgentActivityState;
 }
 
 export default function ChatLog({
@@ -23,6 +25,7 @@ export default function ChatLog({
   variant = "screen",
   ariaLabel,
   typing = false,
+  activity,
 }: ChatLogProps) {
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -43,43 +46,55 @@ export default function ChatLog({
       ref={logRef}
     >
       {messages?.map((m, idx) => {
+        const showCompletedActivity =
+          activity?.label &&
+          !typing &&
+          m.kind === "agent" &&
+          idx === messages.length - 1;
         if (m.kind === "action") {
           return (
-            <div key={idx} className="chat-msg chat-msg--action">
-              <span className="chat-msg__body">{m.body}</span>
-              {onDecideAction && (
-                <div className="chat-msg__ctas">
-                  <button
-                    className="btn btn--moss btn--sm"
-                    type="button"
-                    onClick={() => onDecideAction(idx, "approve")}
-                  >
-                    Approve
-                  </button>
-                  <button
-                    className="btn btn--ghost btn--sm"
-                    type="button"
-                    onClick={() => onDecideAction(idx, "details")}
-                  >
-                    Details
-                  </button>
-                </div>
-              )}
-              <DateTime value={m.at} showTime className="chat-msg__time" />
-            </div>
+            <Fragment key={idx}>
+              {showCompletedActivity && <ActivityLine label={activity.label} />}
+              <div className="chat-msg chat-msg--action">
+                <span className="chat-msg__body">{m.body}</span>
+                {onDecideAction && (
+                  <div className="chat-msg__ctas">
+                    <button
+                      className="btn btn--moss btn--sm"
+                      type="button"
+                      onClick={() => onDecideAction(idx, "approve")}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      className="btn btn--ghost btn--sm"
+                      type="button"
+                      onClick={() => onDecideAction(idx, "details")}
+                    >
+                      Details
+                    </button>
+                  </div>
+                )}
+                <DateTime value={m.at} showTime className="chat-msg__time" />
+              </div>
+            </Fragment>
           );
         }
         return (
-          <div key={idx} className={"chat-msg chat-msg--" + m.kind}>
-            {m.kind === "agent" ? (
-              <ChatMessageBody body={m.body} className="chat-msg__body" />
-            ) : (
-              <span className="chat-msg__body">{m.body}</span>
-            )}
-            <DateTime value={m.at} showTime className="chat-msg__time" />
-          </div>
+          <Fragment key={idx}>
+            {showCompletedActivity && <ActivityLine label={activity.label} />}
+            <div className={"chat-msg chat-msg--" + m.kind}>
+              {m.kind === "agent" ? (
+                <ChatMessageBody body={m.body} className="chat-msg__body" />
+              ) : (
+                <span className="chat-msg__body">{m.body}</span>
+              )}
+              <DateTime value={m.at} showTime className="chat-msg__time" />
+            </div>
+          </Fragment>
         );
       })}
+      {typing && activity?.label && <ActivityLine label={activity.label} live />}
       {typing && (
         <div className="chat-msg chat-msg--agent chat-msg--typing">
           <span className="chat-msg__body">
@@ -91,6 +106,19 @@ export default function ChatLog({
             <span className="sr-only">Agent is typing</span>
           </span>
         </div>
+      )}
+    </div>
+  );
+}
+
+function ActivityLine({ label, live = false }: { label: string; live?: boolean }) {
+  return (
+    <div className="chat-activity">
+      <span aria-hidden="true">{label}</span>
+      {live && (
+        <span className="sr-only" role="status" aria-live="polite">
+          {label}
+        </span>
       )}
     </div>
   );

@@ -82,6 +82,8 @@ describe("INVALIDATIONS — coverage", () => {
     "agent.message.appended",
     "agent.turn.started",
     "agent.turn.finished",
+    "agent.tool.started",
+    "agent.tool.finished",
     "agent.action.pending",
     "agent.settings.changed",
     "task.created",
@@ -684,7 +686,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
       makeEvent("agent.turn.started", { scope: "manager", started_at: "x" }),
       qc,
     );
-    expect(qc.getQueryData(qk.agentTyping("manager"))).toBe(true);
+    expect(qc.getQueryData(qk.agentTyping("manager"))).toEqual({ typing: true });
     INVALIDATIONS["agent.turn.finished"](
       makeEvent("agent.turn.finished", {
         scope: "manager",
@@ -692,7 +694,50 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
       }),
       qc,
     );
-    expect(qc.getQueryData(qk.agentTyping("manager"))).toBe(false);
+    expect(qc.getQueryData(qk.agentTyping("manager"))).toEqual({ typing: false });
+  });
+
+  it("agent.tool.started/finished preserves a safe activity label", () => {
+    const qc = makeClient();
+    INVALIDATIONS["agent.turn.started"](
+      makeEvent("agent.turn.started", { scope: "manager", started_at: "x" }),
+      qc,
+    );
+
+    INVALIDATIONS["agent.tool.started"](
+      makeEvent("agent.tool.started", {
+        scope: "manager",
+        label: "Checking tasks",
+        tool_call_id: "call_1",
+      }),
+      qc,
+    );
+    expect(qc.getQueryData(qk.agentTyping("manager"))).toEqual({
+      typing: true,
+      label: "Checking tasks",
+    });
+
+    INVALIDATIONS["agent.tool.finished"](
+      makeEvent("agent.tool.finished", {
+        scope: "manager",
+        label: "Checking tasks",
+        status: "completed",
+        tool_call_id: "call_1",
+      }),
+      qc,
+    );
+    INVALIDATIONS["agent.message.appended"](
+      makeEvent("agent.message.appended", {
+        scope: "manager",
+        message: { at: "now", kind: "agent", body: "Done." },
+      }),
+      qc,
+    );
+    expect(qc.getQueryData(qk.agentTyping("manager"))).toEqual({
+      typing: false,
+      label: "Checking tasks",
+      status: "completed",
+    });
   });
 
   it("agent.action.pending drops the typing flag AND invalidates approvals", () => {
@@ -710,7 +755,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
       }),
       qc,
     );
-    expect(qc.getQueryData(qk.agentTyping("manager"))).toBe(false);
+    expect(qc.getQueryData(qk.agentTyping("manager"))).toEqual({ typing: false });
     const called = spy.mock.calls.map((c) => c[0]?.queryKey);
     expect(called).toEqual(
       expect.arrayContaining([qk.approvals(), qk.dashboard()]),
@@ -733,7 +778,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
       qc,
     );
 
-    expect(qc.getQueryData(qk.agentTyping("admin"))).toBe(false);
+    expect(qc.getQueryData(qk.agentTyping("admin"))).toEqual({ typing: false });
     const called = spy.mock.calls.map((c) => c[0]?.queryKey);
     expect(called).toEqual(expect.arrayContaining([qk.adminAgentActions()]));
     expect(called).not.toContainEqual(qk.approvals());

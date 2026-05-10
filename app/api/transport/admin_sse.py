@@ -232,6 +232,8 @@ _INVALIDATIONS: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
     "agent.action.pending": (),
     "agent.turn.started": (),
     "agent.turn.finished": (),
+    "agent.tool.started": (),
+    "agent.tool.finished": (),
 }
 
 

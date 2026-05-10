@@ -825,8 +825,16 @@ the platform must guarantee*.
   an approval card, not a reply), an `EventSource` reconnect (stale
   state from the dropped session), or a local 60-second timeout
   (client-side safety net; the server should always pair its
-  events). The indicator is not focusable and not a click target;
-  it does not count toward the `chat-log` unread state.
+  events). If `agent.tool.started` / `agent.tool.finished` events
+  arrive for the same turn, the surface renders the server-provided
+  muted activity label above the typing bubble while the turn is
+  running, then keeps the last completed label above the final agent
+  response bubble. The label is a one-line status, not a log: it is
+  non-interactive, not focusable, and carries no tool args, results,
+  errors, prompts, provider text, or chain-of-thought. Screen readers
+  announce only the live running label politely; the retained
+  completed label is visible context and does not re-announce. The
+  indicator does not count toward the `chat-log` unread state.
 - **Agent preferences surface.** The `/settings` page exposes an
   "Agent preferences" section with the workspace blob (editor if
   the user passes `agent_prefs.edit_workspace`, otherwise a

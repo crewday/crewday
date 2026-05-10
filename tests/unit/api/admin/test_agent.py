@@ -77,6 +77,9 @@ class _FakeDispatcher:
             mutated=self.result_status_code < 400,
         )
 
+    def activity_label_for(self, call: ToolCall) -> str:
+        return call.name.replace(".", " ").capitalize()
+
 
 class _FakeActionProducer:
     def __init__(

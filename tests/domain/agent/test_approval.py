@@ -130,6 +130,9 @@ class _RecordingDispatcher:
             )
         return bucket.pop(0)
 
+    def activity_label_for(self, call: ToolCall) -> str:
+        return call.name.replace(".", " ").capitalize()
+
 
 @dataclass(slots=True)
 class _CapturedDecided:

@@ -203,6 +203,16 @@ class DeploymentAdminToolDispatcher(ToolDispatcher):
             mutated=False,
         )
 
+    def activity_label_for(self, call: ToolCall) -> str:
+        if self._fallback is not None and call.name not in _SUPPORTED_TOOL_NAMES:
+            return self._fallback.activity_label_for(call)
+        return {
+            "admin.settings.update": "Updating settings",
+            "admin.usage.workspaces.cap": "Updating workspace budget",
+            "admin.workspaces.trust": "Updating workspace trust",
+            "admin.workspaces.archive": "Archiving workspace",
+        }.get(call.name, "Working")
+
 
 def _admin_tools() -> tuple[Tool, ...]:
     return (

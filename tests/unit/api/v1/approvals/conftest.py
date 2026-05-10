@@ -206,6 +206,9 @@ class FakeToolDispatcher:
             )
         return bucket.pop(0)
 
+    def activity_label_for(self, call: ToolCall) -> str:
+        return call.name.replace(".", " ").capitalize()
+
 
 # ---------------------------------------------------------------------------
 # Persona seeding

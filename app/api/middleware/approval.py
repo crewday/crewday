@@ -310,6 +310,12 @@ class InProcessApprovalDispatcher(ToolDispatcher):
             == "1",
         )
 
+    def activity_label_for(self, call: ToolCall) -> str:
+        return {
+            BROADCAST_TOOL_NAME: "Sending broadcast",
+            "cancel_task": "Cancelling task",
+        }.get(call.name, "Working")
+
 
 def _dispatch_broadcast(
     call: ToolCall,

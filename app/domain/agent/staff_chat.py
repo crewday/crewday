@@ -265,3 +265,8 @@ class _StaffChatDispatcher:
                 mutated=False,
             )
         return self.inner.dispatch(call, token=token, headers=headers)
+
+    def activity_label_for(self, call: ToolCall) -> str:
+        if not is_staff_chat_tool(call.name):
+            return "Working"
+        return self.inner.activity_label_for(call)

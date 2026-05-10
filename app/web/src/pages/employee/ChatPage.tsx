@@ -5,7 +5,7 @@ import { activeWorkspaceGrantRole, useAuth } from "@/auth";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
-import { useAgentTyping } from "@/lib/agentTyping";
+import { useAgentActivity } from "@/lib/agentTyping";
 import type { AgentMessage, AgentTurnScope } from "@/types/api";
 import ChatLog from "@/components/chat/ChatLog";
 import ChatComposer from "@/components/chat/ChatComposer";
@@ -48,7 +48,7 @@ export default function ChatPage() {
   const { workspaceId } = useWorkspace();
   const config = chatScopeForGrantRole(activeWorkspaceGrantRole(user, workspaceId));
   const activeConfig = config ?? employeeChatConfig();
-  const typing = useAgentTyping(activeConfig.scope);
+  const activity = useAgentActivity(activeConfig.scope);
 
   const q = useQuery({
     queryKey: activeConfig.logKey,
@@ -94,7 +94,8 @@ export default function ChatPage() {
           messages={q.data}
           onDecideAction={(idx, decision) => decide.mutate({ idx, decision })}
           variant="screen"
-          typing={typing}
+          typing={activity.typing}
+          activity={activity}
         />
       </section>
 

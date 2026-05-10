@@ -43,6 +43,9 @@ __all__ = [
     "AgentActionPending",
     "AgentMessageAppended",
     "AgentMessagePayload",
+    "AgentToolFinished",
+    "AgentToolStarted",
+    "AgentToolStatus",
     "AgentTurnFinished",
     "AgentTurnOutcome",
     "AgentTurnScope",
@@ -143,6 +146,7 @@ __all__ = [
 # admin`` only.
 AgentTurnScope = Literal["employee", "manager", "admin", "task"]
 AgentTurnOutcome = Literal["replied", "action", "error", "timeout"]
+AgentToolStatus = Literal["completed", "approval_required", "blocked", "error"]
 
 
 class AgentMessagePayload(BaseModel):
@@ -1937,6 +1941,41 @@ class AgentMessageAppended(Event):
     scope: AgentTurnScope
     task_id: str | None = None
     message: AgentMessagePayload
+
+
+class _AgentToolActivity(Event):
+    """Coarse browser-visible activity for one agent tool call.
+
+    The event is deliberately user-scoped and label-only. It never
+    carries tool inputs, tool outputs, raw errors, prompts, provider
+    text, or chain-of-thought; clients use it only to render a muted
+    process line in the delegating user's chat surface.
+    """
+
+    user_scoped: ClassVar[bool] = True
+
+    actor_user_id: str
+    scope: AgentTurnScope
+    task_id: str | None = None
+    thread_id: str | None
+    tool_call_id: str
+    label: str
+
+
+@register
+class AgentToolStarted(_AgentToolActivity):
+    """A runtime tool call started for the delegating user's turn."""
+
+    name: ClassVar[str] = "agent.tool.started"
+
+
+@register
+class AgentToolFinished(_AgentToolActivity):
+    """A runtime tool call reached a coarse terminal state."""
+
+    name: ClassVar[str] = "agent.tool.finished"
+
+    status: AgentToolStatus
 
 
 @register

@@ -317,6 +317,9 @@ class FakeToolDispatcher:
             )
         return bucket.pop(0)
 
+    def activity_label_for(self, call: ToolCall) -> str:
+        return call.name.replace(".", " ").replace("_", " ").capitalize()
+
 
 @dataclass(slots=True)
 class ScriptedLLMClient:
@@ -441,6 +444,8 @@ class CapturedEvents:
         from app.events.types import (
             AgentActionPending,
             AgentMessageAppended,
+            AgentToolFinished,
+            AgentToolStarted,
             AgentTurnFinished,
             AgentTurnStarted,
         )
@@ -451,6 +456,14 @@ class CapturedEvents:
 
         @self.bus.subscribe(AgentMessageAppended)
         def _on_message(event: AgentMessageAppended) -> None:
+            self.events.append(event)
+
+        @self.bus.subscribe(AgentToolStarted)
+        def _on_tool_started(event: AgentToolStarted) -> None:
+            self.events.append(event)
+
+        @self.bus.subscribe(AgentToolFinished)
+        def _on_tool_finished(event: AgentToolFinished) -> None:
             self.events.append(event)
 
         @self.bus.subscribe(AgentTurnFinished)

@@ -33,7 +33,14 @@ from sqlalchemy.orm import Session
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.llm.models import ApprovalRequest, LlmPromptTemplate, LlmUsage
 from app.adapters.db.messaging.models import ChatMessage
-from app.adapters.llm.ports import LLMResponse, Tool
+from app.adapters.llm.ports import (
+    LLMResponse,
+    LLMUsage,
+    Tool,
+)
+from app.adapters.llm.ports import (
+    ToolCall as NativeToolCall,
+)
 from app.domain.agent.preferences import PreferenceUpdate, save_preference
 from app.domain.agent.runtime import (
     APPROVAL_REQUEST_TTL,
@@ -47,6 +54,8 @@ from app.events.bus import EventBus
 from app.events.types import (
     AgentActionPending,
     AgentMessageAppended,
+    AgentToolFinished,
+    AgentToolStarted,
     AgentTurnFinished,
     AgentTurnScope,
     AgentTurnStarted,
@@ -310,6 +319,66 @@ def test_one_read_tool_no_audit(
     # Exactly one llm_usage row per LLM call.
     usage_count = db_session.scalar(select(func.count()).select_from(LlmUsage))
     assert usage_count == 2
+
+
+def test_tool_activity_events_are_user_scoped_and_label_only(
+    db_session: Session,
+    bus: EventBus,
+    captured_events: CapturedEvents,
+    clock: FrozenClock,
+) -> None:
+    _ws, ctx, channel_id = _bind_and_seed(db_session)
+
+    llm = ScriptedLLMClient(
+        replies=[
+            LLMResponse(
+                text="",
+                usage=LLMUsage(prompt_tokens=12, completion_tokens=4, total_tokens=16),
+                model_id="fake/model",
+                finish_reason="tool_calls",
+                tool_calls=(
+                    NativeToolCall(
+                        id="call_inventory",
+                        name="inventory.low_stock",
+                        arguments={"secret_note": "staff@example.com"},
+                    ),
+                ),
+            ),
+            make_text_response("Inventory checked."),
+        ]
+    )
+    outcome = run_turn(
+        ctx,
+        session=db_session,
+        scope="manager",
+        thread_id=channel_id,
+        user_message="Check inventory",
+        trigger="event",
+        llm_client=llm,
+        tool_dispatcher=FakeToolDispatcher(),
+        token_factory=FakeTokenFactory(),
+        agent_label=_AGENT_LABEL,
+        capability=_CAPABILITY,
+        event_bus=bus,
+        clock=clock,
+    )
+
+    assert outcome.outcome == "replied"
+    started = next(e for e in captured_events.events if isinstance(e, AgentToolStarted))
+    finished = next(
+        e for e in captured_events.events if isinstance(e, AgentToolFinished)
+    )
+    assert started.actor_user_id == ctx.actor_id
+    assert started.correlation_id == outcome.correlation_id
+    assert started.scope == "manager"
+    assert started.thread_id == channel_id
+    assert started.tool_call_id == "call_inventory"
+    assert started.label == "Inventory low stock"
+    assert finished.label == started.label
+    assert finished.status == "completed"
+    event_dump = repr((started.model_dump(), finished.model_dump()))
+    assert "staff@example.com" not in event_dump
+    assert "secret_note" not in event_dump
 
 
 def test_workspace_preferences_are_injected_into_system_prompt(
@@ -693,7 +762,9 @@ def test_gated_write_tool_creates_approval_request_and_pauses(
     assert pending.scope == "manager"
     assert pending.thread_id == channel_id
 
-    finished = captured_events.events[-1]
+    finished = next(
+        e for e in captured_events.events if isinstance(e, AgentTurnFinished)
+    )
     assert isinstance(finished, AgentTurnFinished)
     assert finished.outcome == "action"
 
@@ -757,6 +828,8 @@ def test_scheduled_trigger_records_turn_and_audits(
     # Started/finished still emit (uniform shape across triggers).
     assert captured_events.names() == [
         "agent.turn.started",
+        "agent.tool.started",
+        "agent.tool.finished",
         "agent.turn.finished",
     ]
     started = captured_events.events[0]

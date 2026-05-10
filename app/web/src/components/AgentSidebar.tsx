@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
@@ -6,7 +6,7 @@ import { fetchJson } from "@/lib/api";
 import { fetchApprovals } from "@/lib/approvals";
 import { qk } from "@/lib/queryKeys";
 import { initialAgentCollapsed, persistAgentCollapsed } from "@/lib/preferences";
-import { useAgentTyping } from "@/lib/agentTyping";
+import { useAgentActivity } from "@/lib/agentTyping";
 import ChatComposer from "@/components/chat/ChatComposer";
 import ChatMessageBody from "@/components/chat/ChatMessageBody";
 import DateTime from "@/components/DateTime";
@@ -40,7 +40,7 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
   const isManager = role === "manager";
   const showActions = isManager || isAdmin;
   const typingScope: AgentTurnScope = isAdmin ? "admin" : isManager ? "manager" : "employee";
-  const typing = useAgentTyping(typingScope);
+  const activity = useAgentActivity(typingScope);
 
   // Query keys and endpoints are scoped per role. The admin agent
   // lives under /admin/api/v1/... with its own log/actions. Workspace
@@ -114,7 +114,7 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
     },
     onSettled: () => qc.invalidateQueries({ queryKey: logKey }),
   });
-  const showTyping = typing || sendMessage.isPending;
+  const showTyping = activity.typing || sendMessage.isPending;
 
   const decideAction = useMutation({
     mutationFn: ({ id, decision }: { id: string; decision: "approve" | "deny" }) =>
@@ -177,16 +177,29 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
 
       <div className="desk__agent-body" id="agent-body">
         <div className="agent-log" ref={logRef} role="log" aria-live="polite">
-          {log.data?.map((msg, i) => (
-            <div key={i} className={"agent-msg agent-msg--" + msg.kind}>
-              {msg.kind === "agent" ? (
-                <ChatMessageBody body={msg.body} className="agent-msg__body" />
-              ) : (
-                <span className="agent-msg__body">{msg.body}</span>
-              )}
-              <DateTime value={msg.at} showTime className="agent-msg__time" />
-            </div>
-          ))}
+          {log.data?.map((msg, i) => {
+            const showCompletedActivity =
+              activity.label &&
+              !showTyping &&
+              msg.kind === "agent" &&
+              i === log.data.length - 1;
+            return (
+              <Fragment key={i}>
+                {showCompletedActivity && <AgentActivityLine label={activity.label} />}
+                <div className={"agent-msg agent-msg--" + msg.kind}>
+                  {msg.kind === "agent" ? (
+                    <ChatMessageBody body={msg.body} className="agent-msg__body" />
+                  ) : (
+                    <span className="agent-msg__body">{msg.body}</span>
+                  )}
+                  <DateTime value={msg.at} showTime className="agent-msg__time" />
+                </div>
+              </Fragment>
+            );
+          })}
+          {showTyping && activity.label && (
+            <AgentActivityLine label={activity.label} live />
+          )}
           {showTyping && (
             <div className="agent-msg agent-msg--agent agent-msg--typing">
               <span className="agent-msg__body">
@@ -249,6 +262,19 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
         />
       </div>
     </aside>
+  );
+}
+
+function AgentActivityLine({ label, live = false }: { label: string; live?: boolean }) {
+  return (
+    <div className="agent-activity">
+      <span aria-hidden="true">{label}</span>
+      {live && (
+        <span className="sr-only" role="status" aria-live="polite">
+          {label}
+        </span>
+      )}
+    </div>
   );
 }
 

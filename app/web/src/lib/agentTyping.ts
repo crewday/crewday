@@ -14,16 +14,25 @@
 import { useQuery } from "@tanstack/react-query";
 import { qk } from "./queryKeys";
 import type { AgentTurnScope } from "@/types/api";
+import type { AgentActivityState } from "./sse";
 
-export function useAgentTyping(scope: AgentTurnScope, taskId?: string): boolean {
+export function useAgentActivity(
+  scope: AgentTurnScope,
+  taskId?: string,
+): AgentActivityState {
   const q = useQuery({
     queryKey: qk.agentTyping(scope, taskId),
-    queryFn: () => false,
+    queryFn: (): AgentActivityState => ({ typing: false }),
     staleTime: Infinity,
     gcTime: Infinity,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
-  return q.data === true;
+  if (typeof q.data === "boolean") return { typing: q.data };
+  return q.data ?? { typing: false };
+}
+
+export function useAgentTyping(scope: AgentTurnScope, taskId?: string): boolean {
+  return useAgentActivity(scope, taskId).typing;
 }

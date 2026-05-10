@@ -2,6 +2,7 @@ import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
+import { useAgentActivity } from "@/lib/agentTyping";
 import { qk } from "@/lib/queryKeys";
 import { Ban, Camera, Check, SkipForward } from "lucide-react";
 import { Chip, EmptyState, Loading } from "@/components/common";
@@ -149,6 +150,7 @@ export default function TaskDetailPage() {
       ),
     enabled: Boolean(tid),
   });
+  const chatActivity = useAgentActivity("task", tid);
 
   const chatSend = useMutation<AgentMessage, Error, string, ChatMutationContext>({
     mutationFn: async (body: string) => {
@@ -556,6 +558,8 @@ export default function TaskDetailPage() {
           messages={chatQ.data}
           variant="inline"
           ariaLabel="Task conversation with assistant"
+          typing={chatActivity.typing}
+          activity={chatActivity}
         />
         <ChatComposer
           value={chatDraft}
