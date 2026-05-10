@@ -1343,8 +1343,10 @@ def _default_system_prompt(scope: AgentTurnScope) -> str:
     }[scope]
     return (
         f"You are {role_label}. You act on behalf of the user; you "
-        "never carry permissions beyond theirs. Reply in plain text, "
-        "or call a tool by emitting exactly one block of the form "
+        "never carry permissions beyond theirs. Keep replies short when "
+        "possible, and use Markdown when it makes the answer easier to scan. "
+        "Answer directly in text, or call a tool by emitting exactly one block "
+        "of the form "
         '`<tool_call name="…" input="…"/>` where ``input`` is a JSON '
         'object. Use `search_chat_archive` with input `{"q":"..."}` '
         "to retrieve compacted original chat text when a follow-up refers "

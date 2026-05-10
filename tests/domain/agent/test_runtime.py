@@ -39,6 +39,7 @@ from app.domain.agent.runtime import (
     APPROVAL_REQUEST_TTL,
     GateDecision,
     ToolResult,
+    _default_system_prompt,
     run_turn,
 )
 from app.domain.messaging.notifications import NotificationKind
@@ -47,6 +48,7 @@ from app.events.types import (
     AgentActionPending,
     AgentMessageAppended,
     AgentTurnFinished,
+    AgentTurnScope,
     AgentTurnStarted,
 )
 from app.tenancy.current import set_current
@@ -68,6 +70,12 @@ from tests.domain.agent.conftest import (
 
 _CAPABILITY = "chat.manager"
 _AGENT_LABEL = "manager-chat-agent"
+_DEFAULT_PROMPT_SCOPES: tuple[AgentTurnScope, ...] = (
+    "manager",
+    "employee",
+    "admin",
+    "task",
+)
 
 
 class RecordingNotificationSink:
@@ -378,6 +386,23 @@ def test_runtime_self_seeds_default_prompt_template(
     assert llm.last_messages is not None
     assert llm.last_messages[0]["content"].startswith(row.template)
     assert "manager-side chat agent" in row.template
+    assert "Keep replies short when possible" in row.template
+    assert "use Markdown when it makes the answer easier to scan" in row.template
+    assert 'exactly one block of the form `<tool_call name="…" input="…"/>`' in (
+        row.template
+    )
+
+
+@pytest.mark.parametrize("scope", _DEFAULT_PROMPT_SCOPES)
+def test_default_prompt_guidance_applies_to_every_agent_scope(
+    scope: AgentTurnScope,
+) -> None:
+    prompt = _default_system_prompt(scope)
+
+    assert "Keep replies short when possible" in prompt
+    assert "use Markdown when it makes the answer easier to scan" in prompt
+    assert 'exactly one block of the form `<tool_call name="…" input="…"/>`' in prompt
+    assert "Answer directly in text, or call a tool" in prompt
 
 
 def test_runtime_uses_operator_prompt_template_override(
