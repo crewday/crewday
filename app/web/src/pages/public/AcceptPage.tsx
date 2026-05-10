@@ -37,7 +37,7 @@ import {
   type ReactElement,
 } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { KeyRound } from "lucide-react";
+import { KeyRound, Link2Off } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -188,12 +188,11 @@ export default function AcceptPage(): ReactElement {
   if (introspect.isError || !introspect.data) {
     return (
       <AcceptShell>
-        <EmptyState>
-          <p>
-            This invite link is invalid, already used, or has expired. Ask the
-            person who invited you to resend the link.
-          </p>
-        </EmptyState>
+        <EmptyState
+          icon={Link2Off}
+          title="Invite link unavailable"
+          copy="This invite link is invalid, already used, or has expired. Ask the person who invited you to resend the link."
+        />
       </AcceptShell>
     );
   }

@@ -1,12 +1,13 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useParams } from "react-router-dom";
+import { CalendarX } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
-import { Chip, Loading } from "@/components/common";
+import { Chip, EmptyState, Loading } from "@/components/common";
 import type { Me, Property, PropertyClosure, Stay } from "@/types/api";
 import {
   fallbackProperty,
@@ -236,8 +237,13 @@ export default function PropertyClosuresPage() {
           <tbody>
             {closures.length === 0 ? (
               <tr>
-                <td colSpan={5} className="empty-state empty-state--quiet">
-                  No closures scheduled.
+                <td colSpan={5}>
+                  <EmptyState
+                    icon={CalendarX}
+                    title="No closures scheduled"
+                    copy="Blocked dates and owner stays will appear here."
+                    variant="quiet"
+                  />
                 </td>
               </tr>
             ) : (

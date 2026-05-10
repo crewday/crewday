@@ -9,7 +9,7 @@ import {
 } from "@/lib/offlineQueue";
 import { qk } from "@/lib/queryKeys";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
-import { Camera, Check } from "lucide-react";
+import { CalendarClock, Camera, CheckCircle, WifiOff } from "lucide-react";
 import { Chip, EmptyState, Loading, ProgressBar } from "@/components/common";
 import DateTime from "@/components/DateTime";
 import PageHeader from "@/components/PageHeader";
@@ -121,7 +121,19 @@ export default function TodayPage() {
     return <>{header}<section className="phone__section"><Loading /></section></>;
   }
   if (me.isError || properties.isError || today.isError || !today.data) {
-    return <>{header}<section className="phone__section"><EmptyState>Failed to load.</EmptyState></section></>;
+    return (
+      <>
+        {header}
+        <section className="phone__section">
+          <EmptyState
+            icon={WifiOff}
+            title="Today could not load"
+            copy="Refresh when you are back online."
+            variant="quiet"
+          />
+        </section>
+      </>
+    );
   }
 
   const { now_task, upcoming, completed } = today.data;
@@ -140,9 +152,12 @@ export default function TodayPage() {
             onComplete={() => complete.mutate(now_task)}
           />
         ) : (
-          <EmptyState icon={Check} variant="celebrate">
-            All done for now. Nice work.
-          </EmptyState>
+          <EmptyState
+            icon={CheckCircle}
+            title="All done for now"
+            copy="Nice work."
+            variant="celebrate"
+          />
         )}
       </section>
 
@@ -150,7 +165,14 @@ export default function TodayPage() {
         <h2 className="section-title">Upcoming today · {upcoming.length}</h2>
         <ul className="task-list">
           {upcoming.length === 0 && (
-            <li className="empty-state empty-state--quiet">Nothing else scheduled.</li>
+            <li>
+              <EmptyState
+                icon={CalendarClock}
+                title="Nothing else scheduled"
+                copy="New tasks will appear here when they are assigned."
+                variant="quiet"
+              />
+            </li>
           )}
           {upcoming.map((t) => (
             <li key={t.id}>

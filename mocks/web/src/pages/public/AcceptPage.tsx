@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { KeyRound } from "lucide-react";
+import { CheckCircle, KeyRound } from "lucide-react";
+import { EmptyState } from "@/components/common";
 
 // Static (mock) click-to-accept invitation surface (§03
 // "Additional users (invite → click-to-accept)"). One URL,
@@ -57,9 +58,12 @@ export default function AcceptPage() {
               </section>
 
               {accepted ? (
-                <p className="empty-state empty-state--quiet">
-                  Accepted — the new scopes appear in your workspace switcher.
-                </p>
+                <EmptyState
+                  icon={CheckCircle}
+                  title="Invite accepted"
+                  copy="The new scopes appear in your workspace switcher."
+                  variant="quiet"
+                />
               ) : (
                 <div className="form__actions">
                   <button

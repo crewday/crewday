@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { MapPinned } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
-import { Loading } from "@/components/common";
+import { EmptyState, Loading } from "@/components/common";
 
 type AreaKind = "indoor_room" | "outdoor" | "service";
 
@@ -215,8 +216,13 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
           <tbody>
             {areas.length === 0 ? (
               <tr>
-                <td colSpan={5} className="empty-state empty-state--quiet">
-                  No areas yet.
+                <td colSpan={5}>
+                  <EmptyState
+                    icon={MapPinned}
+                    title="No areas yet"
+                    copy="Rooms and shared spaces will appear here once they are added."
+                    variant="quiet"
+                  />
                 </td>
               </tr>
             ) : (

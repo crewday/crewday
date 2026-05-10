@@ -6,6 +6,7 @@ import {
   BookOpen,
   Building2,
   Gauge,
+  LoaderCircle,
   MessageSquareMore,
   ScrollText,
   Settings,
@@ -23,6 +24,7 @@ import {
   initialNavCollapsed,
   persistNavCollapsed,
 } from "@/lib/preferences";
+import { EmptyState } from "@/components/common";
 import type { AdminMe, Me } from "@/types/api";
 
 // AdminLayout — bare-host /admin/* shell (§14 "Admin shell").
@@ -133,7 +135,12 @@ export default function AdminLayout() {
     return (
       <div className="desk desk--admin">
         <section className="desk__main" aria-busy="true">
-          <div className="empty-state empty-state--quiet">Checking access…</div>
+          <EmptyState
+            icon={LoaderCircle}
+            title="Checking access"
+            copy="Admin tools will load once deployment access is confirmed."
+            variant="quiet"
+          />
         </section>
       </div>
     );

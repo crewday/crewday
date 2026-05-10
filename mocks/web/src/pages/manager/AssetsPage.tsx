@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
+import { PackageSearch, SearchX } from "lucide-react";
 import { fetchJson, resolveApiPath } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
@@ -138,14 +139,18 @@ export default function AssetsPage() {
 
         {noAssets ? (
           <EmptyState
+            icon={PackageSearch}
             title="No assets listed yet"
             copy="Create an asset to track equipment, appliances, warranties, manuals, and QR labels."
+            variant="compact"
           />
         ) : null}
         {noFilteredAssets ? (
           <EmptyState
+            icon={SearchX}
             title="No assets match these filters"
             copy="Clear the active category or property filter to see the full asset list."
+            variant="compact"
           />
         ) : null}
         {filtered.length > 0 ? (

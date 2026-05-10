@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
-import { Camera, Check } from "lucide-react";
+import { CalendarClock, Camera, CheckCircle, WifiOff } from "lucide-react";
 import { Chip, EmptyState, Loading, ProgressBar } from "@/components/common";
 import DateTime from "@/components/DateTime";
 import PageHeader from "@/components/PageHeader";
@@ -45,7 +45,21 @@ export default function TodayPage() {
   );
 
   if (q.isPending) return <>{header}<section className="phone__section"><Loading /></section></>;
-  if (q.isError || !q.data) return <>{header}<section className="phone__section"><EmptyState>Failed to load.</EmptyState></section></>;
+  if (q.isError || !q.data) {
+    return (
+      <>
+        {header}
+        <section className="phone__section">
+          <EmptyState
+            icon={WifiOff}
+            title="Today could not load"
+            copy="Refresh when you are back online."
+            variant="quiet"
+          />
+        </section>
+      </>
+    );
+  }
 
   const { now_task, upcoming, completed, properties } = q.data;
   const propsById = new Map(properties.map((p) => [p.id, p]));
@@ -58,9 +72,12 @@ export default function TodayPage() {
         {now_task ? (
           <NowCard task={now_task} property={propsById.get(now_task.property_id) ?? null} />
         ) : (
-          <EmptyState icon={Check} variant="celebrate">
-            All done for now. Nice work.
-          </EmptyState>
+          <EmptyState
+            icon={CheckCircle}
+            title="All done for now"
+            copy="Nice work."
+            variant="celebrate"
+          />
         )}
       </section>
 
@@ -68,7 +85,14 @@ export default function TodayPage() {
         <h2 className="section-title">Upcoming today · {upcoming.length}</h2>
         <ul className="task-list">
           {upcoming.length === 0 && (
-            <li className="empty-state empty-state--quiet">Nothing else scheduled.</li>
+            <li>
+              <EmptyState
+                icon={CalendarClock}
+                title="Nothing else scheduled"
+                copy="New tasks will appear here when they are assigned."
+                variant="quiet"
+              />
+            </li>
           )}
           {upcoming.map((t) => (
             <li key={t.id}>

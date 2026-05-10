@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
+import { Files } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
@@ -243,13 +244,12 @@ export default function DocumentsPage() {
     return (
       <DeskPage title="Documents" sub={sub}>
         <section className="panel">
-          <EmptyState>
-            <h2>No documents listed yet</h2>
-            <p>
-              Documents are attached from the property or asset they belong to.
-              Open a property for permits, contracts, and insurance, or open an
-              asset for manuals, warranties, and invoices.
-            </p>
+          <EmptyState
+            icon={Files}
+            title="No documents listed yet"
+            copy="Documents are attached from the property or asset they belong to. Open a property for permits, contracts, and insurance, or open an asset for manuals, warranties, and invoices."
+            variant="compact"
+          >
             <p>
               <Link className="btn btn--moss" to={workspaceRouteForPathname(pathname, "/assets")}>Open assets</Link>{" "}
               <Link className="btn btn--ghost" to={workspaceRouteForPathname(pathname, "/properties")}>Open properties</Link>

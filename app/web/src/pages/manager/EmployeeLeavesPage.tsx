@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
+import { CalendarOff } from "lucide-react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
-import { Chip, Loading } from "@/components/common";
+import { Chip, EmptyState, Loading } from "@/components/common";
 import type { Employee, Leave } from "@/types/api";
 import { fmtDayMonYear, inclusiveDays } from "./leaveDisplay";
 
@@ -52,8 +53,13 @@ export default function EmployeeLeavesPage() {
           <tbody>
             {leaves.length === 0 ? (
               <tr>
-                <td colSpan={6} className="empty-state empty-state--quiet">
-                  No leave on file.
+                <td colSpan={6}>
+                  <EmptyState
+                    icon={CalendarOff}
+                    title="No leave on file"
+                    copy="Approved and pending leave for this employee will appear here."
+                    variant="quiet"
+                  />
                 </td>
               </tr>
             ) : (

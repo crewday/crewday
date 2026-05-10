@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { CalendarOff, History, MessageSquareText, ReceiptText } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
 import { fmtDate } from "@/lib/dates";
 import { cap } from "@/lib/strings";
 import DateTime from "@/components/DateTime";
-import { Loading } from "@/components/common";
+import { EmptyState, Loading } from "@/components/common";
 import PageHeader from "@/components/PageHeader";
 import PageTabs, { type PageTab } from "@/components/PageTabs";
 import type { HistoryPagePayload, HistoryTab, Property } from "@/types/api";
@@ -258,7 +259,14 @@ function TaskHistory({
   return (
     <ul className="task-list">
       {tasks.length === 0 ? (
-        <li className="empty-state empty-state--quiet">No past tasks.</li>
+        <li>
+          <EmptyState
+            icon={History}
+            title="No past tasks"
+            copy="Completed and closed tasks will appear here."
+            variant="quiet"
+          />
+        </li>
       ) : (
         tasks.map((t) => {
           const prop = propsById.get(t.property_id);
@@ -286,7 +294,14 @@ function ChatHistory({ chats }: { chats: HistoryPagePayload<"chats">["data"] }) 
   return (
     <ul className="task-list">
       {chats.length === 0 ? (
-        <li className="empty-state empty-state--quiet">No archived chats.</li>
+        <li>
+          <EmptyState
+            icon={MessageSquareText}
+            title="No archived chats"
+            copy="Closed task and support chats will appear here."
+            variant="quiet"
+          />
+        </li>
       ) : (
         chats.map((c) => (
           <li key={c.id} className="stack-row">
@@ -310,7 +325,14 @@ function ExpenseHistory({
   return (
     <ul className="task-list">
       {expenses.length === 0 ? (
-        <li className="empty-state empty-state--quiet">No past expenses.</li>
+        <li>
+          <EmptyState
+            icon={ReceiptText}
+            title="No past expenses"
+            copy="Submitted and reimbursed expenses will appear here."
+            variant="quiet"
+          />
+        </li>
       ) : (
         expenses.map((x) => {
           const stamp = x.submitted_at ?? x.purchased_at;
@@ -339,7 +361,14 @@ function LeaveHistory({ leaves }: { leaves: HistoryPagePayload<"leaves">["data"]
   return (
     <ul className="task-list">
       {leaves.length === 0 ? (
-        <li className="empty-state empty-state--quiet">No past leaves.</li>
+        <li>
+          <EmptyState
+            icon={CalendarOff}
+            title="No past leaves"
+            copy="Approved leave history will appear here."
+            variant="quiet"
+          />
+        </li>
       ) : (
         leaves.map((lv) => (
           <li key={lv.id} className="stack-row">

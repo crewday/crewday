@@ -5,7 +5,7 @@ import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
 import { fmtDate } from "@/lib/dates";
 import { Search } from "lucide-react";
-import { Chip, Loading } from "@/components/common";
+import { Chip, EmptyState, Loading } from "@/components/common";
 import PageHeader from "@/components/PageHeader";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import type {
@@ -234,12 +234,11 @@ export default function MyExpensesPage() {
 
         {/* ── Processing phase ─────────────────────────── */}
         {phase === "processing" && (
-          <div className="empty-state">
-            <span className="empty-state__glyph" aria-hidden="true">
-              <Search size={28} strokeWidth={1.8} />
-            </span>
-            Reading your receipt...
-          </div>
+          <EmptyState
+            icon={Search}
+            title="Reading your receipt"
+            copy="The scan result will appear here for review."
+          />
         )}
 
         {/* ── Review phase ─────────────────────────────── */}

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { ShieldCheck } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { useDecideMutation } from "@/lib/useDecideMutation";
@@ -32,7 +33,14 @@ export default function ApprovalsPage() {
       <div className="panel">
         <ul className="approval-list approval-list--wide">
           {approvals.length === 0 && (
-            <li><EmptyState>Nothing to review — agents are behaving.</EmptyState></li>
+            <li>
+              <EmptyState
+                icon={ShieldCheck}
+                title="Nothing to review"
+                copy="Agent requests that need approval will appear here before they happen."
+                variant="quiet"
+              />
+            </li>
           )}
           {approvals.map((a) => (
             <li key={a.id} className={"approval approval--" + a.risk}>

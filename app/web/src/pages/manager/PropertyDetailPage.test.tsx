@@ -486,7 +486,13 @@ afterEach(() => {
 
 describe("<PropertyDetailPage>", () => {
   it("renders shared empty states for blank overview stays and tasks", async () => {
-    const emptyState = render(<EmptyState icon={CalendarClock}>Plain empty copy.</EmptyState>);
+    const emptyState = render(
+      <EmptyState
+        icon={CalendarClock}
+        title="No upcoming stays"
+        copy="Plain empty copy."
+      />,
+    );
     expect(screen.getByText("Plain empty copy.").tagName).toBe("P");
     const glyph = emptyState.container.querySelector(".empty-state__glyph");
     expect(glyph).toHaveAttribute("aria-hidden", "true");

@@ -1,6 +1,13 @@
 import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
+import {
+  CalendarOff,
+  CircleAlert,
+  ClipboardList,
+  ShieldCheck,
+  Users,
+} from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
@@ -208,7 +215,13 @@ export default function DashboardPage() {
 
           {broadcastTarget === "selected" && (
             <div className="task-list task-list--desk" aria-label="Broadcast recipients">
-              {broadcastRecipients.isPending && <EmptyState variant="quiet">Loading recipients.</EmptyState>}
+              {broadcastRecipients.isPending && (
+                <EmptyState
+                  icon={Users}
+                  title="Loading recipients"
+                  variant="quiet"
+                />
+              )}
               {(broadcastRecipients.data?.data ?? []).map((recipient) => (
                 <Checkbox
                   key={recipient.user_id}
@@ -297,7 +310,12 @@ export default function DashboardPage() {
       <section className="grid grid--split">
         <Panel title="Today's tasks" right={<Link className="link" to={workspaceRouteForPathname(pathname, "/properties")}>By property →</Link>}>
           {todayTasks.length === 0 ? (
-            <EmptyState variant="quiet">No tasks scheduled for today.</EmptyState>
+            <EmptyState
+              icon={ClipboardList}
+              title="No tasks scheduled"
+              copy="Today's task list will appear here once work is assigned."
+              variant="quiet"
+            />
           ) : (
             <table className="table">
               <thead>
@@ -328,7 +346,12 @@ export default function DashboardPage() {
 
         <Panel title="Agent approvals" right={<Link className="link" to={workspaceRouteForPathname(pathname, "/approvals")}>All →</Link>}>
           {pending_approvals.length === 0 ? (
-            <EmptyState variant="quiet">No agent approvals waiting.</EmptyState>
+            <EmptyState
+              icon={ShieldCheck}
+              title="No agent approvals waiting"
+              copy="Agent requests that need a manager decision will appear here."
+              variant="quiet"
+            />
           ) : (
             <ul className="approval-list">
               {pending_approvals.map((a) => (
@@ -365,7 +388,12 @@ export default function DashboardPage() {
       <section className="grid grid--split">
         <Panel title="Open issues" right={<span className="muted">{open_issues.length}</span>}>
           {open_issues.length === 0 ? (
-            <EmptyState variant="quiet">No open issues.</EmptyState>
+            <EmptyState
+              icon={CircleAlert}
+              title="No open issues"
+              copy="Guest, staff, and property issues will show here when they need attention."
+              variant="quiet"
+            />
           ) : (
             <ul className="issue-list">
               {open_issues.map((i) => {
@@ -390,7 +418,12 @@ export default function DashboardPage() {
 
         <Panel title="Pending leaves" right={<Link className="link" to={workspaceRouteForPathname(pathname, "/leaves")}>All →</Link>}>
           {pending_leaves.length === 0 ? (
-            <EmptyState variant="quiet">No pending leave requests.</EmptyState>
+            <EmptyState
+              icon={CalendarOff}
+              title="No pending leave requests"
+              copy="Submitted leave requests will appear here for approval."
+              variant="quiet"
+            />
           ) : (
             <ul className="task-list task-list--desk">
               {pending_leaves.map((lv) => {

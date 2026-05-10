@@ -320,7 +320,9 @@ describe("<PropertiesPage>", () => {
       const header = screen.getByRole("banner");
       expect(await within(header).findByRole("button", { name: "+ Add property" })).toBeEnabled();
       expect(screen.getByText("Create the first property to start tracking stays, closures, and work areas.")).toBeInTheDocument();
-      expect(within(screen.getByRole("region", { name: "No properties visible" })).queryByRole("button", { name: /Add property/ })).toBeNull();
+      const emptyState = screen.getByRole("heading", { name: "No properties visible" }).closest(".empty-state");
+      expect(emptyState).not.toBeNull();
+      expect(within(emptyState as HTMLElement).queryByRole("button", { name: /Add property/ })).toBeNull();
       expect(screen.queryByRole("heading", { name: "Villa Rosa" })).toBeNull();
       expect(fake.calls).not.toContain("/w/acme/api/v1/properties/prop_1/share");
       expect(fake.calls).not.toContain("/w/acme/api/v1/stays/reservations?limit=500");

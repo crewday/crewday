@@ -472,7 +472,7 @@ describe("TaskDetailPage", () => {
     try {
       render(<Harness />);
 
-      expect(await screen.findByText("Task unavailable.")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Task unavailable" })).toBeInTheDocument();
       expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/task/t1");
     } finally {
       env.restore();

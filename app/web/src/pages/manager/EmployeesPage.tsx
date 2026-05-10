@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { BriefcaseBusiness, Pencil, Plus, Trash2 } from "lucide-react";
 import { ApiError, fetchJson } from "@/lib/api";
 import { fetchAllList } from "@/lib/fetchAllList";
 import { qk } from "@/lib/queryKeys";
@@ -294,6 +294,7 @@ function WorkRoleCatalogManager() {
         </p>
       ) : roles.length === 0 ? (
         <EmptyState
+          icon={BriefcaseBusiness}
           title="No work roles yet"
           copy="Create the first role before assigning employees to jobs."
           action={

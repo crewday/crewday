@@ -1,13 +1,14 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
+import { Home } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
-import { Chip, Loading } from "@/components/common";
+import { Chip, EmptyState, Loading } from "@/components/common";
 import type { AuthMe } from "@/auth/types";
 import type { ResolvedPermission } from "@/types/auth";
 import type {
@@ -356,11 +357,11 @@ export default function PropertiesPage() {
   if (propsQ.data.length === 0) {
     return (
       <DeskPage title="Properties" actions={createPropertyAction}>
-        <section className="empty-state" aria-labelledby="properties-empty-title">
-          <h2 id="properties-empty-title">No properties visible</h2>
-          <p>
-            Properties added to this workspace or shared with it will appear here.
-          </p>
+        <EmptyState
+          icon={Home}
+          title="No properties visible"
+          copy="Properties added to this workspace or shared with it will appear here."
+        >
           {canCreateProperty ? (
             <p className="muted">Create the first property to start tracking stays, closures, and work areas.</p>
           ) : isCheckingCreatePermission ? (
@@ -370,7 +371,7 @@ export default function PropertiesPage() {
           ) : (
             <p className="muted">Ask an owner or manager to add a property or share one with this workspace.</p>
           )}
-        </section>
+        </EmptyState>
         {createPropertyDialog}
       </DeskPage>
     );

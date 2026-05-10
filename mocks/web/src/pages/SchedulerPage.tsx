@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { CalendarDays } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import PageHeader from "@/components/PageHeader";
 import DeskPage from "@/components/DeskPage";
-import { Loading } from "@/components/common";
+import { EmptyState, Loading } from "@/components/common";
 import { useRole } from "@/context/RoleContext";
 import type {
   SchedulerCalendarPayload,
@@ -230,12 +231,18 @@ export default function SchedulerPage() {
     if (!calQ.data) return <p>Failed to load scheduler.</p>;
     if (usersToShow.length === 0) {
       return (
-        <div className="panel empty-state">
-          No rota data for this workspace yet.{" "}
-          {scope === "manager"
-            ? "Assign employees to properties and attach a schedule ruleset to see the grid."
-            : "Ask your manager to set up the rota."}
-        </div>
+        <section className="panel">
+          <EmptyState
+            icon={CalendarDays}
+            title="No rota data yet"
+            copy={
+              scope === "manager"
+                ? "Assign employees to properties and attach a schedule ruleset to see the grid."
+                : "Ask your manager to set up the rota."
+            }
+            variant="compact"
+          />
+        </section>
       );
     }
 

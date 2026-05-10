@@ -266,10 +266,10 @@ describe("<DashboardPage>", () => {
     try {
       render(<Harness />);
 
-      expect(within(await panelNamed("Today's tasks")).getByText("No tasks scheduled for today.")).toBeInTheDocument();
-      expect(within(await panelNamed("Agent approvals")).getByText("No agent approvals waiting.")).toBeInTheDocument();
-      expect(within(await panelNamed("Open issues")).getByText("No open issues.")).toBeInTheDocument();
-      expect(within(await panelNamed("Pending leaves")).getByText("No pending leave requests.")).toBeInTheDocument();
+      expect(within(await panelNamed("Today's tasks")).getByRole("heading", { name: "No tasks scheduled" })).toBeInTheDocument();
+      expect(within(await panelNamed("Agent approvals")).getByRole("heading", { name: "No agent approvals waiting" })).toBeInTheDocument();
+      expect(within(await panelNamed("Open issues")).getByRole("heading", { name: "No open issues" })).toBeInTheDocument();
+      expect(within(await panelNamed("Pending leaves")).getByRole("heading", { name: "No pending leave requests" })).toBeInTheDocument();
       expect(document.querySelectorAll(".empty-state.empty-state--quiet")).toHaveLength(4);
       expect(document.querySelector("li.empty-state")).not.toBeInTheDocument();
       expect(within(await panelNamed("Today's tasks")).queryByRole("table")).not.toBeInTheDocument();
@@ -309,7 +309,7 @@ describe("<DashboardPage>", () => {
       expect(within(leaves).getByText("Maya Santos")).toBeInTheDocument();
       expect(within(leaves).getByRole("button", { name: "Approve" })).toBeInTheDocument();
       expect(within(leaves).getByRole("button", { name: "Reject" })).toBeInTheDocument();
-      expect(screen.queryByText("No tasks scheduled for today.")).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "No tasks scheduled" })).not.toBeInTheDocument();
     } finally {
       fake.restore();
     }

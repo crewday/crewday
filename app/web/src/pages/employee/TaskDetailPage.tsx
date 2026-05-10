@@ -287,7 +287,12 @@ export default function TaskDetailPage() {
       <>
         <PageHeader title="Task" />
         <section className="phone__section">
-          <EmptyState variant="quiet">Task unavailable.</EmptyState>
+          <EmptyState
+            icon={Ban}
+            title="Task unavailable"
+            copy="This task may have been moved, completed, or deleted."
+            variant="quiet"
+          />
         </section>
       </>
     );

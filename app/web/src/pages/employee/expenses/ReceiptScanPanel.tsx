@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Search } from "lucide-react";
 import FileDropZone from "@/components/FileDropZone";
+import { EmptyState } from "@/components/common";
 import { ApiError, fetchJson } from "@/lib/api";
 import type { ExpenseScanResult } from "@/types/api";
 
@@ -163,12 +164,11 @@ export default function ReceiptScanPanel({
 
   if (phase === "processing") {
     return (
-      <div className="empty-state">
-        <span className="empty-state__glyph" aria-hidden="true">
-          <Search size={28} strokeWidth={1.8} />
-        </span>
-        Reading your receipt...
-      </div>
+      <EmptyState
+        icon={Search}
+        title="Reading your receipt"
+        copy="The scan result will appear here for review."
+      />
     );
   }
 

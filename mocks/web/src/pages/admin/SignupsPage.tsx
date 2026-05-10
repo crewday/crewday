@@ -137,13 +137,9 @@ export default function SignupsPage() {
           <EmptyState
             variant="quiet"
             icon={ShieldAlert}
-          >
-            <p>
-              Nothing to triage. When a signup burst or repeat-email
-              pattern trips, it lands here with the redacted IP and
-              email hashes your audit log already carries.
-            </p>
-          </EmptyState>
+            title="Nothing to triage"
+            copy="When a signup burst or repeat-email pattern trips, it lands here with the redacted IP and email hashes your audit log already carries."
+          />
         ) : (
           <table className="table">
             <thead>

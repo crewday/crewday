@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
+import { Inbox } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { useDecideMutation } from "@/lib/useDecideMutation";
 import DeskPage from "@/components/DeskPage";
-import { Avatar, Chip, Loading } from "@/components/common";
+import { Avatar, Chip, EmptyState, Loading } from "@/components/common";
 import type { Employee, Leave } from "@/types/api";
 
 interface LeavesPayload {
@@ -65,7 +66,16 @@ export default function LeavesInboxPage() {
           </thead>
           <tbody>
             {pending.length === 0 && (
-              <tr><td colSpan={6} className="empty-state empty-state--quiet">Inbox zero. Nice.</td></tr>
+              <tr>
+                <td colSpan={6}>
+                  <EmptyState
+                    icon={Inbox}
+                    title="Inbox zero"
+                    copy="New leave requests will appear here for approval."
+                    variant="quiet"
+                  />
+                </td>
+              </tr>
             )}
             {pending.map((lv) => {
               const emp = empById.get(lv.employee_id);

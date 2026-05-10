@@ -299,7 +299,8 @@ describe("TodayPage", () => {
     try {
       render(<Harness />);
 
-      expect(await screen.findByText("All done for now. Nice work.")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "All done for now" })).toBeInTheDocument();
+      expect(screen.getByText("Nice work.")).toBeInTheDocument();
       expect(screen.getByText("Refresh towels")).toBeInTheDocument();
       expect(screen.queryByText("Skipped inspection")).not.toBeInTheDocument();
       expect(screen.queryByText("Cancelled errand")).not.toBeInTheDocument();
@@ -416,7 +417,7 @@ describe("TodayPage", () => {
         expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
       });
       expect(screen.getByText("Reset linens")).toBeInTheDocument();
-      expect(screen.queryByText("All done for now. Nice work.")).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "All done for now" })).not.toBeInTheDocument();
     } finally {
       env.restore();
     }
@@ -762,7 +763,7 @@ describe("TodayPage", () => {
     try {
       render(<Harness />);
 
-      expect(await screen.findByText("Failed to load.")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Today could not load" })).toBeInTheDocument();
     } finally {
       env.restore();
     }
@@ -786,7 +787,7 @@ describe("TodayPage", () => {
     try {
       render(<Harness />);
 
-      expect(await screen.findByText("Failed to load.")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Today could not load" })).toBeInTheDocument();
       expect(env.calls.some((call) => call.url.includes("/api/v1/tasks?"))).toBe(false);
     } finally {
       env.restore();

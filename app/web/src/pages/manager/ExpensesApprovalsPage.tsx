@@ -11,8 +11,8 @@ import { useDecideMutation } from "@/lib/useDecideMutation";
 import { formatMoney } from "@/lib/money";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
-import { Camera } from "lucide-react";
-import { Chip, Loading, StatCard } from "@/components/common";
+import { Camera, ReceiptText, ShieldCheck } from "lucide-react";
+import { Chip, EmptyState, Loading, StatCard } from "@/components/common";
 import { EXPENSE_STATUS_TONE } from "@/lib/tones";
 import type { Expense, ExpenseCategory, ExpenseStatus } from "@/types/api";
 
@@ -398,7 +398,14 @@ export default function ExpensesApprovalsPage() {
 
         <ul className="approval-list approval-list--wide">
           {pending.length === 0 && (
-            <li className="empty-state">Queue empty. All submitted claims have been decided.</li>
+            <li>
+              <EmptyState
+                icon={ReceiptText}
+                title="Queue empty"
+                copy="All submitted claims have been decided."
+                variant="quiet"
+              />
+            </li>
           )}
           {pending.map((x) => {
             const cls = "approval" + (x.total_amount_cents >= 10000 ? " approval--medium" : "");
@@ -486,7 +493,16 @@ export default function ExpensesApprovalsPage() {
           </thead>
           <tbody>
             {[...approved, ...reimbursed, ...rejected].length === 0 && (
-              <tr><td colSpan={5} className="empty-state empty-state--quiet">No decisions yet.</td></tr>
+              <tr>
+                <td colSpan={5}>
+                  <EmptyState
+                    icon={ShieldCheck}
+                    title="No decisions yet"
+                    copy="Approved, reimbursed, and rejected claims will appear here."
+                    variant="quiet"
+                  />
+                </td>
+              </tr>
             )}
             {[...approved, ...reimbursed, ...rejected].map((x) => {
               // Already filtered to approved | reimbursed | rejected
