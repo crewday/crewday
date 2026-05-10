@@ -304,12 +304,12 @@ class TestAllowPrivateAddressesGate:
 
     Default ``False`` — the validator rejects loopback / RFC 1918 /
     link-local with ``ical_url_private_address``. Flipping the gate
-    to ``True`` (only ``mocks/docker-compose.e2e.yml`` does so) lets
-    those addresses through so the GA journey 3 e2e (cd-zxvk) can
-    point a feed at an in-cluster ICS server. Every other validator
-    check still applies; we assert that explicitly so a future regress
-    that loosens the scheme / size / DNS-rebind gate alongside the
-    private-address gate trips a test.
+    to ``True`` (only the e2e override layered on the root dev compose
+    file does so) lets those addresses through so the GA journey 3 e2e
+    (cd-zxvk) can point a feed at an in-cluster ICS server. Every other
+    validator check still applies; we assert that explicitly so a future
+    regress that loosens the scheme / size / DNS-rebind gate alongside
+    the private-address gate trips a test.
     """
 
     def test_default_rejects_loopback(self) -> None:

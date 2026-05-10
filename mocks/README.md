@@ -1,16 +1,19 @@
 # crew.day — UI preview mocks
 
-Disposable, hard-coded preview of the manager and employee UIs while
-the real application hasn't been built. No DB, no auth, no real
-business logic. The container runs as a non-root user (`crewday:10001`,
-per `docs/specs/16`). Every mutation (tick a checklist item, approve an
-expense, etc.) is an in-memory toggle that lives until restart.
+Disposable, hard-coded preview of the manager and employee UIs, mounted under
+`/mocks` in the primary dev app stack. No DB, no auth, no real business logic.
+The container runs as a non-root user (`crewday:10001`, per `docs/specs/16`).
+Every mutation (tick a checklist item, approve an expense, etc.) is an
+in-memory toggle that lives until restart.
 
 The goal is to make `docs/specs/14-web-frontend.md` tangible — every
 spec-listed route renders something, the design tokens match, the
 vocabulary matches.
 
 ## Running
+
+For the primary dev app stack, use the repo-root compose file from the repo
+root:
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d --build
@@ -24,7 +27,7 @@ docker compose -f docker-compose.dev.yml up -d --build
 
 ## Topology (cd-g1cy)
 
-The dev stack runs four containers (plus Mailpit) that together
+The root dev stack runs the app and mocks containers (plus Mailpit) that together
 serve the same single-origin shape we will ship in production:
 
 ```
@@ -182,7 +185,7 @@ already CNAMEd to this host.
   `employee_base`, `manager_base`) sharing one design system
 - `app/static/styles.css` — hand-written, ~900 lines, both themes
 - `Dockerfile` — Python 3.12-slim, `USER crewday:crewday`
-- `../docker-compose.dev.yml` — dev-stack Traefik labels and mocks route
+- `../docker-compose.dev.yml` — primary dev app stack, Traefik labels, and mocks route
 
 ## Removing
 

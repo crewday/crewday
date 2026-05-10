@@ -10,6 +10,7 @@ workspace; those live in `docs/specs/11-llm-and-agents.md` and
 ## Surfaces
 
 - **Dev app**: `http://127.0.0.1:8100`
+  - Primary stack: `docker-compose.dev.yml` at the repo root.
   - Default loopback entry point for agent-driven smoke checks, curl, and
     Playwright.
   - Maintainer-specific public or VPN entry points belong in optional local
@@ -91,10 +92,11 @@ From the repo root:
 ./scripts/dev-stack-up.sh
 ```
 
-The wrapper runs `docker compose -f docker-compose.dev.yml up -d --build`,
-waits for `/readyz`, and reports migration, heartbeat, and root-key drift with
-a one-line remediation hint. The raw compose command still works when you
-intentionally want to skip the drift gate.
+The wrapper runs the root dev compose file
+(`docker compose -f docker-compose.dev.yml up -d --build`), waits for
+`/readyz`, and reports migration, heartbeat, and root-key drift with a one-line
+remediation hint. The raw compose command still works when you intentionally
+want to skip the drift gate.
 
 The dev stack defaults to the in-process fake LLM client. To smoke the real
 OpenRouter path locally, set `CREWDAY_LLM_PROVIDER=openrouter` and

@@ -6,8 +6,9 @@ of the GA five.
 The journey is *signup → magic-link → passkey-register → passkey-login
 assertion → role home* via the Chromium CDP WebAuthn virtual
 authenticator (see ``tests/e2e._helpers.auth.enroll_owner``). The
-dev stack must be started with ``mocks/docker-compose.e2e.yml`` so
-the advertised WebAuthn RP ID matches the loopback origin.
+dev stack must be started with the root ``docker-compose.dev.yml`` plus
+``mocks/docker-compose.e2e.yml`` so the advertised WebAuthn RP ID matches
+the loopback origin.
 """
 
 from __future__ import annotations

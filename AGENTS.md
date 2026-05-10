@@ -19,10 +19,11 @@ quality helpers live in
 dev DB, or onboarding a new developer agent.
 
 - **Use loopback for dev URLs from this host.** The default app dev stack
-  is published at `http://127.0.0.1:8100/`. If a maintainer has private
-  remote-entry hostnames, VPN routes, or auth-gated URLs, translate them
-  through the optional local context before using curl, Playwright, smoke
-  checks, or debugging tools.
+  uses the repo-root `docker-compose.dev.yml` and is published at
+  `http://127.0.0.1:8100/`. If a maintainer has private remote-entry
+  hostnames, VPN routes, or auth-gated URLs, translate them through the
+  optional local context before using curl, Playwright, smoke checks, or
+  debugging tools.
 - **Keep the dev site up.** Do not stop, restart, or rebuild shared dev
   website services unless the task requires it. Prefer hot reloads,
   targeted process restarts, or other approaches that preserve the main
