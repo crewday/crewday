@@ -136,7 +136,7 @@ export default function SignupsPage() {
         {rows.length === 0 ? (
           <EmptyState
             variant="quiet"
-            glyph={<ShieldAlert size={22} strokeWidth={1.5} aria-hidden="true" />}
+            icon={ShieldAlert}
           >
             <p>
               Nothing to triage. When a signup burst or repeat-email

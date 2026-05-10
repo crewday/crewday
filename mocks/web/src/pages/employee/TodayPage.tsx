@@ -58,7 +58,7 @@ export default function TodayPage() {
         {now_task ? (
           <NowCard task={now_task} property={propsById.get(now_task.property_id) ?? null} />
         ) : (
-          <EmptyState glyph={<Check size={28} strokeWidth={2} aria-hidden="true" />} variant="celebrate">
+          <EmptyState icon={Check} variant="celebrate">
             All done for now. Nice work.
           </EmptyState>
         )}

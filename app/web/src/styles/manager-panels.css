@@ -384,13 +384,28 @@
 .empty-state__glyph {
   display: flex; align-items: center; justify-content: center;
   width: 42px; height: 42px; margin: var(--space-0) auto var(--space-5);
-  color: var(--moss-2); background: var(--moss-softer);
+  color: var(--moss); background: var(--moss-softer);
   border: 1px solid var(--line); border-radius: 999px;
+}
+.empty-state__glyph svg,
+.empty-state__icon {
+  width: 22px; height: 22px;
+  color: currentColor; stroke: currentColor; fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  flex: 0 0 auto;
+}
+.empty-state__glyph--fill svg,
+.empty-state__glyph--fill .empty-state__icon {
+  fill: currentColor;
 }
 .empty-state--celebrate .empty-state__glyph {
   color: var(--moss);
   width: 56px; height: 56px; border-radius: 50%;
   background: var(--moss-softer);
+}
+.empty-state--celebrate .empty-state__glyph svg,
+.empty-state--celebrate .empty-state__icon {
+  width: 28px; height: 28px;
 }
 .empty-state__title {
   margin: var(--space-0); color: var(--ink);

@@ -1,5 +1,6 @@
 import type { InputHTMLAttributes, ReactNode } from "react";
 import { useEffect, useRef } from "react";
+import type { LucideIcon } from "lucide-react";
 
 // Small presentational helpers. Each one is ~10 lines — trivial at
 // the markup level but standardises class spelling so future refactors
@@ -208,14 +209,16 @@ export function ProgressBar({ value, slim }: { value: number; slim?: boolean }) 
 }
 
 export function EmptyState({
-  glyph,
+  icon: Icon,
+  iconTreatment = "stroke",
   title,
   copy,
   action,
   children,
   variant,
 }: {
-  glyph?: ReactNode;
+  icon?: LucideIcon;
+  iconTreatment?: "stroke" | "fill";
   title?: ReactNode;
   copy?: ReactNode;
   action?: ReactNode;
@@ -223,10 +226,26 @@ export function EmptyState({
   variant?: "celebrate" | "quiet" | "compact";
 }) {
   const cls = ["empty-state", variant ? "empty-state--" + variant : ""].filter(Boolean).join(" ");
+  const glyphCls = [
+    "empty-state__glyph",
+    iconTreatment === "fill" ? "empty-state__glyph--fill" : "",
+  ].filter(Boolean).join(" ");
   const body = copy ?? (typeof children === "string" ? children : null);
+  const iconSize = variant === "celebrate" ? 28 : 22;
   return (
     <div className={cls}>
-      {glyph ? <span className="empty-state__glyph" aria-hidden="true">{glyph}</span> : null}
+      {Icon ? (
+        <span className={glyphCls} aria-hidden="true">
+          <Icon
+            className="empty-state__icon"
+            size={iconSize}
+            strokeWidth={2}
+            fill={iconTreatment === "fill" ? "currentColor" : "none"}
+            aria-hidden="true"
+            focusable="false"
+          />
+        </span>
+      ) : null}
       {title ? <h3 className="empty-state__title">{title}</h3> : null}
       {body ? <p className="empty-state__copy">{body}</p> : null}
       {children && typeof children !== "string" ? (

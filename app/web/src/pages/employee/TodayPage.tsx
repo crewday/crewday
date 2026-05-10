@@ -140,7 +140,7 @@ export default function TodayPage() {
             onComplete={() => complete.mutate(now_task)}
           />
         ) : (
-          <EmptyState glyph={<Check size={28} strokeWidth={2} aria-hidden="true" />} variant="celebrate">
+          <EmptyState icon={Check} variant="celebrate">
             All done for now. Nice work.
           </EmptyState>
         )}

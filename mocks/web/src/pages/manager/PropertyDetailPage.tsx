@@ -787,7 +787,7 @@ export default function PropertyDetailPage() {
               </table>
             ) : (
               <EmptyState
-                glyph={<CalendarClock size={22} strokeWidth={2} />}
+                icon={CalendarClock}
                 title="No upcoming stays"
                 copy="New reservations for this property will appear here with guest, source, and date details."
                 variant="compact"
@@ -823,7 +823,7 @@ export default function PropertyDetailPage() {
               </ul>
             ) : (
               <EmptyState
-                glyph={<ClipboardList size={22} strokeWidth={2} />}
+                icon={ClipboardList}
                 title="No tasks scheduled"
                 copy="Property tasks will land here once cleanings, inspections, or maintenance work are assigned."
                 variant="compact"

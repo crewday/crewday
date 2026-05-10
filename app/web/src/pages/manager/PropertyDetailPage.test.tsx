@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
+import { CalendarClock } from "lucide-react";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { EmptyState } from "@/components/common";
 import { __resetApiProvidersForTests } from "@/lib/api";
@@ -485,8 +486,14 @@ afterEach(() => {
 
 describe("<PropertyDetailPage>", () => {
   it("renders shared empty states for blank overview stays and tasks", async () => {
-    render(<EmptyState>Legacy empty copy.</EmptyState>);
-    expect(screen.getByText("Legacy empty copy.").tagName).toBe("P");
+    const emptyState = render(<EmptyState icon={CalendarClock}>Plain empty copy.</EmptyState>);
+    expect(screen.getByText("Plain empty copy.").tagName).toBe("P");
+    const glyph = emptyState.container.querySelector(".empty-state__glyph");
+    expect(glyph).toHaveAttribute("aria-hidden", "true");
+    const icon = emptyState.container.querySelector(".empty-state__icon");
+    expect(icon).toHaveAttribute("aria-hidden", "true");
+    expect(icon).toHaveAttribute("width", "22");
+    expect(icon).toHaveAttribute("stroke-width", "2");
     cleanup();
 
     const fake = installFetch({ emptyOverview: true });
