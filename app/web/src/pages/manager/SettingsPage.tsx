@@ -157,17 +157,13 @@ function SettingEditor({
   const invalid = def.type === "int" && (!Number.isInteger(Number(draft)) || draft.trim() === "");
 
   return (
-    <div className="settings-editor">
-      <dt>
+    <div className="settings-editor form-layout__row">
+      <dt className="form-layout__label">
         <span className="settings-editor__label">{def.label}</span>
-        <span className="settings-editor__help">{def.description}</span>
-        <span className="settings-editor__scope">
-          Can be overridden at: {scopeLabel(def.override_scope)}
-        </span>
       </dt>
-      <dd>
+      <dd className="form-layout__control">
         <form
-          className="settings-editor__form"
+          className="settings-editor__form form-layout__control"
           onSubmit={(event) => {
             event.preventDefault();
             if (!invalid) save.mutate(parseDraft(def, draft));
@@ -208,7 +204,7 @@ function SettingEditor({
               />
             )}
           </div>
-          <div className="settings-editor__actions">
+          <div className="settings-editor__actions form-layout__actions">
             <button
               className="btn btn--moss btn--sm"
               type="submit"
@@ -227,6 +223,12 @@ function SettingEditor({
           </div>
           {error ? <p className="settings-editor__error">{error}</p> : null}
         </form>
+      </dd>
+      <dd className="settings-editor__help form-layout__help">
+        <span>{def.description}</span>
+        <span className="settings-editor__scope">
+          Can be overridden at: {scopeLabel(def.override_scope)}
+        </span>
       </dd>
     </div>
   );
@@ -397,7 +399,7 @@ export default function SettingsPage() {
             <header className="panel__head">
               <h2>{NAMESPACE_LABELS[ns] ?? ns}</h2>
             </header>
-            <dl className="settings-kv settings-kv--editable">
+            <dl className="settings-kv settings-kv--editable form-layout form-layout--two-column">
               {items.map(({ def, value }) => (
                 <SettingEditor key={def.key} def={def} value={value} />
               ))}

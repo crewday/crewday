@@ -93,6 +93,10 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Can be overridden at: workspace, property, unit, work engagement, task")).toBeInTheDocument();
     expect(screen.getAllByText("Can be overridden at: workspace, work engagement").length).toBeGreaterThan(0);
 
+    const evidenceHelp = screen.getByText("Whether tasks require photo or file evidence.");
+    expect(evidenceHelp.closest(".form-layout__help")).toBeInTheDocument();
+    expect(evidenceHelp.closest(".settings-editor")).toHaveClass("form-layout__row");
+
     expect(within(screen.getByLabelText("Evidence policy")).getByRole("option", { name: "Required" })).toHaveValue("require");
     expect(within(screen.getByLabelText("Booking pay basis")).getByRole("option", { name: "Actual worked time" })).toHaveValue("actual");
     expect(within(screen.getByLabelText("Auto-assign tasks")).getByRole("option", { name: "Yes" })).toHaveValue("true");

@@ -41,4 +41,17 @@ describe("FormField", () => {
       /\.form-field__requirement--optional\s*{\s*color: var\(--ink-3\);/m,
     );
   });
+
+  it("exposes a responsive two-column form layout with full-row help", () => {
+    expect(formsCss).toContain(".form-layout--two-column");
+    expect(formsCss).toMatch(
+      /\.form-layout--two-column\s*{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/m,
+    );
+    expect(formsCss).toMatch(
+      /\.form-layout__help\s*{\s*grid-column: 1 \/ -1;/m,
+    );
+    expect(formsCss).toMatch(
+      /@media \(max-width: 480px\)\s*{[\s\S]*\.form-layout--two-column,[\s\S]*grid-template-columns: minmax\(0, 1fr\);/m,
+    );
+  });
 });

@@ -512,11 +512,11 @@
 .settings-kv { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 10px 20px; }
 .settings-kv dt { color: var(--ink-3); font-size: 13px; }
 .settings-kv dd { margin: 0; font-weight: 500; }
-.settings-kv--editable { grid-template-columns: 1fr; gap: 12px; }
+.settings-kv--editable { gap: 12px; }
+.settings-kv--editable.form-layout--two-column {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 .settings-editor {
-  display: grid;
-  grid-template-columns: minmax(180px, 0.95fr) minmax(240px, 1.2fr);
-  gap: 12px 18px;
   align-items: start;
   padding-bottom: 14px;
   border-bottom: 1px dashed var(--line);
@@ -537,6 +537,7 @@
   margin-top: 4px;
   color: var(--ink-2);
   font-size: 13px;
+  font-weight: 400;
   line-height: 1.45;
 }
 .settings-editor__scope {
@@ -551,7 +552,6 @@
 .settings-editor__input {
   box-sizing: border-box;
   width: 100%;
-  max-width: 280px;
   min-height: 42px;
   padding: 10px 12px;
   background: var(--card);
@@ -573,9 +573,10 @@
 .danger-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; color: var(--rust); }
 .danger-list li { padding: 6px 0; border-bottom: 1px dashed var(--rust-soft); }
 .setting-label { display: block; font-size: 0.8em; }
-@media (max-width: 640px) {
-  .settings-editor { grid-template-columns: 1fr; }
-  .settings-editor__input { max-width: none; }
+@media (max-width: 480px) {
+  .settings-kv--editable.form-layout--two-column {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* §11 agent usage: percent-only envelope on the workspace budget. */
