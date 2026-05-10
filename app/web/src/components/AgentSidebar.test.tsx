@@ -38,7 +38,7 @@ describe("AgentSidebar", () => {
               at: "2026-05-10T10:00:00Z",
               kind: "agent",
               body:
-                "Plan:\n\n- **Open windows**\n- Check `linen`\n\nRead [guide](https://example.com).",
+                "## **Turnover** `plan`\n\n- **Open windows**\n- Check `linen`\n\nRead [guide](https://example.com).",
             },
           ],
         },
@@ -53,6 +53,9 @@ describe("AgentSidebar", () => {
         { queryClient: makeTestQueryClient() },
       );
 
+      const heading = await screen.findByRole("heading", { name: "Turnover plan" });
+      expect(heading.tagName).toBe("H3");
+      expect(heading).not.toHaveTextContent("#");
       expect(await screen.findByText("Open windows")).toBeInTheDocument();
       expect(screen.getByText("Open windows").tagName).toBe("STRONG");
       expect(screen.getByText("linen").tagName).toBe("CODE");

@@ -11,16 +11,29 @@ describe("ChatLog", () => {
             at: "2026-05-10T10:00:00Z",
             kind: "agent",
             body:
-              "First line\nsecond line\n\n- **Bring towels**\n- Check `linen`\n\n```sh\nnpm test\n```\n\nSee [guide](https://example.com/guide).",
+              "### **Communication** `plan` [runbook](https://example.com/runbook)\n\nFirst line\nsecond line\n\n- **Bring towels**\n- Check `linen`\n\n```sh\nnpm test\n```\n\n####### Not a heading\n#No heading\n\nSee [guide](https://example.com/guide).",
           },
         ]}
       />,
     );
 
+    const heading = screen.getByRole("heading", {
+      name: "Communication plan runbook",
+    });
+    expect(heading.tagName).toBe("H4");
+    expect(heading).not.toHaveTextContent("#");
+    expect(heading.querySelector("strong")).toHaveTextContent("Communication");
+    expect(heading.querySelector("code")).toHaveTextContent("plan");
+    expect(screen.getByRole("link", { name: "runbook" })).toHaveAttribute(
+      "href",
+      "https://example.com/runbook",
+    );
     expect(screen.getByText("Bring towels")).toBeInTheDocument();
     expect(screen.getByText("Bring towels").tagName).toBe("STRONG");
     expect(screen.getByText("linen").tagName).toBe("CODE");
     expect(screen.getByText("npm test").closest("pre")).not.toBeNull();
+    expect(screen.getByText("####### Not a heading")).toBeInTheDocument();
+    expect(screen.getByText("#No heading")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "guide" })).toHaveAttribute(
       "href",
       "https://example.com/guide",
@@ -69,7 +82,7 @@ describe("ChatLog", () => {
             at: "2026-05-10T10:00:00Z",
             kind: "agent",
             body:
-              "<img src=x onerror=alert(1)>\n\n<script>alert('xss')</script>\n\n[jump](javascript:alert(1))",
+              "<img src=x onerror=alert(1)>\n\n# <script>alert('xss')</script>\n\n[jump](javascript:alert(1))",
           },
         ]}
       />,
@@ -79,7 +92,31 @@ describe("ChatLog", () => {
     expect(container.querySelector("script")).toBeNull();
     expect(container.querySelector("a")).toBeNull();
     expect(screen.getByText(/<img src=x onerror=alert\(1\)>/u)).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "<script>alert('xss')</script>" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("jump")).toBeInTheDocument();
+  });
+
+  it("keeps heading parsing out of list and code contexts", () => {
+    render(
+      <ChatLog
+        messages={[
+          {
+            at: "2026-05-10T10:00:00Z",
+            kind: "agent",
+            body:
+              "### Closing marker ###\n\n- Keep list context\n# Not a heading inside list context\n\n```md\n## Not a heading in code\n```",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Closing marker" })).not.toHaveTextContent(
+      "#",
+    );
+    expect(screen.getByText("# Not a heading inside list context")).toBeInTheDocument();
+    expect(screen.getByText("## Not a heading in code").closest("pre")).not.toBeNull();
   });
 
   it("renders activity above the running indicator and final agent bubble", () => {

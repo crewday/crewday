@@ -55,6 +55,23 @@
 .chat-markdown__paragraph {
   margin: 0;
 }
+.chat-markdown__heading {
+  margin: 0;
+  color: inherit;
+  font-family: "Fraunces", serif;
+  font-size: 1.08em;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.chat-markdown__heading--level-1,
+.chat-markdown__heading--level-2 {
+  font-size: 1.12em;
+}
+.chat-markdown__heading--level-5,
+.chat-markdown__heading--level-6 {
+  font-size: 1em;
+}
 .chat-markdown__list {
   margin: 0;
   padding-left: 18px;

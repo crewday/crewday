@@ -15,7 +15,10 @@ type InlineToken =
 type MarkdownBlock =
   | { kind: "paragraph"; lines: string[] }
   | { kind: "list"; items: string[] }
-  | { kind: "code"; code: string };
+  | { kind: "code"; code: string }
+  | { kind: "heading"; level: HeadingLevel; text: string };
+
+type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
 interface SafeLink {
   href: string;
@@ -77,6 +80,18 @@ function parseBlocks(source: string): MarkdownBlock[] {
       continue;
     }
 
+    const headingMatch = listItems.length === 0 ? line.match(/^(#{1,6})\s+(.+)$/) : null;
+    const headingText = headingMatch?.[2] ? normalizeHeadingText(headingMatch[2]) : "";
+    if (headingMatch?.[1] && headingText) {
+      flushParagraph();
+      blocks.push({
+        kind: "heading",
+        level: headingMatch[1].length as HeadingLevel,
+        text: headingText,
+      });
+      continue;
+    }
+
     const listMatch = line.match(/^\s*[-*+]\s+(.+)$/);
     if (listMatch?.[1]) {
       flushParagraph();
@@ -120,6 +135,18 @@ function renderBlock(block: MarkdownBlock, index: number): ReactElement {
     );
   }
 
+  if (block.kind === "heading") {
+    const HeadingTag = headingTagFor(block.level);
+    return (
+      <HeadingTag
+        key={index}
+        className={`chat-markdown__heading chat-markdown__heading--level-${block.level}`}
+      >
+        {renderInlineTokens(parseInline(block.text), `h-${index}`)}
+      </HeadingTag>
+    );
+  }
+
   return (
     <p key={index} className="chat-markdown__paragraph">
       {block.lines.map((line, lineIndex) => (
@@ -130,6 +157,17 @@ function renderBlock(block: MarkdownBlock, index: number): ReactElement {
       ))}
     </p>
   );
+}
+
+function headingTagFor(level: HeadingLevel): "h3" | "h4" | "h5" | "h6" {
+  if (level <= 2) return "h3";
+  if (level === 3) return "h4";
+  if (level === 4) return "h5";
+  return "h6";
+}
+
+function normalizeHeadingText(source: string): string {
+  return source.replace(/\s+#{1,}\s*$/u, "").trimEnd();
 }
 
 function parseInline(source: string): InlineToken[] {
