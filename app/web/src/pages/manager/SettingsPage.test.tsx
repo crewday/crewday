@@ -46,7 +46,7 @@ beforeEach(() => {
       return workspaceSettings({}, { display_name: displayName, name: displayName });
     }
     if (path === "/api/v1/settings" && opts?.method === "PATCH") {
-      return workspaceSettings(opts.body as Record<string, unknown>);
+      return workspaceSettings(settingsPatchResponse(opts.body as Record<string, unknown>));
     }
     if (path === "/api/v1/settings") return workspaceSettings();
     if (path === "/api/v1/settings/catalog") return settingsCatalog();
@@ -139,6 +139,9 @@ describe("SettingsPage", () => {
     const evidenceHelp = screen.getByText("Whether tasks require photo or file evidence.");
     expect(evidenceHelp.closest(".form-layout__help")).toBeInTheDocument();
     expect(evidenceHelp.closest(".settings-editor")).toHaveClass("form-layout__row");
+    expect(screen.getByLabelText("Evidence policy")).toHaveAccessibleDescription(
+      "Whether tasks require photo or file evidence. Can be overridden at: workspace, property, unit, work engagement, task",
+    );
 
     expect(within(screen.getByLabelText("Evidence policy")).getByRole("option", { name: "Required" })).toHaveValue("require");
     expect(within(screen.getByLabelText("Booking pay basis")).getByRole("option", { name: "Actual worked time" })).toHaveValue("actual");
@@ -233,23 +236,40 @@ describe("SettingsPage", () => {
     render(renderSettings().view);
 
     const payBasis = await screen.findByLabelText("Booking pay basis");
+    const bookingsPanel = (screen.getByRole("heading", { name: "Bookings" })).closest(".panel");
+    expect(bookingsPanel).not.toBeNull();
+    const bookings = within(bookingsPanel as HTMLElement);
+
+    expect(bookings.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+
     fireEvent.change(payBasis, { target: { value: "actual" } });
-    const payForm = payBasis.closest("form");
-    expect(payForm).not.toBeNull();
-    fireEvent.click(within(payForm as HTMLFormElement).getByRole("button", { name: "Save" }));
+    fireEvent.change(bookings.getByLabelText("Auto-approve overrun"), { target: { value: "45" } });
+
+    expect(bookings.getAllByRole("button", { name: "Save" })).toHaveLength(1);
+    fireEvent.click(bookings.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       expect(fetchJsonMock).toHaveBeenCalledWith("/api/v1/settings", {
         method: "PATCH",
-        body: { "bookings.pay_basis": "actual" },
+        body: {
+          "bookings.pay_basis": "actual",
+          "bookings.auto_approve_overrun_minutes": 45,
+        },
       });
+    });
+    await waitFor(() => {
+      expect(bookings.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     });
 
     const taskAutoAssign = screen.getByLabelText("Auto-assign tasks");
+    const tasksPanel = (screen.getByRole("heading", { name: "Tasks" })).closest(".panel");
+    expect(tasksPanel).not.toBeNull();
+    const tasks = within(tasksPanel as HTMLElement);
+
+    expect(tasks.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     fireEvent.change(taskAutoAssign, { target: { value: "false" } });
-    const taskForm = taskAutoAssign.closest("form");
-    expect(taskForm).not.toBeNull();
-    fireEvent.click(within(taskForm as HTMLFormElement).getByRole("button", { name: "Save" }));
+    expect(tasks.getAllByRole("button", { name: "Save" })).toHaveLength(1);
+    fireEvent.click(tasks.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       expect(fetchJsonMock).toHaveBeenCalledWith("/api/v1/settings", {
@@ -257,6 +277,37 @@ describe("SettingsPage", () => {
         body: { "tasks.auto_assign": false },
       });
     });
+    await waitFor(() => {
+      expect(tasks.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("resets pane defaults without restoring per-field default buttons", async () => {
+    render(renderSettings().view);
+
+    const tasksPanel = (await screen.findByRole("heading", { name: "Tasks" })).closest(".panel");
+    expect(tasksPanel).not.toBeNull();
+    const tasks = within(tasksPanel as HTMLElement);
+
+    expect(screen.queryByRole("button", { name: "Default" })).not.toBeInTheDocument();
+    expect(tasks.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(tasks.getAllByRole("button", { name: "Use defaults" })).toHaveLength(1);
+
+    fireEvent.click(tasks.getByRole("button", { name: "Use defaults" }));
+
+    expect(tasks.getAllByRole("button", { name: "Save" })).toHaveLength(1);
+    fireEvent.click(tasks.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(fetchJsonMock).toHaveBeenCalledWith("/api/v1/settings", {
+        method: "PATCH",
+        body: { "tasks.auto_assign": null },
+      });
+    });
+    await waitFor(() => {
+      expect(tasks.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    });
+    expect(tasks.queryByRole("button", { name: "Use defaults" })).not.toBeInTheDocument();
   });
 
   it("keeps invalid numbers from being submitted", async () => {
@@ -294,16 +345,27 @@ describe("SettingsPage", () => {
   });
 
   it("downloads a workspace export without navigating away", async () => {
+    let resolveExport: (value: { blob: Blob; filename: string }) => void = () => undefined;
+    fetchApiDownloadMock.mockReturnValueOnce(new Promise((resolve) => {
+      resolveExport = resolve;
+    }));
     render(renderSettings().view);
 
     fireEvent.click(await screen.findByRole("button", { name: "Export" }));
 
-    expect(screen.getByRole("button", { name: "Exporting…" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Exporting…" })).toBeDisabled();
     await waitFor(() => {
       expect(fetchApiDownloadMock).toHaveBeenCalledWith(
         "/w/acme/api/v1/admin/workspace/export",
         { method: "POST" },
       );
+    });
+    resolveExport({
+      blob: new Blob(["zip"], { type: "application/zip" }),
+      filename: "acme-export.zip",
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Export" })).toBeInTheDocument();
     });
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
     expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/settings");
@@ -448,6 +510,19 @@ function workspaceSettings(
       danger_zone: ["Delete workspace"],
     },
   };
+}
+
+function settingsPatchResponse(patch: Record<string, unknown>): Record<string, unknown> {
+  const catalogDefaults: Record<string, unknown> = {
+    "evidence.policy": "optional",
+    "bookings.pay_basis": "scheduled",
+    "bookings.auto_approve_overrun_minutes": 30,
+    "bookings.cancellation_pay_to_worker": true,
+    "tasks.auto_assign": false,
+  };
+  return Object.fromEntries(
+    Object.entries(patch).map(([key, value]) => [key, value === null ? catalogDefaults[key] : value]),
+  );
 }
 
 function settingsCatalog(): unknown {

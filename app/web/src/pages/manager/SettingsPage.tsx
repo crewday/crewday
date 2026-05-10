@@ -220,26 +220,144 @@ function parseDraft(def: SettingDefinition, draft: string): unknown {
   return draft;
 }
 
-function SettingEditor({
-  def,
-  value,
-}: {
+interface SettingPaneItem {
   def: SettingDefinition;
   value: unknown;
+}
+
+function settingHelpId(key: string): string {
+  return `setting-help-${key.replaceAll(".", "-")}`;
+}
+
+function draftsFromItems(items: SettingPaneItem[]): Record<string, string> {
+  return Object.fromEntries(items.map(({ def, value }) => [def.key, draftFromValue(value)]));
+}
+
+function catalogDraftsFromItems(items: SettingPaneItem[]): Record<string, string> {
+  return Object.fromEntries(items.map(({ def }) => [def.key, draftFromValue(def.catalog_default)]));
+}
+
+function dirtyPayload(
+  items: SettingPaneItem[],
+  drafts: Record<string, string>,
+  resetKeys: ReadonlySet<string>,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  for (const { def, value } of items) {
+    const draft = drafts[def.key] ?? "";
+    const current = draftFromValue(value);
+    if (resetKeys.has(def.key) && draft === draftFromValue(def.catalog_default)) {
+      if (draft !== current) payload[def.key] = null;
+      continue;
+    }
+    if (draft !== current) payload[def.key] = parseDraft(def, draft);
+  }
+  return payload;
+}
+
+function invalidDirtySetting(items: SettingPaneItem[], drafts: Record<string, string>): boolean {
+  return items.some(({ def, value }) => {
+    const draft = drafts[def.key] ?? "";
+    if (draft === draftFromValue(value)) return false;
+    return def.type === "int" && (!Number.isInteger(Number(draft)) || draft.trim() === "");
+  });
+}
+
+function SettingEditorRow({
+  def,
+  draft,
+  disabled,
+  onDraftChange,
+}: {
+  def: SettingDefinition;
+  draft: string;
+  disabled: boolean;
+  onDraftChange: (draft: string) => void;
+}) {
+  const helpId = settingHelpId(def.key);
+
+  return (
+    <div className="settings-editor form-layout__row">
+      <dt className="form-layout__label">
+        <span className="settings-editor__label">{def.label}</span>
+      </dt>
+      <dd className="form-layout__control">
+        <div className="settings-editor__control">
+          {def.type === "bool" ? (
+            <select
+              className="settings-editor__input"
+              aria-label={def.label}
+              aria-describedby={helpId}
+              value={draft}
+              onChange={(event) => onDraftChange(event.target.value)}
+              disabled={disabled}
+            >
+              <option value="true">Yes</option>
+              <option value="false">No</option>
+            </select>
+          ) : def.type === "enum" ? (
+            <select
+              className="settings-editor__input"
+              aria-label={def.label}
+              aria-describedby={helpId}
+              value={draft}
+              onChange={(event) => onDraftChange(event.target.value)}
+              disabled={disabled}
+            >
+              {(def.enum_values ?? []).map((option) => (
+                <option key={option} value={option}>{enumOptionLabel(def, option)}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              className="settings-editor__input"
+              aria-label={def.label}
+              aria-describedby={helpId}
+              type="number"
+              value={draft}
+              onChange={(event) => onDraftChange(event.target.value)}
+              disabled={disabled}
+            />
+          )}
+        </div>
+      </dd>
+      <dd id={helpId} className="settings-editor__help form-layout__help">
+        <span>{def.description}</span>
+        {" "}
+        <span className="settings-editor__scope">
+          Can be overridden at: {scopeLabel(def.override_scope)}
+        </span>
+      </dd>
+    </div>
+  );
+}
+
+function SettingsPane({
+  namespace,
+  items,
+}: {
+  namespace: string;
+  items: SettingPaneItem[];
 }) {
   const qc = useQueryClient();
-  const [draft, setDraft] = useState(draftFromValue(value));
+  const [drafts, setDrafts] = useState<Record<string, string>>(() => draftsFromItems(items));
+  const [resetKeys, setResetKeys] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
+  const valuesKey = JSON.stringify(items.map(({ def, value }) => [def.key, value]));
+  const syncedValuesKey = useRef(valuesKey);
 
   useEffect(() => {
-    setDraft(draftFromValue(value));
-  }, [value]);
+    if (syncedValuesKey.current === valuesKey) return;
+    syncedValuesKey.current = valuesKey;
+    setDrafts(draftsFromItems(items));
+    setResetKeys(new Set());
+  }, [items, valuesKey]);
 
   const save = useMutation({
-    mutationFn: (next: unknown) =>
+    mutationFn: (payload: Record<string, unknown>) =>
       fetchJson<WorkspaceSettings>("/api/v1/settings", {
         method: "PATCH",
-        body: { [def.key]: next },
+        body: payload,
       }),
     onSuccess: (next) => {
       qc.setQueryData(qk.settings(), next);
@@ -248,99 +366,73 @@ function SettingEditor({
     onError: () => setError("Save failed."),
   });
 
-  const reset = useMutation({
-    mutationFn: () =>
-      fetchJson<WorkspaceSettings>("/api/v1/settings", {
-        method: "PATCH",
-        body: { [def.key]: null },
-      }),
-    onSuccess: (next) => {
-      qc.setQueryData(qk.settings(), next);
-      setError(null);
-    },
-    onError: () => setError("Reset failed."),
+  const payload = dirtyPayload(items, drafts, resetKeys);
+  const dirty = Object.keys(payload).length > 0;
+  const invalid = invalidDirtySetting(items, drafts);
+  const canUseDefaults = items.some(({ def, value }) => {
+    const catalogDefault = draftFromValue(def.catalog_default);
+    return (drafts[def.key] ?? "") !== catalogDefault || draftFromValue(value) !== catalogDefault;
   });
 
-  const current = draftFromValue(value);
-  const changed = draft !== current;
-  const saving = save.isPending || reset.isPending;
-  const isDefault = value === def.catalog_default;
-  const invalid = def.type === "int" && (!Number.isInteger(Number(draft)) || draft.trim() === "");
-
   return (
-    <div className="settings-editor form-layout__row">
-      <dt className="form-layout__label">
-        <span className="settings-editor__label">{def.label}</span>
-      </dt>
-      <dd className="form-layout__control">
-        <form
-          className="settings-editor__form form-layout__control"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!invalid) save.mutate(parseDraft(def, draft));
-          }}
-        >
-          <div className="settings-editor__control">
-            {def.type === "bool" ? (
-              <select
-                className="settings-editor__input"
-                aria-label={def.label}
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                disabled={saving}
+    <div className="panel">
+      <header className="panel__head">
+        <h2>{NAMESPACE_LABELS[namespace] ?? namespace}</h2>
+      </header>
+      <form
+        className="settings-pane"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (dirty && !invalid) save.mutate(payload);
+        }}
+      >
+        <dl className="settings-kv settings-kv--editable form-layout form-layout--two-column">
+          {items.map(({ def }) => (
+            <SettingEditorRow
+              key={def.key}
+              def={def}
+              draft={drafts[def.key] ?? ""}
+              disabled={save.isPending}
+              onDraftChange={(draft) => {
+                setDrafts((current) => ({ ...current, [def.key]: draft }));
+                setResetKeys((current) => {
+                  if (!current.has(def.key)) return current;
+                  const next = new Set(current);
+                  next.delete(def.key);
+                  return next;
+                });
+              }}
+            />
+          ))}
+        </dl>
+        {dirty || canUseDefaults ? (
+          <div className="settings-pane__actions form-layout__actions">
+            {dirty ? (
+              <button
+                className="btn btn--moss btn--sm"
+                type="submit"
+                disabled={invalid || save.isPending}
               >
-                <option value="true">Yes</option>
-                <option value="false">No</option>
-              </select>
-            ) : def.type === "enum" ? (
-              <select
-                className="settings-editor__input"
-                aria-label={def.label}
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                disabled={saving}
+                {save.isPending ? "Saving…" : "Save"}
+              </button>
+            ) : null}
+            {canUseDefaults ? (
+              <button
+                className="btn btn--ghost btn--sm"
+                type="button"
+                disabled={save.isPending}
+                onClick={() => {
+                  setDrafts(catalogDraftsFromItems(items));
+                  setResetKeys(new Set(items.map(({ def }) => def.key)));
+                }}
               >
-                {(def.enum_values ?? []).map((option) => (
-                  <option key={option} value={option}>{enumOptionLabel(def, option)}</option>
-                ))}
-              </select>
-            ) : (
-              <input
-                className="settings-editor__input"
-                aria-label={def.label}
-                type="number"
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                disabled={saving}
-              />
-            )}
+                Use defaults
+              </button>
+            ) : null}
           </div>
-          <div className="settings-editor__actions form-layout__actions">
-            <button
-              className="btn btn--moss btn--sm"
-              type="submit"
-              disabled={!changed || invalid || saving}
-            >
-              {save.isPending ? "Saving…" : "Save"}
-            </button>
-            <button
-              className="btn btn--ghost btn--sm"
-              type="button"
-              disabled={isDefault || saving}
-              onClick={() => reset.mutate()}
-            >
-              Default
-            </button>
-          </div>
-          {error ? <p className="settings-editor__error">{error}</p> : null}
-        </form>
-      </dd>
-      <dd className="settings-editor__help form-layout__help">
-        <span>{def.description}</span>
-        <span className="settings-editor__scope">
-          Can be overridden at: {scopeLabel(def.override_scope)}
-        </span>
-      </dd>
+        ) : null}
+        {error ? <p className="settings-editor__error" role="alert">{error}</p> : null}
+      </form>
     </div>
   );
 }
@@ -739,16 +831,7 @@ export default function SettingsPage() {
       {/* Workspace defaults grouped by namespace */}
       <section className="grid grid--split">
         {Object.entries(grouped).map(([ns, items]) => (
-          <div key={ns} className="panel">
-            <header className="panel__head">
-              <h2>{NAMESPACE_LABELS[ns] ?? ns}</h2>
-            </header>
-            <dl className="settings-kv settings-kv--editable form-layout form-layout--two-column">
-              {items.map(({ def, value }) => (
-                <SettingEditor key={def.key} def={def} value={value} />
-              ))}
-            </dl>
-          </div>
+          <SettingsPane key={ns} namespace={ns} items={items} />
         ))}
       </section>
 
