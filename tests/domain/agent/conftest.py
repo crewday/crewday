@@ -81,6 +81,7 @@ _REGISTERED_TABLES: tuple[str, ...] = (
     "audit_log",
     "approval_request",
     "agent_token",
+    "agent_relay_request",
     "chat_channel",
     "chat_message",
     "agent_preference",

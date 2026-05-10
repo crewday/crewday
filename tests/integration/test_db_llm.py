@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.identity.models import User
 from app.adapters.db.llm.models import (
+    AgentRelayRequest,
     AgentToken,
     ApprovalRequest,
     BudgetLedger,
@@ -45,7 +46,7 @@ from app.adapters.db.llm.models import (
     LlmUsage,
 )
 from app.adapters.db.workspace.models import Workspace
-from app.tenancy import registry
+from app.tenancy import registry, tenant_agnostic
 from app.tenancy.context import WorkspaceContext
 from app.tenancy.current import reset_current, set_current
 from app.tenancy.orm_filter import TenantFilterMissing, install_tenant_filter
@@ -63,6 +64,7 @@ _PERIOD_END = _PINNED + timedelta(days=30)
 _LLM_TABLES: tuple[str, ...] = (
     "llm_assignment",
     "agent_token",
+    "agent_relay_request",
     "approval_request",
     "llm_usage",
     "budget_ledger",
@@ -433,6 +435,86 @@ class TestMigrationShape:
         assert indexes["ix_approval_request_pending_expires"]["column_names"] == [
             "expires_at"
         ]
+
+    def test_agent_relay_request_columns(self, engine: Engine) -> None:
+        cols = {
+            c["name"]: c for c in inspect(engine).get_columns("agent_relay_request")
+        }
+        expected = {
+            "id",
+            "workspace_id",
+            "requester_user_id",
+            "target_user_id",
+            "requester_display_label",
+            "target_display_label",
+            "requester_scope",
+            "requester_thread_ref",
+            "requester_message_ref",
+            "target_scope",
+            "target_thread_ref",
+            "target_message_ref",
+            "status",
+            "request_summary",
+            "request_fingerprint",
+            "response_summary",
+            "created_at",
+            "delivered_at",
+            "responded_at",
+            "closed_at",
+        }
+        assert set(cols) == expected
+        nullable = {
+            "requester_user_id",
+            "target_user_id",
+            "requester_message_ref",
+            "target_thread_ref",
+            "target_message_ref",
+            "response_summary",
+            "delivered_at",
+            "responded_at",
+            "closed_at",
+        }
+        for col in nullable:
+            assert cols[col]["nullable"] is True, f"{col} must be NULLABLE"
+        for notnull in expected - nullable:
+            assert cols[notnull]["nullable"] is False, f"{notnull} must be NOT NULL"
+
+    def test_agent_relay_request_fks(self, engine: Engine) -> None:
+        fks = {
+            tuple(fk["constrained_columns"]): fk
+            for fk in inspect(engine).get_foreign_keys("agent_relay_request")
+        }
+        assert fks[("workspace_id",)]["referred_table"] == "workspace"
+        assert fks[("workspace_id",)]["options"].get("ondelete") == "CASCADE"
+        assert fks[("requester_user_id",)]["referred_table"] == "user"
+        assert fks[("requester_user_id",)]["options"].get("ondelete") == "SET NULL"
+        assert fks[("target_user_id",)]["referred_table"] == "user"
+        assert fks[("target_user_id",)]["options"].get("ondelete") == "SET NULL"
+
+    def test_agent_relay_request_indexes(self, engine: Engine) -> None:
+        indexes = {
+            ix["name"]: ix for ix in inspect(engine).get_indexes("agent_relay_request")
+        }
+        assert indexes["ix_agent_relay_request_open_target"]["column_names"] == [
+            "workspace_id",
+            "target_user_id",
+            "status",
+            "created_at",
+        ]
+        assert indexes["ix_agent_relay_request_requester_thread"]["column_names"] == [
+            "workspace_id",
+            "requester_scope",
+            "requester_thread_ref",
+            "created_at",
+        ]
+        duplicate_idx = indexes["uq_agent_relay_request_active_question"]
+        assert duplicate_idx["column_names"] == [
+            "workspace_id",
+            "requester_user_id",
+            "target_user_id",
+            "request_fingerprint",
+        ]
+        assert bool(duplicate_idx["unique"]) is True
 
     def test_llm_usage_columns(self, engine: Engine) -> None:
         cols = {c["name"]: c for c in inspect(engine).get_columns("llm_usage")}
@@ -853,6 +935,244 @@ class TestLlmAssignmentCrud:
                 .order_by(LlmAssignment.capability)
             ).all()
             assert [r.capability for r in rows] == ["daily_digest", "staff_chat"]
+        finally:
+            reset_current(ctx_token)
+
+
+class TestAgentRelayRequestCrud:
+    """Insert/select/FK behaviour for agent-mediated relay persistence."""
+
+    def test_agent_relay_request_insert_and_open_lookup(
+        self, db_session: Session
+    ) -> None:
+        workspace, requester = _bootstrap(
+            db_session,
+            email="relay-requester@example.com",
+            display="Relay Requester",
+            slug="relay-crud-ws",
+            name="RelayCrudWS",
+        )
+        target = bootstrap_user(
+            db_session,
+            email="relay-target@example.com",
+            display_name="Relay Target",
+            clock=FrozenClock(_PINNED),
+        )
+        ctx_token = set_current(_ctx_for(workspace, requester.id))
+        try:
+            relay = AgentRelayRequest(
+                id="01HWA00000000000000RELAY1",
+                workspace_id=workspace.id,
+                requester_user_id=requester.id,
+                target_user_id=target.id,
+                requester_display_label="Relay Requester",
+                target_display_label="Relay Target",
+                requester_scope="manager",
+                requester_thread_ref="agent:manager:requester",
+                requester_message_ref="msg-requester",
+                target_scope="employee",
+                target_thread_ref="agent:employee:target",
+                target_message_ref=None,
+                status="open",
+                request_summary="Sunday availability",
+                request_fingerprint="f" * 64,
+                response_summary=None,
+                created_at=_PINNED,
+                delivered_at=None,
+                responded_at=None,
+                closed_at=None,
+            )
+            db_session.add(relay)
+            db_session.flush()
+
+            rows = db_session.scalars(
+                select(AgentRelayRequest).where(
+                    AgentRelayRequest.workspace_id == workspace.id,
+                    AgentRelayRequest.target_user_id == target.id,
+                    AgentRelayRequest.status == "open",
+                )
+            ).all()
+            assert [row.id for row in rows] == [relay.id]
+        finally:
+            reset_current(ctx_token)
+
+    def test_agent_relay_request_response_transition(self, db_session: Session) -> None:
+        workspace, requester = _bootstrap(
+            db_session,
+            email="relay-transition-requester@example.com",
+            display="Relay Transition Requester",
+            slug="relay-transition-ws",
+            name="RelayTransitionWS",
+        )
+        target = bootstrap_user(
+            db_session,
+            email="relay-transition-target@example.com",
+            display_name="Relay Transition Target",
+            clock=FrozenClock(_PINNED),
+        )
+        ctx_token = set_current(_ctx_for(workspace, requester.id))
+        try:
+            relay = AgentRelayRequest(
+                id="01HWA00000000000000RELAY2",
+                workspace_id=workspace.id,
+                requester_user_id=requester.id,
+                target_user_id=target.id,
+                requester_display_label="Relay Transition Requester",
+                target_display_label="Relay Transition Target",
+                requester_scope="manager",
+                requester_thread_ref="thread-requester",
+                requester_message_ref=None,
+                target_scope="employee",
+                target_thread_ref="thread-target",
+                target_message_ref="msg-target",
+                status="open",
+                request_summary="Sunday availability",
+                request_fingerprint="a" * 64,
+                response_summary=None,
+                created_at=_PINNED,
+                delivered_at=_PINNED,
+                responded_at=None,
+                closed_at=None,
+            )
+            db_session.add(relay)
+            db_session.flush()
+
+            relay.status = "answered"
+            relay.response_summary = "Target can work 2-6pm."
+            relay.responded_at = _LATER
+            relay.closed_at = _LATER
+            db_session.flush()
+            db_session.expire(relay)
+
+            assert relay.status == "answered"
+            assert relay.response_summary == "Target can work 2-6pm."
+            assert relay.responded_at == _LATER
+            assert relay.closed_at == _LATER
+        finally:
+            reset_current(ctx_token)
+
+    def test_agent_relay_request_workspace_isolation(self, db_session: Session) -> None:
+        workspace_a, requester_a = _bootstrap(
+            db_session,
+            email="relay-iso-a@example.com",
+            display="Relay Iso A",
+            slug="relay-iso-a",
+            name="RelayIsoA",
+        )
+        workspace_b, requester_b = _bootstrap(
+            db_session,
+            email="relay-iso-b@example.com",
+            display="Relay Iso B",
+            slug="relay-iso-b",
+            name="RelayIsoB",
+        )
+        target_a = bootstrap_user(
+            db_session,
+            email="relay-iso-target-a@example.com",
+            display_name="Relay Iso Target A",
+            clock=FrozenClock(_PINNED),
+        )
+        target_b = bootstrap_user(
+            db_session,
+            email="relay-iso-target-b@example.com",
+            display_name="Relay Iso Target B",
+            clock=FrozenClock(_PINNED),
+        )
+        for relay_id, workspace, requester, target in (
+            ("01HWA00000000000000RELYA", workspace_a, requester_a, target_a),
+            ("01HWA00000000000000RELYB", workspace_b, requester_b, target_b),
+        ):
+            db_session.add(
+                AgentRelayRequest(
+                    id=relay_id,
+                    workspace_id=workspace.id,
+                    requester_user_id=requester.id,
+                    target_user_id=target.id,
+                    requester_display_label=requester.display_name,
+                    target_display_label=target.display_name,
+                    requester_scope="manager",
+                    requester_thread_ref=f"thread-{relay_id}",
+                    requester_message_ref=None,
+                    target_scope="employee",
+                    target_thread_ref=None,
+                    target_message_ref=None,
+                    status="open",
+                    request_summary="Same visible ask",
+                    request_fingerprint=relay_id[-1].lower() * 64,
+                    response_summary=None,
+                    created_at=_PINNED,
+                    delivered_at=None,
+                    responded_at=None,
+                    closed_at=None,
+                )
+            )
+        db_session.flush()
+
+        ctx_token = set_current(_ctx_for(workspace_a, requester_a.id))
+        try:
+            rows = db_session.scalars(
+                select(AgentRelayRequest).where(
+                    AgentRelayRequest.workspace_id == workspace_a.id,
+                    AgentRelayRequest.target_user_id == target_a.id,
+                )
+            ).all()
+            assert [row.workspace_id for row in rows] == [workspace_a.id]
+        finally:
+            reset_current(ctx_token)
+
+    def test_agent_relay_request_fk_delete_behaviour(self, db_session: Session) -> None:
+        workspace, requester = _bootstrap(
+            db_session,
+            email="relay-fk-requester@example.com",
+            display="Relay FK Requester",
+            slug="relay-fk-ws",
+            name="RelayFkWS",
+        )
+        target = bootstrap_user(
+            db_session,
+            email="relay-fk-target@example.com",
+            display_name="Relay FK Target",
+            clock=FrozenClock(_PINNED),
+        )
+        ctx_token = set_current(_ctx_for(workspace, requester.id))
+        try:
+            relay = AgentRelayRequest(
+                id="01HWA00000000000000RELAY3",
+                workspace_id=workspace.id,
+                requester_user_id=requester.id,
+                target_user_id=target.id,
+                requester_display_label="Relay FK Requester",
+                target_display_label="Relay FK Target",
+                requester_scope="manager",
+                requester_thread_ref="thread-fk",
+                requester_message_ref=None,
+                target_scope="employee",
+                target_thread_ref=None,
+                target_message_ref=None,
+                status="open",
+                request_summary="Sunday availability",
+                request_fingerprint="b" * 64,
+                response_summary=None,
+                created_at=_PINNED,
+                delivered_at=None,
+                responded_at=None,
+                closed_at=None,
+            )
+            db_session.add(relay)
+            db_session.flush()
+
+            with tenant_agnostic():
+                db_session.delete(target)
+                db_session.flush()
+            db_session.expire(relay)
+            assert relay.target_user_id is None
+            assert relay.target_display_label == "Relay FK Target"
+
+            with tenant_agnostic():
+                db_session.delete(workspace)
+                db_session.flush()
+            db_session.expunge(relay)
+            assert db_session.get(AgentRelayRequest, relay.id) is None
         finally:
             reset_current(ctx_token)
 

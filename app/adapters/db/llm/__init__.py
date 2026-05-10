@@ -5,9 +5,10 @@ This package ships two tiers of tables:
 **Workspace-scoped** (``workspace_id`` column, registered in
 :mod:`app.tenancy.registry`): :class:`AgentToken`,
 :class:`ApprovalRequest`, :class:`LlmUsage`, :class:`BudgetLedger`,
-:class:`AgentPreference`, :class:`AgentPreferenceRevision`. The ORM
-tenant filter auto-injects a ``workspace_id`` predicate on every
-SELECT / UPDATE / DELETE. A bare read without a
+:class:`AgentPreference`, :class:`AgentPreferenceRevision`,
+:class:`AgentRelayRequest`. The ORM tenant filter auto-injects a
+``workspace_id`` predicate on every SELECT / UPDATE / DELETE. A bare
+read without a
 :class:`~app.tenancy.WorkspaceContext` raises
 :class:`~app.tenancy.orm_filter.TenantFilterMissing`.
 
@@ -28,7 +29,8 @@ model / provider_model registry, plus the HITL approval queue,
 delegated tokens, usage ledger, and rolling budget envelope. The
 ``llm_call`` / ``llm_usage_daily`` / full ``agent_action`` state
 machine land in follow-up migrations without breaking this slice's
-write contract.
+write contract. ``AgentRelayRequest`` is the §11 mediated-user-request
+correlation row; visible chat copy lives only in ``chat_message``.
 
 FK hygiene mirrors the rest of the app:
 
@@ -78,6 +80,7 @@ from app.adapters.db.llm.models import (
     AgentDocRevision,
     AgentPreference,
     AgentPreferenceRevision,
+    AgentRelayRequest,
     AgentToken,
     ApprovalRequest,
     BudgetLedger,
@@ -104,6 +107,7 @@ for _table in (
     "budget_ledger",
     "agent_preference",
     "agent_preference_revision",
+    "agent_relay_request",
 ):
     register(_table)
 
@@ -112,6 +116,7 @@ __all__ = [
     "AgentDocRevision",
     "AgentPreference",
     "AgentPreferenceRevision",
+    "AgentRelayRequest",
     "AgentToken",
     "ApprovalRequest",
     "BudgetLedger",

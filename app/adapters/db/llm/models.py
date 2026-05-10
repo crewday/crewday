@@ -88,6 +88,7 @@ __all__ = [
     "AgentDocRevision",
     "AgentPreference",
     "AgentPreferenceRevision",
+    "AgentRelayRequest",
     "AgentToken",
     "ApprovalRequest",
     "BudgetLedger",
@@ -154,6 +155,14 @@ _AGENT_PREFERENCE_SCOPE_VALUES: tuple[str, ...] = (
     "workspace",
     "property",
     "user",
+)
+
+_AGENT_RELAY_REQUEST_STATUS_VALUES: tuple[str, ...] = (
+    "open",
+    "answered",
+    "expired",
+    "cancelled",
+    "failed",
 )
 
 
@@ -563,6 +572,87 @@ class ApprovalRequest(Base):
             "expires_at",
             sqlite_where=text("status = 'pending'"),
             postgresql_where=text("status = 'pending'"),
+        ),
+    )
+
+
+class AgentRelayRequest(Base):
+    """Correlation row for §11 agent-mediated user requests.
+
+    This is not a chat transcript. Human-visible message bodies live in
+    ``chat_message`` rows; this table keeps the workspace-scoped routing
+    index that ties the requester thread to the target thread and back.
+
+    The text columns intentionally store only relay-safe summaries:
+    no provider prompts, chain-of-thought, hidden context, unrelated
+    chat history, or full chat transcript copy. ``request_fingerprint``
+    is a sha256 over a normalized summary and powers duplicate-active
+    prevention.
+    """
+
+    __tablename__ = "agent_relay_request"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    requester_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    target_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    requester_display_label: Mapped[str] = mapped_column(String, nullable=False)
+    target_display_label: Mapped[str] = mapped_column(String, nullable=False)
+    requester_scope: Mapped[str] = mapped_column(String, nullable=False)
+    requester_thread_ref: Mapped[str] = mapped_column(String, nullable=False)
+    requester_message_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    target_scope: Mapped[str] = mapped_column(String, nullable=False)
+    target_thread_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    target_message_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    request_summary: Mapped[str] = mapped_column(String, nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    response_summary: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    delivered_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    responded_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN ({_in_clause(_AGENT_RELAY_REQUEST_STATUS_VALUES)})",
+            name="status",
+        ),
+        Index(
+            "ix_agent_relay_request_open_target",
+            "workspace_id",
+            "target_user_id",
+            "status",
+            "created_at",
+        ),
+        Index(
+            "ix_agent_relay_request_requester_thread",
+            "workspace_id",
+            "requester_scope",
+            "requester_thread_ref",
+            "created_at",
+        ),
+        Index(
+            "uq_agent_relay_request_active_question",
+            "workspace_id",
+            "requester_user_id",
+            "target_user_id",
+            "request_fingerprint",
+            unique=True,
+            sqlite_where=text("status = 'open'"),
+            postgresql_where=text("status = 'open'"),
         ),
     )
 
