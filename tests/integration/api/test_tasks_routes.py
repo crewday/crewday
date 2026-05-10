@@ -39,6 +39,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.instructions.models import Instruction, InstructionVersion
@@ -227,6 +228,82 @@ def seeded(
         actor_was_owner_member=True,
     )
     yield handles
+
+
+def _seed_work_role(
+    session: Session,
+    *,
+    workspace_id: str,
+    key: str = "maid",
+    name: str = "Maid",
+) -> str:
+    """Return a live role, inserting only when workspace bootstrap omitted it."""
+    with tenant_agnostic():
+        existing = session.scalar(
+            select(WorkRole.id).where(
+                WorkRole.workspace_id == workspace_id,
+                WorkRole.key == key,
+                WorkRole.deleted_at.is_(None),
+            )
+        )
+        if existing is not None:
+            return existing
+
+        role = WorkRole(
+            id=new_ulid(),
+            workspace_id=workspace_id,
+            key=key,
+            name=name,
+            description_md="",
+            default_settings_json={},
+            icon_name="",
+            created_at=_PINNED,
+            deleted_at=None,
+        )
+        session.add(role)
+        session.flush()
+        return role.id
+
+
+def test_seed_work_role_reuses_bootstrapped_starter_role(
+    session_factory: sessionmaker[Session],
+    seeded: dict[str, Any],
+) -> None:
+    with session_factory() as s:
+        role_id = _seed_work_role(s, workspace_id=seeded["foreign_workspace_id"])
+        second_role_id = _seed_work_role(s, workspace_id=seeded["foreign_workspace_id"])
+        with tenant_agnostic():
+            role_count = s.scalar(
+                select(func.count())
+                .select_from(WorkRole)
+                .where(
+                    WorkRole.workspace_id == seeded["foreign_workspace_id"],
+                    WorkRole.key == "maid",
+                )
+            )
+
+    assert second_role_id == role_id
+    assert role_count == 1
+
+
+def test_seed_work_role_does_not_reuse_deleted_same_key_role(
+    session_factory: sessionmaker[Session],
+    seeded: dict[str, Any],
+) -> None:
+    with session_factory() as s:
+        with tenant_agnostic():
+            role = s.scalar(
+                select(WorkRole).where(
+                    WorkRole.workspace_id == seeded["foreign_workspace_id"],
+                    WorkRole.key == "maid",
+                )
+            )
+            assert role is not None
+            role.deleted_at = _PINNED
+            s.flush()
+
+        with pytest.raises(IntegrityError):
+            _seed_work_role(s, workspace_id=seeded["foreign_workspace_id"])
 
 
 def _client_for(
@@ -2314,21 +2391,7 @@ class TestPatchTask:
     ) -> None:
         # Seed a role in the foreign workspace.
         with session_factory() as s:
-            with tenant_agnostic():
-                role_id = new_ulid()
-                s.add(
-                    WorkRole(
-                        id=role_id,
-                        workspace_id=seeded["foreign_workspace_id"],
-                        key="maid",
-                        name="Maid",
-                        description_md="",
-                        default_settings_json={},
-                        icon_name="",
-                        created_at=_PINNED,
-                    )
-                )
-                s.flush()
+            role_id = _seed_work_role(s, workspace_id=seeded["foreign_workspace_id"])
             s.commit()
         with _client_for(session_factory, seeded["owner_ctx"]) as client:
             r = client.patch(
