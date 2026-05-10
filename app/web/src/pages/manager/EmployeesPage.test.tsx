@@ -300,12 +300,54 @@ describe("<EmployeesPage> work-role catalog", () => {
 
     const catalog = await screen.findByRole("region", { name: "Work roles" });
     expect(await within(catalog).findByText("Housekeeper")).toBeInTheDocument();
-    expect(within(catalog).getByText("housekeeper")).toBeInTheDocument();
-    expect(within(catalog).getByText("BrushCleaning")).toBeInTheDocument();
+    expect(within(catalog).queryByText("housekeeper")).not.toBeInTheDocument();
+    expect(within(catalog).queryByText("BrushCleaning")).not.toBeInTheDocument();
     expect(within(catalog).getByText("Turns guest rooms between stays.")).toBeInTheDocument();
+    expect(catalog.querySelector(".work-role-row__mark svg")).toBeInTheDocument();
     expect(within(catalog).getByRole("button", { name: "Add role" })).toBeInTheDocument();
     expect(within(catalog).getByRole("button", { name: "Edit" })).toBeInTheDocument();
     expect(within(catalog).getByRole("button", { name: "Remove" })).toBeInTheDocument();
+  });
+
+  it("uses a readable text mark when a role has no icon", async () => {
+    renderEmployees([
+      {
+        path: "/w/acme/api/v1/work_roles?limit=500",
+        respond: {
+          body: {
+            data: [{ ...WORK_ROLE, icon_name: "", name: "Night porter", key: "night_porter" }],
+            next_cursor: null,
+            has_more: false,
+          },
+        },
+      },
+    ]);
+
+    const catalog = await screen.findByRole("region", { name: "Work roles" });
+    const row = (await within(catalog).findByText("Night porter")).closest(".work-role-row");
+    expect(row?.querySelector(".work-role-row__mark")).toHaveTextContent("NP");
+    expect(within(catalog).queryByText("night_porter")).not.toBeInTheDocument();
+  });
+
+  it("falls back cleanly for unknown icon names without exposing the raw value", async () => {
+    renderEmployees([
+      {
+        path: "/w/acme/api/v1/work_roles?limit=500",
+        respond: {
+          body: {
+            data: [{ ...WORK_ROLE, icon_name: "LegacyRoleIcon", name: "Legacy role", key: "legacy_role" }],
+            next_cursor: null,
+            has_more: false,
+          },
+        },
+      },
+    ]);
+
+    const catalog = await screen.findByRole("region", { name: "Work roles" });
+    const row = (await within(catalog).findByText("Legacy role")).closest(".work-role-row");
+    expect(row?.querySelector(".work-role-row__mark svg")).toBeInTheDocument();
+    expect(within(catalog).queryByText("LegacyRoleIcon")).not.toBeInTheDocument();
+    expect(within(catalog).queryByText("legacy_role")).not.toBeInTheDocument();
   });
 
   it("shows loading, error, and actionable empty states", async () => {

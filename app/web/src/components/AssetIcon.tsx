@@ -1,8 +1,12 @@
 import {
   AlarmSmoke,
+  Baby,
+  Bell,
   Biohazard,
   BrushCleaning,
+  Building2,
   Car,
+  ChefHat,
   CookingPot,
   Droplets,
   Fan,
@@ -31,9 +35,13 @@ import {
 // the render.
 const REGISTRY: Record<string, LucideIcon> = {
   AlarmSmoke,
+  Baby,
+  Bell,
   Biohazard,
   BrushCleaning,
+  Building2,
   Car,
+  ChefHat,
   CookingPot,
   Droplets,
   Fan,

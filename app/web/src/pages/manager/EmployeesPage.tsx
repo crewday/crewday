@@ -8,6 +8,7 @@ import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
+import { AssetIcon } from "@/components/AssetIcon";
 import { Avatar, Chip, EmptyState, Loading } from "@/components/common";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { Booking, Employee, Me, Property, WorkRole } from "@/types/api";
@@ -48,6 +49,17 @@ const EMPTY_WORK_ROLE_FORM: WorkRoleFormState = {
   description_md: "",
   icon_name: "",
 };
+
+function workRoleInitials(name: string): string {
+  const initials = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+  return initials || "?";
+}
 
 export default function EmployeesPage() {
   const { pathname } = useLocation();
@@ -311,26 +323,36 @@ function WorkRoleCatalogManager() {
           {roles.map((role) => (
             <li key={role.id} className="work-role-row">
               <div className="work-role-row__mark" aria-hidden="true">
-                {role.icon_name ? role.icon_name.slice(0, 2).toUpperCase() : role.name.slice(0, 2).toUpperCase()}
+                {role.icon_name ? (
+                  <AssetIcon name={role.icon_name} size={18} className="work-role-row__icon" />
+                ) : (
+                  workRoleInitials(role.name)
+                )}
               </div>
               <div className="work-role-row__main">
                 <strong>{role.name}</strong>
-                <div className="work-role-row__meta">
-                  <code className="inline-code">{role.key}</code>
-                  {role.icon_name ? <span>{role.icon_name}</span> : null}
-                </div>
                 {role.description_md ? (
                   <p className="work-role-row__description">{role.description_md}</p>
                 ) : null}
               </div>
               <div className="work-role-row__actions">
-                <button type="button" className="btn btn--ghost btn--sm" onClick={() => openEditDialog(role)}>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm work-role-row__action"
+                  aria-label="Edit"
+                  onClick={() => openEditDialog(role)}
+                >
                   <Pencil size={14} aria-hidden="true" />
-                  Edit
+                  <span className="work-role-row__action-label">Edit</span>
                 </button>
-                <button type="button" className="btn btn--ghost btn--sm" onClick={() => openDeleteDialog(role)}>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm work-role-row__action"
+                  aria-label="Remove"
+                  onClick={() => openDeleteDialog(role)}
+                >
                   <Trash2 size={14} aria-hidden="true" />
-                  Remove
+                  <span className="work-role-row__action-label">Remove</span>
                 </button>
               </div>
             </li>
