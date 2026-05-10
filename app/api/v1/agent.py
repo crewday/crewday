@@ -254,6 +254,7 @@ def build_agent_router(
                     session,
                     workspace_id=ctx.workspace_id,
                 ),
+                commit_before_tool_dispatch=True,
             )
         except Exception:
             session.rollback()

@@ -76,8 +76,6 @@ _PINNED = datetime(2026, 4, 26, 12, 0, 0, tzinfo=UTC)
 # registry between modules, which silently drops the tenant filter
 # off LLM / messaging queries when the full suite runs.
 _REGISTERED_TABLES: tuple[str, ...] = (
-    "llm_assignment",
-    "llm_capability_inheritance",
     "llm_usage",
     "budget_ledger",
     "audit_log",
@@ -585,7 +583,7 @@ def seed_assignment(
     session.flush()
     row = LlmAssignment(
         id=new_ulid(),
-        workspace_id=workspace_id,
+        workspace_id=None,
         capability=capability,
         model_id=pm_id,
         provider="fake",
@@ -599,3 +597,4 @@ def seed_assignment(
     )
     session.add(row)
     session.flush()
+    router_module.invalidate_cache(workspace_id=workspace_id)

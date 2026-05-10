@@ -28,13 +28,14 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db import session as db_session_module
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.models import RoleGrant
-from app.adapters.db.identity.models import ApiToken, User
+from app.adapters.db.identity.models import ApiToken, ApiTokenRequestLog, User
 from app.adapters.db.llm.models import (
     BudgetLedger,
     LlmAssignment,
@@ -46,7 +47,7 @@ from app.adapters.db.messaging.models import ChatChannel, ChatMessage
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.session import FilteredSession, make_engine
 from app.adapters.db.tasks.models import Occurrence
-from app.adapters.db.workspace.models import Workspace
+from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.adapters.llm.ports import LLMResponse, LLMUsage
 from app.agent.dispatcher import make_default_dispatcher
 from app.agent.tokens import DelegatedTokenFactory
@@ -54,18 +55,23 @@ from app.api.deps import current_workspace_context
 from app.api.deps import db_session as _db_session_dep
 from app.api.deps import get_llm as _get_llm_dep
 from app.api.v1.agent import build_agent_router, get_agent_token_factory
+from app.api.v1.places import build_properties_router
 from app.api.v1.tasks import router as tasks_router
 from app.auth import tokens as tokens_module
+from app.auth.session import SESSION_COOKIE_NAME, issue
+from app.config import Settings
 from app.domain.agent.runtime import (
     DelegatedToken,
     ToolCall,
     run_turn,
 )
+from app.domain.llm.router import invalidate_cache as invalidate_llm_router_cache
 from app.events.bus import EventBus
 from app.events.types import AgentMessageAppended, AgentTurnFinished, AgentTurnStarted
 from app.fixtures.llm import seed_default_registry
 from app.tenancy import WorkspaceContext, registry, tenant_agnostic
 from app.tenancy.current import reset_current, set_current
+from app.tenancy.middleware import WorkspaceContextMiddleware
 from app.tenancy.orm_filter import install_tenant_filter
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
@@ -80,8 +86,6 @@ _PINNED = datetime(2026, 4, 26, 12, 0, 0, tzinfo=UTC)
 def _ensure_registered() -> None:
     """Register every table the runtime + dispatcher write to."""
     for table in (
-        "llm_assignment",
-        "llm_capability_inheritance",
         "llm_usage",
         "budget_ledger",
         "audit_log",
@@ -92,6 +96,7 @@ def _ensure_registered() -> None:
         "occurrence",
         "task_template",
         "property_workspace",
+        "user_workspace",
         "role_grant",
         "permission_group",
         "permission_group_member",
@@ -155,6 +160,15 @@ def _seed_workspace_and_user(session: Session) -> tuple[Workspace, User]:
     )
     with tenant_agnostic():
         session.add_all([workspace, user])
+        session.flush()
+        session.add(
+            UserWorkspace(
+                user_id=user.id,
+                workspace_id=workspace.id,
+                source="workspace_grant",
+                added_at=_PINNED,
+            )
+        )
         session.flush()
     # The dispatcher's caller is the workspace manager — every test
     # in this suite needs the ``managers`` system-group fallback to
@@ -286,7 +300,7 @@ def _seed_llm_assignment(session: Session, *, workspace_id: str) -> None:
     session.flush()
     assignment = LlmAssignment(
         id=new_ulid(),
-        workspace_id=workspace_id,
+        workspace_id=None,
         capability="chat.manager",
         model_id=pm_id,
         provider="fake",
@@ -300,6 +314,7 @@ def _seed_llm_assignment(session: Session, *, workspace_id: str) -> None:
     )
     session.add(assignment)
     session.flush()
+    invalidate_llm_router_cache(workspace_id=workspace_id)
 
 
 def _seed_budget_ledger(session: Session, *, workspace_id: str) -> None:
@@ -403,6 +418,52 @@ def _build_agent_app_with_default_db(
         return llm
 
     app.dependency_overrides[current_workspace_context] = _ctx
+    app.dependency_overrides[_get_llm_dep] = _llm
+    return app
+
+
+def _test_settings(database_url: str) -> Settings:
+    return Settings.model_construct(
+        database_url=database_url,
+        root_key=SecretStr("dispatcher-agent-root-key"),
+        session_owner_ttl_days=7,
+        session_user_ttl_days=30,
+        bind_host="127.0.0.1",
+        bind_port=8000,
+        allow_public_bind=False,
+        worker="internal",
+        smtp_host=None,
+        smtp_port=587,
+        smtp_from=None,
+        smtp_use_tls=False,
+        log_level="INFO",
+        cors_allow_origins=[],
+        profile="prod",
+        vite_dev_url="http://127.0.0.1:5173",
+        phase0_stub_enabled=False,
+        demo_mode=False,
+    )
+
+
+def _build_agent_app_with_real_tenancy(
+    *,
+    llm: _ScriptedLLM,
+    clock: FrozenClock,
+    bus: EventBus,
+    settings: Settings,
+) -> FastAPI:
+    app = FastAPI()
+    app.state.settings = settings
+    app.include_router(build_properties_router(), prefix="/w/{slug}/api/v1")
+    app.include_router(tasks_router, prefix="/w/{slug}/api/v1")
+    app.include_router(
+        build_agent_router(clock=clock, event_bus=bus), prefix="/w/{slug}/api/v1"
+    )
+    app.add_middleware(WorkspaceContextMiddleware)
+
+    def _llm() -> _ScriptedLLM:
+        return llm
+
     app.dependency_overrides[_get_llm_dep] = _llm
     return app
 
@@ -857,6 +918,133 @@ def test_agent_message_endpoint_dispatches_live_tool_and_audits(
     assert token_row is not None
     assert token_row.kind == "delegated"
     assert token_row.revoked_at == _PINNED
+
+
+def test_agent_message_endpoint_dispatches_properties_list_through_real_api(
+    engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    if engine.dialect.name != "sqlite":
+        pytest.skip("SQLite-specific nested dispatcher regression")
+
+    source_db = engine.url.database
+    if source_db is None:
+        pytest.skip("SQLite file database required")
+    db_path = tmp_path / "agent-properties-list.db"
+    shutil.copy2(source_db, db_path)
+    isolated_engine = make_engine(f"sqlite:///{db_path}")
+    factory = sessionmaker(
+        bind=isolated_engine,
+        expire_on_commit=False,
+        class_=FilteredSession,
+    )
+    monkeypatch.setattr(db_session_module, "_default_engine", isolated_engine)
+    monkeypatch.setattr(db_session_module, "_default_sessionmaker_", factory)
+    settings = _test_settings(f"sqlite:///{db_path}")
+
+    try:
+        turn_now = datetime.now(UTC)
+        with factory() as seed:
+            workspace, user = _seed_workspace_and_user(seed)
+            _seed_llm_assignment(seed, workspace_id=workspace.id)
+            _seed_budget_ledger(seed, workspace_id=workspace.id)
+            _seed_property(seed, workspace_id=workspace.id)
+            issued = issue(
+                seed,
+                user_id=user.id,
+                workspace_id=workspace.id,
+                has_owner_grant=True,
+                ua="pytest-agent-dispatcher",
+                ip="127.0.0.1",
+                accept_language="en",
+                now=turn_now,
+                settings=settings,
+            )
+            seed.commit()
+
+        bus = EventBus()
+        clock = FrozenClock(turn_now)
+        llm = _ScriptedLLM(
+            replies=[
+                LLMResponse(
+                    text='<tool_call name="properties.list" input="{}"/>',
+                    usage=LLMUsage(
+                        prompt_tokens=20,
+                        completion_tokens=8,
+                        total_tokens=28,
+                    ),
+                    model_id="fake/dispatcher-model",
+                    finish_reason="tool_calls",
+                ),
+                LLMResponse(
+                    text="The current property is 1 Pool Way.",
+                    usage=LLMUsage(
+                        prompt_tokens=24,
+                        completion_tokens=6,
+                        total_tokens=30,
+                    ),
+                    model_id="fake/dispatcher-model",
+                    finish_reason="stop",
+                ),
+            ]
+        )
+        app = _build_agent_app_with_real_tenancy(
+            llm=llm,
+            clock=clock,
+            bus=bus,
+            settings=settings,
+        )
+        client = TestClient(app, raise_server_exceptions=False)
+        headers = {
+            "cookie": f"{SESSION_COOKIE_NAME}={issued.cookie_value}",
+            "user-agent": "pytest-agent-dispatcher",
+            "accept-language": "en",
+        }
+
+        response = client.post(
+            f"/w/{workspace.slug}/api/v1/agent/manager/message",
+            json={"body": "What property do we currently have?"},
+            headers=headers,
+        )
+
+        assert response.status_code == 201, response.text
+        assert llm.replies == []
+        assert len(llm.messages) == 2
+        tool_result = llm.messages[1][-1]["content"]
+        assert '"name": "properties.list"' in tool_result
+        assert '"status": 200' in tool_result
+        assert "1 Pool Way" in tool_result
+        assert "Internal Server Error" not in tool_result
+
+        log_response = client.get(
+            f"/w/{workspace.slug}/api/v1/agent/manager/log",
+            headers=headers,
+        )
+        assert log_response.status_code == 200, log_response.text
+        rows = log_response.json()
+        assert [row["kind"] for row in rows] == ["user", "agent"]
+        assert rows[1]["body"] == "The current property is 1 Pool Way."
+
+        with factory() as check, tenant_agnostic():
+            token_rows = list(check.scalars(select(ApiToken)).all())
+            request_logs = list(check.scalars(select(ApiTokenRequestLog)).all())
+        delegated = [row for row in token_rows if row.kind == "delegated"]
+        assert len(delegated) == 1
+        assert delegated[0].delegate_for_user_id == user.id
+        assert delegated[0].revoked_at is not None
+        assert delegated[0].revoked_at >= turn_now
+        delegated_request_logs = [
+            row for row in request_logs if row.token_id == delegated[0].id
+        ]
+        assert len(delegated_request_logs) == 1
+        assert delegated_request_logs[0].method == "GET"
+        assert (
+            delegated_request_logs[0].path == f"/w/{workspace.slug}/api/v1/properties"
+        )
+        assert delegated_request_logs[0].status == 200
+    finally:
+        isolated_engine.dispose()
 
 
 def test_agent_message_then_log_refetch_uses_sqlite_default_uow_without_locking(

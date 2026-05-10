@@ -59,16 +59,18 @@ class DelegatedTokenFactory:
         if not self._minted_token_ids:
             return
         token_ids = tuple(self._minted_token_ids)
-        self._minted_token_ids.clear()
         if session is not None:
             self._revoke_with_session(session, ctx, token_ids=token_ids)
+            self._minted_token_ids.clear()
             return
         if self.session is not None:
             self._revoke_with_session(self.session, ctx, token_ids=token_ids)
+            self._minted_token_ids.clear()
             return
         with make_uow() as uow_session:
             assert isinstance(uow_session, Session)
             self._revoke_with_session(uow_session, ctx, token_ids=token_ids)
+        self._minted_token_ids.clear()
 
     def _mint_with_session(
         self,

@@ -41,6 +41,7 @@ from app.auth.session import SESSION_COOKIE_NAME, issue
 from app.config import Settings
 from app.domain.agent.runtime import DelegatedToken
 from app.domain.errors import DomainError
+from app.domain.llm.router import invalidate_cache as invalidate_llm_router_cache
 from app.events.bus import EventBus
 from app.events.types import AgentMessageAppended, ChatMessageSent
 from app.tenancy import WorkspaceContext
@@ -185,7 +186,7 @@ def _seed_llm_assignment(
     session.add(
         LlmAssignment(
             id=new_ulid(),
-            workspace_id=workspace_id,
+            workspace_id=None,
             capability=capability,
             model_id=provider_model.id,
             provider="fake",
@@ -198,6 +199,7 @@ def _seed_llm_assignment(
             created_at=_PINNED,
         )
     )
+    invalidate_llm_router_cache(workspace_id=workspace_id)
 
 
 def _ctx(
@@ -280,8 +282,10 @@ class _UnitTokenFactory:
     def mint_for(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         return DelegatedToken(plaintext="mip_FAKEKEY_FAKESECRET", token_id="tok_unit")
 
-    def revoke_minted(self, ctx: WorkspaceContext) -> None:
-        del ctx
+    def revoke_minted(
+        self, ctx: WorkspaceContext, *, session: Session | None = None
+    ) -> None:
+        del ctx, session
 
 
 def _settings() -> Settings:

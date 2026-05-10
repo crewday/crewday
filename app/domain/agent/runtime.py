@@ -528,6 +528,7 @@ def run_turn(
     agent_message_notification_sink: AgentMessageNotificationSink | None = None,
     agent_message_recipient_user_id: str | None = None,
     agent_message_delivery_is_fallback: bool = False,
+    commit_before_tool_dispatch: bool = False,
 ) -> TurnOutcome:
     """Run one agent turn end-to-end without committing the caller's session.
 
@@ -535,6 +536,8 @@ def run_turn(
     Expected §11 failures collapse into :class:`TurnOutcome`: capability
     unassigned, budget exceeded, iteration cap, and wall-clock cap.
     Unexpected LLM or dispatcher failures still bubble to the caller.
+    Set ``commit_before_tool_dispatch`` only for embedded HTTP dispatch, where
+    a nested in-process API call must authenticate and read through its own UoW.
     """
     # code-health: ignore[params] Public entry point preserves API compatibility.
     return _run_turn_impl(
@@ -562,6 +565,7 @@ def run_turn(
             agent_message_notification_sink=agent_message_notification_sink,
             agent_message_recipient_user_id=agent_message_recipient_user_id,
             agent_message_delivery_is_fallback=agent_message_delivery_is_fallback,
+            commit_before_tool_dispatch=commit_before_tool_dispatch,
         )
     )
 
@@ -591,6 +595,7 @@ def _build_turn_run(
     agent_message_notification_sink: AgentMessageNotificationSink | None,
     agent_message_recipient_user_id: str | None,
     agent_message_delivery_is_fallback: bool,
+    commit_before_tool_dispatch: bool,
 ) -> _TurnRun:
     # code-health: ignore[params] Builder mirrors the public compatibility API.
     eff_clock: Clock = clock if clock is not None else SystemClock()
@@ -623,6 +628,7 @@ def _build_turn_run(
             agent_message_recipient_user_id,
             agent_message_delivery_is_fallback,
         ),
+        commit_before_tool_dispatch,
     )
 
 
@@ -704,6 +710,7 @@ class _TurnRun:
     include_user_message: bool
     approval_notifications: _ApprovalNotifications
     agent_message_notifications: _AgentMessageNotifications
+    commit_before_tool_dispatch: bool
 
 
 @dataclass(slots=True)
@@ -947,6 +954,11 @@ def _blocked_tool_result(tool_call: ToolCall) -> ToolResult:
 
 def _dispatch_allowed_tool(turn: _ActiveTurn, tool_call: ToolCall) -> None:
     run = turn.run
+    if run.commit_before_tool_dispatch:
+        # Embedded HTTP dispatch opens a nested request with its own UoW.
+        # Release prior telemetry writes first so SQLite does not hold a
+        # write lock while the delegated-token middleware verifies the call.
+        run.session.commit()
     result = run.tool_dispatcher.dispatch(
         tool_call,
         token=turn.token,
