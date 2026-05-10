@@ -1,15 +1,16 @@
 ---
-import InfoPage from "@/components/InfoPage.astro";
-import { legalPages } from "@/content/en/pages";
+import LegalMarkdownPage from "@/components/LegalMarkdownPage.astro";
+import PrivacyDocument, { frontmatter } from "@/content/en/legal/privacy.md";
 
-const page = legalPages.privacy;
+const page = frontmatter;
 ---
 
-<InfoPage
+<LegalMarkdownPage
   title={page.title}
   description={page.description}
   eyebrow={page.eyebrow}
   heading={page.heading}
   intro={page.intro}
-  sections={page.sections}
-/>
+>
+  <PrivacyDocument />
+</LegalMarkdownPage>

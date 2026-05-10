@@ -24,6 +24,15 @@ lives in React islands noted per route.
 | `/suggest` | Suggestion box surfaces (form + board). See §02. | `SuggestionForm`, `SuggestionBoard` |
 | `/404.astro` | Static 404 page. | — |
 
+Legal routes are fixed public URLs, but their source text lives in
+standalone Markdown or MDX files under
+`site/web/src/content/<locale>/legal/`. The files contain both the
+frontmatter metadata used by the Astro page and the full legal body so
+maintainers can link directly to the document source and its history.
+Route files such as `/legal/privacy` and `/legal/terms` import those
+documents and render them; legal body copy must not be duplicated in
+`site/web/src/content/<locale>/pages.ts`.
+
 Nothing authenticated, no `/w/<slug>/*` paths, no session cookies,
 no `/api/*` routes served by Astro itself. All dynamic calls go to
 `crew.day/api/*` which Caddy routes to `site/api/` (§04).

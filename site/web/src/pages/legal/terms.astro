@@ -1,15 +1,16 @@
 ---
-import InfoPage from "@/components/InfoPage.astro";
-import { legalPages } from "@/content/en/pages";
+import LegalMarkdownPage from "@/components/LegalMarkdownPage.astro";
+import TermsDocument, { frontmatter } from "@/content/en/legal/terms.md";
 
-const page = legalPages.terms;
+const page = frontmatter;
 ---
 
-<InfoPage
+<LegalMarkdownPage
   title={page.title}
   description={page.description}
   eyebrow={page.eyebrow}
   heading={page.heading}
   intro={page.intro}
-  sections={page.sections}
-/>
+>
+  <TermsDocument />
+</LegalMarkdownPage>
