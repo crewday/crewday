@@ -79,7 +79,7 @@ def clean_mailpit() -> Iterator[str]:
         if not is_reachable(mailpit_url):
             pytest.skip(
                 f"Mailpit not reachable at {mailpit_url}; start the dev stack with "
-                "`docker compose -f mocks/docker-compose.yml up -d --build`"
+                "`docker compose -f docker-compose.dev.yml up -d --build`"
             )
         purge_inbox(mailpit_url)
         yield mailpit_url

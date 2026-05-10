@@ -103,19 +103,19 @@ def stack_endpoints() -> Iterator[tuple[str, str]]:
     if not _app_reachable(app_url):
         pytest.skip(
             f"app-api not reachable at {app_url}; start the dev stack with "
-            "`docker compose -f mocks/docker-compose.yml up -d`"
+            "`docker compose -f docker-compose.dev.yml up -d`"
         )
     failures = _readyz_failures(app_url)
     if failures is not None:
         pytest.skip(
             f"app-api at {app_url} is not ready (failing: {failures}); "
-            "run `docker compose -f mocks/docker-compose.yml exec app-api "
+            "run `docker compose -f docker-compose.dev.yml exec app-api "
             "alembic upgrade head` or restart the dev stack"
         )
     if not is_reachable(mailpit_url):
         pytest.skip(
             f"Mailpit not reachable at {mailpit_url}; start the dev stack with "
-            "`docker compose -f mocks/docker-compose.yml up -d`"
+            "`docker compose -f docker-compose.dev.yml up -d`"
         )
     yield app_url, mailpit_url
 
@@ -196,7 +196,7 @@ def _run_dev_login_or_skip(*, email: str, workspace: str, role: str) -> None:
         "docker",
         "compose",
         "-f",
-        "mocks/docker-compose.yml",
+        "docker-compose.dev.yml",
         "exec",
         "-T",
         "app-api",

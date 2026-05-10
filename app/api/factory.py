@@ -541,7 +541,7 @@ def _build_llm(settings: Settings) -> LLMClient | None:
     * ``"fake"`` — swap in the in-process
       :class:`~app.adapters.llm.fake.FakeLLMClient` so dev / e2e stacks
       exercise the LLM seam without an upstream key. Gated to dev/e2e
-      via ``mocks/docker-compose.yml`` and repeated in the e2e override
+      via ``docker-compose.dev.yml`` and repeated in the e2e override
       (§16 "Environment variables", §11 "Provider types"). Never
       enabled in production.
     * ``"openrouter"`` (or ``None``, the legacy default) —

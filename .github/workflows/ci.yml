@@ -283,7 +283,7 @@ jobs:
   e2e:
     # Browser-driven journeys (cd-asvl, spec
     # docs/specs/17-testing-quality.md §"End-to-end"). Brings up the
-    # full dev stack via mocks/docker-compose.yml, then runs
+    # full dev stack via docker-compose.dev.yml, then runs
     # tests/e2e/ headless on Chromium + WebKit. Single Python — the
     # version matrix on browser tests buys nothing and roughly doubles
     # CI minutes. Failure artefacts (trace.zip, video, screenshots,
@@ -325,7 +325,7 @@ jobs:
         # the apt step (system libs are not cached).
         run: uv run playwright install --with-deps chromium webkit
       - name: Pre-create traefik-proxy network
-        # ``mocks/docker-compose.yml`` declares ``traefik-proxy`` as an
+        # ``docker-compose.dev.yml`` declares ``traefik-proxy`` as an
         # external network (the dev box's shared Traefik lives there).
         # GHA runners don't have it, so compose would refuse to bring
         # the stack up with ``network … declared as external, but could
@@ -336,7 +336,7 @@ jobs:
         # name already exists).
         run: docker network create traefik-proxy || true
       - name: Bring up dev stack
-        run: docker compose -f mocks/docker-compose.yml -f mocks/docker-compose.e2e.yml up -d --build
+        run: docker compose -f docker-compose.dev.yml -f mocks/docker-compose.e2e.yml up -d --build
       - name: Wait for app-api healthz
         # The compose healthcheck has start_period=30s and retries=3;
         # we poll the loopback port the web-dev Vite container
@@ -359,8 +359,8 @@ jobs:
           until curl -fsS http://127.0.0.1:8100/healthz >/dev/null; do
             if (( SECONDS >= deadline )); then
               echo "::error::dev stack not healthy after 240s"
-              docker compose -f mocks/docker-compose.yml -f mocks/docker-compose.e2e.yml ps
-              docker compose -f mocks/docker-compose.yml -f mocks/docker-compose.e2e.yml logs --tail=200
+              docker compose -f docker-compose.dev.yml -f mocks/docker-compose.e2e.yml ps
+              docker compose -f docker-compose.dev.yml -f mocks/docker-compose.e2e.yml logs --tail=200
               exit 1
             fi
             sleep 2
@@ -382,13 +382,13 @@ jobs:
         # ``tsc -b`` prelude — type-check is owned by the standalone
         # ``type`` job; running it here would double-charge CI for the
         # same gate and red-fail the e2e job on unrelated TS noise.
-        # The bind-mount (``../app/web:/web``) means the emitted
+        # The bind-mount (``./app/web:/web``) means the emitted
         # ``/web/dist/_surface.json`` lands on the host filesystem at
         # ``app/web/dist/_surface.json`` — exactly where the helper
         # reads it.
         run: |
           set -euo pipefail
-          docker compose -f mocks/docker-compose.yml -f mocks/docker-compose.e2e.yml \
+          docker compose -f docker-compose.dev.yml -f mocks/docker-compose.e2e.yml \
               exec -T web-dev npx vite build
           test -s app/web/dist/_surface.json
           echo "surface manifest emitted ($(wc -c <app/web/dist/_surface.json) bytes)"
@@ -434,4 +434,4 @@ jobs:
         # ephemeral VM. ``-v`` wipes the SQLite volume so subsequent
         # runs start from a clean slate.
         if: always()
-        run: docker compose -f mocks/docker-compose.yml -f mocks/docker-compose.e2e.yml down -v
+        run: docker compose -f docker-compose.dev.yml -f mocks/docker-compose.e2e.yml down -v

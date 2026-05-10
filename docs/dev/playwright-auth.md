@@ -68,7 +68,7 @@ The default `dev_login` invocation (no `--output`) prints
 curl:
 
 ```bash
-docker compose -f mocks/docker-compose.yml exec app-api \
+docker compose -f docker-compose.dev.yml exec app-api \
   python -m scripts.dev_login --email me@dev.local --workspace smoke
 # -> __Host-crewday_session=eyJ...
 

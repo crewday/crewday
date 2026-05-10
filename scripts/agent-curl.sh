@@ -8,7 +8,7 @@
 # Path is appended verbatim to $AGENT_CURL_BASE_URL (default
 # http://127.0.0.1:8100) — include /w/<slug>/api/v1/... yourself.
 # Env: AGENT_CURL_EMAIL (me@dev.local), AGENT_CURL_BASE_URL,
-# AGENT_CURL_COMPOSE (mocks/docker-compose.yml).
+# AGENT_CURL_COMPOSE (docker-compose.dev.yml).
 
 set -euo pipefail
 
@@ -29,7 +29,7 @@ fi
 
 email="${AGENT_CURL_EMAIL:-me@dev.local}"
 base_url="${AGENT_CURL_BASE_URL:-http://127.0.0.1:8100}"
-compose_file="${AGENT_CURL_COMPOSE:-mocks/docker-compose.yml}"
+compose_file="${AGENT_CURL_COMPOSE:-docker-compose.dev.yml}"
 
 email_safe="${email//[^A-Za-z0-9._-]/_}"
 cookie_file="/tmp/crewday-agent-cookie-${workspace}-${email_safe}.txt"

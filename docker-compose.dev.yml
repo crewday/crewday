@@ -67,7 +67,7 @@ services:
   # for HMR.
   app-api:
     build:
-      context: ..
+      context: .
       dockerfile: mocks/Dockerfile.app-api
     container_name: crewday-app-api
     restart: unless-stopped
@@ -75,15 +75,15 @@ services:
     # root-owned) and then drops to the ``crewday`` uid before
     # ``exec``ing uvicorn — see ``mocks/Dockerfile.app-api``.
     volumes:
-      - ../app:/app/app:ro
-      - ../migrations:/app/migrations:ro
-      - ../alembic.ini:/app/alembic.ini:ro
-      - ../pyproject.toml:/app/pyproject.toml:ro
+      - ./app:/app/app:ro
+      - ./migrations:/app/migrations:ro
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./pyproject.toml:/app/pyproject.toml:ro
       # Dev-only mount so ``docker compose exec app-api python -m
       # scripts.dev_login …`` works out of the box (cd-w1ia). The
       # production image does not ship scripts/; it's strictly a
       # dev affordance.
-      - ../scripts:/app/scripts:ro
+      - ./scripts:/app/scripts:ro
       - crewday-app-data:/data
     environment:
       CREWDAY_DATABASE_URL: "sqlite+aiosqlite:////data/crewday.db"
@@ -122,7 +122,7 @@ services:
       # DEV / E2E ONLY — DO NOT enable in production (cd-tblly).
       # Unset defaults to the deterministic fake client. To exercise
       # real OpenRouter locally, put CREWDAY_LLM_PROVIDER=openrouter
-      # and CREWDAY_OPENROUTER_API_KEY=<key> in gitignored mocks/.env;
+      # and CREWDAY_OPENROUTER_API_KEY=<key> in the gitignored root .env;
       # never put the key in this tracked compose file or docs.
       # The e2e override repeats fake values so CI stays keyless.
       CREWDAY_LLM_PROVIDER: "${CREWDAY_LLM_PROVIDER:-fake}"
@@ -200,7 +200,7 @@ services:
       # invariant intact for every path.
       VITE_MOCKS_BACKEND_URL: "http://mocks-web-dev:5173"
     volumes:
-      - ../app/web:/web
+      - ./app/web:/web
     expose:
       - "5173"
     depends_on:
@@ -215,7 +215,7 @@ services:
   # proxy is the only consumer.
   mocks-api:
     build:
-      context: .
+      context: ./mocks
       # ``Dockerfile.mocks-api`` is the slim API-only image — no web
       # build stage, since the mocks SPA is served by the sibling
       # ``mocks-web-dev`` Vite container in this stack. The original
@@ -231,7 +231,7 @@ services:
       # own ``app/`` at ``mocks/app/`` — resolved relative to this
       # compose file — distinct from the repo-root ``app/`` the
       # ``app-api`` service above consumes.
-      - ./app:/app/app:ro
+      - ./mocks/app:/app/app:ro
     expose:
       - "8000"
     networks:
@@ -259,7 +259,7 @@ services:
     environment:
       VITE_BACKEND_URL: "http://mocks-api:8000"
     volumes:
-      - ./web:/web
+      - ./mocks/web:/web
     depends_on:
       - mocks-api
     networks:

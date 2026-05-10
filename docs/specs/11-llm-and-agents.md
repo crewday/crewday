@@ -598,7 +598,7 @@ llm_provider
     few-shot regressions. Never available in production. The factory
     selects this adapter when `CREWDAY_LLM_PROVIDER=fake` (see §16
     "Environment variables"); the dev / e2e Playwright stack
-    (`mocks/docker-compose.yml`, repeated in
+    (`docker-compose.dev.yml`, repeated in
     `mocks/docker-compose.e2e.yml`) is the only deployment that flips
     it on.
 - A native Anthropic SDK adapter is **deferred** to a later version; v1

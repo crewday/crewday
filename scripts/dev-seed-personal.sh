@@ -23,7 +23,7 @@ set -euo pipefail
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 SEED_HOST="$REPO_ROOT/scripts/dev_seed_personal.json"
 SEED_CONTAINER="/tmp/dev_seed_personal.json"
-COMPOSE_FILE="$REPO_ROOT/mocks/docker-compose.yml"
+COMPOSE_FILE="$REPO_ROOT/docker-compose.dev.yml"
 SERVICE="app-api"
 CONTAINER="crewday-app-api"
 

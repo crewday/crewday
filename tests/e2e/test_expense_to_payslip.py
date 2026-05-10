@@ -100,7 +100,7 @@ _SCREENSHOT_DIR: Final[Path] = Path(__file__).resolve().parents[2] / ".playwrigh
 # rationale as :mod:`tests.e2e._helpers.auth` — relative to repo
 # root rather than the caller's cwd.
 _COMPOSE_FILE: Final[Path] = (
-    Path(__file__).resolve().parents[2] / "mocks" / "docker-compose.yml"
+    Path(__file__).resolve().parents[2] / "docker-compose.dev.yml"
 )
 _DEV_LOGIN_SERVICE: Final[str] = "app-api"
 

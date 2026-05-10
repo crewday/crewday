@@ -2,7 +2,7 @@
 #
 # The main ``mocks/Dockerfile`` is a two-stage build that bakes
 # ``mocks/web/dist`` into the image for prod-style runs. The dev stack
-# under ``mocks/docker-compose.yml`` serves the SPA via a separate
+# under ``docker-compose.dev.yml`` serves the SPA via a separate
 # ``mocks-web-dev`` Vite container instead, so baking the dist is
 # wasted work AND couples the dev build to every transient mocks/web
 # TypeScript / npm peer-dep hiccup. This slimmer image skips the

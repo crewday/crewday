@@ -90,7 +90,7 @@ trap cleanup EXIT INT TERM
 # * CREWDAY_DATABASE_URL — fresh SQLite under our scratch dir.
 # * CREWDAY_PROFILE=dev + CREWDAY_DEV_AUTH=1 — dev-login gates.
 # * CREWDAY_ROOT_KEY — 32-byte hex; fixed value below is dev-only and
-#   matches mocks/docker-compose.yml so the env shape stays familiar.
+#   matches docker-compose.dev.yml so the env shape stays familiar.
 # * CREWDAY_BIND_HOST — pinned to 127.0.0.1 (AGENTS.md "never public").
 export CREWDAY_DATABASE_URL="sqlite:///${DB_PATH}"
 export CREWDAY_PROFILE="dev"

@@ -30,25 +30,25 @@
 _readyz_remedy_for() {
   case "$1" in
     migrations_behind|alembic_version_empty|alembic_version_unreadable)
-      printf 'docker compose -f mocks/docker-compose.yml exec app-api alembic upgrade head\n'
+      printf 'docker compose -f docker-compose.dev.yml exec app-api alembic upgrade head\n'
       ;;
     alembic_script_tree_unreadable)
       # A restart can't fix a broken script tree (missing revisions,
       # unmerged heads, IO faults under alembic/versions/) — the
       # operator must inspect the source tree or rebuild the image.
-      printf 'inspect alembic/versions/ for missing/unmerged revisions, then docker compose -f mocks/docker-compose.yml up -d --build app-api\n'
+      printf 'inspect alembic/versions/ for missing/unmerged revisions, then docker compose -f docker-compose.dev.yml up -d --build app-api\n'
       ;;
     db_unreachable)
-      printf 'docker compose -f mocks/docker-compose.yml restart app-api app-db\n'
+      printf 'docker compose -f docker-compose.dev.yml restart app-api\n'
       ;;
     no_heartbeat|heartbeat_stale)
-      printf 'docker compose -f mocks/docker-compose.yml restart app-api\n'
+      printf 'docker compose -f docker-compose.dev.yml restart app-api\n'
       ;;
     root_key_missing)
-      printf 'set CREWDAY_ROOT_KEY in mocks/.env then docker compose -f mocks/docker-compose.yml up -d app-api\n'
+      printf 'set CREWDAY_ROOT_KEY in the root .env then docker compose -f docker-compose.dev.yml up -d app-api\n'
       ;;
     *)
-      printf 'docker compose -f mocks/docker-compose.yml restart app-api\n'
+      printf 'docker compose -f docker-compose.dev.yml restart app-api\n'
       ;;
   esac
 }
@@ -89,7 +89,7 @@ _check_readyz() {
       printf '\n'
       printf '!! readyz drift detected at %s\n' "$url"
       printf '   transport error: %s\n' "${err_msg:-curl exit $curl_rc}"
-      printf '   hint: docker compose -f mocks/docker-compose.yml up -d --build\n'
+      printf '   hint: docker compose -f docker-compose.dev.yml up -d --build\n'
       printf '   override: CREWDAY_SKIP_READYZ_CHECK=1 to bypass\n'
       printf '\n'
     } >&2
@@ -137,7 +137,7 @@ _check_readyz() {
     else
       printf '   (no parseable checks[] in body — first 200 chars below)\n'
       printf '   %s\n' "${body:0:200}"
-      printf '   fix: docker compose -f mocks/docker-compose.yml restart app-api\n'
+      printf '   fix: docker compose -f docker-compose.dev.yml restart app-api\n'
     fi
     printf '   override: CREWDAY_SKIP_READYZ_CHECK=1 to bypass\n'
     printf '\n'

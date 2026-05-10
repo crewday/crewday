@@ -82,7 +82,7 @@ JOURNEY_SLUG_PREFIX: Final[str] = "e2e-turnover-welcome"
 #    both closed.
 #
 # ``crewday-app-api`` is the compose container name pinned in
-# ``mocks/docker-compose.yml`` — stable across compose project-name
+# ``docker-compose.dev.yml`` — stable across compose project-name
 # overrides because the file declares ``container_name`` explicitly.
 _APP_API_CONTAINER: Final[str] = "crewday-app-api"
 

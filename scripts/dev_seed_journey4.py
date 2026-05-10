@@ -21,7 +21,7 @@ seams cannot be driven over HTTP today:
   ``test_mark_paid_settles_approved_claims_for_period_window`` uses.
 
 This script lives alongside :mod:`scripts.dev_login` and is bind-
-mounted into the ``app-api`` container by ``mocks/docker-compose.yml``.
+mounted into the ``app-api`` container by ``docker-compose.dev.yml``.
 Same hard-gate triple as ``dev_login``: ``CREWDAY_DEV_AUTH=1``,
 ``CREWDAY_PROFILE=dev``, SQLite-only database URL.
 

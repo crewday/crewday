@@ -11,7 +11,7 @@
 #
 #   1. Inside the dev stack (recommended — no host-side Python deps):
 #
-#        docker compose -f mocks/docker-compose.yml exec app-api \
+#        docker compose -f docker-compose.dev.yml exec app-api \
 #          python -m scripts.dev_login --email me@dev.local --workspace dev
 #
 #      The compose file already sets CREWDAY_DEV_AUTH=1 +
@@ -118,7 +118,7 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 echo "dev-login: host Python is missing app dependencies or dev auth config; falling back to the app-api container" >&2
-docker compose -f mocks/docker-compose.yml exec -T app-api \
+docker compose -f docker-compose.dev.yml exec -T app-api \
   python -m scripts.dev_login \
     --email "$1" \
     --workspace "$2" \

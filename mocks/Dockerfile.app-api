@@ -2,7 +2,7 @@
 
 # crewday dev stack — production-app runtime image.
 #
-# Used by the ``app-api`` service in ``mocks/docker-compose.yml`` to
+# Used by the ``app-api`` service in ``docker-compose.dev.yml`` to
 # run ``app.main:create_app --factory`` against the repo-root ``app/``
 # package (bind-mounted at runtime) so ``https://dev-app.crew.day`` serves
 # the real product end-to-end. The mocks backend keeps living in its

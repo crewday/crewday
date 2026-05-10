@@ -4,12 +4,12 @@
 # ready to use; non-zero means fix the environment first.
 #
 # Env: AGENT_STATUS_BASE_URL (http://127.0.0.1:8100),
-# AGENT_STATUS_COMPOSE (mocks/docker-compose.yml).
+# AGENT_STATUS_COMPOSE (docker-compose.dev.yml).
 
 set -uo pipefail
 
 base_url="${AGENT_STATUS_BASE_URL:-http://127.0.0.1:8100}"
-compose_file="${AGENT_STATUS_COMPOSE:-mocks/docker-compose.yml}"
+compose_file="${AGENT_STATUS_COMPOSE:-docker-compose.dev.yml}"
 
 problems=0
 app_api_state=""

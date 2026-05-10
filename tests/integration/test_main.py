@@ -255,7 +255,7 @@ class TestSpaProdMountAgainstRealDist:
     ) -> None:
         """The dev app lives on dev-app and sends logged-out root to the site."""
         compose = yaml.safe_load(
-            Path("mocks/docker-compose.yml").read_text(encoding="utf-8")
+            Path("docker-compose.dev.yml").read_text(encoding="utf-8")
         )
         app_api = compose["services"]["app-api"]
         app_env = app_api["environment"]

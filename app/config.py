@@ -109,7 +109,7 @@ class Settings(BaseSettings):
     # form. ``"fake"`` swaps in the in-process
     # :class:`~app.adapters.llm.fake.FakeLLMClient` so dev / e2e stacks
     # exercise the LLM path without an upstream key — gated to dev/e2e
-    # via ``mocks/docker-compose.yml`` and repeated in the e2e override
+    # via ``docker-compose.dev.yml`` and repeated in the e2e override
     # (see §16 "Environment variables"). Production deployments leave
     # this unset; the §11 ``fake`` provider type is dev/test only.
     llm_provider: Literal["openrouter", "fake"] | None = None

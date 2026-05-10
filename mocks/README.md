@@ -13,7 +13,7 @@ vocabulary matches.
 ## Running
 
 ```bash
-docker compose -f mocks/docker-compose.yml up -d --build
+docker compose -f docker-compose.dev.yml up -d --build
 ```
 
 - Local: http://127.0.0.1:8100
@@ -97,7 +97,7 @@ If editing a `.tsx` no longer triggers `[vite] hot updated`:
 3. Open `http://127.0.0.1:8100/` in a browser and look for
    `[vite] connected.` in the console — `[vite] server connection
    lost.` means the WS upgrade didn't reach Vite. Check
-   `docker compose -f mocks/docker-compose.yml logs app-api` for
+   `docker compose -f docker-compose.dev.yml logs app-api` for
    `spa_vite_ws_proxy_failed` events.
 4. Confirm `CREWDAY_VITE_DEV_URL` in the `app-api` environment
    matches the running `web-dev` service hostname (compose service
@@ -182,11 +182,11 @@ already CNAMEd to this host.
   `employee_base`, `manager_base`) sharing one design system
 - `app/static/styles.css` — hand-written, ~900 lines, both themes
 - `Dockerfile` — Python 3.12-slim, `USER crewday:crewday`
-- `docker-compose.yml` — Traefik labels + `user: "10001:10001"`
+- `../docker-compose.dev.yml` — dev-stack Traefik labels and mocks route
 
 ## Removing
 
 ```bash
-docker compose -f mocks/docker-compose.yml down
+docker compose -f docker-compose.dev.yml down
 rm -rf mocks/
 ```

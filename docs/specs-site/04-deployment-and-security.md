@@ -304,7 +304,7 @@ docker compose -f site/docker-compose.yml -f site/docker-compose.dev.yml --profi
   `docker compose -f site/docker-compose.yml up --build`, with Caddy
   serving the built Astro output at `http://127.0.0.1:18080/`.
 - `SITE_APP_RPC_BASE_URL` defaults to `http://127.0.0.1:8100/_internal/feedback`
-  in dev, pointing at the local app container (`mocks/docker-compose.yml`).
+  in dev, pointing at the local app container (`docker-compose.dev.yml`).
   The site appends `/moderate`, `/embed`, or `/cluster` per call —
   there is no per-endpoint env var.
 - Playwright tests live under `site/web/tests/` and run against

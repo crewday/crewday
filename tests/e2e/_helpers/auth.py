@@ -79,7 +79,7 @@ __all__ = [
 _DEFAULT_DEV_LOGIN_SERVICE: Final[str] = "app-api"
 
 # Mailpit's JSON API — see https://mailpit.axllent.org/docs/api-v1/.
-# The ``mocks/docker-compose.yml`` publishes Mailpit's web UI on
+# The ``docker-compose.dev.yml`` publishes Mailpit's web UI on
 # ``127.0.0.1:8026`` (compose maps :8025 → :8026 to dodge a host-side
 # port collision); the JSON API lives on the same port.
 DEFAULT_MAILPIT_BASE_URL: Final[str] = "http://127.0.0.1:8026"
@@ -96,7 +96,7 @@ DEFAULT_DEV_PASSKEY_NAME: Final[str] = "e2e-virtual-authenticator"
 # harness reports rootdir to pytest but ``subprocess.run`` inherits
 # the host cwd).
 _COMPOSE_FILE: Final[Path] = (
-    Path(__file__).resolve().parents[3] / "mocks" / "docker-compose.yml"
+    Path(__file__).resolve().parents[3] / "docker-compose.dev.yml"
 )
 # Dev-only cookie alias that the FastAPI routers accept in addition to
 # the canonical ``__Host-crewday_session`` — see
@@ -312,7 +312,7 @@ def wait_for_magic_link(
     """Poll Mailpit until a message addressed to ``recipient`` arrives.
 
     The dev stack routes outbound email through the in-stack Mailpit
-    container (see ``mocks/docker-compose.yml``); the JSON API
+    container (see ``docker-compose.dev.yml``); the JSON API
     surfaces every message so a test can pull a magic-link without
     racing the SMTP delivery. We poll because Mailpit's ingestion is
     async to the SMTP send — the ``/auth/magic/start`` POST returns
@@ -579,7 +579,7 @@ def enroll_owner(
             f"WebAuthn rp_id {rp_id!r} does not match origin host "
             f"{host!r}; the browser will refuse "
             "navigator.credentials.create() against this combination. "
-            "Run `docker compose -f mocks/docker-compose.yml "
+            "Run `docker compose -f docker-compose.dev.yml "
             "-f mocks/docker-compose.e2e.yml up -d --build` so "
             "CREWDAY_PUBLIC_URL=http://localhost:8100 and "
             "CREWDAY_WEBAUTHN_RP_ID=localhost when the e2e base URL is "

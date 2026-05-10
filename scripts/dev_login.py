@@ -19,7 +19,7 @@ via the ``-m`` flag so Python treats the repo root as the import
 anchor — ``python scripts/dev_login.py`` puts ``scripts/`` (not
 ``/app``) on ``sys.path`` and the ``from app.…`` imports miss::
 
-    docker compose -f mocks/docker-compose.yml exec app-api \\
+    docker compose -f docker-compose.dev.yml exec app-api \\
         python -m scripts.dev_login --email me@dev.local --workspace smoke
 
 Host-side (requires ``uv sync`` / ``pip install -e .`` so sqlalchemy

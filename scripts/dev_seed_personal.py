@@ -23,7 +23,7 @@ re-creates the rows your physical authenticator needs to log into
    is the first thing to check: the signup likely never completed against
    a clean dev DB.
 
-   ``docker compose -f mocks/docker-compose.yml down -v``
+   ``docker compose -f docker-compose.dev.yml down -v``
 
    ``./scripts/dev-stack-up.sh``
 3. Sign up once at ``https://dev-app.crew.day/signup`` (signup is on by

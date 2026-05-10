@@ -113,7 +113,7 @@ def base_url() -> str:
 def dev_stack_ready(base_url: str) -> str:
     """Ping ``/healthz`` once per session; skip the suite if the stack is down.
 
-    The dev stack runs in Docker via ``mocks/docker-compose.yml``;
+    The dev stack runs in Docker via ``docker-compose.dev.yml``;
     AGENTS.md §"Bring the dev stack up" describes the bring-up. A
     crashed ``app-api`` returns 502 through the Vite proxy, which the
     test would otherwise see as a parade of opaque
@@ -130,13 +130,13 @@ def dev_stack_ready(base_url: str) -> str:
             if resp.status != 200:
                 pytest.skip(
                     f"dev stack /healthz returned {resp.status}; "
-                    "run `docker compose -f mocks/docker-compose.yml "
+                    "run `docker compose -f docker-compose.dev.yml "
                     "-f mocks/docker-compose.e2e.yml up -d --build`"
                 )
     except (TimeoutError, urllib.error.URLError, ConnectionError) as exc:
         pytest.skip(
             f"dev stack unreachable at {base_url} ({exc!r}); "
-            "run `docker compose -f mocks/docker-compose.yml "
+            "run `docker compose -f docker-compose.dev.yml "
             "-f mocks/docker-compose.e2e.yml up -d --build`"
         )
     _assert_webauthn_rp_id_matches_origin(base_url)
@@ -163,7 +163,7 @@ def _assert_webauthn_rp_id_matches_origin(base_url: str) -> None:
     except (TimeoutError, urllib.error.URLError, ConnectionError) as exc:
         pytest.skip(
             f"dev stack WebAuthn preflight failed at {url} ({exc!r}); "
-            "run `docker compose -f mocks/docker-compose.yml "
+            "run `docker compose -f docker-compose.dev.yml "
             "-f mocks/docker-compose.e2e.yml up -d --build`"
         )
     rp_id = payload.get("options", {}).get("rpId")
@@ -176,7 +176,7 @@ def _assert_webauthn_rp_id_matches_origin(base_url: str) -> None:
     pytest.skip(
         f"WebAuthn rp_id {rp_id!r} does not match e2e origin host {host!r}. "
         "The e2e suite must run with the loopback override: "
-        "`docker compose -f mocks/docker-compose.yml "
+        "`docker compose -f docker-compose.dev.yml "
         "-f mocks/docker-compose.e2e.yml up -d --build`. "
         f"When {ENV_BASE_URL}=http://localhost:8100, the stack must advertise "
         "CREWDAY_PUBLIC_URL=http://localhost:8100 and "

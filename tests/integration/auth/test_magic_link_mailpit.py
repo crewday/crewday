@@ -8,7 +8,7 @@ This test exercises the *whole* magic-link bootstrap path that
    nonce row, and hands the rendered email to the SMTP relay.
 2. The dev compose stack pipes that send to the in-stack Mailpit
    sink (``CREWDAY_SMTP_HOST=mailpit`` / ``_PORT=1025`` —
-   ``mocks/docker-compose.yml``).
+   ``docker-compose.dev.yml``).
 3. We poll Mailpit's HTTP API for the delivered envelope (default
    shared port: ``127.0.0.1:8026``, see the bind-conflict comment in
    the compose file).
@@ -89,7 +89,7 @@ pytestmark = [
 # Mailpit's host port — set to ``8026`` because the dev compose file
 # remaps the container's ``8025`` to host ``8026`` to avoid conflicting
 # with another project's mailpit on the shared dev box (see
-# ``mocks/docker-compose.yml`` "127.0.0.1:8026:8025"). Override via
+# ``docker-compose.dev.yml`` "127.0.0.1:8026:8025"). Override via
 # ``CREWDAY_TEST_MAILPIT_URL`` when running against a non-dev sink
 # (testcontainers-style throwaway, port-forwarded prod-shadow, …).
 _DEFAULT_MAILPIT_URL = "http://127.0.0.1:8026"
@@ -204,20 +204,20 @@ def stack_endpoints() -> Iterator[tuple[str, str]]:
     if not _app_reachable(app_url):
         pytest.skip(
             f"app-api not reachable at {app_url} — start the dev stack via "
-            "`docker compose -f mocks/docker-compose.yml up -d`"
+            "`docker compose -f docker-compose.dev.yml up -d`"
         )
     failing_checks = _readyz_failures(app_url)
     if failing_checks is not None:
         pytest.skip(
             f"app-api at {app_url} is not ready (failing: {failing_checks}); "
             "if 'migrations' is listed, restart the dev stack — "
-            "`docker compose -f mocks/docker-compose.yml restart app-api` — "
+            "`docker compose -f docker-compose.dev.yml restart app-api` — "
             "to pick up new revisions"
         )
     if not is_reachable(mailpit_url):
         pytest.skip(
             f"Mailpit not reachable at {mailpit_url} — start the dev stack via "
-            "`docker compose -f mocks/docker-compose.yml up -d`"
+            "`docker compose -f docker-compose.dev.yml up -d`"
         )
     yield app_url, mailpit_url
 

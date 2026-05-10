@@ -16,7 +16,7 @@ The full pilot suite is fast (~10 s on Chromium).
 ## Bring it up
 
 ```bash
-docker compose -f mocks/docker-compose.yml \
+docker compose -f docker-compose.dev.yml \
     -f mocks/docker-compose.e2e.yml up -d --build
 uv run playwright install chromium webkit   # one-time
 uv run pytest tests/e2e -v -n0 \

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bring the dev compose stack up and verify it's actually serving.
 #
-# Wraps ``docker compose -f mocks/docker-compose.yml up -d --build``,
+# Wraps ``docker compose -f docker-compose.dev.yml up -d --build``,
 # polls ``/readyz`` until the loopback API responds, and runs the
 # shared drift probe so migration / heartbeat / root-key issues
 # surface here instead of as a cryptic test failure later (cd-3yp9,
@@ -22,7 +22,7 @@ set -uo pipefail
 _here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _repo_root="$(cd "$_here/.." && pwd)"
 
-compose_file="${COMPOSE_FILE:-mocks/docker-compose.yml}"
+compose_file="${COMPOSE_FILE:-docker-compose.dev.yml}"
 base_url="${READYZ_BASE_URL:-http://127.0.0.1:8100}"
 boot_timeout="${READYZ_BOOT_TIMEOUT:-60}"
 boot_interval="${READYZ_BOOT_INTERVAL:-2}"

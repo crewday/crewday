@@ -65,14 +65,14 @@ From the repo root:
 ./scripts/dev-stack-up.sh
 ```
 
-The wrapper runs `docker compose -f mocks/docker-compose.yml up -d --build`,
+The wrapper runs `docker compose -f docker-compose.dev.yml up -d --build`,
 waits for `/readyz`, and reports migration, heartbeat, and root-key drift with
 a one-line remediation hint. The raw compose command still works when you
 intentionally want to skip the drift gate.
 
 The dev stack defaults to the in-process fake LLM client. To smoke the real
 OpenRouter path locally, set `CREWDAY_LLM_PROVIDER=openrouter` and
-`CREWDAY_OPENROUTER_API_KEY` in gitignored `mocks/.env`, then start the stack;
+`CREWDAY_OPENROUTER_API_KEY` in the gitignored root `.env`, then start the stack;
 do not put the key in tracked compose files, specs, tests, or logs.
 
 Check readiness with:
@@ -121,7 +121,7 @@ on 4xx/5xx. Include the full workspace path in the request path.
 If you need a raw cookie inside the compose stack:
 
 ```bash
-docker compose -f mocks/docker-compose.yml exec app-api \
+docker compose -f docker-compose.dev.yml exec app-api \
   python -m scripts.dev_login --email me@dev.local --workspace smoke
 ```
 
@@ -189,7 +189,7 @@ WebAuthn credentials are scoped to the RP ID. If the dev app domain or
 Use this clean reset flow:
 
 ```bash
-docker compose -f mocks/docker-compose.yml down -v
+docker compose -f docker-compose.dev.yml down -v
 ./scripts/dev-stack-up.sh
 ```
 
@@ -274,13 +274,13 @@ If `dev_login`, `/readyz`, or a smoke request fails with a missing
 column/table, run:
 
 ```bash
-docker compose -f mocks/docker-compose.yml exec app-api alembic upgrade head
+docker compose -f docker-compose.dev.yml exec app-api alembic upgrade head
 ```
 
 If the disposable dev DB is still broken, reset only the dev app volume:
 
 ```bash
-docker compose -f mocks/docker-compose.yml down -v
+docker compose -f docker-compose.dev.yml down -v
 ./scripts/dev-stack-up.sh
 ```
 
