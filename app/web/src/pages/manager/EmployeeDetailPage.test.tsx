@@ -21,7 +21,13 @@ interface TestUserWorkRole {
   deleted_at: string | null;
 }
 
-function installFetch(options: { failRoleDelete?: boolean; failRoleList?: boolean; failRoleSave?: boolean } = {}) {
+function installFetch(options: {
+  failRoleDelete?: boolean;
+  failRoleList?: boolean;
+  failRoleSave?: boolean;
+  subjectExpenses?: unknown[];
+  subjectTasks?: unknown[];
+} = {}) {
   const calls: { url: string; method: string; body?: unknown }[] = [];
   const original = globalThis.fetch;
   const roleRows = [
@@ -119,8 +125,8 @@ function installFetch(options: { failRoleDelete?: boolean; failRoleList?: boolea
           preferred_locale: null,
           settings_override: {},
         },
-        subject_tasks: [],
-        subject_expenses: [],
+        subject_tasks: options.subjectTasks ?? [],
+        subject_expenses: options.subjectExpenses ?? [],
         subject_leaves: [],
         subject_payslips: [],
       });
@@ -244,6 +250,75 @@ afterEach(() => {
 });
 
 describe("<EmployeeDetailPage>", () => {
+  it("renders shared empty states for empty overview task and expense panels", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Maya Santos")).toBeInTheDocument();
+      const tasksPanel = screen.getByRole("heading", { name: "Tasks" }).closest(".panel");
+      const expensesPanel = screen.getByRole("heading", { name: "Recent expenses" }).closest(".panel");
+
+      expect(tasksPanel).not.toBeNull();
+      expect(expensesPanel).not.toBeNull();
+      expect(within(tasksPanel as HTMLElement).getByRole("heading", { name: "No tasks scheduled" })).toBeVisible();
+      expect(within(tasksPanel as HTMLElement).getByText(
+        "Assigned work for this employee will appear here once it is scheduled.",
+      )).toBeVisible();
+      expect(within(expensesPanel as HTMLElement).getByRole("heading", { name: "No recent expenses" })).toBeVisible();
+      expect(within(expensesPanel as HTMLElement).getByText(
+        "Submitted reimbursements and purchases for this employee will appear here.",
+      )).toBeVisible();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("keeps non-empty overview task and expense rows visible", async () => {
+    const fake = installFetch({
+      subjectTasks: [
+        {
+          id: "task_1",
+          property_id: "prop_1",
+          assignee_id: "emp_1",
+          title: "Reset suite",
+          area: "North wing",
+          scheduled_start: "2026-01-02T09:00:00Z",
+          status: "scheduled",
+        },
+      ],
+      subjectExpenses: [
+        {
+          id: "exp_1",
+          vendor: "Market Pantry",
+          note_md: "Breakfast supplies",
+          submitted_at: "2026-01-02T10:00:00Z",
+          total_amount_cents: 2375,
+          currency: "USD",
+          state: "submitted",
+        },
+      ],
+    });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Maya Santos")).toBeInTheDocument();
+      const tasksPanel = screen.getByRole("heading", { name: "Tasks" }).closest(".panel");
+      const expensesPanel = screen.getByRole("heading", { name: "Recent expenses" }).closest(".panel");
+
+      expect(tasksPanel).not.toBeNull();
+      expect(expensesPanel).not.toBeNull();
+      expect(within(tasksPanel as HTMLElement).getByText("Reset suite")).toBeInTheDocument();
+      expect(within(tasksPanel as HTMLElement).getByText("North wing")).toBeInTheDocument();
+      expect(within(tasksPanel as HTMLElement).queryByText("No tasks scheduled")).not.toBeInTheDocument();
+      expect(within(expensesPanel as HTMLElement).getByText("Market Pantry")).toBeInTheDocument();
+      expect(within(expensesPanel as HTMLElement).getByText("Breakfast supplies")).toBeInTheDocument();
+      expect(within(expensesPanel as HTMLElement).queryByText("No recent expenses")).not.toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("renders canonical employee sections with shared hash-backed page tabs", async () => {
     const fake = installFetch();
     try {

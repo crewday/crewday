@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ClipboardList, ReceiptText } from "lucide-react";
 import { useParams } from "react-router-dom";
 import { ApiError, fetchJson } from "@/lib/api";
 import type { ListEnvelope } from "@/lib/listResponse";
@@ -8,7 +9,7 @@ import { formatMoney } from "@/lib/money";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import PageTabs, { type PageTab } from "@/components/PageTabs";
-import { Chip, Loading } from "@/components/common";
+import { Chip, EmptyState, Loading } from "@/components/common";
 import type {
   Employee,
   EntitySettingsPayload,
@@ -443,45 +444,63 @@ export default function EmployeeDetailPage() {
         <section id={panelIdFor("overview")} className="grid grid--split" role="tabpanel">
           <div className="panel">
             <header className="panel__head"><h2>Tasks</h2></header>
-            <ul className="task-list task-list--desk">
-              {subject_tasks.map((t) => {
-                const prop = propsById.get(t.property_id);
-                return (
-                  <li key={t.id} className="task-row">
-                    <span className="task-row__time table__mono">
-                      <DateTime value={t.scheduled_start} showTime />
-                    </span>
-                    <span className="task-row__title">
-                      <strong>{t.title}</strong>
-                      <span className="task-row__area">{t.area}</span>
-                    </span>
-                    {prop && <Chip tone={prop.color} size="sm">{prop.name}</Chip>}
-                    <Chip tone={STATUS_TONE[t.status]} size="sm">{t.status}</Chip>
-                  </li>
-                );
-              })}
-            </ul>
+            {subject_tasks.length > 0 ? (
+              <ul className="task-list task-list--desk">
+                {subject_tasks.map((t) => {
+                  const prop = propsById.get(t.property_id);
+                  return (
+                    <li key={t.id} className="task-row">
+                      <span className="task-row__time table__mono">
+                        <DateTime value={t.scheduled_start} showTime />
+                      </span>
+                      <span className="task-row__title">
+                        <strong>{t.title}</strong>
+                        <span className="task-row__area">{t.area}</span>
+                      </span>
+                      {prop && <Chip tone={prop.color} size="sm">{prop.name}</Chip>}
+                      <Chip tone={STATUS_TONE[t.status]} size="sm">{t.status}</Chip>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <EmptyState
+                icon={ClipboardList}
+                title="No tasks scheduled"
+                copy="Assigned work for this employee will appear here once it is scheduled."
+                variant="compact"
+              />
+            )}
           </div>
 
           <div className="panel">
             <header className="panel__head"><h2>Recent expenses</h2></header>
-            <ul className="expense-list">
-              {subject_expenses.map((x) => (
-                <li key={x.id} className="expense-row">
-                  <div className="expense-row__main">
-                    <strong>{x.vendor}</strong>
-                    <span className="expense-row__note">{x.note_md}</span>
-                    <span className="expense-row__time">
-                      <DateTime value={x.submitted_at} showTime empty="draft" />
-                    </span>
-                  </div>
-                  <div className="expense-row__side">
-                    <span className="expense-row__amount">{formatMoney(x.total_amount_cents, x.currency)}</span>
-                    <Chip tone={EXPENSE_TONE[x.state]} size="sm">{x.state}</Chip>
-                  </div>
-                </li>
-              ))}
-            </ul>
+            {subject_expenses.length > 0 ? (
+              <ul className="expense-list">
+                {subject_expenses.map((x) => (
+                  <li key={x.id} className="expense-row">
+                    <div className="expense-row__main">
+                      <strong>{x.vendor}</strong>
+                      <span className="expense-row__note">{x.note_md}</span>
+                      <span className="expense-row__time">
+                        <DateTime value={x.submitted_at} showTime empty="draft" />
+                      </span>
+                    </div>
+                    <div className="expense-row__side">
+                      <span className="expense-row__amount">{formatMoney(x.total_amount_cents, x.currency)}</span>
+                      <Chip tone={EXPENSE_TONE[x.state]} size="sm">{x.state}</Chip>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyState
+                icon={ReceiptText}
+                title="No recent expenses"
+                copy="Submitted reimbursements and purchases for this employee will appear here."
+                variant="compact"
+              />
+            )}
           </div>
         </section>
       )}
