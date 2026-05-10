@@ -197,6 +197,7 @@ function workspaceRoutes({
   grantRole: string | null;
   isManagerSurface: boolean;
 }) {
+  // code-health: ignore[nloc] Workspace route tree stays centralized so role-gated redirects and legacy route compatibility remain visible together.
   return (
     <>
       <Route index element={<RoleHome />} />

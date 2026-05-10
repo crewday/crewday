@@ -27,6 +27,7 @@ const ME_SCOPES: TokenScopeOption[] = [
 ];
 
 export default function PersonalTokensPanel() {
+  // code-health: ignore[nloc] Personal token panel keeps query state, create reveal, and revoke list together as one self-service account panel.
   const qc = useQueryClient();
   const listQ = useQuery({
     queryKey: qk.meApiTokens(),

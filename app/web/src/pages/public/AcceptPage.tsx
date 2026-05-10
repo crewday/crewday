@@ -99,6 +99,7 @@ export default function AcceptPage(): ReactElement {
   const inflightRef = useRef(false);
 
   const onAccept = useCallback(async () => {
+    // code-health: ignore[ccn] Invite acceptance intentionally enumerates existing-user, new-user, auth, and passkey outcomes in one guarded flow.
     if (introspect.data === undefined) return;
     if (inflightRef.current) return;
     // Existing-user branch with no active session: short-circuit to

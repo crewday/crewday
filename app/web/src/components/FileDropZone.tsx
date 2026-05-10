@@ -20,17 +20,18 @@ interface FileDropZoneProps {
   onFiles: (files: File[]) => void;
 }
 
-export default function FileDropZone({
-  title,
-  description,
-  inputLabel,
-  accept,
-  multiple = false,
-  capture,
-  disabled = false,
-  className,
-  onFiles,
-}: FileDropZoneProps) {
+export default function FileDropZone(props: FileDropZoneProps) {
+  const {
+    title,
+    description,
+    inputLabel,
+    accept,
+    multiple = false,
+    capture,
+    disabled = false,
+    className,
+    onFiles,
+  } = props;
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);

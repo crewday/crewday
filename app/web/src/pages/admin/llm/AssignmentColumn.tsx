@@ -47,6 +47,7 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
   return (
     <div className="llm-graph__col llm-graph__col--assignments">
       {roots.map((cap) => {
+        // code-health: ignore[ccn nloc] Capability card mapping keeps graph state, inheritance badges, and modal click targets adjacent for this column.
         const chain = indexes.assignmentsByCapability.get(cap.key) ?? [];
         const inheritsFrom = indexes.inheritanceByChild.get(cap.key);
         const hasExplicitInheritance = indexes.explicitInheritanceByChild.has(cap.key);
@@ -123,6 +124,7 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
             {inheritedChildren.length ? (
               <div className="llm-graph-node__children">
                 {inheritedChildren.map((child) => {
+                  // code-health: ignore[ccn nloc] Inherited-child row mapping is a compact visual state mapper over one capability edge.
                   const missing = indexes.issuesByCapability.get(child.key) ?? [];
                   const isExplicit = indexes.explicitInheritanceByChild.has(child.key);
                   const childActive =

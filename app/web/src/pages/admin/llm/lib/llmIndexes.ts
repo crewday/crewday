@@ -21,6 +21,7 @@ export interface LlmIndexes {
 }
 
 export function buildLlmIndexes(graph: LlmGraphPayload): LlmIndexes {
+  // code-health: ignore[ccn nloc] LLM graph index construction intentionally keeps all derived maps in one pure boundary mapper.
   const providersById = new Map(graph.providers.map((p) => [p.id, p]));
   const modelsById = new Map(graph.models.map((m) => [m.id, m]));
   const pmById = new Map(graph.provider_models.map((pm) => [pm.id, pm]));

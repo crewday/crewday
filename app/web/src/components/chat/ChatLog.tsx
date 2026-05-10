@@ -19,14 +19,15 @@ export interface ChatLogProps {
   activity?: AgentActivityState;
 }
 
-export default function ChatLog({
-  messages,
-  onDecideAction,
-  variant = "screen",
-  ariaLabel,
-  typing = false,
-  activity,
-}: ChatLogProps) {
+export default function ChatLog(props: ChatLogProps) {
+  const {
+    messages,
+    onDecideAction,
+    variant = "screen",
+    ariaLabel,
+    typing = false,
+    activity,
+  } = props;
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

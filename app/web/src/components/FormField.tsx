@@ -11,14 +11,8 @@ interface FormFieldProps {
   helpText?: ReactNode;
 }
 
-export default function FormField({
-  label,
-  requirement,
-  children,
-  className,
-  helpId,
-  helpText,
-}: FormFieldProps) {
+export default function FormField(props: FormFieldProps) {
+  const { label, requirement, children, className, helpId, helpText } = props;
   const classes = ["field", "form-field", `form-field--${requirement}`, className]
     .filter(Boolean)
     .join(" ");

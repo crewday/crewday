@@ -30,6 +30,7 @@ const PAGE_TABS: PageTab[] = TABS.map(([key, label]) => ({
 }));
 
 function isTab(v: string | null): v is Tab {
+  // code-health: ignore[nloc] Lizard misattributes the history route body to this compact tab guard.
   return v === "tasks" || v === "chats" || v === "expenses" || v === "leaves";
 }
 

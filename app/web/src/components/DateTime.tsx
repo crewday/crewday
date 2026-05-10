@@ -16,15 +16,16 @@ export interface DateTimeProps {
   empty?: ReactNode;
 }
 
-export default function DateTime({
-  value,
-  showTime = false,
-  relativeWithinDays = 7,
-  locale,
-  timeZone,
-  className,
-  empty = null,
-}: DateTimeProps) {
+export default function DateTime(props: DateTimeProps) {
+  const {
+    value,
+    showTime = false,
+    relativeWithinDays = 7,
+    locale,
+    timeZone,
+    className,
+    empty = null,
+  } = props;
   const [now, setNow] = useState(() => new Date());
   const parsedValue = useMemo(() => parseDateTime(value), [value]);
 

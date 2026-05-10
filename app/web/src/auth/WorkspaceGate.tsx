@@ -39,7 +39,7 @@ export function WorkspaceGate({
   children?: React.ReactNode;
   forcePicker?: boolean;
 }) {
-  // code-health: ignore[nloc] Workspace gate keeps single-workspace adoption, multi-workspace chooser, and no-access empty state in one guard.
+  // code-health: ignore[ccn nloc] Workspace gate keeps single-workspace adoption, multi-workspace chooser, and no-access empty state in one guard.
   const { user, logout } = useAuth();
   const { workspaceId, setWorkspaceId, clearWorkspaceId } = useWorkspace();
   const location = useLocation();

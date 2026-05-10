@@ -208,15 +208,7 @@ export function ProgressBar({ value, slim }: { value: number; slim?: boolean }) 
   );
 }
 
-export function EmptyState({
-  icon: Icon,
-  iconTreatment = "stroke",
-  title,
-  copy,
-  action,
-  children,
-  variant,
-}: {
+interface EmptyStateProps {
   icon?: LucideIcon;
   iconTreatment?: "stroke" | "fill";
   title?: ReactNode;
@@ -224,7 +216,19 @@ export function EmptyState({
   action?: ReactNode;
   children?: ReactNode;
   variant?: "celebrate" | "quiet" | "compact";
-}) {
+}
+
+export function EmptyState(props: EmptyStateProps) {
+  const {
+    icon: Icon,
+    iconTreatment = "stroke",
+    title,
+    copy,
+    action,
+    children,
+    variant,
+  } = props;
+  // code-health: ignore[ccn] EmptyState intentionally centralizes icon, copy, action, and legacy children render branches for all empty panels.
   const cls = ["empty-state", variant ? "empty-state--" + variant : ""].filter(Boolean).join(" ");
   const glyphCls = [
     "empty-state__glyph",

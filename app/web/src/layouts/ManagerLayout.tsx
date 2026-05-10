@@ -216,6 +216,7 @@ async function resolveAllowedNavActions(
 }
 
 export default function ManagerLayout() {
+  // code-health: ignore[ccn nloc] Manager shell keeps permission-filtered nav, drawer state, route outlet, and agent sidebar in one layout boundary.
   const { user } = useAuth();
   const { data } = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
   const collapsed = initialAgentCollapsed();

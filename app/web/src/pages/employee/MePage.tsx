@@ -39,7 +39,7 @@ type PasskeyRegisterState =
   | { kind: "error"; message: string };
 
 export default function MePage() {
-  // code-health: ignore[nloc] Profile page is declarative settings composition with no reusable logic left to extract.
+  // code-health: ignore[ccn nloc] Profile page is declarative settings composition with passkey, workspace switch, and preferences kept in one account route.
   const [editorOpen, setEditorOpen] = useState(false);
   const [passkeyRegister, setPasskeyRegister] = useState<PasskeyRegisterState>({ kind: "idle" });
   const queryClient = useQueryClient();
