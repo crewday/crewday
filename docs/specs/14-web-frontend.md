@@ -854,8 +854,8 @@ the platform must guarantee*.
   `/property/<id>` page carries the property blob under the same
   rules with `agent_prefs.edit_property`. `/me` carries the
   user's own blob (always editable by self). Each editor shows
-  a live token counter (4 k soft / 16 k hard), a "sent to the
-  model as written" banner (§15), and a "Revisions" link opening
+  a live token counter (4 k soft / 16 k hard), a "sent to agents
+  as written" banner (§15), and a "Revisions" link opening
   the history modal backed by `/agent_preferences/revisions/…`
   (§12). Full rules in §11 "Agent preferences".
 - **Deferred external chat seam.** Off-app adapters are prepared in

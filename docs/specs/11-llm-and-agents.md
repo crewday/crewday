@@ -613,7 +613,7 @@ called out in §11 and §15:
 A save that matches returns `422` with
 `error = "preference_contains_secret"` and a pointer to the
 offending span. The UI surfaces a banner above the editor:
-"Preferences are sent to the model as written. Do not paste
+"Preferences are sent to agents as written. Do not paste
 passwords, codes, or account numbers." This sits next to the
 existing §15 PII notice, not in place of it.
 

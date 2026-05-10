@@ -42,6 +42,7 @@ const AREA_SCOPE_LABEL: Record<TaskTemplate["area_scope"], string> = {
 };
 
 const HINTS_MAX_CHARS = 140;
+const AGENT_GUIDANCE_HELP_ID = "task-template-agent-guidance-help";
 const TASK_TEMPLATES_API_PATH = "/api/v1/tasks/task_templates";
 
 // Coalesce drag-storm reorders into a single PATCH per template. A
@@ -393,11 +394,17 @@ function NewTemplateForm({
           <option value="required">Required</option>
         </select>
       </FormField>
-      <FormField label="LLM hints" requirement="optional">
+      <FormField
+        label="Agent guidance"
+        requirement="optional"
+        helpId={AGENT_GUIDANCE_HELP_ID}
+        helpText="Agents use this when drafting or discussing tasks from this template."
+      >
         <textarea
           value={llmHints}
           onChange={(event) => setLlmHints(event.target.value)}
           rows={3}
+          aria-describedby={AGENT_GUIDANCE_HELP_ID}
         />
       </FormField>
       <label className="checkbox checkbox--block">

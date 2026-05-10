@@ -72,7 +72,7 @@ describe("deriveValues", () => {
     expect(out.property_id).toBe("");
   });
 
-  it("blanks low-confidence fields rather than seeding them with the LLM's guess", () => {
+  it("blanks low-confidence fields rather than seeding them with the agent's guess", () => {
     const scan = highConfidenceScan();
     scan.vendor = { value: "Carrefour", confidence: 0.4 };
     scan.total_amount_cents = { value: 1234, confidence: 0.5 };

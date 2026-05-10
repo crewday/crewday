@@ -42,7 +42,7 @@ export default function ExpensesApprovalsPage() {
     },
   });
 
-  const sub = "Review submitted claims. LLM autofill flags low-confidence fields; approving snaps the exchange rate and attaches to the current open pay period.";
+  const sub = "Review submitted claims. Agent autofill flags low-confidence fields; approving snaps the exchange rate and attaches to the current open pay period.";
   const overflow = [{ label: "Export CSV", onSelect: () => undefined }];
 
   if (expensesQ.isPending || employeesQ.isPending) {
@@ -104,7 +104,7 @@ export default function ExpensesApprovalsPage() {
                   <Chip tone="ghost" size="sm">{x.merchant}</Chip>
                   {x.ocr_confidence !== null ? (
                     <Chip tone={lowConf ? "sand" : "sky"} size="sm">
-                      LLM autofill · {Math.round(x.ocr_confidence * 100)}%
+                      Agent autofill · {Math.round(x.ocr_confidence * 100)}%
                     </Chip>
                   ) : (
                     <Chip tone="ghost" size="sm">manual entry</Chip>

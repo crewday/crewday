@@ -309,7 +309,7 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
  * manager to triage. The avatar slot returns once the roster
  * endpoint is wired.
  *
- * Likewise the LLM-autofill confidence chip (`ocr_confidence` on the
+ * Likewise the agent-autofill confidence chip (`ocr_confidence` on the
  * legacy mock shape) is hidden until cd-95zb surfaces a per-claim
  * extraction confidence on the server payload — guessing locally
  * would make the chip lie.
@@ -331,7 +331,7 @@ export default function ExpensesApprovalsPage() {
     },
   });
 
-  const sub = "Review submitted claims. LLM autofill flags low-confidence fields; approving snaps the exchange rate and attaches to the current open pay period.";
+  const sub = "Review submitted claims. Agent autofill flags low-confidence fields; approving snaps the exchange rate and attaches to the current open pay period.";
   const overflow = [
     {
       label: "Export CSV",

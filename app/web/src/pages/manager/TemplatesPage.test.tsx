@@ -419,7 +419,16 @@ describe("<TemplatesPage> create flow", () => {
       fireEvent.change(within(dialog).getByLabelText(/^Photo evidence\b/), {
         target: { value: "optional" },
       });
-      fireEvent.change(within(dialog).getByLabelText(/^LLM hints\b/), {
+      const guidance = within(dialog).getByLabelText(/^Agent guidance\b/);
+      expect(
+        within(dialog).getByText(
+          "Agents use this when drafting or discussing tasks from this template.",
+        ),
+      ).toBeInTheDocument();
+      expect(guidance).toHaveAccessibleDescription(
+        "Agents use this when drafting or discussing tasks from this template.",
+      );
+      fireEvent.change(guidance, {
         target: { value: "Nightly closing checklist." },
       });
       fireEvent.click(

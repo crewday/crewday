@@ -77,6 +77,11 @@
 .form-field__requirement--optional {
   color: var(--ink-3);
 }
+.form-field__help {
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.45;
+}
 
 /* Semantic layout for forms that pair copy and controls. A
    .form-layout__row renders label/control as two equal columns on

@@ -169,7 +169,7 @@ export default function AgentPreferencesPanel({
       {heading}
 
       <div className="agent-prefs__banner" role="note">
-        Preferences are <strong>sent to the model as written.</strong> Do not paste
+        Preferences are <strong>sent to agents as written.</strong> Do not paste
         passwords, door codes, or account numbers — the save endpoint will refuse
         them. Hard rules belong in <em>Settings</em>; this area carries soft
         guidance only.

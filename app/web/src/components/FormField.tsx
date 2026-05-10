@@ -7,6 +7,8 @@ interface FormFieldProps {
   requirement: FieldRequirement;
   children: ReactNode;
   className?: string;
+  helpId?: string;
+  helpText?: ReactNode;
 }
 
 export default function FormField({
@@ -14,6 +16,8 @@ export default function FormField({
   requirement,
   children,
   className,
+  helpId,
+  helpText,
 }: FormFieldProps) {
   const classes = ["field", "form-field", `form-field--${requirement}`, className]
     .filter(Boolean)
@@ -29,6 +33,11 @@ export default function FormField({
       <span className="form-field__label">
         {label} <span className={requirementClasses}>{requirementLabel}</span>
       </span>
+      {helpText ? (
+        <span id={helpId} className="form-field__help">
+          {helpText}
+        </span>
+      ) : null}
       {children}
     </label>
   );

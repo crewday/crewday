@@ -17,22 +17,22 @@ const CONSENT_CHOICES: ConsentChoice[] = [
   {
     token: "legal_name",
     label: "Legal names",
-    hint: "Allow legal_name fields through the upstream LLM redaction boundary.",
+    hint: "Allow agents to use legal-name fields when this consent is selected.",
   },
   {
     token: "email",
     label: "Email addresses",
-    hint: "Allow email fields through the upstream LLM redaction boundary.",
+    hint: "Allow agents to use email fields when this consent is selected.",
   },
   {
     token: "phone",
     label: "Phone numbers",
-    hint: "Allow phone fields through the upstream LLM redaction boundary.",
+    hint: "Allow agents to use phone fields when this consent is selected.",
   },
   {
     token: "address",
     label: "Addresses",
-    hint: "Allow address fields through the upstream LLM redaction boundary.",
+    hint: "Allow agents to use address fields when this consent is selected.",
   },
 ];
 
@@ -92,20 +92,19 @@ export default function PrivacyTab() {
         <div className="panel__head-stack">
           <h2>Privacy</h2>
           <p className="panel__sub">
-            Owner-managed consent for structured PII fields sent to upstream
-            LLM providers.
+            Owner-managed consent for structured PII fields agents may use.
           </p>
         </div>
       </header>
 
       {selected.length === 0 ? (
         <p className="agent-prefs__banner" role="status">
-          No upstream PII consent selected. Legal names, email addresses,
-          phone numbers, and addresses are redacted before model calls.
+          No agent PII consent selected. Legal names, email addresses,
+          phone numbers, and addresses are redacted before agents use them.
         </p>
       ) : null}
 
-      <fieldset className="permissions__privacy-choices" aria-label="Upstream PII consent">
+      <fieldset className="permissions__privacy-choices" aria-label="Agent PII consent">
         {CONSENT_CHOICES.map((choice) => (
           <Checkbox
             key={choice.token}

@@ -20,7 +20,7 @@ export default function ApprovalsPage() {
     applyOptimistic: (prev, id) => prev.filter((a) => a.id !== id),
   });
 
-  const sub = "Actions an LLM agent has proposed — review before they happen.";
+  const sub = "Actions an agent has proposed — review before they happen.";
 
   if (q.isPending) return <DeskPage title="Agent approvals" sub={sub}><Loading /></DeskPage>;
   if (!q.data) return <DeskPage title="Agent approvals" sub={sub}>Failed to load.</DeskPage>;

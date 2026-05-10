@@ -1243,7 +1243,7 @@ See §11 redaction details. Additional rules:
   can reference real people and places; in exchange, the save
   endpoint refuses bodies that match hard-drop secret patterns
   (IBAN, access codes, Wi-Fi passwords, API tokens) and the
-  editor shows a "sent to the model as written" banner. No other
+  editor shows a "sent to agents as written" banner. No other
   free-text field gets this carve-out.
 - **Extracted document text** (§02 `file_extraction`, §21 "Document
   text extraction") goes through the same redaction layer as other

@@ -75,6 +75,11 @@
 .form-field__requirement--optional {
   color: var(--ink-3);
 }
+.form-field__help {
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.45;
+}
 
 /* Form controls share the same card look — white fill, card border and
    radius — so text inputs, selects and textareas read as "slotted into
