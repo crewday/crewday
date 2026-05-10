@@ -1,3 +1,5 @@
+import type { LLMCall } from "@/types";
+
 export const graph = {
   providers: [
     {
@@ -250,7 +252,24 @@ export const calls = [
     fallback_attempts: 0,
     raw_response_available: false,
   },
-];
+  {
+    at: "2026-04-30T12:01:00Z",
+    capability: "voice.transcribe",
+    model_id: "google/gemma-4-31b-it",
+    input_tokens: 12,
+    output_tokens: 4,
+    cost_usd: "0.000400",
+    cost_cents: 0,
+    latency_ms: 190,
+    status: "ok",
+    assignment_id: "deployment-default:pm_gemma:0",
+    provider_model_id: "pm_gemma",
+    prompt_template_id: null,
+    prompt_version: null,
+    fallback_attempts: 0,
+    raw_response_available: false,
+  },
+] satisfies LLMCall[];
 
 export const prompts = [
   {

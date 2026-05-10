@@ -146,6 +146,12 @@ describe("Admin LlmPage", () => {
       expect(screen.getAllByText("voice.transcribe").length).toBeGreaterThan(0);
       expect(screen.getByText("Provider-model pricing")).toBeInTheDocument();
       expect(screen.getByText("Recent calls")).toBeInTheDocument();
+      const recentCalls = screen.getByText("Recent calls").closest(".panel");
+      if (!(recentCalls instanceof HTMLElement)) throw new Error("Recent calls panel not found");
+      const subCentCost = within(recentCalls).getByText("$0.000400");
+      expect(subCentCost).toHaveClass("mono");
+      expect(within(recentCalls).getByText("$0.03")).toHaveClass("mono");
+      expect(within(recentCalls).queryByText("$0.00")).not.toBeInTheDocument();
 
       openOverflowItem("Prompts");
       const drawer = await screen.findByText("Prompt library");
