@@ -73,6 +73,7 @@ router.post(
     responses={status.HTTP_409_CONFLICT: APPROVAL_REQUIRED_PROBLEM_RESPONSE},
     operation_id="create_task",
     summary="Create a one-off task",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "create"}},
 )(_create_task_route)
 
 router.include_router(templates_router)

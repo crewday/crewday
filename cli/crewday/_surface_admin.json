@@ -1015,7 +1015,7 @@
       }
     ],
     "query_params": [],
-    "response_schema_ref": "#/components/schemas/WorkspaceArchiveResponse",
+    "response_schema_ref": "#/components/schemas/app__api__admin__workspaces__WorkspaceArchiveResponse",
     "summary": "Soft-archive a workspace (deployment owners only)",
     "x_agent_confirm": null,
     "x_cli": {
@@ -1108,6 +1108,109 @@
       "summary": "Promote a workspace to trusted",
       "verb": "workspaces-trust"
     }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin-agent",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/agent/actions"
+    },
+    "idempotent": true,
+    "name": "agent-actions-list",
+    "operation_id": "admin.agent.actions.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Get Actions",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin-agent",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/agent/log"
+    },
+    "idempotent": true,
+    "name": "agent-log-list",
+    "operation_id": "admin.agent.log.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Get Log",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin-agent",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/agent/action/{action_id}/approve"
+    },
+    "idempotent": false,
+    "name": "approve",
+    "operation_id": "admin.agent.action.approve",
+    "path_params": [
+      {
+        "name": "action_id",
+        "required": true,
+        "schema": {
+          "title": "Action Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AdminAgentDecisionResponse",
+    "summary": "Approve Action",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin-agent",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/agent/action/{action_id}/deny"
+    },
+    "idempotent": false,
+    "name": "deny",
+    "operation_id": "admin.agent.action.deny",
+    "path_params": [
+      {
+        "name": "action_id",
+        "required": true,
+        "schema": {
+          "title": "Action Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AdminAgentDecisionResponse",
+    "summary": "Deny Action",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/AdminAgentMessageRequest",
+    "group": "admin-agent",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/agent/message"
+    },
+    "idempotent": false,
+    "name": "message",
+    "operation_id": "admin.agent.message.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AdminAgentMessage",
+    "summary": "Post Message",
+    "x_agent_confirm": null,
+    "x_cli": null
   },
   {
     "body_schema_ref": "#/components/schemas/AssignmentPayload-Input",
@@ -1341,6 +1444,92 @@
     "query_params": [],
     "response_schema_ref": "#/components/schemas/LlmGraphPayload",
     "summary": "Graph",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/CapabilityInheritancePayload",
+    "group": "llm",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/llm/inheritance"
+    },
+    "idempotent": false,
+    "name": "inheritance",
+    "operation_id": "admin.llm.inheritance.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmCapabilityInheritanceResponse",
+    "summary": "Create Inheritance",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "DELETE",
+      "path": "/admin/api/v1/llm/inheritance/{capability}"
+    },
+    "idempotent": true,
+    "name": "inheritance-delete",
+    "operation_id": "admin.llm.inheritance.delete",
+    "path_params": [
+      {
+        "name": "capability",
+        "required": true,
+        "schema": {
+          "title": "Capability",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Delete Inheritance",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/llm/inheritance"
+    },
+    "idempotent": true,
+    "name": "inheritance-list",
+    "operation_id": "admin.llm.inheritance.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List Inheritance",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/CapabilityInheritanceUpdatePayload",
+    "group": "llm",
+    "http": {
+      "method": "PUT",
+      "path": "/admin/api/v1/llm/inheritance/{capability}"
+    },
+    "idempotent": true,
+    "name": "inheritance-replace",
+    "operation_id": "admin.llm.inheritance.update",
+    "path_params": [
+      {
+        "name": "capability",
+        "required": true,
+        "schema": {
+          "title": "Capability",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmCapabilityInheritanceResponse",
+    "summary": "Update Inheritance",
     "x_agent_confirm": null,
     "x_cli": null
   },

@@ -352,7 +352,7 @@ def _seed_channel(session: Session, *, workspace_id: str) -> str:
 def _build_app(session: Session, ctx: WorkspaceContext) -> FastAPI:
     """Mount the tasks router with the seeded session + ctx pinned."""
     app = FastAPI()
-    app.include_router(tasks_router, prefix="/api/v1")
+    app.include_router(tasks_router, prefix="/w/{slug}/api/v1")
 
     def _session() -> Iterator[Session]:
         yield session
@@ -595,6 +595,59 @@ def test_dispatch_unknown_tool_returns_404(db_session: Session) -> None:
     assert result.status_code == 404
     assert result.mutated is False
     assert result.body == {"detail": "tool not found"}
+
+
+def test_dispatcher_tools_catalog_uses_cli_backed_workspace_agent_surface() -> None:
+    app = FastAPI()
+    app.include_router(build_properties_router(), prefix="/w/{slug}/api/v1")
+    app.include_router(
+        build_agent_router(clock=FrozenClock(_PINNED), event_bus=EventBus()),
+        prefix="/w/{slug}/api/v1",
+    )
+    dispatcher = make_default_dispatcher(app, workspace_slug="demo")
+
+    tool_names = {tool["name"] for tool in dispatcher.tools}
+
+    assert "properties.list" in tool_names
+    assert "agent.message.create" not in tool_names
+
+
+def test_dispatcher_rejects_non_agent_operation_even_when_operation_id_is_known(
+    db_session: Session,
+) -> None:
+    workspace, user = _seed_workspace_and_user(db_session)
+    ctx = WorkspaceContext(
+        workspace_id=workspace.id,
+        workspace_slug=workspace.slug,
+        actor_id=user.id,
+        actor_kind="user",
+        actor_grant_role="manager",
+        actor_was_owner_member=True,
+        audit_correlation_id=new_ulid(),
+    )
+    set_current(ctx)
+    app = _build_agent_app(
+        db_session,
+        ctx,
+        llm=_ScriptedLLM(replies=[]),
+        clock=FrozenClock(_PINNED),
+        bus=EventBus(),
+    )
+    dispatcher = make_default_dispatcher(app, workspace_slug=workspace.slug)
+
+    result = dispatcher.dispatch(
+        ToolCall(
+            id="c-denied",
+            name="agent.message.create",
+            input={"scope": "manager", "body": "hello"},
+        ),
+        token=DelegatedToken(plaintext="mip_FAKEKEY_FAKESECRET", token_id="tok"),
+        headers={},
+    )
+
+    assert result.status_code == 403
+    assert result.body == {"detail": "tool requires an interactive session"}
+    assert result.mutated is False
 
 
 # ---------------------------------------------------------------------------
@@ -1200,6 +1253,8 @@ def test_agent_message_endpoint_surfaces_unassigned_capability_in_log(
         audit_correlation_id=new_ulid(),
     )
     set_current(ctx)
+    _seed_budget_ledger(db_session, workspace_id=workspace.id)
+    invalidate_llm_router_cache(workspace_id=workspace.id)
     bus = EventBus()
     events: list[object] = []
     bus.subscribe(AgentTurnStarted)(events.append)

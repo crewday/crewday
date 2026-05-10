@@ -229,6 +229,74 @@
     "group": "agent-prefs",
     "http": {
       "method": "PUT",
+      "path": "/w/{slug}/api/v1/agent_preferences/property/{property_id}"
+    },
+    "idempotent": true,
+    "name": "set-property",
+    "operation_id": "workspace.llm.agent_preferences.property.put",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AgentPreferenceRead",
+    "summary": "Update property agent preferences",
+    "x_agent_confirm": {
+      "fields_to_show": [
+        "blocked_actions",
+        "default_approval_mode"
+      ],
+      "risk": "medium",
+      "summary": "Update property agent preferences?",
+      "verb": "Update property agent preferences"
+    },
+    "x_cli": {
+      "group": "agent-prefs",
+      "mutates": true,
+      "summary": "Update property agent preferences",
+      "verb": "set-property"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/WorkspaceUpstreamPiiConsentUpdate",
+    "group": "agent-prefs",
+    "http": {
+      "method": "PUT",
+      "path": "/w/{slug}/api/v1/agent_preferences/workspace/upstream_pii_consent"
+    },
+    "idempotent": true,
+    "name": "set-upstream-pii-consent",
+    "operation_id": "workspace.llm.agent_preferences.workspace.upstream_pii_consent.put",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkspaceUpstreamPiiConsentRead",
+    "summary": "Update workspace upstream PII consent",
+    "x_agent_confirm": {
+      "fields_to_show": [
+        "upstream_pii_consent"
+      ],
+      "risk": "high",
+      "summary": "Update upstream PII consent?",
+      "verb": "Update upstream PII consent"
+    },
+    "x_cli": {
+      "group": "agent-prefs",
+      "mutates": true,
+      "summary": "Update workspace upstream PII consent",
+      "verb": "set-upstream-pii-consent"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/WorkspaceAgentPreferenceUpdate",
+    "group": "agent-prefs",
+    "http": {
+      "method": "PUT",
       "path": "/w/{slug}/api/v1/agent_preferences/workspace"
     },
     "idempotent": true,
@@ -274,6 +342,59 @@
       "mutates": false,
       "summary": "Read my agent preferences",
       "verb": "show-me"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "agent-prefs",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/agent_preferences/property/{property_id}"
+    },
+    "idempotent": true,
+    "name": "show-property",
+    "operation_id": "workspace.llm.agent_preferences.property.get",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AgentPreferenceRead",
+    "summary": "Read property agent preferences",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "agent-prefs",
+      "mutates": false,
+      "summary": "Read property agent preferences",
+      "verb": "show-property"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "agent-prefs",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/agent_preferences/workspace/upstream_pii_consent"
+    },
+    "idempotent": true,
+    "name": "show-upstream-pii-consent",
+    "operation_id": "workspace.llm.agent_preferences.workspace.upstream_pii_consent.get",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkspaceUpstreamPiiConsentRead",
+    "summary": "Read workspace upstream PII consent",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "agent-prefs",
+      "mutates": false,
+      "summary": "Read workspace upstream PII consent",
+      "verb": "show-upstream-pii-consent"
     }
   },
   {
@@ -507,7 +628,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -1177,7 +1298,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -1878,6 +1999,28 @@
     }
   },
   {
+    "body_schema_ref": "#/components/schemas/WorkspaceCreateBody",
+    "group": "auth",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/me/workspaces"
+    },
+    "idempotent": false,
+    "name": "workspace-create",
+    "operation_id": "auth.me.workspaces.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkspaceCreateResponse",
+    "summary": "Create another workspace for the authenticated user",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "auth",
+      "mutates": true,
+      "summary": "Create another workspace for the current account",
+      "verb": "workspace-create"
+    }
+  },
+  {
     "body_schema_ref": null,
     "group": "auth",
     "http": {
@@ -2002,7 +2145,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       }
@@ -2049,7 +2192,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       }
@@ -2096,7 +2239,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       }
@@ -2143,7 +2286,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       }
@@ -2172,9 +2315,6 @@
           "anyOf": [
             {
               "type": "string"
-            },
-            {
-              "type": "null"
             }
           ],
           "title": "User Id"
@@ -2187,9 +2327,6 @@
           "anyOf": [
             {
               "type": "string"
-            },
-            {
-              "type": "null"
             }
           ],
           "title": "Property Id"
@@ -2203,9 +2340,6 @@
             {
               "format": "date-time",
               "type": "string"
-            },
-            {
-              "type": "null"
             }
           ],
           "title": "From"
@@ -2219,9 +2353,6 @@
             {
               "format": "date-time",
               "type": "string"
-            },
-            {
-              "type": "null"
             }
           ],
           "title": "To"
@@ -2234,9 +2365,6 @@
           "anyOf": [
             {
               "type": "string"
-            },
-            {
-              "type": "null"
             }
           ],
           "title": "Status"
@@ -2249,9 +2377,6 @@
           "anyOf": [
             {
               "type": "boolean"
-            },
-            {
-              "type": "null"
             }
           ],
           "title": "Pending Amend"
@@ -2336,7 +2461,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -2394,12 +2519,14 @@
         "schema": {
           "anyOf": [
             {
+              "maxLength": 256,
               "type": "string"
             },
             {
               "type": "null"
             }
           ],
+          "description": "Opaque boundary cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Before"
         }
       },
@@ -2973,7 +3100,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -3100,7 +3227,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -3141,17 +3268,7 @@
         "name": "user_id",
         "required": false,
         "schema": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Filter target. ``me`` resolves to the caller (no capability required). A different user id requires ``expenses.approve``. Omit the param entirely to get the workspace-wide aggregate (also gated on ``expenses.approve``); the response then carries a ``by_user`` breakdown.",
-          "title": "User Id"
+          "$ref": "#/components/schemas/_PendingReimbursementUserIdQuery"
         }
       }
     ],
@@ -3439,7 +3556,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -3698,7 +3815,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -4711,7 +4828,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -4893,7 +5010,7 @@
         "required": false,
         "schema": {
           "default": "tasks",
-          "description": "Active tab the SPA is rendering. The response carries every tab's array regardless of this value (so the page can switch tabs client-side without a refetch); ``tab`` echoes back so the caller can assert which view it asked for. Unknown values surface as 422 via FastAPI's default Pydantic Literal validation.",
+          "description": "History tab to return. Unknown values surface as 422 via FastAPI's default Pydantic Literal validation.",
           "enum": [
             "chats",
             "expenses",
@@ -4902,6 +5019,35 @@
           ],
           "title": "Tab",
           "type": "string"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
         }
       }
     ],
@@ -5257,6 +5403,55 @@
       "mutates": true,
       "summary": "Rotate one of your personal access tokens",
       "verb": "rotate"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "messaging",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/messaging/broadcast/recipients"
+    },
+    "idempotent": true,
+    "name": "broadcast-recipients",
+    "operation_id": "messaging.broadcast.recipients",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/BroadcastRecipientsResponse",
+    "summary": "Preview broadcast recipients",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "messaging",
+      "verb": "broadcast-recipients"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/BroadcastSendRequest",
+    "group": "messaging",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/messaging/broadcast"
+    },
+    "idempotent": false,
+    "name": "broadcast-send",
+    "operation_id": "messaging.broadcast.send",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/BroadcastSendResponse",
+    "summary": "Send or request approval for a broadcast message",
+    "x_agent_confirm": {
+      "fields_to_show": [
+        "subject",
+        "target",
+        "confirmed_recipient_count"
+      ],
+      "risk": "medium",
+      "summary": "Send broadcast *{subject}*?",
+      "verb": "Send broadcast message"
+    },
+    "x_cli": {
+      "group": "messaging",
+      "verb": "broadcast-send"
     }
   },
   {
@@ -6179,17 +6374,12 @@
         "name": "pay_period_id",
         "required": false,
         "schema": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Filter by pay period.",
-          "title": "Pay Period Id"
+          "description": "Filter by pay period ULID.",
+          "maxLength": 26,
+          "minLength": 26,
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+          "title": "Pay Period Id",
+          "type": "string"
         }
       }
     ],
@@ -6333,7 +6523,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -6462,7 +6652,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -6591,7 +6781,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -6766,7 +6956,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -7884,7 +8074,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -8083,7 +8273,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -8679,7 +8869,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -8884,6 +9074,23 @@
     "x_cli": null
   },
   {
+    "body_schema_ref": "#/components/schemas/WorkspaceBasicsPatch",
+    "group": "settings",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/settings/basics"
+    },
+    "idempotent": false,
+    "name": "basics-update",
+    "operation_id": "settings.workspace.basics.patch",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkspaceSettingsResponse",
+    "summary": "Patch workspace basics",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
     "body_schema_ref": null,
     "group": "settings",
     "http": {
@@ -8999,6 +9206,23 @@
     "query_params": [],
     "response_schema_ref": "#/components/schemas/VerifyResponse",
     "summary": "Consume the signup-verify magic link",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ManualStayCreateRequest",
+    "group": "stays",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/stays"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "stays.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ReservationResponse",
+    "summary": "Create Stay",
     "x_agent_confirm": null,
     "x_cli": null
   },
@@ -9322,7 +9546,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -9401,7 +9625,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -9767,7 +9991,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -9850,7 +10074,10 @@
     "response_schema_ref": "#/components/schemas/TaskPayload",
     "summary": "Create a one-off task",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "tasks",
+      "verb": "create"
+    }
   },
   {
     "body_schema_ref": null,
@@ -9941,7 +10168,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -10096,7 +10323,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -10417,7 +10644,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -10684,7 +10911,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -11049,7 +11276,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -11178,7 +11405,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -11360,7 +11587,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -11463,7 +11690,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -11677,7 +11904,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -11912,7 +12139,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -12156,7 +12383,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -12272,7 +12499,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -13201,7 +13428,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -13380,7 +13607,7 @@
               "type": "null"
             }
           ],
-          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
           "title": "Cursor"
         }
       },
@@ -13427,5 +13654,71 @@
     "summary": "Partial update of a work role",
     "x_agent_confirm": null,
     "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "workspace-admin",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/admin/workspace/archive"
+    },
+    "idempotent": false,
+    "name": "workspace-archive",
+    "operation_id": "workspace_admin.workspace.archive",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/app__api__v1__admin__WorkspaceArchiveResponse",
+    "summary": "Archive the current workspace",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "workspace-admin",
+      "mutates": true,
+      "summary": "Archive the current workspace",
+      "verb": "workspace-archive"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "workspace-admin",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/admin/workspace/delete"
+    },
+    "idempotent": false,
+    "name": "workspace-delete",
+    "operation_id": "workspace_admin.workspace.delete",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkspaceDeleteResponse",
+    "summary": "Schedule deletion of the current workspace",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "workspace-admin",
+      "mutates": true,
+      "summary": "Archive and schedule deletion of the current workspace",
+      "verb": "workspace-delete"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "workspace-admin",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/admin/workspace/export"
+    },
+    "idempotent": false,
+    "name": "workspace-export",
+    "operation_id": "workspace_admin.workspace.export",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Download a full workspace export",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "workspace-admin",
+      "mutates": false,
+      "summary": "Download a full workspace export artifact",
+      "verb": "workspace-export"
+    }
   }
 ]

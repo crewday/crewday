@@ -178783,7 +178783,11 @@
         "summary": "Create a one-off task",
         "tags": [
           "tasks"
-        ]
+        ],
+        "x-cli": {
+          "group": "tasks",
+          "verb": "create"
+        }
       }
     },
     "/w/{slug}/api/v1/tasks/from_nl": {

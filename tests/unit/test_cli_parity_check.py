@@ -27,7 +27,7 @@ def _entry(
         "response_schema_ref": None,
         "summary": f"{operation_id} summary",
         "x_agent_confirm": None,
-        "x_cli": None,
+        "x_cli": {"group": group, "verb": name, "mutates": method != "GET"},
     }
 
 
@@ -35,13 +35,18 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def _schema(*operation_ids: str) -> dict[str, object]:
+def _schema(*operation_ids: str, include_x_cli: bool = True) -> dict[str, object]:
     paths: dict[str, object] = {}
     for index, operation_id in enumerate(operation_ids):
+        operation: dict[str, object] = {
+            "operationId": operation_id,
+            "responses": {"200": {"description": "ok"}},
+        }
+        if include_x_cli:
+            operation["x-cli"] = {"group": "demo", "verb": f"list-{index}"}
         paths[f"/w/{{slug}}/api/v1/demo/{index}"] = {
             "get": {
-                "operationId": operation_id,
-                "responses": {"200": {"description": "ok"}},
+                **operation,
             }
         }
     return {"openapi": "3.1.0", "paths": paths}
@@ -86,6 +91,51 @@ def test_report_names_openapi_operations_missing_from_surface(tmp_path: Path) ->
 
     assert report.missing_from_cli == ("demo.create",)
     assert not report.ok
+
+
+def test_report_ignores_openapi_operations_without_valid_x_cli(
+    tmp_path: Path,
+) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [_entry(operation_id="demo.list")])
+    _write_json(
+        schema,
+        {
+            "openapi": "3.1.0",
+            "paths": {
+                "/w/{slug}/api/v1/demo": {
+                    "get": {
+                        "operationId": "demo.list",
+                        "responses": {"200": {"description": "ok"}},
+                        "x-cli": {"group": "demo", "verb": "list"},
+                    }
+                },
+                "/w/{slug}/api/v1/not-agent": {
+                    "get": {
+                        "operationId": "demo.not_agent",
+                        "responses": {"200": {"description": "ok"}},
+                    }
+                },
+                "/w/{slug}/api/v1/browser-only": {
+                    "get": {
+                        "operationId": "demo.browser_only",
+                        "responses": {"200": {"description": "ok"}},
+                        "x-cli": {"group": "demo", "verb": "browser", "hidden": True},
+                    }
+                },
+            },
+        },
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.missing_from_cli == ()
+    assert report.ok
 
 
 def test_report_names_surface_operations_removed_from_openapi(tmp_path: Path) -> None:

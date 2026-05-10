@@ -77,6 +77,7 @@ _MUTATING_METHODS: Final[frozenset[str]] = frozenset({"POST", "PATCH", "PUT", "D
 # in particular round-trips body=None as Content-Length: 0 which
 # trips a few downstream validators — keep it simple).
 _BODY_METHODS: Final[frozenset[str]] = frozenset({"POST", "PATCH", "PUT"})
+_WORKSPACE_API_ROOT: Final[str] = "/w/{slug}/api/v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,7 +151,49 @@ def _build_tool_catalog(
             ),
         }
         for op_id, entry in sorted(index.items())
+        if _is_workspace_agent_tool(entry)
     )
+
+
+def _is_valid_x_cli_metadata(operation: Mapping[str, Any]) -> bool:
+    x_cli = operation.get("x-cli")
+    if not isinstance(x_cli, Mapping):
+        return False
+    if x_cli.get("hidden") is True:
+        return False
+    group = x_cli.get("group")
+    verb = x_cli.get("verb")
+    return (
+        isinstance(group, str) and bool(group) and isinstance(verb, str) and bool(verb)
+    )
+
+
+def _is_workspace_agent_tool(entry: _OperationEntry) -> bool:
+    """Return ``True`` when an operation may be advertised to workspace agents."""
+    if not _is_workspace_api_path(entry.path):
+        return False
+    if entry.operation.get("x-agent-forbidden") is True:
+        return False
+    if entry.operation.get("x-interactive-only") is True:
+        return False
+    return _is_valid_x_cli_metadata(entry.operation)
+
+
+def _workspace_agent_rejection(entry: _OperationEntry) -> str | None:
+    """Return the reason a known operation cannot be called by this dispatcher."""
+    if not _is_workspace_api_path(entry.path):
+        return "tool is outside the workspace agent surface"
+    if entry.operation.get("x-agent-forbidden") is True:
+        return "tool is forbidden to delegated agents"
+    if entry.operation.get("x-interactive-only") is True:
+        return "tool requires an interactive session"
+    if not _is_valid_x_cli_metadata(entry.operation):
+        return "tool is not backed by CLI metadata"
+    return None
+
+
+def _is_workspace_api_path(path: str) -> bool:
+    return path == _WORKSPACE_API_ROOT or path.startswith(f"{_WORKSPACE_API_ROOT}/")
 
 
 def _tool_description(op_id: str, operation: Mapping[str, Any]) -> str:
@@ -544,6 +587,9 @@ class OpenAPIToolDispatcher:
             workspace_slug=self._workspace_slug,
             components=components,
         )
+        self._tool_names = frozenset(
+            tool["name"] for tool in self._tools if isinstance(tool.get("name"), str)
+        )
         # The TestClient is heavy (it spins a context manager around
         # the ASGI app); building it once and stashing the instance
         # keeps the dispatch hot-path flat. Tests can swap the field
@@ -554,12 +600,12 @@ class OpenAPIToolDispatcher:
 
     @property
     def operation_ids(self) -> frozenset[str]:
-        """Return every tool name the dispatcher knows about."""
-        return frozenset(self._index)
+        """Return the advertised workspace-agent tool names."""
+        return self._tool_names
 
     @property
     def tools(self) -> tuple[Tool, ...]:
-        """Return every OpenAPI operation as a provider-ready tool schema."""
+        """Return the workspace-agent OpenAPI operations as tool schemas."""
         return self._tools
 
     # -- ToolDispatcher Protocol --------------------------------------
@@ -572,6 +618,8 @@ class OpenAPIToolDispatcher:
             # 404 and the runtime threads the result back into the
             # prompt; gating an unknown name would let a misspelling
             # bypass the workspace policy.
+            return GateDecision(gated=False)
+        if _workspace_agent_rejection(entry) is not None:
             return GateDecision(gated=False)
 
         if call.name in self._always_gated_tools:
@@ -608,6 +656,14 @@ class OpenAPIToolDispatcher:
                 call_id=call.id,
                 status_code=404,
                 body={"detail": "tool not found"},
+                mutated=False,
+            )
+        rejection = _workspace_agent_rejection(entry)
+        if rejection is not None:
+            return ToolResult(
+                call_id=call.id,
+                status_code=403,
+                body={"detail": rejection},
                 mutated=False,
             )
 

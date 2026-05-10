@@ -49,6 +49,19 @@ class OpenApiOperation:
     method: str
 
 
+def _has_valid_x_cli_metadata(operation: Mapping[str, Any]) -> bool:
+    x_cli = operation.get("x-cli")
+    if not isinstance(x_cli, Mapping):
+        return False
+    if x_cli.get("hidden") is True:
+        return False
+    group = x_cli.get("group")
+    verb = x_cli.get("verb")
+    return (
+        isinstance(group, str) and bool(group) and isinstance(verb, str) and bool(verb)
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ParityReport:
     """Result of the checks that do not mutate the worktree."""
@@ -220,6 +233,8 @@ def _iter_openapi_operations(schema: Mapping[str, Any]) -> Iterable[OpenApiOpera
             x_cli = operation.get("x-cli")
             if isinstance(x_cli, Mapping) and x_cli.get("hidden") is True:
                 continue
+            if not _has_valid_x_cli_metadata(operation):
+                continue
             operation_id = operation.get("operationId")
             if isinstance(operation_id, str) and operation_id:
                 yield OpenApiOperation(
@@ -247,7 +262,12 @@ def _excluded_operation_ids(
 
 
 def _operation_ids_from_surface(entries: Sequence[SurfaceEntry]) -> set[str]:
-    return {entry.operation_id for entry in entries if entry.operation_id is not None}
+    return {
+        entry.operation_id
+        for entry in entries
+        if entry.operation_id is not None
+        and _has_valid_x_cli_metadata({"x-cli": entry.x_cli})
+    }
 
 
 def _invalid_operation_ids(operations: Sequence[OpenApiOperation]) -> tuple[str, ...]:

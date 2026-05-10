@@ -23,25 +23,40 @@ def _build_app() -> FastAPI:
     app = FastAPI()
     router = APIRouter()
 
-    @router.get("/w/{slug}/api/v1/echo")
+    @router.get(
+        "/w/{slug}/api/v1/echo",
+        openapi_extra={"x-cli": {"group": "echo", "verb": "read"}},
+    )
     def echo(slug: str, q: str | None = Query(default=None)) -> dict[str, Any]:
         return {"slug": slug, "q": q}
 
-    @router.post("/w/{slug}/api/v1/things")
+    @router.post(
+        "/w/{slug}/api/v1/things",
+        openapi_extra={"x-cli": {"group": "things", "verb": "create"}},
+    )
     def create_thing(slug: str, body: dict[str, Any]) -> dict[str, Any]:
         return {"slug": slug, "received": body, "id": "thing_001"}
 
-    @router.post("/w/{slug}/api/v1/batches")
+    @router.post(
+        "/w/{slug}/api/v1/batches",
+        openapi_extra={"x-cli": {"group": "batches", "verb": "create"}},
+    )
     def create_batch(slug: str, body: Annotated[list[str], Body()]) -> dict[str, Any]:
         return {"slug": slug, "received": body}
 
-    @router.delete("/w/{slug}/api/v1/things/{thing_id}")
+    @router.delete(
+        "/w/{slug}/api/v1/things/{thing_id}",
+        openapi_extra={"x-cli": {"group": "things", "verb": "delete"}},
+    )
     def delete_thing(slug: str, thing_id: str) -> dict[str, Any]:
         if thing_id == "missing":
             raise HTTPException(status_code=404, detail="not found")
         return {"slug": slug, "deleted": thing_id}
 
-    @router.get("/w/{slug}/api/v1/echo_headers")
+    @router.get(
+        "/w/{slug}/api/v1/echo_headers",
+        openapi_extra={"x-cli": {"group": "echo", "verb": "headers-read"}},
+    )
     def echo_headers(
         slug: str,
         authorization: str | None = Header(default=None),
@@ -55,7 +70,10 @@ def _build_app() -> FastAPI:
             "x_agent_reason": x_agent_reason,
         }
 
-    @router.post("/w/{slug}/api/v1/echo_post_headers")
+    @router.post(
+        "/w/{slug}/api/v1/echo_post_headers",
+        openapi_extra={"x-cli": {"group": "echo", "verb": "headers-create"}},
+    )
     def echo_post_headers(
         slug: str,
         body: dict[str, Any],
@@ -82,7 +100,14 @@ def _schema_with(*entries: dict[str, Any]) -> dict[str, Any]:
     paths: dict[str, dict[str, Any]] = {}
     for entry in entries:
         op: dict[str, Any] = {"operationId": entry["operationId"]}
-        for key in ("summary", "description", "requestBody"):
+        for key in (
+            "summary",
+            "description",
+            "requestBody",
+            "x-cli",
+            "x-agent-forbidden",
+            "x-interactive-only",
+        ):
             if entry.get(key) is not None:
                 op[key] = entry[key]
         if entry.get("annotation") is not None:
@@ -95,6 +120,10 @@ def _schema_with(*entries: dict[str, Any]) -> dict[str, Any]:
 
 def _token() -> DelegatedToken:
     return DelegatedToken(plaintext="mip_FAKEKEY_FAKESECRET", token_id="tok_001")
+
+
+def _x_cli(group: str, verb: str) -> dict[str, object]:
+    return {"group": group, "verb": verb, "mutates": verb not in {"list", "show"}}
 
 
 # ---------------------------------------------------------------------------
@@ -119,10 +148,10 @@ def test_index_skips_non_operation_keys() -> None:
     """``parameters`` / ``summary`` etc on a path object aren't operations."""
     schema = {
         "paths": {
-            "/x": {
+            "/w/{slug}/api/v1/x": {
                 "summary": "A path",
                 "parameters": [{"name": "common", "in": "query"}],
-                "get": {"operationId": "x.read"},
+                "get": {"operationId": "x.read", "x-cli": _x_cli("x", "read")},
             }
         }
     }
@@ -138,6 +167,7 @@ def test_tools_catalog_is_deterministic_and_omits_injected_slug() -> None:
             "operationId": "items.update",
             "description": "Update an item.",
             "summary": "Patch item",
+            "x-cli": _x_cli("items", "update"),
             "parameters": [
                 {
                     "name": "slug",
@@ -175,6 +205,7 @@ def test_tools_catalog_is_deterministic_and_omits_injected_slug() -> None:
             "method": "get",
             "operationId": "items.list",
             "summary": "List items.",
+            "x-cli": _x_cli("items", "list"),
         },
     )
     disp = OpenAPIToolDispatcher(app=FastAPI(), openapi=schema, workspace_slug="ws")
@@ -197,15 +228,17 @@ def test_tools_catalog_is_deterministic_and_omits_injected_slug() -> None:
 def test_tools_catalog_uses_summary_then_operation_id_fallback() -> None:
     schema = _schema_with(
         {
-            "path": "/a",
+            "path": "/w/{slug}/api/v1/a",
             "method": "get",
             "operationId": "a.read",
             "summary": "Read A.",
+            "x-cli": _x_cli("a", "read"),
         },
         {
-            "path": "/b",
+            "path": "/w/{slug}/api/v1/b",
             "method": "get",
             "operationId": "b.read",
+            "x-cli": _x_cli("b", "read"),
         },
     )
     disp = OpenAPIToolDispatcher(app=FastAPI(), openapi=schema, workspace_slug="ws")
@@ -236,6 +269,7 @@ def test_tools_catalog_advertises_template_vars_and_resolves_body_refs() -> None
             "/w/{slug}/api/v1/things/{thing_id}": {
                 "patch": {
                     "operationId": "things.update",
+                    "x-cli": _x_cli("things", "update"),
                     "requestBody": {
                         "content": {
                             "application/json": {
@@ -270,6 +304,7 @@ def test_tools_catalog_wraps_non_object_request_body() -> None:
             "path": "/w/{slug}/api/v1/batches",
             "method": "post",
             "operationId": "batches.create",
+            "x-cli": _x_cli("batches", "create"),
             "requestBody": {
                 "content": {
                     "application/json": {
@@ -291,6 +326,58 @@ def test_tools_catalog_wraps_non_object_request_body() -> None:
     }
 
 
+def test_tools_catalog_only_advertises_workspace_cli_agent_operations() -> None:
+    schema = _schema_with(
+        {
+            "path": "/w/{slug}/api/v1/properties",
+            "method": "get",
+            "operationId": "properties.list",
+            "summary": "List properties.",
+            "x-cli": _x_cli("properties", "list"),
+        },
+        {
+            "path": "/w/{slug}/api/v1/approvals",
+            "method": "get",
+            "operationId": "approvals.list",
+        },
+        {
+            "path": "/w/{slug}/api/v1/browser-only",
+            "method": "get",
+            "operationId": "browser.only",
+            "x-cli": {"group": "browser", "verb": "only", "hidden": True},
+        },
+        {
+            "path": "/admin/api/v1/usage",
+            "method": "get",
+            "operationId": "admin.usage.list",
+            "x-cli": _x_cli("admin", "usage-list"),
+        },
+        {
+            "path": "/w/{slug}/api/v1/admin/workspace/archive",
+            "method": "post",
+            "operationId": "workspace.archive",
+            "x-cli": _x_cli("admin", "workspace-archive"),
+            "x-agent-forbidden": True,
+        },
+        {
+            "path": "/api/v1/auth/me",
+            "method": "get",
+            "operationId": "auth.me.get",
+            "x-cli": _x_cli("auth", "whoami"),
+        },
+        {
+            "path": "/w/{slug}/api/v1/auth/passkey/register/start",
+            "method": "post",
+            "operationId": "auth.passkey.register_start",
+            "x-cli": _x_cli("auth", "passkey-register-start"),
+            "x-interactive-only": True,
+        },
+    )
+    disp = OpenAPIToolDispatcher(app=FastAPI(), openapi=schema, workspace_slug="ws")
+
+    assert [tool["name"] for tool in disp.tools] == ["properties.list"]
+
+
 # ---------------------------------------------------------------------------
 # is_gated branches
 # ---------------------------------------------------------------------------
@@ -303,10 +390,11 @@ def _disp_for_gating(
 ) -> OpenAPIToolDispatcher:
     schema = _schema_with(
         {
-            "path": "/items",
+            "path": "/w/{slug}/api/v1/items",
             "method": "post",
             "operationId": "items.create",
             "annotation": annotation,
+            "x-cli": _x_cli("items", "create"),
         }
     )
     return OpenAPIToolDispatcher(
@@ -385,6 +473,122 @@ def test_dispatch_unknown_tool_returns_404() -> None:
     )
     assert result.status_code == 404
     assert result.body == {"detail": "tool not found"}
+    assert result.mutated is False
+
+
+def test_dispatch_rejects_known_interactive_only_tool() -> None:
+    app = _build_app()
+    schema = _schema_with(
+        {
+            "path": "/w/{slug}/api/v1/echo",
+            "method": "get",
+            "operationId": "echo.read",
+            "x-cli": _x_cli("echo", "read"),
+            "x-interactive-only": True,
+        }
+    )
+    disp = OpenAPIToolDispatcher(app=app, openapi=schema, workspace_slug="ws-test")
+
+    result = disp.dispatch(
+        ToolCall(id="c-denied", name="echo.read", input={}),
+        token=_token(),
+        headers={},
+    )
+
+    assert result.status_code == 403
+    assert result.body == {"detail": "tool requires an interactive session"}
+    assert result.mutated is False
+
+
+def test_dispatch_rejects_known_tool_without_valid_x_cli() -> None:
+    app = _build_app()
+    schema = _schema_with(
+        {
+            "path": "/w/{slug}/api/v1/echo",
+            "method": "get",
+            "operationId": "echo.read",
+        }
+    )
+    disp = OpenAPIToolDispatcher(app=app, openapi=schema, workspace_slug="ws-test")
+
+    result = disp.dispatch(
+        ToolCall(id="c-denied", name="echo.read", input={}),
+        token=_token(),
+        headers={},
+    )
+
+    assert result.status_code == 403
+    assert result.body == {"detail": "tool is not backed by CLI metadata"}
+    assert result.mutated is False
+
+
+def test_dispatch_rejects_known_hidden_cli_tool() -> None:
+    app = _build_app()
+    schema = _schema_with(
+        {
+            "path": "/w/{slug}/api/v1/echo",
+            "method": "get",
+            "operationId": "echo.read",
+            "x-cli": {"group": "echo", "verb": "read", "hidden": True},
+        }
+    )
+    disp = OpenAPIToolDispatcher(app=app, openapi=schema, workspace_slug="ws-test")
+
+    result = disp.dispatch(
+        ToolCall(id="c-denied", name="echo.read", input={}),
+        token=_token(),
+        headers={},
+    )
+
+    assert result.status_code == 403
+    assert result.body == {"detail": "tool is not backed by CLI metadata"}
+    assert result.mutated is False
+
+
+def test_dispatch_rejects_known_agent_forbidden_tool() -> None:
+    app = _build_app()
+    schema = _schema_with(
+        {
+            "path": "/w/{slug}/api/v1/echo",
+            "method": "get",
+            "operationId": "echo.read",
+            "x-cli": _x_cli("echo", "read"),
+            "x-agent-forbidden": True,
+        }
+    )
+    disp = OpenAPIToolDispatcher(app=app, openapi=schema, workspace_slug="ws-test")
+
+    result = disp.dispatch(
+        ToolCall(id="c-denied", name="echo.read", input={}),
+        token=_token(),
+        headers={},
+    )
+
+    assert result.status_code == 403
+    assert result.body == {"detail": "tool is forbidden to delegated agents"}
+    assert result.mutated is False
+
+
+def test_dispatch_rejects_known_bare_host_tool() -> None:
+    app = _build_app()
+    schema = _schema_with(
+        {
+            "path": "/api/v1/auth/me",
+            "method": "get",
+            "operationId": "auth.me.get",
+            "x-cli": _x_cli("auth", "whoami"),
+        }
+    )
+    disp = OpenAPIToolDispatcher(app=app, openapi=schema, workspace_slug="ws-test")
+
+    result = disp.dispatch(
+        ToolCall(id="c-denied", name="auth.me.get", input={}),
+        token=_token(),
+        headers={},
+    )
+
+    assert result.status_code == 403
+    assert result.body == {"detail": "tool is outside the workspace agent surface"}
     assert result.mutated is False
 
 
@@ -481,9 +685,10 @@ def test_dispatch_missing_path_var_returns_422() -> None:
     """A required path variable that isn't provided is a 422."""
     schema = _schema_with(
         {
-            "path": "/things/{thing_id}",
+            "path": "/w/{slug}/api/v1/things/{thing_id}",
             "method": "delete",
             "operationId": "things.delete",
+            "x-cli": _x_cli("things", "delete"),
         }
     )
     disp = OpenAPIToolDispatcher(
