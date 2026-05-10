@@ -105,8 +105,12 @@ function LocationProbe(): ReactElement {
 function fileInput(): HTMLInputElement {
   const label = screen.getByText("Take photo").closest("label");
   if (!label) throw new Error("evidence picker not found");
+  expect(label).toHaveClass("upload-dropzone");
+  expect(label).toHaveClass("evidence__picker");
   const input = label.querySelector("input[type=file]") as HTMLInputElement | null;
   if (!input) throw new Error("file input not found");
+  expect(input.accept).toBe("image/*");
+  expect(input.getAttribute("capture")).toBe("environment");
   return input;
 }
 
@@ -309,12 +313,38 @@ describe("TaskDetailPage", () => {
       render(<Harness />);
       await screen.findByText("Reset guest room");
 
-      selectFile(new File(["not-a-photo"], "room.txt", { type: "text/plain" }));
+      selectFile(new File(["bad-photo"], "room.jpg", { type: "image/jpeg" }));
 
       expect(await screen.findByText("Upload failed")).toBeInTheDocument();
       expect(screen.getByRole("alert")).toHaveTextContent("Only photos are accepted.");
       expect(screen.getByRole("button", { name: /add photo to complete/i })).toBeDisabled();
       expect(env.calls.some((call) => call.url.endsWith("/api/v1/tasks/t1/complete"))).toBe(false);
+    } finally {
+      env.restore();
+    }
+  });
+
+  it("rejects non-image photo evidence before uploading", async () => {
+    const env = installFetch({
+      "/api/v1/tasks/t1/detail": [{ body: baseTask() }],
+      "/api/v1/tasks/t1/evidence": [{ body: emptyEvidence() }],
+      "/api/v1/tasks/t1/comments": [{ body: emptyComments() }],
+    });
+
+    try {
+      render(<Harness />);
+      await screen.findByText("Reset guest room");
+
+      selectFile(new File(["not-a-photo"], "room.txt", { type: "text/plain" }));
+
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Choose an image file for photo evidence.",
+      );
+      expect(screen.queryByText("Upload failed")).toBeNull();
+      expect(env.calls.some((call) =>
+        call.url.endsWith("/api/v1/tasks/t1/evidence") && call.init.method === "POST",
+      )).toBe(false);
+      expect(screen.getByRole("button", { name: /add photo to complete/i })).toBeDisabled();
     } finally {
       env.restore();
     }

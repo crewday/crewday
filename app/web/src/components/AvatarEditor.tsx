@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import FileDropZone from "@/components/FileDropZone";
 
 // §14 — avatar editor modal opened from the /me avatar. The user picks
 // an image (file picker, or front camera on mobile via `capture=user`),
@@ -219,16 +220,14 @@ export default function AvatarEditor({ open, onClose, currentUrl, userName }: Pr
           </>
         ) : (
           <div className="avatar-editor__empty">
-            <label className="btn btn--moss">
-              Choose image
-              <input
-                type="file"
-                accept="image/*"
-                capture="user"
-                hidden
-                onChange={(e) => onFile(e.target.files?.[0] ?? null)}
-              />
-            </label>
+            <FileDropZone
+              className="avatar-editor__dropzone"
+              title="Choose image"
+              description="Use a photo from your library or front camera."
+              accept="image/*"
+              capture="user"
+              onFiles={(files) => onFile(files[0] ?? null)}
+            />
             {currentUrl && (
               <span className="avatar-editor__hint">
                 Or remove the current photo below.

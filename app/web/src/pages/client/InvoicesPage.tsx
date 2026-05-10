@@ -1,9 +1,10 @@
-import { useRef } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import FileDropZone from "@/components/FileDropZone";
 import { Chip, Loading } from "@/components/common";
 import { formatMoney } from "@/lib/money";
 import type { Me } from "@/types/api";
@@ -39,6 +40,14 @@ interface VendorInvoiceProofResponse {
   proof_of_payment_file_ids: string[];
 }
 
+const PROOF_ACCEPTED_MIMES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+const PROOF_ACCEPT_ATTR = [...PROOF_ACCEPTED_MIMES].join(",");
+
 function statusTone(status: string): "moss" | "sky" | "ghost" {
   // code-health: ignore[params] Tiny status-tone helper is misread as many parameters by lizard's TS parser.
   return status === "paid" ? "moss" : status === "approved" ? "sky" : "ghost";
@@ -59,35 +68,31 @@ function ProofUploadButton({
   invoice,
   disabled,
   onUpload,
+  onRejected,
 }: {
   invoice: ClientInvoiceRow;
   disabled: boolean;
   onUpload: (invoice: ClientInvoiceRow, file: File) => void;
+  onRejected: () => void;
 }) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
   return (
-    <>
-      <input
-        ref={inputRef}
-        className="sr-only"
-        type="file"
-        accept="application/pdf,image/jpeg,image/png,image/webp"
-        aria-label={`Upload proof for ${invoice.invoice_number}`}
-        onChange={(event) => {
-          const file = event.currentTarget.files?.[0];
-          event.currentTarget.value = "";
-          if (file) onUpload(invoice, file);
-        }}
-      />
-      <button
-        type="button"
-        className="btn btn--ghost btn--sm"
-        onClick={() => inputRef.current?.click()}
-        disabled={disabled}
-      >
-        Upload proof
-      </button>
-    </>
+    <FileDropZone
+      className="invoice-proof-upload"
+      title="Upload proof"
+      description="PDF, JPEG, PNG, or WebP"
+      inputLabel={`Upload proof for ${invoice.invoice_number}`}
+      accept={PROOF_ACCEPT_ATTR}
+      disabled={disabled}
+      onFiles={(files) => {
+        const file = files[0] ?? null;
+        if (!file) return;
+        if (!PROOF_ACCEPTED_MIMES.has(file.type)) {
+          onRejected();
+          return;
+        }
+        onUpload(invoice, file);
+      }}
+    />
   );
 }
 
@@ -99,6 +104,7 @@ function ProofUploadButton({
 export default function ClientInvoicesPage() {
   // code-health: ignore[ccn nloc] Invoice route keeps upload mutation, optimistic invalidation, and table states together.
   const qc = useQueryClient();
+  const [proofError, setProofError] = useState<string | null>(null);
   const meQ = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
   const enabled = meQ.data?.role === "client";
   const invoicesQ = useQuery({
@@ -126,6 +132,9 @@ export default function ClientInvoicesPage() {
         method: "POST",
         body,
       });
+    },
+    onMutate: () => {
+      setProofError(null);
     },
     onSuccess: (result, vars) => {
       qc.setQueryData<ClientInvoiceRow[]>(qk.clientInvoices(), (prev) =>
@@ -210,6 +219,9 @@ export default function ClientInvoicesPage() {
                         invoice={v}
                         disabled={uploadProof.isPending}
                         onUpload={(invoice, file) => uploadProof.mutate({ invoice, file })}
+                        onRejected={() =>
+                          setProofError("Upload a PDF, JPEG, PNG, or WebP proof file.")
+                        }
                       />
                     ) : null}
                   </td>
@@ -217,6 +229,11 @@ export default function ClientInvoicesPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {proofError && (
+        <div className="panel">
+          <p className="muted" role="alert">{proofError}</p>
         </div>
       )}
       {uploadProof.error && (

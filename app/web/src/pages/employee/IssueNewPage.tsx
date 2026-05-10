@@ -192,6 +192,7 @@ export default function IssueNewPage() {
         </label>
 
         <div className="form__row">
+          {/* Not migrated yet: issue creation still posts JSON and does not attach the selected file. */}
           <input
             ref={photoInputRef}
             className="sr-only"

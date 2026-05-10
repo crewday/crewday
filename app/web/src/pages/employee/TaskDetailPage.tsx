@@ -1,4 +1,4 @@
-import { type ChangeEvent, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
@@ -10,6 +10,7 @@ import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import ChatLog from "@/components/chat/ChatLog";
 import ChatComposer from "@/components/chat/ChatComposer";
 import DateTime from "@/components/DateTime";
+import FileDropZone from "@/components/FileDropZone";
 import PageHeader from "@/components/PageHeader";
 import type {
   AgentMessage,
@@ -319,11 +320,13 @@ export default function TaskDetailPage() {
     uploadingPhoto ||
     (task.photo_evidence === "required" && photoEvidenceIds.length === 0);
 
-  const onEvidenceChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const input = event.currentTarget;
-    const file = input.files?.[0] ?? null;
-    input.value = "";
+  const onEvidenceFiles = (files: File[]) => {
+    const file = files[0] ?? null;
     if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setEvidenceError("Choose an image file for photo evidence.");
+      return;
+    }
     const localId = "local-" + Date.now().toString(36) + "-" + localEvidence.length;
     const previewUrl =
       typeof URL.createObjectURL === "function" ? URL.createObjectURL(file) : "";
@@ -507,16 +510,14 @@ export default function TaskDetailPage() {
               {evidenceError}
             </p>
           )}
-          <label className="evidence__picker">
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={onEvidenceChange}
-            />
-            <span className="evidence__picker-cta"><Camera size={16} strokeWidth={1.8} aria-hidden="true" /> Take photo</span>
-            <span className="evidence__picker-sub">or choose from your gallery</span>
-          </label>
+          <FileDropZone
+            className="evidence__picker"
+            title="Take photo"
+            description="or choose from your gallery"
+            accept="image/*"
+            capture="environment"
+            onFiles={onEvidenceFiles}
+          />
           {(visibleServerPhotoIds.length > 0 || localEvidence.length > 0) && (
             <ul className="evidence__preview-list" aria-label="Photo evidence">
               {visibleServerPhotoIds.map((id) => (

@@ -11,6 +11,7 @@ import {
 interface FileDropZoneProps {
   title: string;
   description?: string;
+  inputLabel?: string;
   accept?: string;
   multiple?: boolean;
   capture?: boolean | "user" | "environment";
@@ -22,6 +23,7 @@ interface FileDropZoneProps {
 export default function FileDropZone({
   title,
   description,
+  inputLabel,
   accept,
   multiple = false,
   capture,
@@ -108,6 +110,7 @@ export default function FileDropZone({
         id={inputId}
         type="file"
         accept={accept}
+        aria-label={inputLabel}
         multiple={multiple}
         capture={capture}
         disabled={disabled}

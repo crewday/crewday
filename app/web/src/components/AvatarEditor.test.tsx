@@ -91,8 +91,13 @@ describe("AvatarEditor", () => {
     try {
       renderEditor();
 
+      expect(screen.getByRole("button", { name: /Choose image/i })).toHaveClass(
+        "upload-dropzone",
+      );
       const input = document.querySelector<HTMLInputElement>("input[type='file']");
       expect(input).not.toBeNull();
+      expect(input?.accept).toBe("image/*");
+      expect(input?.getAttribute("capture")).toBe("user");
       fireEvent.change(input!, {
         target: {
           files: [new File(["image"], "avatar.png", { type: "image/png" })],

@@ -224,8 +224,13 @@ describe("<InvoicesPage>", () => {
     try {
       render(<Harness />);
 
+      const dropZone = await screen.findByRole("button", { name: /Upload proof/i });
+      expect(dropZone).toHaveClass("upload-dropzone");
+      expect(dropZone).toHaveClass("invoice-proof-upload");
       const file = new File(["proof"], "proof.pdf", { type: "application/pdf" });
-      fireEvent.change(await screen.findByLabelText("Upload proof for A-001"), {
+      const input = await screen.findByLabelText("Upload proof for A-001") as HTMLInputElement;
+      expect(input.accept).toBe("application/pdf,image/jpeg,image/png,image/webp");
+      fireEvent.change(input, {
         target: { files: [file] },
       });
 
@@ -244,12 +249,38 @@ describe("<InvoicesPage>", () => {
     }
   });
 
+  it("rejects unsupported proof files before posting multipart upload", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      const input = await screen.findByLabelText("Upload proof for A-001") as HTMLInputElement;
+      fireEvent.change(input, {
+        target: {
+          files: [new File(["not-proof"], "proof.txt", { type: "text/plain" })],
+        },
+      });
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Upload a PDF, JPEG, PNG, or WebP proof file.",
+      );
+      expect(fake.requests.some((request) =>
+        request.url === "/w/acme/api/v1/billing/vendor-invoices/invoice_1/proof",
+      )).toBe(false);
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("only renders upload controls for approved invoices", async () => {
     const fake = installFetch();
     try {
       render(<Harness />);
 
       expect(await screen.findByLabelText("Upload proof for A-001")).toBeInTheDocument();
+      expect(await screen.findByRole("button", { name: /Upload proof/i })).toHaveClass(
+        "upload-dropzone",
+      );
       expect(screen.queryByLabelText("Upload proof for A-000")).toBeNull();
     } finally {
       fake.restore();
