@@ -7,12 +7,12 @@ import { qk } from "@/lib/queryKeys";
 import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import type {
   LLMCall,
-  LlmAssignment,
   LlmGraphPayload,
   LlmPromptTemplate,
   LlmSyncPricingResult,
 } from "@/types";
 import AssignmentColumn from "./AssignmentColumn";
+import LlmAssignmentModal from "./LlmAssignmentModal";
 import LlmAlerts from "./LlmAlerts";
 import LlmRegistryModals from "./LlmRegistryModals";
 import LlmStats from "./LlmStats";
@@ -51,6 +51,9 @@ export default function AdminLlmPage() {
   const [registryDialog, setRegistryDialog] = useState<RegistryDialogState | null>(
     null,
   );
+  const [assignmentDialogCapability, setAssignmentDialogCapability] = useState<
+    string | null
+  >(null);
   const [promptsOpen, setPromptsOpen] = useState(false);
   useCloseOnEscape(() => setPromptsOpen(false), promptsOpen);
 
@@ -64,52 +67,6 @@ export default function AdminLlmPage() {
     mutationFn: () =>
       fetchJson<LlmSyncPricingResult>("/admin/api/v1/llm/sync-pricing", {
         method: "POST",
-      }),
-    onSuccess: invalidateAdminLlm,
-  });
-  const assignmentMut = useMutation({
-    mutationFn: ({ assignment, providerModelId }: {
-      assignment: LlmAssignment;
-      providerModelId: string;
-    }) =>
-      fetchJson<LlmAssignment>(`/admin/api/v1/llm/assignments/${assignment.id}`, {
-        method: "PUT",
-        body: { provider_model_id: providerModelId },
-      }),
-    onSuccess: invalidateAdminLlm,
-  });
-  const createInheritanceMut = useMutation({
-    mutationFn: ({
-      capability,
-      inheritsFrom,
-    }: {
-      capability: string;
-      inheritsFrom: string;
-    }) =>
-      fetchJson("/admin/api/v1/llm/inheritance", {
-        method: "POST",
-        body: { capability, inherits_from: inheritsFrom },
-      }),
-    onSuccess: invalidateAdminLlm,
-  });
-  const updateInheritanceMut = useMutation({
-    mutationFn: ({
-      capability,
-      inheritsFrom,
-    }: {
-      capability: string;
-      inheritsFrom: string;
-    }) =>
-      fetchJson(`/admin/api/v1/llm/inheritance/${encodeURIComponent(capability)}`, {
-        method: "PUT",
-        body: { inherits_from: inheritsFrom },
-      }),
-    onSuccess: invalidateAdminLlm,
-  });
-  const deleteInheritanceMut = useMutation({
-    mutationFn: (capability: string) =>
-      fetchJson(`/admin/api/v1/llm/inheritance/${encodeURIComponent(capability)}`, {
-        method: "DELETE",
       }),
     onSuccess: invalidateAdminLlm,
   });
@@ -169,28 +126,16 @@ export default function AdminLlmPage() {
       .join(" ");
   };
 
-  const writeAssignmentToModel = (modelId: string): boolean => {
-    // code-health: ignore[ccn] Assignment move guard deliberately lists each graph invariant before mutating.
-    if (!graph || !indexes || selection?.column !== "assignment") return false;
-    const assignment = graph.assignments.find((a) => a.id === selection.id);
-    if (!assignment) return false;
-    if (assignment.is_deployment_default) return false;
-    const model = indexes.modelsById.get(modelId);
-    if (!model) return false;
-    const modelCapabilities = new Set(model.capabilities);
-    if (!assignment.required_capabilities.every((cap) => modelCapabilities.has(cap))) {
-      return false;
-    }
-    const currentPm = indexes.pmById.get(assignment.provider_model_id);
-    const candidates = indexes.providerModelsByModelId.get(modelId) ?? [];
-    const nextPm =
-      candidates.find((pm) => pm.provider_id === currentPm?.provider_id) ??
-      candidates.find((pm) => pm.is_enabled) ??
-      candidates[0];
-    if (!nextPm || nextPm.id === assignment.provider_model_id) return false;
-    assignmentMut.mutate({ assignment, providerModelId: nextPm.id });
-    setSelection({ column: "model", id: modelId });
-    return true;
+  const openCapabilityDialog = (capability: string) => {
+    setSelection({ column: "capability", id: capability });
+    setAssignmentDialogCapability(capability);
+  };
+
+  const openAssignmentDialog = (assignmentId: string) => {
+    const assignment = graph?.assignments.find((item) => item.id === assignmentId);
+    if (!assignment) return;
+    setSelection({ column: "assignment", id: assignmentId });
+    setAssignmentDialogCapability(assignment.capability);
   };
 
   const actions = (
@@ -320,7 +265,6 @@ export default function AdminLlmPage() {
           setSelection={setSelection}
           nodeClass={nodeClass}
           setModelRef={setRef(modelRefs)}
-          onModelClick={writeAssignmentToModel}
           onEditModel={(id) => setRegistryDialog({ kind: "model", mode: "edit", id })}
           onEditProviderModel={(id) =>
             setRegistryDialog({ kind: "providerModel", mode: "edit", id })
@@ -330,7 +274,6 @@ export default function AdminLlmPage() {
         <AssignmentColumn
           capabilities={graph.capabilities}
           indexes={indexes}
-          selection={selection}
           active={active}
           setHover={setHover}
           setSelection={setSelection}
@@ -338,14 +281,8 @@ export default function AdminLlmPage() {
           hasActive={hasActive}
           highlighted={highlighted}
           setRungRef={setRef(rungRefs)}
-          onChangeInheritance={(capability, inheritsFrom, isExplicit) => {
-            if (isExplicit) {
-              updateInheritanceMut.mutate({ capability, inheritsFrom });
-            } else {
-              createInheritanceMut.mutate({ capability, inheritsFrom });
-            }
-          }}
-          onRemoveInheritance={(capability) => deleteInheritanceMut.mutate(capability)}
+          onOpenCapability={openCapabilityDialog}
+          onOpenAssignment={openAssignmentDialog}
         />
       </div>
 
@@ -362,6 +299,12 @@ export default function AdminLlmPage() {
         providerModels={graph.provider_models}
         indexes={indexes}
         onClose={() => setRegistryDialog(null)}
+      />
+      <LlmAssignmentModal
+        capabilityKey={assignmentDialogCapability}
+        graph={graph}
+        indexes={indexes}
+        onClose={() => setAssignmentDialogCapability(null)}
       />
     </DeskPage>
   );

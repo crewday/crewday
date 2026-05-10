@@ -14,7 +14,6 @@ import type {
 interface AssignmentColumnProps {
   capabilities: LlmCapabilityEntry[];
   indexes: LlmIndexes;
-  selection: Selection | null;
   active: Selection | null;
   setHover: SelectionSetter;
   setSelection: SelectionSetter;
@@ -22,19 +21,14 @@ interface AssignmentColumnProps {
   hasActive: boolean;
   highlighted: Highlighted;
   setRungRef: ElementRefSetter;
-  onChangeInheritance: (
-    capability: string,
-    inheritsFrom: string,
-    isExplicit: boolean,
-  ) => void;
-  onRemoveInheritance: (capability: string) => void;
+  onOpenCapability: (capability: string) => void;
+  onOpenAssignment: (assignmentId: string) => void;
 }
 
 export default function AssignmentColumn(props: AssignmentColumnProps) {
   const {
     capabilities,
     indexes,
-    selection,
     active,
     setHover,
     setSelection,
@@ -42,8 +36,8 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
     hasActive,
     highlighted,
     setRungRef,
-    onChangeInheritance,
-    onRemoveInheritance,
+    onOpenCapability,
+    onOpenAssignment,
   } = props;
   const roots = capabilities.filter((cap) => {
     const hasChain = (indexes.assignmentsByCapability.get(cap.key) ?? []).length > 0;
@@ -77,11 +71,7 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
               onFocus={() => setHover({ column: "capability", id: cap.key })}
               onBlur={() => setHover(null)}
               onClick={() =>
-                setSelection(
-                  selection?.column === "capability" && selection.id === cap.key
-                    ? null
-                    : { column: "capability", id: cap.key },
-                )
+                onOpenCapability(cap.key)
               }
             >
               <header className="llm-graph-node__head">
@@ -128,16 +118,13 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
               setHover={setHover}
               setSelection={setSelection}
               setRungRef={setRungRef}
+              onOpenAssignment={onOpenAssignment}
             />
             {inheritedChildren.length ? (
               <div className="llm-graph-node__children">
                 {inheritedChildren.map((child) => {
                   const missing = indexes.issuesByCapability.get(child.key) ?? [];
-                  const parent = indexes.inheritanceByChild.get(child.key) ?? cap.key;
                   const isExplicit = indexes.explicitInheritanceByChild.has(child.key);
-                  const parentOptions = capabilities.filter(
-                    (candidate) => candidate.key !== child.key,
-                  );
                   const childActive =
                     active?.column === "capability" && active.id === child.key;
                   const childLinked = highlighted.capabilities.has(child.key);
@@ -176,6 +163,7 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelection({ column: "capability", id: child.key });
+                          onOpenCapability(child.key);
                         }}
                       >
                         <code className="inline-code">{child.key}</code>
@@ -194,37 +182,9 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
                             ? "invalid implicit"
                             : "implicit default"}
                       </Chip>
-                      <select
-                        className="llm-graph-node__inherit-select"
-                        aria-label={`Change ${child.key} inheritance parent`}
-                        value={parent}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => {
-                          onChangeInheritance(
-                            child.key,
-                            e.currentTarget.value,
-                            isExplicit,
-                          );
-                        }}
-                      >
-                        {parentOptions.map((option) => (
-                          <option key={option.key} value={option.key}>
-                            {option.key}
-                          </option>
-                        ))}
-                      </select>
-                      {isExplicit ? (
-                        <button
-                          className="llm-graph-node__inherit-remove"
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRemoveInheritance(child.key);
-                          }}
-                        >
-                          Remove
-                        </button>
-                      ) : null}
+                      <span className="llm-graph-node__inherit-hint">
+                        {isExplicit ? "Edit in modal" : "Set explicit parent"}
+                      </span>
                     </div>
                   );
                 })}

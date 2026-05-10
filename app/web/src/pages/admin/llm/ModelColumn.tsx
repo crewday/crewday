@@ -20,7 +20,6 @@ interface ModelColumnProps {
   setSelection: SelectionSetter;
   nodeClass: NodeClass;
   setModelRef: ElementRefSetter;
-  onModelClick: (modelId: string) => boolean;
   onEditModel: (modelId: string) => void;
   onEditProviderModel: (providerModelId: string) => void;
   indexes: LlmIndexes;
@@ -33,7 +32,6 @@ export default function ModelColumn(props: ModelColumnProps) {
     setSelection,
     nodeClass,
     setModelRef,
-    onModelClick,
     onEditModel,
     onEditProviderModel,
     indexes,
@@ -54,7 +52,6 @@ export default function ModelColumn(props: ModelColumnProps) {
               onFocus={() => setHover({ column: "model", id: m.id })}
               onBlur={() => setHover(null)}
               onClick={() => {
-                if (onModelClick(m.id)) return;
                 setSelection({ column: "model", id: m.id });
                 onEditModel(m.id);
               }}

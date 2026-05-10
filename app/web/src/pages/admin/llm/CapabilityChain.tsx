@@ -12,11 +12,21 @@ interface CapabilityChainProps {
   setHover: SelectionSetter;
   setSelection: SelectionSetter;
   setRungRef: ElementRefSetter;
+  onOpenAssignment: (assignmentId: string) => void;
 }
 
 export default function CapabilityChain(props: CapabilityChainProps) {
-  const { chain, indexes, active, hasActive, highlighted, setHover, setSelection, setRungRef } =
-    props;
+  const {
+    chain,
+    indexes,
+    active,
+    hasActive,
+    highlighted,
+    setHover,
+    setSelection,
+    setRungRef,
+    onOpenAssignment,
+  } = props;
 
   return (
     <ol className="llm-graph-chain">
@@ -57,6 +67,7 @@ export default function CapabilityChain(props: CapabilityChainProps) {
               onClick={(e) => {
                 e.stopPropagation();
                 setSelection({ column: "assignment", id: a.id });
+                onOpenAssignment(a.id);
               }}
               title={
                 missing.length

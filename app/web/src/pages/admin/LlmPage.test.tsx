@@ -101,6 +101,10 @@ function chatManagerRung(): HTMLElement {
   return rung;
 }
 
+function assignmentDialog(name: string): HTMLElement {
+  return screen.getByRole("dialog", { name });
+}
+
 function modelButton(name: string): HTMLElement {
   return screen.getByRole("button", { name: new RegExp(`${name} model`) });
 }
@@ -610,13 +614,30 @@ describe("Admin LlmPage", () => {
     }
   });
 
-  it("writes selected assignment to a clicked model through the assignment API", async () => {
+  it("updates and creates assignment rungs from the assignment modal", async () => {
     const fetcher = installPageFetch({
+      "/admin/api/v1/llm/graph": [
+        { body: graph },
+        { body: graph },
+        { body: graph },
+        { body: graph },
+      ],
       "/admin/api/v1/llm/assignments/assign_chat_manager": [
         {
           body: {
-            ...graph.assignments[0],
+            ...graph.assignments[1],
+            max_tokens: 2048,
+            temperature: 0.4,
+          },
+        },
+      ],
+      "/admin/api/v1/llm/assignments": [
+        {
+          body: {
+            ...graph.assignments[1],
+            id: "assign_chat_manager_fallback",
             provider_model_id: "pm_fast",
+            priority: 1,
           },
         },
       ],
@@ -626,10 +647,17 @@ describe("Admin LlmPage", () => {
       await findOpenRouterProvider();
 
       fireEvent.click(chatManagerRung());
-
-      const modelCard = screen.getByText("Fast Chat").closest("article");
-      if (!(modelCard instanceof HTMLElement)) throw new Error("model card not found");
-      fireEvent.click(modelButton("Fast Chat"));
+      const dialog = assignmentDialog("chat.manager");
+      fireEvent.change(within(dialog).getAllByLabelText(/Max tokens/)[0]!, {
+        target: { value: "2048" },
+      });
+      fireEvent.change(within(dialog).getAllByLabelText(/Temperature/)[0]!, {
+        target: { value: "0.4" },
+      });
+      fireEvent.change(within(dialog).getAllByLabelText(/Extra API params/)[0]!, {
+        target: { value: '{"top_p":0.8}' },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save rung" }));
 
       await waitFor(() => {
         expect(
@@ -646,33 +674,179 @@ describe("Admin LlmPage", () => {
           call.init.method === "PUT",
       );
       expect(put).toBeDefined();
-      expect(jsonBody(put!)).toEqual({ provider_model_id: "pm_fast" });
-      expect(within(modelCard).getByText("test/fast-chat")).toBeInTheDocument();
+      expect(jsonBody(put!)).toMatchObject({
+        provider_model_id: "pm_gemma",
+        max_tokens: 2048,
+        temperature: 0.4,
+        extra_api_params: { top_p: 0.8 },
+        required_capabilities: ["chat", "function_calling"],
+        is_enabled: true,
+      });
+
+      fireEvent.click(within(dialog).getByRole("button", { name: /Add rung/ }));
+      fireEvent.change(within(dialog).getAllByLabelText(/Provider-model/).at(-1)!, {
+        target: { value: "pm_fast" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create rung" }));
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url === "/admin/api/v1/llm/assignments" &&
+              call.init.method === "POST",
+          ),
+        ).toBe(true);
+      });
+      const post = fetcher.calls.find(
+        (call) =>
+          call.url === "/admin/api/v1/llm/assignments" &&
+          call.init.method === "POST",
+      );
+      expect(jsonBody(post!)).toMatchObject({
+        capability: "chat.manager",
+        provider_model_id: "pm_fast",
+        priority: 1,
+      });
+
+      fireEvent.change(within(dialog).getAllByLabelText(/Required capabilities/)[0]!, {
+        target: { value: "audio_input" },
+      });
+      expect(within(dialog).getByText("missing audio_input")).toBeInTheDocument();
+      expect(
+        within(dialog).getAllByRole("button", { name: "Save rung" })[0]!,
+      ).toBeDisabled();
     } finally {
       fetcher.restore();
     }
   });
 
-  it("selects an incompatible model normally instead of sending a rejected assignment update", async () => {
+  it("deletes and reorders assignment rungs from the assignment modal", async () => {
+    const twoRungGraph = {
+      ...graph,
+      assignments: [
+        graph.assignments[0],
+        graph.assignments[1],
+        {
+          ...graph.assignments[1],
+          id: "assign_chat_manager_fallback",
+          provider_model_id: "pm_fast",
+          priority: 1,
+        },
+      ],
+    };
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/graph": [
+        { body: twoRungGraph },
+        { body: twoRungGraph },
+        { body: twoRungGraph },
+        { body: twoRungGraph },
+      ],
+      "/admin/api/v1/llm/assignments/reorder": [{ body: twoRungGraph.assignments }],
+      "/admin/api/v1/llm/assignments/assign_chat_manager_fallback": [
+        { status: 204, body: null },
+      ],
+    });
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      fireEvent.click(chatManagerRung());
+      const dialog = assignmentDialog("chat.manager");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Move rung 1 up" }));
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url === "/admin/api/v1/llm/assignments/reorder" &&
+              call.init.method === "PATCH",
+          ),
+        ).toBe(true);
+      });
+      const reorder = fetcher.calls.find(
+        (call) =>
+          call.url === "/admin/api/v1/llm/assignments/reorder" &&
+          call.init.method === "PATCH",
+      );
+      expect(jsonBody(reorder!)).toEqual([
+        {
+          capability: "chat.manager",
+          ids_in_priority_order: [
+            "assign_chat_manager_fallback",
+            "assign_chat_manager",
+          ],
+        },
+      ]);
+
+      fireEvent.click(within(dialog).getAllByRole("button", { name: /Delete/ })[0]!);
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url ===
+                "/admin/api/v1/llm/assignments/assign_chat_manager_fallback" &&
+              call.init.method === "DELETE",
+          ),
+        ).toBe(true);
+      });
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("removes unsaved assignment rungs locally from the assignment modal", async () => {
     const fetcher = installPageFetch();
     try {
       render(<Harness />);
       await findOpenRouterProvider();
 
       fireEvent.click(chatManagerRung());
+      const dialog = assignmentDialog("chat.manager");
+      fireEvent.click(within(dialog).getByRole("button", { name: /Add rung/ }));
+      expect(within(dialog).getByText("New rung")).toBeInTheDocument();
 
-      const modelCard = screen.getByText("Text Only").closest("article");
-      if (!(modelCard instanceof HTMLElement)) throw new Error("model card not found");
-      fireEvent.click(modelButton("Text Only"));
-
+      fireEvent.click(within(dialog).getAllByRole("button", { name: /Delete/ }).at(-1)!);
+      expect(within(dialog).queryByText("New rung")).not.toBeInTheDocument();
       expect(
         fetcher.calls.some(
           (call) =>
-            call.url === "/admin/api/v1/llm/assignments/assign_chat_manager" &&
-            call.init.method === "PUT",
+            call.url.startsWith("/admin/api/v1/llm/assignments") &&
+            call.init.method !== "GET",
         ),
       ).toBe(false);
-      expect(modelCard).toHaveClass("is-active");
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("marks deployment-default assignment rows read-only in the modal", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      const defaultCard = screen
+        .getAllByText("default")
+        .find((el) => el.classList.contains("llm-graph-node__name"))
+        ?.closest("article");
+      if (!(defaultCard instanceof HTMLElement)) throw new Error("default card not found");
+      fireEvent.click(
+        within(defaultCard).getByRole("button", { name: /default capability/ }),
+      );
+
+      const dialog = assignmentDialog("default");
+      expect(
+        within(dialog).getByText(/Deployment-default rows are synthetic and read-only/),
+      ).toBeInTheDocument();
+      expect(within(dialog).getByRole("button", { name: "Save rung" })).toBeDisabled();
+      expect(
+        fetcher.calls.some(
+          (call) =>
+            call.url.startsWith("/admin/api/v1/llm/assignments/") &&
+            call.init.method !== "GET",
+        ),
+      ).toBe(false);
     } finally {
       fetcher.restore();
     }
@@ -771,7 +945,7 @@ describe("Admin LlmPage", () => {
     }
   });
 
-  it("changes and removes explicit capability inheritance from the assignment card", async () => {
+  it("creates, updates, and removes capability inheritance from the modal", async () => {
     const explicitGraph = {
       ...graph,
       inheritance: [
@@ -782,10 +956,21 @@ describe("Admin LlmPage", () => {
         },
       ],
     };
+    const updatedGraph = {
+      ...graph,
+      inheritance: [
+        {
+          capability: "voice.transcribe",
+          inherits_from: "default",
+          source: "explicit",
+        },
+      ],
+    };
     const fetcher = installPageFetch({
       "/admin/api/v1/llm/graph": [
         { body: graph },
         { body: explicitGraph },
+        { body: updatedGraph },
         { body: graph },
       ],
       "/admin/api/v1/llm/inheritance": [
@@ -797,17 +982,32 @@ describe("Admin LlmPage", () => {
           },
         },
       ],
-      "/admin/api/v1/llm/inheritance/voice.transcribe": [{ status: 204, body: null }],
+      "/admin/api/v1/llm/inheritance/voice.transcribe": [
+        {
+          body: {
+            capability: "voice.transcribe",
+            inherits_from: "default",
+            source: "explicit",
+          },
+        },
+        { status: 204, body: null },
+      ],
     });
     try {
       render(<Harness />);
       await findOpenRouterProvider();
       expect(screen.getByText("invalid implicit")).toBeInTheDocument();
 
-      fireEvent.change(
-        screen.getByLabelText("Change voice.transcribe inheritance parent"),
-        { target: { value: "chat.manager" } },
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: /voice.transcribe inherited capability/,
+        }),
       );
+      const dialog = assignmentDialog("voice.transcribe");
+      fireEvent.change(within(dialog).getByLabelText(/Parent capability/), {
+        target: { value: "chat.manager" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create inheritance" }));
 
       await waitFor(() => {
         expect(
@@ -827,20 +1027,39 @@ describe("Admin LlmPage", () => {
         capability: "voice.transcribe",
         inherits_from: "chat.manager",
       });
-      expect(await screen.findByText("invalid explicit")).toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+      fireEvent.change(within(dialog).getByLabelText(/Parent capability/), {
+        target: { value: "default" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Update inheritance" }));
 
       await waitFor(() => {
         expect(
           fetcher.calls.some(
             (call) =>
               call.url === "/admin/api/v1/llm/inheritance/voice.transcribe" &&
-              call.init.method === "DELETE",
+              call.init.method === "PUT",
           ),
         ).toBe(true);
       });
-      expect(await screen.findByText("invalid implicit")).toBeInTheDocument();
+      const put = fetcher.calls.find(
+        (call) =>
+          call.url === "/admin/api/v1/llm/inheritance/voice.transcribe" &&
+          call.init.method === "PUT",
+      );
+      expect(jsonBody(put!)).toEqual({ inherits_from: "default" });
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Remove inheritance" }));
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.filter(
+            (call) =>
+              call.url === "/admin/api/v1/llm/inheritance/voice.transcribe" &&
+              call.init.method === "DELETE",
+          ),
+        ).toHaveLength(1);
+      });
     } finally {
       fetcher.restore();
     }
