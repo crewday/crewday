@@ -2,7 +2,7 @@ import { Chip } from "@/components/common";
 import type { LlmModel } from "@/types";
 import LlmUsageTotals from "./LlmUsageTotals";
 import type { LlmIndexes } from "./lib/llmIndexes";
-import type { ElementRefSetter, NodeClass, Selection, SelectionSetter } from "./types";
+import type { ElementRefSetter, NodeClass, SelectionSetter } from "./types";
 
 const CAPABILITY_TAG_LABEL: Record<string, string> = {
   chat: "chat",
@@ -16,24 +16,26 @@ const CAPABILITY_TAG_LABEL: Record<string, string> = {
 
 interface ModelColumnProps {
   models: LlmModel[];
-  selection: Selection | null;
   setHover: SelectionSetter;
   setSelection: SelectionSetter;
   nodeClass: NodeClass;
   setModelRef: ElementRefSetter;
   onModelClick: (modelId: string) => boolean;
+  onEditModel: (modelId: string) => void;
+  onEditProviderModel: (providerModelId: string) => void;
   indexes: LlmIndexes;
 }
 
 export default function ModelColumn(props: ModelColumnProps) {
   const {
     models,
-    selection,
     setHover,
     setSelection,
     nodeClass,
     setModelRef,
     onModelClick,
+    onEditModel,
+    onEditProviderModel,
     indexes,
   } = props;
 
@@ -53,11 +55,8 @@ export default function ModelColumn(props: ModelColumnProps) {
               onBlur={() => setHover(null)}
               onClick={() => {
                 if (onModelClick(m.id)) return;
-                setSelection(
-                  selection?.column === "model" && selection.id === m.id
-                    ? null
-                    : { column: "model", id: m.id },
-                );
+                setSelection({ column: "model", id: m.id });
+                onEditModel(m.id);
               }}
               aria-label={`${m.display_name} model, ${m.calls_30d.toLocaleString()} calls in 30 days`}
             >
@@ -110,11 +109,8 @@ export default function ModelColumn(props: ModelColumnProps) {
                       onBlur={() => setHover(null)}
                       onClick={(event) => {
                         event.stopPropagation();
-                        setSelection(
-                          selection?.column === "providerModel" && selection.id === pm.id
-                            ? null
-                            : { column: "providerModel", id: pm.id },
-                        );
+                        setSelection({ column: "providerModel", id: pm.id });
+                        onEditProviderModel(pm.id);
                       }}
                       aria-label={`${provider?.name ?? "Unknown provider"} provider model for ${m.display_name}, ${pm.calls_30d.toLocaleString()} calls in 30 days`}
                     >

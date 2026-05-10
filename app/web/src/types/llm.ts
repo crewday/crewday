@@ -70,12 +70,15 @@ export interface LlmProviderModel {
   api_model_id: string;
   input_cost_per_million: number;
   output_cost_per_million: number;
+  fixed_cost_per_call_usd: number | null;
   max_tokens_override: number | null;
   temperature_override: number | null;
   supports_system_prompt: boolean;
   supports_temperature: boolean;
   reasoning_effort: LlmReasoningEffort;
+  extra_api_params: Record<string, unknown>;
   price_source_override: LlmPriceSourceOverride;
+  price_source_model_id_override: string | null;
   price_last_synced_at: string | null;
   is_enabled: boolean;
   spend_usd_30d: number;

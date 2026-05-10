@@ -1,0 +1,1102 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import FormField from "@/components/FormField";
+import { ApiError, fetchJson } from "@/lib/api";
+import { qk } from "@/lib/queryKeys";
+import type {
+  LlmModel,
+  LlmPriceSource,
+  LlmPriceSourceOverride,
+  LlmProvider,
+  LlmProviderModel,
+  LlmProviderType,
+  LlmReasoningEffort,
+} from "@/types";
+import type { LlmIndexes } from "./lib/llmIndexes";
+
+export type RegistryDialogState =
+  | { kind: "provider"; mode: "create" }
+  | { kind: "provider"; mode: "edit"; id: string }
+  | { kind: "model"; mode: "create" }
+  | { kind: "model"; mode: "edit"; id: string }
+  | { kind: "providerModel"; mode: "create" }
+  | { kind: "providerModel"; mode: "edit"; id: string };
+
+interface RegistryModalsProps {
+  dialog: RegistryDialogState | null;
+  providers: LlmProvider[];
+  models: LlmModel[];
+  providerModels: LlmProviderModel[];
+  indexes: LlmIndexes;
+  onClose: () => void;
+}
+
+interface ProviderPayload {
+  name: string;
+  provider_type: LlmProviderType;
+  api_endpoint: string | null;
+  api_key_envelope_ref: string | null;
+  default_model: string | null;
+  timeout_s: number;
+  requests_per_minute: number;
+  priority: number;
+  is_enabled: boolean;
+}
+
+interface ModelPayload {
+  canonical_name: string;
+  display_name: string;
+  vendor: string;
+  capabilities: string[];
+  context_window: number | null;
+  max_output_tokens: number | null;
+  price_source: LlmPriceSource;
+  price_source_model_id: string | null;
+  is_active: boolean;
+  notes: string | null;
+}
+
+interface ProviderModelPayload {
+  provider_id: string;
+  model_id: string;
+  api_model_id: string;
+  input_cost_per_million: number;
+  output_cost_per_million: number;
+  fixed_cost_per_call_usd: number | null;
+  max_tokens_override: number | null;
+  temperature_override: number | null;
+  supports_system_prompt: boolean;
+  supports_temperature: boolean;
+  reasoning_effort: LlmReasoningEffort;
+  extra_api_params: Record<string, unknown>;
+  price_source_override: LlmPriceSourceOverride;
+  price_source_model_id_override: string | null;
+  is_enabled: boolean;
+}
+
+const CAPABILITY_TAGS = [
+  "chat",
+  "vision",
+  "audio_input",
+  "reasoning",
+  "function_calling",
+  "json_mode",
+  "streaming",
+  "embeddings",
+] as const;
+
+function emptyToNull(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function numberOrNull(value: string): number | null {
+  if (value.trim() === "") return null;
+  return Number(value);
+}
+
+function optionalNonNegativeNumber(
+  value: string,
+  label: string,
+): { ok: true; value: number | null } | { ok: false; error: string } {
+  const parsed = numberOrNull(value);
+  if (parsed !== null && (!Number.isFinite(parsed) || parsed < 0)) {
+    return { ok: false, error: `${label} must be zero or more.` };
+  }
+  return { ok: true, value: parsed };
+}
+
+function errorCode(error: unknown): string | null {
+  if (error instanceof ApiError && typeof error.problem?.error === "string") {
+    return error.problem.error;
+  }
+  return null;
+}
+
+function apiErrorCopy(error: unknown, fallback: string): string {
+  const code = errorCode(error);
+  if (code === "provider_in_use") {
+    return "This provider is still attached to provider-model rows. Delete or move those joins first.";
+  }
+  if (code === "model_in_use") {
+    return "This model is still attached to provider-model rows. Delete or move those joins first.";
+  }
+  if (code === "provider_model_in_use") {
+    return "This provider-model is assigned to one or more capabilities. Move those assignments first.";
+  }
+  if (error instanceof ApiError) {
+    return error.detail ?? error.title ?? error.message ?? fallback;
+  }
+  return error instanceof Error ? error.message : fallback;
+}
+
+function describedBy(...ids: (string | undefined)[]): string | undefined {
+  const present = ids.filter((id): id is string => id !== undefined);
+  return present.length ? present.join(" ") : undefined;
+}
+
+export default function LlmRegistryModals({
+  dialog,
+  providers,
+  models,
+  providerModels,
+  indexes,
+  onClose,
+}: RegistryModalsProps) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const element = dialogRef.current;
+    if (dialog && element && !element.open) element.showModal();
+    if (!dialog && element?.open) element.close();
+  }, [dialog]);
+
+  const titleId = dialog ? `llm-${dialog.kind}-${dialog.mode}-title` : undefined;
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="modal modal--sheet llm-registry-dialog"
+      aria-labelledby={titleId}
+      onClose={onClose}
+    >
+      {dialog?.kind === "provider" ? (
+        <ProviderForm
+          mode={dialog.mode}
+          provider={
+            dialog.mode === "edit" ? indexes.providersById.get(dialog.id) : undefined
+          }
+          providerModels={providerModels}
+          models={models}
+          titleId={titleId}
+          onClose={onClose}
+        />
+      ) : null}
+      {dialog?.kind === "model" ? (
+        <ModelForm
+          mode={dialog.mode}
+          model={dialog.mode === "edit" ? indexes.modelsById.get(dialog.id) : undefined}
+          titleId={titleId}
+          onClose={onClose}
+        />
+      ) : null}
+      {dialog?.kind === "providerModel" ? (
+        <ProviderModelForm
+          mode={dialog.mode}
+          providerModel={
+            dialog.mode === "edit" ? indexes.pmById.get(dialog.id) : undefined
+          }
+          providers={providers}
+          models={models}
+          titleId={titleId}
+          onClose={onClose}
+        />
+      ) : null}
+    </dialog>
+  );
+}
+
+function ProviderForm({
+  mode,
+  provider,
+  providerModels,
+  models,
+  titleId,
+  onClose,
+}: {
+  mode: "create" | "edit";
+  provider?: LlmProvider;
+  providerModels: LlmProviderModel[];
+  models: LlmModel[];
+  titleId?: string;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [name, setName] = useState(provider?.name ?? "");
+  const [providerType, setProviderType] = useState<LlmProviderType>(
+    provider?.provider_type ?? "openrouter",
+  );
+  const [apiEndpoint, setApiEndpoint] = useState(provider?.endpoint ?? "");
+  const [apiKeyRef, setApiKeyRef] = useState(provider?.api_key_ref ?? "");
+  const [defaultModel, setDefaultModel] = useState(provider?.default_model ?? "");
+  const [timeout, setTimeoutValue] = useState(String(provider?.timeout_s ?? 60));
+  const [rpm, setRpm] = useState(String(provider?.requests_per_minute ?? 60));
+  const [priority, setPriority] = useState(String(provider?.priority ?? 0));
+  const [enabled, setEnabled] = useState(provider?.is_enabled ?? true);
+  const [clientErr, setClientErr] = useState<string | null>(null);
+  const [serverErr, setServerErr] = useState<string | null>(null);
+
+  const defaultModelOptions = useMemo(() => {
+    if (!provider) return [];
+    return providerModels
+      .filter((pm) => pm.provider_id === provider.id)
+      .map((pm) => ({
+        id: pm.id,
+        label:
+          models.find((model) => model.id === pm.model_id)?.display_name ??
+          pm.api_model_id,
+      }));
+  }, [models, provider, providerModels]);
+
+  const invalidate = async () => {
+    await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
+  };
+  const save = useMutation({
+    mutationFn: (body: ProviderPayload) =>
+      fetchJson<LlmProvider>(
+        mode === "create"
+          ? "/admin/api/v1/llm/providers"
+          : `/admin/api/v1/llm/providers/${provider?.id}`,
+        { method: mode === "create" ? "POST" : "PUT", body },
+      ),
+    onSuccess: async () => {
+      await invalidate();
+      onClose();
+    },
+    onError: (error: Error) => setServerErr(apiErrorCopy(error, "Provider save failed.")),
+  });
+  const remove = useMutation({
+    mutationFn: () =>
+      fetchJson(`/admin/api/v1/llm/providers/${provider?.id}`, {
+        method: "DELETE",
+      }),
+    onSuccess: async () => {
+      await invalidate();
+      onClose();
+    },
+    onError: (error: Error) =>
+      setServerErr(apiErrorCopy(error, "Provider delete failed.")),
+  });
+
+  const err = clientErr ?? serverErr;
+  const errId = err ? "llm-provider-error" : undefined;
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const timeoutValue = Number(timeout);
+    const rpmValue = Number(rpm);
+    const priorityValue = Number(priority);
+    if (!name.trim()) return setClientErr("Name is required.");
+    if (providerType === "openai_compatible" && !apiEndpoint.trim()) {
+      return setClientErr("OpenAI-compatible providers need an API endpoint.");
+    }
+    if (!Number.isInteger(timeoutValue) || timeoutValue < 1) {
+      return setClientErr("Timeout must be at least 1 second.");
+    }
+    if (!Number.isInteger(rpmValue) || rpmValue < 1) {
+      return setClientErr("Requests per minute must be at least 1.");
+    }
+    if (!Number.isInteger(priorityValue) || priorityValue < 0) {
+      return setClientErr("Priority must be zero or more.");
+    }
+    setClientErr(null);
+    setServerErr(null);
+    save.mutate({
+      name: name.trim(),
+      provider_type: providerType,
+      api_endpoint: emptyToNull(apiEndpoint),
+      api_key_envelope_ref: emptyToNull(apiKeyRef),
+      default_model: emptyToNull(defaultModel),
+      timeout_s: timeoutValue,
+      requests_per_minute: rpmValue,
+      priority: priorityValue,
+      is_enabled: enabled,
+    });
+  }
+
+  return (
+    <form className="llm-registry-form" onSubmit={submit} noValidate>
+      <header className="llm-registry-form__head">
+        <div>
+          <p className="llm-registry-form__eyebrow">
+            {mode === "create" ? "New provider" : "Edit provider"}
+          </p>
+          <h3 id={titleId} className="llm-registry-form__title">
+            {mode === "create" ? "Create provider" : provider?.name}
+          </h3>
+        </div>
+        <button
+          type="button"
+          className="llm-registry-form__close"
+          onClick={onClose}
+          aria-label="Close"
+        >
+          ×
+        </button>
+      </header>
+      <div className="llm-registry-form__body">
+        <FormField label="Name" requirement="required" className="llm-registry-form__field">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            aria-invalid={clientErr === "Name is required."}
+            aria-describedby={errId}
+          />
+        </FormField>
+        <div className="llm-registry-form__grid">
+          <FormField label="Type" requirement="required" className="llm-registry-form__field">
+            <select
+              value={providerType}
+              onChange={(e) => setProviderType(e.target.value as LlmProviderType)}
+              required
+            >
+              <option value="openrouter">OpenRouter</option>
+              <option value="openai_compatible">OpenAI compatible</option>
+              <option value="fake">Fake</option>
+            </select>
+          </FormField>
+          <FormField label="Enabled" requirement="required" className="llm-registry-form__field">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+            />
+          </FormField>
+        </div>
+        <FormField label="API endpoint" requirement="optional" className="llm-registry-form__field">
+          <input
+            value={apiEndpoint}
+            onChange={(e) => setApiEndpoint(e.target.value)}
+            aria-invalid={
+              clientErr === "OpenAI-compatible providers need an API endpoint."
+            }
+            aria-describedby={errId}
+          />
+        </FormField>
+        <FormField label="API key envelope ref" requirement="optional" className="llm-registry-form__field">
+          <input value={apiKeyRef} onChange={(e) => setApiKeyRef(e.target.value)} />
+        </FormField>
+        <FormField label="Default provider-model" requirement="optional" className="llm-registry-form__field">
+          <select
+            value={defaultModel}
+            onChange={(e) => setDefaultModel(e.target.value)}
+            disabled={defaultModelOptions.length === 0}
+          >
+            <option value="">None</option>
+            {defaultModelOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </FormField>
+        <div className="llm-registry-form__grid">
+          <FormField label="Timeout seconds" requirement="required" className="llm-registry-form__field">
+            <input
+              type="number"
+              min="1"
+              value={timeout}
+              onChange={(e) => setTimeoutValue(e.target.value)}
+              required
+              aria-invalid={clientErr === "Timeout must be at least 1 second."}
+              aria-describedby={errId}
+            />
+          </FormField>
+          <FormField label="Requests per minute" requirement="required" className="llm-registry-form__field">
+            <input
+              type="number"
+              min="1"
+              value={rpm}
+              onChange={(e) => setRpm(e.target.value)}
+              required
+              aria-invalid={clientErr === "Requests per minute must be at least 1."}
+              aria-describedby={errId}
+            />
+          </FormField>
+        </div>
+        <FormField label="Priority" requirement="required" className="llm-registry-form__field">
+          <input
+            type="number"
+            min="0"
+            value={priority}
+            onChange={(e) => setPriority(e.target.value)}
+            required
+            aria-invalid={clientErr === "Priority must be zero or more."}
+            aria-describedby={errId}
+          />
+        </FormField>
+        {err ? (
+          <p id="llm-provider-error" className="form-error" role="alert">
+            {err}
+          </p>
+        ) : null}
+      </div>
+      <footer className="llm-registry-form__footer">
+        {mode === "edit" ? (
+          <button
+            type="button"
+            className="btn btn--rust"
+            onClick={() => remove.mutate()}
+            disabled={remove.isPending || save.isPending}
+          >
+            {remove.isPending ? "Deleting…" : "Delete provider"}
+          </button>
+        ) : null}
+        <button type="button" className="btn btn--ghost" onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          type="submit"
+          className="btn btn--moss"
+          disabled={save.isPending || remove.isPending}
+        >
+          {save.isPending ? "Saving…" : mode === "create" ? "Create provider" : "Save provider"}
+        </button>
+      </footer>
+    </form>
+  );
+}
+
+function ModelForm({
+  mode,
+  model,
+  titleId,
+  onClose,
+}: {
+  mode: "create" | "edit";
+  model?: LlmModel;
+  titleId?: string;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [canonicalName, setCanonicalName] = useState(model?.canonical_name ?? "");
+  const [displayName, setDisplayName] = useState(model?.display_name ?? "");
+  const [vendor, setVendor] = useState(model?.vendor ?? "");
+  const [capabilities, setCapabilities] = useState<string[]>(model?.capabilities ?? []);
+  const [contextWindow, setContextWindow] = useState(
+    model?.context_window === null || model?.context_window === undefined
+      ? ""
+      : String(model.context_window),
+  );
+  const [maxOutput, setMaxOutput] = useState(
+    model?.max_output_tokens === null || model?.max_output_tokens === undefined
+      ? ""
+      : String(model.max_output_tokens),
+  );
+  const [priceSource, setPriceSource] = useState<LlmPriceSource>(
+    model?.price_source ?? "",
+  );
+  const [priceSourceModel, setPriceSourceModel] = useState(
+    model?.price_source_model_id ?? "",
+  );
+  const [active, setActive] = useState(model?.is_active ?? true);
+  const [notes, setNotes] = useState(model?.notes ?? "");
+  const [clientErr, setClientErr] = useState<string | null>(null);
+  const [serverErr, setServerErr] = useState<string | null>(null);
+
+  const invalidate = async () => {
+    await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
+  };
+  const save = useMutation({
+    mutationFn: (body: ModelPayload) =>
+      fetchJson<LlmModel>(
+        mode === "create"
+          ? "/admin/api/v1/llm/models"
+          : `/admin/api/v1/llm/models/${model?.id}`,
+        { method: mode === "create" ? "POST" : "PUT", body },
+      ),
+    onSuccess: async () => {
+      await invalidate();
+      onClose();
+    },
+    onError: (error: Error) => setServerErr(apiErrorCopy(error, "Model save failed.")),
+  });
+  const remove = useMutation({
+    mutationFn: () =>
+      fetchJson(`/admin/api/v1/llm/models/${model?.id}`, { method: "DELETE" }),
+    onSuccess: async () => {
+      await invalidate();
+      onClose();
+    },
+    onError: (error: Error) => setServerErr(apiErrorCopy(error, "Model delete failed.")),
+  });
+  const err = clientErr ?? serverErr;
+  const errId = err ? "llm-model-error" : undefined;
+
+  function toggleCapability(tag: string) {
+    setCapabilities((current) =>
+      current.includes(tag)
+        ? current.filter((value) => value !== tag)
+        : [...current, tag],
+    );
+  }
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const contextValue = numberOrNull(contextWindow);
+    const outputValue = numberOrNull(maxOutput);
+    if (!canonicalName.trim()) return setClientErr("Canonical name is required.");
+    if (!displayName.trim()) return setClientErr("Display name is required.");
+    if (!vendor.trim()) return setClientErr("Vendor is required.");
+    if (contextValue !== null && (!Number.isInteger(contextValue) || contextValue < 1)) {
+      return setClientErr("Context window must be a positive whole number.");
+    }
+    if (outputValue !== null && (!Number.isInteger(outputValue) || outputValue < 1)) {
+      return setClientErr("Max output tokens must be a positive whole number.");
+    }
+    setClientErr(null);
+    setServerErr(null);
+    save.mutate({
+      canonical_name: canonicalName.trim(),
+      display_name: displayName.trim(),
+      vendor: vendor.trim(),
+      capabilities,
+      context_window: contextValue,
+      max_output_tokens: outputValue,
+      price_source: priceSource,
+      price_source_model_id: emptyToNull(priceSourceModel),
+      is_active: active,
+      notes: emptyToNull(notes),
+    });
+  }
+
+  return (
+    <form className="llm-registry-form" onSubmit={submit} noValidate>
+      <header className="llm-registry-form__head">
+        <div>
+          <p className="llm-registry-form__eyebrow">
+            {mode === "create" ? "New model" : "Edit model"}
+          </p>
+          <h3 id={titleId} className="llm-registry-form__title">
+            {mode === "create" ? "Create model" : model?.display_name}
+          </h3>
+        </div>
+        <button
+          type="button"
+          className="llm-registry-form__close"
+          onClick={onClose}
+          aria-label="Close"
+        >
+          ×
+        </button>
+      </header>
+      <div className="llm-registry-form__body">
+        <FormField label="Canonical name" requirement="required" className="llm-registry-form__field">
+          <input
+            value={canonicalName}
+            onChange={(e) => setCanonicalName(e.target.value)}
+            required
+            aria-invalid={clientErr === "Canonical name is required."}
+            aria-describedby={errId}
+          />
+        </FormField>
+        <div className="llm-registry-form__grid">
+          <FormField label="Display name" requirement="required" className="llm-registry-form__field">
+            <input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              required
+              aria-invalid={clientErr === "Display name is required."}
+              aria-describedby={errId}
+            />
+          </FormField>
+          <FormField label="Vendor" requirement="required" className="llm-registry-form__field">
+            <input
+              value={vendor}
+              onChange={(e) => setVendor(e.target.value)}
+              required
+              aria-invalid={clientErr === "Vendor is required."}
+              aria-describedby={errId}
+            />
+          </FormField>
+        </div>
+        <fieldset className="llm-registry-form__fieldset">
+          <legend>Capabilities</legend>
+          <div className="llm-registry-form__checks">
+            {CAPABILITY_TAGS.map((tag) => (
+              <label key={tag} className="llm-registry-form__check">
+                <input
+                  type="checkbox"
+                  checked={capabilities.includes(tag)}
+                  onChange={() => toggleCapability(tag)}
+                />
+                <span>{tag}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <div className="llm-registry-form__grid">
+          <FormField label="Context window" requirement="optional" className="llm-registry-form__field">
+            <input
+              type="number"
+              min="1"
+              value={contextWindow}
+              onChange={(e) => setContextWindow(e.target.value)}
+              aria-invalid={clientErr === "Context window must be a positive whole number."}
+              aria-describedby={errId}
+            />
+          </FormField>
+          <FormField label="Max output tokens" requirement="optional" className="llm-registry-form__field">
+            <input
+              type="number"
+              min="1"
+              value={maxOutput}
+              onChange={(e) => setMaxOutput(e.target.value)}
+              aria-invalid={clientErr === "Max output tokens must be a positive whole number."}
+              aria-describedby={errId}
+            />
+          </FormField>
+        </div>
+        <div className="llm-registry-form__grid">
+          <FormField label="Price source" requirement="required" className="llm-registry-form__field">
+            <select
+              value={priceSource}
+              onChange={(e) => setPriceSource(e.target.value as LlmPriceSource)}
+            >
+              <option value="">None</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="manual">Manual</option>
+            </select>
+          </FormField>
+          <FormField label="Price source model id" requirement="optional" className="llm-registry-form__field">
+            <input
+              value={priceSourceModel}
+              onChange={(e) => setPriceSourceModel(e.target.value)}
+            />
+          </FormField>
+        </div>
+        <FormField label="Active" requirement="required" className="llm-registry-form__field">
+          <input
+            type="checkbox"
+            checked={active}
+            onChange={(e) => setActive(e.target.checked)}
+          />
+        </FormField>
+        <FormField label="Notes" requirement="optional" className="llm-registry-form__field">
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+        </FormField>
+        {err ? (
+          <p id="llm-model-error" className="form-error" role="alert">
+            {err}
+          </p>
+        ) : null}
+      </div>
+      <footer className="llm-registry-form__footer">
+        {mode === "edit" ? (
+          <button
+            type="button"
+            className="btn btn--rust"
+            onClick={() => remove.mutate()}
+            disabled={remove.isPending || save.isPending}
+          >
+            {remove.isPending ? "Deleting…" : "Delete model"}
+          </button>
+        ) : null}
+        <button type="button" className="btn btn--ghost" onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          type="submit"
+          className="btn btn--moss"
+          disabled={save.isPending || remove.isPending}
+        >
+          {save.isPending ? "Saving…" : mode === "create" ? "Create model" : "Save model"}
+        </button>
+      </footer>
+    </form>
+  );
+}
+
+function ProviderModelForm({
+  mode,
+  providerModel,
+  providers,
+  models,
+  titleId,
+  onClose,
+}: {
+  mode: "create" | "edit";
+  providerModel?: LlmProviderModel;
+  providers: LlmProvider[];
+  models: LlmModel[];
+  titleId?: string;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [providerId, setProviderId] = useState(
+    providerModel?.provider_id ?? providers[0]?.id ?? "",
+  );
+  const [modelId, setModelId] = useState(providerModel?.model_id ?? models[0]?.id ?? "");
+  const [apiModelId, setApiModelId] = useState(providerModel?.api_model_id ?? "");
+  const [inputCost, setInputCost] = useState(
+    String(providerModel?.input_cost_per_million ?? 0),
+  );
+  const [outputCost, setOutputCost] = useState(
+    String(providerModel?.output_cost_per_million ?? 0),
+  );
+  const [fixedCost, setFixedCost] = useState(
+    providerModel?.fixed_cost_per_call_usd == null
+      ? ""
+      : String(providerModel.fixed_cost_per_call_usd),
+  );
+  const [maxTokens, setMaxTokens] = useState(
+    providerModel?.max_tokens_override == null
+      ? ""
+      : String(providerModel.max_tokens_override),
+  );
+  const [temperature, setTemperature] = useState(
+    providerModel?.temperature_override == null
+      ? ""
+      : String(providerModel.temperature_override),
+  );
+  const [supportsSystemPrompt, setSupportsSystemPrompt] = useState(
+    providerModel?.supports_system_prompt ?? true,
+  );
+  const [supportsTemperature, setSupportsTemperature] = useState(
+    providerModel?.supports_temperature ?? true,
+  );
+  const [reasoningEffort, setReasoningEffort] = useState<LlmReasoningEffort>(
+    providerModel?.reasoning_effort ?? "",
+  );
+  const [priceSourceOverride, setPriceSourceOverride] =
+    useState<LlmPriceSourceOverride>(providerModel?.price_source_override ?? "");
+  const [priceSourceModelOverride, setPriceSourceModelOverride] = useState(
+    providerModel?.price_source_model_id_override ?? "",
+  );
+  const [extraApiParams, setExtraApiParams] = useState(
+    JSON.stringify(providerModel?.extra_api_params ?? {}, null, 2),
+  );
+  const [enabled, setEnabled] = useState(providerModel?.is_enabled ?? true);
+  const [clientErr, setClientErr] = useState<string | null>(null);
+  const [serverErr, setServerErr] = useState<string | null>(null);
+
+  const invalidate = async () => {
+    await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
+  };
+  const save = useMutation({
+    mutationFn: (body: ProviderModelPayload) =>
+      fetchJson<LlmProviderModel>(
+        mode === "create"
+          ? "/admin/api/v1/llm/provider-models"
+          : `/admin/api/v1/llm/provider-models/${providerModel?.id}`,
+        { method: mode === "create" ? "POST" : "PUT", body },
+      ),
+    onSuccess: async () => {
+      await invalidate();
+      onClose();
+    },
+    onError: (error: Error) =>
+      setServerErr(apiErrorCopy(error, "Provider-model save failed.")),
+  });
+  const remove = useMutation({
+    mutationFn: () =>
+      fetchJson(`/admin/api/v1/llm/provider-models/${providerModel?.id}`, {
+        method: "DELETE",
+      }),
+    onSuccess: async () => {
+      await invalidate();
+      onClose();
+    },
+    onError: (error: Error) =>
+      setServerErr(apiErrorCopy(error, "Provider-model delete failed.")),
+  });
+  const err = clientErr ?? serverErr;
+  const errId = err ? "llm-provider-model-error" : undefined;
+  const extraHelpId = "llm-provider-model-extra-help";
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!providerId) return setClientErr("Provider is required.");
+    if (!modelId) return setClientErr("Model is required.");
+    if (!apiModelId.trim()) return setClientErr("API model id is required.");
+    if (inputCost.trim() === "") return setClientErr("Input cost is required.");
+    if (outputCost.trim() === "") return setClientErr("Output cost is required.");
+    const inputParsed = optionalNonNegativeNumber(inputCost, "Input cost");
+    if (!inputParsed.ok) return setClientErr(inputParsed.error);
+    if (inputParsed.value === null) return setClientErr("Input cost is required.");
+    const outputParsed = optionalNonNegativeNumber(outputCost, "Output cost");
+    if (!outputParsed.ok) return setClientErr(outputParsed.error);
+    if (outputParsed.value === null) return setClientErr("Output cost is required.");
+    const fixedParsed = optionalNonNegativeNumber(fixedCost, "Fixed cost");
+    if (!fixedParsed.ok) return setClientErr(fixedParsed.error);
+    const maxTokensValue = numberOrNull(maxTokens);
+    const temperatureValue = numberOrNull(temperature);
+    if (maxTokensValue !== null && (!Number.isInteger(maxTokensValue) || maxTokensValue < 1)) {
+      return setClientErr("Max tokens override must be a positive whole number.");
+    }
+    if (
+      temperatureValue !== null &&
+      (!Number.isFinite(temperatureValue) || temperatureValue < 0 || temperatureValue > 2)
+    ) {
+      return setClientErr("Temperature override must be between 0 and 2.");
+    }
+
+    let parsedExtra: Record<string, unknown>;
+    try {
+      const parsed: unknown = extraApiParams.trim() ? JSON.parse(extraApiParams) : {};
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        return setClientErr("Extra API params must be a JSON object.");
+      }
+      parsedExtra = parsed as Record<string, unknown>;
+    } catch {
+      return setClientErr("Extra API params must be valid JSON.");
+    }
+
+    setClientErr(null);
+    setServerErr(null);
+    save.mutate({
+      provider_id: providerId,
+      model_id: modelId,
+      api_model_id: apiModelId.trim(),
+      input_cost_per_million: inputParsed.value,
+      output_cost_per_million: outputParsed.value,
+      fixed_cost_per_call_usd: fixedParsed.value,
+      max_tokens_override: maxTokensValue,
+      temperature_override: temperatureValue,
+      supports_system_prompt: supportsSystemPrompt,
+      supports_temperature: supportsTemperature,
+      reasoning_effort: reasoningEffort,
+      extra_api_params: parsedExtra,
+      price_source_override: priceSourceOverride,
+      price_source_model_id_override: emptyToNull(priceSourceModelOverride),
+      is_enabled: enabled,
+    });
+  }
+
+  return (
+    <form className="llm-registry-form" onSubmit={submit} noValidate>
+      <header className="llm-registry-form__head">
+        <div>
+          <p className="llm-registry-form__eyebrow">
+            {mode === "create" ? "New provider-model" : "Edit provider-model"}
+          </p>
+          <h3 id={titleId} className="llm-registry-form__title">
+            {mode === "create" ? "Create provider-model" : providerModel?.api_model_id}
+          </h3>
+        </div>
+        <button
+          type="button"
+          className="llm-registry-form__close"
+          onClick={onClose}
+          aria-label="Close"
+        >
+          ×
+        </button>
+      </header>
+      <div className="llm-registry-form__body">
+        <div className="llm-registry-form__grid">
+          <FormField label="Provider" requirement="required" className="llm-registry-form__field">
+            <select
+              value={providerId}
+              onChange={(e) => setProviderId(e.target.value)}
+              required
+              aria-invalid={clientErr === "Provider is required."}
+              aria-describedby={errId}
+            >
+              {providers.map((provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.name}
+                </option>
+              ))}
+            </select>
+          </FormField>
+          <FormField label="Model" requirement="required" className="llm-registry-form__field">
+            <select
+              value={modelId}
+              onChange={(e) => setModelId(e.target.value)}
+              required
+              aria-invalid={clientErr === "Model is required."}
+              aria-describedby={errId}
+            >
+              {models.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.display_name}
+                </option>
+              ))}
+            </select>
+          </FormField>
+        </div>
+        <FormField label="API model id" requirement="required" className="llm-registry-form__field">
+          <input
+            value={apiModelId}
+            onChange={(e) => setApiModelId(e.target.value)}
+            required
+            aria-invalid={clientErr === "API model id is required."}
+            aria-describedby={errId}
+          />
+        </FormField>
+        <div className="llm-registry-form__grid">
+          <FormField label="Input cost per 1M" requirement="required" className="llm-registry-form__field">
+            <input
+              type="number"
+              min="0"
+              step="0.0001"
+              value={inputCost}
+              onChange={(e) => setInputCost(e.target.value)}
+              required
+              aria-invalid={
+                clientErr === "Input cost is required." ||
+                clientErr === "Input cost must be zero or more."
+              }
+              aria-describedby={errId}
+            />
+          </FormField>
+          <FormField label="Output cost per 1M" requirement="required" className="llm-registry-form__field">
+            <input
+              type="number"
+              min="0"
+              step="0.0001"
+              value={outputCost}
+              onChange={(e) => setOutputCost(e.target.value)}
+              required
+              aria-invalid={
+                clientErr === "Output cost is required." ||
+                clientErr === "Output cost must be zero or more."
+              }
+              aria-describedby={errId}
+            />
+          </FormField>
+        </div>
+        <div className="llm-registry-form__grid">
+          <FormField label="Fixed cost per call" requirement="optional" className="llm-registry-form__field">
+            <input
+              type="number"
+              min="0"
+              step="0.0001"
+              value={fixedCost}
+              onChange={(e) => setFixedCost(e.target.value)}
+              aria-invalid={clientErr === "Fixed cost must be zero or more."}
+              aria-describedby={errId}
+            />
+          </FormField>
+          <FormField label="Reasoning effort" requirement="optional" className="llm-registry-form__field">
+            <select
+              value={reasoningEffort}
+              onChange={(e) => setReasoningEffort(e.target.value as LlmReasoningEffort)}
+            >
+              <option value="">Provider default</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </FormField>
+        </div>
+        <div className="llm-registry-form__grid">
+          <FormField label="Max tokens override" requirement="optional" className="llm-registry-form__field">
+            <input
+              type="number"
+              min="1"
+              value={maxTokens}
+              onChange={(e) => setMaxTokens(e.target.value)}
+              aria-invalid={clientErr === "Max tokens override must be a positive whole number."}
+              aria-describedby={errId}
+            />
+          </FormField>
+          <FormField label="Temperature override" requirement="optional" className="llm-registry-form__field">
+            <input
+              type="number"
+              min="0"
+              max="2"
+              step="0.1"
+              value={temperature}
+              onChange={(e) => setTemperature(e.target.value)}
+              aria-invalid={clientErr === "Temperature override must be between 0 and 2."}
+              aria-describedby={errId}
+            />
+          </FormField>
+        </div>
+        <div className="llm-registry-form__grid">
+          <FormField label="Price source override" requirement="optional" className="llm-registry-form__field">
+            <select
+              value={priceSourceOverride}
+              onChange={(e) =>
+                setPriceSourceOverride(e.target.value as LlmPriceSourceOverride)
+              }
+            >
+              <option value="">Use model default</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="none">Manual / pinned</option>
+            </select>
+          </FormField>
+          <FormField label="Price source model override" requirement="optional" className="llm-registry-form__field">
+            <input
+              value={priceSourceModelOverride}
+              onChange={(e) => setPriceSourceModelOverride(e.target.value)}
+            />
+          </FormField>
+        </div>
+        <fieldset className="llm-registry-form__fieldset">
+          <legend>Provider support overrides</legend>
+          <div className="llm-registry-form__checks">
+            <label className="llm-registry-form__check">
+              <input
+                type="checkbox"
+                checked={supportsSystemPrompt}
+                onChange={(e) => setSupportsSystemPrompt(e.target.checked)}
+              />
+              <span>System prompt</span>
+            </label>
+            <label className="llm-registry-form__check">
+              <input
+                type="checkbox"
+                checked={supportsTemperature}
+                onChange={(e) => setSupportsTemperature(e.target.checked)}
+              />
+              <span>Temperature</span>
+            </label>
+            <label className="llm-registry-form__check">
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={(e) => setEnabled(e.target.checked)}
+              />
+              <span>Enabled</span>
+            </label>
+          </div>
+        </fieldset>
+        <FormField
+          label="Extra API params"
+          requirement="optional"
+          className="llm-registry-form__field"
+          helpId={extraHelpId}
+          helpText="JSON object merged into provider requests for this row."
+        >
+          <textarea
+            className="mono"
+            value={extraApiParams}
+            onChange={(e) => setExtraApiParams(e.target.value)}
+            rows={4}
+            aria-invalid={
+              clientErr === "Extra API params must be valid JSON." ||
+              clientErr === "Extra API params must be a JSON object."
+            }
+            aria-describedby={describedBy(extraHelpId, errId)}
+          />
+        </FormField>
+        {err ? (
+          <p id="llm-provider-model-error" className="form-error" role="alert">
+            {err}
+          </p>
+        ) : null}
+      </div>
+      <footer className="llm-registry-form__footer">
+        {mode === "edit" ? (
+          <button
+            type="button"
+            className="btn btn--rust"
+            onClick={() => remove.mutate()}
+            disabled={remove.isPending || save.isPending}
+          >
+            {remove.isPending ? "Deleting…" : "Delete provider-model"}
+          </button>
+        ) : null}
+        <button type="button" className="btn btn--ghost" onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          type="submit"
+          className="btn btn--moss"
+          disabled={save.isPending || remove.isPending}
+        >
+          {save.isPending
+            ? "Saving…"
+            : mode === "create"
+              ? "Create provider-model"
+              : "Save provider-model"}
+        </button>
+      </footer>
+    </form>
+  );
+}

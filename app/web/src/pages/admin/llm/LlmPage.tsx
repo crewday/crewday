@@ -14,6 +14,7 @@ import type {
 } from "@/types";
 import AssignmentColumn from "./AssignmentColumn";
 import LlmAlerts from "./LlmAlerts";
+import LlmRegistryModals from "./LlmRegistryModals";
 import LlmStats from "./LlmStats";
 import ModelColumn from "./ModelColumn";
 import PromptLibraryDrawer from "./PromptLibraryDrawer";
@@ -24,6 +25,7 @@ import { buildHighlighted, emptyHighlighted } from "./lib/highlight";
 import { buildLlmIndexes } from "./lib/llmIndexes";
 import { useLlmGraphEdges } from "./useLlmGraphEdges";
 import type { Column, EdgeLayout, Selection } from "./types";
+import type { RegistryDialogState } from "./LlmRegistryModals";
 
 const sub =
   "Deployment-wide LLM graph/config: providers, models, provider-model pricing, capability assignment chains, and the prompt library. Shared by every workspace.";
@@ -46,6 +48,9 @@ export default function AdminLlmPage() {
 
   const [selection, setSelection] = useState<Selection | null>(null);
   const [hover, setHover] = useState<Selection | null>(null);
+  const [registryDialog, setRegistryDialog] = useState<RegistryDialogState | null>(
+    null,
+  );
   const [promptsOpen, setPromptsOpen] = useState(false);
   useCloseOnEscape(() => setPromptsOpen(false), promptsOpen);
 
@@ -188,7 +193,15 @@ export default function AdminLlmPage() {
     return true;
   };
 
-  const actions = <button className="btn btn--moss">+ Provider</button>;
+  const actions = (
+    <button
+      type="button"
+      className="btn btn--moss"
+      onClick={() => setRegistryDialog({ kind: "provider", mode: "create" })}
+    >
+      + New provider
+    </button>
+  );
   const overflow = [
     {
       label: "Prompts",
@@ -250,34 +263,68 @@ export default function AdminLlmPage() {
         </svg>
 
         <div className="llm-graph__col-header llm-graph__col-header--providers">
-          <span className="llm-graph__col-title">Providers</span>
-          <span className="llm-graph__col-count">{graph.providers.length}</span>
+          <div className="llm-graph__col-heading">
+            <span className="llm-graph__col-title">Providers</span>
+            <span className="llm-graph__col-count">{graph.providers.length}</span>
+          </div>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            onClick={() => setRegistryDialog({ kind: "provider", mode: "create" })}
+          >
+            + New provider
+          </button>
         </div>
         <div className="llm-graph__col-header llm-graph__col-header--models">
-          <span className="llm-graph__col-title">Models</span>
-          <span className="llm-graph__col-count">{graph.models.length}</span>
+          <div className="llm-graph__col-heading">
+            <span className="llm-graph__col-title">Models</span>
+            <span className="llm-graph__col-count">{graph.models.length}</span>
+          </div>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            onClick={() => setRegistryDialog({ kind: "model", mode: "create" })}
+          >
+            + New model
+          </button>
         </div>
         <div className="llm-graph__col-header llm-graph__col-header--assignments">
-          <span className="llm-graph__col-title">Assignments</span>
-          <span className="llm-graph__col-count">{graph.totals.capability_count}</span>
+          <div className="llm-graph__col-heading">
+            <span className="llm-graph__col-title">Assignments</span>
+            <span className="llm-graph__col-count">
+              {graph.totals.capability_count}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            onClick={() =>
+              setRegistryDialog({ kind: "providerModel", mode: "create" })
+            }
+          >
+            + New provider-model
+          </button>
         </div>
 
         <ProviderColumn
           providers={graph.providers}
-          selection={selection}
           setHover={setHover}
           setSelection={setSelection}
+          onEditProvider={(id) => setRegistryDialog({ kind: "provider", mode: "edit", id })}
           nodeClass={nodeClass}
           setProviderRef={setRef(providerRefs)}
         />
         <ModelColumn
           models={graph.models}
-          selection={selection}
           setHover={setHover}
           setSelection={setSelection}
           nodeClass={nodeClass}
           setModelRef={setRef(modelRefs)}
           onModelClick={writeAssignmentToModel}
+          onEditModel={(id) => setRegistryDialog({ kind: "model", mode: "edit", id })}
+          onEditProviderModel={(id) =>
+            setRegistryDialog({ kind: "providerModel", mode: "edit", id })
+          }
           indexes={indexes}
         />
         <AssignmentColumn
@@ -308,6 +355,14 @@ export default function AdminLlmPage() {
       {promptsOpen ? (
         <PromptLibraryDrawer prompts={prompts} onClose={() => setPromptsOpen(false)} />
       ) : null}
+      <LlmRegistryModals
+        dialog={registryDialog}
+        providers={graph.providers}
+        models={graph.models}
+        providerModels={graph.provider_models}
+        indexes={indexes}
+        onClose={() => setRegistryDialog(null)}
+      />
     </DeskPage>
   );
 }

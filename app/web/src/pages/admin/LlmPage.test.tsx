@@ -10,6 +10,7 @@ import { calls, graph, prompts } from "./LlmPage.testData";
 
 interface FakeResponse {
   status?: number;
+  delayMs?: number;
   body: unknown;
 }
 
@@ -37,6 +38,9 @@ function installFetch(scripted: Record<string, FakeResponse[]>): {
     if (!path) throw new Error(`Unscripted fetch: ${resolved}`);
     const next = queues[path]!.shift();
     if (!next) throw new Error(`No more responses for: ${resolved}`);
+    if (next.delayMs) {
+      await new Promise((resolve) => setTimeout(resolve, next.delayMs));
+    }
     const status = next.status ?? 200;
     const ok = status >= 200 && status < 300;
     return {
@@ -172,6 +176,435 @@ describe("Admin LlmPage", () => {
       expect(await screen.findByText("Pricing sync:")).toBeInTheDocument();
       expect(screen.getByText(/1 updated/)).toBeInTheDocument();
       expect(fetcher.calls.some((call) => call.url === "/admin/api/v1/llm/sync-pricing")).toBe(true);
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("creates, edits, and handles delete conflicts for providers in the sheet dialog", async () => {
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/graph": [
+        { body: graph },
+        { body: graph },
+        { body: graph },
+        { body: graph },
+        { body: graph },
+      ],
+      "/admin/api/v1/llm/providers": [
+        {
+          body: {
+            ...graph.providers[0],
+            id: "prov_fake",
+            name: "Fake provider",
+          },
+        },
+      ],
+      "/admin/api/v1/llm/providers/prov_openrouter": [
+        { body: { ...graph.providers[0], name: "OpenRouter EU" } },
+        { status: 409, body: { error: "provider_in_use" } },
+        { status: 204, body: null },
+      ],
+    });
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      fireEvent.click(screen.getAllByRole("button", { name: "+ New provider" })[0]!);
+      fireEvent.change(screen.getByLabelText(/Name/), {
+        target: { value: "Fake provider" },
+      });
+      fireEvent.change(screen.getByLabelText(/Type/), { target: { value: "fake" } });
+      fireEvent.click(screen.getByRole("button", { name: "Create provider" }));
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url === "/admin/api/v1/llm/providers" &&
+              call.init.method === "POST",
+          ),
+        ).toBe(true);
+      });
+      const post = fetcher.calls.find(
+        (call) =>
+          call.url === "/admin/api/v1/llm/providers" &&
+          call.init.method === "POST",
+      );
+      expect(jsonBody(post!)).toMatchObject({
+        name: "Fake provider",
+        provider_type: "fake",
+      });
+
+      fireEvent.click(await findOpenRouterProvider());
+      fireEvent.change(screen.getByLabelText(/Name/), {
+        target: { value: "OpenRouter EU" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url === "/admin/api/v1/llm/providers/prov_openrouter" &&
+              call.init.method === "PUT",
+          ),
+        ).toBe(true);
+      });
+      const put = fetcher.calls.find(
+        (call) =>
+          call.url === "/admin/api/v1/llm/providers/prov_openrouter" &&
+          call.init.method === "PUT",
+      );
+      expect(jsonBody(put!)).toMatchObject({ name: "OpenRouter EU" });
+
+      fireEvent.click(await findOpenRouterProvider());
+      fireEvent.click(screen.getByRole("button", { name: "Delete provider" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "attached to provider-model rows",
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Delete provider" }));
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.filter(
+            (call) =>
+              call.url === "/admin/api/v1/llm/providers/prov_openrouter" &&
+              call.init.method === "DELETE",
+          ),
+        ).toHaveLength(2);
+      });
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("creates, edits, and handles delete conflicts for canonical models in the sheet dialog", async () => {
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/graph": [
+        { body: graph },
+        { body: graph },
+        { body: graph },
+        { body: graph },
+        { body: graph },
+      ],
+      "/admin/api/v1/llm/models": [
+        {
+          body: {
+            ...graph.models[0],
+            id: "model_new",
+            canonical_name: "test/new",
+            display_name: "New model",
+          },
+        },
+      ],
+      "/admin/api/v1/llm/models/model_gemma": [
+        { body: { ...graph.models[0], display_name: "Gemma admin" } },
+        { status: 409, body: { error: "model_in_use" } },
+        { status: 204, body: null },
+      ],
+    });
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New model" }));
+      fireEvent.change(screen.getByLabelText(/Canonical name/), {
+        target: { value: "test/new" },
+      });
+      fireEvent.change(screen.getByLabelText(/Display name/), {
+        target: { value: "New model" },
+      });
+      fireEvent.change(screen.getByLabelText(/Vendor/), {
+        target: { value: "test" },
+      });
+      fireEvent.click(screen.getByLabelText("chat"));
+      fireEvent.click(screen.getByRole("button", { name: "Create model" }));
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url === "/admin/api/v1/llm/models" &&
+              call.init.method === "POST",
+          ),
+        ).toBe(true);
+      });
+      const post = fetcher.calls.find(
+        (call) =>
+          call.url === "/admin/api/v1/llm/models" && call.init.method === "POST",
+      );
+      expect(jsonBody(post!)).toMatchObject({
+        canonical_name: "test/new",
+        display_name: "New model",
+        capabilities: ["chat"],
+      });
+
+      fireEvent.click(modelButton("Gemma 4 31B IT"));
+      fireEvent.change(screen.getByLabelText(/Display name/), {
+        target: { value: "Gemma admin" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save model" }));
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url === "/admin/api/v1/llm/models/model_gemma" &&
+              call.init.method === "PUT",
+          ),
+        ).toBe(true);
+      });
+      const put = fetcher.calls.find(
+        (call) =>
+          call.url === "/admin/api/v1/llm/models/model_gemma" &&
+          call.init.method === "PUT",
+      );
+      expect(jsonBody(put!)).toMatchObject({ display_name: "Gemma admin" });
+
+      fireEvent.click(modelButton("Gemma 4 31B IT"));
+      fireEvent.click(screen.getByRole("button", { name: "Delete model" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "attached to provider-model rows",
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Delete model" }));
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.filter(
+            (call) =>
+              call.url === "/admin/api/v1/llm/models/model_gemma" &&
+              call.init.method === "DELETE",
+          ),
+        ).toHaveLength(2);
+      });
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("creates, edits, and handles delete conflicts for provider-model joins in the sheet dialog", async () => {
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/graph": [
+        { body: graph },
+        { body: graph },
+        { body: graph },
+        { body: graph },
+        { body: graph },
+      ],
+      "/admin/api/v1/llm/provider-models": [
+        {
+          body: {
+            ...graph.provider_models[0],
+            id: "pm_new",
+            api_model_id: "test/new-wire",
+          },
+        },
+      ],
+      "/admin/api/v1/llm/provider-models/pm_gemma": [
+        { body: { ...graph.provider_models[0], api_model_id: "google/gemma-admin" } },
+        { status: 409, body: { error: "provider_model_in_use" } },
+        { status: 204, delayMs: 200, body: null },
+      ],
+    });
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "+ New provider-model" }),
+      );
+      fireEvent.change(screen.getByLabelText(/API model id/), {
+        target: { value: "test/new-wire" },
+      });
+      fireEvent.change(screen.getByLabelText(/Input cost per 1M/), {
+        target: { value: "0.25" },
+      });
+      fireEvent.change(screen.getByLabelText(/Output cost per 1M/), {
+        target: { value: "0.75" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Create provider-model" }));
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url === "/admin/api/v1/llm/provider-models" &&
+              call.init.method === "POST",
+          ),
+        ).toBe(true);
+      });
+      const post = fetcher.calls.find(
+        (call) =>
+          call.url === "/admin/api/v1/llm/provider-models" &&
+          call.init.method === "POST",
+      );
+      expect(jsonBody(post!)).toMatchObject({
+        provider_id: "prov_openrouter",
+        model_id: "model_gemma",
+        api_model_id: "test/new-wire",
+        input_cost_per_million: 0.25,
+        output_cost_per_million: 0.75,
+      });
+
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: /OpenRouter provider model for Gemma 4 31B IT/,
+        }),
+      );
+      fireEvent.change(screen.getByLabelText(/API model id/), {
+        target: { value: "google/gemma-admin" },
+      });
+      fireEvent.change(screen.getByLabelText(/Fixed cost per call/), {
+        target: { value: "0.05" },
+      });
+      fireEvent.change(screen.getByLabelText(/Max tokens override/), {
+        target: { value: "1024" },
+      });
+      fireEvent.change(screen.getByLabelText(/Temperature override/), {
+        target: { value: "0.7" },
+      });
+      fireEvent.change(screen.getByLabelText(/Reasoning effort/), {
+        target: { value: "high" },
+      });
+      fireEvent.change(screen.getByLabelText(/Price source override/), {
+        target: { value: "openrouter" },
+      });
+      fireEvent.change(screen.getByLabelText(/Price source model override/), {
+        target: { value: "openrouter/google-gemma" },
+      });
+      fireEvent.change(screen.getByLabelText(/Extra API params/), {
+        target: { value: '{"top_p":0.9}' },
+      });
+      fireEvent.click(screen.getByLabelText("System prompt"));
+      fireEvent.click(screen.getByLabelText("Temperature"));
+      fireEvent.click(screen.getByLabelText("Enabled"));
+      fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+              call.init.method === "PUT",
+          ),
+        ).toBe(true);
+      });
+      const put = fetcher.calls.find(
+        (call) =>
+          call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+          call.init.method === "PUT",
+      );
+      expect(jsonBody(put!)).toMatchObject({
+        api_model_id: "google/gemma-admin",
+        fixed_cost_per_call_usd: 0.05,
+        max_tokens_override: 1024,
+        temperature_override: 0.7,
+        supports_system_prompt: false,
+        supports_temperature: false,
+        reasoning_effort: "high",
+        extra_api_params: { top_p: 0.9 },
+        price_source_override: "openrouter",
+        price_source_model_id_override: "openrouter/google-gemma",
+        is_enabled: false,
+      });
+
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: /OpenRouter provider model for Gemma 4 31B IT/,
+        }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Delete provider-model" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "assigned to one or more capabilities",
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Delete provider-model" }));
+      expect(await screen.findByRole("button", { name: "Deleting…" })).toBeDisabled();
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.filter(
+            (call) =>
+              call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+              call.init.method === "DELETE",
+          ),
+        ).toHaveLength(2);
+      });
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("blocks invalid provider-model numeric fields before sending mutations", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: /OpenRouter provider model for Gemma 4 31B IT/,
+        }),
+      );
+      fireEvent.change(screen.getByLabelText(/Fixed cost per call/), {
+        target: { value: "-1" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Fixed cost must be zero or more.",
+      );
+
+      fireEvent.change(screen.getByLabelText(/Fixed cost per call/), {
+        target: { value: "" },
+      });
+      fireEvent.change(screen.getByLabelText(/Temperature override/), {
+        target: { value: "3" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Temperature override must be between 0 and 2.",
+      );
+
+      expect(
+        fetcher.calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+            call.init.method === "PUT",
+        ),
+      ).toBe(false);
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("shows provider save pending state while the create mutation is in flight", async () => {
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/graph": [{ body: graph }, { body: graph }],
+      "/admin/api/v1/llm/providers": [
+        {
+          delayMs: 200,
+          body: {
+            ...graph.providers[0],
+            id: "prov_slow",
+            name: "Slow provider",
+          },
+        },
+      ],
+    });
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      fireEvent.click(screen.getAllByRole("button", { name: "+ New provider" })[0]!);
+      fireEvent.change(screen.getByLabelText(/Name/), {
+        target: { value: "Slow provider" },
+      });
+      fireEvent.change(screen.getByLabelText(/Type/), { target: { value: "fake" } });
+      fireEvent.click(screen.getByRole("button", { name: "Create provider" }));
+
+      expect(await screen.findByRole("button", { name: "Saving…" })).toBeDisabled();
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name: "Create provider" })).toBeNull();
+      });
     } finally {
       fetcher.restore();
     }

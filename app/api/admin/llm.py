@@ -180,12 +180,15 @@ class LlmProviderModelResponse(BaseModel):
     api_model_id: str
     input_cost_per_million: float
     output_cost_per_million: float
+    fixed_cost_per_call_usd: float | None
     max_tokens_override: int | None
     temperature_override: float | None
     supports_system_prompt: bool
     supports_temperature: bool
     reasoning_effort: Literal["", "low", "medium", "high"]
+    extra_api_params: dict[str, Any]
     price_source_override: Literal["", "none", "openrouter"]
+    price_source_model_id_override: str | None
     price_last_synced_at: str | None
     is_enabled: bool
     spend_usd_30d: float = 0.0
@@ -399,6 +402,7 @@ class ProviderModelPayload(BaseModel):
     api_model_id: str = Field(min_length=1, max_length=240)
     input_cost_per_million: float = Field(default=0, ge=0)
     output_cost_per_million: float = Field(default=0, ge=0)
+    fixed_cost_per_call_usd: float | None = Field(default=None, ge=0)
     max_tokens_override: int | None = Field(default=None, ge=1)
     temperature_override: float | None = Field(default=None, ge=0, le=2)
     supports_system_prompt: bool = True
@@ -574,12 +578,19 @@ def _provider_model_response(
         api_model_id=row.api_model_id,
         input_cost_per_million=_money(row.input_cost_per_million),
         output_cost_per_million=_money(row.output_cost_per_million),
+        fixed_cost_per_call_usd=(
+            _money(row.fixed_cost_per_call_usd)
+            if row.fixed_cost_per_call_usd is not None
+            else None
+        ),
         max_tokens_override=row.max_tokens_override,
         temperature_override=row.temperature_override,
         supports_system_prompt=row.supports_system_prompt,
         supports_temperature=row.supports_temperature,
         reasoning_effort=row.reasoning_effort or "",
+        extra_api_params=dict(row.extra_api_params or {}),
         price_source_override=row.price_source_override or "",
+        price_source_model_id_override=row.price_source_model_id_override,
         price_last_synced_at=_iso(row.price_last_synced_at),
         is_enabled=row.is_enabled,
         spend_usd_30d=_spend_usd(spend),
@@ -1674,6 +1685,11 @@ def build_admin_llm_router() -> APIRouter:
             api_model_id=payload.api_model_id,
             input_cost_per_million=Decimal(str(payload.input_cost_per_million)),
             output_cost_per_million=Decimal(str(payload.output_cost_per_million)),
+            fixed_cost_per_call_usd=(
+                Decimal(str(payload.fixed_cost_per_call_usd))
+                if payload.fixed_cost_per_call_usd is not None
+                else None
+            ),
             max_tokens_override=payload.max_tokens_override,
             temperature_override=payload.temperature_override,
             supports_system_prompt=payload.supports_system_prompt,
@@ -1728,6 +1744,11 @@ def build_admin_llm_router() -> APIRouter:
             row.api_model_id = payload.api_model_id
             row.input_cost_per_million = Decimal(str(payload.input_cost_per_million))
             row.output_cost_per_million = Decimal(str(payload.output_cost_per_million))
+            row.fixed_cost_per_call_usd = (
+                Decimal(str(payload.fixed_cost_per_call_usd))
+                if payload.fixed_cost_per_call_usd is not None
+                else None
+            )
             row.max_tokens_override = payload.max_tokens_override
             row.temperature_override = payload.temperature_override
             row.supports_system_prompt = payload.supports_system_prompt

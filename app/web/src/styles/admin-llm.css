@@ -28,17 +28,28 @@
   margin: 16px 0 24px;
 }
 .llm-graph__col-header {
-  display: flex; align-items: baseline; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 0 4px 8px;
   border-bottom: 1px solid var(--line);
   color: var(--ink-2);
   font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
   text-transform: uppercase;
 }
+.llm-graph__col-heading {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
 .llm-graph__col-title { font-size: 12.5px; }
 .llm-graph__col-count {
   font-size: 12px; font-weight: 500; color: var(--ink-3);
   padding: 1px 8px; border-radius: 999px; background: var(--card); border: 1px solid var(--line);
+}
+.llm-graph__col-header .btn {
+  flex: 0 0 auto;
+  letter-spacing: 0;
+  text-transform: none;
 }
 .llm-graph__col {
   display: flex; flex-direction: column; gap: 10px;
@@ -395,6 +406,145 @@
   display: flex; gap: 12px; font-size: 11.5px;
 }
 
+.llm-registry-dialog.modal--sheet[open] {
+  width: min(640px, calc(100vw - 24px));
+  max-height: min(820px, calc(100vh - 24px));
+}
+.llm-registry-form {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-height: inherit;
+}
+.llm-registry-form__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 22px 24px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.llm-registry-form__eyebrow {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.llm-registry-form__title {
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-family: "Fraunces", ui-serif, serif;
+  font-size: 1.35rem;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+.llm-registry-form__close {
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: 22px;
+  line-height: 1;
+}
+.llm-registry-form__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 24px;
+  overflow-y: auto;
+}
+.llm-registry-form__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+.llm-registry-form__field input,
+.llm-registry-form__field select,
+.llm-registry-form__field textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 15px;
+  padding: 10px 12px;
+  min-height: 40px;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.llm-registry-form__field textarea {
+  resize: vertical;
+}
+.llm-registry-form__field input[type="checkbox"] {
+  width: 22px;
+  min-height: 22px;
+  padding: 0;
+}
+.llm-registry-form__field input:focus,
+.llm-registry-form__field select:focus,
+.llm-registry-form__field textarea:focus {
+  outline: none;
+  border-color: var(--moss);
+  box-shadow: 0 0 0 3px var(--moss-softer);
+}
+.llm-registry-form__field input[aria-invalid="true"],
+.llm-registry-form__field select[aria-invalid="true"],
+.llm-registry-form__field textarea[aria-invalid="true"] {
+  border-color: var(--rust);
+  box-shadow: 0 0 0 3px rgba(154, 73, 43, 0.14);
+}
+.llm-registry-form__fieldset {
+  margin: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+}
+.llm-registry-form__fieldset legend {
+  padding: 0 6px;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+.llm-registry-form__checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.llm-registry-form__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.llm-registry-form__check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--moss);
+}
+.llm-registry-form__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 24px 22px;
+  border-top: 1px solid var(--line);
+  background: var(--paper-2);
+}
+.llm-registry-form__footer .btn--rust {
+  margin-right: auto;
+}
+
 @media (max-width: 960px) {
   .llm-graph {
     grid-template-columns: 1fr;
@@ -429,6 +579,24 @@
   .llm-provider-model-list .llm-graph-node,
   .llm-usage-total {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .llm-registry-dialog.modal--sheet[open] {
+    width: 100vw;
+    max-width: 100vw;
+  }
+  .llm-registry-form__grid {
+    grid-template-columns: 1fr;
+  }
+  .llm-registry-form__footer {
+    flex-direction: column-reverse;
+  }
+  .llm-registry-form__footer .btn,
+  .llm-registry-form__footer .btn--rust {
+    width: 100%;
+    margin-right: 0;
   }
 }
 

@@ -1,20 +1,26 @@
 import { Chip } from "@/components/common";
 import type { LlmProvider } from "@/types";
 import LlmUsageTotals from "./LlmUsageTotals";
-import type { ElementRefSetter, NodeClass, Selection, SelectionSetter } from "./types";
+import type { ElementRefSetter, NodeClass, SelectionSetter } from "./types";
 
 interface ProviderColumnProps {
   providers: LlmProvider[];
-  selection: Selection | null;
   setHover: SelectionSetter;
   setSelection: SelectionSetter;
+  onEditProvider: (providerId: string) => void;
   nodeClass: NodeClass;
   setProviderRef: ElementRefSetter;
 }
 
 export default function ProviderColumn(props: ProviderColumnProps) {
-  const { providers, selection, setHover, setSelection, nodeClass, setProviderRef } =
-    props;
+  const {
+    providers,
+    setHover,
+    setSelection,
+    onEditProvider,
+    nodeClass,
+    setProviderRef,
+  } = props;
 
   return (
     <div className="llm-graph__col llm-graph__col--providers">
@@ -28,13 +34,10 @@ export default function ProviderColumn(props: ProviderColumnProps) {
           onMouseLeave={() => setHover(null)}
           onFocus={() => setHover({ column: "provider", id: p.id })}
           onBlur={() => setHover(null)}
-          onClick={() =>
-            setSelection(
-              selection?.column === "provider" && selection.id === p.id
-                ? null
-                : { column: "provider", id: p.id },
-            )
-          }
+          onClick={() => {
+            setSelection({ column: "provider", id: p.id });
+            onEditProvider(p.id);
+          }}
           aria-label={`${p.name} provider, ${p.calls_30d.toLocaleString()} calls in 30 days`}
         >
           <header className="llm-graph-node__head">
