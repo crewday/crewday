@@ -422,6 +422,29 @@ Use native `<dialog>` for popovers (one keyboard model, one
 escape semantic). Tooltip-on-hover is reserved for icon-only
 controls — every icon-only button must also carry an `aria-label`.
 
+### Modals (`.modal`)
+
+Use native `<dialog>` and the `.modal` / `.modal--sheet` shell for
+blocking surfaces. Structured forms inside modals use a semantic form
+block, not the generic body as the form contract: follow the inventory
+`New item` dialog in
+`app/web/src/pages/manager/InventoryPage.tsx` (`inv-create`) as the
+current implementation reference.
+
+Modal forms have block-scoped header, body, and footer elements
+(`__head`, `__body`, `__footer`) so titles, scroll containment, and
+actions evolve together. Use `FormField` for every labelled input so
+required and optional badges stay consistent. Pair related controls in
+a responsive two-column block grid when the fields scan as a set, and
+let long-form bodies scroll inside the modal rather than growing the
+dialog past the viewport. Footer actions stay in a consistent trailing
+row: cancel / secondary first, one primary submit last.
+
+Do not build new structured modal forms from bare `.modal__body` plus
+ad hoc `.field` stacks. Reference the `inv-create` and `FormField`
+patterns, then add only the block classes needed for that dialog's
+domain.
+
 ### Page header (`PageHeader`)
 
 Three slots: `leading` (back / hamburger), `title + sub`,
