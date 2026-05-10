@@ -568,6 +568,22 @@
 }
 .settings-editor__actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .settings-editor__error { margin: 0; color: var(--rust); font-size: 13px; }
+.workspace-details-form__slug {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  color: var(--ink-2);
+}
+.workspace-details-form__defaults {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: var(--ink-2);
+}
+.workspace-details-form__actions {
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+}
 .settings-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
 .settings-list li { padding: 8px 0; border-bottom: 1px dashed var(--line); display: flex; justify-content: space-between; align-items: center; }
 .workspace-danger-actions {

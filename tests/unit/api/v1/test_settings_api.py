@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
@@ -9,8 +11,10 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
+from app.adapters.db.authz.models import RoleGrant
 from app.api.v1.settings import VerifyOwnershipConsumeBody, build_settings_router
 from app.tenancy import WorkspaceContext
+from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user, bootstrap_workspace
 from tests.unit.api.v1.identity.conftest import build_client, ctx_for
 
@@ -98,7 +102,9 @@ def test_settings_read_merges_workspace_values_with_catalog_defaults(
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["meta"] == {
+        "slug": "settings",
         "name": "Settings House",
+        "display_name": "Settings House",
         "timezone": "Europe/Paris",
         "currency": "EUR",
         "country": "FR",
@@ -107,6 +113,91 @@ def test_settings_read_merges_workspace_values_with_catalog_defaults(
     assert body["defaults"]["evidence.policy"] == "require"
     assert body["defaults"]["tasks.checklist_required"] is False
     assert body["policy"]["approvals"]["always_gated"]
+
+
+def test_settings_basics_patch_updates_display_name_and_audits(
+    factory: sessionmaker[Session],
+) -> None:
+    ctx, workspace_id = _seed(factory)
+    client = _client(ctx, factory)
+
+    response = client.patch(
+        "/settings/basics",
+        json={"display_name": "Settings Cottage"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["meta"]["slug"] == "settings"
+    assert body["meta"]["display_name"] == "Settings Cottage"
+    assert body["meta"]["name"] == "Settings Cottage"
+
+    with factory() as session:
+        audit = (
+            session.query(AuditLog)
+            .filter_by(
+                workspace_id=workspace_id,
+                action="workspace.basics_updated",
+            )
+            .one()
+        )
+        assert audit.diff["before"] == {"name": "Settings House"}
+        assert audit.diff["after"]["name"] == "Settings Cottage"
+
+
+def test_settings_basics_patch_rejects_invalid_display_name(
+    factory: sessionmaker[Session],
+) -> None:
+    ctx, _workspace_id = _seed(factory)
+    client = _client(ctx, factory)
+
+    response = client.patch("/settings/basics", json={"display_name": "   "})
+
+    assert response.status_code == 422
+    body = _assert_problem_json(response)
+    assert body["error"] == "workspace_basics_invalid"
+    assert body["field"] == "name"
+
+
+def test_settings_basics_patch_denies_non_owner_manager(
+    factory: sessionmaker[Session],
+) -> None:
+    owner_ctx, workspace_id = _seed(factory)
+    with factory() as session:
+        manager = bootstrap_user(
+            session,
+            email="settings-manager@example.com",
+            display_name="Settings Manager",
+        )
+        session.add(
+            RoleGrant(
+                id=new_ulid(),
+                workspace_id=workspace_id,
+                user_id=manager.id,
+                grant_role="manager",
+                scope_property_id=None,
+                created_at=datetime(2026, 5, 10, 12, 0, tzinfo=UTC),
+                created_by_user_id=owner_ctx.actor_id,
+            )
+        )
+        session.commit()
+        manager_id = manager.id
+    manager_ctx = ctx_for(
+        workspace_id=owner_ctx.workspace_id,
+        workspace_slug=owner_ctx.workspace_slug,
+        actor_id=manager_id,
+        grant_role="manager",
+        actor_was_owner_member=False,
+    )
+    client = _client(manager_ctx, factory)
+
+    response = client.patch(
+        "/settings/basics",
+        json={"display_name": "Manager Rename"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"] == "owners_only"
 
 
 def test_settings_patch_updates_known_keys_and_audits(

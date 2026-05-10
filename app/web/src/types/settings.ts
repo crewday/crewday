@@ -3,7 +3,9 @@
 
 export interface WorkspaceSettings {
   meta: {
+    slug: string;
     name: string;
+    display_name: string;
     timezone: string;
     currency: string;
     country: string;

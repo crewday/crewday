@@ -62,7 +62,11 @@ from app.services.workspace.ownership_verification import (
     consume_ownership_verification,
     request_ownership_verification,
 )
-from app.services.workspace.settings_service import OwnersOnlyError
+from app.services.workspace.settings_service import (
+    OwnersOnlyError,
+    WorkspaceFieldInvalid,
+    update_basics,
+)
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import SystemClock
 
@@ -105,7 +109,9 @@ class SettingDefinitionResponse(BaseModel):
 class WorkspaceSettingsMeta(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    slug: str
     name: str
+    display_name: str
     timezone: str
     currency: str
     country: str
@@ -182,6 +188,12 @@ class WorkspaceSettingsPatch(RootModel[dict[str, Any]]):
     The root object is a map of catalog key to value. `null` restores
     the catalog default by removing the workspace override.
     """
+
+
+class WorkspaceBasicsPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: Annotated[str | None, Field(min_length=1, max_length=200)] = None
 
 
 _CATALOG: tuple[SettingDefinitionResponse, ...] = (
@@ -706,6 +718,43 @@ def patch_workspace_settings(
     return _workspace_settings_response(ws)
 
 
+@router.patch(
+    "/settings/basics",
+    response_model=WorkspaceSettingsResponse,
+    operation_id="settings.workspace.basics.patch",
+    summary="Patch workspace basics",
+    dependencies=[Depends(Permission("scope.edit_settings", scope_kind="workspace"))],
+)
+def patch_workspace_basics(
+    payload: WorkspaceBasicsPatch,
+    ctx: _Ctx,
+    session: _Db,
+) -> WorkspaceSettingsResponse:
+    before_name = _get_workspace(session, ctx).name
+    try:
+        basics = update_basics(
+            session,
+            ctx,
+            name=payload.display_name,
+            actor_user_id=ctx.actor_id,
+        )
+    except OwnersOnlyError as exc:
+        raise Forbidden(extra={"error": "owners_only"}) from exc
+    except WorkspaceFieldInvalid as exc:
+        raise Validation(
+            extra={
+                "error": "workspace_basics_invalid",
+                "field": exc.field,
+                "reason": exc.reason,
+            }
+        ) from exc
+
+    ws = _get_workspace(session, ctx)
+    if basics.name != before_name:
+        _publish_workspace_changed(ctx, changed_keys=["workspace.name"])
+    return _workspace_settings_response(ws)
+
+
 def _get_workspace(session: Session, ctx: WorkspaceContext) -> Workspace:
     with tenant_agnostic():
         ws = session.get(Workspace, ctx.workspace_id)
@@ -761,7 +810,9 @@ def _workspace_settings_response(ws: Workspace) -> WorkspaceSettingsResponse:
     settings_json = _coerce_settings(ws.settings_json)
     return WorkspaceSettingsResponse(
         meta=WorkspaceSettingsMeta(
+            slug=ws.slug,
             name=ws.name,
+            display_name=ws.name,
             timezone=ws.default_timezone,
             currency=ws.default_currency,
             country=_country(settings_json),

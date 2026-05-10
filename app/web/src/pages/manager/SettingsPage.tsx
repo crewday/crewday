@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { fetchApiDownload, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -8,9 +9,11 @@ import { workspaceRouteForPathname, workspaceSlugFromRoutePath } from "@/lib/wor
 import DeskPage from "@/components/DeskPage";
 import AgentPreferencesPanel from "@/components/AgentPreferencesPanel";
 import { Chip, Loading, ProgressBar } from "@/components/common";
+import type { AuthMe } from "@/auth/types";
 import type {
   AvailableWorkspace,
   Employee,
+  Me,
   Property,
   SettingDefinition,
   WorkspaceSettings,
@@ -106,6 +109,15 @@ interface WorkspaceDeleteResponse {
   purge_after: string;
 }
 
+interface WorkspaceSwitcherEntry {
+  workspace_id: string;
+  slug: string;
+  name: string;
+  current_role: string | null;
+  last_seen_at: string | null;
+  settings_override: Record<string, unknown>;
+}
+
 function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message) return err.message;
   return fallback;
@@ -140,6 +152,44 @@ function nextWorkspaceRoute(currentPathname: string, workspaces: AvailableWorksp
 function workspaceAdminPath(pathname: string, path: string): string {
   const slug = workspaceSlugFromRoutePath(pathname);
   return slug ? `/w/${encodeURIComponent(slug)}${path}` : path;
+}
+
+function renameAvailableWorkspaces<T extends { available_workspaces: AvailableWorkspace[] }>(
+  cached: T | undefined,
+  slug: string,
+  name: string,
+): T | undefined {
+  if (!cached) return cached;
+  return {
+    ...cached,
+    available_workspaces: cached.available_workspaces.map((entry) =>
+      entry.workspace.id === slug
+        ? { ...entry, workspace: { ...entry.workspace, name } }
+        : entry,
+    ),
+  };
+}
+
+function renameSwitcherWorkspaces(
+  cached: WorkspaceSwitcherEntry[] | undefined,
+  slug: string,
+  name: string,
+): WorkspaceSwitcherEntry[] | undefined {
+  if (!cached) return cached;
+  return cached.map((entry) => (entry.slug === slug ? { ...entry, name } : entry));
+}
+
+function renameWorkspaceInCaches(qc: QueryClient, settings: WorkspaceSettings): void {
+  const { slug, display_name: displayName } = settings.meta;
+  qc.setQueryData(
+    qk.authMe(),
+    renameAvailableWorkspaces(qc.getQueryData<AuthMe>(qk.authMe()), slug, displayName),
+  );
+  qc.setQueryData(qk.me(), renameAvailableWorkspaces(qc.getQueryData<Me>(qk.me()), slug, displayName));
+  qc.setQueryData(
+    qk.meWorkspaces(),
+    renameSwitcherWorkspaces(qc.getQueryData<WorkspaceSwitcherEntry[]>(qk.meWorkspaces()), slug, displayName),
+  );
 }
 
 async function routeAfterWorkspaceArchived(pathname: string): Promise<string> {
@@ -292,6 +342,95 @@ function SettingEditor({
         </span>
       </dd>
     </div>
+  );
+}
+
+function WorkspaceDetailsForm({ settings }: { settings: WorkspaceSettings }) {
+  const qc = useQueryClient();
+  const displayName = settings.meta.display_name;
+  const [draft, setDraft] = useState(displayName);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(displayName);
+  }, [displayName]);
+
+  const save = useMutation({
+    mutationFn: () =>
+      fetchJson<WorkspaceSettings>("/api/v1/settings/basics", {
+        method: "PATCH",
+        body: { display_name: draft },
+      }),
+    onSuccess: (next) => {
+      qc.setQueryData(qk.settings(), next);
+      renameWorkspaceInCaches(qc, next);
+      setError(null);
+    },
+    onError: (err) => {
+      setError(errorMessage(err, "Workspace details could not be saved."));
+    },
+  });
+
+  const dirty = draft !== displayName;
+  const invalid = draft.trim() === "";
+  const displayNameId = "workspace-display-name";
+
+  return (
+    <form
+      className="workspace-details-form form-layout form-layout--two-column"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!dirty || invalid || save.isPending) return;
+        save.mutate();
+      }}
+    >
+      <div className="settings-editor form-layout__row">
+        <label className="form-layout__label settings-editor__label" htmlFor={displayNameId}>
+          Display name
+        </label>
+        <div className="form-layout__control">
+          <input
+            id={displayNameId}
+            className="settings-editor__input"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            disabled={save.isPending}
+          />
+        </div>
+        <p className="settings-editor__help form-layout__help">
+          Shown in workspace lists, page titles, and notifications.
+        </p>
+      </div>
+      <div className="settings-editor form-layout__row">
+        <span className="form-layout__label settings-editor__label">Slug</span>
+        <span className="form-layout__control">
+          <span className="workspace-details-form__slug mono">{settings.meta.slug}</span>
+        </span>
+        <p className="settings-editor__help form-layout__help">
+          Read-only URL slug for routes under <span className="mono">/w/{settings.meta.slug}</span>.
+        </p>
+      </div>
+      <div className="settings-editor form-layout__row">
+        <span className="form-layout__label settings-editor__label">Workspace defaults</span>
+        <span className="form-layout__control workspace-details-form__defaults">
+          <span className="mono">{settings.meta.timezone}</span>
+          <span className="mono">{settings.meta.currency}</span>
+          <span className="mono">{settings.meta.country}</span>
+          <span className="mono">{settings.meta.default_locale}</span>
+        </span>
+        <p className="settings-editor__help form-layout__help">
+          Timezone, currency, country, and locale remain managed by the workspace defaults flow.
+        </p>
+      </div>
+      {dirty ? (
+        <div className="workspace-details-form__actions form-layout__actions">
+          <button className="btn btn--moss" type="submit" disabled={invalid || save.isPending}>
+            {save.isPending ? "Saving…" : "Save"}
+          </button>
+        </div>
+      ) : null}
+      {error ? <p className="settings-editor__error" role="alert">{error}</p> : null}
+    </form>
   );
 }
 
@@ -563,13 +702,7 @@ export default function SettingsPage() {
       {/* Workspace identity */}
       <section className="panel">
         <header className="panel__head"><h2>Workspace</h2></header>
-        <dl className="settings-kv">
-          <dt>Name</dt><dd>{ws.meta.name}</dd>
-          <dt>Timezone</dt><dd className="mono">{ws.meta.timezone}</dd>
-          <dt>Currency</dt><dd className="mono">{ws.meta.currency}</dd>
-          <dt>Country</dt><dd className="mono">{ws.meta.country}</dd>
-          <dt>Locale</dt><dd className="mono">{ws.meta.default_locale}</dd>
-        </dl>
+        <WorkspaceDetailsForm settings={ws} />
       </section>
 
       {/* §11 — Workspace usage budget. Manager-visible shape is

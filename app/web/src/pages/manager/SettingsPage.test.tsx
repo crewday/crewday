@@ -6,6 +6,7 @@ import type { ReactElement } from "react";
 import { fetchApiDownload, fetchJson } from "@/lib/api";
 import type { FetchOpts } from "@/lib/api";
 import { NavHistoryProvider } from "@/context/NavHistoryContext";
+import { qk } from "@/lib/queryKeys";
 import SettingsPage from "./SettingsPage";
 
 vi.mock("@/lib/api", () => ({
@@ -39,6 +40,11 @@ beforeEach(() => {
     filename: "acme-export.zip",
   });
   fetchJsonMock.mockImplementation(async (path: string, opts?: FetchOpts) => {
+    if (path === "/api/v1/settings/basics" && opts?.method === "PATCH") {
+      const body = opts.body as { display_name?: string };
+      const displayName = body.display_name ?? "Acme";
+      return workspaceSettings({}, { display_name: displayName, name: displayName });
+    }
     if (path === "/api/v1/settings" && opts?.method === "PATCH") {
       return workspaceSettings(opts.body as Record<string, unknown>);
     }
@@ -138,6 +144,89 @@ describe("SettingsPage", () => {
     expect(within(screen.getByLabelText("Booking pay basis")).getByRole("option", { name: "Actual worked time" })).toHaveValue("actual");
     expect(within(screen.getByLabelText("Auto-assign tasks")).getByRole("option", { name: "Yes" })).toHaveValue("true");
     expect(within(screen.getByLabelText("Auto-assign tasks")).getByRole("option", { name: "No" })).toHaveValue("false");
+  });
+
+  it("renders display name as editable and slug as read-only text", async () => {
+    render(renderSettings().view);
+
+    const displayName = await screen.findByLabelText("Display name");
+    expect(displayName).toHaveValue("Acme");
+    expect(screen.getByText("acme")).toHaveClass("workspace-details-form__slug");
+    expect(screen.getByText(/Read-only URL slug/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Slug")).not.toBeInTheDocument();
+  });
+
+  it("shows one workspace save button only while display name is dirty", async () => {
+    const rendered = renderSettings();
+    rendered.queryClient.setQueryData(qk.authMe(), {
+      user_id: "user_1",
+      display_name: "Owner",
+      email: "owner@example.com",
+      current_workspace_id: "ws_acme",
+      is_deployment_admin: false,
+      available_workspaces: [
+        {
+          workspace: {
+            id: "acme",
+            name: "Acme",
+            timezone: "Europe/Paris",
+            default_currency: "EUR",
+            default_country: "FR",
+            default_locale: "fr-FR",
+          },
+          grant_role: "manager",
+          binding_org_id: null,
+          source: "workspace_grant",
+        },
+      ],
+    });
+    rendered.queryClient.setQueryData(qk.meWorkspaces(), [
+      {
+        workspace_id: "ws_acme",
+        slug: "acme",
+        name: "Acme",
+        current_role: "manager",
+        last_seen_at: null,
+        settings_override: {},
+      },
+    ]);
+    render(rendered.view);
+
+    const workspacePanel = (await screen.findByRole("heading", { name: "Workspace" })).closest(".panel");
+    expect(workspacePanel).not.toBeNull();
+    const workspace = within(workspacePanel as HTMLElement);
+    expect(workspace.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+
+    fireEvent.change(workspace.getByLabelText("Display name"), {
+      target: { value: "Acme Villas" },
+    });
+
+    const save = workspace.getByRole("button", { name: "Save" });
+    expect(save).toBeInTheDocument();
+    expect(workspace.getAllByRole("button", { name: "Save" })).toHaveLength(1);
+
+    fireEvent.click(save);
+
+    await waitFor(() => {
+      expect(fetchJsonMock).toHaveBeenCalledWith("/api/v1/settings/basics", {
+        method: "PATCH",
+        body: { display_name: "Acme Villas" },
+      });
+    });
+    expect(await workspace.findByLabelText("Display name")).toHaveValue("Acme Villas");
+    expect(workspace.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/settings");
+    await waitFor(() => {
+      expect(rendered.queryClient.getQueryData(qk.settings())).toMatchObject({
+        meta: { slug: "acme", display_name: "Acme Villas" },
+      });
+      expect(rendered.queryClient.getQueryData(qk.authMe())).toMatchObject({
+        available_workspaces: [{ workspace: { id: "acme", name: "Acme Villas" } }],
+      });
+      expect(rendered.queryClient.getQueryData(qk.meWorkspaces())).toMatchObject([
+        { slug: "acme", name: "Acme Villas" },
+      ]);
+    });
   });
 
   it("keeps PATCH values as API enum and boolean values", async () => {
@@ -320,14 +409,28 @@ describe("SettingsPage", () => {
   });
 });
 
-function workspaceSettings(overrides: Record<string, unknown> = {}): unknown {
+function workspaceSettings(
+  overrides: Record<string, unknown> = {},
+  metaOverrides: Partial<{
+    slug: string;
+    name: string;
+    display_name: string;
+    timezone: string;
+    currency: string;
+    country: string;
+    default_locale: string;
+  }> = {},
+): unknown {
   return {
     meta: {
+      slug: "acme",
       name: "Acme",
+      display_name: "Acme",
       timezone: "Europe/Paris",
       currency: "EUR",
       country: "FR",
       default_locale: "fr-FR",
+      ...metaOverrides,
     },
     defaults: {
       "evidence.policy": "optional",
