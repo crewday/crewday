@@ -48,9 +48,9 @@ from app.api.admin._usage_helpers import (
     _window,
 )
 from app.api.admin._workspace_state import (
+    archive_workspace_if_needed,
     format_archived_at,
     load_workspace,
-    set_archived_at,
     set_verification_state,
     verification_state_of,
 )
@@ -502,29 +502,34 @@ def build_admin_workspaces_router() -> APIRouter:
         workspace = load_workspace(session, workspace_id=id)
         if workspace is None:
             raise _not_found()
-        existing = format_archived_at(workspace)
-        if existing is not None:
-            return WorkspaceArchiveResponse(id=workspace.id, archived_at=existing)
         moment = datetime.now(UTC)
         with tenant_agnostic():
-            set_archived_at(workspace, when=moment)
-            audit_admin(
-                session,
-                ctx=ctx,
-                request=request,
-                entity_kind="workspace",
-                entity_id=workspace.id,
-                action="workspace.archived",
-                diff={"archived_at": moment.astimezone(UTC).isoformat()},
+            archived_at, changed = archive_workspace_if_needed(
+                session, workspace, when=moment
             )
-            session.flush()
+            if changed:
+                audit_admin(
+                    session,
+                    ctx=ctx,
+                    request=request,
+                    entity_kind="workspace",
+                    entity_id=workspace.id,
+                    action="workspace.archived",
+                    diff={"archived_at": archived_at.astimezone(UTC).isoformat()},
+                )
+                session.flush()
+        if not changed:
+            return WorkspaceArchiveResponse(
+                id=workspace.id,
+                archived_at=archived_at.astimezone(UTC).isoformat(),
+            )
         admin_sse.publish_admin_event(
             kind="admin.workspace.archived",
             ctx=ctx,
             request=request,
             payload={
                 "workspace_id": workspace.id,
-                "archived_at": moment.astimezone(UTC).isoformat(),
+                "archived_at": archived_at.astimezone(UTC).isoformat(),
             },
         )
         formatted = format_archived_at(workspace)

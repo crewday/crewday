@@ -21,6 +21,7 @@ See ``docs/specs/12-rest-api.md`` §"Auth" — ``GET /api/v1/me/workspaces``.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import FastAPI
@@ -407,6 +408,55 @@ class TestIsolation:
         body = client.get("/api/v1/me/workspaces").json()
         assert {row["workspace_id"] for row in body} == {ws_a_id}
         assert {row["slug"] for row in body} == {"ws-alpha"}
+
+    def test_excludes_archived_workspaces(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        owner_id, live_id = _seed_owner_workspace(
+            session_factory,
+            slug="ws-live",
+            name="Live",
+            email="live-owner@example.com",
+        )
+        _other_owner, archived_id = _seed_owner_workspace(
+            session_factory,
+            slug="ws-archived",
+            name="Archived",
+            email="archived-owner@example.com",
+        )
+        with session_factory() as s, tenant_agnostic():
+            archived = s.get(Workspace, archived_id)
+            assert archived is not None
+            archived.archived_at = datetime(2026, 4, 25, 12, 0, 0, tzinfo=UTC)
+            s.add(
+                UserWorkspace(
+                    user_id=owner_id,
+                    workspace_id=archived_id,
+                    source="workspace_grant",
+                    added_at=datetime(2026, 4, 25, 12, 0, 0, tzinfo=UTC),
+                )
+            )
+            s.add(
+                RoleGrant(
+                    id=new_ulid(),
+                    workspace_id=archived_id,
+                    user_id=owner_id,
+                    grant_role="manager",
+                    scope_property_id=None,
+                    created_at=datetime(2026, 4, 25, 12, 0, 0, tzinfo=UTC),
+                    created_by_user_id=None,
+                )
+            )
+            s.commit()
+        cookie = _issue_cookie(session_factory, user_id=owner_id, settings=settings)
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+        body = client.get("/api/v1/me/workspaces").json()
+
+        assert {row["workspace_id"] for row in body} == {live_id}
 
 
 class TestRoleResolution:

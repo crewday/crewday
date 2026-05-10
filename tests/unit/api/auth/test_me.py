@@ -202,6 +202,36 @@ class TestHighestPrivilegeCollapse:
         assert len(available) == 1
         assert available[0].grant_role == "worker"
 
+    def test_archived_workspace_is_excluded(
+        self, session_factory: sessionmaker[Session]
+    ) -> None:
+        with session_factory() as s, tenant_agnostic():
+            user = bootstrap_user(
+                s, email="archived@example.com", display_name="Archived"
+            )
+            live = _add_workspace(s, slug="ws-live", name="Live")
+            archived = _add_workspace(s, slug="ws-archived", name="Archived")
+            archived.archived_at = _NOW
+            _add_grant(
+                s,
+                workspace_id=live.id,
+                user_id=user.id,
+                grant_role="worker",
+            )
+            _add_grant(
+                s,
+                workspace_id=archived.id,
+                user_id=user.id,
+                grant_role="manager",
+            )
+            s.commit()
+            user_id = user.id
+
+        with session_factory() as s:
+            available = _load_available_workspaces(s, user_id=user_id)
+
+        assert [row.workspace.id for row in available] == ["ws-live"]
+
 
 # ---------------------------------------------------------------------------
 # Tests — owners-group promotion

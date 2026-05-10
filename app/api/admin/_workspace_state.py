@@ -25,6 +25,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Final
 
+from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from app.adapters.db.workspace.models import Workspace
@@ -36,6 +38,7 @@ __all__ = [
     "VERIFICATION_STATES",
     "VERIFICATION_STATE_KEY",
     "VerificationState",
+    "archive_workspace_if_needed",
     "archived_at_of",
     "format_archived_at",
     "set_archived_at",
@@ -110,6 +113,46 @@ def set_archived_at(workspace: Workspace, *, when: datetime) -> None:
     if when.tzinfo is None:  # pragma: no cover - defensive
         when = when.replace(tzinfo=UTC)
     workspace.archived_at = when.astimezone(UTC)
+
+
+def archive_workspace_if_needed(
+    session: Session, workspace: Workspace, *, when: datetime
+) -> tuple[datetime, bool]:
+    """Ensure ``workspace.archived_at`` is stamped.
+
+    Returns ``(archived_at, changed)``. Already archived workspaces keep
+    their original timestamp so every archive surface stays idempotent.
+    The write is conditional at the SQL layer so competing archive calls
+    cannot both produce audit rows.
+    """
+    existing = archived_at_of(workspace)
+    if existing is not None:
+        return existing, False
+    if when.tzinfo is None:  # pragma: no cover - defensive
+        when = when.replace(tzinfo=UTC)
+    archived = when.astimezone(UTC)
+    with tenant_agnostic():
+        result = session.execute(
+            update(Workspace)
+            .where(Workspace.id == workspace.id)
+            .where(Workspace.archived_at.is_(None))
+            .values(archived_at=archived)
+            .execution_options(synchronize_session="fetch")
+        )
+        if not isinstance(result, CursorResult):  # pragma: no cover - SQLAlchemy DML
+            raise TypeError(f"expected CursorResult, got {type(result).__name__}")
+        if result.rowcount == 1:
+            workspace.archived_at = archived
+            return archived, True
+        stored = session.scalar(
+            select(Workspace.archived_at).where(Workspace.id == workspace.id).limit(1)
+        )
+    if stored is None:  # pragma: no cover - defensive
+        return archived, False
+    archived = stored
+    if archived.tzinfo is None:
+        archived = archived.replace(tzinfo=UTC)
+    return archived, False
 
 
 def format_archived_at(workspace: Workspace) -> str | None:

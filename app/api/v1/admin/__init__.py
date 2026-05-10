@@ -28,17 +28,22 @@ mitigations", ``docs/specs/12-rest-api.md`` §"Base URL", and
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.workspace.models import UserWorkspace
+from app.adapters.db.identity.models import Session as SessionRow
+from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.adapters.storage.ports import Storage
+from app.api.admin._workspace_state import archive_workspace_if_needed
 from app.api.deps import current_workspace_context, db_session, get_storage
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.audit import write_audit
+from app.auth import session as auth_session
 from app.auth.passkey import (
     LastPasskeyCredential,
     PasskeyNotFound,
@@ -58,6 +63,11 @@ _Db = Annotated[Session, Depends(db_session)]
 _Storage = Annotated[Storage, Depends(get_storage)]
 
 router = APIRouter(tags=["workspace_admin"], responses=IDENTITY_PROBLEM_RESPONSES)
+
+
+class WorkspaceArchiveResponse(BaseModel):
+    id: str
+    archived_at: str
 
 
 @router.post(
@@ -123,6 +133,82 @@ def export_workspace(ctx: _Ctx, session: _Db, storage: _Storage) -> Response:
         headers={
             "Content-Disposition": f'attachment; filename="{artifact.filename}"',
         },
+    )
+
+
+def _clear_current_session_workspace(
+    session: Session, *, ctx: WorkspaceContext, request: Request
+) -> None:
+    if ctx.principal_kind != "session":
+        return
+    cookie_value = request.cookies.get(
+        auth_session.SESSION_COOKIE_NAME
+    ) or request.cookies.get("crewday_session")
+    if not cookie_value:
+        return
+    with tenant_agnostic():
+        row = session.get(SessionRow, auth_session.hash_cookie_value(cookie_value))
+    if row is None:
+        return
+    if row.user_id == ctx.actor_id and row.workspace_id == ctx.workspace_id:
+        row.workspace_id = None
+
+
+@router.post(
+    "/workspace/archive",
+    response_model=WorkspaceArchiveResponse,
+    operation_id="workspace_admin.workspace.archive",
+    summary="Archive the current workspace",
+    openapi_extra={
+        "x-cli": {
+            "group": "workspace-admin",
+            "verb": "workspace-archive",
+            "summary": "Archive the current workspace",
+            "mutates": True,
+        },
+        "x-owner-only": True,
+    },
+)
+def archive_current_workspace(
+    request: Request,
+    ctx: _Ctx,
+    session: _Db,
+) -> WorkspaceArchiveResponse:
+    if not is_owner_member(
+        session, workspace_id=ctx.workspace_id, user_id=ctx.actor_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": "owners_only"},
+        )
+
+    with tenant_agnostic():
+        workspace = session.get(Workspace, ctx.workspace_id)
+        if workspace is None:
+            raise RuntimeError(
+                f"workspace {ctx.workspace_id!r} present in ctx but absent in DB"
+            )
+        archived_at, changed = archive_workspace_if_needed(
+            session,
+            workspace,
+            when=datetime.now(UTC),
+        )
+        if changed:
+            write_audit(
+                session,
+                ctx,
+                entity_kind="workspace",
+                entity_id=ctx.workspace_id,
+                action="workspace.archived",
+                diff={"archived_at": archived_at.astimezone(UTC).isoformat()},
+                via="api",
+            )
+        _clear_current_session_workspace(session, ctx=ctx, request=request)
+        session.flush()
+
+    return WorkspaceArchiveResponse(
+        id=ctx.workspace_id,
+        archived_at=archived_at.astimezone(UTC).isoformat(),
     )
 
 

@@ -325,7 +325,7 @@ def _validated_session_user(
 def _load_available_workspaces(
     session: Session, *, user_id: str
 ) -> list[AvailableWorkspaceResponse]:
-    """Return every workspace the user has a :class:`RoleGrant` on.
+    """Return every active workspace the user has a :class:`RoleGrant` on.
 
     Collapses multiple grants on the same workspace onto the
     highest-privilege one (manager > worker > client > guest). Users
@@ -344,6 +344,7 @@ def _load_available_workspaces(
             # cd-x1xh: live grants only — a soft-retired grant must
             # not surface a workspace in the user's switcher.
             .where(RoleGrant.revoked_at.is_(None))
+            .where(Workspace.archived_at.is_(None))
         ).all()
 
         owners_workspace_ids = set(
@@ -430,14 +431,31 @@ def _client_binding_org_ids(
     return sorted({org_id for org_id in rows if org_id is not None})
 
 
-def _workspace_ids_for_user(session: Session, *, user_id: str) -> list[str]:
+def _active_workspace_ids_for_user(session: Session, *, user_id: str) -> list[str]:
     with tenant_agnostic():
         return list(
             session.scalars(
                 select(UserWorkspace.workspace_id)
+                .join(Workspace, Workspace.id == UserWorkspace.workspace_id)
                 .where(UserWorkspace.user_id == user_id)
+                .where(Workspace.archived_at.is_(None))
                 .order_by(UserWorkspace.workspace_id.asc())
             ).all()
+        )
+
+
+def _is_active_workspace_id(session: Session, *, workspace_id: str | None) -> bool:
+    if workspace_id is None:
+        return False
+    with tenant_agnostic():
+        return (
+            session.scalar(
+                select(Workspace.id)
+                .where(Workspace.id == workspace_id)
+                .where(Workspace.archived_at.is_(None))
+                .limit(1)
+            )
+            is not None
         )
 
 
@@ -448,11 +466,15 @@ def _current_workspace_id(
     session_row: SessionRow,
 ) -> str:
     ctx = get_current()
-    if ctx is not None:
+    if ctx is not None and _is_active_workspace_id(
+        session, workspace_id=ctx.workspace_id
+    ):
         return ctx.workspace_id
-    if session_row.workspace_id:
-        return session_row.workspace_id
-    workspace_ids = _workspace_ids_for_user(session, user_id=user_id)
+    session_workspace_id = session_row.workspace_id
+    if _is_active_workspace_id(session, workspace_id=session_workspace_id):
+        assert session_workspace_id is not None
+        return session_workspace_id
+    workspace_ids = _active_workspace_ids_for_user(session, user_id=user_id)
     if workspace_ids:
         return workspace_ids[0]
     raise auth_not_found("workspace_required")
@@ -560,6 +582,7 @@ def _load_switcher_entries(
             select(UserWorkspace, Workspace)
             .join(Workspace, Workspace.id == UserWorkspace.workspace_id)
             .where(UserWorkspace.user_id == user_id)
+            .where(Workspace.archived_at.is_(None))
             .order_by(Workspace.slug.asc())
         ).all()
 
@@ -734,7 +757,7 @@ def build_me_profile_router(*, operation_id: str = "me.profile.get") -> APIRoute
             session_row=session_row,
         )
         role = _workspace_role(session, user_id=user.id, workspace_id=workspace_id)
-        workspace_ids = _workspace_ids_for_user(session, user_id=user.id)
+        workspace_ids = _active_workspace_ids_for_user(session, user_id=user.id)
         now = datetime.now(UTC)
         return MeProfileResponse(
             role=role,

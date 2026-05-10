@@ -23,7 +23,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
@@ -423,6 +423,42 @@ class TestArchiveWorkspace:
             "admin.workspace.archived",
         ]
         assert published[1]["payload"]["workspace_id"] == ws
+
+    def test_archive_is_idempotent_for_deployment_admin(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        published: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            admin_sse.default_admin_fanout,
+            "publish",
+            lambda **kwargs: published.append(kwargs),
+        )
+        original = PINNED - timedelta(days=1)
+        with session_factory() as s:
+            ws = seed_workspace(s, slug="ws-owner-archive-repeat")
+            workspace = s.get(Workspace, ws)
+            assert workspace is not None
+            workspace.archived_at = original
+            s.commit()
+        _user, cookie = _admin_cookie(session_factory, settings, owner=True)
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+        resp = client.post(f"/admin/api/v1/workspaces/{ws}/archive")
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"id": ws, "archived_at": original.isoformat()}
+        with session_factory() as s, tenant_agnostic():
+            count = s.scalar(
+                select(func.count())
+                .select_from(AuditLog)
+                .where(AuditLog.action == "workspace.archived")
+            )
+        assert count == 0
+        assert published == []
 
     def test_404_for_non_admin_without_workspace_id_leak(
         self,

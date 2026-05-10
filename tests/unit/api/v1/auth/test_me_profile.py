@@ -18,6 +18,7 @@ from app.adapters.db.base import Base
 from app.adapters.db.billing.models import Organization
 from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.session import make_engine
+from app.adapters.db.workspace.models import Workspace
 from app.api.deps import db_session as db_session_dep
 from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.auth import me as me_module
@@ -236,6 +237,57 @@ def test_bare_me_returns_shell_profile(
     assert body["available_workspaces"][0]["workspace"]["id"] == "smoke"
     assert body["is_deployment_admin"] is False
     assert body["is_deployment_owner"] is False
+
+
+def test_bare_me_ignores_archived_session_workspace(
+    client: TestClient,
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+) -> None:
+    with session_factory() as s:
+        user = bootstrap_user(
+            s,
+            email="archive-fallback@example.test",
+            display_name="Archive Fallback",
+            clock=SystemClock(),
+        )
+        archived = bootstrap_workspace(
+            s,
+            slug="old-home",
+            name="Old Home",
+            owner_user_id=user.id,
+            clock=SystemClock(),
+        )
+        live = bootstrap_workspace(
+            s,
+            slug="new-home",
+            name="New Home",
+            owner_user_id=user.id,
+            clock=SystemClock(),
+        )
+        archived.archived_at = SystemClock().now()
+        s.commit()
+        user_id = user.id
+        archived_id = archived.id
+        live_id = live.id
+    cookie = _issue_cookie(
+        session_factory,
+        user_id=user_id,
+        workspace_id=archived_id,
+        settings=settings,
+    )
+    client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+    response = client.get("/api/v1/me")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["current_workspace_id"] == live_id
+    assert {row["workspace"]["id"] for row in body["available_workspaces"]} == {
+        "new-home"
+    }
+    with session_factory() as s:
+        assert s.get(Workspace, archived_id).archived_at is not None
 
 
 def test_me_profile_reports_deployment_owner(
