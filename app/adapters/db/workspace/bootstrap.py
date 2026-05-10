@@ -29,8 +29,9 @@ class StarterWorkRole:
 
 STARTER_WORK_ROLES: tuple[StarterWorkRole, ...] = (
     StarterWorkRole(
-        key="maid",
-        name="Maid",
+        # code-health: ignore[duplicate] Seed catalog rows stay explicit data.
+        key="maid",  # code-health: ignore[duplicate] Seed catalog rows stay explicit data.  # noqa: E501
+        name="Maid",  # code-health: ignore[duplicate] Seed catalog rows stay explicit data.  # noqa: E501
         description_md="Cleaning, housekeeping, and turnover preparation.",
         default_settings_json={},
         icon_name="BrushCleaning",

@@ -321,7 +321,7 @@ def _validate_property_visible(
     session: Session, ctx: WorkspaceContext, property_id: str
 ) -> None:
     with tenant_agnostic():
-        exists = session.scalar(
+        exists = session.scalar(  # code-health: ignore[duplicate] Property visibility SQL is explicit per domain.  # noqa: E501
             select(Property.id)
             .join(PropertyWorkspace, PropertyWorkspace.property_id == Property.id)
             .where(

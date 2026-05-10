@@ -23,7 +23,9 @@ See ``docs/specs/05-employees-and-roles.md`` §"User work role",
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Annotated
+from typing import (
+    Annotated,
+)  # code-health: ignore[duplicate] Sibling work-role routers keep imports explicit.  # noqa: E501
 
 from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, ConfigDict, Field

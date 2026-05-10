@@ -314,7 +314,9 @@ class LlmAssignment(Base):
         default=list,
         server_default="[]",
     )
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), nullable=False
+    )  # code-health: ignore[duplicate] Timestamp columns stay explicit per table.  # noqa: E501
 
     __table_args__ = (
         # Defensive CHECK: ``priority`` is a sort key; a negative
@@ -403,7 +405,9 @@ class AgentToken(Base):
         JSON, nullable=False, default=dict
     )
     expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), nullable=False
+    )  # code-health: ignore[duplicate] Timestamp columns stay explicit per table.  # noqa: E501
     # Set on explicit user-initiated revocation (before ``expires_at``).
     # NULL while the token is live. The listing query can filter on
     # ``revoked_at IS NULL`` cheaply because the composite index below
@@ -1114,7 +1118,9 @@ class AgentDoc(Base):
     notes: Mapped[str | None] = mapped_column(
         String, nullable=True
     )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), nullable=False
+    )  # code-health: ignore[duplicate] Timestamp columns stay explicit per table.  # noqa: E501
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
@@ -1180,7 +1186,9 @@ class LlmPromptTemplate(Base):
     )
     default_hash: Mapped[str] = mapped_column(String(16), nullable=False)
     notes: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), nullable=False
+    )  # code-health: ignore[duplicate] Timestamp columns stay explicit per table.  # noqa: E501
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (

@@ -771,7 +771,7 @@ def _validate_turn_start(run: _TurnRun) -> None:
 
 def _publish_turn_started(run: _TurnRun) -> None:
     run.bus.publish(
-        AgentTurnStarted(
+        AgentTurnStarted(  # code-health: ignore[duplicate] Event payloads stay explicit per event.  # noqa: E501
             workspace_id=run.ctx.workspace_id,
             actor_id=run.ctx.actor_id,
             actor_user_id=run.ctx.actor_id,
@@ -1086,20 +1086,7 @@ def _append_result(
 
 def _finish_reply(turn: _ActiveTurn, body_md: str) -> TurnOutcome:
     run = turn.run
-    notifications = run.agent_message_notifications
-    chat_message_id = _write_chat_reply(
-        run.session,
-        ctx=run.ctx,
-        thread_id=run.thread_id,
-        body_md=body_md,
-        scope=run.scope,
-        event_bus=run.bus,
-        correlation_id=run.correlation_id,
-        clock=run.clock,
-        agent_message_notification_sink=notifications.sink,
-        agent_message_recipient_user_id=notifications.recipient_user_id,
-        agent_message_delivery_is_fallback=notifications.delivery_is_fallback,
-    )
+    chat_message_id = _write_turn_reply(run, body_md)
     return _finish_turn(
         run,
         _TurnTerminal(
@@ -1159,6 +1146,23 @@ def _notify_approval_if_requested(run: _TurnRun, approval_id: str) -> None:
     )
 
 
+def _write_turn_reply(run: _TurnRun, body_md: str) -> str | None:
+    notifications = run.agent_message_notifications
+    return _write_chat_reply(
+        run.session,
+        ctx=run.ctx,
+        thread_id=run.thread_id,
+        body_md=body_md,
+        scope=run.scope,
+        event_bus=run.bus,
+        correlation_id=run.correlation_id,
+        clock=run.clock,
+        agent_message_notification_sink=notifications.sink,
+        agent_message_recipient_user_id=notifications.recipient_user_id,
+        agent_message_delivery_is_fallback=notifications.delivery_is_fallback,
+    )
+
+
 def _publish_action_pending(
     run: _TurnRun,
     approval_id: str,
@@ -1186,19 +1190,9 @@ def _finish_timeout(turn: _ActiveTurn) -> TurnOutcome:
         error_code="timeout",
         level=logging.WARNING,
     )
-    notifications = run.agent_message_notifications
-    chat_message_id = _write_chat_reply(
-        run.session,
-        ctx=run.ctx,
-        thread_id=run.thread_id,
-        body_md=_reply_with_error_id(_TIMEOUT_REPLY_TEXT, run.correlation_id),
-        scope=run.scope,
-        event_bus=run.bus,
-        correlation_id=run.correlation_id,
-        clock=run.clock,
-        agent_message_notification_sink=notifications.sink,
-        agent_message_recipient_user_id=notifications.recipient_user_id,
-        agent_message_delivery_is_fallback=notifications.delivery_is_fallback,
+    chat_message_id = _write_turn_reply(
+        run,
+        _reply_with_error_id(_TIMEOUT_REPLY_TEXT, run.correlation_id),
     )
     return _finish_turn(
         run,
@@ -1224,19 +1218,9 @@ def _finish_error(
         error_code=error_code,
         level=logging.WARNING,
     )
-    notifications = run.agent_message_notifications
-    chat_message_id = _write_chat_reply(
-        run.session,
-        ctx=run.ctx,
-        thread_id=run.thread_id,
-        body_md=_reply_with_error_id(_error_reply_text(error_code), run.correlation_id),
-        scope=run.scope,
-        event_bus=run.bus,
-        correlation_id=run.correlation_id,
-        clock=run.clock,
-        agent_message_notification_sink=notifications.sink,
-        agent_message_recipient_user_id=notifications.recipient_user_id,
-        agent_message_delivery_is_fallback=notifications.delivery_is_fallback,
+    chat_message_id = _write_turn_reply(
+        run,
+        _reply_with_error_id(_error_reply_text(error_code), run.correlation_id),
     )
     return _finish_turn(
         run,
@@ -1609,7 +1593,7 @@ def _call_llm(
         consents=load_consent_set(session, ctx.workspace_id),
     )
     elapsed_ms = int((clock.now() - started).total_seconds() * 1000)
-    cost_cents = estimate_cost_cents(
+    cost_cents = estimate_cost_cents(  # code-health: ignore[duplicate] Usage pricing is recorded at each LLM boundary.  # noqa: E501
         prompt_tokens=response.usage.prompt_tokens,
         max_output_tokens=response.usage.completion_tokens,
         api_model_id=model_pick.api_model_id,

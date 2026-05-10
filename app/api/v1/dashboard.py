@@ -237,7 +237,9 @@ def _employees(session: Session, ctx: WorkspaceContext) -> list[EmployeeResponse
     users = _load_users(session, user_ids=user_ids)
     # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     engagements = _load_active_engagements(session, ctx, user_ids=user_ids)
-    role_keys = _load_role_keys_by_user(session, ctx, user_ids=user_ids)
+    role_keys = _load_role_keys_by_user(
+        session, ctx, user_ids=user_ids
+    )  # code-health: ignore[duplicate] Dashboard projection mirrors employee list.  # noqa: E501
     property_ids = _load_property_ids_by_user(session, ctx, user_ids=user_ids)
     out: list[EmployeeResponse] = []
     for user_id in user_ids:

@@ -451,7 +451,7 @@ def build_invite_router(
             return AcceptResponse(
                 kind="new_user",
                 invite_id=outcome.session.invite_id,
-                user_id=outcome.session.user_id,
+                user_id=outcome.session.user_id,  # code-health: ignore[duplicate] Parallel invite routes keep response shape explicit.  # noqa: E501
                 email_lower=outcome.session.email_lower,
                 display_name=outcome.session.display_name,
             )

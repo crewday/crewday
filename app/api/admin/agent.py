@@ -229,25 +229,18 @@ def build_admin_agent_router() -> APIRouter:
         try:
             producer = _get_action_producer(request)
         except ServiceUnavailable as exc:
-            error = str(exc.extra.get("error", "admin_agent_runtime_unwired"))
-            if not _is_admin_fallback_error(error):
-                _publish_admin_turn_finished(
-                    request,
-                    ctx,
-                    created_at,
-                    outcome="error",
-                    error=error,
-                )
-                raise
-            return _record_admin_fallback_turn(
+            fallback = _record_service_unavailable_fallback(
                 request,
                 ctx=ctx,
                 session=session,
                 body=body.body,
                 page_context=page,
-                error=error,
                 created_at=created_at,
+                exc=exc,
             )
+            if fallback is None:
+                raise
+            return fallback
         try:
             proposal = _validated_action_proposal(
                 producer.produce_action(
@@ -258,25 +251,18 @@ def build_admin_agent_router() -> APIRouter:
                 )
             )
         except ServiceUnavailable as exc:
-            error = str(exc.extra.get("error", "admin_agent_runtime_unwired"))
-            if not _is_admin_fallback_error(error):
-                _publish_admin_turn_finished(
-                    request,
-                    ctx,
-                    created_at,
-                    outcome="error",
-                    error=error,
-                )
-                raise
-            return _record_admin_fallback_turn(
+            fallback = _record_service_unavailable_fallback(
                 request,
                 ctx=ctx,
                 session=session,
                 body=body.body,
                 page_context=page,
-                error=error,
                 created_at=created_at,
+                exc=exc,
             )
+            if fallback is None:
+                raise
+            return fallback
         except Exception as exc:
             error = "admin_agent_runtime_error"
             _log_admin_agent_failure(
@@ -551,6 +537,38 @@ def _admin_agent_unavailable(error: str) -> ServiceUnavailable:
 
 def _is_admin_fallback_error(error: str) -> bool:
     return error in _ADMIN_FALLBACK_ACTION_ERRORS
+
+
+def _record_service_unavailable_fallback(
+    request: Request,
+    *,
+    ctx: DeploymentContext,
+    session: Session,
+    body: str,
+    page_context: str,
+    created_at: datetime,
+    exc: ServiceUnavailable,
+) -> AdminAgentMessage | None:
+    # code-health: ignore[params] Fallback helper mirrors route context explicitly.
+    error = str(exc.extra.get("error", "admin_agent_runtime_unwired"))
+    if not _is_admin_fallback_error(error):
+        _publish_admin_turn_finished(
+            request,
+            ctx,
+            created_at,
+            outcome="error",
+            error=error,
+        )
+        return None
+    return _record_admin_fallback_turn(
+        request,
+        ctx=ctx,
+        session=session,
+        body=body,
+        page_context=page_context,
+        error=error,
+        created_at=created_at,
+    )
 
 
 def _validated_action_proposal(

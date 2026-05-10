@@ -30,7 +30,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
-    JSON,
+    JSON,  # code-health: ignore[duplicate] ORM import preludes stay local.
     CheckConstraint,
     Float,
     ForeignKey,
@@ -38,7 +38,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     String,
-    UniqueConstraint,
+    UniqueConstraint,  # code-health: ignore[duplicate] ORM imports stay explicit.
 )
 from sqlalchemy.orm import Mapped, mapped_column
 

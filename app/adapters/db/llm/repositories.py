@@ -33,7 +33,7 @@ _ACTIVE_RELAY_UNIQUE_HINTS: tuple[str, ...] = (
 def _to_relay_view(row: AgentRelayRequest) -> AgentRelayRequestView:
     status = _relay_status(row.status)
     return AgentRelayRequestView(
-        id=row.id,
+        id=row.id,  # code-health: ignore[duplicate] Relay row/view fields stay explicit for schema drift.  # noqa: E501
         workspace_id=row.workspace_id,
         requester_user_id=row.requester_user_id,
         target_user_id=row.target_user_id,

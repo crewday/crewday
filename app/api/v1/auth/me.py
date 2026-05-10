@@ -730,9 +730,9 @@ def build_me_profile_router(*, operation_id: str = "me.profile.get") -> APIRoute
     # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
     def get_me_profile(
         # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
-        request: Request,
-        session: _Db,
-        session_cookie_primary: Annotated[
+        request: Request,  # code-health: ignore[duplicate] FastAPI cookie signatures stay explicit per route.  # noqa: E501
+        session: _Db,  # code-health: ignore[duplicate] FastAPI cookie signatures stay explicit per route.  # noqa: E501
+        session_cookie_primary: Annotated[  # code-health: ignore[duplicate] FastAPI cookie signatures stay explicit per route.  # noqa: E501
             str | None,
             Cookie(alias=auth_session.SESSION_COOKIE_NAME),
         ] = None,

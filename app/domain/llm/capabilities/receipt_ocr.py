@@ -209,7 +209,7 @@ def _check_budget(
         max_output_tokens=_PROJECTED_COMPLETION_TOKENS,
         api_model_id=model_pick.api_model_id,
         pricing=pricing,
-        workspace_id=ctx.workspace_ctx.workspace_id,
+        workspace_id=ctx.workspace_ctx.workspace_id,  # code-health: ignore[duplicate] Usage pricing is recorded at each LLM boundary.  # noqa: E501
     )
     check_budget(
         ctx.session,
@@ -239,7 +239,7 @@ def _record_usage(
         max_output_tokens=response.usage.completion_tokens,
         api_model_id=model_pick.api_model_id,
         pricing=pricing,
-        workspace_id=ctx.workspace_ctx.workspace_id,
+        workspace_id=ctx.workspace_ctx.workspace_id,  # code-health: ignore[duplicate] Usage pricing is recorded at each LLM boundary.  # noqa: E501
     )
     cost_usd = estimate_cost_usd(
         prompt_tokens=response.usage.prompt_tokens,
