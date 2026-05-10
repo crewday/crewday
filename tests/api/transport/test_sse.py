@@ -37,6 +37,8 @@ from app.events import bus as default_bus
 from app.events import registry as registry_module
 from app.events.registry import ALL_ROLES, Event, register
 from app.events.types import (
+    AgentMessageAppended,
+    AgentMessagePayload,
     ChatMessageSent,
     TaskCompleted,
     TaskCreated,
@@ -1391,6 +1393,26 @@ DEFAULT_ROLE_EVENTS_ALLOWLIST: frozenset[str] = frozenset(
 
 
 class TestDefaultRolesReviewGate:
+    def test_agent_message_appended_is_user_scoped_for_relay_delivery(self) -> None:
+        event = AgentMessageAppended(
+            workspace_id="ws_1",
+            actor_id="target_user",
+            actor_user_id="target_user",
+            correlation_id="corr_1",
+            occurred_at=_utc(),
+            scope="employee",
+            message=AgentMessagePayload(
+                at=_utc(),
+                kind="agent",
+                body="Manager is asking: Can you work Sunday?",
+                channel_kind=None,
+            ),
+        )
+
+        assert event.name == "agent.message.appended"
+        assert event.user_scoped is True
+        assert event.actor_user_id == "target_user"
+
     def test_no_new_event_silently_inherits_all_roles(self) -> None:
         """Every registered event using the default must be allowlisted.
 

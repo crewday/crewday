@@ -249,6 +249,13 @@ def _is_workspace_agent_tool(entry: _OperationEntry) -> bool:
     return _is_valid_x_cli_metadata(entry.operation)
 
 
+def _agent_scopes_for_operation(operation: Mapping[str, Any]) -> frozenset[str]:
+    raw = operation.get("x-agent-scopes")
+    if not isinstance(raw, list):
+        return frozenset()
+    return frozenset(item for item in raw if isinstance(item, str) and item)
+
+
 def _workspace_agent_rejection(entry: _OperationEntry) -> str | None:
     """Return the reason a known operation cannot be called by this dispatcher."""
     if not _is_workspace_api_path(entry.path):
@@ -894,6 +901,16 @@ class OpenAPIToolDispatcher:
         domain-level checks remain authoritative.
         """
         requirements = self._permission_index.get(op_id, ())
+        scopes = _agent_scopes_for_operation(self._index[op_id].operation)
+        if scopes and self._ctx is not None:
+            if self._ctx.actor_grant_role == "worker":
+                actor_scope = "employee"
+            elif self._ctx.actor_grant_role == "manager":
+                actor_scope = "manager"
+            else:
+                actor_scope = self._ctx.actor_grant_role
+            if actor_scope not in scopes:
+                return False
         if not requirements:
             return True
         return all(

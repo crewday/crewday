@@ -215,6 +215,29 @@ class _CountingDispatcher:
         return call.name.replace(".", " ").capitalize()
 
 
+@dataclass(slots=True)
+class _RelayDispatcher(_CountingDispatcher):
+    def dispatch(
+        self,
+        call: ToolCall,
+        *,
+        token: DelegatedToken,
+        headers: Mapping[str, str],
+    ) -> ToolResult:
+        self.captured.append(call)
+        assert token.plaintext.startswith("mip_")
+        return ToolResult(
+            call_id=call.id,
+            status_code=201,
+            body={
+                "confirmation": "I asked Maria.",
+                "target_user_id": "usr_maria",
+                "target_display_label": "Maria",
+            },
+            mutated=True,
+        )
+
+
 # ---------------------------------------------------------------------------
 # The end-to-end scenario
 # ---------------------------------------------------------------------------
@@ -430,6 +453,27 @@ def test_manager_turn_writes_audit_with_real_delegated_token(
     assert token_row.kind == "delegated"
     assert token_row.delegate_for_user_id == user.id
     assert token_row.label == "manager-chat-agent"
+
+
+def test_relay_tool_result_keeps_runtime_confirmation_safe() -> None:
+    dispatcher = _RelayDispatcher()
+    result = dispatcher.dispatch(
+        ToolCall(
+            id="call_relay",
+            name="agent.relay.request",
+            input={"target_name": "Maria", "request": "Can you work Sunday?"},
+        ),
+        token=DelegatedToken(plaintext="mip_FAKEKEY_FAKESECRET", token_id="tok_001"),
+        headers={},
+    )
+
+    assert [call.name for call in dispatcher.captured] == ["agent.relay.request"]
+    assert result.status_code == 201
+    assert result.body == {
+        "confirmation": "I asked Maria.",
+        "target_user_id": "usr_maria",
+        "target_display_label": "Maria",
+    }
 
 
 def test_agent_message_fallback_notifies_target_user_with_inbox_and_sse(

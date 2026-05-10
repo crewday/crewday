@@ -18,19 +18,22 @@ from sqlalchemy.engine.interfaces import ExecutionContext
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import JSONResponse
 
+from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.base import Base
 from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.identity.models import User, canonicalise_email
 from app.adapters.db.llm.models import (
+    AgentRelayRequest,
     BudgetLedger,
     LlmAssignment,
     LlmModel,
     LlmProvider,
     LlmProviderModel,
 )
+from app.adapters.db.messaging.models import ChatChannel, ChatMessage, Notification
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
-from app.adapters.db.workspace.models import UserWorkspace, Workspace
+from app.adapters.db.workspace.models import UserWorkspace, WorkEngagement, Workspace
 from app.adapters.llm.ports import LLMResponse, LLMUsage
 from app.api.deps import current_workspace_context, db_session
 from app.api.deps import get_llm as get_llm_dep
@@ -137,6 +140,68 @@ def _bootstrap(
         )
         s.commit()
     return workspace_id, user_id
+
+
+def _grant_role(
+    session: Session,
+    *,
+    workspace_id: str,
+    user_id: str,
+    role: Literal["manager", "worker"],
+) -> None:
+    session.add(
+        RoleGrant(
+            id=new_ulid(),
+            workspace_id=workspace_id,
+            user_id=user_id,
+            grant_role=role,
+            scope_kind="workspace",
+            created_at=_PINNED,
+        )
+    )
+
+
+def _seed_worker_target(
+    session: Session,
+    *,
+    workspace_id: str,
+    display_name: str = "Maria",
+    archived: bool = False,
+) -> str:
+    user_id = new_ulid()
+    session.add(
+        User(
+            id=user_id,
+            email=f"{user_id.lower()}@example.com",
+            email_lower=canonicalise_email(f"{user_id.lower()}@example.com"),
+            display_name=display_name,
+            created_at=_PINNED,
+            archived_at=_PINNED if archived else None,
+        )
+    )
+    session.flush()
+    session.add(
+        UserWorkspace(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            source="workspace_grant",
+            added_at=_PINNED,
+        )
+    )
+    _grant_role(session, workspace_id=workspace_id, user_id=user_id, role="worker")
+    session.add(
+        WorkEngagement(
+            id=new_ulid(),
+            user_id=user_id,
+            workspace_id=workspace_id,
+            engagement_kind="payroll",
+            started_on=_PINNED.date(),
+            archived_on=None,
+            created_at=_PINNED,
+            updated_at=_PINNED,
+        )
+    )
+    return user_id
 
 
 def role_to_scope(role: Literal["manager", "worker"]) -> Literal["manager", "employee"]:
@@ -435,6 +500,219 @@ def test_agent_scope_mismatch_returns_problem_json(
     assert response.status_code == 403
     assert response.headers["content-type"].startswith("application/problem+json")
     assert response.json()["error"] == "agent_scope_forbidden"
+
+
+def test_agent_relay_request_delivers_to_target_agent_thread(
+    factory: sessionmaker[Session],
+) -> None:
+    workspace_id, manager_id = _bootstrap(factory, role="manager")
+    with factory() as s:
+        _grant_role(s, workspace_id=workspace_id, user_id=manager_id, role="manager")
+        worker_id = _seed_worker_target(s, workspace_id=workspace_id)
+        s.commit()
+    bus = EventBus()
+    appended: list[AgentMessageAppended] = []
+    bus.subscribe(AgentMessageAppended)(appended.append)
+    client = _client(
+        factory,
+        _ctx(workspace_id=workspace_id, actor_id=manager_id, role="manager"),
+        event_bus=bus,
+    )
+
+    response = client.post(
+        "/w/agent-test/api/v1/agent/manager/relay/request",
+        json={"target_user_id": worker_id, "request": "Can you work Sunday?"},
+    )
+
+    assert response.status_code == 201
+    assert response.json() == {
+        "confirmation": "I asked Maria.",
+        "target_user_id": worker_id,
+        "target_display_label": "Maria",
+    }
+    with factory() as s:
+        channel = s.scalars(
+            select(ChatChannel).where(
+                ChatChannel.workspace_id == workspace_id,
+                ChatChannel.external_ref == f"agent:employee:{worker_id}",
+            )
+        ).one()
+        message = s.scalars(
+            select(ChatMessage).where(ChatMessage.channel_id == channel.id)
+        ).one()
+        relay = s.scalars(select(AgentRelayRequest)).one()
+    assert channel.kind == "staff"
+    assert message.author_user_id == worker_id
+    assert message.author_label == "agent"
+    assert message.body_md == "Manager is asking: Can you work Sunday?"
+    assert relay.requester_user_id == manager_id
+    assert relay.target_user_id == worker_id
+    assert relay.target_thread_ref == f"agent:employee:{worker_id}"
+    assert relay.target_message_ref == message.id
+    assert relay.request_summary == "Can you work Sunday?"
+    assert [event.actor_user_id for event in appended] == [worker_id]
+    assert appended[0].message.body == message.body_md
+    with factory() as s:
+        notification = s.scalars(select(Notification)).one()
+        audit = s.scalars(
+            select(AuditLog).where(
+                AuditLog.entity_kind == "agent_relay_request",
+                AuditLog.action == "agent.relay.requested",
+            )
+        ).one()
+    assert notification.recipient_user_id == worker_id
+    assert notification.kind == "agent_message"
+    assert notification.payload_json["message_id"] == message.id
+    assert notification.payload_json["chat_thread_ref"] == channel.id
+    assert audit.diff == {
+        "requester_user_id": manager_id,
+        "target_user_id": worker_id,
+        "agent_relay_request_id": relay.id,
+        "target_channel_id": channel.id,
+        "target_message_id": message.id,
+    }
+
+
+def test_agent_relay_request_resolves_unambiguous_target_name(
+    factory: sessionmaker[Session],
+) -> None:
+    workspace_id, manager_id = _bootstrap(factory, role="manager")
+    with factory() as s:
+        _grant_role(s, workspace_id=workspace_id, user_id=manager_id, role="manager")
+        worker_id = _seed_worker_target(s, workspace_id=workspace_id)
+        s.commit()
+    client = _client(
+        factory,
+        _ctx(workspace_id=workspace_id, actor_id=manager_id, role="manager"),
+    )
+
+    response = client.post(
+        "/w/agent-test/api/v1/agent/manager/relay/request",
+        json={"target_name": "maria", "request": "Can you work Sunday?"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["target_user_id"] == worker_id
+
+
+def test_agent_relay_request_rejects_ambiguous_name_without_message_row(
+    factory: sessionmaker[Session],
+) -> None:
+    workspace_id, manager_id = _bootstrap(factory, role="manager")
+    with factory() as s:
+        _grant_role(s, workspace_id=workspace_id, user_id=manager_id, role="manager")
+        _seed_worker_target(s, workspace_id=workspace_id, display_name="Maria")
+        _seed_worker_target(s, workspace_id=workspace_id, display_name="Maria")
+        s.commit()
+    client = _client(
+        factory,
+        _ctx(workspace_id=workspace_id, actor_id=manager_id, role="manager"),
+    )
+
+    response = client.post(
+        "/w/agent-test/api/v1/agent/manager/relay/request",
+        json={"target_name": "Maria", "request": "Can you work Sunday?"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "agent_relay_target_ambiguous"
+    with factory() as s:
+        assert s.scalars(select(ChatMessage)).all() == []
+        assert s.scalars(select(AgentRelayRequest)).all() == []
+
+
+def test_agent_relay_request_rejects_archived_target_without_message_row(
+    factory: sessionmaker[Session],
+) -> None:
+    workspace_id, manager_id = _bootstrap(factory, role="manager")
+    with factory() as s:
+        _grant_role(s, workspace_id=workspace_id, user_id=manager_id, role="manager")
+        worker_id = _seed_worker_target(
+            s, workspace_id=workspace_id, display_name="Maria", archived=True
+        )
+        s.commit()
+    client = _client(
+        factory,
+        _ctx(workspace_id=workspace_id, actor_id=manager_id, role="manager"),
+    )
+
+    response = client.post(
+        "/w/agent-test/api/v1/agent/manager/relay/request",
+        json={"target_user_id": worker_id, "request": "Can you work Sunday?"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"] == "agent_relay_target_forbidden"
+    with factory() as s:
+        assert s.scalars(select(ChatMessage)).all() == []
+        assert s.scalars(select(AgentRelayRequest)).all() == []
+
+
+def test_agent_relay_request_rejects_cross_workspace_target_without_rows(
+    factory: sessionmaker[Session],
+) -> None:
+    workspace_id, manager_id = _bootstrap(factory, role="manager")
+    other_workspace_id = new_ulid()
+    with factory() as s:
+        s.add(
+            Workspace(
+                id=other_workspace_id,
+                slug="agent-test-other",
+                name="Other Agent Test",
+                plan="free",
+                quota_json={},
+                settings_json={},
+                created_at=_PINNED,
+            )
+        )
+        s.flush()
+        _grant_role(s, workspace_id=workspace_id, user_id=manager_id, role="manager")
+        worker_id = _seed_worker_target(s, workspace_id=other_workspace_id)
+        s.commit()
+    client = _client(
+        factory,
+        _ctx(workspace_id=workspace_id, actor_id=manager_id, role="manager"),
+    )
+
+    response = client.post(
+        "/w/agent-test/api/v1/agent/manager/relay/request",
+        json={"target_user_id": worker_id, "request": "Can you work Sunday?"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"] == "agent_relay_target_forbidden"
+    with factory() as s:
+        assert s.scalars(select(ChatMessage)).all() == []
+        assert s.scalars(select(AgentRelayRequest)).all() == []
+        assert s.scalars(select(Notification)).all() == []
+
+
+def test_worker_cannot_open_relay_request_without_rows(
+    factory: sessionmaker[Session],
+) -> None:
+    workspace_id, worker_actor_id = _bootstrap(factory, role="worker")
+    with factory() as s:
+        _grant_role(
+            s, workspace_id=workspace_id, user_id=worker_actor_id, role="worker"
+        )
+        target_id = _seed_worker_target(s, workspace_id=workspace_id)
+        s.commit()
+    client = _client(
+        factory,
+        _ctx(workspace_id=workspace_id, actor_id=worker_actor_id, role="worker"),
+    )
+
+    response = client.post(
+        "/w/agent-test/api/v1/agent/manager/relay/request",
+        json={"target_user_id": target_id, "request": "Can you work Sunday?"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["error"] == "permission_denied"
+    with factory() as s:
+        assert s.scalars(select(ChatMessage)).all() == []
+        assert s.scalars(select(AgentRelayRequest)).all() == []
+        assert s.scalars(select(Notification)).all() == []
 
 
 def test_manager_log_workspace_resolution_defers_session_touch_autoflush(

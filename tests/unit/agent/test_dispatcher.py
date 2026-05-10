@@ -113,6 +113,7 @@ def _schema_with(*entries: dict[str, Any]) -> dict[str, Any]:
             "x-cli",
             "x-agent-forbidden",
             "x-interactive-only",
+            "x-agent-scopes",
         ):
             if entry.get(key) is not None:
                 op[key] = entry[key]
@@ -509,6 +510,70 @@ def test_tools_catalog_only_advertises_workspace_cli_agent_operations() -> None:
     disp = OpenAPIToolDispatcher(app=FastAPI(), openapi=schema, workspace_slug="ws")
 
     assert [tool["name"] for tool in disp.tools] == ["properties.list"]
+
+
+def test_relay_tool_catalog_hides_manager_scoped_tool_from_worker() -> None:
+    schema = _schema_with(
+        {
+            "path": "/w/{slug}/api/v1/agent/manager/relay/request",
+            "method": "post",
+            "operationId": "agent.relay.request",
+            "x-cli": _x_cli("agent", "relay-request"),
+            "x-agent-scopes": ["manager"],
+            "requestBody": {
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "target_user_id": {"type": "string"},
+                                "request": {"type": "string"},
+                            },
+                            "required": ["target_user_id", "request"],
+                        }
+                    }
+                }
+            },
+        }
+    )
+    worker_ctx = WorkspaceContext(
+        workspace_id="ws_001",
+        workspace_slug="ws",
+        actor_id="usr_001",
+        actor_kind="user",
+        actor_grant_role="worker",
+        actor_was_owner_member=False,
+        audit_correlation_id="corr_001",
+    )
+    manager_ctx = WorkspaceContext(
+        workspace_id="ws_001",
+        workspace_slug="ws",
+        actor_id="usr_002",
+        actor_kind="user",
+        actor_grant_role="manager",
+        actor_was_owner_member=False,
+        audit_correlation_id="corr_002",
+    )
+
+    worker_dispatcher = OpenAPIToolDispatcher(
+        app=FastAPI(),
+        openapi=schema,
+        workspace_slug="ws",
+        session=object(),
+        ctx=worker_ctx,
+    )
+    manager_dispatcher = OpenAPIToolDispatcher(
+        app=FastAPI(),
+        openapi=schema,
+        workspace_slug="ws",
+        session=object(),
+        ctx=manager_ctx,
+    )
+
+    assert "agent.relay.request" not in {
+        tool["name"] for tool in worker_dispatcher.tools
+    }
+    assert "agent.relay.request" in {tool["name"] for tool in manager_dispatcher.tools}
 
 
 # ---------------------------------------------------------------------------
