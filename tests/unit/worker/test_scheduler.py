@@ -58,6 +58,8 @@ from app.worker.scheduler import (
     USER_WORKSPACE_REFRESH_JOB_ID,
     WEB_PUSH_DISPATCH_JOB_ID,
     WEBHOOK_DISPATCH_JOB_ID,
+    WORKSPACE_PURGE_INTERVAL_SECONDS,
+    WORKSPACE_PURGE_JOB_ID,
     create_scheduler,
     register_jobs,
     registered_job_ids,
@@ -122,6 +124,7 @@ class TestRegisterJobs:
             USER_WORKSPACE_REFRESH_JOB_ID,
             WEB_PUSH_DISPATCH_JOB_ID,
             WEBHOOK_DISPATCH_JOB_ID,
+            WORKSPACE_PURGE_JOB_ID,
         }
 
     def test_is_idempotent_under_replace_existing(self) -> None:
@@ -170,6 +173,7 @@ class TestRegisterJobs:
             USER_WORKSPACE_REFRESH_JOB_ID,
             WEB_PUSH_DISPATCH_JOB_ID,
             WEBHOOK_DISPATCH_JOB_ID,
+            WORKSPACE_PURGE_JOB_ID,
         }
         assert set(ids) == expected_ids
         assert len(ids) == len(expected_ids)
@@ -886,6 +890,39 @@ class TestSignupGcJob:
         body()
 
         assert seen_calls == [(fake_session, clock.now())]
+
+
+class TestWorkspacePurgeJob:
+    """Registration shape for owner-requested workspace purge."""
+
+    def test_adds_workspace_purge_job_at_hourly_interval(self) -> None:
+        """Registered with the pinned interval + coalesce settings."""
+        from apscheduler.triggers.interval import IntervalTrigger
+
+        sched = create_scheduler()
+        register_jobs(sched)
+
+        job = sched.get_job(WORKSPACE_PURGE_JOB_ID)
+        assert job is not None, (
+            f"{WORKSPACE_PURGE_JOB_ID} not registered by register_jobs"
+        )
+
+        assert isinstance(job.trigger, IntervalTrigger)
+        assert job.trigger.interval.total_seconds() == 3600.0
+        assert WORKSPACE_PURGE_INTERVAL_SECONDS == 3600
+
+        assert job.misfire_grace_time == WORKSPACE_PURGE_INTERVAL_SECONDS
+        assert job.coalesce is True
+        assert job.max_instances == 1
+
+    def test_is_idempotent(self) -> None:
+        """Re-registering keeps exactly one workspace purge job."""
+        sched = create_scheduler()
+        register_jobs(sched)
+        register_jobs(sched)
+
+        matching = [j for j in sched.get_jobs() if j.id == WORKSPACE_PURGE_JOB_ID]
+        assert len(matching) == 1
 
 
 # ---------------------------------------------------------------------------

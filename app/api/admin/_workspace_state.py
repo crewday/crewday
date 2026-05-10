@@ -22,7 +22,7 @@ See ``docs/specs/02-domain-model.md`` §"workspaces" and
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Final
 
 from sqlalchemy import select, update
@@ -40,7 +40,10 @@ __all__ = [
     "VerificationState",
     "archive_workspace_if_needed",
     "archived_at_of",
+    "delete_requested_at_of",
     "format_archived_at",
+    "purge_after_of",
+    "schedule_workspace_deletion_if_needed",
     "set_archived_at",
     "set_verification_state",
     "verification_state_of",
@@ -67,6 +70,7 @@ DEFAULT_VERIFICATION_STATE: Final[str] = "unverified"
 # like ``recovery.kill_switch_enabled``).
 VERIFICATION_STATE_KEY: Final[str] = "admin_verification_state"
 ARCHIVED_AT_KEY: Final[str] = "admin_archived_at"
+WORKSPACE_DELETE_GRACE: Final[timedelta] = timedelta(days=14)
 
 
 def verification_state_of(workspace: Workspace) -> str:
@@ -101,6 +105,26 @@ def archived_at_of(workspace: Workspace) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed
+
+
+def delete_requested_at_of(workspace: Workspace) -> datetime | None:
+    """Return the deletion request timestamp, normalised to aware UTC."""
+    parsed = workspace.delete_requested_at
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def purge_after_of(workspace: Workspace) -> datetime | None:
+    """Return the scheduled purge deadline, normalised to aware UTC."""
+    parsed = workspace.purge_after
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def set_archived_at(workspace: Workspace, *, when: datetime) -> None:
@@ -153,6 +177,95 @@ def archive_workspace_if_needed(
     if archived.tzinfo is None:
         archived = archived.replace(tzinfo=UTC)
     return archived, False
+
+
+def schedule_workspace_deletion_if_needed(
+    session: Session, workspace: Workspace, *, when: datetime
+) -> tuple[datetime, datetime, bool]:
+    """Ensure owner-requested deletion is scheduled.
+
+    Returns ``(delete_requested_at, purge_after, changed)``. An existing
+    schedule always wins so repeated Delete requests before the deadline
+    are idempotent and cannot extend the grace period.
+    """
+    if when.tzinfo is None:  # pragma: no cover - defensive
+        when = when.replace(tzinfo=UTC)
+    requested_at = when.astimezone(UTC)
+    purge_after = requested_at + WORKSPACE_DELETE_GRACE
+
+    existing_requested = delete_requested_at_of(workspace)
+    existing_purge_after = purge_after_of(workspace)
+    if existing_requested is not None and existing_purge_after is not None:
+        return existing_requested, existing_purge_after, False
+
+    if existing_requested is None and existing_purge_after is None:
+        with tenant_agnostic():
+            result = session.execute(
+                update(Workspace)
+                .where(Workspace.id == workspace.id)
+                .where(Workspace.delete_requested_at.is_(None))
+                .where(Workspace.purge_after.is_(None))
+                .values(delete_requested_at=requested_at, purge_after=purge_after)
+                .execution_options(synchronize_session="fetch")
+            )
+            if not isinstance(
+                result, CursorResult
+            ):  # pragma: no cover - SQLAlchemy DML
+                raise TypeError(f"expected CursorResult, got {type(result).__name__}")
+            if result.rowcount == 1:
+                workspace.delete_requested_at = requested_at
+                workspace.purge_after = purge_after
+                return requested_at, purge_after, True
+            stored = session.get(Workspace, workspace.id, populate_existing=True)
+        if stored is None:  # pragma: no cover - defensive
+            return requested_at, purge_after, False
+        existing_requested = delete_requested_at_of(stored)
+        existing_purge_after = purge_after_of(stored)
+        if existing_requested is not None and existing_purge_after is not None:
+            return existing_requested, existing_purge_after, False
+
+    repair_requested = existing_requested or (
+        existing_purge_after - WORKSPACE_DELETE_GRACE
+        if existing_purge_after is not None
+        else requested_at
+    )
+    repair_purge_after = existing_purge_after or (
+        repair_requested + WORKSPACE_DELETE_GRACE
+    )
+    repair_values: dict[str, datetime] = {}
+    if existing_requested is None:
+        repair_values["delete_requested_at"] = repair_requested
+    if existing_purge_after is None:
+        repair_values["purge_after"] = repair_purge_after
+    with tenant_agnostic():
+        result = session.execute(
+            update(Workspace)
+            .where(Workspace.id == workspace.id)
+            .where(
+                *(
+                    getattr(Workspace, column_name).is_(None)
+                    for column_name in repair_values
+                )
+            )
+            .values(**repair_values)
+            .execution_options(synchronize_session="fetch")
+        )
+        if not isinstance(result, CursorResult):  # pragma: no cover - SQLAlchemy DML
+            raise TypeError(f"expected CursorResult, got {type(result).__name__}")
+        if result.rowcount == 1:
+            if existing_requested is None:
+                workspace.delete_requested_at = repair_requested
+            if existing_purge_after is None:
+                workspace.purge_after = repair_purge_after
+            return repair_requested, repair_purge_after, True
+        stored = session.get(Workspace, workspace.id, populate_existing=True)
+    if stored is None:  # pragma: no cover - defensive
+        return repair_requested, repair_purge_after, False
+    return (
+        delete_requested_at_of(stored) or repair_requested,
+        purge_after_of(stored) or repair_purge_after,
+        False,
+    )
 
 
 def format_archived_at(workspace: Workspace) -> str | None:

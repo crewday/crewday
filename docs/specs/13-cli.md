@@ -605,6 +605,12 @@ pre-verification signals have no workspace to scope to (see §15
 global `--workspace <slug>` flag (§12 "Workspace slug in the CLI")
 like any other workspace-scoped group.
 
+The host-only deployment CLI also exposes
+`crewday admin workspace purge-due` for operators to run the same
+due-workspace purge path as the scheduled worker immediately. It
+does not shorten the owner grace period; it only purges rows whose
+persisted `purge_after` deadline has already passed.
+
 Naming convention reminder: per §12 "`operationId` convention",
 operation ids are dotted and underscored (`workspace_admin.*`);
 per §13 "Command tree", CLI groups are dashed

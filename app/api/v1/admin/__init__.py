@@ -39,7 +39,10 @@ from sqlalchemy.orm import Session
 from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.adapters.storage.ports import Storage
-from app.api.admin._workspace_state import archive_workspace_if_needed
+from app.api.admin._workspace_state import (
+    archive_workspace_if_needed,
+    schedule_workspace_deletion_if_needed,
+)
 from app.api.deps import current_workspace_context, db_session, get_storage
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.audit import write_audit
@@ -68,6 +71,13 @@ router = APIRouter(tags=["workspace_admin"], responses=IDENTITY_PROBLEM_RESPONSE
 class WorkspaceArchiveResponse(BaseModel):
     id: str
     archived_at: str
+
+
+class WorkspaceDeleteResponse(BaseModel):
+    id: str
+    archived_at: str
+    delete_requested_at: str
+    purge_after: str
 
 
 @router.post(
@@ -209,6 +219,86 @@ def archive_current_workspace(
     return WorkspaceArchiveResponse(
         id=ctx.workspace_id,
         archived_at=archived_at.astimezone(UTC).isoformat(),
+    )
+
+
+@router.post(
+    "/workspace/delete",
+    response_model=WorkspaceDeleteResponse,
+    operation_id="workspace_admin.workspace.delete",
+    summary="Schedule deletion of the current workspace",
+    openapi_extra={
+        "x-cli": {
+            "group": "workspace-admin",
+            "verb": "workspace-delete",
+            "summary": "Archive and schedule deletion of the current workspace",
+            "mutates": True,
+        },
+        "x-owner-only": True,
+    },
+)
+def delete_current_workspace(
+    request: Request,
+    ctx: _Ctx,
+    session: _Db,
+) -> WorkspaceDeleteResponse:
+    if not is_owner_member(
+        session, workspace_id=ctx.workspace_id, user_id=ctx.actor_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": "owners_only"},
+        )
+
+    now = datetime.now(UTC)
+    with tenant_agnostic():
+        workspace = session.get(Workspace, ctx.workspace_id)
+        if workspace is None:
+            raise RuntimeError(
+                f"workspace {ctx.workspace_id!r} present in ctx but absent in DB"
+            )
+        archived_at, archived_changed = archive_workspace_if_needed(
+            session,
+            workspace,
+            when=now,
+        )
+        delete_requested_at, purge_after, delete_changed = (
+            schedule_workspace_deletion_if_needed(session, workspace, when=now)
+        )
+        if archived_changed:
+            write_audit(
+                session,
+                ctx,
+                entity_kind="workspace",
+                entity_id=ctx.workspace_id,
+                action="workspace.archived",
+                diff={"archived_at": archived_at.astimezone(UTC).isoformat()},
+                via="api",
+            )
+        if delete_changed:
+            write_audit(
+                session,
+                ctx,
+                entity_kind="workspace",
+                entity_id=ctx.workspace_id,
+                action="workspace.delete_requested",
+                diff={
+                    "archived_at": archived_at.astimezone(UTC).isoformat(),
+                    "delete_requested_at": delete_requested_at.astimezone(
+                        UTC
+                    ).isoformat(),
+                    "purge_after": purge_after.astimezone(UTC).isoformat(),
+                },
+                via="api",
+            )
+        _clear_current_session_workspace(session, ctx=ctx, request=request)
+        session.flush()
+
+    return WorkspaceDeleteResponse(
+        id=ctx.workspace_id,
+        archived_at=archived_at.astimezone(UTC).isoformat(),
+        delete_requested_at=delete_requested_at.astimezone(UTC).isoformat(),
+        purge_after=purge_after.astimezone(UTC).isoformat(),
     )
 
 

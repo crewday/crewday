@@ -142,6 +142,17 @@ def _make_signup_gc_body(clock: Clock) -> Callable[[], None]:
     return _body
 
 
+def _make_workspace_purge_body(clock: Clock) -> Callable[[], None]:
+    """Build the hourly owner-requested workspace deletion purge body."""
+
+    def _body() -> None:
+        from app.worker.tasks.workspace_purge import purge_due_workspace_deletions
+
+        purge_due_workspace_deletions(clock=clock)
+
+    return _body
+
+
 def _make_webhook_dispatch_body(clock: Clock) -> Callable[[], None]:
     """Build the 30 s outbound webhook dispatcher body (cd-q885).
 

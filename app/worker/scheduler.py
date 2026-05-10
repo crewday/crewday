@@ -89,6 +89,7 @@ from app.worker.jobs.maintenance import (
     _make_retention_rotation_body,
     _make_signup_gc_body,
     _make_webhook_dispatch_body,
+    _make_workspace_purge_body,
 )
 from app.worker.jobs.messaging import (
     _make_daily_digest_fanout_body,
@@ -326,6 +327,10 @@ SIGNUP_GC_JOB_ID: str = "signup_gc"
 # prunes after one hour; an hourly tick bounds cleanup lag without
 # waking an idle deployment often for a rare path.
 SIGNUP_GC_INTERVAL_SECONDS: int = 3600
+
+
+WORKSPACE_PURGE_JOB_ID: str = "workspace_purge"
+WORKSPACE_PURGE_INTERVAL_SECONDS: int = 3600
 
 
 # Stable job id for the outbound webhook dispatcher tick (cd-q885).
@@ -819,6 +824,12 @@ def _job_specs() -> tuple[
             _clock_body(_make_signup_gc_body),
             _interval(SIGNUP_GC_INTERVAL_SECONDS),
             SIGNUP_GC_INTERVAL_SECONDS,
+        ),
+        JobSpec(
+            WORKSPACE_PURGE_JOB_ID,
+            _clock_body(_make_workspace_purge_body),
+            _interval(WORKSPACE_PURGE_INTERVAL_SECONDS),
+            WORKSPACE_PURGE_INTERVAL_SECONDS,
         ),
         JobSpec(
             WEBHOOK_DISPATCH_JOB_ID,

@@ -280,6 +280,37 @@ workspace_bootstrap = cli_override("admin workspace", "bootstrap", covers=[])(
 )
 
 
+@click.command(name="purge-due")
+@click.option("--limit", type=click.IntRange(min=1), default=None)
+@click.pass_obj
+def workspace_purge_due(_ctx: object, *, limit: int | None) -> None:
+    """Hard-delete workspaces whose owner-delete deadline has elapsed."""
+    try:
+        from app.worker.tasks.workspace_purge import purge_due_workspace_deletions
+    except Exception as exc:
+        raise ConfigError(
+            "admin workspace purge-due must run on the server host with app "
+            "dependencies installed"
+        ) from exc
+
+    result = purge_due_workspace_deletions(limit=limit, require_storage=True)
+    click.echo(
+        json.dumps(
+            {
+                "purged": result.purged,
+                "workspace_ids": list(result.workspace_ids),
+                "deleted_blob_hashes": list(result.deleted_blob_hashes),
+            },
+            sort_keys=True,
+        )
+    )
+
+
+workspace_purge_due = cli_override("admin workspace", "purge-due", covers=[])(
+    workspace_purge_due
+)
+
+
 @click.command(name="purge")
 @click.option("--person", "person_id", required=True, help="User id to purge.")
 @click.option(
@@ -932,6 +963,7 @@ def register(root: click.Group) -> None:
         help_text="host-only workspace admin commands",
     )
     workspace.add_command(workspace_bootstrap)
+    workspace.add_command(workspace_purge_due)
 
     worker = _ensure_group(
         group,

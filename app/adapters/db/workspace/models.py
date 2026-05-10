@@ -208,6 +208,10 @@ class Workspace(Base):
     signup_ip: Mapped[str | None] = mapped_column(String, nullable=True)
     signup_ip_key: Mapped[str | None] = mapped_column(String, nullable=True)
     archived_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    delete_requested_at: Mapped[datetime | None] = mapped_column(
+        UtcDateTime(), nullable=True
+    )
+    purge_after: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -234,6 +238,7 @@ class Workspace(Base):
             "verification_state",
         ),
         Index("ix_workspace_archived_at", "archived_at"),
+        Index("ix_workspace_purge_after", "purge_after"),
     )
 
 
