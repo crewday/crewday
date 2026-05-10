@@ -12,9 +12,12 @@ implementation sprint.
 ## Target Environment
 
 - **Default app URL**: `http://127.0.0.1:8100`
-- **Remote dev URL**: `https://dev.crew.day`, but agents on this host
+- **Remote dev app URL**: `https://dev-app.crew.day`, but agents on this host
   cannot pass Pangolin badger forward-auth. Use the loopback URL above;
   paths are 1:1.
+- **Remote dev public-site URL**: `https://dev.crew.day`; from this host
+  use `http://127.0.0.1:18080` for the built site or
+  `http://127.0.0.1:18081` for Vite.
 - **Production**: not deployed yet.
 
 Unless the user explicitly names another environment, assume bugs are in
@@ -331,5 +334,5 @@ When the user is done:
 - Asking the user before trying to reproduce the bug.
 - Forgetting the paired selfreview task.
 - Pairing a selfreview task with another selfreview task.
-- Using `dev.crew.day` from this host instead of `http://127.0.0.1:8100`.
+- Using `dev-app.crew.day` from this host instead of `http://127.0.0.1:8100`.
 - Saving Playwright screenshots outside `.playwright-mcp/`.

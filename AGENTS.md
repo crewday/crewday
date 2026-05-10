@@ -16,6 +16,15 @@ recovery, Mailpit activation links, and quality helpers live in
 [`SETUP.md`](SETUP.md). Read it before bringing the stack up, resetting a
 dev DB, or onboarding a new developer agent.
 
+- **Use loopback for dev URLs from this host.** The user's
+  `https://dev-app.crew.day/` is the same running dev app container that
+  agents reach at `http://127.0.0.1:8100/`; the user's
+  `https://dev.crew.day/` is the same dev public-site container that
+  agents reach at `http://127.0.0.1:18080/` (or Vite at
+  `http://127.0.0.1:18081/`). The public hostnames are remote-entry URLs
+  protected by Pangolin/badger auth, which agents on this host cannot
+  bypass. For curl, Playwright, smoke checks, and debugging, translate
+  the path to the loopback URL instead of opening the public hostname.
 - **Keep the dev site up.** Do not stop, restart, or rebuild shared dev
   website services unless the task requires it. Prefer hot reloads,
   targeted process restarts, or other approaches that preserve the main
