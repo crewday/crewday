@@ -27,6 +27,7 @@ from app.adapters.db.identity.models import (
     User,
     canonicalise_email,
 )
+from app.adapters.db.llm.models import LlmProviderModel
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.audit import write_deployment_audit
 from app.auth._hashing import hash_with_pepper
@@ -42,7 +43,9 @@ from app.domain.places.property_service import (
     create_property,
 )
 from app.domain.plans import FREE_TIER_DEFAULTS, seed_free_tier_10pct, tight_cap_cents
-from app.fixtures.llm import seed_default_registry
+from app.fixtures.llm import (
+    seed_default_registry_for_settings,
+)
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.tenancy.slug import normalise_slug
 from app.util.clock import Clock, SystemClock
@@ -150,6 +153,12 @@ def _seed_deployment_settings(
             seeded += 1
         session.flush()
     return seeded
+
+
+def _seed_llm_registry(
+    session: Session, *, settings: Settings, clock: Clock | None = None
+) -> LlmProviderModel:
+    return seed_default_registry_for_settings(session, settings=settings, clock=clock)
 
 
 def _seed_first_deployment_owner(
@@ -361,7 +370,7 @@ def admin_init(
             )
     seeded = _seed_deployment_settings(session, now=now, updated_by="system")
     with tenant_agnostic():
-        provider_model = seed_default_registry(session, clock=clock)
+        provider_model = _seed_llm_registry(session, settings=settings, clock=clock)
         if generated_root_key is not None:
             session.add(
                 DeploymentSetting(

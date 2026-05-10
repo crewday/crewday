@@ -63,6 +63,7 @@ from app.domain.agent.runtime import (
 )
 from app.events.bus import EventBus
 from app.events.types import AgentMessageAppended, AgentTurnFinished, AgentTurnStarted
+from app.fixtures.llm import seed_default_registry
 from app.tenancy import WorkspaceContext, registry, tenant_agnostic
 from app.tenancy.current import reset_current, set_current
 from app.tenancy.orm_filter import install_tenant_filter
@@ -702,6 +703,70 @@ def test_manager_creates_task_end_to_end_via_dispatcher(
     assert diff["agent_label"] == "manager-chat-agent"
     assert diff["status_code"] == 201
     assert isinstance(diff["token_id"], str) and diff["token_id"]
+
+
+def test_manager_agent_uses_deployment_default_without_workspace_assignment(
+    db_session: Session,
+) -> None:
+    seed_default_registry(db_session)
+    workspace, user = _seed_workspace_and_user(db_session)
+    ctx = WorkspaceContext(
+        workspace_id=workspace.id,
+        workspace_slug=workspace.slug,
+        actor_id=user.id,
+        actor_kind="user",
+        actor_grant_role="manager",
+        actor_was_owner_member=True,
+        audit_correlation_id=new_ulid(),
+    )
+    set_current(ctx)
+    _seed_budget_ledger(db_session, workspace_id=workspace.id)
+    channel_id = _seed_channel(db_session, workspace_id=workspace.id)
+
+    app = _build_app(db_session, ctx)
+    dispatcher = make_default_dispatcher(app, workspace_slug=workspace.slug)
+    factory = _RealDelegatedTokenFactory(session=db_session)
+    bus = EventBus()
+    clock = FrozenClock(_PINNED)
+    llm = _ScriptedLLM(
+        replies=[
+            LLMResponse(
+                text="I can help with that.",
+                usage=LLMUsage(prompt_tokens=20, completion_tokens=5, total_tokens=25),
+                model_id="fake/dispatcher-model",
+                finish_reason="stop",
+            )
+        ]
+    )
+
+    outcome = run_turn(
+        ctx,
+        session=db_session,
+        scope="manager",
+        thread_id=channel_id,
+        user_message="Hello",
+        trigger="event",
+        llm_client=llm,
+        tool_dispatcher=dispatcher,
+        token_factory=factory,
+        agent_label="manager-chat-agent",
+        capability="chat.manager",
+        event_bus=bus,
+        clock=clock,
+    )
+
+    assert outcome.outcome == "replied"
+    assert outcome.llm_calls_made == 1
+    rows = list(
+        db_session.scalars(
+            select(ChatMessage)
+            .where(ChatMessage.channel_id == channel_id)
+            .order_by(ChatMessage.created_at)
+        ).all()
+    )
+    assert len(rows) == 1
+    assert rows[0].author_label == "agent"
+    assert rows[0].body_md == "I can help with that."
 
 
 def test_agent_message_endpoint_dispatches_live_tool_and_audits(

@@ -85,6 +85,7 @@ from app.domain.plans import (
     seed_free_tier_10pct,
     tight_cap_cents,
 )
+from app.fixtures.llm import seed_default_registry_for_settings
 from app.tenancy import (
     InvalidSlug,
     WorkspaceContext,
@@ -1112,6 +1113,9 @@ def provision_workspace_and_owner_seat(
                 now=now,
                 clock=clock,
             )
+        )
+        seed_default_registry_for_settings(
+            session, settings=get_settings(), clock=clock
         )
         session.flush()
 

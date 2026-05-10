@@ -19,6 +19,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -28,10 +29,15 @@ from app.adapters.db.llm.models import (
     LlmProvider,
     LlmProviderModel,
 )
+from app.config import Settings
 from app.fixtures.llm import (
     DEFAULT_MODEL_CANONICAL_NAME,
+    DEFAULT_MODEL_CAPABILITIES,
     DEFAULT_PROVIDER_NAME,
+    OPENROUTER_DEFAULT_MODEL_CANONICAL_NAME,
+    OPENROUTER_DEFAULT_PROVIDER_NAME,
     seed_default_registry,
+    seed_default_registry_for_settings,
 )
 from app.tenancy.context import WorkspaceContext
 from app.tenancy.current import reset_current, set_current
@@ -57,6 +63,7 @@ class TestSeedDefaultRegistry:
         assert model is not None
         assert provider.name == DEFAULT_PROVIDER_NAME
         assert model.canonical_name == DEFAULT_MODEL_CANONICAL_NAME
+        assert model.capabilities == list(DEFAULT_MODEL_CAPABILITIES)
         assert pm.api_model_id == "default/chat-base"
         assert pm.is_enabled is True
 
@@ -138,3 +145,22 @@ class TestSeedDefaultRegistry:
             assert loaded.model_id == pm.id
         finally:
             reset_current(token)
+
+    def test_settings_seed_uses_openrouter_for_legacy_keyed_runtime(
+        self, db_session: Session
+    ) -> None:
+        clock = FrozenClock(_PINNED)
+        pm = seed_default_registry_for_settings(
+            db_session,
+            settings=Settings(openrouter_api_key=SecretStr("test-key")),
+            clock=clock,
+        )
+
+        provider = db_session.get(LlmProvider, pm.provider_id)
+        model = db_session.get(LlmModel, pm.model_id)
+        assert provider is not None
+        assert model is not None
+        assert provider.name == OPENROUTER_DEFAULT_PROVIDER_NAME
+        assert provider.provider_type == "openrouter"
+        assert model.canonical_name == OPENROUTER_DEFAULT_MODEL_CANONICAL_NAME
+        assert pm.api_model_id == OPENROUTER_DEFAULT_MODEL_CANONICAL_NAME

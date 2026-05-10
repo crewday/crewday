@@ -36,6 +36,7 @@ from app.domain.agent.compaction import (
 )
 from app.domain.agent.runtime import _default_system_prompt
 from app.domain.errors import Conflict, NotFound, NotImplementedFeature, Validation
+from app.domain.llm.router import DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID
 from app.events.bus import bus as default_event_bus
 from app.events.types import LlmAssignmentChanged
 from app.tenancy import DeploymentContext, tenant_agnostic
@@ -770,6 +771,26 @@ def _publish_assignment_changed(
     )
 
 
+def _publish_deployment_defaults_changed(
+    ctx: DeploymentContext,
+    request: Request,
+) -> None:
+    default_event_bus.publish(
+        LlmAssignmentChanged(
+            workspace_id=DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID,
+            actor_id=ctx.user_id,
+            correlation_id=new_ulid(),
+            occurred_at=_now(),
+        )
+    )
+    admin_sse.publish_admin_event(
+        kind="admin.llm.assignment_updated",
+        ctx=ctx,
+        request=request,
+        payload={"workspace_id": None},
+    )
+
+
 def _workspace_exists(session: Session, workspace_id: str) -> bool:
     return session.get(Workspace, workspace_id) is not None
 
@@ -967,7 +988,7 @@ def build_admin_llm_router() -> APIRouter:
         operation_id="admin.llm.providers.create",
     )
     def create_provider(
-        ctx: _WriteCtx, session: _Db, payload: ProviderPayload
+        ctx: _WriteCtx, request: Request, session: _Db, payload: ProviderPayload
     ) -> LlmProviderResponse:
         now = _now()
         row = LlmProvider(
@@ -989,6 +1010,7 @@ def build_admin_llm_router() -> APIRouter:
             _validate_provider_payload(session, payload)
             session.add(row)
             _commit_or_conflict(session, "provider_constraint_violation")
+            _publish_deployment_defaults_changed(ctx, request)
             session.refresh(row)
         return _provider_response(row, Counter())
 
@@ -1017,7 +1039,11 @@ def build_admin_llm_router() -> APIRouter:
         operation_id="admin.llm.providers.update",
     )
     def update_provider(
-        ctx: _WriteCtx, session: _Db, provider_id: str, payload: ProviderPayload
+        ctx: _WriteCtx,
+        request: Request,
+        session: _Db,
+        provider_id: str,
+        payload: ProviderPayload,
     ) -> LlmProviderResponse:
         with tenant_agnostic():
             row = session.get(LlmProvider, provider_id)
@@ -1036,6 +1062,7 @@ def build_admin_llm_router() -> APIRouter:
             row.updated_at = _now()
             row.updated_by_user_id = ctx.user_id
             _commit_or_conflict(session, "provider_constraint_violation")
+            _publish_deployment_defaults_changed(ctx, request)
             session.refresh(row)
             count = session.scalar(
                 select(func.count(LlmProviderModel.id)).where(
@@ -1049,7 +1076,9 @@ def build_admin_llm_router() -> APIRouter:
         status_code=204,
         operation_id="admin.llm.providers.delete",
     )
-    def delete_provider(_ctx: _WriteCtx, session: _Db, provider_id: str) -> None:
+    def delete_provider(
+        ctx: _WriteCtx, request: Request, session: _Db, provider_id: str
+    ) -> None:
         with tenant_agnostic():
             row = session.get(LlmProvider, provider_id)
             if row is None:
@@ -1063,6 +1092,7 @@ def build_admin_llm_router() -> APIRouter:
                 raise _conflict("provider_in_use")
             session.delete(row)
             _commit_or_conflict(session, "provider_constraint_violation")
+            _publish_deployment_defaults_changed(ctx, request)
 
     @router.get(
         "/models",
@@ -1086,7 +1116,7 @@ def build_admin_llm_router() -> APIRouter:
         operation_id="admin.llm.models.create",
     )
     def create_model(
-        ctx: _WriteCtx, session: _Db, payload: ModelPayload
+        ctx: _WriteCtx, request: Request, session: _Db, payload: ModelPayload
     ) -> LlmModelResponse:
         now = _now()
         row = LlmModel(
@@ -1109,6 +1139,7 @@ def build_admin_llm_router() -> APIRouter:
             _validate_model_payload(session, payload)
             session.add(row)
             _commit_or_conflict(session, "model_constraint_violation")
+            _publish_deployment_defaults_changed(ctx, request)
             session.refresh(row)
         return _model_response(row, Counter())
 
@@ -1135,7 +1166,11 @@ def build_admin_llm_router() -> APIRouter:
         operation_id="admin.llm.models.update",
     )
     def update_model(
-        ctx: _WriteCtx, session: _Db, model_id: str, payload: ModelPayload
+        ctx: _WriteCtx,
+        request: Request,
+        session: _Db,
+        model_id: str,
+        payload: ModelPayload,
     ) -> LlmModelResponse:
         with tenant_agnostic():
             row = session.get(LlmModel, model_id)
@@ -1155,6 +1190,7 @@ def build_admin_llm_router() -> APIRouter:
             row.updated_at = _now()
             row.updated_by_user_id = ctx.user_id
             _commit_or_conflict(session, "model_constraint_violation")
+            _publish_deployment_defaults_changed(ctx, request)
             session.refresh(row)
             count = session.scalar(
                 select(func.count(LlmProviderModel.id)).where(
@@ -1166,7 +1202,9 @@ def build_admin_llm_router() -> APIRouter:
     @router.delete(
         "/models/{model_id}", status_code=204, operation_id="admin.llm.models.delete"
     )
-    def delete_model(_ctx: _WriteCtx, session: _Db, model_id: str) -> None:
+    def delete_model(
+        ctx: _WriteCtx, request: Request, session: _Db, model_id: str
+    ) -> None:
         with tenant_agnostic():
             row = session.get(LlmModel, model_id)
             if row is None:
@@ -1180,6 +1218,7 @@ def build_admin_llm_router() -> APIRouter:
                 raise _conflict("model_in_use")
             session.delete(row)
             _commit_or_conflict(session, "model_constraint_violation")
+            _publish_deployment_defaults_changed(ctx, request)
 
     @router.get(
         "/provider-models",
@@ -1209,7 +1248,7 @@ def build_admin_llm_router() -> APIRouter:
         operation_id="admin.llm.provider_models.create",
     )
     def create_provider_model(
-        _ctx: _WriteCtx, session: _Db, payload: ProviderModelPayload
+        ctx: _WriteCtx, request: Request, session: _Db, payload: ProviderModelPayload
     ) -> LlmProviderModelResponse:
         now = _now()
         row = LlmProviderModel(
@@ -1235,6 +1274,7 @@ def build_admin_llm_router() -> APIRouter:
             _validate_provider_model_payload(session, payload)
             session.add(row)
             _commit_or_conflict(session, "provider_model_constraint_violation")
+            _publish_deployment_defaults_changed(ctx, request)
             session.refresh(row)
         return _provider_model_response(row)
 
@@ -1256,7 +1296,8 @@ def build_admin_llm_router() -> APIRouter:
         operation_id="admin.llm.provider_models.update",
     )
     def update_provider_model(
-        _ctx: _WriteCtx,
+        ctx: _WriteCtx,
+        request: Request,
         session: _Db,
         provider_model_id: str,
         payload: ProviderModelPayload,
@@ -1282,6 +1323,7 @@ def build_admin_llm_router() -> APIRouter:
             row.is_enabled = payload.is_enabled
             row.updated_at = _now()
             _commit_or_conflict(session, "provider_model_constraint_violation")
+            _publish_deployment_defaults_changed(ctx, request)
             session.refresh(row)
         return _provider_model_response(row)
 
@@ -1291,7 +1333,7 @@ def build_admin_llm_router() -> APIRouter:
         operation_id="admin.llm.provider_models.delete",
     )
     def delete_provider_model(
-        _ctx: _WriteCtx, session: _Db, provider_model_id: str
+        ctx: _WriteCtx, request: Request, session: _Db, provider_model_id: str
     ) -> None:
         with tenant_agnostic():
             row = _provider_model(session, provider_model_id)
@@ -1304,6 +1346,7 @@ def build_admin_llm_router() -> APIRouter:
                 raise _conflict("provider_model_in_use")
             session.delete(row)
             _commit_or_conflict(session, "provider_model_constraint_violation")
+            _publish_deployment_defaults_changed(ctx, request)
 
     @router.get(
         "/assignments",

@@ -37,14 +37,17 @@ from app.domain.llm import router as router_module
 from app.domain.llm.invalidation_bridge import PostgresLlmAssignmentInvalidationBridge
 from app.domain.llm.router import (
     CACHE_TTL_SECONDS,
+    DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID,
     CapabilityUnassignedError,
     ModelPick,
+    invalidate_cache,
     resolve_model,
     resolve_primary,
 )
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import LlmAssignmentChanged
+from app.fixtures.llm import seed_default_registry
 from app.tenancy import WorkspaceContext
 from app.tenancy.current import reset_current, set_current
 from app.util.clock import FrozenClock
@@ -93,6 +96,102 @@ def _publish_assignment_changed(bus: EventBus, workspace_id: str) -> None:
 
 class TestHappyPath:
     """The resolver returns the seeded assignment when only the seed exists."""
+
+    def test_workspace_without_override_inherits_deployment_default(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        provider_model = seed_default_registry(db_session, clock=clock)
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            pick = resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+
+            assert pick.assignment_id == ""
+            assert pick.provider_model_id == provider_model.id
+            assert pick.api_model_id == provider_model.api_model_id
+            assert pick.required_capabilities == ("chat", "function_calling")
+        finally:
+            reset_current(token)
+
+    def test_workspace_override_takes_precedence_over_deployment_default(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        seed_default_registry(db_session, clock=clock)
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            row = seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="chat.manager",
+                priority=0,
+                model_id="01HWA0000000000000000OVER",
+                api_model_id="override/wire",
+            )
+
+            pick = resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+
+            assert pick.assignment_id == row.id
+            assert pick.provider_model_id == "01HWA0000000000000000OVER"
+            assert pick.api_model_id == "override/wire"
+        finally:
+            reset_current(token)
+
+    def test_capability_without_override_or_default_stays_unassigned(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        seed_default_registry(db_session, clock=clock)
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            with pytest.raises(CapabilityUnassignedError):
+                resolve_primary(db_session, ctx, "voice.transcribe", clock=clock)
+        finally:
+            reset_current(token)
+
+    def test_deployment_default_requires_model_capabilities(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        seed_default_registry(
+            db_session,
+            clock=clock,
+            model_capabilities=["chat"],
+        )
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            with pytest.raises(CapabilityUnassignedError):
+                resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+        finally:
+            reset_current(token)
+
+    def test_deployment_default_edit_uses_cache_invalidation(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        provider_model = seed_default_registry(db_session, clock=clock)
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            first = resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+            assert first.api_model_id == "default/chat-base"
+
+            provider_model.api_model_id = "default/chat-base-v2"
+            db_session.flush()
+
+            cached = resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+            assert cached.api_model_id == "default/chat-base"
+
+            invalidate_cache()
+
+            fresh = resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+            assert fresh.api_model_id == "default/chat-base-v2"
+        finally:
+            reset_current(token)
 
     def test_primary_returns_seed(
         self, db_session: Session, clock: FrozenClock
@@ -873,6 +972,52 @@ class TestCache:
             b2 = resolve_primary(db_session, ctx_b, "chat.manager", clock=clock)
             # B still sees its cached rung — the event was for A.
             assert b2.provider_model_id == "01HWA00000000000000000ISOB"
+        finally:
+            reset_current(token)
+
+    def test_deployment_default_invalidation_drops_all_workspaces(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        """Deployment registry edits affect every default-using workspace."""
+        provider_model = seed_default_registry(db_session, clock=clock)
+        ws_a = seed_workspace(db_session, slug="default-a")
+        ws_b = seed_workspace(db_session, slug="default-b")
+        ctx_a = build_context(ws_a.id, slug="default-a")
+        ctx_b = build_context(ws_b.id, slug="default-b")
+
+        token = set_current(ctx_a)
+        try:
+            a1 = resolve_primary(db_session, ctx_a, "chat.manager", clock=clock)
+            assert a1.api_model_id == "default/chat-base"
+        finally:
+            reset_current(token)
+
+        token = set_current(ctx_b)
+        try:
+            b1 = resolve_primary(db_session, ctx_b, "chat.manager", clock=clock)
+            assert b1.api_model_id == "default/chat-base"
+        finally:
+            reset_current(token)
+
+        provider_model.api_model_id = "default/chat-base-v2"
+        db_session.flush()
+
+        _publish_assignment_changed(
+            default_event_bus,
+            DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID,
+        )
+
+        token = set_current(ctx_a)
+        try:
+            a2 = resolve_primary(db_session, ctx_a, "chat.manager", clock=clock)
+            assert a2.api_model_id == "default/chat-base-v2"
+        finally:
+            reset_current(token)
+
+        token = set_current(ctx_b)
+        try:
+            b2 = resolve_primary(db_session, ctx_b, "chat.manager", clock=clock)
+            assert b2.api_model_id == "default/chat-base-v2"
         finally:
             reset_current(token)
 

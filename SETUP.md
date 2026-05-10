@@ -70,6 +70,11 @@ waits for `/readyz`, and reports migration, heartbeat, and root-key drift with
 a one-line remediation hint. The raw compose command still works when you
 intentionally want to skip the drift gate.
 
+The dev stack defaults to the in-process fake LLM client. To smoke the real
+OpenRouter path locally, set `CREWDAY_LLM_PROVIDER=openrouter` and
+`CREWDAY_OPENROUTER_API_KEY` in gitignored `mocks/.env`, then start the stack;
+do not put the key in tracked compose files, specs, tests, or logs.
+
 Check readiness with:
 
 ```bash

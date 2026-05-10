@@ -74,6 +74,7 @@ from app.auth.signup import FALLBACK_CAP_CENTS, provision_workspace_and_owner_se
 from app.config import get_settings
 from app.domain.llm.budget import new_ledger_row
 from app.domain.plans import seed_free_tier_10pct, tight_cap_cents
+from app.fixtures.llm import seed_default_registry_for_settings
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import SystemClock
 from app.util.ulid import new_ulid
@@ -427,6 +428,7 @@ def _resolve_or_create_workspace(
                 now=now,
             )
         )
+        seed_default_registry_for_settings(session, settings=get_settings())
         session.flush()
         seed_ctx = WorkspaceContext(
             workspace_id=workspace_id,

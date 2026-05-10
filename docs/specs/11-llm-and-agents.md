@@ -936,8 +936,8 @@ At first boot the deployment is seeded with:
 
 | capability              | default `provider_model`                                                    | rationale |
 |-------------------------|-----------------------------------------------------------------------------|-----------|
-| all chat-kind           | OpenRouter × `google/gemma-3-27b-it` (priority 0)                           | Matches the user's Gemma pick. Multimodal, supports JSON mode. |
-| `expenses.autofill`     | OpenRouter × `google/gemma-3-27b-it` (priority 0)                           | Same model; `vision` tag drives OCR. |
+| all chat-kind           | OpenRouter × `google/gemma-4-31b-it` (priority 0)                           | Matches the user's Gemma pick. Multimodal, supports JSON mode. |
+| `expenses.autofill`     | OpenRouter × `google/gemma-4-31b-it` (priority 0)                           | Same model; `vision` tag drives OCR. |
 | `voice.transcribe`      | **No seed** — capability is disabled until an admin assigns an audio model  | No default audio-input model ships. |
 | `documents.ocr`         | **No seed** — capability is disabled until an admin assigns a vision model  | Local extractors handle the common cases; the LLM fallback is opt-in per deployment because every call charges the workspace 30-day budget. See §21 "Document text extraction". |
 

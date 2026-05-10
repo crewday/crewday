@@ -29,13 +29,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.llm.models import LlmModel, LlmProvider, LlmProviderModel
+from app.config import Settings
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
 
 __all__ = [
     "DEFAULT_MODEL_CANONICAL_NAME",
+    "DEFAULT_MODEL_CAPABILITIES",
     "DEFAULT_PROVIDER_NAME",
+    "OPENROUTER_DEFAULT_MODEL_CANONICAL_NAME",
+    "OPENROUTER_DEFAULT_PROVIDER_NAME",
     "seed_default_registry",
+    "seed_default_registry_for_settings",
 ]
 
 
@@ -45,6 +50,14 @@ __all__ = [
 # once they wire a real key.
 DEFAULT_PROVIDER_NAME: str = "default-fake"
 DEFAULT_MODEL_CANONICAL_NAME: str = "default/chat-base"
+DEFAULT_MODEL_CAPABILITIES: tuple[str, ...] = (
+    "chat",
+    "function_calling",
+    "json_mode",
+    "vision",
+)
+OPENROUTER_DEFAULT_PROVIDER_NAME: str = "openrouter-default"
+OPENROUTER_DEFAULT_MODEL_CANONICAL_NAME: str = "google/gemma-4-31b-it"
 
 
 def seed_default_registry(
@@ -52,6 +65,12 @@ def seed_default_registry(
     *,
     clock: Clock | None = None,
     api_model_id: str = "default/chat-base",
+    provider_name: str = DEFAULT_PROVIDER_NAME,
+    provider_type: str = "fake",
+    model_canonical_name: str = DEFAULT_MODEL_CANONICAL_NAME,
+    model_display_name: str = "Default Chat Base",
+    model_vendor: str = "other",
+    model_capabilities: list[str] | None = None,
 ) -> LlmProviderModel:
     """Insert (or return) the default LLM registry trio.
 
@@ -80,13 +99,13 @@ def seed_default_registry(
     now: datetime = c.now()
 
     provider = session.execute(
-        select(LlmProvider).where(LlmProvider.name == DEFAULT_PROVIDER_NAME)
+        select(LlmProvider).where(LlmProvider.name == provider_name)
     ).scalar_one_or_none()
     if provider is None:
         provider = LlmProvider(
             id=new_ulid(c),
-            name=DEFAULT_PROVIDER_NAME,
-            provider_type="fake",
+            name=provider_name,
+            provider_type=provider_type,
             timeout_s=60,
             requests_per_minute=60,
             priority=0,
@@ -98,15 +117,15 @@ def seed_default_registry(
         session.flush()
 
     model = session.execute(
-        select(LlmModel).where(LlmModel.canonical_name == DEFAULT_MODEL_CANONICAL_NAME)
+        select(LlmModel).where(LlmModel.canonical_name == model_canonical_name)
     ).scalar_one_or_none()
     if model is None:
         model = LlmModel(
             id=new_ulid(c),
-            canonical_name=DEFAULT_MODEL_CANONICAL_NAME,
-            display_name="Default Chat Base",
-            vendor="other",
-            capabilities=["chat"],
+            canonical_name=model_canonical_name,
+            display_name=model_display_name,
+            vendor=model_vendor,
+            capabilities=list(model_capabilities or DEFAULT_MODEL_CAPABILITIES),
             is_active=True,
             price_source="",
             created_at=now,
@@ -139,3 +158,28 @@ def seed_default_registry(
         session.add(provider_model)
         session.flush()
     return provider_model
+
+
+def seed_default_registry_for_settings(
+    session: Session,
+    *,
+    settings: Settings,
+    clock: Clock | None = None,
+) -> LlmProviderModel:
+    """Seed the default registry row matching the configured runtime client."""
+    if settings.llm_provider == "openrouter" or (
+        settings.llm_provider is None
+        and (settings.openrouter_api_key is not None or settings.root_key is not None)
+    ):
+        return seed_default_registry(
+            session,
+            clock=clock,
+            api_model_id=OPENROUTER_DEFAULT_MODEL_CANONICAL_NAME,
+            provider_name=OPENROUTER_DEFAULT_PROVIDER_NAME,
+            provider_type="openrouter",
+            model_canonical_name=OPENROUTER_DEFAULT_MODEL_CANONICAL_NAME,
+            model_display_name="Google Gemma 4 31B IT",
+            model_vendor="google",
+            model_capabilities=["chat", "function_calling", "json_mode", "vision"],
+        )
+    return seed_default_registry(session, clock=clock)

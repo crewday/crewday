@@ -104,6 +104,8 @@ from sqlalchemy.orm import Session
 from app.adapters.db.llm.models import (
     LlmAssignment,
     LlmCapabilityInheritance,
+    LlmModel,
+    LlmProvider,
     LlmProviderModel,
 )
 from app.config import get_settings
@@ -116,6 +118,7 @@ from app.util.clock import Clock, SystemClock
 
 __all__ = [
     "CACHE_TTL_SECONDS",
+    "DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID",
     "CapabilityUnassignedError",
     "ModelPick",
     "invalidate_cache",
@@ -134,6 +137,7 @@ __all__ = [
 # current chain inside the window use :func:`invalidate_cache`
 # explicitly.
 CACHE_TTL_SECONDS: int = 30
+DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID: str = "__deployment_llm_defaults__"
 
 # Inheritance-walk cycle guard. v1 seeds one edge (``chat.admin →
 # chat.manager``); deeper chains remain rare by spec intent. The
@@ -142,6 +146,43 @@ CACHE_TTL_SECONDS: int = 30
 # any plausible inheritance tree and well short of a runaway
 # hot-loop.
 _MAX_INHERITANCE_HOPS: int = 16
+_DEFAULT_CHAT_CAPABILITIES: frozenset[str] = frozenset(
+    {
+        "chat.manager",
+        "chat.employee",
+        "chat.admin",
+        "chat.compact",
+        "chat.detect_language",
+        "chat.translate",
+        "feedback.moderate",
+        "feedback.cluster",
+    }
+)
+_DEFAULT_VISION_CAPABILITIES: frozenset[str] = frozenset({"expenses.autofill"})
+_DEPLOYMENT_DEFAULT_CAPABILITIES: frozenset[str] = (
+    _DEFAULT_CHAT_CAPABILITIES | _DEFAULT_VISION_CAPABILITIES
+)
+_DEPLOYMENT_INHERITANCE: Mapping[str, str] = MappingProxyType(
+    {"chat.admin": "chat.manager"}
+)
+_DEFAULT_MODEL_CANONICAL_ORDER: tuple[str, ...] = (
+    "google/gemma-4-31b-it",
+    "google/gemma-3-27b-it",
+    "default/chat-base",
+)
+_DEFAULT_REQUIRED_CAPABILITIES: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        "chat.manager": ("chat", "function_calling"),
+        "chat.employee": ("chat", "function_calling"),
+        "chat.admin": ("chat", "function_calling"),
+        "chat.compact": ("chat",),
+        "chat.detect_language": ("chat", "json_mode"),
+        "chat.translate": ("chat",),
+        "expenses.autofill": ("vision", "json_mode"),
+        "feedback.moderate": ("chat", "json_mode"),
+        "feedback.cluster": ("chat", "json_mode"),
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,6 +328,9 @@ def _on_llm_assignment_changed(event: LlmAssignmentChanged) -> None:
     chain of a capability two hops downstream, so narrowing the
     invalidation scope without a richer payload would miss cases.
     """
+    if event.workspace_id == DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID:
+        invalidate_cache()
+        return
     invalidate_cache(workspace_id=event.workspace_id)
 
 
@@ -356,6 +400,63 @@ def _load_enabled_chain(
     )
     rows = session.execute(stmt).all()
     return [_to_pick(assignment, provider_model) for assignment, provider_model in rows]
+
+
+def _load_deployment_default_chain(
+    session: Session,
+    *,
+    capability: str,
+) -> list[ModelPick]:
+    """Return the code-declared deployment default for ``capability``.
+
+    Defaults are read-time fallbacks, not copied workspace rows. The
+    deployment registry still owns the concrete provider/model row; if
+    first-boot seeding has not created one, the capability remains
+    unassigned.
+    """
+    if capability not in _DEPLOYMENT_DEFAULT_CAPABILITIES:
+        return []
+
+    canonical_rank = {
+        canonical_name: rank
+        for rank, canonical_name in enumerate(_DEFAULT_MODEL_CANONICAL_ORDER)
+    }
+    stmt = (
+        select(LlmProviderModel, LlmProvider, LlmModel)
+        .join(LlmProvider, LlmProviderModel.provider_id == LlmProvider.id)
+        .join(LlmModel, LlmProviderModel.model_id == LlmModel.id)
+        .where(
+            LlmProviderModel.is_enabled.is_(True),
+            LlmProvider.is_enabled.is_(True),
+            LlmModel.is_active.is_(True),
+            LlmModel.canonical_name.in_(_DEFAULT_MODEL_CANONICAL_ORDER),
+        )
+        .order_by(
+            LlmProvider.priority.asc(),
+            LlmProviderModel.id.asc(),
+        )
+    )
+    rows = session.execute(stmt).all()
+    required_capabilities = _DEFAULT_REQUIRED_CAPABILITIES.get(capability, ("chat",))
+    ranked_rows = [
+        (canonical_rank[model.canonical_name], provider_model)
+        for provider_model, _provider, model in rows
+        if set(required_capabilities).issubset(set(model.capabilities or []))
+    ]
+    if not ranked_rows:
+        return []
+    _rank, provider_model = min(ranked_rows, key=lambda item: item[0])
+    return [
+        ModelPick(
+            provider_model_id=provider_model.id,
+            api_model_id=provider_model.api_model_id,
+            max_tokens=None,
+            temperature=None,
+            extra_api_params=MappingProxyType({}),
+            required_capabilities=required_capabilities,
+            assignment_id="",
+        )
+    ]
 
 
 def _to_pick(row: LlmAssignment, provider_model: LlmProviderModel) -> ModelPick:
@@ -455,7 +556,13 @@ def _resolve_chain(
         if chain:
             return chain
 
+        chain = _load_deployment_default_chain(session, capability=current)
+        if chain:
+            return chain
+
         parent = _lookup_parent_capability(session, capability=current)
+        if parent is None:
+            parent = _DEPLOYMENT_INHERITANCE.get(current)
         if parent is None:
             return []
         current = parent
