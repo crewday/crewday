@@ -23,8 +23,11 @@ interface TestUserWorkRole {
 
 function installFetch(options: {
   failRoleDelete?: boolean;
+  failLeavesStatus?: number;
   failRoleList?: boolean;
   failRoleSave?: boolean;
+  leaves?: unknown[];
+  leavesDelay?: Promise<void>;
   subjectExpenses?: unknown[];
   subjectTasks?: unknown[];
 } = {}) {
@@ -129,6 +132,35 @@ function installFetch(options: {
         subject_expenses: options.subjectExpenses ?? [],
         subject_leaves: [],
         subject_payslips: [],
+      });
+    }
+    if (path === "/w/acme/api/v1/employees/emp_1/leaves") {
+      if (options.leavesDelay) await options.leavesDelay;
+      if (options.failLeavesStatus) {
+        return jsonResponse({ detail: "Leave ledger is unavailable." }, options.failLeavesStatus);
+      }
+      return jsonResponse({
+        subject: {
+          id: "emp_1",
+          name: "Maya Santos",
+          roles: ["housekeeper"],
+          properties: [],
+          avatar_initials: "MS",
+          avatar_file_id: null,
+          avatar_url: null,
+          phone: "+351 555 0100",
+          email: "maya@example.com",
+          started_on: "2026-01-01",
+          capabilities: {},
+          workspaces: ["ws_owner"],
+          villas: [],
+          language: "en",
+          weekly_availability: {},
+          evidence_policy: "inherit",
+          preferred_locale: null,
+          settings_override: {},
+        },
+        leaves: options.leaves ?? [],
       });
     }
     if (path === "/w/acme/api/v1/work_roles") {
@@ -389,6 +421,119 @@ describe("<EmployeeDetailPage>", () => {
       });
     } finally {
       fake.restore();
+    }
+  });
+
+  it("loads and renders an empty Leaves tab state", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Maya Santos")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "Leaves" }));
+
+      expect(await screen.findByRole("heading", { name: "No leave on file" })).toBeVisible();
+      expect(screen.getByText("Approved and pending leave for this employee will appear here.")).toBeVisible();
+      expect(fake.calls).toContainEqual({
+        url: "/w/acme/api/v1/employees/emp_1/leaves",
+        method: "GET",
+      });
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("shows Leaves tab loading while the leave endpoint is pending", async () => {
+    let releaseLeaves: () => void = () => undefined;
+    const leavesDelay = new Promise<void>((resolve) => {
+      releaseLeaves = resolve;
+    });
+    const fake = installFetch({ leavesDelay });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Maya Santos")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "Leaves" }));
+
+      const leavesPanel = document.getElementById("employee-leaves-panel");
+      expect(leavesPanel).not.toBeNull();
+      expect(await within(leavesPanel as HTMLElement).findByText("Loading…")).toBeVisible();
+      releaseLeaves();
+      expect(await screen.findByRole("heading", { name: "No leave on file" })).toBeVisible();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("renders non-empty Leaves tab rows with dates, category, and status", async () => {
+    const fake = installFetch({
+      leaves: [
+        {
+          id: "leave_pending",
+          employee_id: "emp_1",
+          starts_on: "2026-05-10",
+          ends_on: "2026-05-12",
+          category: "vacation",
+          note: "Family trip",
+          approved_at: null,
+        },
+        {
+          id: "leave_approved",
+          employee_id: "emp_1",
+          starts_on: "2026-06-01",
+          ends_on: "2026-06-01",
+          category: "sick",
+          note: "Checkup",
+          approved_at: "2026-04-30T00:00:00Z",
+        },
+      ],
+    });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Maya Santos")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "Leaves" }));
+
+      expect(await screen.findByText("10 May 2026 → 12 May 2026")).toBeInTheDocument();
+      expect(screen.getByText("01 Jun 2026 → 01 Jun 2026")).toBeInTheDocument();
+      expect(screen.getByText("vacation")).toBeInTheDocument();
+      expect(screen.getByText("sick")).toBeInTheDocument();
+      expect(screen.getByText("Family trip")).toBeInTheDocument();
+      expect(screen.getByText("Pending")).toBeInTheDocument();
+      expect(screen.getByText("Approved")).toBeInTheDocument();
+      expect(screen.queryByText("No leave on file")).not.toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("renders visible Leaves tab access and error states", async () => {
+    const forbidden = installFetch({ failLeavesStatus: 403 });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Maya Santos")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "Leaves" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Access denied");
+      expect(screen.getByText("You do not have permission to view this employee's leave ledger.")).toBeVisible();
+    } finally {
+      forbidden.restore();
+    }
+
+    cleanup();
+    window.location.hash = "";
+
+    const failure = installFetch({ failLeavesStatus: 500 });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Maya Santos")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "Leaves" }));
+
+      expect(await screen.findByText("Failed to load leaves.")).toBeVisible();
+    } finally {
+      failure.restore();
     }
   });
 

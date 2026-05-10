@@ -6,23 +6,11 @@ import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
 import { Chip, Loading } from "@/components/common";
 import type { Employee, Leave } from "@/types/api";
+import { fmtDayMonYear, inclusiveDays } from "./leaveDisplay";
 
 interface LeavesPayload {
   subject: Employee;
   leaves: Leave[];
-}
-
-function fmtDayMonYear(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function inclusiveDays(startIso: string, endIso: string): number {
-  const ms = new Date(endIso).getTime() - new Date(startIso).getTime();
-  return Math.floor(ms / 86_400_000) + 1;
 }
 
 export default function EmployeeLeavesPage() {

@@ -287,8 +287,10 @@ each tab is a stable hash deep link: `#overview`, `#shifts`,
 `#payslips`, `#leaves`, `#policies`, `#settings`, and `#passkeys`.
 Hash navigation selects the active tab on first load and while the
 page is open. `#settings` is the employee-scoped settings override
-surface; the other non-overview tabs are reserved chrome until their
-own page bodies land.
+surface. `#leaves` fetches `GET /api/v1/employees/{id}/leaves` and
+renders the employee leave ledger with loading, empty, row, and access
+states. The remaining non-overview tabs are reserved chrome until
+their own page bodies land.
 
 The employee detail overflow menu does not include a `Message` action
 in v1. Direct manager-to-worker messaging remains absent; managers who

@@ -1,15 +1,17 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardList, ReceiptText } from "lucide-react";
+import { CalendarOff, ClipboardList, ReceiptText } from "lucide-react";
 import { useParams } from "react-router-dom";
 import { ApiError, fetchJson } from "@/lib/api";
 import type { ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
+import { ForbiddenPanel } from "@/auth/RequirePermission";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import PageTabs, { type PageTab } from "@/components/PageTabs";
 import { Chip, EmptyState, Loading } from "@/components/common";
+import { fmtDayMonYear, inclusiveDays } from "./leaveDisplay";
 import type {
   Employee,
   EntitySettingsPayload,
@@ -30,6 +32,11 @@ interface EmployeeDetail {
   subject_expenses: Expense[];
   subject_leaves: Leave[];
   subject_payslips: PaySlip[];
+}
+
+interface LeavesPayload {
+  subject: Employee;
+  leaves: Leave[];
 }
 
 interface UserWorkRole {
@@ -300,6 +307,12 @@ export default function EmployeeDetailPage() {
     queryFn: () => fetchJson<SettingDefinition[]>("/api/v1/settings/catalog"),
     enabled: activeTab === "settings",
   });
+  const leavesQ = useQuery({
+    queryKey: qk.employeeLeaves(eid),
+    queryFn: () => fetchJson<LeavesPayload>("/api/v1/employees/" + eid + "/leaves"),
+    enabled: eid !== "" && activeTab === "leaves",
+    retry: false,
+  });
 
   if (detailQ.isPending || propsQ.isPending) {
     return <DeskPage title="Employee"><Loading /></DeskPage>;
@@ -521,7 +534,60 @@ export default function EmployeeDetailPage() {
         </div>
       )}
 
-      {!["overview", "settings"].includes(activeTab) && <div id={panelIdFor(activeTab)} role="tabpanel" />}
+      {activeTab === "leaves" && (
+        <div id={panelIdFor("leaves")} role="tabpanel">
+          {leavesQ.isPending ? (
+            <Loading />
+          ) : leavesQ.error instanceof ApiError && leavesQ.error.status === 403 ? (
+            <ForbiddenPanel detail="You do not have permission to view this employee's leave ledger." />
+          ) : leavesQ.isError || !leavesQ.data ? (
+            <p>Failed to load leaves.</p>
+          ) : (
+            <div className="panel">
+              <header className="panel__head"><h2>Leave ledger</h2></header>
+              {leavesQ.data.leaves.length === 0 ? (
+                <EmptyState
+                  icon={CalendarOff}
+                  title="No leave on file"
+                  copy="Approved and pending leave for this employee will appear here."
+                  variant="compact"
+                />
+              ) : (
+                <table className="table table--roomy">
+                  <thead>
+                    <tr>
+                      <th>Dates</th>
+                      <th>Days</th>
+                      <th>Category</th>
+                      <th>Note</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {leavesQ.data.leaves.map((lv) => (
+                      <tr key={lv.id}>
+                        <td className="mono">
+                          {fmtDayMonYear(lv.starts_on)} → {fmtDayMonYear(lv.ends_on)}
+                        </td>
+                        <td>{inclusiveDays(lv.starts_on, lv.ends_on)}</td>
+                        <td><Chip tone="ghost" size="sm">{lv.category}</Chip></td>
+                        <td className="table__sub">{lv.note}</td>
+                        <td>
+                          <Chip tone={lv.approved_at ? "moss" : "sand"} size="sm">
+                            {lv.approved_at ? "Approved" : "Pending"}
+                          </Chip>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {!["overview", "settings", "leaves"].includes(activeTab) && <div id={panelIdFor(activeTab)} role="tabpanel" />}
     </DeskPage>
   );
 }
