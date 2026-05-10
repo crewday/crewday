@@ -28,6 +28,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.adapters.db.audit.models import AuditLog
@@ -52,7 +53,7 @@ from app.domain.places.property_work_role_assignments import (
     list_property_work_role_assignments,
     update_property_work_role_assignment,
 )
-from app.tenancy import registry
+from app.tenancy import registry, tenant_agnostic
 from app.tenancy.context import WorkspaceContext
 from app.tenancy.current import reset_current, set_current
 from app.tenancy.orm_filter import install_tenant_filter
@@ -169,20 +170,32 @@ def _seed_property(
 
 
 def _seed_work_role(session: Session, *, workspace_id: str, key: str = "maid") -> str:
-    role = WorkRole(
-        id=new_ulid(),
-        workspace_id=workspace_id,
-        key=key,
-        name=key.title(),
-        description_md="",
-        default_settings_json={},
-        icon_name="",
-        created_at=_PINNED,
-        deleted_at=None,
-    )
-    session.add(role)
-    session.flush()
-    return role.id
+    """Return a live work role, inserting only when bootstrap omitted it."""
+    with tenant_agnostic():
+        existing = session.scalar(
+            select(WorkRole.id).where(
+                WorkRole.workspace_id == workspace_id,
+                WorkRole.key == key,
+                WorkRole.deleted_at.is_(None),
+            )
+        )
+        if existing is not None:
+            return existing
+
+        role = WorkRole(
+            id=new_ulid(),
+            workspace_id=workspace_id,
+            key=key,
+            name=key.title(),
+            description_md="",
+            default_settings_json={},
+            icon_name="",
+            created_at=_PINNED,
+            deleted_at=None,
+        )
+        session.add(role)
+        session.flush()
+        return role.id
 
 
 def _seed_pay_rule(session: Session, *, user_id: str, workspace_id: str) -> str:
@@ -268,6 +281,49 @@ def env(
         yield db_session, ctx, prop_id, uwr_id
     finally:
         reset_current(token)
+
+
+def test_seed_work_role_reuses_existing_starter_role(
+    env: tuple[Session, WorkspaceContext, str, str],
+) -> None:
+    """Fixture helper stays idempotent after workspace bootstrap seeds starters."""
+    session, ctx, _prop_id, _uwr_id = env
+
+    role_id = _seed_work_role(session, workspace_id=ctx.workspace_id)
+
+    with tenant_agnostic():
+        role_ids = session.scalars(
+            select(WorkRole.id).where(
+                WorkRole.workspace_id == ctx.workspace_id,
+                WorkRole.key == "maid",
+            )
+        ).all()
+    assert role_ids == [role_id]
+
+
+def test_seed_work_role_does_not_reuse_deleted_role(
+    env: tuple[Session, WorkspaceContext, str, str],
+) -> None:
+    """A tombstoned catalog key remains unavailable instead of being reused."""
+    session, ctx, _prop_id, _uwr_id = env
+    deleted_role = WorkRole(
+        id=new_ulid(),
+        workspace_id=ctx.workspace_id,
+        key="butler",
+        name="Butler",
+        description_md="",
+        default_settings_json={},
+        icon_name="",
+        created_at=_PINNED,
+        deleted_at=_PINNED,
+    )
+    with tenant_agnostic():
+        session.add(deleted_role)
+        session.flush()
+
+    with pytest.raises(IntegrityError):
+        _seed_work_role(session, workspace_id=ctx.workspace_id, key="butler")
+    session.rollback()
 
 
 # ---------------------------------------------------------------------------
