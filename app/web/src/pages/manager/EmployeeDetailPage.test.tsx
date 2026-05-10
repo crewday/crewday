@@ -361,7 +361,7 @@ describe("<EmployeeDetailPage>", () => {
     }
   });
 
-  it("renders canonical employee sections with shared hash-backed page tabs", async () => {
+  it("renders implemented employee sections with shared hash-backed page tabs", async () => {
     const fake = installFetch();
     try {
       window.location.hash = "#passkeys";
@@ -370,15 +370,16 @@ describe("<EmployeeDetailPage>", () => {
       expect(await screen.findByText("Maya Santos")).toBeInTheDocument();
       const tablist = screen.getByRole("tablist", { name: "Employee sections" });
       expect(tablist).toHaveClass("page-tabs");
-      for (const label of ["Overview", "Shifts", "Payslips", "Leaves", "Policies", "Settings", "Passkeys"]) {
+      for (const label of ["Overview", "Payslips", "Leaves", "Settings"]) {
         expect(within(tablist).getByRole("tab", { name: label })).toHaveClass("page-tabs__tab");
       }
-      expect(within(tablist).getByRole("tab", { name: "Passkeys" })).toHaveAttribute("aria-selected", "true");
-      expect(within(tablist).getByRole("tab", { name: "Passkeys" })).toHaveAttribute(
-        "aria-controls",
-        "employee-passkeys-panel",
-      );
-      expect(document.getElementById("employee-passkeys-panel")).toHaveAttribute("role", "tabpanel");
+      for (const label of ["Shifts", "Policies", "Passkeys"]) {
+        expect(within(tablist).queryByRole("tab", { name: label })).not.toBeInTheDocument();
+      }
+      expect(within(tablist).getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+      expect(window.location.hash).toBe("#overview");
+      expect(document.getElementById("employee-overview-panel")).toHaveAttribute("role", "tabpanel");
+      expect(document.getElementById("employee-passkeys-panel")).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "Overview" })).not.toBeInTheDocument();
 
       fireEvent.click(within(tablist).getByRole("tab", { name: "Payslips" }));
@@ -437,6 +438,31 @@ describe("<EmployeeDetailPage>", () => {
       expect(await screen.findByRole("heading", { name: "No payslips on file" })).toBeVisible();
     } finally {
       fake.restore();
+    }
+  });
+
+  it("normalizes reserved employee section hashes to overview", async () => {
+    for (const hash of ["#shifts", "#policies", "#passkeys"]) {
+      cleanup();
+      const fake = installFetch();
+      try {
+        window.location.hash = hash;
+        render(<Harness />);
+
+        expect(await screen.findByText("Maya Santos")).toBeInTheDocument();
+        const tablist = screen.getByRole("tablist", { name: "Employee sections" });
+        expect(within(tablist).getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+        expect(window.location.hash).toBe("#overview");
+        expect(screen.getByRole("heading", { name: "Tasks" })).toBeVisible();
+        expect(document.getElementById("employee-shifts-panel")).not.toBeInTheDocument();
+        expect(document.getElementById("employee-policies-panel")).not.toBeInTheDocument();
+        expect(document.getElementById("employee-passkeys-panel")).not.toBeInTheDocument();
+        for (const label of ["Shifts", "Policies", "Passkeys"]) {
+          expect(within(tablist).queryByRole("tab", { name: label })).not.toBeInTheDocument();
+        }
+      } finally {
+        fake.restore();
+      }
     }
   });
 

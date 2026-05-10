@@ -229,7 +229,7 @@ function SettingsOverridePanel({
   );
 }
 
-type Tab = "overview" | "shifts" | "payslips" | "leaves" | "policies" | "settings" | "passkeys";
+type Tab = "overview" | "payslips" | "leaves" | "settings";
 
 function panelIdFor(tab: Tab): string {
   return `employee-${tab}-panel`;
@@ -237,18 +237,26 @@ function panelIdFor(tab: Tab): string {
 
 const EMPLOYEE_TABS = [
   { key: "overview", label: "Overview", panelId: panelIdFor("overview") },
-  { key: "shifts", label: "Shifts", panelId: panelIdFor("shifts") },
   { key: "payslips", label: "Payslips", panelId: panelIdFor("payslips") },
   { key: "leaves", label: "Leaves", panelId: panelIdFor("leaves") },
-  { key: "policies", label: "Policies", panelId: panelIdFor("policies") },
   { key: "settings", label: "Settings", panelId: panelIdFor("settings") },
-  { key: "passkeys", label: "Passkeys", panelId: panelIdFor("passkeys") },
 ] satisfies Array<PageTab & { key: Tab }>;
 
 function tabFromHash(hash: string): Tab {
   // code-health: ignore[nloc] Tiny hash mapper is misattributed by lizard across the surrounding TSX module.
-  const key = hash.replace(/^#/, "");
+  let key: string;
+  try {
+    key = decodeURIComponent(hash.replace(/^#/, ""));
+  } catch {
+    key = "";
+  }
   return EMPLOYEE_TABS.find((tab) => tab.key === key)?.key ?? "overview";
+}
+
+function normalizeEmployeeTabHash(tab: Tab): void {
+  const nextHash = `#${encodeURIComponent(tab)}`;
+  if (window.location.hash === "" || window.location.hash === nextHash) return;
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${nextHash}`);
 }
 
 export default function EmployeeDetailPage() {
@@ -260,7 +268,11 @@ export default function EmployeeDetailPage() {
   const qc = useQueryClient();
 
   useEffect(() => {
-    const syncFromHash = () => setActiveTab(tabFromHash(window.location.hash));
+    const syncFromHash = () => {
+      const nextTab = tabFromHash(window.location.hash);
+      normalizeEmployeeTabHash(nextTab);
+      setActiveTab(nextTab);
+    };
     syncFromHash();
     window.addEventListener("hashchange", syncFromHash);
     return () => window.removeEventListener("hashchange", syncFromHash);
@@ -666,9 +678,6 @@ export default function EmployeeDetailPage() {
         </div>
       )}
 
-      {!["overview", "settings", "leaves", "payslips"].includes(activeTab) && (
-        <div id={panelIdFor(activeTab)} role="tabpanel" />
-      )}
     </DeskPage>
   );
 }

@@ -282,18 +282,18 @@ future flow for replacing a whole workspace or creating a new
 workspace from an export artifact (§16 "Restore").
 
 The manager employee detail page (`/w/<slug>/employee/<id>`, also
-linked from legacy `/user/<id>` copy) has seven canonical tabs, and
-each tab is a stable hash deep link: `#overview`, `#shifts`,
-`#payslips`, `#leaves`, `#policies`, `#settings`, and `#passkeys`.
+linked from legacy `/user/<id>` copy) exposes only implemented tabs.
+Each visible tab is a stable hash deep link: `#overview`, `#payslips`,
+`#leaves`, and `#settings`.
 Hash navigation selects the active tab on first load and while the
-page is open. `#settings` is the employee-scoped settings override
+page is open; unavailable hashes such as `#shifts`, `#policies`, and
+`#passkeys` fall back to the default visible tab instead of exposing
+blank panels. `#settings` is the employee-scoped settings override
 surface. `#leaves` fetches `GET /api/v1/employees/{id}/leaves` and
 renders the employee leave ledger with loading, empty, row, and access
 states. `#payslips` fetches `GET /api/v1/payroll/payslips`, filters
 rows to the selected employee/user id from the route detail subject,
-and renders payroll loading, empty, row, and access/error states. The
-remaining non-overview tabs are reserved chrome until their own page
-bodies land.
+and renders payroll loading, empty, row, and access/error states.
 
 The employee detail overflow menu does not include a `Message` action
 in v1. Direct manager-to-worker messaging remains absent; managers who
