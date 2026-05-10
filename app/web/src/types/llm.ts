@@ -8,6 +8,7 @@ export interface LLMCall {
   model_id: string;
   input_tokens: number;
   output_tokens: number;
+  cost_usd: string;
   cost_cents: number;
   latency_ms: number;
   status: "ok" | "error" | "redacted_block";

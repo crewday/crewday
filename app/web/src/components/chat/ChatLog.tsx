@@ -46,15 +46,18 @@ export default function ChatLog({
       ref={logRef}
     >
       {messages?.map((m, idx) => {
+        const completedActivityLabel = activity?.label;
         const showCompletedActivity =
-          activity?.label &&
+          completedActivityLabel &&
           !typing &&
           m.kind === "agent" &&
           idx === messages.length - 1;
         if (m.kind === "action") {
           return (
             <Fragment key={idx}>
-              {showCompletedActivity && <ActivityLine label={activity.label} />}
+              {showCompletedActivity && (
+                <ActivityLine label={completedActivityLabel} />
+              )}
               <div className="chat-msg chat-msg--action">
                 <span className="chat-msg__body">{m.body}</span>
                 {onDecideAction && (
@@ -82,7 +85,9 @@ export default function ChatLog({
         }
         return (
           <Fragment key={idx}>
-            {showCompletedActivity && <ActivityLine label={activity.label} />}
+            {showCompletedActivity && (
+              <ActivityLine label={completedActivityLabel} />
+            )}
             <div className={"chat-msg chat-msg--" + m.kind}>
               {m.kind === "agent" ? (
                 <ChatMessageBody body={m.body} className="chat-msg__body" />

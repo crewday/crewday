@@ -75,6 +75,7 @@ See ``docs/specs/11-llm-and-agents.md`` §"Client abstraction",
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
@@ -83,7 +84,6 @@ from app.domain.llm.router import ModelPick
 from app.observability.metrics import (
     LLM_CALLS_TOTAL,
     LLM_COST_USD_TOTAL,
-    cents_to_usd,
     sanitize_label,
     sanitize_workspace_label,
 )
@@ -200,6 +200,7 @@ def record(
     status: UsageStatus,
     finish_reason: str | None,
     attribution: AgentAttribution,
+    cost_usd: Decimal | None = None,
     attempt: int = 0,
     clock: Clock | None = None,
 ) -> RecordedCall:
@@ -246,8 +247,10 @@ def record(
     * ``correlation_id`` — tie-id shared across the retry chain and
       echoed back to the caller.
     * ``prompt_tokens`` / ``completion_tokens`` / ``cost_cents`` /
-      ``latency_ms`` — provider-reported metrics. ``cost_cents`` is
-      already cent-rounded; callers use
+      ``cost_usd`` / ``latency_ms`` — provider-reported metrics.
+      ``cost_usd`` is the canonical precise amount; ``cost_cents``
+      is the compatibility budget amount. Callers use
+      :func:`~app.domain.llm.budget.estimate_cost_usd` and
       :func:`~app.domain.llm.budget.estimate_cost_cents` on the
       actual (not estimated) token counts.
     * ``status`` — ``"ok" | "error" | "timeout"``. ``"refused"`` is
@@ -271,10 +274,16 @@ def record(
     # them straight through so the budget adapter can pick them up
     # via the existing ``api_model_id`` / ``provider_model_id``
     # contract.
+    precise_cost = (
+        cost_usd
+        if cost_usd is not None
+        else (Decimal(cost_cents) / Decimal("100")).quantize(Decimal("0.000001"))
+    )
     usage = LlmUsage(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         cost_cents=cost_cents,
+        cost_usd=precise_cost,
         provider_model_id=model_pick.provider_model_id,
         api_model_id=model_pick.api_model_id,
         assignment_id=model_pick.assignment_id,
@@ -324,8 +333,8 @@ def _record_metrics(
         capability=sanitize_label(capability),
         status=sanitize_label(usage.status),
     ).inc()
-    if usage.status == "ok" and usage.cost_cents > 0:
+    if usage.status == "ok" and usage.cost_usd > 0:
         LLM_COST_USD_TOTAL.labels(
             workspace_id=workspace,
             model=sanitize_label(usage.api_model_id),
-        ).inc(cents_to_usd(usage.cost_cents))
+        ).inc(float(usage.cost_usd))

@@ -19,6 +19,7 @@ from app.domain.llm.budget import (
     check_budget,
     default_pricing_table,
     estimate_cost_cents,
+    estimate_cost_usd,
 )
 from app.domain.llm.consent import load_consent_set
 from app.domain.llm.router import ModelPick, resolve_primary
@@ -389,6 +390,13 @@ def _call_compactor(
         pricing=pricing,
         workspace_id=ctx.workspace_id,
     )
+    cost_usd = estimate_cost_usd(
+        prompt_tokens=response.usage.prompt_tokens,
+        max_output_tokens=response.usage.completion_tokens,
+        api_model_id=model_pick.api_model_id,
+        pricing=pricing,
+        workspace_id=ctx.workspace_id,
+    )
     record(
         session,
         ctx,
@@ -407,6 +415,7 @@ def _call_compactor(
             token_id=None,
             agent_label=COMPACT_AGENT_LABEL,
         ),
+        cost_usd=cost_usd,
         clock=clock,
     )
     return response

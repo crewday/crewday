@@ -13173,6 +13173,11 @@
             "title": "Cost Cents",
             "type": "integer"
           },
+          "cost_usd": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Cost Usd",
+            "type": "string"
+          },
           "fallback_attempts": {
             "default": 0,
             "title": "Fallback Attempts",
@@ -13246,6 +13251,7 @@
           "at",
           "capability",
           "cost_cents",
+          "cost_usd",
           "input_tokens",
           "latency_ms",
           "model_id",

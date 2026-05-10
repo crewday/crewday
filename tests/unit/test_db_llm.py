@@ -14,6 +14,7 @@ See ``docs/specs/02-domain-model.md`` §"LLM",
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 from sqlalchemy import CheckConstraint, Index, UniqueConstraint
 
@@ -401,6 +402,7 @@ class TestLlmUsageModel:
             tokens_in=1200,
             tokens_out=340,
             cost_cents=18,
+            cost_usd=Decimal("0.184200"),
             latency_ms=942,
             status="ok",
             correlation_id="01HWA00000000000000000CRLB",
@@ -409,6 +411,7 @@ class TestLlmUsageModel:
         assert row.tokens_in == 1200
         assert row.tokens_out == 340
         assert row.cost_cents == 18
+        assert row.cost_usd == Decimal("0.184200")
         assert row.latency_ms == 942
 
     def test_every_status_constructs(self) -> None:

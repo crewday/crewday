@@ -190,6 +190,7 @@ export const calls = [
     model_id: "google/gemma-4-31b-it",
     input_tokens: 100,
     output_tokens: 40,
+    cost_usd: "0.030000",
     cost_cents: 3,
     latency_ms: 420,
     status: "ok",

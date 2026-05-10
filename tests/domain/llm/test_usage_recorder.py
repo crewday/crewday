@@ -34,6 +34,7 @@ See ``docs/specs/11-llm-and-agents.md`` §"Client abstraction",
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from types import MappingProxyType
 
 import pytest
@@ -166,6 +167,7 @@ class TestRecordHappyPath:
                     agent_label="manager-chat",
                     agent_conversation_ref="conv-xyz",
                 ),
+                cost_usd=Decimal("0.170000"),
                 clock=clock,
             )
             db_session.flush()
@@ -180,6 +182,7 @@ class TestRecordHappyPath:
             # Core shape.
             assert row.capability == "chat.manager"
             assert row.cost_cents == 17
+            assert row.cost_usd == Decimal("0.170000")
             assert row.tokens_in == 120
             assert row.tokens_out == 60
             assert row.latency_ms == 412

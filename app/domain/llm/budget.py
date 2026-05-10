@@ -84,6 +84,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from decimal import Decimal
 from ipaddress import IPv4Address, ip_address, ip_network
 from typing import Any, Final, Literal
 
@@ -112,6 +113,7 @@ __all__ = [
     "check_budget",
     "default_pricing_table",
     "estimate_cost_cents",
+    "estimate_cost_usd",
     "lift_tight_llm_budget_cap",
     "new_ledger_row",
     "normalize_signup_ip_key",
@@ -181,9 +183,9 @@ UsageStatus = Literal["ok", "error", "refused", "timeout"]
 
 # Pricing table: ``api_model_id`` → ``(input_cents_per_million,
 # output_cents_per_million)``. The per-million denomination matches
-# OpenRouter / OpenAI-compatible wire conventions; storing cents
-# (not dollars) sidesteps decimal / rounding hazards across SQLite
-# + PG (same rationale as the DB cap / spent columns).
+# OpenRouter / OpenAI-compatible wire conventions. Budget caps remain
+# cent-denominated for compatibility, while ``llm_usage.cost_usd``
+# preserves the precise per-call USD amount for admin reporting.
 #
 # An unknown key returns ``(0, 0)`` and logs a WARNING at call time
 # (§11 "Pricing source"). A ``:free``-suffixed model is short-
@@ -292,6 +294,9 @@ class LlmUsage:
       (not dollars) sidesteps decimal / rounding hazards across
       SQLite + PG. **Must be ``0`` when ``status != "ok"``** —
       see "Cost / status invariant" below.
+    * ``cost_usd`` — canonical precise USD amount for the call,
+      quantized to six decimal places to match the DB column. It can
+      be non-zero while ``cost_cents`` remains zero.
     * ``latency_ms`` — wall time between request-out and body-in, as
       measured by the adapter.
     * ``api_model_id`` / ``provider_model_id`` — the wire name / the
@@ -368,6 +373,7 @@ class LlmUsage:
     correlation_id: str
     attempt: int
     status: UsageStatus
+    cost_usd: Decimal = Decimal("0.000000")
     latency_ms: int = 0
     # cd-wjpl agent-trail telemetry. Defaults keep pre-cd-wjpl
     # callers (e.g. the digest worker smoke path) compiling without
@@ -400,11 +406,95 @@ class LlmUsage:
                 f"bills a non-successful call against the workspace's 30-day "
                 f"meter. Pass cost_cents=0 on error / timeout / refused."
             )
+        if self.status != "ok" and self.cost_usd != Decimal("0.000000"):
+            raise ValueError(
+                f"LlmUsage.cost_usd must be 0 when status={self.status!r}; "
+                f"got cost_usd={self.cost_usd}. §11 'Cost tracking' never "
+                f"bills a non-successful call against the workspace's 30-day "
+                f"meter. Pass cost_usd=0 on error / timeout / refused."
+            )
 
 
 # ---------------------------------------------------------------------------
 # Pricing
 # ---------------------------------------------------------------------------
+
+_USD_QUANT = Decimal("0.000001")
+
+
+def _zero_cost_for_unpriced_model(
+    *,
+    api_model_id: str,
+    workspace_id: str | None,
+) -> bool:
+    if not api_model_id.endswith(":free"):
+        return False
+    _log.debug(
+        "llm.pricing.free_tier",
+        extra={
+            "event": "llm.pricing.free_tier",
+            "api_model_id": api_model_id,
+            "workspace_id": workspace_id,
+        },
+    )
+    return True
+
+
+def _log_unknown_pricing_model(
+    *,
+    api_model_id: str,
+    workspace_id: str | None,
+) -> None:
+    dedup_key = (workspace_id, api_model_id)
+    with _UNKNOWN_MODEL_DEDUP_LOCK:
+        seen = dedup_key in _UNKNOWN_MODEL_DEDUP
+        if not seen:
+            _UNKNOWN_MODEL_DEDUP.add(dedup_key)
+    if seen:
+        _log.debug(
+            "LLM pricing model is unknown",
+            extra={
+                "event": "llm.pricing.unknown_model",
+                "api_model_id": api_model_id,
+                "workspace_id": workspace_id,
+                "deduped": True,
+            },
+        )
+        return
+    _log.warning(
+        "LLM pricing model is unknown",
+        extra={
+            "event": "llm.pricing.unknown_model",
+            "api_model_id": api_model_id,
+            "workspace_id": workspace_id,
+        },
+    )
+
+
+def estimate_cost_usd(
+    prompt_tokens: int,
+    max_output_tokens: int,
+    *,
+    api_model_id: str,
+    pricing: PricingTable,
+    workspace_id: str | None = None,
+) -> Decimal:
+    """Estimate the call's precise USD cost for per-call reporting."""
+    if _zero_cost_for_unpriced_model(
+        api_model_id=api_model_id, workspace_id=workspace_id
+    ):
+        return Decimal("0.000000")
+    prices = pricing.get(api_model_id)
+    if prices is None:
+        _log_unknown_pricing_model(api_model_id=api_model_id, workspace_id=workspace_id)
+        return Decimal("0.000000")
+    input_per_million, output_per_million = prices
+    total_cents_per_million = (
+        prompt_tokens * input_per_million + max_output_tokens * output_per_million
+    )
+    return (Decimal(total_cents_per_million) / Decimal("100000000")).quantize(
+        _USD_QUANT
+    )
 
 
 def estimate_cost_cents(
@@ -434,55 +524,13 @@ def estimate_cost_cents(
     to match the DB representation (``cap_cents``, ``spent_cents``,
     :class:`LlmUsage.cost_cents`).
     """
-    if api_model_id.endswith(":free"):
-        # Free-tier short-circuit. Log at DEBUG so operators can
-        # confirm the free-tier code path is firing (spec §11 "Demo
-        # mode" seeds these deliberately, and an occasional DEBUG
-        # line is enough for the "are my demo workspaces hitting
-        # ``:free`` models?" question). A WARNING per call would
-        # drown the operator inbox on a deliberately-free deployment.
-        _log.debug(
-            "llm.pricing.free_tier",
-            extra={
-                "event": "llm.pricing.free_tier",
-                "api_model_id": api_model_id,
-                "workspace_id": workspace_id,
-            },
-        )
+    if _zero_cost_for_unpriced_model(
+        api_model_id=api_model_id, workspace_id=workspace_id
+    ):
         return 0
     prices = pricing.get(api_model_id)
     if prices is None:
-        # Dedup the WARNING on ``(workspace_id, api_model_id)`` so a
-        # workspace hammering an unregistered model logs once per
-        # process lifetime instead of once per call. The first miss
-        # stays at WARNING (operators want a loud signal for the
-        # missing registry row); subsequent misses drop to DEBUG so
-        # the code path is still traceable when diagnosing a
-        # misdirected budget number.
-        dedup_key = (workspace_id, api_model_id)
-        with _UNKNOWN_MODEL_DEDUP_LOCK:
-            seen = dedup_key in _UNKNOWN_MODEL_DEDUP
-            if not seen:
-                _UNKNOWN_MODEL_DEDUP.add(dedup_key)
-        if seen:
-            _log.debug(
-                "LLM pricing model is unknown",
-                extra={
-                    "event": "llm.pricing.unknown_model",
-                    "api_model_id": api_model_id,
-                    "workspace_id": workspace_id,
-                    "deduped": True,
-                },
-            )
-        else:
-            _log.warning(
-                "LLM pricing model is unknown",
-                extra={
-                    "event": "llm.pricing.unknown_model",
-                    "api_model_id": api_model_id,
-                    "workspace_id": workspace_id,
-                },
-            )
+        _log_unknown_pricing_model(api_model_id=api_model_id, workspace_id=workspace_id)
         return 0
     input_per_million, output_per_million = prices
     # Integer maths: rely on Python's true-div + int() to floor; the
@@ -1053,6 +1101,7 @@ def record_usage(
         tokens_in=usage.prompt_tokens,
         tokens_out=usage.completion_tokens,
         cost_cents=usage.cost_cents,
+        cost_usd=usage.cost_usd,
         latency_ms=usage.latency_ms,
         status=usage.status,
         correlation_id=usage.correlation_id,

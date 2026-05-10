@@ -25,6 +25,7 @@ import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -62,13 +63,11 @@ _PERIOD_END = _PINNED + timedelta(days=30)
 
 
 _LLM_TABLES: tuple[str, ...] = (
-    "llm_assignment",
     "agent_token",
     "agent_relay_request",
     "approval_request",
     "llm_usage",
     "budget_ledger",
-    "llm_capability_inheritance",
 )
 
 
@@ -255,15 +254,14 @@ class TestMigrationShape:
             "created_at",
         }
         assert set(cols) == expected
-        nullable = {"max_tokens", "temperature"}
+        nullable = {"workspace_id", "max_tokens", "temperature"}
         for col in nullable:
             assert cols[col]["nullable"] is True, f"{col} must be NULLABLE"
         for notnull in expected - nullable:
             assert cols[notnull]["nullable"] is False, f"{notnull} must be NOT NULL"
 
     def test_llm_assignment_fks(self, engine: Engine) -> None:
-        """cd-4btd: ``workspace_id`` CASCADE; ``model_id`` is now a real
-        FK to ``llm_provider_model.id`` ON DELETE RESTRICT.
+        """``model_id`` is a real FK to ``llm_provider_model.id``.
 
         The pre-cd-4btd shape carried no FK on ``model_id`` (it was a
         soft reference because the deployment-scope registry hadn't
@@ -276,34 +274,29 @@ class TestMigrationShape:
             tuple(fk["constrained_columns"]): fk
             for fk in inspect(engine).get_foreign_keys("llm_assignment")
         }
-        assert fks[("workspace_id",)]["referred_table"] == "workspace"
-        assert fks[("workspace_id",)]["options"].get("ondelete") == "CASCADE"
         # cd-4btd: real FK on ``model_id`` → ``llm_provider_model.id``.
         assert fks[("model_id",)]["referred_table"] == "llm_provider_model"
         assert fks[("model_id",)]["options"].get("ondelete") == "RESTRICT"
 
     def test_llm_assignment_priority_index(self, engine: Engine) -> None:
-        """cd-u84y: non-unique ``(workspace_id, capability, priority)`` index.
+        """cd-1k20r: non-unique ``(capability, priority)`` index.
 
-        Replaces the cd-cm5 unique ``(workspace_id, capability)`` index.
-        The non-uniqueness is the feature: the §11 router's fallback
-        chain is multiple rows per capability, ordered by priority.
-        Leading ``workspace_id`` carries the tenant filter; per-
-        capability lookup rides the ``(workspace_id, capability)``
-        prefix of the same index.
+        Deployment-level assignment lookup is no longer tenant-scoped;
+        the resolver scans rungs for one capability ordered by priority.
         """
         indexes = {
             ix["name"]: ix for ix in inspect(engine).get_indexes("llm_assignment")
         }
-        assert "ix_llm_assignment_workspace_capability_priority" in indexes
-        ix = indexes["ix_llm_assignment_workspace_capability_priority"]
-        assert ix["column_names"] == ["workspace_id", "capability", "priority"]
+        assert "ix_llm_assignment_capability_priority" in indexes
+        ix = indexes["ix_llm_assignment_capability_priority"]
+        assert ix["column_names"] == ["capability", "priority"]
         # SQLite's inspector returns 1/0, PG returns True/False — coerce.
         assert bool(ix["unique"]) is False
         # The cd-cm5 unique index is gone — guard against re-introducing
         # the "one row per capability" rule the resolver relies on being
         # absent.
         assert "uq_llm_assignment_workspace_capability" not in indexes
+        assert "ix_llm_assignment_workspace_capability_priority" not in indexes
 
     def test_agent_token_columns(self, engine: Engine) -> None:
         cols = {c["name"]: c for c in inspect(engine).get_columns("agent_token")}
@@ -526,6 +519,7 @@ class TestMigrationShape:
             "tokens_in",
             "tokens_out",
             "cost_cents",
+            "cost_usd",
             "latency_ms",
             "status",
             "correlation_id",
@@ -663,27 +657,27 @@ class TestMigrationShape:
             "created_at",
         }
         assert set(cols) == expected
-        for notnull in expected:
+        for notnull in expected - {"workspace_id"}:
             assert cols[notnull]["nullable"] is False, f"{notnull} must be NOT NULL"
+        assert cols["workspace_id"]["nullable"] is True
 
     def test_llm_capability_inheritance_fks(self, engine: Engine) -> None:
-        """``workspace_id`` CASCADE — sweeping a workspace sweeps its edges."""
+        """cd-1k20r: inheritance is deployment-level; no workspace FK."""
         fks = {
             tuple(fk["constrained_columns"]): fk
             for fk in inspect(engine).get_foreign_keys("llm_capability_inheritance")
         }
-        assert fks[("workspace_id",)]["referred_table"] == "workspace"
-        assert fks[("workspace_id",)]["options"].get("ondelete") == "CASCADE"
+        assert ("workspace_id",) not in fks
 
     def test_llm_capability_inheritance_unique_index(self, engine: Engine) -> None:
-        """Unique ``(workspace_id, capability)`` — one parent per child per ws."""
+        """Unique ``capability`` — one deployment-level parent per child."""
         indexes = {
             ix["name"]: ix
             for ix in inspect(engine).get_indexes("llm_capability_inheritance")
         }
-        assert "uq_llm_capability_inheritance_workspace_capability" in indexes
-        uq = indexes["uq_llm_capability_inheritance_workspace_capability"]
-        assert uq["column_names"] == ["workspace_id", "capability"]
+        assert "uq_llm_capability_inheritance_capability" in indexes
+        uq = indexes["uq_llm_capability_inheritance_capability"]
+        assert uq["column_names"] == ["capability"]
         assert bool(uq["unique"]) is True
 
 
@@ -1562,6 +1556,7 @@ class TestLlmUsageCrud:
                 tokens_in=1200,
                 tokens_out=340,
                 cost_cents=18,
+                cost_usd=Decimal("0.184200"),
                 latency_ms=942,
                 status="ok",
                 correlation_id="01HWA00000000000000000CRLA",
@@ -1576,6 +1571,7 @@ class TestLlmUsageCrud:
             assert loaded.tokens_in == 1200
             assert loaded.tokens_out == 340
             assert loaded.cost_cents == 18
+            assert loaded.cost_usd == Decimal("0.184200")
             assert loaded.latency_ms == 942
             assert loaded.status == "ok"
             assert loaded.correlation_id == "01HWA00000000000000000CRLA"
@@ -2228,14 +2224,11 @@ class TestLlmCapabilityInheritanceCrud:
         finally:
             reset_current(ctx_token)
 
-    def test_unique_workspace_capability_rejects_duplicate(
-        self, db_session: Session
-    ) -> None:
+    def test_unique_capability_rejects_duplicate(self, db_session: Session) -> None:
         """cd-u84y acceptance: a second edge on the same child is rejected.
 
-        Uniqueness on ``(workspace_id, capability)`` — a child has one
-        parent or none. A duplicate would force the resolver to pick
-        at random.
+        cd-1k20r later made the edge deployment-level, but the same
+        one-parent-per-child invariant still holds on ``capability``.
         """
         workspace, user = _bootstrap(
             db_session,
@@ -2340,16 +2333,11 @@ class TestLlmCapabilityInheritanceCrud:
         finally:
             reset_current(ctx_token)
 
-    def test_cross_workspace_isolation(self, db_session: Session) -> None:
-        """cd-u84y acceptance: a row in workspace A is invisible under
-        a workspace-B context.
-
-        Mirrors the sibling LLM-layer cross-workspace isolation tests —
-        the tenant filter auto-injects ``workspace_id``, and the same
-        ``(capability, inherits_from)`` pair can coexist across
-        workspaces without colliding.
-        """
-        ws_a, user = _bootstrap(
+    def test_deployment_edge_is_visible_across_workspace_contexts(
+        self, db_session: Session
+    ) -> None:
+        """cd-1k20r: inheritance edges are deployment-level rows."""
+        _ws_a, user = _bootstrap(
             db_session,
             email="lci-xws@example.com",
             display="LciXws",
@@ -2365,41 +2353,25 @@ class TestLlmCapabilityInheritanceCrud:
             clock=clock,
         )
 
-        token_a = set_current(_ctx_for(ws_a, user.id))
-        try:
-            db_session.add(
-                LlmCapabilityInheritance(
-                    id="01HWA00000000000000000LCXA",
-                    workspace_id=ws_a.id,
-                    capability="chat.admin",
-                    inherits_from="chat.manager",
-                    created_at=_PINNED,
-                )
+        db_session.add(
+            LlmCapabilityInheritance(
+                id="01HWA00000000000000000LCXA",
+                workspace_id=None,
+                capability="chat.admin",
+                inherits_from="chat.manager",
+                created_at=_PINNED,
             )
-            db_session.flush()
-        finally:
-            reset_current(token_a)
+        )
+        db_session.flush()
 
         token_b = set_current(_ctx_for(ws_b, user.id))
         try:
-            # Same child / parent pair lands cleanly in the sibling ws.
-            db_session.add(
-                LlmCapabilityInheritance(
-                    id="01HWA00000000000000000LCXB",
-                    workspace_id=ws_b.id,
-                    capability="chat.admin",
-                    inherits_from="chat.manager",
-                    created_at=_PINNED,
-                )
-            )
-            db_session.flush()
-
             b_rows = db_session.scalars(
                 select(LlmCapabilityInheritance).where(
-                    LlmCapabilityInheritance.workspace_id == ws_b.id
+                    LlmCapabilityInheritance.capability == "chat.admin"
                 )
             ).all()
-            assert [r.id for r in b_rows] == ["01HWA00000000000000000LCXB"]
+            assert [r.id for r in b_rows] == ["01HWA00000000000000000LCXA"]
         finally:
             reset_current(token_b)
 
@@ -2421,14 +2393,6 @@ class TestCascadeOnWorkspaceDelete:
         try:
             db_session.add_all(
                 [
-                    LlmAssignment(
-                        id="01HWA00000000000000000MACW",
-                        workspace_id=workspace.id,
-                        capability="staff_chat",
-                        model_id="01HWA00000000000000000MDLA",
-                        provider="openrouter",
-                        created_at=_PINNED,
-                    ),
                     AgentToken(
                         id="01HWA00000000000000000ATCW",
                         workspace_id=workspace.id,
@@ -2463,13 +2427,6 @@ class TestCascadeOnWorkspaceDelete:
                         cap_cents=500,
                         updated_at=_PINNED,
                     ),
-                    LlmCapabilityInheritance(
-                        id="01HWA00000000000000000LCCW",
-                        workspace_id=workspace.id,
-                        capability="chat.admin",
-                        inherits_from="chat.manager",
-                        created_at=_PINNED,
-                    ),
                 ]
             )
             db_session.flush()
@@ -2486,12 +2443,10 @@ class TestCascadeOnWorkspaceDelete:
         ctx_token = set_current(_ctx_for(workspace, user.id))
         try:
             for model in (
-                LlmAssignment,
                 AgentToken,
                 ApprovalRequest,
                 LlmUsage,
                 BudgetLedger,
-                LlmCapabilityInheritance,
             ):
                 rows = db_session.scalars(
                     select(model).where(model.workspace_id == workspace.id)
@@ -2625,35 +2580,24 @@ class TestCrossWorkspaceIsolation:
 
 
 class TestTenantFilter:
-    """Every LLM table is workspace-scoped under the filter.
-
-    Covers the cd-cm5 quintet plus the cd-u84y
-    ``llm_capability_inheritance`` edge table — the tenancy filter
-    auto-injects ``workspace_id`` on every SELECT, and a bare read
-    without a :class:`WorkspaceContext` raises
-    :class:`TenantFilterMissing`.
-    """
+    """Workspace-scoped LLM tables require a workspace context."""
 
     @pytest.mark.parametrize(
         "model",
         [
-            LlmAssignment,
             AgentToken,
             ApprovalRequest,
             LlmUsage,
             BudgetLedger,
-            LlmCapabilityInheritance,
         ],
     )
     def test_read_without_ctx_raises(
         self,
         filtered_factory: sessionmaker[Session],
-        model: type[LlmAssignment]
-        | type[AgentToken]
+        model: type[AgentToken]
         | type[ApprovalRequest]
         | type[LlmUsage]
-        | type[BudgetLedger]
-        | type[LlmCapabilityInheritance],
+        | type[BudgetLedger],
     ) -> None:
         with (
             filtered_factory() as session,
@@ -2747,7 +2691,7 @@ class TestCdU84yMigrationRoundTrip:
             # Old unique gone, new composite non-unique in (under the
             # cd-z7wm-renamed name).
             assert "uq_llm_assignment_workspace_capability" not in indexes
-            assert "ix_llm_assignment_workspace_capability_priority" in indexes
+            assert "ix_llm_assignment_capability_priority" in indexes
 
             # New table landed with its shape.
             assert "llm_capability_inheritance" in insp.get_table_names()

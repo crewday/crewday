@@ -41,6 +41,7 @@ import os
 import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import cast
 
 import pytest
@@ -59,6 +60,7 @@ from app.domain.llm.budget import (
     UsageStatus,
     check_budget,
     estimate_cost_cents,
+    estimate_cost_usd,
     lift_tight_llm_budget_cap,
     record_usage,
     refresh_aggregate,
@@ -191,6 +193,7 @@ def _seed_usage_row(
 def _build_usage(
     *,
     cost_cents: int,
+    cost_usd: Decimal | None = None,
     capability: str = "chat.manager",
     correlation_id: str | None = None,
     attempt: int = 0,
@@ -212,6 +215,11 @@ def _build_usage(
         prompt_tokens=100,
         completion_tokens=50,
         cost_cents=cost_cents,
+        cost_usd=(
+            cost_usd
+            if cost_usd is not None
+            else (Decimal(cost_cents) / Decimal("100")).quantize(Decimal("0.000001"))
+        ),
         provider_model_id=api_model_id,
         api_model_id=api_model_id,
         assignment_id="01HWA00000000000000000ASGN",
@@ -315,6 +323,25 @@ class TestEstimateCostCents:
         )
         # 1M * 15 + 1M * 60 = 75_000_000; // 1M = 75 cents.
         assert cost == 75
+
+    def test_precise_usd_preserves_sub_cent_cost(self) -> None:
+        pricing = {"gpt-4o-mini": (15, 60)}  # cents per 1M tokens
+
+        cents = estimate_cost_cents(
+            1_000,
+            500,
+            api_model_id="gpt-4o-mini",
+            pricing=pricing,
+        )
+        usd = estimate_cost_usd(
+            1_000,
+            500,
+            api_model_id="gpt-4o-mini",
+            pricing=pricing,
+        )
+
+        assert cents == 0
+        assert usd == Decimal("0.000450")
 
     def test_unknown_model_returns_zero_with_warning(
         self,
@@ -729,6 +756,35 @@ class TestRecordUsage:
                 select(BudgetLedger).where(BudgetLedger.workspace_id == ws.id)
             ).scalar_one()
             assert ledger.spent_cents == 25
+        finally:
+            reset_current(token)
+
+    def test_sub_cent_cost_persists_without_bumping_cent_ledger(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        """Admin reporting keeps sub-cent cost; budget meter stays cents."""
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        _seed_ledger(db_session, workspace_id=ws.id, cap_cents=500)
+        token = set_current(ctx)
+        try:
+            record_usage(
+                db_session,
+                ctx,
+                _build_usage(cost_cents=0, cost_usd=Decimal("0.000450")),
+                clock=clock,
+            )
+            db_session.flush()
+
+            row = db_session.execute(
+                select(LlmUsageRow).where(LlmUsageRow.workspace_id == ws.id)
+            ).scalar_one()
+            assert row.cost_cents == 0
+            assert row.cost_usd == Decimal("0.000450")
+            ledger = db_session.execute(
+                select(BudgetLedger).where(BudgetLedger.workspace_id == ws.id)
+            ).scalar_one()
+            assert ledger.spent_cents == 0
         finally:
             reset_current(token)
 
@@ -1547,6 +1603,7 @@ class TestNewTelemetryFields:
                 attempt=1,
                 status="ok",
                 latency_ms=420,
+                cost_usd=Decimal("0.120000"),
                 fallback_attempts=2,
                 finish_reason="stop",
                 actor_user_id="01HWA00000000000000000USR0",
@@ -1686,12 +1743,29 @@ class TestNewTelemetryFields:
                 status=status,
             )
 
+    def test_cost_usd_must_be_zero_when_status_is_error(self) -> None:
+        with pytest.raises(ValueError, match="cost_usd must be 0"):
+            LlmUsage(
+                prompt_tokens=10,
+                completion_tokens=0,
+                cost_cents=0,
+                cost_usd=Decimal("0.000450"),
+                provider_model_id="x",
+                api_model_id="x",
+                assignment_id="",
+                capability="chat.manager",
+                correlation_id="corr",
+                attempt=0,
+                status="error",
+            )
+
     def test_non_zero_cost_on_ok_status_passes(self) -> None:
         """Non-zero cost on a successful call is the billable happy path."""
         usage = LlmUsage(
             prompt_tokens=10,
             completion_tokens=5,
             cost_cents=7,
+            cost_usd=Decimal("0.070000"),
             provider_model_id="x",
             api_model_id="x",
             assignment_id="",
@@ -1701,6 +1775,7 @@ class TestNewTelemetryFields:
             status="ok",
         )
         assert usage.cost_cents == 7
+        assert usage.cost_usd == Decimal("0.070000")
 
     def test_empty_assignment_id_coerces_to_null(
         self, db_session: Session, clock: FrozenClock

@@ -22,7 +22,7 @@ export function useAgentActivity(
 ): AgentActivityState {
   const q = useQuery({
     queryKey: qk.agentTyping(scope, taskId),
-    queryFn: (): AgentActivityState => ({ typing: false }),
+    queryFn: (): AgentActivityState | boolean => ({ typing: false }),
     staleTime: Infinity,
     gcTime: Infinity,
     refetchOnMount: false,

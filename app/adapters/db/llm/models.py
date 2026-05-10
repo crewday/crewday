@@ -675,10 +675,11 @@ class LlmUsage(Base):
     a later slice.
 
     ``tokens_in`` / ``tokens_out`` are the provider's reported token
-    counts; ``cost_cents`` is the crew.day-computed dollar estimate
-    snapped to the nearest cent (storing cents avoids decimal /
-    rounding hazards across SQLite + PG). ``latency_ms`` is the
-    adapter-measured wall time between request-out and body-in.
+    counts. ``cost_usd`` is the canonical precise crew.day-computed
+    dollar estimate; ``cost_cents`` remains the compatibility field
+    used by existing budget-cap and admin rollup consumers.
+    ``latency_ms`` is the adapter-measured wall time between
+    request-out and body-in.
 
     ``provider_model_id`` carries the resolved provider-model wire
     name — the string the adapter actually sent on the network — and
@@ -746,6 +747,12 @@ class LlmUsage(Base):
     tokens_in: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     tokens_out: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     cost_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(12, 6),
+        nullable=False,
+        default=Decimal("0.000000"),
+        server_default="0",
+    )
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # ``ok | error | refused | timeout`` — see
     # ``_LLM_USAGE_STATUS_VALUES`` for the enum body + why this

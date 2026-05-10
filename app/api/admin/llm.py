@@ -278,6 +278,7 @@ class LlmCallResponse(BaseModel):
     model_id: str
     input_tokens: int
     output_tokens: int
+    cost_usd: Decimal
     cost_cents: int
     latency_ms: int
     status: Literal["ok", "error", "redacted_block"]
@@ -2114,6 +2115,7 @@ def build_admin_llm_router() -> APIRouter:
                 model_id=row.provider_model_id,
                 input_tokens=row.tokens_in,
                 output_tokens=row.tokens_out,
+                cost_usd=row.cost_usd,
                 cost_cents=row.cost_cents,
                 latency_ms=row.latency_ms,
                 status=_status(row),

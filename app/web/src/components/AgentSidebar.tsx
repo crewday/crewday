@@ -178,14 +178,17 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
       <div className="desk__agent-body" id="agent-body">
         <div className="agent-log" ref={logRef} role="log" aria-live="polite">
           {log.data?.map((msg, i) => {
+            const completedActivityLabel = activity.label;
             const showCompletedActivity =
-              activity.label &&
+              completedActivityLabel &&
               !showTyping &&
               msg.kind === "agent" &&
               i === log.data.length - 1;
             return (
               <Fragment key={i}>
-                {showCompletedActivity && <AgentActivityLine label={activity.label} />}
+                {showCompletedActivity && (
+                  <AgentActivityLine label={completedActivityLabel} />
+                )}
                 <div className={"agent-msg agent-msg--" + msg.kind}>
                   {msg.kind === "agent" ? (
                     <ChatMessageBody body={msg.body} className="agent-msg__body" />
