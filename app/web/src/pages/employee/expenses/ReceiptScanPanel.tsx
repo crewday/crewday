@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import type { ChangeEvent } from "react";
 import { Search } from "lucide-react";
+import FileDropZone from "@/components/FileDropZone";
 import { ApiError, fetchJson } from "@/lib/api";
 import type { ExpenseScanResult } from "@/types/api";
 
@@ -97,12 +97,8 @@ export default function ReceiptScanPanel({
   }, [phase]);
 
   const handleFileSelect = useCallback(
-    async (event: ChangeEvent<HTMLInputElement>) => {
-      const input = event.target;
-      const file = input.files?.[0] ?? null;
-      // Reset the input value so picking the same file twice in a row
-      // still fires `change` (browsers debounce identical selections).
-      input.value = "";
+    async (files: File[]) => {
+      const file = files[0] ?? null;
       if (!file) return;
 
       if (!ACCEPTED_MIMES.has(file.type)) {
@@ -153,20 +149,14 @@ export default function ReceiptScanPanel({
             {error}
           </p>
         )}
-        <label className="evidence__picker" tabIndex={0}>
-          <input
-            type="file"
-            accept={ACCEPT_ATTR}
-            capture="environment"
-            onChange={handleFileSelect}
-          />
-          <span className="evidence__picker-cta">
-            Scan a receipt or screenshot
-          </span>
-          <span className="evidence__picker-sub">
-            Photo, payment confirmation, or bank transfer
-          </span>
-        </label>
+        <FileDropZone
+          className="evidence__picker"
+          title="Scan a receipt or screenshot"
+          description="Photo, payment confirmation, or bank transfer"
+          accept={ACCEPT_ATTR}
+          capture="environment"
+          onFiles={handleFileSelect}
+        />
       </>
     );
   }

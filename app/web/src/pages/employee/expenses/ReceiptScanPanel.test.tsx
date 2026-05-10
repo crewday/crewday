@@ -33,6 +33,7 @@ import {
   __resetApiProvidersForTests,
   registerWorkspaceSlugGetter,
 } from "@/lib/api";
+import FileDropZone from "@/components/FileDropZone";
 import ReceiptScanPanel, { messageForScanError } from "./ReceiptScanPanel";
 import { ApiError } from "@/lib/api";
 
@@ -195,6 +196,51 @@ describe("ReceiptScanPanel — happy path", () => {
     } finally {
       env.restore();
     }
+  });
+});
+
+describe("FileDropZone", () => {
+  it("prevents file drop navigation while disabled without emitting files", () => {
+    const onFiles = vi.fn();
+    render(
+      <FileDropZone
+        title="Upload receipt"
+        description="JPEG, PNG, WebP, HEIC, or PDF"
+        disabled
+        onFiles={onFiles}
+      />,
+    );
+
+    const dropZone = screen.getByRole("button", { name: /Upload receipt/i });
+    expect(dropZone).toHaveAttribute("aria-disabled", "true");
+    expect(
+      fireEvent.dragOver(dropZone, {
+        dataTransfer: {
+          files: [new File(["receipt"], "receipt.jpg", { type: "image/jpeg" })],
+          types: ["Files"],
+        },
+      }),
+    ).toBe(false);
+    expect(dropZone).not.toHaveClass("upload-dropzone--active");
+    expect(
+      fireEvent.drop(dropZone, {
+        dataTransfer: {
+          files: [new File(["receipt"], "receipt.jpg", { type: "image/jpeg" })],
+          types: ["Files"],
+        },
+      }),
+    ).toBe(false);
+    expect(onFiles).not.toHaveBeenCalled();
+  });
+
+  it("opens the file input from keyboard activation", () => {
+    const clickSpy = vi.spyOn(HTMLInputElement.prototype, "click");
+    render(<FileDropZone title="Upload receipt" onFiles={vi.fn()} />);
+
+    const dropZone = screen.getByRole("button", { name: /Upload receipt/i });
+    expect(dropZone).toHaveAttribute("aria-disabled", "false");
+    expect(fireEvent.keyDown(dropZone, { key: " " })).toBe(false);
+    expect(clickSpy).toHaveBeenCalledTimes(1);
   });
 });
 

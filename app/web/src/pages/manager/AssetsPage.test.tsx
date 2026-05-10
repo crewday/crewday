@@ -263,16 +263,22 @@ function selectDocuments(dialog: HTMLElement, files: File[]): void {
   fireEvent.change(input);
 }
 
-function dropDocuments(dialog: HTMLElement, files: File[]): void {
-  fireEvent.drop(
-    within(dialog).getByLabelText(/Upload or drop invoices, manuals, warranties/i),
-    {
-      dataTransfer: {
-        files,
-        types: ["Files"],
-      },
-    },
+function documentDropZone(dialog: HTMLElement): HTMLElement {
+  const input = within(dialog).getByLabelText(
+    /Upload or drop invoices, manuals, warranties/i,
   );
+  const label = input.closest("label");
+  if (!label) throw new Error("document drop zone not found");
+  return label;
+}
+
+function dropDocuments(dialog: HTMLElement, files: File[]): void {
+  fireEvent.drop(documentDropZone(dialog), {
+    dataTransfer: {
+      files,
+      types: ["Files"],
+    },
+  });
 }
 
 function Harness({ initial = "/w/acme/assets" }: { initial?: string }) {
@@ -691,12 +697,27 @@ describe("<AssetsPage>", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "+ New asset" }));
       const dialog = screen.getByRole("dialog", { name: "New asset" });
+      const dropZone = documentDropZone(dialog);
+      fireEvent.dragOver(dropZone, {
+        dataTransfer: {
+          files: [],
+          types: ["Files"],
+        },
+      });
+
+      expect(dropZone).toHaveClass("upload-dropzone--active");
+
       dropDocuments(dialog, [
         new File(["permit"], "deck-permit.pdf", { type: "application/pdf" }),
+        new File(["warranty"], "deck-warranty.pdf", { type: "application/pdf" }),
       ]);
 
+      expect(dropZone).not.toHaveClass("upload-dropzone--active");
       expect(within(dialog).getByText("deck-permit.pdf")).toBeInTheDocument();
-      expect(within(dialog).getByLabelText("Kind")).toHaveValue("permit");
+      expect(within(dialog).getByText("deck-warranty.pdf")).toBeInTheDocument();
+      const kinds = within(dialog).getAllByLabelText("Kind");
+      expect(kinds.at(0)).toHaveValue("permit");
+      expect(kinds.at(1)).toHaveValue("warranty");
     } finally {
       restore();
     }
@@ -771,6 +792,8 @@ describe("<AssetsPage>", () => {
       /\.asset-create__field input\[aria-invalid="true"\],[\s\S]*border-color: var\(--rust\);/,
     );
     expect(managerPanelsCss).toContain(".asset-create__upload");
+    expect(tasksCss).toContain(".upload-dropzone");
+    expect(tasksCss).toContain(".upload-dropzone--active");
     expect(managerPanelsCss).toContain(".asset-create__document");
     expect(managerPanelsCss).toMatch(
       /@media \(max-width: 560px\) \{[\s\S]*\.asset-create__grid \{\n    grid-template-columns: 1fr;/,

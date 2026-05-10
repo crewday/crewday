@@ -1,9 +1,10 @@
-import { useRef, useState, type DragEvent, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { ApiError, fetchJson, resolveApiPath } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import FileDropZone from "@/components/FileDropZone";
 import { Checkbox, Chip, EmptyState, FilterChipGroup, Loading } from "@/components/common";
 import { AssetIcon } from "@/components/AssetIcon";
 import { ASSET_CONDITION_TONE, ASSET_STATUS_TONE } from "@/lib/tones";
@@ -178,7 +179,6 @@ function NewAssetButton({
   const [guestInstructions, setGuestInstructions] = useState("");
   const [notes, setNotes] = useState("");
   const [queuedDocuments, setQueuedDocuments] = useState<QueuedAssetDocument[]>([]);
-  const [documentDragActive, setDocumentDragActive] = useState(false);
   const [createdAssetAfterUploadFailure, setCreatedAssetAfterUploadFailure] =
     useState<Asset | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -247,7 +247,6 @@ function NewAssetButton({
     setGuestInstructions("");
     setNotes("");
     setQueuedDocuments([]);
-    setDocumentDragActive(false);
     setCreatedAssetAfterUploadFailure(null);
     setFormError(null);
     create.reset();
@@ -297,11 +296,11 @@ function NewAssetButton({
     create.mutate(body);
   }
 
-  function addDocuments(files: FileList | null): void {
-    if (!files?.length) return;
+  function addDocuments(files: File[]): void {
+    if (files.length === 0) return;
     setQueuedDocuments((current) => [
       ...current,
-      ...Array.from(files).map((file) => ({
+      ...files.map((file) => ({
         localId: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
         file,
         kind: defaultDocumentKind(file),
@@ -309,24 +308,6 @@ function NewAssetButton({
       })),
     ]);
     setFormError(null);
-  }
-
-  function handleDocumentDragOver(event: DragEvent<HTMLLabelElement>): void {
-    event.preventDefault();
-    if (event.dataTransfer.types.includes("Files")) {
-      setDocumentDragActive(true);
-      event.dataTransfer.dropEffect = "copy";
-    }
-  }
-
-  function handleDocumentDragLeave(): void {
-    setDocumentDragActive(false);
-  }
-
-  function handleDocumentDrop(event: DragEvent<HTMLLabelElement>): void {
-    event.preventDefault();
-    setDocumentDragActive(false);
-    addDocuments(event.dataTransfer.files);
   }
 
   function updateDocument(
@@ -644,26 +625,14 @@ function NewAssetButton({
               <h4 id="asset-create-documents" className="asset-create__section-title">
                 Documents
               </h4>
-              <label
-                className={
-                  documentDragActive
-                    ? "asset-create__upload asset-create__upload--active"
-                    : "asset-create__upload"
-                }
-                onDragOver={handleDocumentDragOver}
-                onDragLeave={handleDocumentDragLeave}
-                onDrop={handleDocumentDrop}
-              >
-                <span>Upload or drop invoices, manuals, warranties, receipts, certificates, photos, or permits</span>
-                <input
-                  type="file"
-                  multiple
-                  onChange={(event) => {
-                    addDocuments(event.currentTarget.files);
-                    event.currentTarget.value = "";
-                  }}
-                />
-              </label>
+              <FileDropZone
+                className="asset-create__upload"
+                title="Upload or drop invoices, manuals, warranties, receipts, certificates, photos, or permits"
+                description="Select multiple files or drop them here."
+                multiple
+                disabled={create.isPending}
+                onFiles={addDocuments}
+              />
               {createdAssetAfterUploadFailure ? (
                 <p className="form-notice form-notice--error" role="status">
                   The asset was created. Retry the failed document uploads or close this form.

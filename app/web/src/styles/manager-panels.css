@@ -792,28 +792,8 @@
   box-shadow: 0 0 0 3px rgba(154, 73, 43, 0.14);
 }
 .asset-create__upload {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  padding: 14px;
-  border: 1px dashed var(--line-strong);
-  border-radius: 6px;
-  background: var(--paper-2);
-  color: var(--ink-2);
-  cursor: pointer;
-  font-size: 13px;
-  line-height: 1.4;
-}
-.asset-create__upload input {
   width: 100%;
   min-width: 0;
-  color: var(--ink-2);
-}
-.asset-create__upload--active {
-  border-color: var(--moss);
-  background: var(--wash);
-  color: var(--ink);
 }
 .asset-create__documents {
   display: flex;

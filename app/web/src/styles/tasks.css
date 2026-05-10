@@ -122,13 +122,25 @@
 
 /* ── Evidence ─────────────────────────────────────────────── */
 .evidence { margin-top: 22px; display: flex; flex-direction: column; gap: 12px; }
+.upload-dropzone,
 .evidence__picker {
   display: flex; flex-direction: column; gap: 4px; align-items: center;
   border: 1.5px dashed var(--ink-4); padding: 22px; text-align: center;
   border-radius: 10px; cursor: pointer;
 }
+.upload-dropzone--active {
+  border-color: var(--moss);
+  background: var(--wash);
+}
+.upload-dropzone--disabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+.upload-dropzone input,
 .evidence__picker input { display: none; }
+.upload-dropzone__title,
 .evidence__picker-cta { font-weight: 600; font-family: "Fraunces", serif; }
+.upload-dropzone__description,
 .evidence__picker-sub { color: var(--ink-3); font-size: 12px; }
 .evidence__note-hint { margin: 4px 2px 0; font-size: 13px; line-height: 1.5; }
 .evidence__preview-list {
@@ -223,4 +235,3 @@
 .comment__time { margin-left: auto; color: var(--ink-3); font-size: 11px; font-family: "JetBrains Mono", monospace; }
 .comment__compose { display: flex; gap: 8px; align-items: flex-end; }
 .comment__compose textarea { flex: 1; }
-
