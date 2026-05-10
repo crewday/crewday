@@ -4,6 +4,7 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
 import DeskPage from "@/components/DeskPage";
+import DateTime from "@/components/DateTime";
 import { Chip, Loading } from "@/components/common";
 import type { AdminWorkspaceRow, AdminWorkspacesResponse } from "@/types/api";
 
@@ -223,7 +224,9 @@ export default function AdminWorkspacesPage() {
                     </span>
                   )}
                 </td>
-                <td className="mono muted">{w.created_at}</td>
+                <td className="mono muted">
+                  <DateTime value={w.created_at} />
+                </td>
                 <td>
                   <div className="inline-actions">
                     {w.verification_state !== "trusted" && (
@@ -312,7 +315,9 @@ export default function AdminWorkspacesPage() {
                     <div className="table__sub">/w/{w.slug}</div>
                   </td>
                   <td className="muted">{w.plan}</td>
-                  <td className="mono muted">{w.archived_at}</td>
+                  <td className="mono muted">
+                    <DateTime value={w.archived_at} />
+                  </td>
                 </tr>
               ))}
             </tbody>

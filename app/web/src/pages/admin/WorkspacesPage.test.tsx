@@ -96,7 +96,7 @@ function workspaces(overrides: Record<string, unknown> = {}): unknown {
         spent_cents_30d: 600,
         cap_cents_30d: 1000,
         archived_at: null,
-        created_at: "2026-04-01T00:00:00+00:00",
+        created_at: "2026-05-06T12:00:00.000Z",
       },
       {
         id: "ws_2",
@@ -108,7 +108,7 @@ function workspaces(overrides: Record<string, unknown> = {}): unknown {
         members_count: 2,
         spent_cents_30d: 75,
         cap_cents_30d: 500,
-        archived_at: "2026-04-20T00:00:00+00:00",
+        archived_at: "2026-04-20T12:00:00.000Z",
         created_at: "2026-03-01T00:00:00+00:00",
       },
     ],
@@ -155,6 +155,7 @@ function jsonBody(call: FetchCall): unknown {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
@@ -162,6 +163,8 @@ afterEach(() => {
 
 describe("Admin WorkspacesPage", () => {
   it("renders active and archived workspace rows from the API envelope", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-05-10T12:00:00.000Z"));
     const fetcher = installPageFetch();
     try {
       render(<Harness />);
@@ -178,10 +181,20 @@ describe("Admin WorkspacesPage", () => {
       expect(within(row).getByText("4")).toBeInTheDocument();
       expect(within(row).getByText("$6.00")).toBeInTheDocument();
       expect(within(row).getByText("$10.00")).toBeInTheDocument();
+      const createdAt = within(row).getByText("4 days ago");
+      expect(createdAt.tagName).toBe("TIME");
+      expect(createdAt).toHaveAttribute("dateTime", "2026-05-06T12:00:00.000Z");
+      expect(createdAt).toHaveAttribute("title", expect.stringContaining("May 6, 2026"));
+      expect(within(row).queryByText("2026-05-06T12:00:00.000Z")).not.toBeInTheDocument();
 
       const archivedRow = rowFor("Archive House");
       expect(within(archivedRow).getByText("/w/archive")).toBeInTheDocument();
       expect(within(archivedRow).getByText("pro")).toBeInTheDocument();
+      const archivedAt = within(archivedRow).getByText("April 20th, 2026");
+      expect(archivedAt.tagName).toBe("TIME");
+      expect(archivedAt).toHaveAttribute("dateTime", "2026-04-20T12:00:00.000Z");
+      expect(archivedAt).toHaveAttribute("title", expect.stringContaining("April 20, 2026"));
+      expect(within(archivedRow).queryByText("2026-04-20T12:00:00.000Z")).not.toBeInTheDocument();
     } finally {
       fetcher.restore();
     }
@@ -216,6 +229,8 @@ describe("Admin WorkspacesPage", () => {
   });
 
   it("archives a workspace after confirmation with the mock confirmation text", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-05-10T12:00:00.000Z"));
     const archiveResponse = deferredResponse();
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     const fetcher = installFetch({
@@ -254,6 +269,13 @@ describe("Admin WorkspacesPage", () => {
       );
       expect(await screen.findByText("Active (0)")).toBeInTheDocument();
       expect(screen.getByText("Archived (1)")).toBeInTheDocument();
+      const archivedRow = rowFor("Smoke House");
+      const archivedAt = within(archivedRow).getByText("just now");
+      expect(archivedAt.tagName).toBe("TIME");
+      expect(archivedAt.getAttribute("dateTime")).toMatch(
+        /^2026-05-10T12:00:00\.\d{3}Z$/,
+      );
+      expect(archivedAt).toHaveAttribute("title", expect.stringContaining("May 10, 2026"));
       archiveResponse.resolve({
         body: { id: "ws_1", archived_at: "2026-04-29T12:00:00.000Z" },
       });
