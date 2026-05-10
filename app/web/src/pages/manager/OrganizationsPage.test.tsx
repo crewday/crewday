@@ -96,6 +96,7 @@ function installFetch({
           workspace_id: "ws_owner",
           kind: body.kind,
           display_name: body.display_name,
+          legal_name: body.legal_name ?? null,
           billing_address: body.billing_address ?? {},
           tax_id: null,
           default_currency: body.default_currency ?? "EUR",
@@ -393,7 +394,7 @@ describe("<OrganizationsPage>", () => {
     }
   });
 
-  it("keeps legal name out of the create payload until the API accepts it", async () => {
+  it("sends legal name in the create payload when present", async () => {
     const fake = installFetch();
     try {
       render(<Harness initial="/w/acme/organizations" />);
@@ -402,16 +403,13 @@ describe("<OrganizationsPage>", () => {
       fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Ocean Homes" } });
       fireEvent.change(screen.getByLabelText("Legal name"), { target: { value: "Ocean Homes LLC" } });
 
-      expect(
-        screen.getByText(/current billing API does not accept legal_name yet/i),
-      ).toBeInTheDocument();
-
       fireEvent.click(screen.getByRole("button", { name: "Create organization" }));
 
       await screen.findByRole("heading", { name: "Ocean Homes" });
       expect(fake.bodies).toContainEqual({
         kind: "client",
         display_name: "Ocean Homes",
+        legal_name: "Ocean Homes LLC",
       });
     } finally {
       fake.restore();

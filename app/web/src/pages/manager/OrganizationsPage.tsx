@@ -51,6 +51,7 @@ type BillingOrganizationKind = "client" | "vendor" | "mixed";
 interface OrganizationCreateBody {
   kind: BillingOrganizationKind;
   display_name: string;
+  legal_name?: string;
   billing_address?: Record<string, string>;
   default_currency?: string;
 }
@@ -455,12 +456,6 @@ function NewOrganizationButton({
               </div>
             </section>
 
-            {draft.legalName.trim() ? (
-              <p className="form-notice">
-                The current billing API does not accept legal_name yet, so this
-                create will save the organization without it.
-              </p>
-            ) : null}
             {formError && (
               <p id="organization-create-error" className="form-error" role="alert">
                 {formError}
@@ -511,6 +506,7 @@ function buildOrganizationCreateBody(
   if (currency && !/^[A-Z]{3}$/.test(currency)) {
     return "Use a three-letter currency code, such as USD.";
   }
+  const legalName = draft.legalName.trim();
   const address = compactRecord({
     line1: draft.addressLine1,
     line2: draft.addressLine2,
@@ -522,6 +518,7 @@ function buildOrganizationCreateBody(
   return {
     kind: draft.kind,
     display_name: displayName,
+    ...(legalName ? { legal_name: legalName } : {}),
     ...(currency ? { default_currency: currency } : {}),
     ...(Object.keys(address).length > 0 ? { billing_address: address } : {}),
   };

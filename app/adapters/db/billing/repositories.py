@@ -105,6 +105,7 @@ def _to_row(row: Organization) -> OrganizationRow:
         workspace_id=row.workspace_id,
         kind=row.kind,
         display_name=row.display_name,
+        legal_name=row.legal_name,
         billing_address=dict(row.billing_address),
         tax_id=row.tax_id,
         default_currency=row.default_currency,
@@ -114,6 +115,21 @@ def _to_row(row: Organization) -> OrganizationRow:
         created_at=_as_utc(row.created_at),
         archived_at=_as_utc_optional(row.archived_at),
     )
+
+
+def _organization_unique_field(exc: IntegrityError) -> str | None:
+    message = str(exc.orig)
+    if (
+        "uq_organization_workspace_legal_name" in message
+        or "organization.legal_name" in message
+    ):
+        return "legal_name"
+    if (
+        "uq_organization_workspace_display_name" in message
+        or "organization.display_name" in message
+    ):
+        return "display_name"
+    return None
 
 
 class SqlAlchemyOrganizationRepository(OrganizationRepository):
@@ -138,6 +154,7 @@ class SqlAlchemyOrganizationRepository(OrganizationRepository):
         workspace_id: str,
         kind: str,
         display_name: str,
+        legal_name: str | None,
         billing_address: Mapping[str, object],
         tax_id: str | None,
         default_currency: str,
@@ -152,6 +169,7 @@ class SqlAlchemyOrganizationRepository(OrganizationRepository):
             workspace_id=workspace_id,
             kind=kind,
             display_name=display_name,
+            legal_name=legal_name,
             billing_address=dict(billing_address),
             tax_id=tax_id,
             default_currency=default_currency,
@@ -166,9 +184,16 @@ class SqlAlchemyOrganizationRepository(OrganizationRepository):
                 self._session.add(row)
                 self._session.flush()
         except IntegrityError as exc:
-            raise OrganizationInvalid(
-                f"organization named {display_name!r} already exists"
-            ) from exc
+            unique_field = _organization_unique_field(exc)
+            if unique_field == "legal_name" and legal_name is not None:
+                raise OrganizationInvalid(
+                    f"organization legal name {legal_name!r} already exists"
+                ) from exc
+            if unique_field == "display_name":
+                raise OrganizationInvalid(
+                    f"organization named {display_name!r} already exists"
+                ) from exc
+            raise
         return _to_row(row)
 
     def get(
@@ -200,6 +225,22 @@ class SqlAlchemyOrganizationRepository(OrganizationRepository):
         stmt = select(Organization).where(
             Organization.workspace_id == workspace_id,
             Organization.display_name == display_name,
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(Organization.id != exclude_id)
+        row = self._session.scalars(stmt).one_or_none()
+        return _to_row(row) if row is not None else None
+
+    def get_by_legal_name(
+        self,
+        *,
+        workspace_id: str,
+        legal_name: str,
+        exclude_id: str | None = None,
+    ) -> OrganizationRow | None:
+        stmt = select(Organization).where(
+            Organization.workspace_id == workspace_id,
+            Organization.legal_name == legal_name,
         )
         if exclude_id is not None:
             stmt = stmt.where(Organization.id != exclude_id)
@@ -271,7 +312,16 @@ class SqlAlchemyOrganizationRepository(OrganizationRepository):
                     setattr(row, key, value)
                 self._session.flush()
         except IntegrityError as exc:
-            if "display_name" in fields and isinstance(fields["display_name"], str):
+            unique_field = _organization_unique_field(exc)
+            if unique_field == "legal_name" and isinstance(
+                fields.get("legal_name"), str
+            ):
+                raise OrganizationInvalid(
+                    f"organization legal name {fields['legal_name']!r} already exists"
+                ) from exc
+            if unique_field == "display_name" and isinstance(
+                fields.get("display_name"), str
+            ):
                 raise OrganizationInvalid(
                     f"organization named {fields['display_name']!r} already exists"
                 ) from exc

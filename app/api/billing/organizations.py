@@ -41,6 +41,7 @@ class OrganizationResponse(BaseModel):
     workspace_id: str
     kind: str
     display_name: str
+    legal_name: str | None
     billing_address: dict[str, object]
     tax_id: str | None
     default_currency: str
@@ -57,6 +58,7 @@ class OrganizationResponse(BaseModel):
             workspace_id=view.workspace_id,
             kind=view.kind,
             display_name=view.display_name,
+            legal_name=view.legal_name,
             billing_address=dict(view.billing_address),
             tax_id=view.tax_id,
             default_currency=view.default_currency,
@@ -77,6 +79,7 @@ class OrganizationCreateRequest(BaseModel):
 
     kind: Literal["client", "vendor", "mixed"]
     display_name: str = Field(min_length=1, max_length=200)
+    legal_name: str | None = Field(default=None, max_length=200)
     billing_address: dict[str, object] = Field(default_factory=dict)
     tax_id: str | None = Field(default=None, max_length=128)
     default_currency: str | None = Field(default=None, min_length=3, max_length=3)
@@ -88,6 +91,7 @@ class OrganizationCreateRequest(BaseModel):
         return OrganizationCreate(
             kind=self.kind,
             display_name=self.display_name,
+            legal_name=self.legal_name,
             billing_address=self.billing_address,
             tax_id=self.tax_id,
             default_currency=self.default_currency,
@@ -102,6 +106,7 @@ class OrganizationPatchRequest(BaseModel):
 
     kind: Literal["client", "vendor", "mixed"] | None = None
     display_name: str | None = Field(default=None, min_length=1, max_length=200)
+    legal_name: str | None = Field(default=None, max_length=200)
     billing_address: dict[str, object] | None = None
     tax_id: str | None = Field(default=None, max_length=128)
     default_currency: str | None = Field(default=None, min_length=3, max_length=3)

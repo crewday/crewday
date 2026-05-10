@@ -201,12 +201,14 @@ def test_create_defaults_currency_from_workspace_and_audits(
             OrganizationCreate(
                 kind="client",
                 display_name="  Dupont Family  ",
+                legal_name="  Dupont Family Holdings SARL  ",
                 billing_address={"country": "FR"},
             ),
         )
 
         assert view.kind == "client"
         assert view.display_name == "Dupont Family"
+        assert view.legal_name == "Dupont Family Holdings SARL"
         assert view.default_currency == "GBP"
         assert view.archived_at is None
 
@@ -379,6 +381,129 @@ def test_duplicate_names_are_rejected_without_hiding_original(
             )
 
         assert _service(ctx).get(repo, first.id).id == first.id
+
+
+def test_legal_name_can_be_changed_cleared_and_must_be_unique_when_set(
+    factory: sessionmaker[Session],
+) -> None:
+    with factory() as s:
+        workspace_id = _seed_workspace(s)
+        ctx = _ctx(workspace_id)
+        repo = SqlAlchemyOrganizationRepository(s)
+        service = _service(ctx)
+        first = service.create(
+            repo,
+            OrganizationCreate(
+                kind="client",
+                display_name="Dupont Family",
+                legal_name="Dupont Family SARL",
+            ),
+        )
+        second = service.create(
+            repo,
+            OrganizationCreate(kind="vendor", display_name="CleanCo"),
+        )
+
+        with pytest.raises(OrganizationInvalid, match=r"legal name .* already exists"):
+            service.create(
+                repo,
+                OrganizationCreate(
+                    kind="vendor",
+                    display_name="Mirror Legal",
+                    legal_name=" Dupont Family SARL ",
+                ),
+            )
+        with pytest.raises(OrganizationInvalid, match=r"legal name .* already exists"):
+            service.update(
+                repo,
+                second.id,
+                OrganizationPatch({"legal_name": "Dupont Family SARL"}),
+            )
+
+        changed = service.update(
+            repo,
+            first.id,
+            OrganizationPatch({"legal_name": "Dupont Estate SARL"}),
+        )
+        assert changed.legal_name == "Dupont Estate SARL"
+
+        cleared = service.update(repo, first.id, OrganizationPatch({"legal_name": ""}))
+        assert cleared.legal_name is None
+
+        reused = service.update(
+            repo,
+            second.id,
+            OrganizationPatch({"legal_name": "Dupont Estate SARL"}),
+        )
+        assert reused.legal_name == "Dupont Estate SARL"
+
+
+def test_repository_classifies_organization_unique_constraint_errors(
+    factory: sessionmaker[Session],
+) -> None:
+    with factory() as s:
+        workspace_id = _seed_workspace(s)
+        ctx = _ctx(workspace_id)
+        repo = SqlAlchemyOrganizationRepository(s)
+        service = _service(ctx)
+        first = service.create(
+            repo,
+            OrganizationCreate(
+                kind="client",
+                display_name="Dupont Family",
+                legal_name="Dupont Family SARL",
+            ),
+        )
+        second = service.create(
+            repo,
+            OrganizationCreate(
+                kind="vendor",
+                display_name="CleanCo",
+                legal_name="CleanCo SARL",
+            ),
+        )
+
+        with pytest.raises(OrganizationInvalid, match="organization named"):
+            repo.insert(
+                organization_id=new_ulid(),
+                workspace_id=workspace_id,
+                kind="vendor",
+                display_name="Dupont Family",
+                legal_name="Unique Legal SARL",
+                billing_address={},
+                tax_id=None,
+                default_currency="EUR",
+                contact_email=None,
+                contact_phone=None,
+                notes_md=None,
+                created_at=_PINNED,
+            )
+
+        with pytest.raises(OrganizationInvalid, match="organization legal name"):
+            repo.insert(
+                organization_id=new_ulid(),
+                workspace_id=workspace_id,
+                kind="vendor",
+                display_name="Unique Display",
+                legal_name="Dupont Family SARL",
+                billing_address={},
+                tax_id=None,
+                default_currency="EUR",
+                contact_email=None,
+                contact_phone=None,
+                notes_md=None,
+                created_at=_PINNED,
+            )
+
+        with pytest.raises(OrganizationInvalid, match="organization named"):
+            repo.update_fields(
+                workspace_id=workspace_id,
+                organization_id=second.id,
+                fields={
+                    "display_name": first.display_name,
+                    "legal_name": "Still Unique SARL",
+                },
+            )
 
 
 def test_update_rejects_duplicate_name_and_archived_rows(

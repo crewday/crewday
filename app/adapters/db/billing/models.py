@@ -87,6 +87,7 @@ class Organization(Base):
     )
     kind: Mapped[str] = mapped_column(String, nullable=False)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
+    legal_name: Mapped[str | None] = mapped_column(String, nullable=True)
     billing_address: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict
     )
@@ -116,6 +117,11 @@ class Organization(Base):
             "workspace_id",
             "display_name",
             name="uq_organization_workspace_display_name",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "legal_name",
+            name="uq_organization_workspace_legal_name",
         ),
         Index("ix_organization_workspace_kind", "workspace_id", "kind"),
         Index("ix_organization_workspace_archived", "workspace_id", "archived_at"),

@@ -35,6 +35,7 @@ _MUTABLE_FIELDS: frozenset[str] = frozenset(
     {
         "kind",
         "display_name",
+        "legal_name",
         "billing_address",
         "tax_id",
         "default_currency",
@@ -71,6 +72,7 @@ class OrganizationRow:
     workspace_id: str
     kind: str
     display_name: str
+    legal_name: str | None
     billing_address: Mapping[str, object]
     tax_id: str | None
     default_currency: str
@@ -87,6 +89,7 @@ class OrganizationView:
     workspace_id: str
     kind: str
     display_name: str
+    legal_name: str | None
     billing_address: Mapping[str, object]
     tax_id: str | None
     default_currency: str
@@ -101,6 +104,7 @@ class OrganizationView:
 class OrganizationCreate:
     kind: str
     display_name: str
+    legal_name: str | None = None
     billing_address: Mapping[str, object] | None = None
     tax_id: str | None = None
     default_currency: str | None = None
@@ -127,6 +131,7 @@ class OrganizationRepository(Protocol):
         workspace_id: str,
         kind: str,
         display_name: str,
+        legal_name: str | None,
         billing_address: Mapping[str, object],
         tax_id: str | None,
         default_currency: str,
@@ -150,6 +155,14 @@ class OrganizationRepository(Protocol):
         *,
         workspace_id: str,
         display_name: str,
+        exclude_id: str | None = None,
+    ) -> OrganizationRow | None: ...
+
+    def get_by_legal_name(
+        self,
+        *,
+        workspace_id: str,
+        legal_name: str,
         exclude_id: str | None = None,
     ) -> OrganizationRow | None: ...
 
@@ -195,12 +208,15 @@ class OrganizationService:
     ) -> OrganizationView:
         currency = self._currency_or_workspace_default(repo, body.default_currency)
         display_name = _clean_required(body.display_name, field="display_name")
+        legal_name = _clean_optional(body.legal_name)
         self._reject_duplicate_display_name(repo, display_name=display_name)
+        self._reject_duplicate_legal_name(repo, legal_name=legal_name)
         row = repo.insert(
             organization_id=new_ulid(),
             workspace_id=self._ctx.workspace_id,
             kind=_validate_kind(body.kind),
             display_name=display_name,
+            legal_name=legal_name,
             billing_address=_clean_billing_address(body.billing_address),
             tax_id=_clean_optional(body.tax_id),
             default_currency=currency,
@@ -380,6 +396,17 @@ class OrganizationService:
                         exclude_id=current.id,
                     )
                 fields[key] = display_name
+            elif key == "legal_name":
+                if value is not None and not isinstance(value, str):
+                    raise OrganizationInvalid("legal_name must be a string or null")
+                legal_name = _clean_optional(value)
+                if legal_name != current.legal_name:
+                    self._reject_duplicate_legal_name(
+                        repo,
+                        legal_name=legal_name,
+                        exclude_id=current.id,
+                    )
+                fields[key] = legal_name
             elif key == "billing_address":
                 if value is None:
                     raise OrganizationInvalid("billing_address cannot be null")
@@ -434,6 +461,25 @@ class OrganizationService:
                 f"organization named {display_name!r} already exists"
             )
 
+    def _reject_duplicate_legal_name(
+        self,
+        repo: OrganizationRepository,
+        *,
+        legal_name: str | None,
+        exclude_id: str | None = None,
+    ) -> None:
+        if legal_name is None:
+            return
+        existing = repo.get_by_legal_name(
+            workspace_id=self._ctx.workspace_id,
+            legal_name=legal_name,
+            exclude_id=exclude_id,
+        )
+        if existing is not None:
+            raise OrganizationInvalid(
+                f"organization legal name {legal_name!r} already exists"
+            )
+
 
 def _validate_kind(kind: str) -> OrganizationKind:
     match kind:
@@ -482,6 +528,7 @@ def _to_view(row: OrganizationRow) -> OrganizationView:
         workspace_id=row.workspace_id,
         kind=row.kind,
         display_name=row.display_name,
+        legal_name=row.legal_name,
         billing_address=dict(row.billing_address),
         tax_id=row.tax_id,
         default_currency=row.default_currency,
@@ -499,6 +546,7 @@ def _audit_shape(view: OrganizationView) -> dict[str, object]:
         "workspace_id": view.workspace_id,
         "kind": view.kind,
         "display_name": view.display_name,
+        "legal_name": view.legal_name,
         "billing_address": dict(view.billing_address),
         "tax_id": view.tax_id,
         "default_currency": view.default_currency,

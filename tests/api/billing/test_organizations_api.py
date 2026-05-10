@@ -181,20 +181,27 @@ def test_create_list_get_patch_archive_and_no_delete(
         json={
             "kind": "client",
             "display_name": "Dupont Family",
+            "legal_name": "Dupont Family Holdings SARL",
             "billing_address": {"country": "FR"},
         },
     )
     assert created.status_code == 201
     org = created.json()
+    assert org["legal_name"] == "Dupont Family Holdings SARL"
     assert org["default_currency"] == "EUR"
     assert org["archived_at"] is None
 
     patched = client.patch(
         f"/billing/organizations/{org['id']}",
-        json={"display_name": "Dupont Household", "default_currency": "gbp"},
+        json={
+            "display_name": "Dupont Household",
+            "legal_name": "Dupont Household SARL",
+            "default_currency": "gbp",
+        },
     )
     assert patched.status_code == 200
     assert patched.json()["display_name"] == "Dupont Household"
+    assert patched.json()["legal_name"] == "Dupont Household SARL"
     assert patched.json()["default_currency"] == "GBP"
 
     listed = client.get(
@@ -203,10 +210,19 @@ def test_create_list_get_patch_archive_and_no_delete(
     )
     assert listed.status_code == 200
     assert [row["id"] for row in listed.json()["data"]] == [org["id"]]
+    assert listed.json()["data"][0]["legal_name"] == "Dupont Household SARL"
 
     fetched = client.get(f"/billing/organizations/{org['id']}")
     assert fetched.status_code == 200
     assert fetched.json()["id"] == org["id"]
+    assert fetched.json()["legal_name"] == "Dupont Household SARL"
+
+    cleared = client.patch(
+        f"/billing/organizations/{org['id']}",
+        json={"legal_name": None},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["legal_name"] is None
 
     archived = client.post(f"/billing/organizations/{org['id']}/archive")
     assert archived.status_code == 200
@@ -296,6 +312,68 @@ def test_patch_duplicate_name_returns_422(
     assert duplicate.status_code == 422
     assert duplicate.json()["error"] == "organization_invalid"
     assert "already exists" in duplicate.json()["message"]
+
+
+def test_duplicate_legal_names_return_422_when_set(
+    factory: sessionmaker[Session],
+    seeded: tuple[str, str, str],
+) -> None:
+    workspace_id, manager_id, _worker_id = seeded
+    client = TestClient(
+        _build_app(
+            factory,
+            _ctx(workspace_id=workspace_id, actor_id=manager_id, role="manager"),
+        ),
+        raise_server_exceptions=False,
+    )
+    first = client.post(
+        "/billing/organizations",
+        json={
+            "kind": "client",
+            "display_name": "Alpha Family",
+            "legal_name": "Alpha Family SARL",
+        },
+    )
+    assert first.status_code == 201
+    second = client.post(
+        "/billing/organizations",
+        json={"kind": "vendor", "display_name": "Beta Co"},
+    )
+    assert second.status_code == 201
+
+    duplicate_create = client.post(
+        "/billing/organizations",
+        json={
+            "kind": "vendor",
+            "display_name": "Mirror Legal",
+            "legal_name": " Alpha Family SARL ",
+        },
+    )
+    assert duplicate_create.status_code == 422
+    assert duplicate_create.json()["error"] == "organization_invalid"
+    assert "legal name" in duplicate_create.json()["message"]
+
+    duplicate_patch = client.patch(
+        f"/billing/organizations/{second.json()['id']}",
+        json={"legal_name": first.json()["legal_name"]},
+    )
+    assert duplicate_patch.status_code == 422
+    assert duplicate_patch.json()["error"] == "organization_invalid"
+    assert "legal name" in duplicate_patch.json()["message"]
+
+    cleared = client.patch(
+        f"/billing/organizations/{first.json()['id']}",
+        json={"legal_name": ""},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["legal_name"] is None
+
+    reused = client.patch(
+        f"/billing/organizations/{second.json()['id']}",
+        json={"legal_name": "Alpha Family SARL"},
+    )
+    assert reused.status_code == 200
+    assert reused.json()["legal_name"] == "Alpha Family SARL"
 
 
 def test_kind_transition_conflict_maps_to_422(
