@@ -125,7 +125,8 @@ services:
       # instead of requiring an OpenRouter key or DB-backed model config.
       # The e2e override repeats these values so the fake seam remains
       # visible next to the WebAuthn localhost overrides.
-      CREWDAY_LLM_PROVIDER: "fake"
+      CREWDAY_LLM_PROVIDER: "${CREWDAY_LLM_PROVIDER:-fake}"
+      CREWDAY_OPENROUTER_API_KEY: "${CREWDAY_OPENROUTER_API_KEY:-}"
       CREWDAY_LLM_OCR_MODEL: "fake-ocr"
     expose:
       - "8000"
