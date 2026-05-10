@@ -196,6 +196,127 @@
   }
 }
 
+/* ── Lucide icon selector ─────────────────────────────────── */
+.icon-selector {
+  gap: 8px;
+}
+.icon-selector__selected {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+  color: var(--ink);
+}
+.icon-selector__selected-mark,
+.icon-selector__choice-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--moss-2);
+}
+.icon-selector__selected-mark {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+}
+.icon-selector__selected-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+.icon-selector__selected-kicker,
+.icon-selector__selected-note {
+  color: var(--ink-3);
+  font-size: 11px;
+  line-height: 1.3;
+}
+.icon-selector__selected-copy strong {
+  font-size: 13px;
+  line-height: 1.3;
+}
+.icon-selector__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink-3);
+}
+.icon-selector__search:focus-within {
+  border-color: var(--moss);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--moss) 16%, transparent);
+}
+.icon-selector__search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  outline: 0;
+}
+.icon-selector__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 2px;
+}
+.icon-selector__choice {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  text-align: left;
+}
+.icon-selector__choice span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.icon-selector__choice:hover {
+  border-color: var(--line-strong);
+  background: var(--paper-2);
+}
+.icon-selector__choice:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--moss) 22%, transparent);
+  outline-offset: 2px;
+}
+.icon-selector__choice.is-selected {
+  border-color: var(--moss);
+  background: color-mix(in srgb, var(--moss) 9%, var(--card));
+  color: var(--ink);
+}
+.icon-selector__empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
 /* Semantic layout for forms that pair copy and controls. A
    .form-layout__row renders label/control as two equal columns on
    desktop, then lets .form-layout__help span the full row below them. */

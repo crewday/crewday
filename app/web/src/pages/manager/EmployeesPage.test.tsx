@@ -407,7 +407,9 @@ describe("<EmployeesPage> work-role catalog", () => {
     const dialog = screen.getByRole("dialog", { name: "Add work role" });
     fireEvent.change(within(dialog).getByLabelText(/^Name\b/), { target: { value: "Pool technician" } });
     fireEvent.change(within(dialog).getByLabelText(/^Key\b/), { target: { value: "pool_tech" } });
-    fireEvent.change(within(dialog).getByLabelText(/^Icon name\b/), { target: { value: "Waves" } });
+    expect(within(dialog).queryByLabelText(/^Icon name\b/)).not.toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText("Search icon choices"), { target: { value: "waves" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Select Waves icon" }));
     fireEvent.change(within(dialog).getByLabelText(/^Description\b/), {
       target: { value: "Handles weekly pool checks." },
     });
@@ -553,6 +555,8 @@ describe("<EmployeesPage> work-role catalog", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const dialog = screen.getByRole("dialog", { name: "Edit work role" });
+    expect(within(dialog).getByText("Selected icon")).toBeInTheDocument();
+    expect(within(dialog).getAllByText("Brush Cleaning").length).toBeGreaterThan(0);
     fireEvent.change(within(dialog).getByLabelText(/^Name\b/), { target: { value: "Lead housekeeper" } });
     fireEvent.change(within(dialog).getByLabelText(/^Key\b/), { target: { value: "lead_housekeeper" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
@@ -564,6 +568,71 @@ describe("<EmployeesPage> work-role catalog", () => {
       key: "lead_housekeeper",
       description_md: "Turns guest rooms between stays.",
       icon_name: "BrushCleaning",
+    });
+  });
+
+  it("clears an optional work role icon before submitting", async () => {
+    const roles: WorkRole[] = [{ ...WORK_ROLE }];
+    const { requests } = renderEmployees([
+      {
+        path: "/w/acme/api/v1/work_roles?limit=500",
+        respond: { body: { data: roles, next_cursor: null, has_more: false } },
+      },
+      {
+        path: "/w/acme/api/v1/work_roles/wr_housekeeper",
+        method: "PATCH",
+        respond: ({ body }) => {
+          roles[0] = { ...roles[0]!, ...(body as Partial<WorkRole>) };
+          return { body: roles[0] };
+        },
+      },
+    ]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit work role" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "No icon" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+
+    expect(await screen.findByText("Housekeeper")).toBeInTheDocument();
+    const patchRequest = requests.find((request) => request.method === "PATCH");
+    expect(patchRequest?.body).toEqual({
+      name: "Housekeeper",
+      key: "housekeeper",
+      description_md: "Turns guest rooms between stays.",
+      icon_name: "",
+    });
+  });
+
+  it("drops stale unknown work role icon names on submit", async () => {
+    const legacyRole = { ...WORK_ROLE, icon_name: "LegacyRoleIcon", name: "Legacy role", key: "legacy_role" };
+    const roles: WorkRole[] = [legacyRole];
+    const { requests } = renderEmployees([
+      {
+        path: "/w/acme/api/v1/work_roles?limit=500",
+        respond: { body: { data: roles, next_cursor: null, has_more: false } },
+      },
+      {
+        path: "/w/acme/api/v1/work_roles/wr_housekeeper",
+        method: "PATCH",
+        respond: ({ body }) => {
+          roles[0] = { ...roles[0]!, ...(body as Partial<WorkRole>) };
+          return { body: roles[0] };
+        },
+      },
+    ]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit work role" });
+    expect(within(dialog).getByText(/Saved icon is unavailable/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+
+    expect(await screen.findByText("Legacy role")).toBeInTheDocument();
+    const patchRequest = requests.find((request) => request.method === "PATCH");
+    expect(patchRequest?.body).toEqual({
+      name: "Legacy role",
+      key: "legacy_role",
+      description_md: "Turns guest rooms between stays.",
+      icon_name: "",
     });
   });
 

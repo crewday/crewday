@@ -8,7 +8,8 @@ import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
-import { AssetIcon } from "@/components/AssetIcon";
+import { AssetIcon, isAssetIconName } from "@/components/AssetIcon";
+import IconSelector from "@/components/IconSelector";
 import { Avatar, Chip, EmptyState, Loading } from "@/components/common";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { Booking, Employee, Me, Property, WorkRole } from "@/types/api";
@@ -269,7 +270,7 @@ function WorkRoleCatalogManager() {
       name: form.name.trim(),
       key: form.key.trim(),
       description_md: form.description_md.trim(),
-      icon_name: form.icon_name.trim(),
+      icon_name: workRoleIconNameForSubmit(form.icon_name),
     };
     const nextErrors: Partial<Record<WorkRoleField, string>> = {};
     if (!payload.name) nextErrors.name = "Enter a role name.";
@@ -424,18 +425,14 @@ function WorkRoleCatalogManager() {
             {fieldErrors.key ? <span id="work-role-key-error" className="form-field-error">{fieldErrors.key}</span> : null}
           </FormField>
 
-          <FormField label="Icon name" requirement="optional" className="work-role-form__field sheet-form__field">
-            <input
-              value={form.icon_name}
-              aria-invalid={fieldErrors.icon_name ? "true" : undefined}
-              aria-describedby={fieldErrors.icon_name ? "work-role-icon-error" : undefined}
-              onChange={(event) => setField("icon_name", event.currentTarget.value)}
-              placeholder="e.g. BrushCleaning"
-            />
-            {fieldErrors.icon_name ? (
-              <span id="work-role-icon-error" className="form-field-error">{fieldErrors.icon_name}</span>
-            ) : null}
-          </FormField>
+          <IconSelector
+            label="Icon"
+            value={form.icon_name}
+            onChange={(value) => setField("icon_name", value)}
+            className="work-role-form__field sheet-form__field"
+            error={fieldErrors.icon_name}
+            errorId="work-role-icon-error"
+          />
 
           <FormField label="Description" requirement="optional" className="work-role-form__field sheet-form__field">
             <textarea
@@ -777,6 +774,11 @@ function workRoleFieldFromLoc(loc: readonly (string | number)[] | undefined): Wo
     return field;
   }
   return null;
+}
+
+function workRoleIconNameForSubmit(value: string): string {
+  const trimmed = value.trim();
+  return isAssetIconName(trimmed) ? trimmed : "";
 }
 
 function workRoleProblemKey(error: ApiError): string | null {
