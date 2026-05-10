@@ -163,9 +163,6 @@ services:
       # forwards SPA routes onward to ``web-dev:5173``; Traefik never
       # talks to the Vite container directly anymore.
       - "traefik.http.services.crewday-dev-app.loadbalancer.server.port=8000"
-      - "traefik.http.services.crewday-dev-app.loadbalancer.healthcheck.path=/healthz"
-      - "traefik.http.services.crewday-dev-app.loadbalancer.healthcheck.interval=10s"
-      - "traefik.http.services.crewday-dev-app.loadbalancer.healthcheck.hostname=dev-app.crew.day"
 
   # Vite dev server for ``app/web/`` (the production SPA). No host
   # port and no Traefik labels — the only consumer is the sibling
