@@ -116,73 +116,73 @@ afterEach(() => {
 describe("<RequirePermission>", () => {
   it("wraps the real approvals route before the manager shell", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="approvals\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/approvals" element={<ApprovalsPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="approvals\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="approvals" element={<ApprovalsPage \/>} \/>/,
     );
   });
 
   it("wraps the real settings route before the manager shell", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="scope\.edit_settings" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/settings" element={<SettingsPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="scope\.edit_settings" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="settings" element={<SettingsPage \/>} \/>/,
     );
   });
 
   it("wraps the real webhooks route before the manager shell", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="scope\.edit_settings" \/>}>\s*<Route element={<ManagerLayout \/>}>[\s\S]*?<Route path="\/webhooks" element={<WebhooksPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="scope\.edit_settings" \/>}>\s*<Route element={<ManagerLayout \/>}>[\s\S]*?<Route path="webhooks" element={<WebhooksPage \/>} \/>/,
     );
   });
 
   it("wraps the chat channels route before the manager shell", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="chat_gateway\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/chat\/channels" element={<ChatChannelsPage \/>} \/>[\s\S]*?<Route path="\/w\/:slug\/chat\/channels" element={<ChatChannelsPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="chat_gateway\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="chat\/channels" element={<ChatChannelsPage \/>} \/>/,
     );
   });
 
   it("wraps the real stays route before the manager shell", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="stays\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/stays" element={<StaysPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="stays\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="stays" element={<StaysPage \/>} \/>/,
     );
   });
 
   it("wraps the instructions library routes before the manager shell", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="instructions\.edit" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/instructions" element={<InstructionsPage \/>} \/>[\s\S]*?<Route path="\/instructions\/:iid" element={<InstructionDetailPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="instructions\.edit" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="instructions" element={<InstructionsPage \/>} \/>[\s\S]*?<Route path="instructions\/:iid" element={<InstructionDetailPage \/>} \/>/,
     );
   });
 
   it("wraps the real property detail route before the manager shell", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="properties\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>[\s\S]*?<Route path="\/property\/:pid" element={<PropertyDetailPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="properties\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>[\s\S]*?<Route path="property\/:pid" element={<PropertyDetailPage \/>} \/>/,
     );
   });
 
   it("wraps the real property closures route before the manager shell", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="properties\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>[\s\S]*?<Route path="\/property\/:pid\/closures" element={<PropertyClosuresPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="properties\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>[\s\S]*?<Route path="property\/:pid\/closures" element={<PropertyClosuresPage \/>} \/>/,
     );
   });
 
   it("wraps the real properties list route before the manager shell", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="properties\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/properties" element={<PropertiesPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="properties\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="properties" element={<PropertiesPage \/>} \/>/,
     );
   });
 
   it("wraps the real leaves route before the manager shell", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="leaves\.view_others" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/leaves" element={<LeavesInboxPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="leaves\.view_others" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="leaves" element={<LeavesInboxPage \/>} \/>/,
     );
   });
 
   it("wraps the employee leave ledger aliases before the manager shell", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="leaves\.view_others" \/>}>[\s\S]*?<Route element={<RequirePermission actionKey="employees\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>[\s\S]*?<Route path="\/employee\/:eid\/leaves" element={<EmployeeLeavesPage \/>} \/>[\s\S]*?<Route path="\/user\/:eid\/leaves" element={<EmployeeLeavesPage \/>} \/>[\s\S]*?<Route path="\/w\/:slug\/employee\/:eid\/leaves" element={<EmployeeLeavesPage \/>} \/>[\s\S]*?<Route path="\/w\/:slug\/user\/:eid\/leaves" element={<EmployeeLeavesPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="leaves\.view_others" \/>}>[\s\S]*?<Route element={<RequirePermission actionKey="employees\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>[\s\S]*?<Route path="employee\/:eid\/leaves" element={<EmployeeLeavesPage \/>} \/>[\s\S]*?<Route path="user\/:eid\/leaves" element={<EmployeeLeavesPage \/>} \/>/,
     );
   });
 
   it("wraps the real audit route before the manager shell", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="audit_log\.view" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/audit" element={<AuditPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="audit_log\.view" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="audit" element={<AuditPage \/>} \/>/,
     );
   });
 
