@@ -84,6 +84,19 @@ function jsonBody(call: FetchCall): unknown {
   return JSON.parse(String(call.init.body));
 }
 
+function chatManagerRung(): HTMLElement {
+  const capability = screen
+    .getAllByText("chat.manager")
+    .find((el) => el.classList.contains("llm-graph-node__name"))
+    ?.closest("article");
+  if (!(capability instanceof HTMLElement)) {
+    throw new Error("chat.manager capability not found");
+  }
+  const rung = within(capability).getByText("google/gemma-4-31b-it").closest(".llm-graph-chain__rung");
+  if (!(rung instanceof HTMLElement)) throw new Error("assignment rung not found");
+  return rung;
+}
+
 beforeEach(() => {
   class TestResizeObserver {
     observe(): void {}
@@ -171,11 +184,7 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
       await screen.findByText("OpenRouter");
 
-      const assignmentText = screen.getAllByText("google/gemma-4-31b-it").find((el) =>
-        el.closest(".llm-graph-chain__rung"),
-      );
-      if (!assignmentText) throw new Error("assignment rung not found");
-      fireEvent.click(assignmentText.closest(".llm-graph-chain__rung")!);
+      fireEvent.click(chatManagerRung());
 
       const modelCard = screen.getByText("Fast Chat").closest("article");
       if (!(modelCard instanceof HTMLElement)) throw new Error("model card not found");
@@ -209,11 +218,7 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
       await screen.findByText("OpenRouter");
 
-      const assignmentText = screen.getAllByText("google/gemma-4-31b-it").find((el) =>
-        el.closest(".llm-graph-chain__rung"),
-      );
-      if (!assignmentText) throw new Error("assignment rung not found");
-      fireEvent.click(assignmentText.closest(".llm-graph-chain__rung")!);
+      fireEvent.click(chatManagerRung());
 
       const modelCard = screen.getByText("Text Only").closest("article");
       if (!(modelCard instanceof HTMLElement)) throw new Error("model card not found");
@@ -227,6 +232,81 @@ describe("Admin LlmPage", () => {
         ),
       ).toBe(false);
       expect(modelCard).toHaveClass("is-active");
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("changes and removes explicit capability inheritance from the assignment card", async () => {
+    const explicitGraph = {
+      ...graph,
+      inheritance: [
+        {
+          capability: "voice.transcribe",
+          inherits_from: "chat.manager",
+          source: "explicit",
+        },
+      ],
+    };
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/graph": [
+        { body: graph },
+        { body: explicitGraph },
+        { body: graph },
+      ],
+      "/admin/api/v1/llm/inheritance": [
+        {
+          body: {
+            capability: "voice.transcribe",
+            inherits_from: "chat.manager",
+            source: "explicit",
+          },
+        },
+      ],
+      "/admin/api/v1/llm/inheritance/voice.transcribe": [{ status: 204, body: null }],
+    });
+    try {
+      render(<Harness />);
+      await screen.findByText("OpenRouter");
+      expect(screen.getByText("invalid implicit")).toBeInTheDocument();
+
+      fireEvent.change(
+        screen.getByLabelText("Change voice.transcribe inheritance parent"),
+        { target: { value: "chat.manager" } },
+      );
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url === "/admin/api/v1/llm/inheritance" &&
+              call.init.method === "POST",
+          ),
+        ).toBe(true);
+      });
+      const post = fetcher.calls.find(
+        (call) =>
+          call.url === "/admin/api/v1/llm/inheritance" &&
+          call.init.method === "POST",
+      );
+      expect(jsonBody(post!)).toEqual({
+        capability: "voice.transcribe",
+        inherits_from: "chat.manager",
+      });
+      expect(await screen.findByText("invalid explicit")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url === "/admin/api/v1/llm/inheritance/voice.transcribe" &&
+              call.init.method === "DELETE",
+          ),
+        ).toBe(true);
+      });
+      expect(await screen.findByText("invalid implicit")).toBeInTheDocument();
     } finally {
       fetcher.restore();
     }

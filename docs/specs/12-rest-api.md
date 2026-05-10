@@ -1176,6 +1176,7 @@ GET    /admin/api/v1/me/admins                       # listing of deployment adm
 
 # LLM graph (moved from per-workspace /w/<slug>/llm; see §11)
 # Everything deployment-scope; gated by deployment.llm.{view,edit}.
+GET    /admin/api/v1/llm/graph                       # complete providers/models/provider-models/assignments/inheritance graph
 
 # Providers — the upstream services we call.
 GET    /admin/api/v1/llm/providers                   # list; shape per §11 llm_provider
@@ -1208,9 +1209,10 @@ DELETE /admin/api/v1/llm/assignments/{id}
 PATCH  /admin/api/v1/llm/assignments/reorder         # body: [{capability, ids_in_priority_order: [...]}]
 
 # Capability inheritance.
-GET    /admin/api/v1/llm/capability-inheritance
-PUT    /admin/api/v1/llm/capability-inheritance/{capability}  # body: { inherits_from } ; 422 on cycle
-DELETE /admin/api/v1/llm/capability-inheritance/{capability}
+GET    /admin/api/v1/llm/inheritance
+POST   /admin/api/v1/llm/inheritance                 # body: { capability, inherits_from }
+PUT    /admin/api/v1/llm/inheritance/{capability}    # body: { inherits_from } ; 422 on unknown/self-loop/cycle
+DELETE /admin/api/v1/llm/inheritance/{capability}
 
 # Prompt library — hash-self-seeding; see §11 "Prompt library".
 GET    /admin/api/v1/llm/prompts                     # one row per capability, current active body

@@ -76,15 +76,13 @@ migrate_once = _migrate_once_fixture
 _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
 
 
-# LLM tables must stay in the workspace-scoped registry. A sibling
+# Workspace-scoped LLM usage/budget tables must stay in the registry. A sibling
 # unit test (``tests/unit/test_tenancy_orm_filter.py``) wipes the
 # process-wide registry in an autouse fixture; without this repair
 # the tenant filter silently drops off our LLM queries when the
 # full suite runs. Same pattern as
 # ``tests/integration/test_db_llm.py::_ensure_llm_registered``.
 _LLM_TABLES: tuple[str, ...] = (
-    "llm_assignment",
-    "llm_capability_inheritance",
     # cd-irng adds ``llm_usage`` + ``budget_ledger`` reads / writes
     # to the budget module's surface; both must stay in the
     # workspace-scoped registry for the ORM tenant filter to inject
@@ -268,6 +266,7 @@ def seed_provider_model(
     canonical_name: str | None = None,
     provider_name: str | None = None,
     provider_type: str = "fake",
+    model_capabilities: list[str] | None = None,
 ) -> LlmProviderModel:
     """Insert a :class:`LlmProviderModel` plus its :class:`LlmProvider` /
     :class:`LlmModel` ancestors.
@@ -308,7 +307,7 @@ def seed_provider_model(
         canonical_name=canonical,
         display_name=canonical,
         vendor="other",
-        capabilities=["chat"],
+        capabilities=list(model_capabilities or ["chat"]),
         is_active=True,
         price_source="",
         created_at=_PINNED,
@@ -366,6 +365,7 @@ def seed_assignment(
         seed_provider_model(
             session,
             provider_model_id=pm_id,
+            model_capabilities=required_capabilities,
             # Default the wire form to ``model_id`` so legacy
             # assertions ``pick.api_model_id == pick.provider_model_id``
             # round-trip; tests that exercise the cd-4btd split pass
@@ -382,7 +382,7 @@ def seed_assignment(
 
     row = LlmAssignment(
         id=new_ulid(),
-        workspace_id=workspace_id,
+        workspace_id=None,
         capability=capability,
         model_id=pm_id,
         provider=provider,
@@ -409,7 +409,7 @@ def seed_inheritance(
     """Insert a child → parent inheritance edge."""
     row = LlmCapabilityInheritance(
         id=new_ulid(),
-        workspace_id=workspace_id,
+        workspace_id=None,
         capability=capability,
         inherits_from=inherits_from,
         created_at=_PINNED,

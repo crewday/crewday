@@ -3,9 +3,8 @@
 This package ships two tiers of tables:
 
 **Workspace-scoped** (``workspace_id`` column, registered in
-:mod:`app.tenancy.registry`): :class:`LlmAssignment`,
-:class:`AgentToken`, :class:`ApprovalRequest`, :class:`LlmUsage`,
-:class:`BudgetLedger`, :class:`LlmCapabilityInheritance`,
+:mod:`app.tenancy.registry`): :class:`AgentToken`,
+:class:`ApprovalRequest`, :class:`LlmUsage`, :class:`BudgetLedger`,
 :class:`AgentPreference`, :class:`AgentPreferenceRevision`. The ORM
 tenant filter auto-injects a ``workspace_id`` predicate on every
 SELECT / UPDATE / DELETE. A bare read without a
@@ -13,6 +12,7 @@ SELECT / UPDATE / DELETE. A bare read without a
 :class:`~app.tenancy.orm_filter.TenantFilterMissing`.
 
 **Deployment-scope** (no ``workspace_id``, NOT registered):
+:class:`LlmAssignment`, :class:`LlmCapabilityInheritance`,
 :class:`LlmProvider`, :class:`LlmModel`, :class:`LlmProviderModel`,
 :class:`AgentDoc`, :class:`AgentDocRevision`,
 :class:`LlmPromptTemplate`, :class:`LlmPromptTemplateRevision`. Every
@@ -22,7 +22,7 @@ the §11 resolver. Registering them in the workspace-scoped registry
 would inject a ``workspace_id =`` predicate the column doesn't have and
 break every read.
 
-Together this is the §11 agent layer: per-workspace capability →
+Together this is the §11 agent layer: deployment-level capability →
 provider_model bindings backed by a deployment-shared provider /
 model / provider_model registry, plus the HITL approval queue,
 delegated tokens, usage ledger, and rolling budget envelope. The
@@ -98,12 +98,10 @@ from app.tenancy.registry import register
 # filter would inject a ``workspace_id =`` predicate against a column
 # that does not exist and break every read.
 for _table in (
-    "llm_assignment",
     "agent_token",
     "approval_request",
     "llm_usage",
     "budget_ledger",
-    "llm_capability_inheritance",
     "agent_preference",
     "agent_preference_revision",
 ):

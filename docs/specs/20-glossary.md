@@ -740,17 +740,20 @@ fix the offender.
   canonical model can be priced and tuned differently across
   providers. See §11.
 - **LLM assignment chain.** The priority-ordered list of
-  `llm_assignment` rows bound to a capability. The client walks the
-  chain on retryable failures; `fallback_attempts` on `llm_call`
-  records how deep the chain was traversed before success. See §11
-  "Model assignment".
-- **Capability inheritance.** A workspace-scoped override row in
-  `llm_capability_inheritance` (unique on `(workspace_id,
-  capability)`) names a parent capability whose assignment chain and
-  prompt template serve the child when the child has none of its
-  own. The resolver layers the workspace row over the deployment-
-  level seed at read time; v1 ships one deployment seed,
-  `chat.admin → chat.manager`. See §11.
+  `llm_assignment` rows bound to a capability. `default` is the
+  first-class deployment fallback chain; catalogue capabilities with
+  no direct chain inherit it unless an explicit inheritance edge points
+  elsewhere. The client walks the chain on retryable failures;
+  `fallback_attempts` on `llm_call` records how deep the chain was
+  traversed before success. See §11 "Model assignment".
+- **Capability inheritance.** A deployment-scoped row in
+  `llm_capability_inheritance` (unique on `capability`) names a parent
+  capability whose assignment chain and prompt template serve the
+  child when the child has none of its own. v1 ships
+  `chat.admin → chat.manager` plus implicit fallback from otherwise-unassigned catalogue capabilities
+  to `default`. Inherited chains are validated against the child
+  capability's required model tags, so audio/embedding children do not
+  silently route to the Gemma chat default. See §11.
 - **Prompt library.** DB-backed system-prompt store
   (`llm_prompt_template`) with full version history
   (`llm_prompt_template_revision`). One of the **hash-self-seeded

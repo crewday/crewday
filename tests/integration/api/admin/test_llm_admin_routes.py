@@ -33,6 +33,7 @@ from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.transport import admin_sse
 from app.auth.session import SESSION_COOKIE_NAME, issue
 from app.config import Settings
+from app.domain.llm.router import DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID
 from app.events.bus import EventBus
 from app.events.types import LlmAssignmentChanged
 from app.main import create_app
@@ -237,7 +238,7 @@ def _seed_llm_graph(session_factory: sessionmaker[Session]) -> SeededLlm:
         s.add(
             LlmAssignment(
                 id=assignment_id,
-                workspace_id=workspace_id,
+                workspace_id=None,
                 capability="chat.manager",
                 model_id=provider_model_id,
                 provider="OpenRouter",
@@ -253,7 +254,7 @@ def _seed_llm_graph(session_factory: sessionmaker[Session]) -> SeededLlm:
         s.add(
             LlmCapabilityInheritance(
                 id=new_ulid(),
-                workspace_id=workspace_id,
+                workspace_id=None,
                 capability="chat.admin",
                 inherits_from="chat.manager",
                 created_at=_PINNED,
@@ -371,6 +372,24 @@ class TestAdminLlmRoutes:
                 _seed_admin(session_factory, settings=pinned_settings),
             )
             seeded = _seed_llm_graph(session_factory)
+            with session_factory() as s, tenant_agnostic():
+                s.add(
+                    LlmAssignment(
+                        id="default-fallback",
+                        workspace_id=None,
+                        capability="default",
+                        model_id=seeded.provider_model_id,
+                        provider="OpenRouter",
+                        priority=1,
+                        enabled=True,
+                        max_tokens=None,
+                        temperature=None,
+                        extra_api_params={},
+                        required_capabilities=["chat", "function_calling"],
+                        created_at=_PINNED,
+                    )
+                )
+                s.commit()
 
             graph = client.get("/admin/api/v1/llm/graph")
             assert graph.status_code == 200, graph.text
@@ -381,6 +400,21 @@ class TestAdminLlmRoutes:
             assert body["provider_models"][0]["id"] == seeded.provider_model_id
             assert body["assignments"][0]["id"] == seeded.assignment_id
             assert body["assignments"][0]["spend_usd_30d"] == 0.17
+            default_assignments = [
+                assignment
+                for assignment in body["assignments"]
+                if assignment["capability"] == "default"
+            ]
+            assert [assignment["priority"] for assignment in default_assignments] == [
+                0,
+                1,
+            ]
+            assert default_assignments[0]["is_deployment_default"] is True
+            assert {
+                "capability": "tasks.nl_intake",
+                "inherits_from": "default",
+                "source": "implicit_default",
+            } in body["inheritance"]
             assert body["totals"]["calls_30d"] == 1
 
             calls = client.get("/admin/api/v1/llm/calls")
@@ -452,7 +486,6 @@ class TestAdminLlmRoutes:
             resp = client.post(
                 "/admin/api/v1/llm/assignments",
                 json={
-                    "workspace_id": seeded.workspace_id,
                     "capability": "tasks.assist",
                     "provider_model_id": seeded.provider_model_id,
                     "priority": 0,
@@ -463,11 +496,161 @@ class TestAdminLlmRoutes:
             body = resp.json()
             assert body["capability"] == "tasks.assist"
             assert body["required_capabilities"] == ["chat"]
-            assert [event.workspace_id for event in published] == [seeded.workspace_id]
+            assert [event.workspace_id for event in published] == [
+                DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID
+            ]
             assert [event["kind"] for event in admin_events] == [
                 "admin.llm.assignment_updated"
             ]
-            assert admin_events[0]["payload"]["workspace_id"] == seeded.workspace_id
+            assert admin_events[0]["payload"]["workspace_id"] is None
+        finally:
+            _wipe(session_factory)
+
+    def test_inheritance_crud_is_deployment_level_and_publishes_refetch(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            _seed_llm_graph(session_factory)
+            published: list[LlmAssignmentChanged] = []
+            event_bus = EventBus()
+            event_bus.subscribe(LlmAssignmentChanged)(published.append)
+            admin_events: list[dict[str, object]] = []
+            monkeypatch.setattr("app.api.admin.llm.default_event_bus", event_bus)
+            monkeypatch.setattr(
+                admin_sse.default_admin_fanout,
+                "publish",
+                lambda **kwargs: admin_events.append(kwargs),
+            )
+
+            created = client.post(
+                "/admin/api/v1/llm/inheritance",
+                json={
+                    "capability": "tasks.assist",
+                    "inherits_from": "chat.manager",
+                },
+            )
+            assert created.status_code == 200, created.text
+            assert created.json() == {
+                "capability": "tasks.assist",
+                "inherits_from": "chat.manager",
+                "source": "explicit",
+            }
+            with session_factory() as s, tenant_agnostic():
+                row = s.scalar(
+                    select(LlmCapabilityInheritance).where(
+                        LlmCapabilityInheritance.capability == "tasks.assist"
+                    )
+                )
+                assert row is not None
+                assert row.workspace_id is None
+
+            updated = client.put(
+                "/admin/api/v1/llm/inheritance/tasks.assist",
+                json={"inherits_from": "default"},
+            )
+            assert updated.status_code == 200, updated.text
+            assert updated.json()["inherits_from"] == "default"
+
+            deleted = client.delete("/admin/api/v1/llm/inheritance/tasks.assist")
+            assert deleted.status_code == 204, deleted.text
+            graph = client.get("/admin/api/v1/llm/graph")
+            assert graph.status_code == 200, graph.text
+            assert {
+                "capability": "tasks.assist",
+                "inherits_from": "default",
+                "source": "implicit_default",
+            } in graph.json()["inheritance"]
+            assert [event.workspace_id for event in published] == [
+                DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID,
+                DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID,
+                DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID,
+            ]
+            assert [event["kind"] for event in admin_events] == [
+                "admin.llm.assignment_updated",
+                "admin.llm.assignment_updated",
+                "admin.llm.assignment_updated",
+            ]
+            assert all(
+                event["payload"]["workspace_id"] is None for event in admin_events
+            )
+        finally:
+            _wipe(session_factory)
+
+    def test_inheritance_crud_rejects_unknown_capabilities_self_loops_and_cycles(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            _seed_llm_graph(session_factory)
+
+            unknown_child = client.post(
+                "/admin/api/v1/llm/inheritance",
+                json={
+                    "capability": "not.real",
+                    "inherits_from": "default",
+                },
+            )
+            assert unknown_child.status_code == 422, unknown_child.text
+            assert unknown_child.json()["error"] == "unknown_capability"
+            assert unknown_child.json()["capability"] == "not.real"
+
+            unknown_parent = client.post(
+                "/admin/api/v1/llm/inheritance",
+                json={
+                    "capability": "tasks.assist",
+                    "inherits_from": "not.real",
+                },
+            )
+            assert unknown_parent.status_code == 422, unknown_parent.text
+            assert unknown_parent.json()["error"] == "unknown_capability"
+            assert unknown_parent.json()["capability"] == "not.real"
+
+            self_loop = client.post(
+                "/admin/api/v1/llm/inheritance",
+                json={
+                    "capability": "tasks.assist",
+                    "inherits_from": "tasks.assist",
+                },
+            )
+            assert self_loop.status_code == 422, self_loop.text
+            assert self_loop.json()["error"] == "capability_inheritance_self_loop"
+
+            default_child = client.post(
+                "/admin/api/v1/llm/inheritance",
+                json={
+                    "capability": "default",
+                    "inherits_from": "tasks.assist",
+                },
+            )
+            assert default_child.status_code == 422, default_child.text
+            assert (
+                default_child.json()["error"]
+                == "default_capability_inheritance_forbidden"
+            )
+
+            cycle = client.post(
+                "/admin/api/v1/llm/inheritance",
+                json={
+                    "capability": "chat.manager",
+                    "inherits_from": "chat.admin",
+                },
+            )
+            assert cycle.status_code == 422, cycle.text
+            assert cycle.json()["error"] == "capability_inheritance_cycle"
         finally:
             _wipe(session_factory)
 
@@ -499,7 +682,6 @@ class TestAdminLlmRoutes:
             override = client.post(
                 "/admin/api/v1/llm/assignments",
                 json={
-                    "workspace_id": seeded.workspace_id,
                     "capability": "tasks.assist",
                     "provider_model_id": seeded.provider_model_id,
                     "priority": 1,
@@ -532,7 +714,6 @@ class TestAdminLlmRoutes:
             missing = client.post(
                 "/admin/api/v1/llm/assignments",
                 json={
-                    "workspace_id": seeded.workspace_id,
                     "capability": "expenses.autofill",
                     "provider_model_id": provider_model.json()["id"],
                     "priority": 1,
@@ -573,7 +754,6 @@ class TestAdminLlmRoutes:
             added = client.post(
                 "/admin/api/v1/llm/assignments",
                 json={
-                    "workspace_id": seeded.workspace_id,
                     "capability": "chat.manager",
                     "provider_model_id": seeded.provider_model_id,
                     "priority": 1,
@@ -608,5 +788,6 @@ class TestAdminLlmRoutes:
             "/admin/api/v1/llm/models",
             "/admin/api/v1/llm/provider-models",
             "/admin/api/v1/llm/assignments",
+            "/admin/api/v1/llm/inheritance",
         ):
             assert path in paths

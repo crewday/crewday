@@ -72,6 +72,41 @@ export default function AdminLlmPage() {
       }),
     onSuccess: invalidateAdminLlm,
   });
+  const createInheritanceMut = useMutation({
+    mutationFn: ({
+      capability,
+      inheritsFrom,
+    }: {
+      capability: string;
+      inheritsFrom: string;
+    }) =>
+      fetchJson("/admin/api/v1/llm/inheritance", {
+        method: "POST",
+        body: { capability, inherits_from: inheritsFrom },
+      }),
+    onSuccess: invalidateAdminLlm,
+  });
+  const updateInheritanceMut = useMutation({
+    mutationFn: ({
+      capability,
+      inheritsFrom,
+    }: {
+      capability: string;
+      inheritsFrom: string;
+    }) =>
+      fetchJson(`/admin/api/v1/llm/inheritance/${encodeURIComponent(capability)}`, {
+        method: "PUT",
+        body: { inherits_from: inheritsFrom },
+      }),
+    onSuccess: invalidateAdminLlm,
+  });
+  const deleteInheritanceMut = useMutation({
+    mutationFn: (capability: string) =>
+      fetchJson(`/admin/api/v1/llm/inheritance/${encodeURIComponent(capability)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: invalidateAdminLlm,
+  });
 
   const graph = graphQ.data;
   const indexes = useMemo(() => (graph ? buildLlmIndexes(graph) : null), [graph]);
@@ -131,6 +166,7 @@ export default function AdminLlmPage() {
     if (!graph || !indexes || selection?.column !== "assignment") return false;
     const assignment = graph.assignments.find((a) => a.id === selection.id);
     if (!assignment) return false;
+    if (assignment.is_deployment_default) return false;
     const model = indexes.modelsById.get(modelId);
     if (!model) return false;
     const modelCapabilities = new Set(model.capabilities);
@@ -250,6 +286,14 @@ export default function AdminLlmPage() {
           hasActive={hasActive}
           highlighted={highlighted}
           setRungRef={setRef(rungRefs)}
+          onChangeInheritance={(capability, inheritsFrom, isExplicit) => {
+            if (isExplicit) {
+              updateInheritanceMut.mutate({ capability, inheritsFrom });
+            } else {
+              createInheritanceMut.mutate({ capability, inheritsFrom });
+            }
+          }}
+          onRemoveInheritance={(capability) => deleteInheritanceMut.mutate(capability)}
         />
       </div>
 

@@ -68,7 +68,7 @@ from app.domain.llm.client import (
     LLMResult,
     is_retryable_error,
 )
-from app.domain.llm.router import CapabilityUnassignedError
+from app.domain.llm.router import CapabilityUnassignedError, invalidate_cache
 from app.domain.llm.usage_recorder import AgentAttribution
 from app.tenancy import WorkspaceContext
 from app.tenancy.current import reset_current, set_current
@@ -135,9 +135,11 @@ def clock() -> FrozenClock:
 def _reset_tenancy() -> Iterator[None]:
     """Every test starts without an active :class:`WorkspaceContext`."""
     token = set_current(None)
+    invalidate_cache()
     try:
         yield
     finally:
+        invalidate_cache()
         reset_current(token)
 
 
@@ -217,7 +219,7 @@ def _seed_assignment(
     pm = _seed_provider_model(session, api_model_id=api_model_id)
     row = LlmAssignment(
         id=new_ulid(),
-        workspace_id=workspace_id,
+        workspace_id=None,
         capability=capability,
         model_id=pm.id,
         provider="openrouter",

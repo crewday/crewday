@@ -2625,7 +2625,7 @@ LLM_PROVIDERS: list[LlmProvider] = [
         endpoint="https://openrouter.ai/api/v1",
         api_key_ref="envelope:llm:openrouter:default",
         api_key_status="present",
-        default_model="google/gemma-3-27b-it",
+        default_model="google/gemma-4-31b-it",
         requests_per_minute=60,
         timeout_s=60,
         priority=0,
@@ -2650,8 +2650,8 @@ LLM_PROVIDERS: list[LlmProvider] = [
 LLM_MODELS: list[LlmModel] = [
     LlmModel(
         id="mdl-gemma-3-27b-it",
-        canonical_name="google/gemma-3-27b-it",
-        display_name="Gemma 3 27B IT",
+        canonical_name="google/gemma-4-31b-it",
+        display_name="Gemma 4 31B IT",
         vendor="google",
         capabilities=["chat", "vision", "json_mode", "function_calling", "streaming"],
         context_window=128_000,
@@ -2731,7 +2731,7 @@ LLM_PROVIDER_MODELS: list[LlmProviderModel] = [
         id="pm-or-gemma-27b",
         provider_id="prov-openrouter",
         model_id="mdl-gemma-3-27b-it",
-        api_model_id="google/gemma-3-27b-it",
+        api_model_id="google/gemma-4-31b-it",
         input_cost_per_million=0.10,
         output_cost_per_million=0.30,
         max_tokens_override=None,
@@ -2813,6 +2813,7 @@ LLM_PROVIDER_MODELS: list[LlmProviderModel] = [
 # Capability catalogue — mirrors docs/specs/11 "Capability catalog".
 # Drives the "required_capabilities" validation in the graph.
 LLM_CAPABILITY_CATALOGUE: list[dict[str, Any]] = [
+    {"key": "default",              "description": "Deployment default fallback chain",                         "required_capabilities": ["chat", "function_calling"]},
     {"key": "tasks.nl_intake",      "description": "Parse free-text into task/template/schedule drafts",         "required_capabilities": ["chat", "json_mode"]},
     {"key": "tasks.assist",         "description": "Staff chat assistant: explain an instruction, etc.",         "required_capabilities": ["chat"]},
     {"key": "digest.manager",       "description": "Morning manager digest composition",                         "required_capabilities": ["chat"]},
@@ -2834,12 +2835,16 @@ LLM_CAPABILITY_CATALOGUE: list[dict[str, Any]] = [
 
 LLM_CAPABILITY_INHERITANCE: list[LlmCapabilityInheritance] = [
     LlmCapabilityInheritance(capability="chat.admin", inherits_from="chat.manager"),
+    LlmCapabilityInheritance(capability="voice.transcribe", inherits_from="default"),
 ]
 
 
 LLM_ASSIGNMENTS_GRAPH: list[LlmAssignment] = [
-    # Primary assignments + a sprinkling of fallbacks. chat.admin has no row
-    # of its own — it flows through the inheritance edge to chat.manager.
+    # Primary assignments + a sprinkling of fallbacks. default is the visible
+    # deployment parent; chat.admin has no row of its own and flows through
+    # chat.manager. voice.transcribe inherits default but is visibly invalid
+    # until an audio-input model is assigned.
+    LlmAssignment("as-default",  "default",             "Deployment default fallback chain",                     0, "pm-or-gemma-27b",     None, 0.2, {}, ["chat", "function_calling"],  True, "2026-04-18T10:06:44Z", 0.00, 0),
     LlmAssignment("as-nl",       "tasks.nl_intake",      "Parse free-text into task/template/schedule drafts",     0, "pm-or-gemma-27b",     None, 0.2, {}, ["chat", "json_mode"],        True, "2026-04-18T09:54:11Z", 6.60, 540),
     LlmAssignment("as-assist",   "tasks.assist",         "Staff chat assistant",                                   0, "pm-or-gemma-27b",     None, 0.3, {}, ["chat"],                     True, "2026-04-18T09:58:03Z", 12.30, 960),
     LlmAssignment("as-digest-m", "digest.manager",       "Morning manager digest (primary)",                       0, "pm-or-haiku-4-5",     None, 0.3, {}, ["chat"],                     True, "2026-04-18T06:02:00Z", 2.40, 60),
@@ -2856,7 +2861,8 @@ LLM_ASSIGNMENTS_GRAPH: list[LlmAssignment] = [
     LlmAssignment("as-compact",  "chat.compact",         "Topic compaction",                                       0, "pm-or-gemma-27b",     None, 0.2, {}, ["chat"],                      True, "2026-04-18T01:00:00Z", 1.20, 60),
     LlmAssignment("as-detect",   "chat.detect_language", "Message language detection",                             0, "pm-or-gemma-27b",     None, 0.0, {}, ["chat", "json_mode"],         True, "2026-04-18T10:01:11Z", 0.60, 240),
     LlmAssignment("as-translate","chat.translate",       "Message translation",                                    0, "pm-or-gemma-27b",     None, 0.3, {}, ["chat"],                      True, "2026-04-18T09:30:18Z", 1.80, 180),
-    # voice.transcribe has no assignment — graph shows "unassigned" pill.
+    # voice.transcribe has no direct assignment — graph shows inherited default
+    # plus a required-capability warning instead of silently routing audio to chat.
 ]
 
 

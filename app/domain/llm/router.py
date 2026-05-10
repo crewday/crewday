@@ -3,9 +3,9 @@
 Every LLM caller asks for a **capability** (``chat.manager``,
 ``expenses.autofill``, ``tasks.nl_intake``, …), never for a specific
 model id. This module answers the question "which models should I
-try, in what order, for this capability in this workspace?" by
-walking the workspace's :class:`~app.adapters.db.llm.models.LlmAssignment`
-rows (priority-ascending, enabled-only) and falling through
+try, in what order, for this capability?" by walking deployment-level
+:class:`~app.adapters.db.llm.models.LlmAssignment` rows
+(priority-ascending, enabled-only) and falling through
 :class:`~app.adapters.db.llm.models.LlmCapabilityInheritance` edges
 when the capability itself has no enabled assignments.
 
@@ -48,14 +48,14 @@ Implementation notes:
   hop budget; a detected cycle is treated as "no parent" — the
   caller sees :class:`CapabilityUnassignedError` rather than a
   hang.
-* **30 s in-process cache, event-invalidated.** A workspace-wide
-  dict keyed by ``(workspace_id, capability)`` avoids a DB round
+* **30 s in-process cache, event-invalidated.** A deployment-wide
+  dict keyed by capability avoids a DB round
   trip on every chat turn. The admin / API layer that mutates
   assignments publishes :class:`~app.events.types.LlmAssignmentChanged`
   on the production bus; a module-level subscriber drops every
-  cache entry for the affected workspace on receipt, so operator
+  cache entries on receipt, so operator
   edits land on the next call without waiting for the TTL.
-  Invalidation is workspace-scoped (not capability-scoped) because
+  Invalidation is deployment-wide (not capability-scoped) because
   the event payload does not carry enough information to target a
   single capability's chain — an edit to an inheritance edge can
   silently change the chain of a capability two hops downstream.
@@ -118,6 +118,7 @@ from app.util.clock import Clock, SystemClock
 
 __all__ = [
     "CACHE_TTL_SECONDS",
+    "DEFAULT_LLM_CAPABILITY",
     "DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID",
     "CapabilityUnassignedError",
     "ModelPick",
@@ -127,7 +128,7 @@ __all__ = [
 ]
 
 
-# Cache lifetime for a (workspace_id, capability) chain. 30 s is the
+# Cache lifetime for a deployment-level capability chain. 30 s is the
 # §11-pinned value: long enough to cover bursty chat traffic (a
 # worker process can complete dozens of turns inside one window
 # without re-reading the DB) and short enough that an admin edit
@@ -138,6 +139,7 @@ __all__ = [
 # explicitly.
 CACHE_TTL_SECONDS: int = 30
 DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID: str = "__deployment_llm_defaults__"
+DEFAULT_LLM_CAPABILITY: str = "default"
 
 # Inheritance-walk cycle guard. v1 seeds one edge (``chat.admin →
 # chat.manager``); deeper chains remain rare by spec intent. The
@@ -159,9 +161,6 @@ _DEFAULT_CHAT_CAPABILITIES: frozenset[str] = frozenset(
     }
 )
 _DEFAULT_VISION_CAPABILITIES: frozenset[str] = frozenset({"expenses.autofill"})
-_DEPLOYMENT_DEFAULT_CAPABILITIES: frozenset[str] = (
-    _DEFAULT_CHAT_CAPABILITIES | _DEFAULT_VISION_CAPABILITIES
-)
 _DEPLOYMENT_INHERITANCE: Mapping[str, str] = MappingProxyType(
     {"chat.admin": "chat.manager"}
 )
@@ -172,14 +171,26 @@ _DEFAULT_MODEL_CANONICAL_ORDER: tuple[str, ...] = (
 )
 _DEFAULT_REQUIRED_CAPABILITIES: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
+        DEFAULT_LLM_CAPABILITY: ("chat", "function_calling"),
+        "tasks.nl_intake": ("chat", "json_mode"),
+        "tasks.assist": ("chat",),
+        "digest.manager": ("chat",),
+        "digest.employee": ("chat",),
+        "anomaly.detect": ("chat", "json_mode"),
+        "instructions.draft": ("chat",),
+        "issue.triage": ("chat", "json_mode"),
+        "stay.summarize": ("chat",),
+        "voice.transcribe": ("audio_input",),
         "chat.manager": ("chat", "function_calling"),
         "chat.employee": ("chat", "function_calling"),
         "chat.admin": ("chat", "function_calling"),
         "chat.compact": ("chat",),
         "chat.detect_language": ("chat", "json_mode"),
         "chat.translate": ("chat",),
+        "documents.ocr": ("vision",),
         "expenses.autofill": ("vision", "json_mode"),
         "feedback.moderate": ("chat", "json_mode"),
+        "feedback.embed": ("embeddings",),
         "feedback.cluster": ("chat", "json_mode"),
     }
 )
@@ -234,9 +245,9 @@ class CapabilityUnassignedError(Exception):
 
     Raised when:
 
-    * the capability has no enabled
-      :class:`~app.adapters.db.llm.models.LlmAssignment` rows in
-      the workspace, and
+    * the capability has no enabled deployment-level
+      :class:`~app.adapters.db.llm.models.LlmAssignment` rows,
+    * the `default` chain is absent or incompatible, and
     * no :class:`~app.adapters.db.llm.models.LlmCapabilityInheritance`
       edge leads to a capability that does, and
     * the inheritance walk either terminates at a capability with
@@ -265,7 +276,7 @@ class CapabilityUnassignedError(Exception):
 
 @dataclass(slots=True)
 class _CacheEntry:
-    """One ``(workspace_id, capability) → chain`` bucket with its TTL.
+    """One deployment-level ``capability → chain`` bucket with its TTL.
 
     Stored eagerly even for the empty-chain outcome so repeated
     calls against an unassigned capability don't re-walk the
@@ -278,12 +289,12 @@ class _CacheEntry:
     expires_at: datetime
 
 
-# Module-level cache. Keyed by ``(workspace_id, capability)``. The
+# Module-level cache. Keyed by ``capability``. The
 # lock protects mutation against the event handler (which may fire
 # on a different thread once SSE fan-out lands); read paths take
 # the lock too for consistent dict snapshots, but they never hold
 # it across DB I/O — the pattern is "grab the bucket, release, use".
-_CACHE: dict[tuple[str, str], _CacheEntry] = {}
+_CACHE: dict[str, _CacheEntry] = {}
 _CACHE_LOCK = threading.Lock()
 
 # Tracks which buses have been wired up to our invalidation
@@ -297,11 +308,8 @@ _SUBSCRIBED_BUSES_LOCK = threading.Lock()
 def invalidate_cache(workspace_id: str | None = None) -> None:
     """Drop cache entries.
 
-    ``workspace_id=None`` wipes every entry (used by tests and the
-    belt-and-braces "something odd happened" path); a concrete
-    workspace id drops only that workspace's entries, which is the
-    shape the :class:`~app.events.types.LlmAssignmentChanged`
-    handler uses.
+    Assignment and inheritance are deployment-level, so any concrete
+    workspace id is treated as a deployment-wide invalidation too.
 
     Thread-safe: the lock covers both the scan and the pop so a
     concurrent write from another thread cannot leave the dict in
@@ -311,16 +319,11 @@ def invalidate_cache(workspace_id: str | None = None) -> None:
         if workspace_id is None:
             _CACHE.clear()
             return
-        # Snapshot the matching keys, then pop. Iterating the live
-        # dict while mutating would raise ``RuntimeError: dictionary
-        # changed size during iteration`` on CPython.
-        stale_keys = [key for key in _CACHE if key[0] == workspace_id]
-        for key in stale_keys:
-            _CACHE.pop(key, None)
+        _CACHE.clear()
 
 
 def _on_llm_assignment_changed(event: LlmAssignmentChanged) -> None:
-    """Subscribe hook: drop the cache for the affected workspace.
+    """Subscribe hook: drop the deployment-level assignment cache.
 
     Whole-workspace invalidation (not per-capability) because the
     event payload does not name the affected capability: an edit to
@@ -328,10 +331,7 @@ def _on_llm_assignment_changed(event: LlmAssignmentChanged) -> None:
     chain of a capability two hops downstream, so narrowing the
     invalidation scope without a richer payload would miss cases.
     """
-    if event.workspace_id == DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID:
-        invalidate_cache()
-        return
-    invalidate_cache(workspace_id=event.workspace_id)
+    invalidate_cache()
 
 
 def _subscribe_to_bus(event_bus: EventBus) -> None:
@@ -359,22 +359,16 @@ def _subscribe_to_bus(event_bus: EventBus) -> None:
 def _load_enabled_chain(
     session: Session,
     *,
-    workspace_id: str,
     capability: str,
-) -> list[ModelPick]:
+    required_capabilities: tuple[str, ...] | None,
+) -> tuple[list[ModelPick], bool, bool]:
     """Read enabled assignments for ``capability`` in priority order.
 
     Returns an empty list when the capability has no enabled rows;
     the caller decides whether to walk inheritance from there.
-    Relies on the ORM tenant filter (see
-    :mod:`app.tenancy.orm_filter`) to pin ``workspace_id`` on the
-    workspace-scoped ``llm_assignment`` table; the deployment-
-    scope ``llm_provider_model`` join target is intentionally NOT
-    in the registry, so the filter leaves it alone — exactly what
-    we want for a deployment-shared row. We still pass
-    ``workspace_id`` through to keep the function self-documenting
-    and to narrow the :class:`CapabilityUnassignedError` message in
-    the caller.
+    ``llm_assignment`` is deployment-level; workspace context remains
+    part of usage, consent, budget, and audit paths outside model
+    selection.
 
     cd-4btd: the JOIN through ``llm_provider_model`` lets the
     resolver surface :attr:`LlmProviderModel.api_model_id` (the
@@ -387,34 +381,52 @@ def _load_enabled_chain(
     from one.
     """
     stmt = (
-        select(LlmAssignment, LlmProviderModel)
+        select(LlmAssignment, LlmProviderModel, LlmModel)
         .join(
             LlmProviderModel,
             LlmAssignment.model_id == LlmProviderModel.id,
         )
+        .join(LlmModel, LlmProviderModel.model_id == LlmModel.id)
+        .join(LlmProvider, LlmProviderModel.provider_id == LlmProvider.id)
         .where(
+            LlmAssignment.workspace_id.is_(None),
             LlmAssignment.capability == capability,
             LlmAssignment.enabled.is_(True),
+            LlmProviderModel.is_enabled.is_(True),
+            LlmProvider.is_enabled.is_(True),
+            LlmModel.is_active.is_(True),
         )
         .order_by(LlmAssignment.priority.asc(), LlmAssignment.id.asc())
     )
     rows = session.execute(stmt).all()
-    return [_to_pick(assignment, provider_model) for assignment, provider_model in rows]
+    picks = []
+    has_priority_zero = False
+    for assignment, provider_model, model in rows:
+        has_priority_zero = has_priority_zero or assignment.priority == 0
+        required = (
+            required_capabilities
+            if required_capabilities is not None
+            else tuple(assignment.required_capabilities or ())
+        )
+        if set(required).issubset(set(model.capabilities or [])):
+            picks.append(_to_pick(assignment, provider_model))
+    return picks, bool(rows), has_priority_zero
 
 
 def _load_deployment_default_chain(
     session: Session,
     *,
     capability: str,
+    required_capabilities: tuple[str, ...],
 ) -> list[ModelPick]:
-    """Return the code-declared deployment default for ``capability``.
+    """Return the code-declared deployment default for ``default``.
 
     Defaults are read-time fallbacks, not copied workspace rows. The
     deployment registry still owns the concrete provider/model row; if
     first-boot seeding has not created one, the capability remains
     unassigned.
     """
-    if capability not in _DEPLOYMENT_DEFAULT_CAPABILITIES:
+    if capability != DEFAULT_LLM_CAPABILITY:
         return []
 
     canonical_rank = {
@@ -437,7 +449,6 @@ def _load_deployment_default_chain(
         )
     )
     rows = session.execute(stmt).all()
-    required_capabilities = _DEFAULT_REQUIRED_CAPABILITIES.get(capability, ("chat",))
     ranked_rows = [
         (canonical_rank[model.canonical_name], provider_model)
         for provider_model, _provider, model in rows
@@ -474,8 +485,8 @@ def _to_pick(row: LlmAssignment, provider_model: LlmProviderModel) -> ModelPick:
     cd-4btd surfaces :attr:`LlmProviderModel.api_model_id` directly
     on the pick. Per-call tuning (``max_tokens``, ``temperature``,
     ``extra_api_params``) still comes from the assignment — the
-    operator's per-workspace override beats the deployment-scope
-    default. Promoting provider_model overrides to the pick is a
+    operator's deployment assignment beats the deployment default.
+    Promoting provider_model overrides to the pick is a
     follow-up once the spec pins the merge order; the
     :attr:`LlmProviderModel.max_tokens_override` /
     ``temperature_override`` / ``supports_*`` flags are the obvious
@@ -507,15 +518,14 @@ def _lookup_parent_capability(
     """Return the parent capability via ``llm_capability_inheritance``.
 
     ``None`` means this capability has no inheritance edge; the
-    caller raises :class:`CapabilityUnassignedError`. The ORM
-    tenant filter scopes the read to the active workspace.
+    caller raises :class:`CapabilityUnassignedError`.
 
-    Uniqueness of ``(workspace_id, capability)`` on the
-    inheritance table (see model docstring) means at most one row
+    Uniqueness of ``capability`` on the inheritance table means at most one row
     matches — no tie-break rule needed.
     """
     stmt = select(LlmCapabilityInheritance.inherits_from).where(
-        LlmCapabilityInheritance.capability == capability
+        LlmCapabilityInheritance.workspace_id.is_(None),
+        LlmCapabilityInheritance.capability == capability,
     )
     return session.execute(stmt).scalar_one_or_none()
 
@@ -536,6 +546,8 @@ def _resolve_chain(
     """
     visited: set[str] = set()
     current = capability
+    requested_required = _DEFAULT_REQUIRED_CAPABILITIES.get(capability, ("chat",))
+    has_default_parent = capability in _DEFAULT_REQUIRED_CAPABILITIES
     hops = 0
     while True:
         if current in visited or hops >= _MAX_INHERITANCE_HOPS:
@@ -550,19 +562,37 @@ def _resolve_chain(
         visited.add(current)
         hops += 1
 
-        chain = _load_enabled_chain(
-            session, workspace_id=workspace_id, capability=current
+        chain, has_enabled_rows, has_priority_zero = _load_enabled_chain(
+            session,
+            capability=current,
+            required_capabilities=None if current == capability else requested_required,
         )
+        if current == DEFAULT_LLM_CAPABILITY:
+            deployment_chain = _load_deployment_default_chain(
+                session,
+                capability=current,
+                required_capabilities=requested_required,
+            )
+            if deployment_chain and not has_priority_zero:
+                return deployment_chain + chain
         if chain:
             return chain
+        if has_enabled_rows:
+            return []
 
-        chain = _load_deployment_default_chain(session, capability=current)
+        chain = _load_deployment_default_chain(
+            session,
+            capability=current,
+            required_capabilities=requested_required,
+        )
         if chain:
             return chain
 
         parent = _lookup_parent_capability(session, capability=current)
         if parent is None:
             parent = _DEPLOYMENT_INHERITANCE.get(current)
+        if parent is None and current != DEFAULT_LLM_CAPABILITY and has_default_parent:
+            parent = DEFAULT_LLM_CAPABILITY
         if parent is None:
             return []
         current = parent
@@ -582,7 +612,7 @@ def _cached_or_resolve(
     caller. The cached value itself is immutable (tuple of frozen
     dataclasses).
     """
-    key = (ctx.workspace_id, capability)
+    key = capability
     now = clock.now()
 
     with _CACHE_LOCK:

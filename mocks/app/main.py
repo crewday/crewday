@@ -4389,6 +4389,34 @@ def api_admin_llm_graph(request: Request) -> Response:
                 "capability": a.capability,
                 "missing_capabilities": missing,
             })
+    assignments_by_capability: dict[str, list[Any]] = {}
+    for a in md.LLM_ASSIGNMENTS_GRAPH:
+        assignments_by_capability.setdefault(a.capability, []).append(a)
+    required_by_capability = {
+        c["key"]: c["required_capabilities"] for c in md.LLM_CAPABILITY_CATALOGUE
+    }
+    directly_assigned = {
+        a.capability for a in md.LLM_ASSIGNMENTS_GRAPH if a.is_enabled
+    }
+    for edge in md.LLM_CAPABILITY_INHERITANCE:
+        if edge.capability in directly_assigned:
+            continue
+        for a in assignments_by_capability.get(edge.inherits_from, []):
+            pm = by_pm.get(a.provider_model_id)
+            model = by_model.get(pm.model_id) if pm else None
+            if model is None:
+                continue
+            missing = [
+                c
+                for c in required_by_capability.get(edge.capability, [])
+                if c not in model.capabilities
+            ]
+            if missing:
+                assignment_issues.append({
+                    "assignment_id": a.id,
+                    "capability": edge.capability,
+                    "missing_capabilities": missing,
+                })
 
     total_spent = sum(a.spend_usd_30d for a in md.LLM_ASSIGNMENTS_GRAPH)
     total_calls = sum(a.calls_30d for a in md.LLM_ASSIGNMENTS_GRAPH)

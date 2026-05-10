@@ -1,10 +1,9 @@
 """SQLAlchemy models for the LLM / agent layer (cd-cm5).
 
-Defines the five workspace-scoped tables that back §11's agent and
+Defines the LLM tables that back §11's agent and
 LLM plumbing from the DB side:
 
-* :class:`LlmAssignment` — capability → model map, one row per
-  ``(workspace_id, capability)`` pair.
+* :class:`LlmAssignment` — deployment-level capability → model map.
 * :class:`AgentToken` — delegated agent tokens (one row per minted
   token). ``hash`` stores the **sha256** digest of the plaintext
   token; ``prefix`` carries the first 6-8 chars of the plaintext so
@@ -21,13 +20,9 @@ LLM plumbing from the DB side:
 * :class:`LlmPromptTemplate` — deployment-scoped prompt-library row
   keyed by capability, with a hash-self-seeded code default.
 
-The spec (§02 "LLM" and §11) lands a richer normalised model in a
-later slice (``llm_provider`` / ``llm_model`` / ``llm_provider_model``
-/ ``llm_assignment`` / ``llm_call`` / ``llm_usage_daily`` / etc.) —
-this cd-cm5 v1 slice is the minimum-viable workspace-scoped shape
-that covers the five columns the Beads task pins. The richer surface
-lands via follow-up migrations without breaking this slice's write
-contract.
+The spec (§02 "LLM" and §11) lands richer normalised surfaces over
+time (``llm_provider`` / ``llm_model`` / ``llm_provider_model`` /
+``llm_assignment`` / ``llm_call`` / ``llm_usage_daily`` / etc.).
 
 As of cd-4btd this module also ships the deployment-scope
 :class:`LlmProvider` / :class:`LlmModel` / :class:`LlmProviderModel`
@@ -172,17 +167,16 @@ def _in_clause(values: tuple[str, ...]) -> str:
 
 
 class LlmAssignment(Base):
-    """Capability → model binding for a workspace.
+    """Deployment-level capability → model binding.
 
     A capability may carry **many** assignments, forming a priority-
     ordered fallback chain — the §11 resolver walks the chain on
     retryable failures (provider 5xx, 429, timeout, provider content
     refusal, transport error). Lower ``priority`` is tried first; 0 is
-    the primary. The cd-cm5 v1 slice pinned one row per
-    ``(workspace_id, capability)``; cd-u84y replaces that with the
-    composite ``(workspace_id, capability, priority)`` shape the
-    §11-pinned resolver and the v1 `LLMAssignment` API surface both
-    depend on.
+    the primary. Earlier slices pinned this table per workspace;
+    assignment and inheritance are now deployment-level only, so
+    ``workspace_id`` is retained as a nullable legacy column for old
+    rows and is ``NULL`` on active assignment rows.
 
     Reassigning the primary is an UPDATE on the ``priority=0`` row (or
     an insert-then-reorder through the bulk reorder API); deletion
@@ -232,8 +226,9 @@ class LlmAssignment(Base):
     through to :class:`LlmCapabilityInheritance` and then raises
     ``CapabilityUnassignedError`` (§11 "Capability inheritance").
 
-    FK hygiene: ``workspace_id`` CASCADE — sweeping a workspace
-    sweeps its assignments.
+    ``workspace_id`` is intentionally not a live tenant boundary.
+    Workspace context still applies to usage, budget, consent, and
+    chat runtime state outside model selection.
     """
 
     __tablename__ = "llm_assignment"
@@ -241,10 +236,9 @@ class LlmAssignment(Base):
     id: Mapped[str] = mapped_column(
         String, primary_key=True
     )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
-    workspace_id: Mapped[str] = mapped_column(
+    workspace_id: Mapped[str | None] = mapped_column(
         String,
-        ForeignKey("workspace.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
     # Capability key from the §11 catalogue. See class docstring for
     # why this is a plain string rather than a CHECK-clamped enum.
@@ -320,16 +314,12 @@ class LlmAssignment(Base):
         # (0, 1, 2, …); this guard survives a buggy direct-insert
         # path the API doesn't own.
         CheckConstraint("priority >= 0", name="priority_non_negative"),
-        # Sorted scan: ``(workspace_id, capability, priority)`` backs
-        # the §11 resolver's "enabled assignments for this capability,
-        # in priority order" query. Non-unique — multiple assignments
-        # per ``(workspace, capability)`` is the whole point of this
-        # slice. The composite's leading ``workspace_id`` carries the
-        # tenant filter; per-capability lookup still rides the same
-        # index's ``(workspace_id, capability)`` prefix.
+        # Sorted scan: ``(capability, priority)`` backs the §11
+        # resolver's deployment-wide "enabled assignments for this
+        # capability, in priority order" query. Non-unique — multiple
+        # rungs per capability is the whole point of this slice.
         Index(
-            "ix_llm_assignment_workspace_capability_priority",
-            "workspace_id",
+            "ix_llm_assignment_capability_priority",
             "capability",
             "priority",
         ),
@@ -825,19 +815,16 @@ class BudgetLedger(Base):
 
 
 class LlmCapabilityInheritance(Base):
-    """Parent-child fallback edge between two capabilities.
+    """Deployment-level parent-child fallback edge between capabilities.
 
     When the §11 resolver finds no enabled :class:`LlmAssignment`
-    for a child capability in the active workspace, it walks one hop
-    up this edge to the parent and replays the resolver against the
-    parent's chain. v1 seeds one edge per deployment
-    (``chat.admin → chat.manager``); operators introduce surgical
-    ties as sub-capabilities appear.
+    for a child capability, it walks one hop up this edge to the
+    parent and replays the resolver against the parent's chain. v1
+    seeds one edge per deployment (``chat.admin → chat.manager``);
+    operators introduce surgical ties as sub-capabilities appear.
 
-    Modelled on fj2's ``LLMUseCaseInheritance``. Scoped per-workspace
-    so a deployment operator's default edges do not leak into an
-    operator's per-workspace overrides — the service layer composes
-    the workspace edge over the deployment seed at read time.
+    Modelled on fj2's ``LLMUseCaseInheritance``. Earlier drafts scoped
+    this per workspace; the live contract is deployment-level only.
 
     Constraints:
 
@@ -846,20 +833,16 @@ class LlmCapabilityInheritance(Base):
       concern: the admin / API layer that writes this table rejects
       ``422 capability_inheritance_cycle`` before the insert reaches
       the DB.
-    * Unique ``(workspace_id, capability)`` — one edge per child per
-      workspace. The child has either a single parent or none.
-
-    FK hygiene: ``workspace_id`` CASCADE — sweeping a workspace
-    sweeps its override edges.
+    * Unique ``capability`` — one edge per child. The child has either
+      a single parent or none.
     """
 
     __tablename__ = "llm_capability_inheritance"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    workspace_id: Mapped[str] = mapped_column(
+    workspace_id: Mapped[str | None] = mapped_column(
         String,
-        ForeignKey("workspace.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
     # Child capability — the one that falls through when its own
     # chain is exhausted. Same open-enum rationale as
@@ -880,12 +863,11 @@ class LlmCapabilityInheritance(Base):
             "capability <> inherits_from",
             name="no_self_loop",
         ),
-        # Unique: one inheritance edge per child per workspace. A
-        # second edge for the same child would force the resolver to
-        # pick a parent at random.
+        # Unique: one inheritance edge per child. A second edge for
+        # the same child would force the resolver to pick a parent at
+        # random.
         Index(
-            "uq_llm_capability_inheritance_workspace_capability",
-            "workspace_id",
+            "uq_llm_capability_inheritance_capability",
             "capability",
             unique=True,
         ),

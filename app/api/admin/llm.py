@@ -24,7 +24,6 @@ from app.adapters.db.llm.models import (
     LlmProviderModel,
     LlmUsage,
 )
-from app.adapters.db.workspace.models import Workspace
 from app.api.admin.deps import require_deployment_scope
 from app.api.deps import db_session
 from app.api.transport import admin_sse
@@ -36,7 +35,10 @@ from app.domain.agent.compaction import (
 )
 from app.domain.agent.runtime import _default_system_prompt
 from app.domain.errors import Conflict, NotFound, NotImplementedFeature, Validation
-from app.domain.llm.router import DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID
+from app.domain.llm.router import (
+    DEFAULT_LLM_CAPABILITY,
+    DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID,
+)
 from app.events.bus import bus as default_event_bus
 from app.events.types import LlmAssignmentChanged
 from app.tenancy import DeploymentContext, tenant_agnostic
@@ -55,6 +57,11 @@ _WriteCtx = Annotated[
 
 _OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1"
 _CAPABILITIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    (
+        DEFAULT_LLM_CAPABILITY,
+        "Deployment default fallback chain inherited by unassigned capabilities",
+        ("chat", "function_calling"),
+    ),
     (
         "tasks.nl_intake",
         "Parse a free-text description into a task / template / schedule draft",
@@ -188,6 +195,7 @@ class LlmCapabilityEntry(BaseModel):
 class LlmCapabilityInheritanceResponse(BaseModel):
     capability: str
     inherits_from: str
+    source: Literal["explicit", "implicit_default"] = "explicit"
 
 
 class LlmAssignmentResponse(BaseModel):
@@ -204,6 +212,7 @@ class LlmAssignmentResponse(BaseModel):
     last_used_at: str | None
     spend_usd_30d: float
     calls_30d: int
+    is_deployment_default: bool = False
 
 
 class LlmAssignmentIssue(BaseModel):
@@ -387,7 +396,6 @@ class ProviderModelPayload(BaseModel):
 class AssignmentPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    workspace_id: str
     capability: str
     provider_model_id: str
     priority: int = Field(default=0, ge=0)
@@ -415,6 +423,19 @@ class AssignmentReorderItem(BaseModel):
 
     capability: str
     ids_in_priority_order: list[str]
+
+
+class CapabilityInheritancePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    capability: str
+    inherits_from: str
+
+
+class CapabilityInheritanceUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    inherits_from: str
 
 
 class PromptUpdatePayload(BaseModel):
@@ -560,6 +581,27 @@ def _assignment_response(
     )
 
 
+def _deployment_default_assignment_response(
+    provider_model: LlmProviderModel,
+) -> LlmAssignmentResponse:
+    return LlmAssignmentResponse(
+        id=f"deployment-default:{provider_model.id}:0",
+        capability=DEFAULT_LLM_CAPABILITY,
+        description=_CAPABILITY_DESCRIPTIONS[DEFAULT_LLM_CAPABILITY],
+        priority=0,
+        provider_model_id=provider_model.id,
+        max_tokens=None,
+        temperature=None,
+        extra_api_params={},
+        required_capabilities=list(_CAPABILITY_REQUIRED[DEFAULT_LLM_CAPABILITY]),
+        is_enabled=True,
+        last_used_at=None,
+        spend_usd_30d=0,
+        calls_30d=0,
+        is_deployment_default=True,
+    )
+
+
 def _prompt_response(
     row: LlmPromptTemplate,
     revisions_count: int,
@@ -617,6 +659,52 @@ def _capability_has_chain(
     return False
 
 
+def _deployment_default_provider_model(
+    provider_models: list[LlmProviderModel],
+    providers_by_id: dict[str, LlmProvider],
+    models_by_id: dict[str, LlmModel],
+) -> LlmProviderModel | None:
+    canonical_order = (
+        "google/gemma-4-31b-it",
+        "google/gemma-3-27b-it",
+        "default/chat-base",
+    )
+    canonical_rank = {name: rank for rank, name in enumerate(canonical_order)}
+    ranked: list[tuple[int, str, LlmProviderModel]] = []
+    required = set(_CAPABILITY_REQUIRED[DEFAULT_LLM_CAPABILITY])
+    for provider_model in provider_models:
+        provider = providers_by_id.get(provider_model.provider_id)
+        model = models_by_id.get(provider_model.model_id)
+        if (
+            provider is None
+            or model is None
+            or not provider.is_enabled
+            or not provider_model.is_enabled
+            or not model.is_active
+        ):
+            continue
+        rank = canonical_rank.get(model.canonical_name)
+        if rank is None or not required.issubset(set(model.capabilities or [])):
+            continue
+        ranked.append((rank, provider_model.id, provider_model))
+    if not ranked:
+        return None
+    return min(ranked, key=lambda item: (item[0], item[1]))[2]
+
+
+def _missing_model_capabilities(
+    *,
+    assignment: LlmAssignmentResponse,
+    provider_models_by_id: dict[str, LlmProviderModel],
+    models_by_id: dict[str, LlmModel],
+    required_capabilities: list[str],
+) -> list[str]:
+    provider_model = provider_models_by_id.get(assignment.provider_model_id)
+    model = models_by_id.get(provider_model.model_id) if provider_model else None
+    model_caps = set(model.capabilities if model else [])
+    return [cap for cap in required_capabilities if cap not in model_caps]
+
+
 def _load_graph(session: Session) -> LlmGraphPayload:
     # code-health: ignore[ccn nloc] API fields are generated schema contract.  # noqa: E501
     cutoff = _now() - timedelta(days=30)
@@ -640,7 +728,9 @@ def _load_graph(session: Session) -> LlmGraphPayload:
         )
         assignments = list(
             session.scalars(
-                select(LlmAssignment).order_by(
+                select(LlmAssignment)
+                .where(LlmAssignment.workspace_id.is_(None))
+                .order_by(
                     LlmAssignment.capability,
                     LlmAssignment.priority,
                     LlmAssignment.id,
@@ -649,15 +739,16 @@ def _load_graph(session: Session) -> LlmGraphPayload:
         )
         inheritance = list(
             session.scalars(
-                select(LlmCapabilityInheritance).order_by(
-                    LlmCapabilityInheritance.capability
-                )
+                select(LlmCapabilityInheritance)
+                .where(LlmCapabilityInheritance.workspace_id.is_(None))
+                .order_by(LlmCapabilityInheritance.capability)
             ).all()
         )
         usage = _assignment_usage(session, cutoff)
 
     provider_counts: Counter[str] = Counter(row.provider_id for row in provider_models)
     model_counts: Counter[str] = Counter(row.model_id for row in provider_models)
+    providers_by_id = {row.id: row for row in providers}
     provider_models_by_id = {row.id: row for row in provider_models}
     models_by_id = {row.id: row for row in models}
     inheritance_by_capability = {
@@ -667,16 +758,29 @@ def _load_graph(session: Session) -> LlmGraphPayload:
     assignment_responses = [
         _assignment_response(row, usage=usage) for row in assignments
     ]
+    deployment_default_pm = _deployment_default_provider_model(
+        provider_models, providers_by_id, models_by_id
+    )
+    deployment_default_assignment = (
+        _deployment_default_assignment_response(deployment_default_pm)
+        if deployment_default_pm is not None
+        else None
+    )
+    default_has_priority_zero = any(
+        row.capability == DEFAULT_LLM_CAPABILITY and row.enabled and row.priority == 0
+        for row in assignments
+    )
+    if deployment_default_assignment is not None and not default_has_priority_zero:
+        assignment_responses.append(deployment_default_assignment)
+    assignment_responses.sort(key=lambda row: (row.capability, row.priority, row.id))
     issues: list[LlmAssignmentIssue] = []
-    for assignment in assignments:
-        provider_model = provider_models_by_id.get(assignment.model_id)
-        model = models_by_id.get(provider_model.model_id) if provider_model else None
-        model_caps = set(model.capabilities if model else [])
-        missing = [
-            cap
-            for cap in assignment.required_capabilities or []
-            if cap not in model_caps
-        ]
+    for assignment in assignment_responses:
+        missing = _missing_model_capabilities(
+            assignment=assignment,
+            provider_models_by_id=provider_models_by_id,
+            models_by_id=models_by_id,
+            required_capabilities=assignment.required_capabilities,
+        )
         if missing:
             issues.append(
                 LlmAssignmentIssue(
@@ -687,7 +791,48 @@ def _load_graph(session: Session) -> LlmGraphPayload:
             )
 
     enabled_assignment_caps = {row.capability for row in assignments if row.enabled}
+    if deployment_default_assignment is not None:
+        enabled_assignment_caps.add(DEFAULT_LLM_CAPABILITY)
     capability_keys = [entry.key for entry in _capabilities()]
+    explicit_inheritance = set(inheritance_by_capability)
+    effective_inheritance = dict(inheritance_by_capability)
+    for capability in capability_keys:
+        if (
+            capability != DEFAULT_LLM_CAPABILITY
+            and capability not in effective_inheritance
+            and capability not in enabled_assignment_caps
+        ):
+            effective_inheritance[capability] = DEFAULT_LLM_CAPABILITY
+
+    inherited_caps = {
+        capability
+        for capability in capability_keys
+        if capability not in enabled_assignment_caps
+        and capability in effective_inheritance
+    }
+    assignments_by_capability: dict[str, list[LlmAssignmentResponse]] = {}
+    for assignment in assignment_responses:
+        assignments_by_capability.setdefault(assignment.capability, []).append(
+            assignment
+        )
+    for capability in inherited_caps:
+        parent = effective_inheritance[capability]
+        required = _CAPABILITY_REQUIRED.get(capability, [])
+        for assignment in assignments_by_capability.get(parent, []):
+            missing = _missing_model_capabilities(
+                assignment=assignment,
+                provider_models_by_id=provider_models_by_id,
+                models_by_id=models_by_id,
+                required_capabilities=required,
+            )
+            if missing:
+                issues.append(
+                    LlmAssignmentIssue(
+                        assignment_id=assignment.id,
+                        capability=capability,
+                        missing_capabilities=missing,
+                    )
+                )
     total_calls = sum(calls for calls, _spend in usage.values())
     total_spend = sum(spend for _calls, spend in usage.values())
     return LlmGraphPayload(
@@ -697,9 +842,13 @@ def _load_graph(session: Session) -> LlmGraphPayload:
         capabilities=_capabilities(),
         inheritance=[
             LlmCapabilityInheritanceResponse(
-                capability=row.capability, inherits_from=row.inherits_from
+                capability=capability,
+                inherits_from=inherits_from,
+                source="explicit"
+                if capability in explicit_inheritance
+                else "implicit_default",
             )
-            for row in inheritance
+            for capability, inherits_from in sorted(effective_inheritance.items())
         ],
         assignments=assignment_responses,
         assignment_issues=issues,
@@ -715,7 +864,7 @@ def _load_graph(session: Session) -> LlmGraphPayload:
                 if not _capability_has_chain(
                     capability,
                     assigned_capabilities=enabled_assignment_caps,
-                    inheritance=inheritance_by_capability,
+                    inheritance=effective_inheritance,
                 )
             ],
         ),
@@ -753,11 +902,10 @@ def _flush_or_conflict(session: Session, error: str) -> None:
 def _publish_assignment_changed(
     ctx: DeploymentContext,
     request: Request,
-    workspace_id: str,
 ) -> None:
     default_event_bus.publish(
         LlmAssignmentChanged(
-            workspace_id=workspace_id,
+            workspace_id=DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID,
             actor_id=ctx.user_id,
             correlation_id=new_ulid(),
             occurred_at=_now(),
@@ -767,7 +915,7 @@ def _publish_assignment_changed(
         kind="admin.llm.assignment_updated",
         ctx=ctx,
         request=request,
-        payload={"workspace_id": workspace_id},
+        payload={"workspace_id": None},
     )
 
 
@@ -789,10 +937,6 @@ def _publish_deployment_defaults_changed(
         request=request,
         payload={"workspace_id": None},
     )
-
-
-def _workspace_exists(session: Session, workspace_id: str) -> bool:
-    return session.get(Workspace, workspace_id) is not None
 
 
 def _provider_exists(session: Session, provider_id: str) -> bool:
@@ -912,7 +1056,6 @@ def _validate_provider_model_payload(
 def _validate_assignment_priority(
     session: Session,
     *,
-    workspace_id: str,
     capability: str,
     priority: int,
     assignment_id: str | None = None,
@@ -920,7 +1063,7 @@ def _validate_assignment_priority(
     duplicate = session.scalar(
         select(LlmAssignment.id)
         .where(
-            LlmAssignment.workspace_id == workspace_id,
+            LlmAssignment.workspace_id.is_(None),
             LlmAssignment.capability == capability,
             LlmAssignment.priority == priority,
         )
@@ -932,9 +1075,77 @@ def _validate_assignment_priority(
 
 def _assignment(session: Session, assignment_id: str) -> LlmAssignment:
     row = session.get(LlmAssignment, assignment_id)
+    if row is None or row.workspace_id is not None:
+        raise _not_found()
+    return row
+
+
+def _capability_exists(capability: str) -> bool:
+    return capability in _CAPABILITY_REQUIRED
+
+
+def _explicit_inheritance(
+    session: Session, capability: str
+) -> LlmCapabilityInheritance:
+    row = session.scalar(
+        select(LlmCapabilityInheritance).where(
+            LlmCapabilityInheritance.workspace_id.is_(None),
+            LlmCapabilityInheritance.capability == capability,
+        )
+    )
     if row is None:
         raise _not_found()
     return row
+
+
+def _validate_inheritance_edge(
+    session: Session,
+    *,
+    capability: str,
+    inherits_from: str,
+) -> None:
+    if not _capability_exists(capability):
+        raise _unprocessable("unknown_capability", capability=capability)
+    if not _capability_exists(inherits_from):
+        raise _unprocessable("unknown_capability", capability=inherits_from)
+    if capability == DEFAULT_LLM_CAPABILITY:
+        raise _unprocessable(
+            "default_capability_inheritance_forbidden", capability=capability
+        )
+    if capability == inherits_from:
+        raise _unprocessable("capability_inheritance_self_loop", capability=capability)
+
+    edges = {
+        child: parent
+        for child, parent in session.execute(
+            select(
+                LlmCapabilityInheritance.capability,
+                LlmCapabilityInheritance.inherits_from,
+            ).where(LlmCapabilityInheritance.workspace_id.is_(None))
+        ).all()
+    }
+    edges[capability] = inherits_from
+    seen: set[str] = set()
+    current = capability
+    while current in edges:
+        if current in seen:
+            raise _unprocessable(
+                "capability_inheritance_cycle",
+                capability=capability,
+                inherits_from=inherits_from,
+            )
+        seen.add(current)
+        current = edges[current]
+
+
+def _inheritance_response(
+    row: LlmCapabilityInheritance,
+) -> LlmCapabilityInheritanceResponse:
+    return LlmCapabilityInheritanceResponse(
+        capability=row.capability,
+        inherits_from=row.inherits_from,
+        source="explicit",
+    )
 
 
 def _status(row: LlmUsage) -> Literal["ok", "error", "redacted_block"]:
@@ -1358,7 +1569,9 @@ def build_admin_llm_router() -> APIRouter:
         with tenant_agnostic():
             rows = list(
                 session.scalars(
-                    select(LlmAssignment).order_by(
+                    select(LlmAssignment)
+                    .where(LlmAssignment.workspace_id.is_(None))
+                    .order_by(
                         LlmAssignment.capability,
                         LlmAssignment.priority,
                         LlmAssignment.id,
@@ -1367,6 +1580,107 @@ def build_admin_llm_router() -> APIRouter:
             )
             usage = _assignment_usage(session, cutoff)
         return [_assignment_response(row, usage=usage) for row in rows]
+
+    @router.get(
+        "/inheritance",
+        response_model=list[LlmCapabilityInheritanceResponse],
+        operation_id="admin.llm.inheritance.list",
+    )
+    def list_inheritance(
+        _ctx: _ReadCtx, session: _Db
+    ) -> list[LlmCapabilityInheritanceResponse]:
+        with tenant_agnostic():
+            rows = list(
+                session.scalars(
+                    select(LlmCapabilityInheritance)
+                    .where(LlmCapabilityInheritance.workspace_id.is_(None))
+                    .order_by(LlmCapabilityInheritance.capability)
+                ).all()
+            )
+        return [_inheritance_response(row) for row in rows]
+
+    @router.post(
+        "/inheritance",
+        response_model=LlmCapabilityInheritanceResponse,
+        operation_id="admin.llm.inheritance.create",
+    )
+    def create_inheritance(
+        ctx: _WriteCtx,
+        session: _Db,
+        request: Request,
+        payload: CapabilityInheritancePayload,
+    ) -> LlmCapabilityInheritanceResponse:
+        with tenant_agnostic():
+            _validate_inheritance_edge(
+                session,
+                capability=payload.capability,
+                inherits_from=payload.inherits_from,
+            )
+            existing = session.scalar(
+                select(LlmCapabilityInheritance.id).where(
+                    LlmCapabilityInheritance.workspace_id.is_(None),
+                    LlmCapabilityInheritance.capability == payload.capability,
+                )
+            )
+            if existing is not None:
+                raise _conflict("capability_inheritance_exists")
+            row = LlmCapabilityInheritance(
+                id=new_ulid(),
+                workspace_id=None,
+                capability=payload.capability,
+                inherits_from=payload.inherits_from,
+                created_at=_now(),
+            )
+            session.add(row)
+            _flush_or_conflict(session, "capability_inheritance_constraint_violation")
+            _publish_assignment_changed(ctx, request)
+            _commit_or_conflict(session, "capability_inheritance_constraint_violation")
+            session.refresh(row)
+        return _inheritance_response(row)
+
+    @router.put(
+        "/inheritance/{capability}",
+        response_model=LlmCapabilityInheritanceResponse,
+        operation_id="admin.llm.inheritance.update",
+    )
+    def update_inheritance(
+        ctx: _WriteCtx,
+        session: _Db,
+        request: Request,
+        capability: str,
+        payload: CapabilityInheritanceUpdatePayload,
+    ) -> LlmCapabilityInheritanceResponse:
+        with tenant_agnostic():
+            row = _explicit_inheritance(session, capability)
+            _validate_inheritance_edge(
+                session,
+                capability=capability,
+                inherits_from=payload.inherits_from,
+            )
+            row.inherits_from = payload.inherits_from
+            _flush_or_conflict(session, "capability_inheritance_constraint_violation")
+            _publish_assignment_changed(ctx, request)
+            _commit_or_conflict(session, "capability_inheritance_constraint_violation")
+            session.refresh(row)
+        return _inheritance_response(row)
+
+    @router.delete(
+        "/inheritance/{capability}",
+        status_code=204,
+        operation_id="admin.llm.inheritance.delete",
+    )
+    def delete_inheritance(
+        ctx: _WriteCtx,
+        session: _Db,
+        request: Request,
+        capability: str,
+    ) -> None:
+        with tenant_agnostic():
+            row = _explicit_inheritance(session, capability)
+            session.delete(row)
+            _flush_or_conflict(session, "capability_inheritance_constraint_violation")
+            _publish_assignment_changed(ctx, request)
+            _commit_or_conflict(session, "capability_inheritance_constraint_violation")
 
     @router.post(
         "/assignments",
@@ -1378,8 +1692,6 @@ def build_admin_llm_router() -> APIRouter:
     ) -> LlmAssignmentResponse:
         now = _now()
         with tenant_agnostic():
-            if not _workspace_exists(session, payload.workspace_id):
-                raise _not_found()
             provider_model = _provider_model(session, payload.provider_model_id)
             provider = session.get(LlmProvider, provider_model.provider_id)
             required_capabilities = _validate_required_capabilities(
@@ -1387,7 +1699,6 @@ def build_admin_llm_router() -> APIRouter:
             )
             _validate_assignment_priority(
                 session,
-                workspace_id=payload.workspace_id,
                 capability=payload.capability,
                 priority=payload.priority,
             )
@@ -1400,7 +1711,7 @@ def build_admin_llm_router() -> APIRouter:
             )
             row = LlmAssignment(
                 id=new_ulid(),
-                workspace_id=payload.workspace_id,
+                workspace_id=None,
                 capability=payload.capability,
                 model_id=payload.provider_model_id,
                 provider=provider.name
@@ -1416,7 +1727,7 @@ def build_admin_llm_router() -> APIRouter:
             )
             session.add(row)
             _flush_or_conflict(session, "assignment_constraint_violation")
-            _publish_assignment_changed(ctx, request, row.workspace_id)
+            _publish_assignment_changed(ctx, request)
             _commit_or_conflict(session, "assignment_constraint_violation")
             session.refresh(row)
         return _assignment_response(row, usage={})
@@ -1432,7 +1743,7 @@ def build_admin_llm_router() -> APIRouter:
         request: Request,
         payload: list[AssignmentReorderItem],
     ) -> list[LlmAssignmentResponse]:
-        changed_workspaces: set[str] = set()
+        changed = False
         with tenant_agnostic():
             for group in payload:
                 rows = list(
@@ -1446,14 +1757,12 @@ def build_admin_llm_router() -> APIRouter:
                 by_id = {row.id: row for row in rows}
                 if set(by_id) != set(group.ids_in_priority_order):
                     raise _unprocessable("assignment_reorder_mismatch")
-                workspace_ids = {row.workspace_id for row in rows}
-                if len(workspace_ids) != 1:
+                if any(row.workspace_id is not None for row in rows):
                     raise _unprocessable("assignment_reorder_mismatch")
-                workspace_id = next(iter(workspace_ids))
                 all_group_ids = set(
                     session.scalars(
                         select(LlmAssignment.id).where(
-                            LlmAssignment.workspace_id == workspace_id,
+                            LlmAssignment.workspace_id.is_(None),
                             LlmAssignment.capability == group.capability,
                         )
                     ).all()
@@ -1463,14 +1772,16 @@ def build_admin_llm_router() -> APIRouter:
                 for priority, assignment_id in enumerate(group.ids_in_priority_order):
                     row = by_id[assignment_id]
                     row.priority = priority
-                    changed_workspaces.add(row.workspace_id)
+                    changed = True
             _flush_or_conflict(session, "assignment_constraint_violation")
-            for workspace_id in changed_workspaces:
-                _publish_assignment_changed(ctx, request, workspace_id)
+            if changed:
+                _publish_assignment_changed(ctx, request)
             _commit_or_conflict(session, "assignment_constraint_violation")
             all_rows = list(
                 session.scalars(
-                    select(LlmAssignment).order_by(
+                    select(LlmAssignment)
+                    .where(LlmAssignment.workspace_id.is_(None))
+                    .order_by(
                         LlmAssignment.capability,
                         LlmAssignment.priority,
                         LlmAssignment.id,
@@ -1517,7 +1828,6 @@ def build_admin_llm_router() -> APIRouter:
                     raise _unprocessable("priority_required")
                 _validate_assignment_priority(
                     session,
-                    workspace_id=row.workspace_id,
                     capability=row.capability,
                     priority=payload.priority,
                     assignment_id=row.id,
@@ -1562,8 +1872,7 @@ def build_admin_llm_router() -> APIRouter:
                     raise _unprocessable("is_enabled_required")
                 row.enabled = payload.is_enabled
             _flush_or_conflict(session, "assignment_constraint_violation")
-            workspace_id = row.workspace_id
-            _publish_assignment_changed(ctx, request, workspace_id)
+            _publish_assignment_changed(ctx, request)
             _commit_or_conflict(session, "assignment_constraint_violation")
             session.refresh(row)
         return _assignment_response(row, usage={})
@@ -1581,10 +1890,9 @@ def build_admin_llm_router() -> APIRouter:
     ) -> None:
         with tenant_agnostic():
             row = _assignment(session, assignment_id)
-            workspace_id = row.workspace_id
             session.delete(row)
             _flush_or_conflict(session, "assignment_constraint_violation")
-            _publish_assignment_changed(ctx, request, workspace_id)
+            _publish_assignment_changed(ctx, request)
             _commit_or_conflict(session, "assignment_constraint_violation")
 
     @router.get(

@@ -847,7 +847,7 @@ behaviour; fj2 ships the same shape under the name `LLMAssignment`.
 ```
 llm_assignment
 ├── id                          ULID PK
-├── workspace_id                ULID FK workspace ON DELETE CASCADE  -- per-workspace override row
+├── workspace_id                ULID?           -- legacy nullable column; active rows are NULL
 ├── capability                  text            -- key from the catalog above
 ├── priority                    int             -- lower = tried first; 0 = primary
 ├── provider_model_id           ULID FK llm_provider_model ON DELETE PROTECT
@@ -860,20 +860,16 @@ llm_assignment
 ├── last_used_at                tstz?
 ├── created_at / updated_at
 ├── updated_by_user_id          ULID?
-└── UNIQUE(workspace_id, capability, priority)
+└── INDEX(capability, priority)
 ```
 
-`llm_assignment` is **workspace-scoped**: rows are operator overrides
-for a single workspace's capability/priority slot. Deployment-level
-defaults live in code (the `app/domain/llm/` capability catalogue + seed
-chains); a workspace's resolved chain is "deployment seed, then any
-overriding `llm_assignment` rows for `(workspace_id, capability)` walked
-in priority order". Cascade on `workspace_id` keeps a workspace
-deletion clean.
+`llm_assignment` is **deployment-scoped**: every workspace resolves the
+same capability/priority chain. `workspace_id` is a nullable legacy
+column kept only for migration safety; active rows have `workspace_id
+IS NULL` and the resolver ignores legacy non-NULL rows.
 
-- The `UNIQUE(workspace_id, capability, priority)` constraint replaces the prior
-  `UNIQUE(capability)` rule — a capability can now have
-  `(priority=0, primary)`, `(priority=1, fallback)`, etc. per workspace. Reordering is
+- A capability can have `(priority=0, primary)`, `(priority=1,
+  fallback)`, etc. deployment-wide. Reordering is
   a `PATCH /admin/api/v1/llm/assignments/reorder` bulk operation (the
   CLI exposes `llm assignment reorder`).
 - **Retryable errors** that advance the chain: HTTP 5xx from the
@@ -891,44 +887,67 @@ deletion clean.
   still runs **before** the chain is entered — once the envelope
   blocks a workspace, no attempt leaves the client.
 - Capabilities without assignments fall back through **capability
-  inheritance** (below) before the call is considered unassigned. An
-  unassigned capability fails closed with
-  `503 capability_unassigned` and a `CRITICAL` audit row.
+  inheritance** (below). When no explicit parent exists, the resolver
+  uses the first-class `default` capability as the parent. An
+  unassigned or incompatible capability still fails closed with
+  `503 capability_unassigned` and a `CRITICAL` audit row; the resolver
+  never sends a request to a model that lacks the requesting
+  capability's required tags.
 
 ### Capability inheritance
 
-Modelled on fj2's `LLMUseCaseInheritance`, but scoped per-workspace
-so an operator's edge does not leak into a sibling workspace's chain:
+Modelled on fj2's `LLMUseCaseInheritance`; edges are deployment-level
+and shared by every workspace:
 
 ```
 llm_capability_inheritance
 ├── id                 ULID PK
-├── workspace_id       ULID FK workspace.id ON DELETE CASCADE
+├── workspace_id       ULID?            -- legacy nullable column; active rows are NULL
 ├── capability         text             -- child
 ├── inherits_from      text             -- parent; must also be a key in the catalog
 ├── created_at         tstz
-└── UNIQUE(workspace_id, capability)
+└── UNIQUE(capability)
 ```
 
 The resolver walks children to parents: when `chat.admin` has no
 enabled assignments of its own, it falls through to `chat.manager`'s
-chain. Inheritance also applies to `llm_prompt_template` (below) — a
-child capability without a custom prompt uses the parent's. A cycle is
-rejected on save with `422 capability_inheritance_cycle`; a self-loop
-(`capability = inherits_from`) is rejected by a CHECK at the DB layer.
-Child assignments **override** the parent when present (not merged).
+chain. When a catalogue capability has no enabled assignments and no
+explicit deployment inheritance edge, it implicitly falls through
+to `default`. Inheritance also applies to `llm_prompt_template`
+(below) — a child capability without a custom prompt uses the
+parent's. A cycle is rejected on save with
+`422 capability_inheritance_cycle`; a self-loop (`capability =
+inherits_from`) is rejected by a CHECK at the DB layer. Child
+assignments **override** the parent when present (not merged);
+deleting or disabling the child chain returns the capability to its
+inherited parent.
 
-The unique on `(workspace_id, capability)` pins one parent per child
-per workspace — a child has either a single parent or none. Workspace
-edges **compose over** the deployment-level seed (below) at read time:
-the resolver consults the workspace row first, then falls through to
-the deployment seed when the workspace has no override for that child.
+The unique on `capability` pins one parent per child — a child has
+either a single parent or none. Explicit deployment edges override the
+implicit fallback-to-`default` rule.
 
-v1 seeds one inheritance edge at the deployment level:
-`chat.admin → chat.manager`. Others stay flat so operators can reason
-about their chain in isolation; new ties are introduced surgically as
-sub-capabilities appear, either as deployment seeds or per-workspace
-overrides written from `/admin/llm`.
+The deployment-admin API exposes explicit inheritance edges at
+`/admin/api/v1/llm/inheritance`: `POST` creates an edge, `PUT
+/{capability}` changes its parent, and `DELETE /{capability}` removes
+the explicit edge. Request bodies never include `workspace_id`; active
+rows are deployment-level (`workspace_id IS NULL`). The write path
+rejects unknown capability keys with `422 unknown_capability`,
+self-loops with `422 capability_inheritance_self_loop`, and multi-hop
+cycles with `422 capability_inheritance_cycle`.
+
+v1 seeds `default` plus one explicit inheritance edge at the
+deployment level: `chat.admin → chat.manager`. Every other capability
+without its own enabled chain inherits `default` unless an operator
+writes a deployment inheritance row that points somewhere else.
+
+Inherited chains are validated against the **child** capability's
+`required_capabilities`, not only against the parent assignment's own
+tags. This is visible in `/admin/llm`: `voice.transcribe` and
+`feedback.embed` can inherit the `default` chain structurally, but the
+Gemma chat model is marked incompatible because it lacks
+`audio_input` / `embeddings`; calls fail closed until an operator adds
+a compatible direct assignment or changes the inheritance target to a
+compatible chain.
 
 ### Capability defaults (seeds)
 
@@ -936,54 +955,55 @@ At first boot the deployment is seeded with:
 
 | capability              | default `provider_model`                                                    | rationale |
 |-------------------------|-----------------------------------------------------------------------------|-----------|
-| all chat-kind           | OpenRouter × `google/gemma-4-31b-it` (priority 0)                           | Matches the user's Gemma pick. Multimodal, supports JSON mode. |
-| `expenses.autofill`     | OpenRouter × `google/gemma-4-31b-it` (priority 0)                           | Same model; `vision` tag drives OCR. |
-| `voice.transcribe`      | **No seed** — capability is disabled until an admin assigns an audio model  | No default audio-input model ships. |
-| `documents.ocr`         | **No seed** — capability is disabled until an admin assigns a vision model  | Local extractors handle the common cases; the LLM fallback is opt-in per deployment because every call charges the workspace 30-day budget. See §21 "Document text extraction". |
+| `default`               | OpenRouter × `google/gemma-4-31b-it` (priority 0)                           | Matches the user's Gemma pick; inherited by capabilities without their own chain. |
+| capabilities without direct chains | inherit `default` unless a deployment inheritance edge says otherwise | Keeps ordinary LLM features auto-configured while preserving direct override precedence. |
+| `voice.transcribe`      | inherits `default`, but is **invalid until an audio model is assigned**      | The inherited Gemma chat model lacks `audio_input`, so routing fails closed and `/admin/llm` shows the mismatch. |
+| `feedback.embed`        | inherits `default`, but is **invalid until an embedding model is assigned**  | The inherited Gemma chat model lacks `embeddings`; unsupported model use is never silent. |
+| `documents.ocr`         | inherits `default` only when the model has the required `vision` tag         | Local extractors handle the common cases; the LLM fallback remains visibly governed by model capability tags. See §21 "Document text extraction". |
 
 The capability catalogue itself (the closed enum of keys —
-`chat.manager`, `expenses.autofill`, `receipt_ocr`,
-`voice.transcribe`, …) and the **deployment-level seed edges** (the
-`chat.admin → chat.manager` inheritance row) are declared in code
-under `app/domain/llm/` and applied at boot. Deployment admins
+`default`, `chat.manager`, `expenses.autofill`, `voice.transcribe`,
+…) and the **deployment-level seed edges** (`chat.admin →
+chat.manager` plus implicit fallback to `default`) are declared in
+code under `app/domain/llm/` and applied at boot. Deployment admins
 override the chain from `/admin/llm` without a redeploy by writing
-**workspace-scoped rows** into `llm_assignment` and
-`llm_capability_inheritance`; the resolver layers those workspace
-rows over the deployment seeds at read time. A workspace with no
-overrides sees the deployment defaults verbatim.
+deployment-level rows into `llm_assignment` and
+`llm_capability_inheritance`. Every workspace sees the same assignment
+and inheritance graph; capability-specific rows still take precedence
+over inherited defaults.
 
 ### SSE: `llm.assignment.changed`
 
-A workspace-scoped SSE event published whenever the `/admin/llm`
-surface mutates an `llm_assignment` or `llm_capability_inheritance`
-row for a given workspace (create, update, delete, reorder,
-enable/disable). Routes the workspace `/w/<slug>/events` stream;
-the deployment-scope sibling on `/admin/events` is named
-`admin.llm.assignment_updated` (§12 "SSE") — they are separate
-signals with different scopes and different subscribers.
+An internal deployment-scope invalidation event published whenever
+the `/admin/llm` surface mutates provider/model/provider-model
+registry rows, an `llm_assignment`, or a
+`llm_capability_inheritance` row (create, update, delete, reorder,
+enable/disable). Assignments and inheritance are not workspace
+overrides, so the event is never routed on `/w/<slug>/events`.
 
-- **Scope:** workspace (`/w/<slug>/events`).
-- **`allowed_roles`:** `("manager",)`. LLM configuration is the
-  admin/manager surface; workers, clients, and guests neither see
-  nor care about the `/admin/llm` graph, and narrowing the role
-  tuple keeps the event off client-bound SSE streams where its
-  arrival would leak which providers / models are wired up and how
-  often they change.
+- **Scope:** deployment. The event payload uses the sentinel
+  `workspace_id = "__deployment_llm_defaults__"` only because the
+  shared event envelope still carries a `workspace_id` field.
 - **Payload:** the base `Event` envelope only —
   `{workspace_id, actor_id, correlation_id, occurred_at}`. No
   capability / assignment id is named: a single edit to a
   `llm_capability_inheritance` edge can silently change the chain
-  of a capability two hops downstream, so the event is deliberately
-  whole-workspace and subscribers fan out from there.
+  of a capability two hops downstream, so the event deliberately
+  invalidates the whole deployment resolver cache.
 - **Consumer (router cache):** the §11 router
   (`app/domain/llm/router.py`) drops its 30 s in-process resolver
-  cache for the affected workspace so the next `resolve_model` call
-  observes the new chain without waiting for the TTL to expire.
-  Whole-workspace invalidation (not per-capability) for the reason
-  above.
-- **Consumer (admin SPA):** the `/admin/llm` LlmPage invalidates
-  its admin LLM-graph queries so providers, models, assignments,
-  and capability inheritance refetch in every connected admin tab.
+  cache so the next `resolve_model` call observes the new chain
+  without waiting for the TTL to expire. Workspace context is still
+  carried by the call path for usage, budget, consent, and audit
+  attribution; it does not partition the assignment cache.
+- **Consumer (admin SPA):** the `/admin/llm` LlmPage listens to the
+  deployment `/admin/events` stream event
+  `admin.llm.assignment_updated` and invalidates its admin LLM-graph
+  queries so providers, models, assignments, and capability
+  inheritance refetch in every connected admin tab. Graph inheritance
+  edges carry `source = explicit | implicit_default` so the UI can
+  distinguish removable operator-set edges from the implicit
+  fallback-to-`default` rule.
 
 ## Prompt library
 
@@ -1135,10 +1155,13 @@ retired.
     clicking the backdrop closes it.
 - **Validation feedback.**
   - Capabilities with no enabled assignment chain render a red
-    "unassigned" pill at the top of their group.
+    "unassigned" pill at the top of their group only when no
+    inherited chain exists. Capabilities inheriting `default` render
+    an inherited-state pill instead.
   - Assignments whose `provider_model` fails the
-    `required_capabilities` check render with a red outline and a
-    hover tooltip listing the missing tags.
+    `required_capabilities` check for either their own capability or
+    an inherited child render with a red outline and a hover tooltip
+    listing the missing tags.
   - Pricing rows flagged `price_source_override = 'none'` show a
     small "manual" chip; stale (`price_last_synced_at > 14 days` for
     an unpinned row) show a "stale" chip.

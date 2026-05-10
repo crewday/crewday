@@ -33,6 +33,7 @@ import pytest
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
+from app.adapters.db.llm.models import LlmModel, LlmProvider, LlmProviderModel
 from app.domain.llm import router as router_module
 from app.domain.llm.invalidation_bridge import PostgresLlmAssignmentInvalidationBridge
 from app.domain.llm.router import (
@@ -193,6 +194,59 @@ class TestHappyPath:
         finally:
             reset_current(token)
 
+    def test_default_fallback_rung_appends_after_deployment_primary(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        provider_model = seed_default_registry(db_session, clock=clock)
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            fallback = seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="default",
+                priority=1,
+                model_id="01HWA0000000000000000FALL",
+                api_model_id="fallback/wire",
+                required_capabilities=["chat", "function_calling"],
+            )
+
+            chain = resolve_model(db_session, ctx, "chat.manager", clock=clock)
+
+            assert [pick.provider_model_id for pick in chain] == [
+                provider_model.id,
+                fallback.model_id,
+            ]
+            assert [pick.assignment_id for pick in chain] == ["", fallback.id]
+        finally:
+            reset_current(token)
+
+    def test_default_priority_zero_assignment_replaces_deployment_primary(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        seed_default_registry(db_session, clock=clock)
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            primary = seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="default",
+                priority=0,
+                model_id="01HWA0000000000000000PRIM",
+                api_model_id="operator/default-primary",
+                required_capabilities=["chat", "function_calling"],
+            )
+
+            chain = resolve_model(db_session, ctx, "chat.manager", clock=clock)
+
+            assert [pick.provider_model_id for pick in chain] == [primary.model_id]
+            assert [pick.assignment_id for pick in chain] == [primary.id]
+        finally:
+            reset_current(token)
+
     def test_primary_returns_seed(
         self, db_session: Session, clock: FrozenClock
     ) -> None:
@@ -297,6 +351,109 @@ class TestHappyPath:
             assert [p.provider_model_id for p in chain] == [
                 "01HWA00000000000000000ENBL",
             ]
+        finally:
+            reset_current(token)
+
+    def test_disabled_registry_rows_skipped(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        """Disabled provider-models are invisible to the resolver."""
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            disabled = seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="chat.manager",
+                priority=0,
+                model_id="01HWA0000000000000000DSPM",
+            )
+            enabled = seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="chat.manager",
+                priority=1,
+                model_id="01HWA0000000000000000ENPM",
+            )
+            provider_model = db_session.get(LlmProviderModel, disabled.model_id)
+            assert provider_model is not None
+            provider_model.is_enabled = False
+            db_session.flush()
+
+            chain = resolve_model(db_session, ctx, "chat.manager", clock=clock)
+
+            assert [p.provider_model_id for p in chain] == [enabled.model_id]
+        finally:
+            reset_current(token)
+
+    def test_disabled_provider_skipped(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        """Disabled providers are invisible to direct assignment chains."""
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            disabled = seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="chat.manager",
+                priority=0,
+                model_id="01HWA0000000000000000DSPR",
+            )
+            enabled = seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="chat.manager",
+                priority=1,
+                model_id="01HWA0000000000000000ENPR",
+            )
+            provider_model = db_session.get(LlmProviderModel, disabled.model_id)
+            assert provider_model is not None
+            provider = db_session.get(LlmProvider, provider_model.provider_id)
+            assert provider is not None
+            provider.is_enabled = False
+            db_session.flush()
+
+            chain = resolve_model(db_session, ctx, "chat.manager", clock=clock)
+
+            assert [p.provider_model_id for p in chain] == [enabled.model_id]
+        finally:
+            reset_current(token)
+
+    def test_inactive_model_skipped(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        """Inactive model catalogue rows are invisible to direct assignments."""
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            inactive = seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="chat.manager",
+                priority=0,
+                model_id="01HWA0000000000000000INAC",
+            )
+            enabled = seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="chat.manager",
+                priority=1,
+                model_id="01HWA0000000000000000ENAC",
+            )
+            provider_model = db_session.get(LlmProviderModel, inactive.model_id)
+            assert provider_model is not None
+            model = db_session.get(LlmModel, provider_model.model_id)
+            assert model is not None
+            model.is_active = False
+            db_session.flush()
+
+            chain = resolve_model(db_session, ctx, "chat.manager", clock=clock)
+
+            assert [p.provider_model_id for p in chain] == [enabled.model_id]
         finally:
             reset_current(token)
 
@@ -459,6 +616,7 @@ class TestInheritance:
                 capability="chat.manager",
                 priority=0,
                 model_id="01HWA00000000000000000PARM",
+                required_capabilities=["chat", "function_calling"],
             )
             seed_assignment(
                 db_session,
@@ -466,6 +624,7 @@ class TestInheritance:
                 capability="chat.manager",
                 priority=1,
                 model_id="01HWA00000000000000000PARF",
+                required_capabilities=["chat", "function_calling"],
             )
             seed_inheritance(
                 db_session,
@@ -538,6 +697,7 @@ class TestInheritance:
                 capability="chat.base",
                 priority=0,
                 model_id="01HWA00000000000000000BASE",
+                required_capabilities=["chat", "function_calling"],
             )
             seed_inheritance(
                 db_session,
@@ -900,19 +1060,18 @@ class TestCache:
         finally:
             reset_current(token)
 
-    def test_invalidation_is_workspace_scoped(
+    def test_invalidation_is_deployment_wide(
         self, db_session: Session, clock: FrozenClock
     ) -> None:
-        """An event for workspace A does not drop workspace B's cache."""
+        """Assignment events drop every deployment-level capability cache."""
         ws_a = seed_workspace(db_session, slug="ws-a")
         ws_b = seed_workspace(db_session, slug="ws-b")
         ctx_a = build_context(ws_a.id, slug="ws-a")
         ctx_b = build_context(ws_b.id, slug="ws-b")
 
-        # Seed both workspaces.
         token = set_current(ctx_a)
         try:
-            row_a = seed_assignment(
+            row = seed_assignment(
                 db_session,
                 workspace_id=ws_a.id,
                 capability="chat.manager",
@@ -922,19 +1081,6 @@ class TestCache:
         finally:
             reset_current(token)
 
-        token = set_current(ctx_b)
-        try:
-            row_b = seed_assignment(
-                db_session,
-                workspace_id=ws_b.id,
-                capability="chat.manager",
-                priority=0,
-                model_id="01HWA00000000000000000ISOB",
-            )
-        finally:
-            reset_current(token)
-
-        # Warm both caches.
         token = set_current(ctx_a)
         try:
             a1 = resolve_primary(db_session, ctx_a, "chat.manager", clock=clock)
@@ -945,17 +1091,14 @@ class TestCache:
         token = set_current(ctx_b)
         try:
             b1 = resolve_primary(db_session, ctx_b, "chat.manager", clock=clock)
-            assert b1.provider_model_id == "01HWA00000000000000000ISOB"
+            assert b1.provider_model_id == "01HWA00000000000000000ISOA"
         finally:
             reset_current(token)
 
-        # Mutate both rows; publish only A's event. Only A's cache
-        # should drop; B's cached pick stays. cd-4btd FK requires
-        # the new ULIDs to exist in ``llm_provider_model`` first.
+        # Mutate the deployment row. Any assignment event clears the
+        # shared cache, even when it carries a concrete workspace id.
         seed_provider_model(db_session, provider_model_id="01HWA00000000000000000ISA2")
-        seed_provider_model(db_session, provider_model_id="01HWA00000000000000000ISB2")
-        row_a.model_id = "01HWA00000000000000000ISA2"
-        row_b.model_id = "01HWA00000000000000000ISB2"
+        row.model_id = "01HWA00000000000000000ISA2"
         db_session.flush()
 
         _publish_assignment_changed(default_event_bus, ws_a.id)
@@ -970,8 +1113,7 @@ class TestCache:
         token = set_current(ctx_b)
         try:
             b2 = resolve_primary(db_session, ctx_b, "chat.manager", clock=clock)
-            # B still sees its cached rung — the event was for A.
-            assert b2.provider_model_id == "01HWA00000000000000000ISOB"
+            assert b2.provider_model_id == "01HWA00000000000000000ISA2"
         finally:
             reset_current(token)
 
@@ -1182,14 +1324,13 @@ class TestChainOrdering:
 
 
 class TestTenancy:
-    """The resolver only returns rows from the caller's workspace.
+    """The resolver keeps workspace context out of model selection.
 
-    A per-workspace cache miss could silently hand back another
-    tenant's chain if the ORM filter were absent or the cache key
-    dropped the workspace id. The test exercises the full path.
+    Workspace id still belongs to usage, budget, consent, and audit
+    paths, but assignment chains are deployment-level.
     """
 
-    def test_workspaces_see_different_chains(
+    def test_workspaces_share_deployment_chain(
         self, db_session: Session, clock: FrozenClock
     ) -> None:
         ws_a = seed_workspace(db_session, slug="ws-a")
@@ -1197,7 +1338,6 @@ class TestTenancy:
         ctx_a = build_context(ws_a.id, slug="ws-a")
         ctx_b = build_context(ws_b.id, slug="ws-b")
 
-        # Seed each workspace with its own rung.
         token = set_current(ctx_a)
         try:
             seed_assignment(
@@ -1210,19 +1350,6 @@ class TestTenancy:
         finally:
             reset_current(token)
 
-        token = set_current(ctx_b)
-        try:
-            seed_assignment(
-                db_session,
-                workspace_id=ws_b.id,
-                capability="chat.manager",
-                priority=0,
-                model_id="01HWA00000000000000000WSB0",
-            )
-        finally:
-            reset_current(token)
-
-        # Resolve each side under its own context.
         token = set_current(ctx_a)
         try:
             pick_a = resolve_primary(db_session, ctx_a, "chat.manager", clock=clock)
@@ -1233,7 +1360,7 @@ class TestTenancy:
         token = set_current(ctx_b)
         try:
             pick_b = resolve_primary(db_session, ctx_b, "chat.manager", clock=clock)
-            assert pick_b.provider_model_id == "01HWA00000000000000000WSB0"
+            assert pick_b.provider_model_id == "01HWA00000000000000000WSA0"
         finally:
             reset_current(token)
 

@@ -1,5 +1,5 @@
 // crewday — JSON API types: LLM providers, models, provider-model
-// graph, capabilities, assignments, prompt templates, per-workspace
+// graph, capabilities, assignments, prompt templates, workspace
 // usage envelope, and agent preferences / agent docs metadata.
 
 export interface LLMCall {
@@ -89,6 +89,7 @@ export interface LlmAssignment {
   last_used_at: string | null;
   spend_usd_30d: number;
   calls_30d: number;
+  is_deployment_default?: boolean;
 }
 
 export interface LlmCapabilityEntry {
@@ -100,6 +101,7 @@ export interface LlmCapabilityEntry {
 export interface LlmCapabilityInheritance {
   capability: string;
   inherits_from: string;
+  source: "explicit" | "implicit_default";
 }
 
 export interface LlmAssignmentIssue {

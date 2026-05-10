@@ -111,6 +111,11 @@ export const graph = {
   ],
   capabilities: [
     {
+      key: "default",
+      description: "Deployment default fallback chain",
+      required_capabilities: ["chat", "function_calling"],
+    },
+    {
       key: "chat.manager",
       description: "Owner/manager-side embedded chat agent",
       required_capabilities: ["chat", "function_calling"],
@@ -121,8 +126,30 @@ export const graph = {
       required_capabilities: ["audio_input"],
     },
   ],
-  inheritance: [],
+  inheritance: [
+    {
+      capability: "voice.transcribe",
+      inherits_from: "default",
+      source: "implicit_default",
+    },
+  ],
   assignments: [
+    {
+      id: "deployment-default:pm_gemma:0",
+      capability: "default",
+      description: "Deployment default fallback chain",
+      priority: 0,
+      provider_model_id: "pm_gemma",
+      max_tokens: null,
+      temperature: null,
+      extra_api_params: {},
+      required_capabilities: ["chat", "function_calling"],
+      is_enabled: true,
+      last_used_at: null,
+      spend_usd_30d: 0,
+      calls_30d: 0,
+      is_deployment_default: true,
+    },
     {
       id: "assign_chat_manager",
       capability: "chat.manager",
@@ -139,14 +166,20 @@ export const graph = {
       calls_30d: 12,
     },
   ],
-  assignment_issues: [],
+  assignment_issues: [
+    {
+      assignment_id: "deployment-default:pm_gemma:0",
+      capability: "voice.transcribe",
+      missing_capabilities: ["audio_input"],
+    },
+  ],
   totals: {
     spend_usd_30d: 1.25,
     calls_30d: 12,
     provider_count: 1,
     model_count: 3,
-    capability_count: 2,
-    unassigned_capabilities: ["voice.transcribe"],
+    capability_count: 3,
+    unassigned_capabilities: [],
   },
 };
 
