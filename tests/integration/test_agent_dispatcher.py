@@ -494,6 +494,14 @@ def _new_delegated_tokens(
     ]
 
 
+def _new_token_ids(
+    token_rows: list[ApiToken],
+    *,
+    existing_token_ids: set[str],
+) -> set[str]:
+    return {row.id for row in token_rows if row.id not in existing_token_ids}
+
+
 def _assert_manager_chat_delegated_token(
     token: ApiToken,
     *,
@@ -1589,6 +1597,8 @@ def test_agent_message_unexpected_turn_failure_revokes_default_uow_token(
             _seed_llm_assignment(seed, workspace_id=workspace.id)
             _seed_budget_ledger(seed, workspace_id=workspace.id)
             seed.commit()
+        with factory() as check, tenant_agnostic():
+            existing_token_ids = set(check.scalars(select(ApiToken.id)).all())
 
         ctx = WorkspaceContext(
             workspace_id=workspace.id,
@@ -1622,9 +1632,24 @@ def test_agent_message_unexpected_turn_failure_revokes_default_uow_token(
 
         with factory() as check, tenant_agnostic():
             token_rows = list(check.scalars(select(ApiToken)).all())
-        assert len(token_rows) == 1
-        assert token_rows[0].kind == "delegated"
-        assert token_rows[0].revoked_at is not None
+            request_logs = list(check.scalars(select(ApiTokenRequestLog)).all())
+        delegated = _new_delegated_tokens(
+            token_rows,
+            existing_token_ids=existing_token_ids,
+        )
+        assert len(delegated) == 1
+        _assert_manager_chat_delegated_token(
+            delegated[0],
+            workspace_id=workspace.id,
+            user_id=user.id,
+            expires_at=_PINNED + timedelta(minutes=10),
+        )
+        assert delegated[0].revoked_at is not None
+        assert delegated[0].revoked_at >= _PINNED
+        assert _new_token_ids(token_rows, existing_token_ids=existing_token_ids) == {
+            delegated[0].id
+        }
+        assert [row for row in request_logs if row.token_id == delegated[0].id] == []
     finally:
         isolated_engine.dispose()
 
