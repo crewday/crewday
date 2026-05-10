@@ -11,10 +11,10 @@ export const homeCopy = {
     dateline: "Proudly open source · Self hostable",
     github: { label: "GitHub", href: "https://github.com/crewday/crewday" },
     navLinks: [
-      { label: "Why", href: "#why" },
-      { label: "Demo", href: "#try-it" },
-      { label: "Who it's for", href: "#audiences" },
-      { label: "Pricing", href: "#pricing" },
+      { label: "Why", href: "/#why" },
+      { label: "Demo", href: "/#try-it" },
+      { label: "Who it's for", href: "/#audiences" },
+      { label: "Pricing", href: "/#pricing" },
     ],
   },
   hero: {
