@@ -10,6 +10,8 @@ chat-log seam. The deeper LLM turn runner is wired separately in
 from __future__ import annotations
 
 import logging
+import re
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
@@ -38,11 +40,14 @@ from app.authz.dep import Permission
 from app.domain.agent.notifications import notify_agent_message_fallback
 from app.domain.agent.relay_requests import (
     AgentRelayRequestCreate,
+    AgentRelayRequestView,
     create_relay,
+    list_open_relays_for_target,
     mark_relay_delivered,
+    mark_relay_responded,
 )
 from app.domain.agent.runtime import run_turn
-from app.domain.errors import Forbidden, Validation
+from app.domain.errors import Conflict, Forbidden, Validation
 from app.domain.messaging.notifications import NotificationService
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
@@ -80,6 +85,13 @@ _SCOPE_CAPABILITY: dict[AgentScope, str] = {
     "employee": "chat.employee",
     "manager": "chat.manager",
 }
+_CLEAR_RELAY_ANSWER_RE = re.compile(
+    r"\b(yes|yeah|yep|no|nope|available|unavailable|can't|cannot)\b"
+    r"|\bi\s+can(?:\s+(?:do|work|make|cover|help|come|be))?\b"
+    r"|\b\d{1,2}\s*(?::\d{2})?\s*(?:am|pm)\b"
+    r"|\b\d{1,2}\s*-\s*\d{1,2}\s*(?:am|pm)?\b",
+    re.IGNORECASE,
+)
 
 
 def _approval_notification_sink(
@@ -257,6 +269,7 @@ def build_agent_router(
         session.flush()
         payload = _message_payload(row)
         session.commit()
+        pending_relays = _pending_target_relays(session, ctx=ctx, scope=scope)
         bus.publish(
             AgentMessageAppended(
                 workspace_id=ctx.workspace_id,
@@ -305,6 +318,16 @@ def build_agent_router(
                     workspace_id=ctx.workspace_id,
                 ),
                 commit_before_tool_dispatch=True,
+                pending_relay_context=_pending_relay_context(pending_relays),
+            )
+            _complete_answered_relay_once(
+                session,
+                ctx=ctx,
+                relays=pending_relays,
+                target_reply=row.body_md,
+                bus=bus,
+                correlation_id=ctx.audit_correlation_id,
+                clock=eff_clock,
             )
         except Exception:
             session.rollback()
@@ -547,6 +570,224 @@ def _get_or_create_agent_channel_for_user(
 
 def _external_ref(scope: AgentScope, actor_id: str) -> str:
     return f"agent:{scope}:{actor_id}"
+
+
+def _pending_target_relays(
+    session: Session,
+    *,
+    ctx: WorkspaceContext,
+    scope: AgentScope,
+) -> list[AgentRelayRequestView]:
+    if scope != "employee":
+        return []
+    repo = SqlAlchemyAgentRelayRequestRepository(session)
+    return [
+        relay
+        for relay in list_open_relays_for_target(repo, ctx, target_user_id=ctx.actor_id)
+        if relay.target_scope == scope and relay.target_user_id == ctx.actor_id
+    ]
+
+
+def _pending_relay_context(relays: list[AgentRelayRequestView]) -> str | None:
+    if not relays:
+        return None
+    if len(relays) == 1:
+        relay = relays[0]
+        return (
+            f"{relay.requester_display_label} asked: {relay.request_summary}\n"
+            "If the user's latest message clearly answers this request, "
+            "acknowledge briefly. If it does not clearly answer, ask one "
+            "short clarifying question."
+        )
+    lines = [
+        "The user has multiple pending relayed requests. Ask which one they "
+        "are answering before treating the latest message as a relay answer."
+    ]
+    lines.extend(
+        f"- {relay.requester_display_label} asked: {relay.request_summary}"
+        for relay in relays
+    )
+    return "\n".join(lines)
+
+
+def _complete_answered_relay_once(
+    session: Session,
+    *,
+    ctx: WorkspaceContext,
+    relays: list[AgentRelayRequestView],
+    target_reply: str,
+    bus: EventBus,
+    correlation_id: str,
+    clock: Clock,
+) -> None:
+    if len(relays) != 1 or not _is_clear_relay_answer(target_reply):
+        return
+    relay = relays[0]
+    summary = _relay_response_summary(relay, target_reply)
+    repo = SqlAlchemyAgentRelayRequestRepository(session)
+    try:
+        mark_relay_responded(
+            repo,
+            ctx,
+            relay_id=relay.id,
+            response_summary=summary,
+            clock=clock,
+        )
+    except Conflict:
+        return
+    if relay.requester_user_id is None:
+        return
+    requester_scope = _relay_scope(relay.requester_scope)
+    if requester_scope is None:
+        return
+    requester_ctx = _relay_requester_context(
+        session,
+        ctx=ctx,
+        requester_user_id=relay.requester_user_id,
+        requester_scope=requester_scope,
+    )
+    if requester_ctx is None:
+        return
+    requester_channel = _get_or_create_agent_channel_for_user(
+        session,
+        ctx=requester_ctx,
+        scope=requester_scope,
+        user_id=requester_ctx.actor_id,
+        clock=clock,
+    )
+    message = _append_relay_requester_message(
+        session,
+        ctx=requester_ctx,
+        requester_channel_id=requester_channel.id,
+        body_md=summary,
+        clock=clock,
+    )
+    payload = _message_payload(message)
+    write_audit(
+        session,
+        requester_ctx,
+        entity_kind="agent_relay_request",
+        entity_id=relay.id,
+        action="agent.relay.responded",
+        diff={
+            "target_user_id": relay.target_user_id,
+            "requester_user_id": relay.requester_user_id,
+            "requester_channel_id": requester_channel.id,
+            "requester_message_id": message.id,
+        },
+        clock=clock,
+    )
+    session.flush()
+    bus.publish(
+        AgentMessageAppended(
+            workspace_id=requester_ctx.workspace_id,
+            actor_id=requester_ctx.actor_id,
+            actor_user_id=requester_ctx.actor_id,
+            correlation_id=correlation_id,
+            occurred_at=message.created_at,
+            scope=requester_scope,
+            message=AgentMessagePayload(
+                at=payload.at,
+                kind=payload.kind,
+                body=payload.body,
+                channel_kind=payload.channel_kind,
+            ),
+        )
+    )
+
+
+def _is_clear_relay_answer(text: str) -> bool:
+    return _CLEAR_RELAY_ANSWER_RE.search(text.strip()) is not None
+
+
+def _relay_response_summary(relay: AgentRelayRequestView, target_reply: str) -> str:
+    answer = " ".join(target_reply.split())
+    return f"{relay.target_display_label} responded: {answer}"
+
+
+def _relay_scope(value: str) -> AgentScope | None:
+    if value == "employee":
+        return "employee"
+    if value == "manager":
+        return "manager"
+    return None
+
+
+def _relay_requester_context(
+    session: Session,
+    *,
+    ctx: WorkspaceContext,
+    requester_user_id: str,
+    requester_scope: AgentScope,
+) -> WorkspaceContext | None:
+    role: Literal["manager", "worker"] = (
+        "manager" if requester_scope == "manager" else "worker"
+    )
+    role_exists = session.scalar(
+        select(RoleGrant.id).where(
+            RoleGrant.workspace_id == ctx.workspace_id,
+            RoleGrant.user_id == requester_user_id,
+            RoleGrant.scope_kind == "workspace",
+            RoleGrant.grant_role == role,
+            RoleGrant.revoked_at.is_(None),
+        )
+    )
+    if role_exists is None:
+        return None
+    member_exists = session.scalar(
+        select(UserWorkspace.user_id)
+        .join(User, User.id == UserWorkspace.user_id)
+        .where(
+            UserWorkspace.workspace_id == ctx.workspace_id,
+            UserWorkspace.user_id == requester_user_id,
+            User.archived_at.is_(None),
+        )
+    )
+    if member_exists is None:
+        return None
+    if requester_scope == "employee":
+        active_engagement = session.scalar(
+            select(WorkEngagement.id).where(
+                WorkEngagement.workspace_id == ctx.workspace_id,
+                WorkEngagement.user_id == requester_user_id,
+                WorkEngagement.archived_on.is_(None),
+            )
+        )
+        if active_engagement is None:
+            return None
+    return replace(
+        ctx,
+        actor_id=requester_user_id,
+        actor_grant_role=role,
+        actor_was_owner_member=requester_scope == "manager",
+    )
+
+
+def _append_relay_requester_message(
+    session: Session,
+    *,
+    ctx: WorkspaceContext,
+    requester_channel_id: str,
+    body_md: str,
+    clock: Clock,
+) -> ChatMessage:
+    row = ChatMessage(
+        id=new_ulid(clock=clock),
+        workspace_id=ctx.workspace_id,
+        channel_id=requester_channel_id,
+        author_user_id=ctx.actor_id,
+        author_label="agent",
+        body_md=body_md,
+        attachments_json=[],
+        source="app",
+        provider_message_id=None,
+        gateway_binding_id=None,
+        dispatched_to_agent_at=None,
+        created_at=clock.now(),
+    )
+    session.add(row)
+    session.flush()
+    return row
 
 
 def _actor_label(session: Session, actor_id: str) -> str:

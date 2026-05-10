@@ -17,6 +17,7 @@ from app.domain.agent.relay_requests import (
     RelayNotFound,
     RelayStatus,
 )
+from app.domain.errors import Conflict
 from app.util.clock import aware_utc as _as_utc
 
 __all__ = ["SqlAlchemyAgentRelayRequestRepository"]
@@ -191,11 +192,30 @@ class SqlAlchemyAgentRelayRequestRepository(AgentRelayRequestRepository):
         response_summary: str,
         responded_at: datetime,
     ) -> AgentRelayRequestView:
+        changed = (
+            self._session.query(AgentRelayRequest)
+            .filter(
+                AgentRelayRequest.workspace_id == workspace_id,
+                AgentRelayRequest.id == relay_id,
+                AgentRelayRequest.status == "open",
+            )
+            .update(
+                {
+                    AgentRelayRequest.status: "answered",
+                    AgentRelayRequest.response_summary: response_summary,
+                    AgentRelayRequest.responded_at: responded_at,
+                    AgentRelayRequest.closed_at: responded_at,
+                },
+                synchronize_session=False,
+            )
+        )
+        if changed != 1:
+            row = self._load_required(workspace_id=workspace_id, relay_id=relay_id)
+            raise Conflict(
+                f"relay {relay_id!r} is in state {row.status!r}",
+                extra={"agent_relay_request_id": row.id, "status": row.status},
+            )
         row = self._load_required(workspace_id=workspace_id, relay_id=relay_id)
-        row.status = "answered"
-        row.response_summary = response_summary
-        row.responded_at = responded_at
-        row.closed_at = responded_at
         self._session.flush()
         return _to_relay_view(row)
 

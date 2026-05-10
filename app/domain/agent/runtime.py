@@ -537,6 +537,7 @@ def run_turn(
     agent_message_recipient_user_id: str | None = None,
     agent_message_delivery_is_fallback: bool = False,
     commit_before_tool_dispatch: bool = False,
+    pending_relay_context: str | None = None,
 ) -> TurnOutcome:
     """Run one agent turn end-to-end without committing the caller's session.
 
@@ -574,6 +575,7 @@ def run_turn(
             agent_message_recipient_user_id=agent_message_recipient_user_id,
             agent_message_delivery_is_fallback=agent_message_delivery_is_fallback,
             commit_before_tool_dispatch=commit_before_tool_dispatch,
+            pending_relay_context=pending_relay_context,
         )
     )
 
@@ -604,6 +606,7 @@ def _build_turn_run(
     agent_message_recipient_user_id: str | None,
     agent_message_delivery_is_fallback: bool,
     commit_before_tool_dispatch: bool,
+    pending_relay_context: str | None,
 ) -> _TurnRun:
     # code-health: ignore[params] Builder mirrors the public compatibility API.
     eff_clock: Clock = clock if clock is not None else SystemClock()
@@ -637,6 +640,7 @@ def _build_turn_run(
             agent_message_delivery_is_fallback,
         ),
         commit_before_tool_dispatch,
+        pending_relay_context.strip() if pending_relay_context else None,
     )
 
 
@@ -727,6 +731,7 @@ class _TurnRun:
     approval_notifications: _ApprovalNotifications
     agent_message_notifications: _AgentMessageNotifications
     commit_before_tool_dispatch: bool
+    pending_relay_context: str | None
 
 
 @dataclass(slots=True)
@@ -943,6 +948,7 @@ def _initial_turn_history(
         preferences=preferences,
         system_prompt=system_prompt,
         include_user_message=run.include_user_message,
+        pending_relay_context=run.pending_relay_context,
     )
 
 
@@ -1383,6 +1389,7 @@ def _assemble_history(
     preferences: PreferenceBundle,
     system_prompt: str,
     include_user_message: bool = True,
+    pending_relay_context: str | None = None,
 ) -> list[LlmChatMessage]:
     """Build the ``[system, …history, user]`` sequence the LLM sees.
 
@@ -1403,6 +1410,13 @@ def _assemble_history(
             "content": f"{system_prompt}\n\n{preferences.text}",
         },
     ]
+    if pending_relay_context is not None:
+        messages.append(
+            {
+                "role": "system",
+                "content": f"Pending mediated relay:\n{pending_relay_context}",
+            }
+        )
     if thread_id is not None:
         messages.extend(_load_recent_history(session, thread_id, history_cap))
     if include_user_message:

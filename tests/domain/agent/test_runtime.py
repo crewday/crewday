@@ -226,6 +226,73 @@ def test_runtime_forwards_dispatcher_tools_to_llm(
     assert llm.last_tools == tools
 
 
+def test_runtime_includes_pending_relay_context_without_unrelated_history(
+    db_session: Session,
+    bus: EventBus,
+    clock: FrozenClock,
+) -> None:
+    workspace, ctx, channel_id = _bind_and_seed(db_session, capability="chat.employee")
+    previous_channel_id = seed_channel(
+        db_session,
+        workspace_id=workspace.id,
+        kind="staff",
+        external_ref="agent:employee:someone-else",
+    )
+    db_session.add(
+        ChatMessage(
+            id="msg_unrelated_relay_history",
+            workspace_id=workspace.id,
+            channel_id=previous_channel_id,
+            author_user_id=ctx.actor_id,
+            author_label="agent",
+            body_md="Unrelated private chat history",
+            attachments_json=[],
+            source="app",
+            provider_message_id=None,
+            gateway_binding_id=None,
+            dispatched_to_agent_at=None,
+            created_at=clock.now(),
+        )
+    )
+    db_session.flush()
+    llm = ScriptedLLMClient(replies=[make_text_response("Thanks, I will clarify.")])
+
+    run_turn(
+        ctx,
+        session=db_session,
+        scope="employee",
+        thread_id=channel_id,
+        user_message="Maybe",
+        trigger="event",
+        llm_client=llm,
+        tool_dispatcher=FakeToolDispatcher(),
+        token_factory=FakeTokenFactory(),
+        agent_label="worker-chat-agent",
+        capability="chat.employee",
+        event_bus=bus,
+        clock=clock,
+        pending_relay_context=(
+            "Vincent asked: Can you work Sunday?\n"
+            "If this does not clearly answer, ask one short clarifying question."
+        ),
+    )
+
+    assert llm.last_messages is not None
+    system_messages = [
+        message["content"]
+        for message in llm.last_messages
+        if message["role"] == "system"
+    ]
+    assert (
+        "Pending mediated relay:\n"
+        "Vincent asked: Can you work Sunday?\n"
+        "If this does not clearly answer, ask one short clarifying question."
+    ) in system_messages
+    assert all(
+        "Unrelated private chat history" not in message for message in system_messages
+    )
+
+
 def test_task_scope_reply_event_carries_task_key(
     db_session: Session,
     bus: EventBus,

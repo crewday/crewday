@@ -289,6 +289,7 @@ def _client(
     ctx: WorkspaceContext,
     *,
     event_bus: EventBus | None = None,
+    llm: _ReplyLLM | None = None,
 ) -> TestClient:
     app = FastAPI()
     app.include_router(
@@ -312,7 +313,7 @@ def _client(
             yield s
 
     def _override_llm() -> _ReplyLLM:
-        return _ReplyLLM()
+        return llm or _ReplyLLM()
 
     def _override_token_factory() -> _UnitTokenFactory:
         return _UnitTokenFactory()
@@ -325,12 +326,17 @@ def _client(
 
 
 class _ReplyLLM:
+    def __init__(self, text: str = "I can help.") -> None:
+        self.text = text
+        self.calls: list[list[dict[str, str]]] = []
+
     def complete(self, **kwargs):  # type: ignore[no-untyped-def]
         raise NotImplementedError
 
     def chat(self, **kwargs):  # type: ignore[no-untyped-def]
+        self.calls.append(list(kwargs["messages"]))
         return LLMResponse(
-            text="I can help.",
+            text=self.text,
             usage=LLMUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
             model_id="fake/unit",
             finish_reason="stop",
@@ -571,6 +577,295 @@ def test_agent_relay_request_delivers_to_target_agent_thread(
         "target_channel_id": channel.id,
         "target_message_id": message.id,
     }
+
+
+def test_worker_relay_answer_summarizes_to_requester_once(
+    factory: sessionmaker[Session],
+) -> None:
+    workspace_id, manager_id = _bootstrap(factory, role="manager")
+    with factory() as s:
+        _grant_role(s, workspace_id=workspace_id, user_id=manager_id, role="manager")
+        worker_id = _seed_worker_target(s, workspace_id=workspace_id)
+        _seed_llm_assignment(s, workspace_id=workspace_id, capability="chat.employee")
+        s.commit()
+    manager_client = _client(
+        factory,
+        _ctx(workspace_id=workspace_id, actor_id=manager_id, role="manager"),
+    )
+    opened = manager_client.post(
+        "/w/agent-test/api/v1/agent/manager/relay/request",
+        json={"target_user_id": worker_id, "request": "Can you work Sunday?"},
+    )
+    assert opened.status_code == 201
+    bus = EventBus()
+    appended: list[AgentMessageAppended] = []
+    bus.subscribe(AgentMessageAppended)(appended.append)
+    llm = _ReplyLLM("Thanks, I will pass that along.")
+    worker_client = _client(
+        factory,
+        _ctx(workspace_id=workspace_id, actor_id=worker_id, role="worker"),
+        event_bus=bus,
+        llm=llm,
+    )
+
+    response = worker_client.post(
+        "/w/agent-test/api/v1/agent/employee/message",
+        json={"body": "Yes, but only 2-6pm"},
+    )
+
+    assert response.status_code == 201
+    with factory() as s:
+        relay = s.scalars(select(AgentRelayRequest)).one()
+        requester_channel = s.scalars(
+            select(ChatChannel).where(
+                ChatChannel.workspace_id == workspace_id,
+                ChatChannel.external_ref == f"agent:manager:{manager_id}",
+            )
+        ).one()
+        requester_messages = s.scalars(
+            select(ChatMessage).where(ChatMessage.channel_id == requester_channel.id)
+        ).all()
+    assert relay.status == "answered"
+    assert relay.response_summary == "Maria responded: Yes, but only 2-6pm"
+    assert [message.body_md for message in requester_messages] == [
+        "Maria responded: Yes, but only 2-6pm"
+    ]
+    requester_events = [
+        event for event in appended if event.actor_user_id == manager_id
+    ]
+    assert len(requester_events) == 1
+    assert requester_events[0].scope == "manager"
+    assert requester_events[0].message.body == "Maria responded: Yes, but only 2-6pm"
+    assert llm.calls
+    relay_context = [
+        message["content"]
+        for message in llm.calls[0]
+        if message["role"] == "system"
+        and "Pending mediated relay" in message["content"]
+    ]
+    assert relay_context == [
+        "Pending mediated relay:\n"
+        "Manager asked: Can you work Sunday?\n"
+        "If the user's latest message clearly answers this request, "
+        "acknowledge briefly. If it does not clearly answer, ask one "
+        "short clarifying question."
+    ]
+
+    repeated = worker_client.post(
+        "/w/agent-test/api/v1/agent/employee/message",
+        json={"body": "Yes, but only 2-6pm"},
+    )
+    assert repeated.status_code == 201
+    with factory() as s:
+        requester_messages = s.scalars(
+            select(ChatMessage).where(ChatMessage.channel_id == requester_channel.id)
+        ).all()
+        relay = s.scalars(select(AgentRelayRequest)).one()
+    assert relay.status == "answered"
+    assert [
+        message.body_md
+        for message in requester_messages
+        if message.body_md == "Maria responded: Yes, but only 2-6pm"
+    ] == ["Maria responded: Yes, but only 2-6pm"]
+
+
+def test_worker_ambiguous_relay_reply_keeps_relay_open_without_requester_notice(
+    factory: sessionmaker[Session],
+) -> None:
+    workspace_id, manager_id = _bootstrap(factory, role="manager")
+    with factory() as s:
+        _grant_role(s, workspace_id=workspace_id, user_id=manager_id, role="manager")
+        worker_id = _seed_worker_target(s, workspace_id=workspace_id)
+        _seed_llm_assignment(s, workspace_id=workspace_id, capability="chat.employee")
+        s.commit()
+    manager_client = _client(
+        factory,
+        _ctx(workspace_id=workspace_id, actor_id=manager_id, role="manager"),
+    )
+    opened = manager_client.post(
+        "/w/agent-test/api/v1/agent/manager/relay/request",
+        json={"target_user_id": worker_id, "request": "Can you work Sunday?"},
+    )
+    assert opened.status_code == 201
+    bus = EventBus()
+    appended: list[AgentMessageAppended] = []
+    bus.subscribe(AgentMessageAppended)(appended.append)
+    worker_client = _client(
+        factory,
+        _ctx(workspace_id=workspace_id, actor_id=worker_id, role="worker"),
+        event_bus=bus,
+        llm=_ReplyLLM("What hours would work for you?"),
+    )
+
+    response = worker_client.post(
+        "/w/agent-test/api/v1/agent/employee/message",
+        json={"body": "Hmm"},
+    )
+
+    assert response.status_code == 201
+    with factory() as s:
+        relay = s.scalars(select(AgentRelayRequest)).one()
+        requester_channel = s.scalars(
+            select(ChatChannel).where(
+                ChatChannel.workspace_id == workspace_id,
+                ChatChannel.external_ref == f"agent:manager:{manager_id}",
+            )
+        ).first()
+    assert relay.status == "open"
+    assert relay.response_summary is None
+    assert requester_channel is None
+    assert all(event.actor_user_id != manager_id for event in appended)
+
+
+def test_worker_relay_question_reply_keeps_relay_open_without_requester_notice(
+    factory: sessionmaker[Session],
+) -> None:
+    workspace_id, manager_id = _bootstrap(factory, role="manager")
+    with factory() as s:
+        _grant_role(s, workspace_id=workspace_id, user_id=manager_id, role="manager")
+        worker_id = _seed_worker_target(s, workspace_id=workspace_id)
+        _seed_llm_assignment(s, workspace_id=workspace_id, capability="chat.employee")
+        s.commit()
+    manager_client = _client(
+        factory,
+        _ctx(workspace_id=workspace_id, actor_id=manager_id, role="manager"),
+    )
+    opened = manager_client.post(
+        "/w/agent-test/api/v1/agent/manager/relay/request",
+        json={"target_user_id": worker_id, "request": "Can you work Sunday?"},
+    )
+    assert opened.status_code == 201
+    bus = EventBus()
+    appended: list[AgentMessageAppended] = []
+    bus.subscribe(AgentMessageAppended)(appended.append)
+    worker_client = _client(
+        factory,
+        _ctx(workspace_id=workspace_id, actor_id=worker_id, role="worker"),
+        event_bus=bus,
+        llm=_ReplyLLM("What hours would work for you?"),
+    )
+
+    response = worker_client.post(
+        "/w/agent-test/api/v1/agent/employee/message",
+        json={"body": "Can you clarify the hours?"},
+    )
+
+    assert response.status_code == 201
+    with factory() as s:
+        relay = s.scalars(select(AgentRelayRequest)).one()
+        requester_channel = s.scalars(
+            select(ChatChannel).where(
+                ChatChannel.workspace_id == workspace_id,
+                ChatChannel.external_ref == f"agent:manager:{manager_id}",
+            )
+        ).first()
+    assert relay.status == "open"
+    assert relay.response_summary is None
+    assert requester_channel is None
+    assert all(event.actor_user_id != manager_id for event in appended)
+
+
+def test_worker_relay_answer_skips_invalid_requester_delivery(
+    factory: sessionmaker[Session],
+) -> None:
+    workspace_id, manager_id = _bootstrap(factory, role="manager")
+    with factory() as s:
+        _grant_role(s, workspace_id=workspace_id, user_id=manager_id, role="manager")
+        worker_id = _seed_worker_target(s, workspace_id=workspace_id)
+        _seed_llm_assignment(s, workspace_id=workspace_id, capability="chat.employee")
+        s.commit()
+    manager_client = _client(
+        factory,
+        _ctx(workspace_id=workspace_id, actor_id=manager_id, role="manager"),
+    )
+    opened = manager_client.post(
+        "/w/agent-test/api/v1/agent/manager/relay/request",
+        json={"target_user_id": worker_id, "request": "Can you work Sunday?"},
+    )
+    assert opened.status_code == 201
+    with factory() as s:
+        grant = s.scalars(
+            select(RoleGrant).where(
+                RoleGrant.workspace_id == workspace_id,
+                RoleGrant.user_id == manager_id,
+                RoleGrant.grant_role == "manager",
+            )
+        ).one()
+        grant.revoked_at = _PINNED
+        s.commit()
+    bus = EventBus()
+    appended: list[AgentMessageAppended] = []
+    bus.subscribe(AgentMessageAppended)(appended.append)
+    worker_client = _client(
+        factory,
+        _ctx(workspace_id=workspace_id, actor_id=worker_id, role="worker"),
+        event_bus=bus,
+        llm=_ReplyLLM("Thanks, I will pass that along."),
+    )
+
+    response = worker_client.post(
+        "/w/agent-test/api/v1/agent/employee/message",
+        json={"body": "Yes, but only 2-6pm"},
+    )
+
+    assert response.status_code == 201
+    with factory() as s:
+        relay = s.scalars(select(AgentRelayRequest)).one()
+        requester_channel = s.scalars(
+            select(ChatChannel).where(
+                ChatChannel.workspace_id == workspace_id,
+                ChatChannel.external_ref == f"agent:manager:{manager_id}",
+            )
+        ).first()
+    assert relay.status == "answered"
+    assert relay.response_summary == "Maria responded: Yes, but only 2-6pm"
+    assert requester_channel is None
+    assert all(event.actor_user_id != manager_id for event in appended)
+
+
+def test_worker_relay_lookup_ignores_wrong_target_scope(
+    factory: sessionmaker[Session],
+) -> None:
+    workspace_id, manager_id = _bootstrap(factory, role="manager")
+    with factory() as s:
+        _grant_role(s, workspace_id=workspace_id, user_id=manager_id, role="manager")
+        worker_id = _seed_worker_target(s, workspace_id=workspace_id)
+        _seed_llm_assignment(s, workspace_id=workspace_id, capability="chat.employee")
+        s.commit()
+    manager_client = _client(
+        factory,
+        _ctx(workspace_id=workspace_id, actor_id=manager_id, role="manager"),
+    )
+    opened = manager_client.post(
+        "/w/agent-test/api/v1/agent/manager/relay/request",
+        json={"target_user_id": worker_id, "request": "Can you work Sunday?"},
+    )
+    assert opened.status_code == 201
+    with factory() as s:
+        relay = s.scalars(select(AgentRelayRequest)).one()
+        relay.target_scope = "manager"
+        s.commit()
+    llm = _ReplyLLM("I can help.")
+    worker_client = _client(
+        factory,
+        _ctx(workspace_id=workspace_id, actor_id=worker_id, role="worker"),
+        llm=llm,
+    )
+
+    response = worker_client.post(
+        "/w/agent-test/api/v1/agent/employee/message",
+        json={"body": "Yes, but only 2-6pm"},
+    )
+
+    assert response.status_code == 201
+    with factory() as s:
+        relay = s.scalars(select(AgentRelayRequest)).one()
+    assert relay.status == "open"
+    assert all(
+        "Pending mediated relay" not in message["content"]
+        for message in llm.calls[0]
+        if message["role"] == "system"
+    )
 
 
 def test_agent_relay_request_resolves_unambiguous_target_name(
