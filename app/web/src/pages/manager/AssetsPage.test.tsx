@@ -786,6 +786,12 @@ describe("<AssetsPage>", () => {
   it("styles the new asset form with responsive grids and design-system control radius", () => {
     expect(managerPanelsCss).toContain(".asset-create__grid");
     expect(managerPanelsCss).toMatch(
+      /\.asset-create-dialog\.modal--sheet\[open\] \{[\s\S]*max-height: min\(86dvh, 820px\);[\s\S]*overflow: hidden;/,
+    );
+    expect(managerPanelsCss).toMatch(
+      /\.asset-create__body \{[\s\S]*flex: 1 1 auto;[\s\S]*overflow-y: auto;/,
+    );
+    expect(managerPanelsCss).toMatch(
       /\.asset-create__field input,\n\.asset-create__field select,\n\.asset-create__field textarea \{[^}]*border-radius: 6px;/,
     );
     expect(managerPanelsCss).toMatch(
