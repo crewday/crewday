@@ -99,7 +99,7 @@ const BASE_NAV_ITEMS: SideNavItem[] = [
 
 // §14 "Administration link" — rendered only when the caller holds any
 // active (scope_kind='deployment') role_grants row. LLM provider +
-// capability config lives on /admin/llm (§11), not on the workspace.
+// capability config lives on /admin/llm/graph (§11), not on the workspace.
 const ADMINISTRATION_LINK: SideNavItem = {
   type: "link",
   to: "/admin",

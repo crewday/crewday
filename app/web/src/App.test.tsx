@@ -17,6 +17,7 @@ import App from "./App";
 const mockRenders = vi.hoisted(() => ({
   adminDashboardPage: vi.fn(),
   adminLayout: vi.fn(),
+  adminLlmPage: vi.fn(),
   clientBillableHoursPage: vi.fn(),
   clientInvoicesPage: vi.fn(),
   clientLayout: vi.fn(),
@@ -131,6 +132,13 @@ vi.mock("@/pages/admin/DashboardPage", () => ({
   default: function MockAdminDashboardPage(): ReactElement {
     mockRenders.adminDashboardPage();
     return <main data-testid="admin-dashboard">Admin dashboard</main>;
+  },
+}));
+
+vi.mock("@/pages/admin/LlmPage", () => ({
+  default: function MockAdminLlmPage(): ReactElement {
+    mockRenders.adminLlmPage();
+    return <main data-testid="admin-llm-graph">Admin LLM graph</main>;
   },
 }));
 
@@ -596,6 +604,26 @@ describe("App public root and protected deep links", () => {
     });
     expect(await screen.findByTestId("admin-dashboard")).toBeInTheDocument();
     expect(mockRenders.adminLayout).toHaveBeenCalled();
+  });
+
+  it("redirects bare admin LLM to the dedicated graph route", async () => {
+    renderAppAt("/admin/llm", "manager");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/admin/llm/graph");
+    });
+    expect(await screen.findByTestId("admin-llm-graph")).toBeInTheDocument();
+    expect(mockRenders.adminLlmPage).toHaveBeenCalled();
+  });
+
+  it("renders the dedicated admin LLM graph route directly", async () => {
+    renderAppAt("/admin/llm/graph", "manager");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/admin/llm/graph");
+    });
+    expect(await screen.findByTestId("admin-llm-graph")).toBeInTheDocument();
+    expect(mockRenders.adminLlmPage).toHaveBeenCalled();
   });
 
   it("keeps the authenticated workspace picker on the bare host", async () => {

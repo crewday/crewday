@@ -262,7 +262,7 @@ component mounts with `role="admin"`. Its characteristics:
   Route: /admin/usage
   Params: ws=bernard
   Entity: workspace Bernard (id=ws_01H…)
-  Neighbouring routes: /admin/llm, /admin/workspaces, /admin/settings
+  Neighbouring routes: /admin/llm/graph, /admin/workspaces, /admin/settings
   ```
 
   With this, the admin can say "restart that capability" or
@@ -665,8 +665,9 @@ The LLM plumbing is a three-layer registry modelled on the pattern in
 [`micasa-dev/fj2`](https://github.com/micasa-dev/fj2)'s `llm_providers`
 app, adapted to crew.day's FastAPI + SQLAlchemy stack and semantic-CSS
 front-end. All three tables are **deployment-scope**; workspaces never
-see these rows directly. Every table is edited from the `/admin/llm`
-graph (§ "LLM graph admin") or its CLI equivalents (§13).
+see these rows directly. Every table is edited from the
+`/admin/llm/graph` page (§ "LLM graph admin") or its CLI
+equivalents (§13).
 
 ### `llm_provider`
 
@@ -704,7 +705,7 @@ llm_provider
   `envelope:llm:openrouter:default`) that the server resolves through
   `secret_envelope` (§15). The raw key is never returned by the API,
   never logged, and never appears in `llm_call.*` payloads.
-- Until the full `/admin/llm` provider graph is the only operator
+- Until the full `/admin/llm/graph` page is the only operator
   surface, the default OpenRouter adapter also accepts a transitional
   deployment setting named `openrouter.api_key_envelope_id`. Its value
   is only the referenced `secret_envelope.id`; writes accept plaintext
@@ -763,7 +764,7 @@ Every crew.day capability in the catalog below carries a
 `required_capabilities` list. Saving an `llm_assignment` whose
 `provider_model` resolves to a model missing one of the required tags
 returns `422 assignment_missing_capability` with the concrete diff.
-The `/admin/llm` graph renders the offending edge in red until the
+The `/admin/llm/graph` page renders the offending edge in red until the
 assignment is fixed. This is the server-side guard against the
 "assigned a text-only model to receipt OCR" foot-gun.
 
@@ -1039,7 +1040,7 @@ writes a deployment inheritance row that points somewhere else.
 
 Inherited chains are validated against the **child** capability's
 `required_capabilities`, not only against the parent assignment's own
-tags. This is visible in `/admin/llm`: `voice.transcribe` and
+tags. This is visible in `/admin/llm/graph`: `voice.transcribe` and
 `feedback.embed` can inherit the `default` chain structurally, but the
 Gemma chat model is marked incompatible because it lacks
 `audio_input` / `embeddings`; calls fail closed until an operator adds
@@ -1054,7 +1055,7 @@ At first boot the deployment is seeded with:
 |-------------------------|-----------------------------------------------------------------------------|-----------|
 | `default`               | OpenRouter × `google/gemma-4-31b-it` (priority 0)                           | Matches the user's Gemma pick; inherited by capabilities without their own chain. |
 | capabilities without direct chains | inherit `default` unless a deployment inheritance edge says otherwise | Keeps ordinary LLM features auto-configured while preserving direct override precedence. |
-| `voice.transcribe`      | inherits `default`, but is **invalid until an audio model is assigned**      | The inherited Gemma chat model lacks `audio_input`, so routing fails closed and `/admin/llm` shows the mismatch. |
+| `voice.transcribe`      | inherits `default`, but is **invalid until an audio model is assigned**      | The inherited Gemma chat model lacks `audio_input`, so routing fails closed and `/admin/llm/graph` shows the mismatch. |
 | `feedback.embed`        | inherits `default`, but is **invalid until an embedding model is assigned**  | The inherited Gemma chat model lacks `embeddings`; unsupported model use is never silent. |
 | `documents.ocr`         | inherits `default` only when the model has the required `vision` tag         | Local extractors handle the common cases; the LLM fallback remains visibly governed by model capability tags. See §21 "Document text extraction". |
 
@@ -1063,8 +1064,8 @@ The capability catalogue itself (the closed enum of keys —
 …) and the **deployment-level seed edges** (`chat.admin →
 chat.manager` plus implicit fallback to `default`) are declared in
 code under `app/domain/llm/` and applied at boot. Deployment admins
-override the chain from `/admin/llm` without a redeploy by writing
-deployment-level rows into `llm_assignment` and
+override the chain from `/admin/llm/graph` without a redeploy by
+writing deployment-level rows into `llm_assignment` and
 `llm_capability_inheritance`. Every workspace sees the same assignment
 and inheritance graph; capability-specific rows still take precedence
 over inherited defaults.
@@ -1072,7 +1073,7 @@ over inherited defaults.
 ### SSE: `llm.assignment.changed`
 
 An internal deployment-scope invalidation event published whenever
-the `/admin/llm` surface mutates provider/model/provider-model
+the `/admin/llm/graph` surface mutates provider/model/provider-model
 registry rows, an `llm_assignment`, or a
 `llm_capability_inheritance` row (create, update, delete, reorder,
 enable/disable). Assignments and inheritance are not workspace
@@ -1093,7 +1094,7 @@ overrides, so the event is never routed on `/w/<slug>/events`.
   without waiting for the TTL to expire. Workspace context is still
   carried by the call path for usage, budget, consent, and audit
   attribution; it does not partition the assignment cache.
-- **Consumer (admin SPA):** the `/admin/llm` LlmPage listens to the
+- **Consumer (admin SPA):** the `/admin/llm/graph` LlmPage listens to the
   deployment `/admin/events` stream event
   `admin.llm.assignment_updated` and invalidates its admin LLM-graph
   queries so providers, models, assignments, and capability
@@ -1221,15 +1222,16 @@ the `app/config/llm_pricing.yml` file from earlier drafts is retired.
 
 The sync job does **not** mutate the model registry — new models
 announced by OpenRouter do not auto-appear. Operators import models
-explicitly via `/admin/llm` or `crewday admin llm model create`. This
+explicitly via `/admin/llm/graph` or `crewday admin llm model create`. This
 keeps the model catalogue small and intentional.
 
 ## LLM graph admin
 
-The `/admin/llm` page presents the registry as a three-column visual
-graph (providers → models → assignments), modelled on fj2's
+The `/admin/llm/graph` page presents the registry as a three-column
+visual graph (providers → models → assignments), modelled on fj2's
 `admin/llm_graph/` interface. The tabular page from earlier drafts is
-retired.
+retired. `/admin/llm` redirects here so old bookmarks and agent page
+refs land on the graph intentionally.
 
 - **Column 1 — Providers.** One card per `llm_provider`; shows type,
   endpoint host, enabled state, API-key status (present / missing /
@@ -1918,7 +1920,7 @@ that the agent itself reads.
   default auto-upgrades unmodified rows and preserves operator
   edits.
 - Operators edit per-deployment overrides at `/admin/agent-docs`
-  (a slide-over on the `/admin/llm` page, mirroring the prompt
+  (a sibling route in the admin LLM sidebar group, mirroring the prompt
   library) or via `crewday admin agent-docs edit <slug>`.
 - Reset-to-default and revision history follow the shared
   hash-self-seeded admin contract (§02). Retention follows
@@ -2179,7 +2181,7 @@ low-token calls may therefore carry `cost_usd > 0` while
 `cost_cents = 0`. The background worker aggregates `cost_cents` into
 the rolling meter used by the **workspace usage budget** (§ "Workspace
 usage budget" below), preserving the existing cent-denominated cap
-contract, while `/admin/llm` per-call reporting surfaces `cost_usd`.
+contract, while `/admin/llm/graph` per-call reporting surfaces `cost_usd`.
 Per-call `max_tokens` caps live on the assignment / provider-model /
 model cascade; the workspace envelope is enforced before the client
 picks a chain rung, as an envelope over every capability.
@@ -2332,7 +2334,8 @@ the call for telemetry but the cost contribution is zero.
     maths keeps the precise ratio for the at-cap decision.
   - Accessible to every user whose grant role passes the existing
     `settings.view` action (owners and managers by default; §05).
-- **Admin LLM page** (`/admin/llm`). The three-column graph
+- **Admin LLM graph page** (`/admin/llm/graph`; `/admin/llm`
+  redirects here). The three-column graph
   (providers → models → assignments) plus the prompt-library
   slide-over, dollar amounts, token counts, per-capability spend,
   per-workspace spend, provider key status, and the sync-pricing
@@ -2375,7 +2378,7 @@ reported `usage.total_tokens` and the cost estimate computed from the
 serving `llm_provider_model`. The background worker aggregates daily
 totals into `llm_usage_daily` (one row per `(day, workspace_id,
 capability, provider_model_id)`), which powers the per-capability
-breakdowns on the `/admin/llm` page and the rolling 30-day meter. The
+breakdowns on the `/admin/llm/graph` page and the rolling 30-day meter. The
 per-capability daily dollar caps remain a useful throttle on a single
 noisy capability; they run **after** the workspace envelope check so
 the workspace-level refusal wins when both would fire.
@@ -2428,7 +2431,7 @@ the workspace-level refusal wins when both would fire.
   day one does.
 - Auto-import of models from OpenRouter's `/models` endpoint. The
   weekly sync touches prices only; the model catalogue is curated by
-  hand via `/admin/llm`.
+  hand via `/admin/llm/graph`.
 - A Redis dependency. Rolling meter, daily summaries, and
   `raw_response_json` all live in the DB with worker-driven TTL
   sweeps. If a deployment grows past SQLite's comfort, the migration

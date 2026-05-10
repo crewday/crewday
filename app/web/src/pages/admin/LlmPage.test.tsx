@@ -59,7 +59,7 @@ function Harness(): ReactElement {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={["/admin/llm"]}>
+      <MemoryRouter initialEntries={["/admin/llm/graph"]}>
         <LlmPage />
       </MemoryRouter>
     </QueryClientProvider>
@@ -125,7 +125,7 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
 
       expect(await screen.findByText("OpenRouter")).toBeInTheDocument();
-      expect(screen.getByText("LLM & agents")).toBeInTheDocument();
+      expect(screen.getByText("LLM graph")).toBeInTheDocument();
       expect(screen.getByText("Gemma 4 31B IT")).toBeInTheDocument();
       expect(screen.getAllByText("voice.transcribe").length).toBeGreaterThan(0);
       expect(screen.getByText("Provider-model pricing")).toBeInTheDocument();

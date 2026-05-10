@@ -147,7 +147,8 @@ workspace once and the rest of the tree is unaware of the prefix.
 ```
 /admin                     → redirects to /admin/dashboard
 /admin/dashboard           → operator landing page: deployment health, recent audit, usage
-/admin/llm                 → LLM providers, capability → model, pricing, deployment-wide spend
+/admin/llm                 → redirects to /admin/llm/graph
+/admin/llm/graph           → LLM providers, capability → model, pricing, deployment-wide spend
 /admin/agent-docs          → system-side virtual files (§11 "Agent knowledge tools" — agent_doc table, §02)
 /admin/chat-gateway        → deployment-default WhatsApp provider, templates, webhook, overrides (§23)
 /admin/usage               → per-workspace spend, cap adjust, pause state
@@ -615,7 +616,7 @@ ranking the user sees is the relevance ranking the agent sees.
 
 The former `/w/<slug>/llm` page is gone in v1 — LLM provider and
 capability config is a deployment-level concern rendered on
-`/admin/llm` (§11, "Admin shell" below). Workspace managers
+`/admin/llm/graph` (§11, "Admin shell" below). Workspace managers
 still see the "Agent usage — N%" tile on `/settings` (§11).
 
 ### Administration link
@@ -710,10 +711,11 @@ a different product. What differs:
 - **No workspace slug**, no workspace switcher. A single "Back
   to workspaces" affordance in the nav footer returns the user
   to `/select-workspace`.
-- **Left-nav sections** (`OPERATE` / `USAGE` / `ADMIN`):
+- **Left-nav sections** (`OPERATE` / `LLM` / `USAGE` / `ADMIN`):
     - OPERATE: Dashboard, Workspaces, Signup
-    - USAGE: LLM & agents, Usage
-    - ADMIN: Admins, Permissions, Settings, Audit log
+    - LLM: Graph/config, Prompts/docs, Chat gateway
+    - USAGE: Usage
+    - ADMIN: Admins, Settings, Audit log
 - **Right-rail agent** is the same shared `<AgentSidebar />`
   component with `role="admin"`. It hits
   `/admin/api/v1/agent/{log,message,actions}` instead of the

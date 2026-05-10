@@ -478,7 +478,8 @@ export default function App() {
               <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
               <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
               <Route path="/admin/chat-gateway" element={<AdminChatGatewayPage />} />
-              <Route path="/admin/llm" element={<AdminLlmPage />} />
+              <Route path="/admin/llm" element={<Navigate to="/admin/llm/graph" replace />} />
+              <Route path="/admin/llm/graph" element={<AdminLlmPage />} />
               <Route path="/admin/agent-docs" element={<AdminAgentDocsPage />} />
               <Route path="/admin/usage" element={<AdminUsagePage />} />
               <Route path="/admin/workspaces" element={<AdminWorkspacesPage />} />

@@ -1133,7 +1133,7 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
   "llm.assignment.changed": (_event, qc) => {
     // §11 LLM router (`app/domain/llm/router.py`) drops its
     // workspace-scoped resolver cache on this event; the admin
-    // `/admin/llm` graph reads `qk.adminLlmGraph()` for the
+    // `/admin/llm/graph` reads `qk.adminLlmGraph()` for the
     // assignment chain + capability inheritance. Whole-workspace
     // invalidation matches the backend posture (the event payload
     // does not name the affected capability, so narrowing here

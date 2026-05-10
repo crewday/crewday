@@ -31,6 +31,18 @@ import { type ReactElement } from "react";
 import AdminLayout from "./AdminLayout";
 import { __resetApiProvidersForTests } from "@/lib/api";
 
+vi.mock("@/components/AgentSidebar", () => ({
+  default: function MockAgentSidebar(): ReactElement {
+    return <aside data-testid="admin-agent-sidebar" />;
+  },
+}));
+
+vi.mock("@/components/WorkspaceSwitcher", () => ({
+  default: function MockWorkspaceSwitcher(): ReactElement {
+    return <div data-testid="workspace-switcher" />;
+  },
+}));
+
 // ── Test harness ──────────────────────────────────────────────────
 
 interface FakeResponse {
@@ -96,6 +108,7 @@ function Harness({ initial = "/admin/dashboard" }: { initial?: string }): ReactE
               path="/admin/dashboard"
               element={<div data-testid="admin-dashboard">admin dashboard</div>}
             />
+            <Route path="/admin/llm/*" element={<div data-testid="admin-llm">admin llm</div>} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -112,6 +125,72 @@ afterEach(() => {
 // ── Tests ─────────────────────────────────────────────────────────
 
 describe("<AdminLayout> — role guard (closes cd-28s7)", () => {
+  it("groups LLM admin routes and highlights nested graph routes", async () => {
+    const { restore } = installFetch({
+      "/api/v1/me": [
+        {
+          status: 200,
+          body: {
+            role: "manager",
+            theme: "light",
+            agent_sidebar_collapsed: false,
+            employee: { id: "emp_admin", name: "Admin" },
+            manager_name: "Admin",
+            today: "2026-05-02",
+            now: "2026-05-02T10:00:00Z",
+            user_id: "01HZ_ADMIN",
+            agent_approval_mode: "auto",
+            current_workspace_id: "ws_1",
+            available_workspaces: [],
+            client_binding_org_ids: [],
+            is_deployment_admin: true,
+            is_deployment_owner: false,
+          },
+        },
+      ],
+      "/admin/api/v1/me": [
+        {
+          status: 200,
+          body: {
+            display_name: "Deployment Admin",
+            is_owner: false,
+          },
+        },
+      ],
+    });
+
+    try {
+      render(
+        <Harness initial="/admin/llm/graph/providers" />,
+      );
+
+      expect(await screen.findByTestId("admin-agent-sidebar")).toBeInTheDocument();
+      expect(screen.getByText("LLM")).toBeInTheDocument();
+      expect(screen.getByText("USAGE")).toBeInTheDocument();
+
+      const graph = screen.getByRole("link", { name: /Graph\/config/ });
+      expect(graph).toHaveAttribute("href", "/admin/llm/graph");
+      expect(graph).toHaveClass("nav-link--active");
+      expect(screen.getByRole("link", { name: /Prompts\/docs/ })).toHaveAttribute(
+        "href",
+        "/admin/agent-docs",
+      );
+      expect(screen.getByRole("link", { name: /Chat gateway/ })).toHaveAttribute(
+        "href",
+        "/admin/chat-gateway",
+      );
+      expect(screen.getByRole("link", { name: /^Usage$/ })).toHaveAttribute(
+        "href",
+        "/admin/usage",
+      );
+      expect(screen.getByRole("link", { name: /Dashboard/ })).not.toHaveClass(
+        "nav-link--active",
+      );
+    } finally {
+      restore();
+    }
+  });
+
   it("redirects a signed-in non-admin to RoleHome instead of mounting the admin outlet", async () => {
     const { restore } = installFetch({
       // /api/v1/me — caller is a worker, NOT a deployment admin.

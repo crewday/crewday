@@ -26,7 +26,8 @@ import { useLlmGraphEdges } from "./useLlmGraphEdges";
 import type { Column, EdgeLayout, Selection } from "./types";
 
 const sub =
-  "Deployment-wide LLM config: providers, models, provider-model pricing, capability assignment chains, and the prompt library. Shared by every workspace.";
+  "Deployment-wide LLM graph/config: providers, models, provider-model pricing, capability assignment chains, and the prompt library. Shared by every workspace.";
+const title = "LLM graph";
 
 export default function AdminLlmPage() {
   // code-health: ignore[nloc] LLM graph route already delegates columns, alerts, stats, pricing, calls, and drawers.
@@ -201,14 +202,14 @@ export default function AdminLlmPage() {
 
   if (graphQ.isPending || callsQ.isPending || promptsQ.isPending) {
     return (
-      <DeskPage title="LLM & agents" sub={sub} actions={actions} overflow={overflow}>
+      <DeskPage title={title} sub={sub} actions={actions} overflow={overflow}>
         <Loading />
       </DeskPage>
     );
   }
   if (!graph || !callsQ.data || !promptsQ.data || !indexes) {
     return (
-      <DeskPage title="LLM & agents" sub={sub} actions={actions} overflow={overflow}>
+      <DeskPage title={title} sub={sub} actions={actions} overflow={overflow}>
         Failed to load.
       </DeskPage>
     );
@@ -219,7 +220,7 @@ export default function AdminLlmPage() {
   const syncResult = syncMut.data;
 
   return (
-    <DeskPage title="LLM & agents" sub={sub} actions={actions} overflow={overflow}>
+    <DeskPage title={title} sub={sub} actions={actions} overflow={overflow}>
       <LlmStats graph={graph} />
       <LlmAlerts graph={graph} syncResult={syncResult} />
 
