@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Outlet } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
@@ -43,13 +43,19 @@ const ORGS = [
 function installFetch({
   organizationsStatus = 200,
   detailStatus = 200,
+  organizations = ORGS,
+  createStatus = 201,
 }: {
   organizationsStatus?: number;
   detailStatus?: number;
+  organizations?: typeof ORGS;
+  createStatus?: number;
 } = {}) {
   const calls: string[] = [];
+  const bodies: unknown[] = [];
+  let currentOrgs = [...organizations];
   const original = globalThis.fetch;
-  const spy = vi.fn(async (url: string | URL | Request) => {
+  const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const resolved = typeof url === "string" ? url : url.toString();
     calls.push(resolved);
     if (resolved === "/w/acme/api/v1/me") {
@@ -71,13 +77,43 @@ function installFetch({
       });
     }
     if (resolved === "/w/acme/api/v1/billing/organizations") {
-      return jsonResponse({ data: ORGS }, organizationsStatus);
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body));
+        bodies.push(body);
+        if (createStatus !== 201) {
+          return jsonResponse(
+            {
+              type: "https://crew.day/errors/validation",
+              title: "Validation failed",
+              detail: "Organization could not be created.",
+              errors: [{ loc: ["body", "display_name"], msg: "Display name is already in use." }],
+            },
+            createStatus,
+          );
+        }
+        const created = {
+          id: "org_new",
+          workspace_id: "ws_owner",
+          kind: body.kind,
+          display_name: body.display_name,
+          billing_address: body.billing_address ?? {},
+          tax_id: null,
+          default_currency: body.default_currency ?? "EUR",
+          contact_email: null,
+          contact_phone: null,
+          notes_md: null,
+          created_at: "2026-05-10T00:00:00Z",
+          archived_at: null,
+        };
+        currentOrgs = [...currentOrgs, created];
+        return jsonResponse(created, 201);
+      }
+      return jsonResponse({ data: currentOrgs }, organizationsStatus);
     }
-    if (resolved === "/w/acme/api/v1/billing/organizations/org_client") {
-      return jsonResponse(ORGS[0], detailStatus);
-    }
-    if (resolved === "/w/acme/api/v1/billing/organizations/org_vendor") {
-      return jsonResponse(ORGS[1], detailStatus);
+    if (resolved.startsWith("/w/acme/api/v1/billing/organizations/")) {
+      const id = resolved.split("/").at(-1);
+      const org = currentOrgs.find((row) => row.id === id);
+      if (org) return jsonResponse(org, detailStatus);
     }
     if (resolved === "/w/acme/api/v1/work_roles") {
       return jsonResponse({
@@ -91,6 +127,7 @@ function installFetch({
   (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
   return {
     calls,
+    bodies,
     restore: () => {
       (globalThis as { fetch: typeof fetch }).fetch = original;
     },
@@ -114,6 +151,13 @@ beforeEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("acme");
+  HTMLDialogElement.prototype.showModal = vi.fn(function showModal(this: HTMLDialogElement) {
+    this.setAttribute("open", "");
+  });
+  HTMLDialogElement.prototype.close = vi.fn(function close(this: HTMLDialogElement) {
+    this.removeAttribute("open");
+    this.dispatchEvent(new Event("close"));
+  });
 });
 
 afterEach(() => {
@@ -241,7 +285,7 @@ describe("<OrganizationsPage>", () => {
       expect(screen.getAllByText("Luxury Villas").length).toBeGreaterThan(0);
       expect(screen.getByText("CleanCo")).toBeInTheDocument();
       expect(screen.getAllByText("Client").length).toBeGreaterThan(0);
-      expect(screen.getByText("Supplier")).toBeInTheDocument();
+      expect(screen.getAllByText("Supplier").length).toBeGreaterThan(0);
       expect(await screen.findByText("PT-123")).toBeInTheDocument();
       expect(screen.getByText("Preferred monthly rollup.")).toBeInTheDocument();
       expect(screen.getByText("No rates on file. Shifts will surface in the \"unpriced\" CSV bucket.")).toBeInTheDocument();
@@ -274,6 +318,101 @@ describe("<OrganizationsPage>", () => {
       render(<Harness />);
       expect(await screen.findByText("Failed to load.")).toBeInTheDocument();
       expect(screen.queryByText("No organizations in this workspace.")).toBeNull();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("opens the create form from the populated state and selects the created organization", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness initial="/w/acme/organizations" />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "+ New organization" }));
+      expect(screen.getByRole("heading", { name: "New organization" })).toBeInTheDocument();
+
+      fireEvent.change(screen.getByLabelText("Kind"), { target: { value: "client" } });
+      fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Ocean Homes" } });
+      fireEvent.change(screen.getByLabelText("Default currency"), { target: { value: "usd" } });
+      fireEvent.change(screen.getByLabelText("Address line 1"), { target: { value: "1 Harbor Way" } });
+      fireEvent.change(screen.getByLabelText("Country"), { target: { value: "US" } });
+      fireEvent.click(screen.getByRole("button", { name: "Create organization" }));
+
+      await waitFor(() =>
+        expect(fake.calls.filter((call) => call === "/w/acme/api/v1/billing/organizations").length)
+          .toBeGreaterThan(1),
+      );
+      expect(fake.bodies).toContainEqual({
+        kind: "client",
+        display_name: "Ocean Homes",
+        default_currency: "USD",
+        billing_address: { line1: "1 Harbor Way", country: "US" },
+      });
+      expect(await screen.findByRole("heading", { name: "Ocean Homes" })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "New organization" })).toBeNull();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("opens the create form from the empty state and validates required fields", async () => {
+    const fake = installFetch({ organizations: [] });
+    try {
+      render(<Harness initial="/w/acme/organizations" />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "+ New organization" }));
+      fireEvent.click(screen.getByRole("button", { name: "Create organization" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Enter a display name before creating the organization.",
+      );
+      expect(fake.bodies).toHaveLength(0);
+
+      fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "New Client" } });
+      fireEvent.click(screen.getByRole("button", { name: "Create organization" }));
+
+      expect(await screen.findByRole("heading", { name: "New Client" })).toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("keeps API validation failures in the create form", async () => {
+    const fake = installFetch({ createStatus: 422 });
+    try {
+      render(<Harness initial="/w/acme/organizations" />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "+ New organization" }));
+      fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Luxury Villas" } });
+      fireEvent.click(screen.getByRole("button", { name: "Create organization" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Display name is already in use.");
+      expect(screen.getByRole("heading", { name: "New organization" })).toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("keeps legal name out of the create payload until the API accepts it", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness initial="/w/acme/organizations" />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "+ New organization" }));
+      fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Ocean Homes" } });
+      fireEvent.change(screen.getByLabelText("Legal name"), { target: { value: "Ocean Homes LLC" } });
+
+      expect(
+        screen.getByText(/current billing API does not accept legal_name yet/i),
+      ).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Create organization" }));
+
+      await screen.findByRole("heading", { name: "Ocean Homes" });
+      expect(fake.bodies).toContainEqual({
+        kind: "client",
+        display_name: "Ocean Homes",
+      });
     } finally {
       fake.restore();
     }

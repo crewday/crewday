@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { fetchJson } from "@/lib/api";
+import { useMemo, useRef, useState, type FormEvent } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import DeskPage from "@/components/DeskPage";
@@ -34,6 +34,7 @@ interface BillingOrganizationPayload {
   workspace_id: string;
   kind: "client" | "vendor" | "mixed" | string;
   display_name: string;
+  legal_name?: string | null;
   billing_address?: Record<string, object>;
   tax_id: string | null;
   default_currency: string;
@@ -45,6 +46,27 @@ interface BillingOrganizationPayload {
 }
 
 type ListResponse<T> = T[] | { data: T[] };
+type BillingOrganizationKind = "client" | "vendor" | "mixed";
+
+interface OrganizationCreateBody {
+  kind: BillingOrganizationKind;
+  display_name: string;
+  billing_address?: Record<string, string>;
+  default_currency?: string;
+}
+
+interface OrganizationCreateDraft {
+  kind: BillingOrganizationKind;
+  displayName: string;
+  legalName: string;
+  defaultCurrency: string;
+  addressLine1: string;
+  addressLine2: string;
+  locality: string;
+  region: string;
+  postalCode: string;
+  country: string;
+}
 
 // `WorkRole` is not currently exported from api.ts — read the legacy
 // `Role` shape (id + name) used everywhere else for the rate table.
@@ -65,7 +87,7 @@ function mapOrganization(row: BillingOrganizationPayload): Organization {
     id: row.id,
     workspace_id: row.workspace_id,
     name: row.display_name,
-    legal_name: null,
+    legal_name: row.legal_name ?? null,
     is_client: isClient,
     is_supplier: isSupplier,
     default_currency: row.default_currency,
@@ -90,6 +112,14 @@ function mapOrganization(row: BillingOrganizationPayload): Organization {
 async function fetchOrganizations(): Promise<Organization[]> {
   const rows = await fetchJson<ListResponse<BillingOrganizationPayload>>("/api/v1/billing/organizations");
   return listData(rows).map(mapOrganization);
+}
+
+async function createOrganization(body: OrganizationCreateBody): Promise<Organization> {
+  const row = await fetchJson<BillingOrganizationPayload>("/api/v1/billing/organizations", {
+    method: "POST",
+    body,
+  });
+  return mapOrganization(row);
 }
 
 async function fetchOrganizationDetail(organizationId: string): Promise<OrganizationDetailPayload> {
@@ -132,6 +162,12 @@ export default function OrganizationsPage() {
   const orgs = orgsQ.data ?? [];
   const visibleOrgs = useMemo(() => orgs, [orgs]);
   const selectedOid = activeOid ?? visibleOrgs[0]?.id ?? null;
+  const createButton = (
+    <NewOrganizationButton
+      workspaceId={workspaceId ?? "active"}
+      onCreated={(organization) => setActiveOid(organization.id)}
+    />
+  );
 
   const detailQ = useQuery({
     queryKey: qk.organization(selectedOid ?? ""),
@@ -153,7 +189,7 @@ export default function OrganizationsPage() {
     return (
       <DeskPage
         title="Organizations"
-        actions={<button className="btn btn--moss">+ New organization</button>}
+        actions={createButton}
       >
         <div className="panel">
           <p className="muted">
@@ -170,7 +206,7 @@ export default function OrganizationsPage() {
     <DeskPage
       title="Organizations"
       sub="Clients we bill, suppliers that bill us, and the contracts in between."
-      actions={<button className="btn btn--moss">+ New organization</button>}
+      actions={createButton}
     >
       <section className="grid grid--split">
         <div className="panel">
@@ -208,6 +244,307 @@ export default function OrganizationsPage() {
       </section>
     </DeskPage>
   );
+}
+
+function NewOrganizationButton({
+  workspaceId,
+  onCreated,
+}: {
+  workspaceId: string;
+  onCreated: (organization: Organization) => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const queryClient = useQueryClient();
+  const [draft, setDraft] = useState<OrganizationCreateDraft>(() => emptyOrganizationDraft());
+  const [formError, setFormError] = useState<string | null>(null);
+  const create = useMutation({
+    mutationFn: createOrganization,
+    onSuccess: async (organization) => {
+      setFormError(null);
+      await queryClient.invalidateQueries({ queryKey: qk.organizations(workspaceId) });
+      await queryClient.invalidateQueries({ queryKey: qk.organization(organization.id) });
+      onCreated(organization);
+      dialogRef.current?.close();
+    },
+    onError: (error) => setFormError(organizationCreateErrorMessage(error)),
+  });
+
+  function openDialog(): void {
+    setFormError(null);
+    dialogRef.current?.showModal();
+  }
+
+  function reset(): void {
+    if (create.isPending) return;
+    setDraft(emptyOrganizationDraft());
+    setFormError(null);
+    create.reset();
+  }
+
+  function update<K extends keyof OrganizationCreateDraft>(
+    key: K,
+    value: OrganizationCreateDraft[K],
+  ): void {
+    setDraft((current) => ({ ...current, [key]: value }));
+    setFormError(null);
+  }
+
+  function submit(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    if (create.isPending) return;
+    const body = buildOrganizationCreateBody(draft);
+    if (typeof body === "string") {
+      setFormError(body);
+      return;
+    }
+    setFormError(null);
+    create.mutate(body);
+  }
+
+  const formErrorId = formError ? "organization-create-error" : undefined;
+  const nameInvalid = formError === "Enter a display name before creating the organization.";
+  const currencyInvalid = formError === "Use a three-letter currency code, such as USD.";
+
+  return (
+    <>
+      <button type="button" className="btn btn--moss" onClick={openDialog}>
+        + New organization
+      </button>
+
+      <dialog
+        className="modal modal--sheet asset-create-dialog"
+        ref={dialogRef}
+        aria-labelledby="new-organization-title"
+        onCancel={(event) => {
+          if (create.isPending) event.preventDefault();
+        }}
+        onClose={reset}
+      >
+        <form className="asset-create" onSubmit={submit} noValidate>
+          <header className="asset-create__head">
+            <div>
+              <p className="asset-create__eyebrow">Billing organization</p>
+              <h3 id="new-organization-title" className="asset-create__title">
+                New organization
+              </h3>
+              <p className="asset-create__sub">
+                Add a client, supplier, or mixed counterparty for billing.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="asset-create__close"
+              disabled={create.isPending}
+              onClick={() => dialogRef.current?.close()}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </header>
+
+          <div className="asset-create__body">
+            <section className="asset-create__section" aria-labelledby="organization-create-basics">
+              <h4 id="organization-create-basics" className="asset-create__section-title">
+                Basics
+              </h4>
+              <div className="asset-create__grid">
+                <label className="field asset-create__field">
+                  <span>Kind</span>
+                  <select
+                    value={draft.kind}
+                    onChange={(event) =>
+                      update("kind", event.target.value as BillingOrganizationKind)
+                    }
+                  >
+                    <option value="client">Client</option>
+                    <option value="vendor">Supplier</option>
+                    <option value="mixed">Client and supplier</option>
+                  </select>
+                </label>
+                <label className="field asset-create__field">
+                  <span>Default currency</span>
+                  <input
+                    aria-invalid={currencyInvalid}
+                    aria-describedby={currencyInvalid ? formErrorId : undefined}
+                    value={draft.defaultCurrency}
+                    onChange={(event) => update("defaultCurrency", event.target.value)}
+                    placeholder="Workspace default"
+                    maxLength={3}
+                    autoCapitalize="characters"
+                  />
+                </label>
+              </div>
+              <label className="field asset-create__field">
+                <span>Display name</span>
+                <input
+                  autoFocus
+                  required
+                  aria-invalid={nameInvalid}
+                  aria-describedby={nameInvalid ? formErrorId : undefined}
+                  value={draft.displayName}
+                  onChange={(event) => update("displayName", event.target.value)}
+                  placeholder="e.g. Dupont Family"
+                />
+              </label>
+              <label className="field asset-create__field">
+                <span>Legal name</span>
+                <input
+                  value={draft.legalName}
+                  onChange={(event) => update("legalName", event.target.value)}
+                  placeholder="Optional invoice name"
+                />
+              </label>
+            </section>
+
+            <section className="asset-create__section" aria-labelledby="organization-create-address">
+              <h4 id="organization-create-address" className="asset-create__section-title">
+                Billing address
+              </h4>
+              <label className="field asset-create__field">
+                <span>Address line 1</span>
+                <input
+                  value={draft.addressLine1}
+                  onChange={(event) => update("addressLine1", event.target.value)}
+                  autoComplete="address-line1"
+                />
+              </label>
+              <label className="field asset-create__field">
+                <span>Address line 2</span>
+                <input
+                  value={draft.addressLine2}
+                  onChange={(event) => update("addressLine2", event.target.value)}
+                  autoComplete="address-line2"
+                />
+              </label>
+              <div className="asset-create__grid">
+                <label className="field asset-create__field">
+                  <span>City or locality</span>
+                  <input
+                    value={draft.locality}
+                    onChange={(event) => update("locality", event.target.value)}
+                    autoComplete="address-level2"
+                  />
+                </label>
+                <label className="field asset-create__field">
+                  <span>State or region</span>
+                  <input
+                    value={draft.region}
+                    onChange={(event) => update("region", event.target.value)}
+                    autoComplete="address-level1"
+                  />
+                </label>
+              </div>
+              <div className="asset-create__grid">
+                <label className="field asset-create__field">
+                  <span>Postal code</span>
+                  <input
+                    value={draft.postalCode}
+                    onChange={(event) => update("postalCode", event.target.value)}
+                    autoComplete="postal-code"
+                  />
+                </label>
+                <label className="field asset-create__field">
+                  <span>Country</span>
+                  <input
+                    value={draft.country}
+                    onChange={(event) => update("country", event.target.value)}
+                    autoComplete="country-name"
+                    placeholder="US"
+                  />
+                </label>
+              </div>
+            </section>
+
+            {draft.legalName.trim() ? (
+              <p className="form-notice">
+                The current billing API does not accept legal_name yet, so this
+                create will save the organization without it.
+              </p>
+            ) : null}
+            {formError && (
+              <p id="organization-create-error" className="form-error" role="alert">
+                {formError}
+              </p>
+            )}
+          </div>
+
+          <footer className="asset-create__footer">
+            <button
+              type="button"
+              className="btn btn--ghost"
+              disabled={create.isPending}
+              onClick={() => dialogRef.current?.close()}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn btn--moss" disabled={create.isPending}>
+              {create.isPending ? "Creating..." : "Create organization"}
+            </button>
+          </footer>
+        </form>
+      </dialog>
+    </>
+  );
+}
+
+function emptyOrganizationDraft(): OrganizationCreateDraft {
+  return {
+    kind: "client",
+    displayName: "",
+    legalName: "",
+    defaultCurrency: "",
+    addressLine1: "",
+    addressLine2: "",
+    locality: "",
+    region: "",
+    postalCode: "",
+    country: "",
+  };
+}
+
+function buildOrganizationCreateBody(
+  draft: OrganizationCreateDraft,
+): OrganizationCreateBody | string {
+  const displayName = draft.displayName.trim();
+  if (!displayName) return "Enter a display name before creating the organization.";
+  const currency = draft.defaultCurrency.trim().toUpperCase();
+  if (currency && !/^[A-Z]{3}$/.test(currency)) {
+    return "Use a three-letter currency code, such as USD.";
+  }
+  const address = compactRecord({
+    line1: draft.addressLine1,
+    line2: draft.addressLine2,
+    locality: draft.locality,
+    region: draft.region,
+    postal_code: draft.postalCode,
+    country: draft.country,
+  });
+  return {
+    kind: draft.kind,
+    display_name: displayName,
+    ...(currency ? { default_currency: currency } : {}),
+    ...(Object.keys(address).length > 0 ? { billing_address: address } : {}),
+  };
+}
+
+function compactRecord(values: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(values)) {
+    const trimmed = value.trim();
+    if (trimmed) out[key] = trimmed;
+  }
+  return out;
+}
+
+function organizationCreateErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    const fieldMessages = error.fieldErrors
+      .map((fieldError) => fieldError.msg)
+      .filter((message): message is string => Boolean(message));
+    if (fieldMessages.length > 0) return fieldMessages.join(" ");
+    return error.detail ?? error.title ?? error.message;
+  }
+  return error instanceof Error ? error.message : "Organization could not be created.";
 }
 
 function OrganizationDetail({
