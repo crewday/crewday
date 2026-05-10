@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation } from "react-router-dom";
-import { fetchJson } from "@/lib/api";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { fetchApiDownload, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
-import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
+import { landingForWorkspace } from "@/auth/roleLanding";
+import { workspaceRouteForPathname, workspaceSlugFromRoutePath } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
 import AgentPreferencesPanel from "@/components/AgentPreferencesPanel";
 import { Chip, Loading, ProgressBar } from "@/components/common";
 import type {
+  AvailableWorkspace,
   Employee,
   Property,
   SettingDefinition,
@@ -85,6 +87,65 @@ const ENUM_LABELS: Record<string, Record<string, string>> = {
     sunday: "Sunday",
   },
 };
+
+const ARCHIVE_CONFIRMATION = "ARCHIVE";
+const DELETE_CONFIRMATION = "DELETE";
+const WORKSPACE_EXPORT_PATH = "/api/v1/admin/workspace/export";
+const WORKSPACE_ARCHIVE_PATH = "/api/v1/admin/workspace/archive";
+const WORKSPACE_DELETE_PATH = "/api/v1/admin/workspace/delete";
+
+interface WorkspaceArchiveResponse {
+  id: string;
+  archived_at: string;
+}
+
+interface WorkspaceDeleteResponse {
+  id: string;
+  archived_at: string;
+  delete_requested_at: string;
+  purge_after: string;
+}
+
+function errorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
+
+function formatDeadline(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function triggerBrowserDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function nextWorkspaceRoute(currentPathname: string, workspaces: AvailableWorkspace[]): string {
+  const currentSlug = workspaceSlugFromRoutePath(currentPathname);
+  const next = workspaces.find((workspace) => workspace.workspace.id !== currentSlug);
+  return next ? landingForWorkspace(next) : "/select-workspace";
+}
+
+function workspaceAdminPath(pathname: string, path: string): string {
+  const slug = workspaceSlugFromRoutePath(pathname);
+  return slug ? `/w/${encodeURIComponent(slug)}${path}` : path;
+}
+
+async function routeAfterWorkspaceArchived(pathname: string): Promise<string> {
+  const workspaces = await fetchJson<AvailableWorkspace[]>("/api/v1/me/workspaces");
+  return nextWorkspaceRoute(pathname, workspaces);
+}
 
 function enumOptionLabel(def: SettingDefinition, option: string): string {
   const label = ENUM_LABELS[def.key]?.[option];
@@ -292,9 +353,104 @@ function OverrideSummary({ properties, employees }: { properties: Property[]; em
   );
 }
 
+function WorkspaceLifecycleDialog({
+  action,
+  expected,
+  title,
+  description,
+  confirmLabel,
+  pending,
+  error,
+  onCancel,
+  onConfirm,
+}: {
+  action: "archive" | "delete";
+  expected: string;
+  title: string;
+  description: string;
+  confirmLabel: string;
+  pending: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const ref = useRef<HTMLDialogElement | null>(null);
+  const [draft, setDraft] = useState("");
+
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    if (typeof dialog.showModal === "function") {
+      if (!dialog.open) dialog.showModal();
+    } else if (!dialog.open) {
+      dialog.setAttribute("open", "");
+    }
+    return () => {
+      if (dialog.open && typeof dialog.close === "function") dialog.close();
+      dialog.removeAttribute("open");
+    };
+  }, []);
+
+  const valid = draft.trim() === expected;
+  const inputId = `workspace-${action}-confirmation`;
+
+  return (
+    <dialog
+      ref={ref}
+      className="modal workspace-danger-dialog"
+      aria-labelledby={`workspace-${action}-title`}
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!pending) onCancel();
+      }}
+      onClose={() => {
+        if (!pending) onCancel();
+      }}
+    >
+      <form
+        className="modal__body workspace-danger-dialog__body"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (valid && !pending) onConfirm();
+        }}
+      >
+        <h3 id={`workspace-${action}-title`} className="modal__title">{title}</h3>
+        <p className="modal__sub">{description}</p>
+        <label className="field">
+          <span>Type {expected} to confirm</span>
+          <input
+            id={inputId}
+            className="workspace-danger-dialog__input"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            disabled={pending}
+            autoFocus
+          />
+        </label>
+        {error ? <p className="form-error" role="alert">{error}</p> : null}
+        <div className="modal__actions">
+          <button className="btn btn--ghost" type="button" disabled={pending} onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="btn btn--rust" type="submit" disabled={!valid || pending}>
+            {pending ? "Working…" : confirmLabel}
+          </button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
+
 export default function SettingsPage() {
   // code-health: ignore[nloc] Manager settings route keeps catalog grouping, drafts, and shared setting editor together.
   const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const [confirmation, setConfirmation] = useState<"archive" | "delete" | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteResult, setDeleteResult] = useState<WorkspaceDeleteResponse | null>(null);
   const settingsQ = useQuery({
     queryKey: qk.settings(),
     queryFn: () => fetchJson<WorkspaceSettings>("/api/v1/settings"),
@@ -314,6 +470,61 @@ export default function SettingsPage() {
   const usageQ = useQuery({
     queryKey: qk.workspaceUsage(),
     queryFn: () => fetchJson<WorkspaceUsage>("/api/v1/workspace/usage"),
+  });
+  const invalidateWorkspaceLifecycle = (): void => {
+    void qc.invalidateQueries({ queryKey: qk.authMe() });
+    void qc.invalidateQueries({ queryKey: qk.meWorkspaces() });
+    void qc.invalidateQueries({ queryKey: qk.me(), refetchType: "none" });
+    void qc.invalidateQueries({ queryKey: qk.settings(), refetchType: "none" });
+  };
+  const exportWorkspace = useMutation({
+    mutationFn: () =>
+      fetchApiDownload(workspaceAdminPath(pathname, WORKSPACE_EXPORT_PATH), { method: "POST" }),
+    onMutate: () => {
+      setExportError(null);
+    },
+    onSuccess: (download) => {
+      triggerBrowserDownload(download.blob, download.filename ?? "crewday-workspace-export.zip");
+    },
+    onError: (err) => {
+      setExportError(errorMessage(err, "Workspace export failed."));
+    },
+  });
+  const archiveWorkspace = useMutation({
+    mutationFn: () =>
+      fetchJson<WorkspaceArchiveResponse>(workspaceAdminPath(pathname, WORKSPACE_ARCHIVE_PATH), {
+        method: "POST",
+      }),
+    onMutate: () => {
+      setArchiveError(null);
+    },
+    onSuccess: async () => {
+      setConfirmation(null);
+      invalidateWorkspaceLifecycle();
+      const route = await routeAfterWorkspaceArchived(pathname).catch(() => "/select-workspace");
+      navigate(route, { replace: true });
+    },
+    onError: (err) => {
+      setArchiveError(errorMessage(err, "Workspace could not be archived."));
+    },
+  });
+  const deleteWorkspace = useMutation({
+    mutationFn: () =>
+      fetchJson<WorkspaceDeleteResponse>(workspaceAdminPath(pathname, WORKSPACE_DELETE_PATH), {
+        method: "POST",
+      }),
+    onMutate: () => {
+      setDeleteError(null);
+      setDeleteResult(null);
+    },
+    onSuccess: async (result) => {
+      setDeleteResult(result);
+      setConfirmation(null);
+      invalidateWorkspaceLifecycle();
+    },
+    onError: (err) => {
+      setDeleteError(errorMessage(err, "Workspace deletion could not be scheduled."));
+    },
   });
   const sub = (
     <>
@@ -468,13 +679,107 @@ export default function SettingsPage() {
 
       <div className="panel panel--danger">
         <header className="panel__head"><h2>Danger zone</h2></header>
-        <p className="muted">Host-CLI-only. No HTTP surface, no agent path.</p>
-        <ul className="danger-list">
-          {ws.policy.danger_zone.map((d) => (
-            <li key={d}>{d}</li>
-          ))}
+        <p className="muted">
+          Owner-only workspace lifecycle actions. Archive and Delete remove this workspace from
+          normal selection immediately.
+        </p>
+        {deleteResult ? (
+          <p className="workspace-danger-actions__notice" role="status">
+            Deletion scheduled. This workspace is archived now and will be purged after{" "}
+            <time dateTime={deleteResult.purge_after}>{formatDeadline(deleteResult.purge_after)}</time>.
+          </p>
+        ) : null}
+        <ul className="workspace-danger-actions">
+          <li className="workspace-danger-action">
+            <div className="workspace-danger-action__copy">
+              <strong>Export</strong>
+              <span>Download a portable ZIP of this workspace's rows and uploads.</span>
+            </div>
+            <button
+              className="btn btn--ghost"
+              type="button"
+              disabled={exportWorkspace.isPending}
+              onClick={() => exportWorkspace.mutate()}
+            >
+              {exportWorkspace.isPending ? "Exporting…" : "Export"}
+            </button>
+          </li>
+          <li className="workspace-danger-action">
+            <div className="workspace-danger-action__copy">
+              <strong>Archive</strong>
+              <span>Make the workspace inactive while keeping its data for a future reactivation flow.</span>
+            </div>
+            <button
+              className="btn btn--rust"
+              type="button"
+              disabled={archiveWorkspace.isPending || deleteWorkspace.isPending}
+              onClick={() => {
+                setArchiveError(null);
+                setConfirmation("archive");
+              }}
+            >
+              Archive
+            </button>
+          </li>
+          <li className="workspace-danger-action">
+            <div className="workspace-danger-action__copy">
+              <strong>Delete</strong>
+              <span>Archive now and schedule irreversible purge after the 14-day grace period.</span>
+            </div>
+            <button
+              className="btn btn--rust"
+              type="button"
+              disabled={archiveWorkspace.isPending || deleteWorkspace.isPending}
+              onClick={() => {
+                setDeleteError(null);
+                setConfirmation("delete");
+              }}
+            >
+              Delete
+            </button>
+          </li>
         </ul>
+        {exportError ? <p className="form-error" role="alert">{exportError}</p> : null}
+        {deleteResult ? (
+          <button
+            className="btn btn--moss workspace-danger-actions__continue"
+            type="button"
+            onClick={async () => {
+              const route = await routeAfterWorkspaceArchived(pathname).catch(() => "/select-workspace");
+              navigate(route, { replace: true });
+            }}
+          >
+            Continue
+          </button>
+        ) : null}
       </div>
+
+      {confirmation === "archive" ? (
+        <WorkspaceLifecycleDialog
+          action="archive"
+          expected={ARCHIVE_CONFIRMATION}
+          title="Archive workspace"
+          description="The workspace becomes inactive immediately and disappears from normal workspace selection."
+          confirmLabel="Archive workspace"
+          pending={archiveWorkspace.isPending}
+          error={archiveError}
+          onCancel={() => setConfirmation(null)}
+          onConfirm={() => archiveWorkspace.mutate()}
+        />
+      ) : null}
+      {confirmation === "delete" ? (
+        <WorkspaceLifecycleDialog
+          action="delete"
+          expected={DELETE_CONFIRMATION}
+          title="Delete workspace"
+          description="The workspace is archived immediately. Deletion is scheduled for purge after the 14-day grace period."
+          confirmLabel="Schedule deletion"
+          pending={deleteWorkspace.isPending}
+          error={deleteError}
+          onCancel={() => setConfirmation(null)}
+          onConfirm={() => deleteWorkspace.mutate()}
+        />
+      ) : null}
     </DeskPage>
   );
 }

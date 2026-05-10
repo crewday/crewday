@@ -1,14 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import type { ReactElement } from "react";
-import { fetchJson } from "@/lib/api";
+import { fetchApiDownload, fetchJson } from "@/lib/api";
 import type { FetchOpts } from "@/lib/api";
 import { NavHistoryProvider } from "@/context/NavHistoryContext";
 import SettingsPage from "./SettingsPage";
 
 vi.mock("@/lib/api", () => ({
+  fetchApiDownload: vi.fn(),
   fetchJson: vi.fn(),
 }));
 
@@ -29,9 +30,14 @@ vi.mock("@/components/AgentPreferencesPanel", () => ({
   ),
 }));
 
+const fetchApiDownloadMock = vi.mocked(fetchApiDownload);
 const fetchJsonMock = vi.mocked(fetchJson);
 
 beforeEach(() => {
+  fetchApiDownloadMock.mockResolvedValue({
+    blob: new Blob(["zip"], { type: "application/zip" }),
+    filename: "acme-export.zip",
+  });
   fetchJsonMock.mockImplementation(async (path: string, opts?: FetchOpts) => {
     if (path === "/api/v1/settings" && opts?.method === "PATCH") {
       return workspaceSettings(opts.body as Record<string, unknown>);
@@ -41,31 +47,62 @@ beforeEach(() => {
     if (path === "/api/v1/properties") return [];
     if (path === "/api/v1/employees") return [];
     if (path === "/api/v1/workspace/usage") return workspaceUsage();
+    if (path === "/api/v1/me/workspaces") return [];
+    if (path === "/w/acme/api/v1/admin/workspace/archive" && opts?.method === "POST") {
+      return { id: "ws_acme", archived_at: "2026-05-10T12:00:00.000Z" };
+    }
+    if (path === "/w/acme/api/v1/admin/workspace/delete" && opts?.method === "POST") {
+      return {
+        id: "ws_acme",
+        archived_at: "2026-05-10T12:00:00.000Z",
+        delete_requested_at: "2026-05-10T12:00:00.000Z",
+        purge_after: "2026-05-24T12:00:00.000Z",
+      };
+    }
     throw new Error("Unscripted fetch: " + path);
   });
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:workspace-export");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
 });
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
+  fetchApiDownloadMock.mockReset();
   fetchJsonMock.mockReset();
 });
 
-function renderSettings(): ReactElement {
+interface RenderedSettings {
+  queryClient: QueryClient;
+  view: ReactElement;
+}
+
+function LocationProbe(): ReactElement {
+  const location = useLocation();
+  return <span data-testid="location">{location.pathname + location.search + location.hash}</span>;
+}
+
+function renderSettings(): RenderedSettings {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return (
+  return {
+    queryClient: qc,
+    view: (
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={["/w/acme/settings"]}>
         <NavHistoryProvider>
           <SettingsPage />
+          <LocationProbe />
         </NavHistoryProvider>
       </MemoryRouter>
     </QueryClientProvider>
-  );
+    ),
+  };
 }
 
 describe("SettingsPage", () => {
   it("renders workspace-owned settings without personal agent controls", async () => {
-    render(renderSettings());
+    render(renderSettings().view);
 
     expect(screen.getByRole("heading", { name: "Workspace settings" })).toBeInTheDocument();
     expect(screen.getByText(/Workspace-wide configuration only/i)).toBeInTheDocument();
@@ -86,7 +123,7 @@ describe("SettingsPage", () => {
   });
 
   it("renders visible advanced-setting help, readable control labels, and scope labels", async () => {
-    render(renderSettings());
+    render(renderSettings().view);
 
     expect(await screen.findByText("Whether tasks require photo or file evidence.")).toBeInTheDocument();
     expect(screen.getByText("How booking pay is computed by default.")).toBeInTheDocument();
@@ -104,7 +141,7 @@ describe("SettingsPage", () => {
   });
 
   it("keeps PATCH values as API enum and boolean values", async () => {
-    render(renderSettings());
+    render(renderSettings().view);
 
     const payBasis = await screen.findByLabelText("Booking pay basis");
     fireEvent.change(payBasis, { target: { value: "actual" } });
@@ -134,7 +171,7 @@ describe("SettingsPage", () => {
   });
 
   it("keeps invalid numbers from being submitted", async () => {
-    render(renderSettings());
+    render(renderSettings().view);
 
     const overrun = await screen.findByLabelText("Auto-approve overrun");
     fireEvent.change(overrun, { target: { value: "" } });
@@ -149,6 +186,137 @@ describe("SettingsPage", () => {
       method: "PATCH",
       body: { "bookings.auto_approve_overrun_minutes": expect.anything() },
     });
+  });
+
+  it("renders only the current owner-facing danger zone actions", async () => {
+    render(renderSettings().view);
+
+    const dangerZone = (await screen.findByRole("heading", { name: "Danger zone" })).closest(".panel");
+    expect(dangerZone).not.toBeNull();
+    const zone = within(dangerZone as HTMLElement);
+
+    expect(zone.getByRole("button", { name: "Export" })).toBeInTheDocument();
+    expect(zone.getByRole("button", { name: "Archive" })).toBeInTheDocument();
+    expect(zone.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+    expect(zone.queryByText(/Restore/i)).not.toBeInTheDocument();
+    expect(zone.queryByText(/Root key/i)).not.toBeInTheDocument();
+    expect(zone.queryByText(/Backup restore/i)).not.toBeInTheDocument();
+    expect(zone.queryByText(/Hard-delete purge/i)).not.toBeInTheDocument();
+  });
+
+  it("downloads a workspace export without navigating away", async () => {
+    render(renderSettings().view);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Export" }));
+
+    expect(screen.getByRole("button", { name: "Exporting…" })).toBeDisabled();
+    await waitFor(() => {
+      expect(fetchApiDownloadMock).toHaveBeenCalledWith(
+        "/w/acme/api/v1/admin/workspace/export",
+        { method: "POST" },
+      );
+    });
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
+    expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/settings");
+  });
+
+  it("surfaces workspace export failures without starting a download", async () => {
+    fetchApiDownloadMock.mockRejectedValueOnce(new Error("Export service unavailable"));
+    render(renderSettings().view);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Export" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Export service unavailable");
+    expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
+  });
+
+  it("archives the workspace after typed confirmation and refreshes workspace state", async () => {
+    fetchJsonMock.mockImplementation(async (path: string, opts?: FetchOpts) => {
+      if (path === "/api/v1/settings") return workspaceSettings();
+      if (path === "/api/v1/settings/catalog") return settingsCatalog();
+      if (path === "/api/v1/properties") return [];
+      if (path === "/api/v1/employees") return [];
+      if (path === "/api/v1/workspace/usage") return workspaceUsage();
+      if (path === "/api/v1/me/workspaces") return [
+        {
+          workspace: {
+            id: "beta",
+            name: "Beta",
+            timezone: "Europe/Paris",
+            default_currency: "EUR",
+            default_country: "FR",
+            default_locale: "fr-FR",
+          },
+          grant_role: "worker",
+          binding_org_id: null,
+          source: "workspace_grant",
+        },
+      ];
+      if (path === "/w/acme/api/v1/admin/workspace/archive" && opts?.method === "POST") {
+        return { id: "ws_acme", archived_at: "2026-05-10T12:00:00.000Z" };
+      }
+      throw new Error("Unscripted fetch: " + path);
+    });
+    const rendered = renderSettings();
+    const invalidate = vi.spyOn(rendered.queryClient, "invalidateQueries");
+    render(rendered.view);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Archive" }));
+    const dialog = screen.getByRole("dialog", { name: "Archive workspace" });
+    expect(within(dialog).getByRole("button", { name: "Archive workspace" })).toBeDisabled();
+
+    fireEvent.change(within(dialog).getByLabelText("Type ARCHIVE to confirm"), {
+      target: { value: "ARCHIVE" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Archive workspace" }));
+
+    await waitFor(() => {
+      expect(fetchJsonMock).toHaveBeenCalledWith(
+        "/w/acme/api/v1/admin/workspace/archive",
+        { method: "POST" },
+      );
+    });
+    await waitFor(() => {
+      expect(fetchJsonMock).toHaveBeenCalledWith("/api/v1/me/workspaces");
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/beta/today");
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["auth", "me"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["w", "_", "me", "workspaces"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["w", "_", "me"], refetchType: "none" });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["w", "_", "settings"], refetchType: "none" });
+    expect(screen.queryByRole("dialog", { name: "Archive workspace" })).not.toBeInTheDocument();
+  });
+
+  it("schedules workspace deletion after deliberate confirmation and shows the purge deadline", async () => {
+    const rendered = renderSettings();
+    const invalidate = vi.spyOn(rendered.queryClient, "invalidateQueries");
+    render(rendered.view);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete workspace" });
+    expect(within(dialog).getByText(/14-day grace period/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Schedule deletion" })).toBeDisabled();
+
+    fireEvent.change(within(dialog).getByLabelText("Type DELETE to confirm"), {
+      target: { value: "DELETE" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Schedule deletion" }));
+
+    await waitFor(() => {
+      expect(fetchJsonMock).toHaveBeenCalledWith(
+        "/w/acme/api/v1/admin/workspace/delete",
+        { method: "POST" },
+      );
+    });
+    expect(await screen.findByText(/Deletion scheduled/i)).toBeInTheDocument();
+    expect(screen.getByText(/May 24, 2026/i)).toBeInTheDocument();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["auth", "me"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["w", "_", "me", "workspaces"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["w", "_", "me"], refetchType: "none" });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["w", "_", "settings"], refetchType: "none" });
+    expect(screen.queryByRole("dialog", { name: "Delete workspace" })).not.toBeInTheDocument();
   });
 });
 

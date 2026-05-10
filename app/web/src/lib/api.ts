@@ -142,6 +142,61 @@ export function openApiDownload(path: string): void {
   window.open(resolveApiPath(path), "_blank", "noopener,noreferrer");
 }
 
+export interface ApiDownload {
+  blob: Blob;
+  filename: string | null;
+}
+
+export async function fetchApiDownload(path: string, opts: FetchOpts = {}): Promise<ApiDownload> {
+  const method = opts.method ?? "GET";
+  const url = resolveApiPath(path);
+  const headers: Record<string, string> = { Accept: "application/octet-stream", ...(opts.headers ?? {}) };
+  const init: RequestInit = {
+    method,
+    credentials: "same-origin",
+    headers,
+    signal: opts.signal,
+  };
+
+  if (opts.body !== undefined) {
+    if (opts.body instanceof FormData) {
+      init.body = opts.body;
+    } else {
+      if (!headers["Content-Type"]) headers["Content-Type"] = "application/json";
+      init.body = JSON.stringify(opts.body);
+    }
+  }
+
+  if (method !== "GET") {
+    const csrf = readCookie(CSRF_COOKIE);
+    if (csrf) headers["X-CSRF"] = csrf;
+  }
+
+  const token = authTokenGetter();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(url, init);
+  if (!res.ok) {
+    const text = await res.text();
+    const body: unknown = text ? safeParse(text) : null;
+    const message = pickMessage(body, res.statusText, res.status);
+    if (shouldInvokeAuthRecovery(res.status, url, body) && onUnauthorizedHandler) {
+      try {
+        onUnauthorizedHandler(res.status, url);
+      } catch (err) {
+        // eslint-disable-next-line no-console -- last-resort visibility for an auth-handler bug.
+        console.error("onUnauthorized handler threw", err);
+      }
+    }
+    throw new ApiError(message, res.status, body);
+  }
+
+  return {
+    blob: await res.blob(),
+    filename: filenameFromContentDisposition(res.headers.get("Content-Disposition")),
+  };
+}
+
 function readCookie(name: string): string | null {
   const target = name + "=";
   for (const chunk of document.cookie.split(";")) {
@@ -332,6 +387,24 @@ function safeParse(text: string): unknown {
     return JSON.parse(text);
   } catch {
     return text;
+  }
+}
+
+function filenameFromContentDisposition(value: string | null): string | null {
+  if (!value) return null;
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(value);
+  if (utf8Match?.[1]) return decodeHeaderFilename(utf8Match[1]);
+  const quotedMatch = /filename="([^"]+)"/i.exec(value);
+  if (quotedMatch?.[1]) return quotedMatch[1];
+  const bareMatch = /filename=([^;]+)/i.exec(value);
+  return bareMatch?.[1]?.trim() ?? null;
+}
+
+function decodeHeaderFilename(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
   }
 }
 

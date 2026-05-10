@@ -531,10 +531,9 @@ _CONFIGURABLE_APPROVAL_ACTIONS = [
     "booking.amend",
 ]
 _DANGER_ZONE = [
-    "Backup restore",
-    "Root key rotation",
-    "Workspace archive",
-    "Hard-delete purge",
+    "Export",
+    "Archive",
+    "Delete",
 ]
 
 
