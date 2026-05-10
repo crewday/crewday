@@ -48,7 +48,8 @@ from app.adapters.db.identity.models import (
 )
 from app.adapters.db.llm.models import BudgetLedger
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
-from app.adapters.db.workspace.models import UserWorkspace, Workspace
+from app.adapters.db.workspace.bootstrap import STARTER_WORK_ROLE_KEYS
+from app.adapters.db.workspace.models import UserWorkspace, WorkRole, Workspace
 from app.api.deps import db_session
 from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.auth import signup as signup_api
@@ -1969,6 +1970,34 @@ class TestProvisionSeedsBudgetLedger:
             select(Workspace).where(Workspace.id == workspace_id)
         ).one()
         assert workspace.settings_json["workspace.default_country"] == "FR"
+
+    def test_provision_seeds_starter_work_roles(self, session: Session) -> None:
+        workspace_id = "01HWAWSTUBI00000000000ROLE"
+        user_id = "01HWAUSRTUBI000000000ROLEU"
+
+        signup.provision_workspace_and_owner_seat(
+            session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            slug="tubi-roles",
+            email_lower="roles@example.com",
+            display_name="Roles",
+            timezone="UTC",
+            now=_PINNED,
+        )
+
+        roles = session.scalars(
+            select(WorkRole)
+            .where(WorkRole.workspace_id == workspace_id)
+            .order_by(WorkRole.key)
+        ).all()
+        assert [role.key for role in roles] == sorted(STARTER_WORK_ROLE_KEYS)
+        assert all(role.default_settings_json == {} for role in roles)
+        assert {role.icon_name for role in roles} >= {
+            "BrushCleaning",
+            "ChefHat",
+            "Building2",
+        }
 
 
 class TestSignedInWorkspaceCreation:

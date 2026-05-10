@@ -1063,22 +1063,19 @@ class TestPropertyWorkRoleAssignmentRoundTrip:
                     created_at=_PINNED,
                 )
             )
-            db_session.add(
-                WorkRole(
-                    id="01HWA00000000000000000WRQQ",
-                    workspace_id=ws.id,
-                    key="maid",
-                    name="Maid",
-                    created_at=_PINNED,
+            work_role_id = db_session.scalar(
+                select(WorkRole.id).where(
+                    WorkRole.workspace_id == ws.id,
+                    WorkRole.key == "maid",
                 )
             )
-            db_session.flush()
+            assert work_role_id is not None
             db_session.add(
                 UserWorkRole(
                     id="01HWA00000000000000000UWQQ",
                     user_id=user.id,
                     workspace_id=ws.id,
-                    work_role_id="01HWA00000000000000000WRQQ",
+                    work_role_id=work_role_id,
                     started_on=_PINNED.date(),
                     created_at=_PINNED,
                 )
@@ -1143,22 +1140,19 @@ class TestPropertyWorkRoleAssignmentRoundTrip:
                     created_at=_PINNED,
                 )
             )
-            db_session.add(
-                WorkRole(
-                    id="01HWA00000000000000000WRHH",
-                    workspace_id=ws.id,
-                    key="maid",
-                    name="Maid",
-                    created_at=_PINNED,
+            work_role_id = db_session.scalar(
+                select(WorkRole.id).where(
+                    WorkRole.workspace_id == ws.id,
+                    WorkRole.key == "maid",
                 )
             )
-            db_session.flush()
+            assert work_role_id is not None
             db_session.add(
                 UserWorkRole(
                     id="01HWA00000000000000000UWHH",
                     user_id=user.id,
                     workspace_id=ws.id,
-                    work_role_id="01HWA00000000000000000WRHH",
+                    work_role_id=work_role_id,
                     started_on=_PINNED.date(),
                     created_at=_PINNED,
                 )

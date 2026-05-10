@@ -28,6 +28,7 @@ from app.adapters.db.identity.models import (
     canonicalise_email,
 )
 from app.adapters.db.llm.models import LlmProviderModel
+from app.adapters.db.workspace.bootstrap import seed_starter_work_roles
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.audit import write_deployment_audit
 from app.auth._hashing import hash_with_pepper
@@ -659,6 +660,7 @@ def workspace_bootstrap(
             clock=clock,
         )
         seed_asset_type_catalog(session, ctx, clock=clock)
+        seed_starter_work_roles(session, workspace_id=workspace_id, now=now)
         invite_id = new_ulid(clock=clock)
         session.add(
             Invite(

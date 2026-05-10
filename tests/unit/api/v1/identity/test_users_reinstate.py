@@ -20,6 +20,7 @@ from datetime import date
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.identity.models import User
@@ -125,24 +126,32 @@ def _seed_archived_target(
         )
         s.add(eng)
         s.flush()
-        wrole = WorkRole(
-            id=new_ulid(),
-            workspace_id=workspace_id,
-            key=role_key,
-            name=role_key.title(),
-            description_md="",
-            default_settings_json={},
-            icon_name="",
-            created_at=_PINNED,
-            deleted_at=None,
+        work_role_id = s.scalar(
+            select(WorkRole.id).where(
+                WorkRole.workspace_id == workspace_id,
+                WorkRole.key == role_key,
+            )
         )
-        s.add(wrole)
-        s.flush()
+        if work_role_id is None:
+            wrole = WorkRole(
+                id=new_ulid(),
+                workspace_id=workspace_id,
+                key=role_key,
+                name=role_key.title(),
+                description_md="",
+                default_settings_json={},
+                icon_name="",
+                created_at=_PINNED,
+                deleted_at=None,
+            )
+            s.add(wrole)
+            s.flush()
+            work_role_id = wrole.id
         uwr = UserWorkRole(
             id=new_ulid(),
             user_id=user.id,
             workspace_id=workspace_id,
-            work_role_id=wrole.id,
+            work_role_id=work_role_id,
             started_on=_PINNED.date(),
             ended_on=_PINNED.date(),
             pay_rule_id=None,

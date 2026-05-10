@@ -23,7 +23,8 @@ from app.adapters.db.identity.models import (
     User,
 )
 from app.adapters.db.places.models import Property, PropertyWorkspace, Unit
-from app.adapters.db.workspace.models import UserWorkspace, Workspace
+from app.adapters.db.workspace.bootstrap import STARTER_WORK_ROLE_KEYS
+from app.adapters.db.workspace.models import UserWorkspace, WorkRole, Workspace
 from app.admin.init import workspace_bootstrap
 from app.config import Settings
 from app.tenancy import tenant_agnostic
@@ -123,6 +124,11 @@ def test_workspace_bootstrap_creates_workspace_owner_and_cli_audit(
             if default_property is not None
             else []
         )
+        work_role_keys = db_session.scalars(
+            select(WorkRole.key)
+            .where(WorkRole.workspace_id == result.workspace_id)
+            .order_by(WorkRole.key)
+        ).all()
 
     assert workspace is not None
     assert workspace.slug == "ops-home"
@@ -160,6 +166,7 @@ def test_workspace_bootstrap_creates_workspace_owner_and_cli_audit(
     assert len(units) == 1
     assert units[0].name == "Home"
     assert units[0].ordinal == 0
+    assert work_role_keys == sorted(STARTER_WORK_ROLE_KEYS)
 
 
 def test_workspace_bootstrap_duplicate_slug_does_not_seed_second_property(

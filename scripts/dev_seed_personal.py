@@ -81,6 +81,7 @@ from app.adapters.db.identity.models import (
     canonicalise_email,
 )
 from app.adapters.db.session import make_uow
+from app.adapters.db.workspace.bootstrap import seed_starter_work_roles
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.auth.signup import FALLBACK_CAP_CENTS
 from app.auth.webauthn import base64url_to_bytes, bytes_to_base64url
@@ -404,6 +405,7 @@ def _create_workspace(
             session,
             workspace_id=workspace_id,
         )
+        seed_starter_work_roles(session, workspace_id=workspace_id, now=now)
     return workspace_id
 
 
@@ -521,6 +523,7 @@ def apply_seed(payload: dict[str, Any]) -> dict[str, Any]:
         else:
             workspace_id = existing_workspace.id
 
+        seed_starter_work_roles(session, workspace_id=workspace_id, now=now)
         _ensure_user_workspace(
             session, user_id=user_id, workspace_id=workspace_id, now=now
         )

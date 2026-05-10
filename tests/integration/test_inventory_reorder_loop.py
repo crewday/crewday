@@ -14,7 +14,6 @@ from app.adapters.db.inventory.models import Item, Movement
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.session import make_engine
 from app.adapters.db.tasks.models import Occurrence
-from app.adapters.db.workspace.models import WorkRole
 from app.events.bus import EventBus
 from app.events.types import InventoryLowStock
 from app.services.inventory import movement_service
@@ -168,19 +167,6 @@ def _seed_loop(
                 membership_role="owner_workspace",
                 status="active",
                 created_at=clock.now(),
-            )
-        )
-        session.add(
-            WorkRole(
-                id=new_ulid(clock=clock),
-                workspace_id=workspace.id,
-                key="property_manager",
-                name="Property manager",
-                description_md="",
-                default_settings_json={},
-                icon_name="",
-                created_at=clock.now(),
-                deleted_at=None,
             )
         )
         session.flush()

@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.assets.bootstrap import seed_asset_type_catalog
 from app.adapters.db.authz.bootstrap import seed_owners_system_group
 from app.adapters.db.identity.models import User, canonicalise_email
+from app.adapters.db.workspace.bootstrap import seed_starter_work_roles
 from app.adapters.db.workspace.models import Workspace
 from app.domain.identity.user_workspace_refresh import reconcile_user_workspace_for
 from app.tenancy import WorkspaceContext, tenant_agnostic
@@ -204,6 +205,7 @@ def bootstrap_workspace(
             clock=clock,
         )
         seed_asset_type_catalog(session, ctx, clock=clock)
+        seed_starter_work_roles(session, workspace_id=workspace_id, now=now)
     # The derived ``user_workspace`` row materialises through
     # :func:`reconcile_user_workspace_for` (cd-yqm4): the production
     # worker runs the global reconciler every

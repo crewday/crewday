@@ -68,6 +68,7 @@ from app.adapters.db.identity.models import (
     User,
     canonicalise_email,
 )
+from app.adapters.db.workspace.bootstrap import seed_starter_work_roles
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.adapters.mail.ports import Mailer
 from app.audit import write_audit
@@ -1187,6 +1188,7 @@ def provision_workspace_and_owner_seat(
             clock=clock,
         )
         seed_asset_type_catalog(session, real_ctx, clock=clock)
+        seed_starter_work_roles(session, workspace_id=workspace_id, now=now)
     return real_ctx
 
 

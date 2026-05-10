@@ -67,6 +67,7 @@ from app.adapters.db.authz.models import (
 from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.identity.models import User, canonicalise_email
 from app.adapters.db.session import make_uow
+from app.adapters.db.workspace.bootstrap import seed_starter_work_roles
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.audit import write_audit
 from app.auth.session import SessionIssue, issue
@@ -449,6 +450,7 @@ def _resolve_or_create_workspace(
             session,
             workspace_id=workspace_id,
         )
+        seed_starter_work_roles(session, workspace_id=workspace_id, now=now)
     return workspace_id
 
 
@@ -571,6 +573,7 @@ def mint_session(
         # greenfield helper already laid the rows down, row-inserts
         # otherwise. Keeping the final shape identical for every
         # branch means the audit row is always accurate.
+        seed_starter_work_roles(session, workspace_id=workspace_id, now=now)
         _ensure_user_workspace(
             session, user_id=user_id, workspace_id=workspace_id, now=now
         )

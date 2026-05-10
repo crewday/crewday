@@ -44,6 +44,10 @@ from app.adapters.db.workspace import (
     WorkRole,
     Workspace,
 )
+from app.adapters.db.workspace.bootstrap import (
+    STARTER_WORK_ROLE_KEYS,
+    seed_starter_work_roles,
+)
 from app.tenancy import registry
 
 _PINNED = datetime(2026, 4, 24, 12, 0, 0, tzinfo=UTC)
@@ -214,6 +218,62 @@ class TestWorkRoleModelShape:
         target = next(i for i in indexes if i.name == "ix_work_role_workspace_deleted")
         assert target.unique is False
         assert [c.name for c in target.columns] == ["workspace_id", "deleted_at"]
+
+
+class TestStarterWorkRoleBootstrap:
+    """Starter catalogue seeding for new workspace bootstrap paths."""
+
+    def test_seed_starter_work_roles_inserts_spec_keys_once(
+        self, session: Session
+    ) -> None:
+        workspace_id = "01HWA00000000000000000WSPA"
+        _seed_workspace(session, workspace_id, "starter-a")
+
+        first = seed_starter_work_roles(session, workspace_id=workspace_id, now=_PINNED)
+        second = seed_starter_work_roles(session, workspace_id=workspace_id, now=_LATER)
+
+        assert [row.key for row in first] == list(STARTER_WORK_ROLE_KEYS)
+        assert second == []
+        rows = session.scalars(
+            select(WorkRole)
+            .where(WorkRole.workspace_id == workspace_id)
+            .order_by(WorkRole.key)
+        ).all()
+        assert [row.key for row in rows] == sorted(STARTER_WORK_ROLE_KEYS)
+        assert {row.created_at.replace(tzinfo=UTC) for row in rows} == {_PINNED}
+
+    def test_seed_starter_work_roles_does_not_overwrite_existing_rows(
+        self, session: Session
+    ) -> None:
+        workspace_id = "01HWA00000000000000000WSPB"
+        _seed_workspace(session, workspace_id, "starter-b")
+        custom = WorkRole(
+            id="01HWA00000000000000000CSTM",
+            workspace_id=workspace_id,
+            key="maid",
+            name="Housekeeper",
+            description_md="Custom fixture text.",
+            default_settings_json={"evidence.policy": "photo"},
+            icon_name="Sparkles",
+            created_at=_PINNED,
+        )
+        session.add(custom)
+        session.flush()
+
+        seed_starter_work_roles(session, workspace_id=workspace_id, now=_LATER)
+
+        rows = session.scalars(
+            select(WorkRole)
+            .where(WorkRole.workspace_id == workspace_id)
+            .order_by(WorkRole.key)
+        ).all()
+        assert len(rows) == len(STARTER_WORK_ROLE_KEYS)
+        reloaded_custom = next(row for row in rows if row.key == "maid")
+        assert reloaded_custom.id == custom.id
+        assert reloaded_custom.name == "Housekeeper"
+        assert reloaded_custom.description_md == "Custom fixture text."
+        assert reloaded_custom.default_settings_json == {"evidence.policy": "photo"}
+        assert reloaded_custom.icon_name == "Sparkles"
 
 
 class TestUserWorkRoleModelShape:

@@ -17,6 +17,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.authz.models import RoleGrant
@@ -49,6 +50,14 @@ def _seed_work_role(
     factory: sessionmaker[Session], *, workspace_id: str, key: str
 ) -> str:
     with factory() as s:
+        existing = s.scalar(
+            select(WorkRole.id).where(
+                WorkRole.workspace_id == workspace_id,
+                WorkRole.key == key,
+            )
+        )
+        if existing is not None:
+            return existing
         row = WorkRole(
             id=new_ulid(),
             workspace_id=workspace_id,

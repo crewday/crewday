@@ -27,6 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
+from app.adapters.db.workspace.bootstrap import STARTER_WORK_ROLE_KEYS
 from app.adapters.db.workspace.models import UserWorkRole, WorkRole
 from app.api.v1.work_roles import build_work_roles_router
 from app.tenancy import WorkspaceContext
@@ -48,7 +49,7 @@ def _assert_problem_error(resp: Response, *, error: str) -> dict[str, object]:
 
 
 class TestList:
-    def test_owner_gets_empty_envelope(
+    def test_owner_gets_starter_catalogue(
         self,
         owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
     ) -> None:
@@ -57,7 +58,9 @@ class TestList:
         resp = client.get("/work_roles")
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body == {"data": [], "next_cursor": None, "has_more": False}
+        assert [row["key"] for row in body["data"]] == list(STARTER_WORK_ROLE_KEYS)
+        assert body["next_cursor"] is None
+        assert body["has_more"] is False
 
     def test_worker_can_read_catalogue(
         self,
@@ -98,13 +101,13 @@ class TestCreate:
         client = _owner_client(ctx, factory)
         resp = client.post(
             "/work_roles",
-            json={"key": "maid", "name": "Maid", "icon_name": "BrushCleaning"},
+            json={"key": "sommelier", "name": "Sommelier", "icon_name": "Wine"},
         )
         assert resp.status_code == 201, resp.text
         body = resp.json()
-        assert body["key"] == "maid"
-        assert body["name"] == "Maid"
-        assert body["icon_name"] == "BrushCleaning"
+        assert body["key"] == "sommelier"
+        assert body["name"] == "Sommelier"
+        assert body["icon_name"] == "Wine"
         assert body["workspace_id"] == ws_id
 
     def test_duplicate_key_returns_422(
@@ -113,8 +116,10 @@ class TestCreate:
     ) -> None:
         ctx, factory, _ = owner_ctx
         client = _owner_client(ctx, factory)
-        client.post("/work_roles", json={"key": "maid", "name": "Maid"})
-        resp = client.post("/work_roles", json={"key": "maid", "name": "Dup Maid"})
+        client.post("/work_roles", json={"key": "sommelier", "name": "Sommelier"})
+        resp = client.post(
+            "/work_roles", json={"key": "sommelier", "name": "Dup Sommelier"}
+        )
         assert resp.status_code == 422
         body = _assert_problem_error(resp, error="work_role_key_conflict")
         assert body["message"] == body["detail"]
@@ -125,7 +130,9 @@ class TestCreate:
     ) -> None:
         ctx, factory, _, _ = worker_ctx
         client = build_client([("", build_work_roles_router())], factory, ctx)
-        resp = client.post("/work_roles", json={"key": "maid", "name": "Maid"})
+        resp = client.post(
+            "/work_roles", json={"key": "sommelier", "name": "Sommelier"}
+        )
         assert resp.status_code == 403, resp.text
         assert resp.json()["detail"]["error"] == "permission_denied"
         assert resp.json()["detail"]["action_key"] == "work_roles.manage"
@@ -136,7 +143,7 @@ class TestCreate:
     ) -> None:
         ctx, factory, _ = owner_ctx
         client = _owner_client(ctx, factory)
-        resp = client.post("/work_roles", json={"name": "Maid"})
+        resp = client.post("/work_roles", json={"name": "Sommelier"})
         assert resp.status_code == 422
 
     def test_unknown_field_returns_422(
@@ -147,7 +154,8 @@ class TestCreate:
         ctx, factory, _ = owner_ctx
         client = _owner_client(ctx, factory)
         resp = client.post(
-            "/work_roles", json={"key": "maid", "name": "Maid", "flavour": "oops"}
+            "/work_roles",
+            json={"key": "sommelier", "name": "Sommelier", "flavour": "oops"},
         )
         assert resp.status_code == 422
 
@@ -160,7 +168,7 @@ class TestPatch:
         ctx, factory, _ = owner_ctx
         client = _owner_client(ctx, factory)
         created = client.post(
-            "/work_roles", json={"key": "maid", "name": "Maid"}
+            "/work_roles", json={"key": "sommelier", "name": "Sommelier"}
         ).json()
         resp = client.patch(
             f"/work_roles/{created['id']}", json={"name": "Housekeeper"}
@@ -184,11 +192,11 @@ class TestPatch:
     ) -> None:
         ctx, factory, _ = owner_ctx
         client = _owner_client(ctx, factory)
-        client.post("/work_roles", json={"key": "maid", "name": "Maid"})
+        client.post("/work_roles", json={"key": "sommelier", "name": "Sommelier"})
         driver = client.post(
-            "/work_roles", json={"key": "driver", "name": "Driver"}
+            "/work_roles", json={"key": "butler", "name": "Butler"}
         ).json()
-        resp = client.patch(f"/work_roles/{driver['id']}", json={"key": "maid"})
+        resp = client.patch(f"/work_roles/{driver['id']}", json={"key": "sommelier"})
         assert resp.status_code == 422
         body = _assert_problem_error(resp, error="work_role_key_conflict")
         assert body["message"] == body["detail"]
@@ -212,7 +220,7 @@ class TestDelete:
         ctx, factory, _ = owner_ctx
         client = _owner_client(ctx, factory)
         created = client.post(
-            "/work_roles", json={"key": "maid", "name": "Maid"}
+            "/work_roles", json={"key": "sommelier", "name": "Sommelier"}
         ).json()
 
         resp = client.delete(f"/work_roles/{created['id']}")
@@ -221,7 +229,9 @@ class TestDelete:
 
         listed = client.get("/work_roles")
         assert listed.status_code == 200, listed.text
-        assert listed.json()["data"] == []
+        assert [row["key"] for row in listed.json()["data"]] == list(
+            STARTER_WORK_ROLE_KEYS
+        )
 
         with factory() as s:
             row = s.get(WorkRole, created["id"])
@@ -244,7 +254,7 @@ class TestDelete:
         ctx, factory, ws_id = owner_ctx
         client = _owner_client(ctx, factory)
         created = client.post(
-            "/work_roles", json={"key": "driver", "name": "Driver"}
+            "/work_roles", json={"key": "butler", "name": "Butler"}
         ).json()
         link_id = new_ulid()
         with factory() as s:
@@ -289,7 +299,7 @@ class TestDelete:
         ctx, factory, _ = owner_ctx
         client = _owner_client(ctx, factory)
         created = client.post(
-            "/work_roles", json={"key": "maid", "name": "Maid"}
+            "/work_roles", json={"key": "sommelier", "name": "Sommelier"}
         ).json()
         first = client.delete(f"/work_roles/{created['id']}")
         assert first.status_code == 204, first.text
@@ -316,8 +326,8 @@ class TestDelete:
             role = WorkRole(
                 id=new_ulid(),
                 workspace_id=other_ws.id,
-                key="maid",
-                name="Maid",
+                key="sommelier",
+                name="Sommelier",
                 description_md="",
                 default_settings_json={},
                 icon_name="",

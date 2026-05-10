@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from httpx import Response
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.workspace.models import UserWorkRole, UserWorkspace, WorkRole
@@ -39,6 +40,14 @@ def _assert_problem_error(resp: Response, *, error: str) -> dict[str, object]:
 
 def _seed_work_role(factory: sessionmaker[Session], workspace_id: str) -> str:
     with factory() as s:
+        existing = s.scalar(
+            select(WorkRole.id).where(
+                WorkRole.workspace_id == workspace_id,
+                WorkRole.key == "maid",
+            )
+        )
+        if existing is not None:
+            return existing
         row = WorkRole(
             id=new_ulid(),
             workspace_id=workspace_id,
@@ -174,21 +183,17 @@ class TestList:
         # Seed three distinct roles + three user_work_role rows.
         role_ids: list[str] = []
         with factory() as s:
-            for key in ("maid", "cook", "driver"):
-                role = WorkRole(
-                    id=new_ulid(),
-                    workspace_id=ws_id,
-                    key=key,
-                    name=key.title(),
-                    description_md="",
-                    default_settings_json={},
-                    icon_name="",
-                    created_at=datetime.now(tz=UTC),
-                    deleted_at=None,
+            role_ids = list(
+                s.scalars(
+                    select(WorkRole.id)
+                    .where(
+                        WorkRole.workspace_id == ws_id,
+                        WorkRole.key.in_(("maid", "cook", "driver")),
+                    )
+                    .order_by(WorkRole.key)
                 )
-                s.add(role)
-                role_ids.append(role.id)
-            s.commit()
+            )
+            assert len(role_ids) == 3
         client = _owner_client(ctx, factory)
         for rid in role_ids:
             client.post(

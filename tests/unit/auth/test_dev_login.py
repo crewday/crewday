@@ -39,7 +39,8 @@ from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.identity.models import User
 from app.adapters.db.llm.models import BudgetLedger
 from app.adapters.db.session import make_engine
-from app.adapters.db.workspace.models import UserWorkspace, Workspace
+from app.adapters.db.workspace.bootstrap import STARTER_WORK_ROLE_KEYS
+from app.adapters.db.workspace.models import UserWorkspace, WorkRole, Workspace
 from app.auth.signup import FALLBACK_CAP_CENTS
 from app.util.clock import SystemClock
 from app.util.ulid import new_ulid
@@ -602,6 +603,32 @@ class TestMintSessionBudgetLedger:
             assert ledger_b.cap_cents == 50
             assert ledger_b.spent_cents == 0
             assert ws_b.quota_json["llm_budget_cents_30d"] == ledger_b.cap_cents
+
+    def test_mint_session_seeds_starter_work_roles_idempotently(
+        self,
+        patched_uow: sessionmaker[Session],
+        patched_settings: _config_mod.Settings,
+    ) -> None:
+        first = dev_login.mint_session(
+            email="roles@dev.local", workspace_slug="dev-roles"
+        )
+        second = dev_login.mint_session(
+            email="roles@dev.local", workspace_slug="dev-roles"
+        )
+        assert first.workspace_created is True
+        assert second.workspace_created is False
+
+        with patched_uow() as s:
+            workspace = s.scalars(
+                select(Workspace).where(Workspace.slug == "dev-roles")
+            ).one()
+            roles = s.scalars(
+                select(WorkRole)
+                .where(WorkRole.workspace_id == workspace.id)
+                .order_by(WorkRole.key)
+            ).all()
+            assert [role.key for role in roles] == sorted(STARTER_WORK_ROLE_KEYS)
+            assert len({role.key for role in roles}) == len(STARTER_WORK_ROLE_KEYS)
 
 
 # ---------------------------------------------------------------------------
