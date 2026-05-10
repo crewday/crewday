@@ -11,6 +11,7 @@ import {
   registerQueryKeyWorkspaceGetter,
 } from "@/lib/queryKeys";
 import { installFetchRouteHandlers, type FetchRoute } from "@/test/helpers";
+import type { WorkRole } from "@/types/api";
 import EmployeesPage from "./EmployeesPage";
 
 const originalShowModal = HTMLDialogElement.prototype.showModal;
@@ -70,14 +71,30 @@ const ME = {
   is_deployment_owner: false,
 };
 
+const WORK_ROLE = {
+  id: "wr_housekeeper",
+  workspace_id: "ws_1",
+  key: "housekeeper",
+  name: "Housekeeper",
+  description_md: "Turns guest rooms between stays.",
+  default_settings_json: {},
+  icon_name: "BrushCleaning",
+  created_at: "2026-01-01T00:00:00Z",
+  deleted_at: null,
+} satisfies WorkRole;
+
 function renderEmployees(routes: FetchRoute[] = []) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const fetchEnv = installFetchRouteHandlers([
+    ...routes,
     { path: "/w/acme/api/v1/employees", respond: { body: [EMPLOYEE] } },
     { path: "/w/acme/api/v1/properties", respond: { body: [PROPERTY] } },
     { path: "/w/acme/api/v1/bookings", respond: { body: [] } },
     { path: "/w/acme/api/v1/me", respond: { body: ME } },
-    ...routes,
+    {
+      path: "/w/acme/api/v1/work_roles?limit=500",
+      respond: { body: { data: [WORK_ROLE], next_cursor: null, has_more: false } },
+    },
   ]);
   const view = render(
     <QueryClientProvider client={qc}>
@@ -274,5 +291,307 @@ describe("<EmployeesPage> invite action", () => {
       "Invite mailer failed",
     );
     expect(within(dialog).getByRole("button", { name: "Send invite" })).toBeEnabled();
+  });
+});
+
+describe("<EmployeesPage> work-role catalog", () => {
+  it("lists role catalog rows with edit and remove affordances", async () => {
+    renderEmployees();
+
+    const catalog = await screen.findByRole("region", { name: "Work roles" });
+    expect(await within(catalog).findByText("Housekeeper")).toBeInTheDocument();
+    expect(within(catalog).getByText("housekeeper")).toBeInTheDocument();
+    expect(within(catalog).getByText("BrushCleaning")).toBeInTheDocument();
+    expect(within(catalog).getByText("Turns guest rooms between stays.")).toBeInTheDocument();
+    expect(within(catalog).getByRole("button", { name: "Add role" })).toBeInTheDocument();
+    expect(within(catalog).getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    expect(within(catalog).getByRole("button", { name: "Remove" })).toBeInTheDocument();
+  });
+
+  it("shows loading, error, and actionable empty states", async () => {
+    const rolesResponse = deferred<{ data: unknown[]; next_cursor: null; has_more: false }>();
+    const { unmount } = renderEmployees([
+      {
+        path: "/w/acme/api/v1/work_roles?limit=500",
+        respond: () => rolesResponse.promise.then((body) => ({ body })),
+      },
+    ]);
+
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    rolesResponse.resolve({ data: [], next_cursor: null, has_more: false });
+    expect(await screen.findByText("No work roles yet")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Add role" }).length).toBeGreaterThan(0);
+    unmount();
+
+    renderEmployees([
+      {
+        path: "/w/acme/api/v1/work_roles?limit=500",
+        respond: {
+          status: 500,
+          body: { type: "https://crewday.dev/errors/internal", title: "Internal server error" },
+        },
+      },
+    ]);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Work roles could not be loaded.");
+  });
+
+  it("creates a work role and invalidates dependent queries", async () => {
+    const roles = [WORK_ROLE];
+    const { requests } = renderEmployees([
+      {
+        path: "/w/acme/api/v1/work_roles?limit=500",
+        respond: { body: { data: roles, next_cursor: null, has_more: false } },
+      },
+      {
+        path: "/w/acme/api/v1/work_roles",
+        method: "POST",
+        respond: ({ body }) => {
+          const role = {
+            ...WORK_ROLE,
+            ...(body as object),
+            id: "wr_pool",
+            workspace_id: "ws_1",
+            created_at: "2026-01-02T00:00:00Z",
+            deleted_at: null,
+          };
+          roles.push(role);
+          return { status: 201, body: role };
+        },
+      },
+    ]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add role" }));
+    const dialog = screen.getByRole("dialog", { name: "Add work role" });
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Pool technician" } });
+    fireEvent.change(within(dialog).getByLabelText("Key"), { target: { value: "pool_tech" } });
+    fireEvent.change(within(dialog).getByLabelText("Icon name"), { target: { value: "Waves" } });
+    fireEvent.change(within(dialog).getByLabelText("Description"), {
+      target: { value: "Handles weekly pool checks." },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+
+    expect(await screen.findByText("Pool technician")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Add work role" })).not.toBeInTheDocument();
+    const createRequest = requests.find((request) => request.method === "POST");
+    expect(createRequest?.path).toBe("/w/acme/api/v1/work_roles");
+    expect(createRequest?.body).toEqual({
+      name: "Pool technician",
+      key: "pool_tech",
+      description_md: "Handles weekly pool checks.",
+      icon_name: "Waves",
+      default_settings_json: {},
+    });
+    expect(requests.filter((request) => request.path === "/w/acme/api/v1/employees").length).toBeGreaterThan(1);
+    expect(requests.filter((request) => request.path === "/w/acme/api/v1/work_roles?limit=500").length).toBeGreaterThan(1);
+  });
+
+  it("shows save-in-progress while creating a role", async () => {
+    const saveResponse = deferred<never>();
+    renderEmployees([
+      {
+        path: "/w/acme/api/v1/work_roles",
+        method: "POST",
+        respond: () => saveResponse.promise,
+      },
+    ]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add role" }));
+    const dialog = screen.getByRole("dialog", { name: "Add work role" });
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Housekeeper" } });
+    fireEvent.change(within(dialog).getByLabelText("Key"), { target: { value: "housekeeper" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+
+    expect(await within(dialog).findByRole("button", { name: "Saving..." })).toBeDisabled();
+  });
+
+  it("surfaces duplicate-key and validation errors from the API", async () => {
+    renderEmployees([
+      {
+        path: "/w/acme/api/v1/work_roles",
+        method: "POST",
+        respond: {
+          status: 422,
+          body: {
+            type: "https://crewday.dev/errors/validation",
+            title: "Validation error",
+            detail: "Duplicate key",
+            error: "work_role_key_conflict",
+          },
+        },
+      },
+    ]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add role" }));
+    const dialog = screen.getByRole("dialog", { name: "Add work role" });
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Housekeeper" } });
+    fireEvent.change(within(dialog).getByLabelText("Key"), { target: { value: "housekeeper" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "That role key is already used",
+    );
+    expect(screen.getByRole("dialog", { name: "Add work role" })).toBeInTheDocument();
+  });
+
+  it("shows API field errors next to the matching input", async () => {
+    renderEmployees([
+      {
+        path: "/w/acme/api/v1/work_roles",
+        method: "POST",
+        respond: {
+          status: 422,
+          body: {
+            type: "https://crewday.dev/errors/validation",
+            title: "Validation error",
+            detail: "Request validation failed",
+            errors: [{ loc: ["body", "key"], msg: "Use lowercase letters, numbers, or underscores" }],
+          },
+        },
+      },
+    ]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add role" }));
+    const dialog = screen.getByRole("dialog", { name: "Add work role" });
+    const keyInput = within(dialog).getByLabelText("Key");
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Night manager" } });
+    fireEvent.change(keyInput, { target: { value: "Night Manager" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+
+    expect(await within(dialog).findByText("Use lowercase letters, numbers, or underscores")).toBeInTheDocument();
+    expect(keyInput).toHaveAttribute("aria-invalid", "true");
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(
+      "Could not save work role. Use lowercase letters, numbers, or underscores",
+    );
+  });
+
+  it("surfaces permission errors when saving a role", async () => {
+    renderEmployees([
+      {
+        path: "/w/acme/api/v1/work_roles",
+        method: "POST",
+        respond: {
+          status: 403,
+          body: {
+            type: "https://crewday.dev/errors/forbidden",
+            title: "Forbidden",
+            detail: "Forbidden",
+          },
+        },
+      },
+    ]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add role" }));
+    const dialog = screen.getByRole("dialog", { name: "Add work role" });
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Driver" } });
+    fireEvent.change(within(dialog).getByLabelText("Key"), { target: { value: "driver" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "You do not have permission to manage work roles.",
+    );
+  });
+
+  it("edits a work role", async () => {
+    const roles: WorkRole[] = [{ ...WORK_ROLE }];
+    const { requests } = renderEmployees([
+      {
+        path: "/w/acme/api/v1/work_roles?limit=500",
+        respond: { body: { data: roles, next_cursor: null, has_more: false } },
+      },
+      {
+        path: "/w/acme/api/v1/work_roles/wr_housekeeper",
+        method: "PATCH",
+        respond: ({ body }) => {
+          roles[0] = { ...roles[0]!, ...(body as Partial<WorkRole>) };
+          return { body: roles[0] };
+        },
+      },
+    ]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit work role" });
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Lead housekeeper" } });
+    fireEvent.change(within(dialog).getByLabelText("Key"), { target: { value: "lead_housekeeper" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+
+    expect(await screen.findByText("Lead housekeeper")).toBeInTheDocument();
+    const patchRequest = requests.find((request) => request.method === "PATCH");
+    expect(patchRequest?.body).toEqual({
+      name: "Lead housekeeper",
+      key: "lead_housekeeper",
+      description_md: "Turns guest rooms between stays.",
+      icon_name: "BrushCleaning",
+    });
+  });
+
+  it("confirms soft-retire behavior before removing a role", async () => {
+    const roles = [{ ...WORK_ROLE }];
+    const { requests } = renderEmployees([
+      {
+        path: "/w/acme/api/v1/work_roles?limit=500",
+        respond: { body: { data: roles, next_cursor: null, has_more: false } },
+      },
+      {
+        path: "/w/acme/api/v1/work_roles/wr_housekeeper",
+        method: "DELETE",
+        respond: () => {
+          roles.length = 0;
+          return { status: 204, body: null };
+        },
+      },
+    ]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
+    const dialog = screen.getByRole("dialog", { name: "Remove work role?" });
+    expect(within(dialog).getByText(/soft-retires Housekeeper/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/future employee assignment lists/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove role" }));
+
+    expect(await screen.findByText("No work roles yet")).toBeInTheDocument();
+    expect(requests.some((request) => request.method === "DELETE")).toBe(true);
+  });
+
+  it("shows delete-in-progress while removing a role", async () => {
+    const deleteResponse = deferred<never>();
+    renderEmployees([
+      {
+        path: "/w/acme/api/v1/work_roles/wr_housekeeper",
+        method: "DELETE",
+        respond: () => deleteResponse.promise,
+      },
+    ]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
+    const dialog = screen.getByRole("dialog", { name: "Remove work role?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove role" }));
+
+    expect(await within(dialog).findByRole("button", { name: "Removing..." })).toBeDisabled();
+  });
+
+  it("surfaces remove permission errors and leaves confirmation open", async () => {
+    renderEmployees([
+      {
+        path: "/w/acme/api/v1/work_roles/wr_housekeeper",
+        method: "DELETE",
+        respond: {
+          status: 403,
+          body: {
+            type: "https://crewday.dev/errors/forbidden",
+            title: "Forbidden",
+            detail: "Forbidden",
+          },
+        },
+      },
+    ]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
+    const dialog = screen.getByRole("dialog", { name: "Remove work role?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove role" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "You do not have permission to manage work roles.",
+    );
+    expect(screen.getByRole("dialog", { name: "Remove work role?" })).toBeInTheDocument();
   });
 });

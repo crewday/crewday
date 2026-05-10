@@ -1,13 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { ApiError, fetchJson } from "@/lib/api";
+import { fetchAllList } from "@/lib/fetchAllList";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
-import { Avatar, Chip, Loading } from "@/components/common";
+import { Avatar, Chip, EmptyState, Loading } from "@/components/common";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
-import type { Booking, Employee, Me, Property } from "@/types/api";
+import type { Booking, Employee, Me, Property, WorkRole } from "@/types/api";
 
 interface InviteEmployeeRequest {
   email: string;
@@ -25,6 +27,26 @@ interface InviteEmployeeResponse {
   user_id: string | null;
   user_created: boolean;
 }
+
+interface WorkRoleFormState {
+  name: string;
+  key: string;
+  description_md: string;
+  icon_name: string;
+}
+
+type WorkRoleField = keyof WorkRoleFormState;
+
+interface WorkRoleWriteRequest extends WorkRoleFormState {
+  default_settings_json?: Record<string, unknown>;
+}
+
+const EMPTY_WORK_ROLE_FORM: WorkRoleFormState = {
+  name: "",
+  key: "",
+  description_md: "",
+  icon_name: "",
+};
 
 export default function EmployeesPage() {
   const { pathname } = useLocation();
@@ -65,6 +87,8 @@ export default function EmployeesPage() {
       title="Employees"
       actions={inviteAction}
     >
+      <WorkRoleCatalogManager />
+
       <div className="panel">
         <table className="table table--roomy">
           <thead>
@@ -126,6 +150,341 @@ export default function EmployeesPage() {
         </table>
       </div>
     </DeskPage>
+  );
+}
+
+function WorkRoleCatalogManager() {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const deleteDialogRef = useRef<HTMLDialogElement>(null);
+  const queryClient = useQueryClient();
+  const rolesQ = useQuery({
+    queryKey: qk.workRoles(),
+    queryFn: () => fetchAllList<WorkRole>("/api/v1/work_roles"),
+  });
+  const [editingRole, setEditingRole] = useState<WorkRole | null>(null);
+  const [roleToDelete, setRoleToDelete] = useState<WorkRole | null>(null);
+  const [form, setForm] = useState<WorkRoleFormState>(EMPTY_WORK_ROLE_FORM);
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<WorkRoleField, string>>>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const roles = rolesQ.data ?? [];
+
+  const invalidateRoleDependents = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: qk.workRoles() }),
+      queryClient.invalidateQueries({ queryKey: qk.employees() }),
+      queryClient.invalidateQueries({
+        predicate: (query) => {
+          const key = query.queryKey;
+          return Array.isArray(key) && key.includes("employee") && key.includes("user_work_roles");
+        },
+      }),
+    ]);
+
+  const saveRole = useMutation({
+    mutationFn: (payload: WorkRoleWriteRequest) => {
+      if (editingRole) {
+        return fetchJson<WorkRole>("/api/v1/work_roles/" + encodeURIComponent(editingRole.id), {
+          method: "PATCH",
+          body: payload,
+        });
+      }
+      return fetchJson<WorkRole>("/api/v1/work_roles", {
+        method: "POST",
+        body: { ...payload, default_settings_json: {} },
+      });
+    },
+    onSuccess: async () => {
+      await invalidateRoleDependents();
+      dialogRef.current?.close();
+    },
+    onError: (error) => {
+      const nextFieldErrors = workRoleFieldErrors(error);
+      setFieldErrors(nextFieldErrors);
+      setFormError(workRoleErrorMessage(error, nextFieldErrors));
+    },
+  });
+
+  const deleteRole = useMutation({
+    mutationFn: (role: WorkRole) =>
+      fetchJson<void>("/api/v1/work_roles/" + encodeURIComponent(role.id), {
+        method: "DELETE",
+      }),
+    onSuccess: async () => {
+      await invalidateRoleDependents();
+      deleteDialogRef.current?.close();
+    },
+  });
+
+  function openCreateDialog(): void {
+    setEditingRole(null);
+    setForm(EMPTY_WORK_ROLE_FORM);
+    setFieldErrors({});
+    setFormError(null);
+    saveRole.reset();
+    dialogRef.current?.showModal();
+  }
+
+  function openEditDialog(role: WorkRole): void {
+    setEditingRole(role);
+    setForm({
+      name: role.name,
+      key: role.key,
+      description_md: role.description_md,
+      icon_name: role.icon_name,
+    });
+    setFieldErrors({});
+    setFormError(null);
+    saveRole.reset();
+    dialogRef.current?.showModal();
+  }
+
+  function openDeleteDialog(role: WorkRole): void {
+    setRoleToDelete(role);
+    deleteRole.reset();
+    deleteDialogRef.current?.showModal();
+  }
+
+  function setField(field: WorkRoleField, value: string): void {
+    setForm((prev) => ({ ...prev, [field]: value }));
+    setFieldErrors((prev) => ({ ...prev, [field]: undefined }));
+    setFormError(null);
+  }
+
+  function submitForm(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    const payload: WorkRoleWriteRequest = {
+      name: form.name.trim(),
+      key: form.key.trim(),
+      description_md: form.description_md.trim(),
+      icon_name: form.icon_name.trim(),
+    };
+    const nextErrors: Partial<Record<WorkRoleField, string>> = {};
+    if (!payload.name) nextErrors.name = "Enter a role name.";
+    if (!payload.key) nextErrors.key = "Enter a role key.";
+    if (Object.keys(nextErrors).length > 0) {
+      setFieldErrors(nextErrors);
+      setFormError("Fix the highlighted fields before saving.");
+      return;
+    }
+    setFieldErrors({});
+    setFormError(null);
+    saveRole.mutate(payload);
+  }
+
+  return (
+    <section className="panel work-role-catalog" aria-labelledby="work-role-catalog-title">
+      <header className="panel__head work-role-catalog__head">
+        <div>
+          <h2 id="work-role-catalog-title">Work roles</h2>
+          <p className="work-role-catalog__sub">
+            Workspace job definitions available for employee assignment.
+          </p>
+        </div>
+        <button type="button" className="btn btn--moss" onClick={openCreateDialog}>
+          <Plus size={16} aria-hidden="true" />
+          Add role
+        </button>
+      </header>
+
+      {rolesQ.isPending ? (
+        <Loading />
+      ) : rolesQ.isError ? (
+        <p className="form-error" role="alert">
+          Work roles could not be loaded.
+        </p>
+      ) : roles.length === 0 ? (
+        <EmptyState
+          title="No work roles yet"
+          copy="Create the first role before assigning employees to jobs."
+          action={
+            <button type="button" className="btn btn--moss" onClick={openCreateDialog}>
+              <Plus size={16} aria-hidden="true" />
+              Add role
+            </button>
+          }
+          variant="quiet"
+        />
+      ) : (
+        <ul className="work-role-list">
+          {roles.map((role) => (
+            <li key={role.id} className="work-role-row">
+              <div className="work-role-row__mark" aria-hidden="true">
+                {role.icon_name ? role.icon_name.slice(0, 2).toUpperCase() : role.name.slice(0, 2).toUpperCase()}
+              </div>
+              <div className="work-role-row__main">
+                <strong>{role.name}</strong>
+                <div className="work-role-row__meta">
+                  <code className="inline-code">{role.key}</code>
+                  {role.icon_name ? <span>{role.icon_name}</span> : null}
+                </div>
+                {role.description_md ? (
+                  <p className="work-role-row__description">{role.description_md}</p>
+                ) : null}
+              </div>
+              <div className="work-role-row__actions">
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => openEditDialog(role)}>
+                  <Pencil size={14} aria-hidden="true" />
+                  Edit
+                </button>
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => openDeleteDialog(role)}>
+                  <Trash2 size={14} aria-hidden="true" />
+                  Remove
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <dialog
+        className="modal modal--sheet"
+        ref={dialogRef}
+        aria-labelledby="work-role-dialog-title"
+        onCancel={(event) => {
+          if (saveRole.isPending) event.preventDefault();
+        }}
+        onClose={() => {
+          if (saveRole.isPending) return;
+          setEditingRole(null);
+          setForm(EMPTY_WORK_ROLE_FORM);
+          setFieldErrors({});
+          setFormError(null);
+          saveRole.reset();
+        }}
+      >
+        <form className="modal__body form work-role-form" onSubmit={submitForm} noValidate>
+          <h3 id="work-role-dialog-title" className="modal__title">
+            {editingRole ? "Edit work role" : "Add work role"}
+          </h3>
+          <p className="modal__sub">
+            Keys are stable slugs used by assignments and integrations. Rename with care.
+          </p>
+
+          <label className="field">
+            <span>Name</span>
+            <input
+              autoFocus
+              required
+              value={form.name}
+              aria-invalid={fieldErrors.name ? "true" : undefined}
+              aria-describedby={fieldErrors.name ? "work-role-name-error" : undefined}
+              onChange={(event) => setField("name", event.currentTarget.value)}
+              placeholder="e.g. Housekeeper"
+            />
+            {fieldErrors.name ? <span id="work-role-name-error" className="form-field-error">{fieldErrors.name}</span> : null}
+          </label>
+
+          <label className="field">
+            <span>Key</span>
+            <input
+              required
+              value={form.key}
+              aria-invalid={fieldErrors.key ? "true" : undefined}
+              aria-describedby={fieldErrors.key ? "work-role-key-error" : undefined}
+              onChange={(event) => setField("key", event.currentTarget.value)}
+              placeholder="e.g. housekeeper"
+            />
+            {fieldErrors.key ? <span id="work-role-key-error" className="form-field-error">{fieldErrors.key}</span> : null}
+          </label>
+
+          <label className="field">
+            <span>Icon name</span>
+            <input
+              value={form.icon_name}
+              aria-invalid={fieldErrors.icon_name ? "true" : undefined}
+              aria-describedby={fieldErrors.icon_name ? "work-role-icon-error" : undefined}
+              onChange={(event) => setField("icon_name", event.currentTarget.value)}
+              placeholder="e.g. BrushCleaning"
+            />
+            {fieldErrors.icon_name ? (
+              <span id="work-role-icon-error" className="form-field-error">{fieldErrors.icon_name}</span>
+            ) : null}
+          </label>
+
+          <label className="field">
+            <span>Description</span>
+            <textarea
+              rows={4}
+              value={form.description_md}
+              aria-invalid={fieldErrors.description_md ? "true" : undefined}
+              aria-describedby={fieldErrors.description_md ? "work-role-description-error" : undefined}
+              onChange={(event) => setField("description_md", event.currentTarget.value)}
+              placeholder="What this role covers in this workspace."
+            />
+            {fieldErrors.description_md ? (
+              <span id="work-role-description-error" className="form-field-error">{fieldErrors.description_md}</span>
+            ) : null}
+          </label>
+
+          {formError ? <p className="form-error" role="alert">{formError}</p> : null}
+
+          <div className="modal__actions">
+            <button
+              type="button"
+              className="btn btn--ghost"
+              disabled={saveRole.isPending}
+              onClick={() => dialogRef.current?.close()}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn--moss"
+              disabled={saveRole.isPending || !form.name.trim() || !form.key.trim()}
+            >
+              {saveRole.isPending ? "Saving..." : "Save role"}
+            </button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog
+        className="modal"
+        ref={deleteDialogRef}
+        aria-labelledby="work-role-delete-title"
+        onCancel={(event) => {
+          if (deleteRole.isPending) event.preventDefault();
+        }}
+        onClose={() => {
+          if (deleteRole.isPending) return;
+          setRoleToDelete(null);
+          deleteRole.reset();
+        }}
+      >
+        <div className="modal__body">
+          <h3 id="work-role-delete-title" className="modal__title">Remove work role?</h3>
+          <p className="modal__sub">
+            This soft-retires {roleToDelete ? roleToDelete.name : "the role"} and removes it from future
+            employee assignment lists. Historical work remains attached to its original role record.
+          </p>
+          {deleteRole.isError ? (
+            <p className="form-error" role="alert">
+              {workRoleErrorMessage(deleteRole.error, {})}
+            </p>
+          ) : null}
+          <div className="modal__actions">
+            <button
+              type="button"
+              className="btn btn--ghost"
+              disabled={deleteRole.isPending}
+              onClick={() => deleteDialogRef.current?.close()}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn--rust"
+              disabled={deleteRole.isPending || !roleToDelete}
+              onClick={() => {
+                if (roleToDelete) deleteRole.mutate(roleToDelete);
+              }}
+            >
+              {deleteRole.isPending ? "Removing..." : "Remove role"}
+            </button>
+          </div>
+        </div>
+      </dialog>
+    </section>
   );
 }
 
@@ -327,4 +686,48 @@ function inviteFieldLabel(loc: readonly (string | number)[] | undefined): string
   if (field === "display_name") return "Full name";
   if (field === "grants") return "Role";
   return null;
+}
+
+function workRoleErrorMessage(
+  error: unknown,
+  fieldErrors: Partial<Record<WorkRoleField, string>>,
+): string {
+  const fieldMessages = Object.values(fieldErrors).filter((message): message is string => Boolean(message));
+  if (fieldMessages.length > 0) {
+    return "Could not save work role. " + fieldMessages.join(" ");
+  }
+  if (error instanceof ApiError) {
+    if (workRoleProblemKey(error) === "work_role_key_conflict") {
+      return "That role key is already used. Choose a unique key.";
+    }
+    if (error.status === 403) return "You do not have permission to manage work roles.";
+    if (error.status === 401) return "Sign in again before managing work roles.";
+    return error.detail ?? error.title ?? "Could not save work role. Check the fields and try again.";
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return "Could not save work role. Try again in a moment.";
+}
+
+function workRoleFieldErrors(error: unknown): Partial<Record<WorkRoleField, string>> {
+  if (!(error instanceof ApiError)) return {};
+  const errors: Partial<Record<WorkRoleField, string>> = {};
+  for (const fieldError of error.fieldErrors) {
+    const field = workRoleFieldFromLoc(fieldError.loc);
+    const message = fieldError.msg?.trim();
+    if (field && message) errors[field] = message;
+  }
+  return errors;
+}
+
+function workRoleFieldFromLoc(loc: readonly (string | number)[] | undefined): WorkRoleField | null {
+  const field = loc?.at(-1);
+  if (field === "name" || field === "key" || field === "description_md" || field === "icon_name") {
+    return field;
+  }
+  return null;
+}
+
+function workRoleProblemKey(error: ApiError): string | null {
+  const raw = error.problem?.error;
+  return typeof raw === "string" ? raw : error.type;
 }

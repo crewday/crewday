@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarOff, ClipboardList, ReceiptText } from "lucide-react";
 import { useParams } from "react-router-dom";
 import { ApiError, fetchJson, openApiDownload } from "@/lib/api";
-import type { ListEnvelope } from "@/lib/listResponse";
+import { fetchAllList } from "@/lib/fetchAllList";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
 import {
@@ -72,21 +72,6 @@ class RoleSaveError extends Error {
     this.original = original;
     this.partial = partial;
   }
-}
-
-async function fetchAllList<T>(path: string): Promise<T[]> {
-  const rows: T[] = [];
-  let cursor: string | null = null;
-
-  do {
-    const params = new URLSearchParams({ limit: "500" });
-    if (cursor !== null) params.set("cursor", cursor);
-    const page = await fetchJson<ListEnvelope<T>>(path + "?" + params.toString());
-    rows.push(...page.data);
-    cursor = page.has_more ? page.next_cursor : null;
-  } while (cursor !== null);
-
-  return rows;
 }
 
 const STATUS_TONE: Record<TaskStatus, "moss" | "sky" | "ghost" | "rust" | "sand"> = {

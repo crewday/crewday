@@ -1,8 +1,8 @@
 const DAY_MS = 86_400_000;
 
 function utcDateFromIsoDate(iso: string): Date {
-  const [year, month, day] = iso.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, day));
+  const [year, month, day] = iso.split("-");
+  return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
 }
 
 export function fmtDayMonYear(iso: string): string {
