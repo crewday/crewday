@@ -56,6 +56,18 @@ _ADMIN_INLINE_CHANNEL: Literal["web_admin_sidebar"] = "web_admin_sidebar"
 _ADMIN_AGENT_CAPABILITY: Literal["chat.admin"] = "chat.admin"
 _ADMIN_AGENT_CHANNEL: Literal["web_admin_sidebar"] = "web_admin_sidebar"
 _ADMIN_DECIDED_STATES: frozenset[str] = frozenset({"rejected", "executed"})
+_ADMIN_FALLBACK_ACTION_ERRORS: frozenset[str] = frozenset(
+    {
+        "admin_agent_model_unavailable",
+        "admin_agent_no_action_proposal",
+        "admin_agent_runtime_unwired",
+    }
+)
+_ADMIN_RUNTIME_FALLBACK_REPLY = (
+    "The admin agent cannot propose an action right now because its chat runtime "
+    "is not configured or did not return a supported action. Your message was "
+    "recorded, and no admin action was approved or executed."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +223,27 @@ def build_admin_agent_router() -> APIRouter:
         _publish_admin_turn_started(request, ctx, created_at)
         try:
             producer = _get_action_producer(request)
+        except ServiceUnavailable as exc:
+            error = str(exc.extra.get("error", "admin_agent_runtime_unwired"))
+            if not _is_admin_fallback_error(error):
+                _publish_admin_turn_finished(
+                    request,
+                    ctx,
+                    created_at,
+                    outcome="error",
+                    error=error,
+                )
+                raise
+            return _record_admin_fallback_turn(
+                request,
+                ctx=ctx,
+                session=session,
+                body=body.body,
+                page_context=page,
+                error=error,
+                created_at=created_at,
+            )
+        try:
             proposal = _validated_action_proposal(
                 producer.produce_action(
                     message=body.body,
@@ -220,14 +253,25 @@ def build_admin_agent_router() -> APIRouter:
                 )
             )
         except ServiceUnavailable as exc:
-            _publish_admin_turn_finished(
+            error = str(exc.extra.get("error", "admin_agent_runtime_unwired"))
+            if not _is_admin_fallback_error(error):
+                _publish_admin_turn_finished(
+                    request,
+                    ctx,
+                    created_at,
+                    outcome="error",
+                    error=error,
+                )
+                raise
+            return _record_admin_fallback_turn(
                 request,
-                ctx,
-                created_at,
-                outcome="error",
-                error=str(exc.extra.get("error", "admin_agent_runtime_unwired")),
+                ctx=ctx,
+                session=session,
+                body=body.body,
+                page_context=page,
+                error=error,
+                created_at=created_at,
             )
-            raise
         except Exception as exc:
             _publish_admin_turn_finished(
                 request,
@@ -237,35 +281,15 @@ def build_admin_agent_router() -> APIRouter:
                 error="admin_agent_runtime_error",
             )
             raise _admin_agent_unavailable("admin_agent_runtime_error") from exc
-        row = AdminAgentMessageRow(
-            id=new_ulid(),
-            admin_user_id=ctx.user_id,
-            kind="user",
-            body_md=body.body,
+        row = _record_admin_user_message(
+            request,
+            ctx=ctx,
+            session=session,
+            body=body.body,
             page_context=page,
-            author_label="user",
             created_at=created_at,
         )
-        # justification: deployment-admin transcript rows are not workspace-scoped.
-        with tenant_agnostic():
-            session.add(row)
-            session.flush()
-        audit_admin(
-            session,
-            ctx=ctx,
-            request=request,
-            entity_kind="admin_agent_message",
-            entity_id=row.id,
-            action="admin_agent.message.sent",
-            diff={
-                "capability": _ADMIN_AGENT_CAPABILITY,
-                "inline_channel": _ADMIN_AGENT_CHANNEL,
-                "page": page,
-                "principal": ctx.principal,
-            },
-        )
         payload = _message_payload(row)
-        _publish_admin_message(request, ctx, payload)
         try:
             action = _produce_admin_action(
                 proposal,
@@ -501,6 +525,10 @@ def _admin_agent_unavailable(error: str) -> ServiceUnavailable:
     return ServiceUnavailable(message, extra={"error": error, "message": message})
 
 
+def _is_admin_fallback_error(error: str) -> bool:
+    return error in _ADMIN_FALLBACK_ACTION_ERRORS
+
+
 def _validated_action_proposal(
     proposal: AdminAgentActionProposal | None,
 ) -> AdminAgentActionProposal:
@@ -650,6 +678,124 @@ def _produce_admin_action(
         },
     )
     return row
+
+
+def _record_admin_user_message(
+    request: Request,
+    *,
+    ctx: DeploymentContext,
+    session: Session,
+    body: str,
+    page_context: str,
+    created_at: datetime,
+) -> AdminAgentMessageRow:
+    row = AdminAgentMessageRow(
+        id=new_ulid(),
+        admin_user_id=ctx.user_id,
+        kind="user",
+        body_md=body,
+        page_context=page_context,
+        author_label="user",
+        created_at=created_at,
+    )
+    # justification: deployment-admin transcript rows are not workspace-scoped.
+    with tenant_agnostic():
+        session.add(row)
+        session.flush()
+    audit_admin(
+        session,
+        ctx=ctx,
+        request=request,
+        entity_kind="admin_agent_message",
+        entity_id=row.id,
+        action="admin_agent.message.sent",
+        diff={
+            "capability": _ADMIN_AGENT_CAPABILITY,
+            "inline_channel": _ADMIN_AGENT_CHANNEL,
+            "page": page_context,
+            "principal": ctx.principal,
+        },
+    )
+    _publish_admin_message(request, ctx, _message_payload(row))
+    return row
+
+
+def _record_admin_fallback_turn(
+    request: Request,
+    *,
+    ctx: DeploymentContext,
+    session: Session,
+    body: str,
+    page_context: str,
+    error: str,
+    created_at: datetime,
+) -> AdminAgentMessage:
+    row = _record_admin_user_message(
+        request,
+        ctx=ctx,
+        session=session,
+        body=body,
+        page_context=page_context,
+        created_at=created_at,
+    )
+    _record_admin_runtime_fallback(
+        request,
+        ctx=ctx,
+        session=session,
+        page_context=page_context,
+        user_message=row,
+        error=error,
+    )
+    return _message_payload(row)
+
+
+def _record_admin_runtime_fallback(
+    request: Request,
+    *,
+    ctx: DeploymentContext,
+    session: Session,
+    page_context: str,
+    user_message: AdminAgentMessageRow,
+    error: str,
+) -> AdminAgentMessageRow:
+    fallback = AdminAgentMessageRow(
+        id=new_ulid(),
+        admin_user_id=ctx.user_id,
+        kind="agent",
+        body_md=_ADMIN_RUNTIME_FALLBACK_REPLY,
+        page_context=page_context,
+        author_label="agent",
+        created_at=_now_utc(),
+    )
+    # justification: deployment-admin transcript rows are not workspace-scoped.
+    with tenant_agnostic():
+        session.add(fallback)
+        session.flush()
+    audit_admin(
+        session,
+        ctx=ctx,
+        request=request,
+        entity_kind="admin_agent_message",
+        entity_id=fallback.id,
+        action="admin_agent.message.fallback",
+        diff={
+            "capability": _ADMIN_AGENT_CAPABILITY,
+            "inline_channel": _ADMIN_AGENT_CHANNEL,
+            "page": page_context,
+            "principal": ctx.principal,
+            "reason": error,
+            "user_message_id": user_message.id,
+        },
+    )
+    _publish_admin_message(request, ctx, _message_payload(fallback))
+    _publish_admin_turn_finished(
+        request,
+        ctx,
+        user_message.created_at,
+        outcome="error",
+        error=error,
+    )
+    return fallback
 
 
 def _get_action_by_idempotency_key(

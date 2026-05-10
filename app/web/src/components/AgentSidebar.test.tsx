@@ -306,6 +306,78 @@ describe("AgentSidebar", () => {
     }
   });
 
+  it("keeps the optimistic admin message while rendering the runtime fallback", async () => {
+    const sentAt = "2026-05-06T12:00:00Z";
+    const fallbackAt = "2026-05-06T12:00:01Z";
+    let messages: Array<{ at: string; kind: "user" | "agent"; body: string }> = [];
+    const env = installFetchRouteHandlers([
+      {
+        path: "/admin/api/v1/agent/log",
+        respond: () => ({ body: messages }),
+      },
+      {
+        path: "/admin/api/v1/agent/actions",
+        respond: { body: [] },
+      },
+      {
+        path: "/admin/api/v1/agent/message",
+        method: "POST",
+        respond: () => {
+          const userMessage = {
+            at: sentAt,
+            kind: "user" as const,
+            body: "Check admin runtime",
+          };
+          messages = [
+            userMessage,
+            {
+              at: fallbackAt,
+              kind: "agent" as const,
+              body:
+                "The admin agent cannot propose an action right now because its chat runtime " +
+                "is not configured or did not return a supported action. Your message was " +
+                "recorded, and no admin action was approved or executed.",
+            },
+          ];
+          return {
+            status: 201,
+            body: userMessage,
+          };
+        },
+      },
+    ]);
+
+    try {
+      renderWithProviders(
+        <MemoryRouter initialEntries={["/admin/usage"]}>
+          <AgentSidebar role="admin" />
+        </MemoryRouter>,
+        { queryClient: makeTestQueryClient() },
+      );
+
+      const input = screen.getByLabelText("Message agent");
+      fireEvent.change(input, { target: { value: "Check admin runtime" } });
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+      expect(await screen.findByText("Check admin runtime")).toBeInTheDocument();
+      expect(
+        await screen.findByText(/admin agent cannot propose an action right now/i),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Agent is typing")).not.toBeInTheDocument();
+
+      const post = env.requests.find(
+        (request) =>
+          request.method === "POST" &&
+          request.path === "/admin/api/v1/agent/message",
+      );
+      expect(post?.headers["X-Agent-Page"]).toBe(
+        "route=/admin/usage; surface=admin",
+      );
+    } finally {
+      env.restore();
+    }
+  });
+
   it("rolls back the optimistic user message when send fails", async () => {
     let rejectSend: (value: Response) => void = () => {};
     const failedSend = new Promise<Response>((resolve) => {

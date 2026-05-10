@@ -172,6 +172,34 @@ def _assert_no_agent_writes(session_factory: sessionmaker[Session]) -> None:
         assert session.scalars(select(ApprovalRequest)).all() == []
 
 
+def _assert_admin_runtime_fallback_write(
+    session_factory: sessionmaker[Session],
+    *,
+    user_body: str,
+) -> None:
+    with session_factory() as session, tenant_agnostic():
+        messages = session.scalars(
+            select(AdminAgentChatMessage).order_by(
+                AdminAgentChatMessage.created_at.asc(),
+                AdminAgentChatMessage.id.asc(),
+            )
+        ).all()
+        actions = session.scalars(select(AdminAgentAction)).all()
+        approvals = session.scalars(select(ApprovalRequest)).all()
+    assert [(message.kind, message.body_md) for message in messages] == [
+        ("user", user_body),
+        (
+            "agent",
+            "The admin agent cannot propose an action right now because its chat "
+            "runtime is not configured or did not return a supported action. "
+            "Your message was recorded, and no admin action was approved or "
+            "executed.",
+        ),
+    ]
+    assert actions == []
+    assert approvals == []
+
+
 def _seed_admin_model_default(session_factory: sessionmaker[Session]) -> None:
     with session_factory() as session, tenant_agnostic():
         provider_model = seed_default_registry(session)
@@ -357,7 +385,7 @@ class TestAdminAgent:
         assert other_log_resp.status_code == 200
         assert other_log_resp.json() == []
 
-    def test_message_without_action_producer_fails_closed_without_phantom_write(
+    def test_message_without_action_producer_records_user_and_fallback(
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
@@ -378,27 +406,39 @@ class TestAdminAgent:
             json={"body": "change the budget"},
         )
 
-        assert resp.status_code == 503
-        assert resp.json()["error"] == "admin_agent_runtime_unwired"
-        with session_factory() as session, tenant_agnostic():
-            actions = session.scalars(select(AdminAgentAction)).all()
-            approvals = session.scalars(select(ApprovalRequest)).all()
-            messages = session.scalars(select(AdminAgentChatMessage)).all()
-        assert messages == []
-        assert actions == []
-        assert approvals == []
+        assert resp.status_code == 201
+        assert resp.json()["kind"] == "user"
+        assert resp.json()["body"] == "change the budget"
+        _assert_admin_runtime_fallback_write(
+            session_factory,
+            user_body="change the budget",
+        )
         assert [event["kind"] for event in published] == [
             "agent.turn.started",
+            "admin.audit.appended",
+            "agent.message.appended",
+            "admin.audit.appended",
+            "agent.message.appended",
             "agent.turn.finished",
         ]
         assert published[0]["user_scope"] == user_id
-        assert published[1]["user_scope"] == user_id
-        finished_payload = published[1]["payload"]
+        assert published[2]["user_scope"] == user_id
+        assert published[4]["user_scope"] == user_id
+        assert published[5]["user_scope"] == user_id
+        fallback_payload = published[4]["payload"]
+        assert isinstance(fallback_payload, dict)
+        fallback_message = fallback_payload["message"]
+        assert isinstance(fallback_message, dict)
+        assert fallback_message["kind"] == "agent"
+        assert (
+            "admin agent cannot propose an action right now" in fallback_message["body"]
+        )
+        finished_payload = published[5]["payload"]
         assert isinstance(finished_payload, dict)
         assert finished_payload["outcome"] == "error"
         assert finished_payload["error"] == "admin_agent_runtime_unwired"
 
-    def test_message_without_action_proposal_fails_closed_without_phantom_write(
+    def test_message_without_action_proposal_records_user_and_fallback(
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
@@ -420,14 +460,22 @@ class TestAdminAgent:
             json={"body": "say something that has no tool call"},
         )
 
-        assert resp.status_code == 503
-        assert resp.json()["error"] == "admin_agent_no_action_proposal"
-        _assert_no_agent_writes(session_factory)
+        assert resp.status_code == 201
+        assert resp.json()["kind"] == "user"
+        assert resp.json()["body"] == "say something that has no tool call"
+        _assert_admin_runtime_fallback_write(
+            session_factory,
+            user_body="say something that has no tool call",
+        )
         assert [event["kind"] for event in published] == [
             "agent.turn.started",
+            "admin.audit.appended",
+            "agent.message.appended",
+            "admin.audit.appended",
+            "agent.message.appended",
             "agent.turn.finished",
         ]
-        finished_payload = published[1]["payload"]
+        finished_payload = published[5]["payload"]
         assert isinstance(finished_payload, dict)
         assert finished_payload["outcome"] == "error"
         assert finished_payload["error"] == "admin_agent_no_action_proposal"
@@ -480,7 +528,7 @@ class TestAdminAgent:
         assert resp.json()["error"] == "admin_agent_runtime_error"
         _assert_no_agent_writes(session_factory)
 
-    def test_runtime_producer_model_unavailable_fails_closed_without_writes(
+    def test_runtime_producer_model_unavailable_records_user_and_fallback(
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
@@ -504,9 +552,13 @@ class TestAdminAgent:
             json={"body": "raise that workspace cap"},
         )
 
-        assert resp.status_code == 503
-        assert resp.json()["error"] == "admin_agent_model_unavailable"
-        _assert_no_agent_writes(session_factory)
+        assert resp.status_code == 201
+        assert resp.json()["kind"] == "user"
+        assert resp.json()["body"] == "raise that workspace cap"
+        _assert_admin_runtime_fallback_write(
+            session_factory,
+            user_body="raise that workspace cap",
+        )
 
     def test_runtime_producer_supported_tool_creates_pending_admin_action(
         self,
@@ -561,7 +613,7 @@ class TestAdminAgent:
         ]
         assert row.card_risk == "high"
 
-    def test_runtime_producer_rejects_missing_workspace_without_writes(
+    def test_runtime_producer_missing_workspace_records_user_and_fallback(
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
@@ -586,11 +638,15 @@ class TestAdminAgent:
             json={"body": "raise that workspace cap"},
         )
 
-        assert resp.status_code == 503
-        assert resp.json()["error"] == "admin_agent_no_action_proposal"
-        _assert_no_agent_writes(session_factory)
+        assert resp.status_code == 201
+        assert resp.json()["kind"] == "user"
+        assert resp.json()["body"] == "raise that workspace cap"
+        _assert_admin_runtime_fallback_write(
+            session_factory,
+            user_body="raise that workspace cap",
+        )
 
-    def test_runtime_producer_rejects_negative_cap_without_writes(
+    def test_runtime_producer_negative_cap_records_user_and_fallback(
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
@@ -618,11 +674,15 @@ class TestAdminAgent:
             json={"body": "set that workspace cap below zero"},
         )
 
-        assert resp.status_code == 503
-        assert resp.json()["error"] == "admin_agent_no_action_proposal"
-        _assert_no_agent_writes(session_factory)
+        assert resp.status_code == 201
+        assert resp.json()["kind"] == "user"
+        assert resp.json()["body"] == "set that workspace cap below zero"
+        _assert_admin_runtime_fallback_write(
+            session_factory,
+            user_body="set that workspace cap below zero",
+        )
 
-    def test_runtime_producer_unsupported_tool_fails_closed_without_writes(
+    def test_runtime_producer_unsupported_tool_records_user_and_fallback(
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
@@ -647,9 +707,10 @@ class TestAdminAgent:
             json={"body": "show usage"},
         )
 
-        assert resp.status_code == 503
-        assert resp.json()["error"] == "admin_agent_no_action_proposal"
-        _assert_no_agent_writes(session_factory)
+        assert resp.status_code == 201
+        assert resp.json()["kind"] == "user"
+        assert resp.json()["body"] == "show usage"
+        _assert_admin_runtime_fallback_write(session_factory, user_body="show usage")
 
     def test_runtime_producer_supported_non_secret_setting_creates_action(
         self,
@@ -695,7 +756,7 @@ class TestAdminAgent:
         ]
         assert row.card_risk == "medium"
 
-    def test_runtime_producer_secret_setting_fails_closed_without_plaintext_write(
+    def test_runtime_producer_secret_setting_records_user_and_no_action_payload(
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
@@ -723,9 +784,13 @@ class TestAdminAgent:
             json={"body": "set the OpenRouter key"},
         )
 
-        assert resp.status_code == 503
-        assert resp.json()["error"] == "admin_agent_no_action_proposal"
-        _assert_no_agent_writes(session_factory)
+        assert resp.status_code == 201
+        assert resp.json()["kind"] == "user"
+        assert resp.json()["body"] == "set the OpenRouter key"
+        _assert_admin_runtime_fallback_write(
+            session_factory,
+            user_body="set the OpenRouter key",
+        )
 
     @pytest.mark.parametrize(
         ("key", "value"),
@@ -768,7 +833,7 @@ class TestAdminAgent:
         assert resp.json()["error"] == "admin_agent_action_proposal_invalid"
         _assert_no_agent_writes(session_factory)
 
-    def test_runtime_producer_multiple_tool_calls_fail_closed_without_writes(
+    def test_runtime_producer_multiple_tool_calls_records_user_and_fallback(
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
@@ -801,9 +866,13 @@ class TestAdminAgent:
             json={"body": "raise the cap and trust it"},
         )
 
-        assert resp.status_code == 503
-        assert resp.json()["error"] == "admin_agent_no_action_proposal"
-        _assert_no_agent_writes(session_factory)
+        assert resp.status_code == 201
+        assert resp.json()["kind"] == "user"
+        assert resp.json()["body"] == "raise the cap and trust it"
+        _assert_admin_runtime_fallback_write(
+            session_factory,
+            user_body="raise the cap and trust it",
+        )
 
     def test_runtime_producer_without_tools_fails_closed_without_writes(
         self,
