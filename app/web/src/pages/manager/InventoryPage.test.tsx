@@ -99,6 +99,7 @@ function installFetch(
   properties: Property[] = PROPERTIES,
   options: { createStatus?: number; createBody?: unknown } = {},
 ) {
+  // code-health: ignore[nloc] Inventory route fixture keeps property, item, adjustment, and create endpoints explicit.
   const secondPropertyItems: typeof ITEMS = [];
   const env = installFetchRouteHandlers([
     { path: "/w/acme/api/v1/properties", respond: { body: properties } },

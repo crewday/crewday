@@ -10,6 +10,7 @@ import { installFetchRouteHandlers } from "@/test/helpers";
 import ExpensesApprovalsPage from "./ExpensesApprovalsPage";
 
 function installFetch() {
+  // code-health: ignore[nloc] Expense approval fixture keeps claim state and decision endpoints together for table-flow assertions.
   const claimOne = {
     id: "claim_1",
     workspace_id: "ws_1",

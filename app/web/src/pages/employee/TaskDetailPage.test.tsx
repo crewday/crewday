@@ -56,6 +56,7 @@ function installFetch(scripted: Record<string, FakeResponse[]>): {
 }
 
 function baseTask(overrides: Record<string, unknown> = {}): unknown {
+  // code-health: ignore[nloc] Task detail fixture intentionally spells out the full API task shape used across route assertions.
   return {
     id: "t1",
     workspace_id: "ws1",

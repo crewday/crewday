@@ -313,6 +313,7 @@ function authMeFor(
   role: AppRole,
   grantRole: WorkspaceGrantRole = role === "employee" ? "worker" : role,
 ): AuthMe {
+  // code-health: ignore[nloc params] App route tests keep the full auth payload local so role redirects remain explicit.
   return {
     user_id:
       role === "manager" ? "usr_manager"

@@ -25,6 +25,7 @@ vi.mock("@/lib/offlineQueue", () => ({
 }));
 
 function authMe(): AuthMe {
+  // code-health: ignore[nloc] Employee layout tests keep the full worker auth fixture beside shell navigation assertions.
   return {
     user_id: "usr_worker",
     display_name: "Worker User",

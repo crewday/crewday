@@ -22,6 +22,7 @@ interface TestUserWorkRole {
 }
 
 function installFetch(options: {
+  // code-health: ignore[nloc] Employee-detail fixture keeps subject, leave, payroll, and role endpoint scripts local to this route suite.
   failRoleDelete?: boolean;
   failLeavesStatus?: number;
   failPayslipsStatus?: number;
@@ -99,6 +100,7 @@ function installFetch(options: {
   const bodyOf = (body: BodyInit | null | undefined) =>
     typeof body === "string" ? JSON.parse(body) as unknown : undefined;
   const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    // code-health: ignore[ccn nloc] The route fetch fixture intentionally enumerates each employee-detail endpoint response branch.
     const resolved = typeof url === "string" ? url : url.toString();
     const parsed = new URL(resolved, "http://crewday.test");
     const path = parsed.pathname;

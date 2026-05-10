@@ -47,6 +47,7 @@ interface InstallFetchOptions {
 }
 
 function installFetch(options: InstallFetchOptions = {}) {
+  // code-health: ignore[nloc] Pay route fixture keeps payroll periods, payslips, and lock endpoint scripts together.
   const periods = options.periods ?? [periodPayload("open")];
   return installFetchRouteHandlers([
     {

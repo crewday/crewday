@@ -41,6 +41,7 @@ vi.mock("@/components/AgentSidebar", () => ({
 }));
 
 function authMe(): AuthMe {
+  // code-health: ignore[nloc] Manager layout tests keep the full auth grant fixture beside permission-filtered navigation assertions.
   return {
     user_id: "usr_manager",
     display_name: "Manager User",

@@ -952,6 +952,7 @@ describe("Admin LlmPage", () => {
   });
 
   it("creates, updates, and removes capability inheritance from the modal", async () => {
+    // code-health: ignore[nloc] Inheritance modal regression keeps create, update, delete, and graph refresh assertions in one flow.
     const explicitGraph = {
       ...graph,
       inheritance: [

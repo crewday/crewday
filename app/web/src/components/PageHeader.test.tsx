@@ -6,6 +6,7 @@ import { NavHistoryProvider, useNavHistory } from "@/context/NavHistoryContext";
 import PageHeader from "./PageHeader";
 
 function renderRoutes(initial = "/w/acme/schedule"): ReactElement {
+  // code-health: ignore[nloc] Page-header navigation tests keep the route graph inline so history behavior is visible.
   return (
     <MemoryRouter initialEntries={[initial]}>
       <NavHistoryProvider>

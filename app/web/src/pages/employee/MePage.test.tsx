@@ -89,6 +89,7 @@ afterEach(() => {
 });
 
 function renderProfile(initial = "/w/acme/me"): ReactElement {
+  // code-health: ignore[nloc] Profile tests keep the routed account/history/login harness inline to exercise navigation state.
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>

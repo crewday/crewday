@@ -40,6 +40,7 @@ beforeEach(() => {
     filename: "acme-export.zip",
   });
   fetchJsonMock.mockImplementation(async (path: string, opts?: FetchOpts) => {
+    // code-health: ignore[ccn] Settings mock intentionally enumerates every settings endpoint this route can touch.
     if (path === "/api/v1/settings/basics" && opts?.method === "PATCH") {
       const body = opts.body as { display_name?: string };
       const displayName = body.display_name ?? "Acme";

@@ -18,6 +18,7 @@ const SKIP_DIRS = new Set([
 ]);
 
 function sourceFiles(root: string): string[] {
+  // code-health: ignore[ccn] Import-boundary traversal deliberately keeps directory filtering and extension collection in one tiny helper.
   const files: string[] = [];
   const visit = (dir: string) => {
     for (const entry of readdirSync(dir)) {
