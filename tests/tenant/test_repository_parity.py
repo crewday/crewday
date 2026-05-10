@@ -416,6 +416,15 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.identity.work_roles.get_work_role",
         "app.domain.identity.work_roles.list_work_roles",
         "app.domain.identity.work_roles.update_work_role",
+        # cd-rfk94: agent-mediated relay requests are standard
+        # workspace-scoped rows. Creates stamp ``ctx.workspace_id``;
+        # reads and state transitions filter by ``workspace_id`` in
+        # the repository seam.
+        "app.domain.agent.relay_requests.close_relay",
+        "app.domain.agent.relay_requests.create_relay",
+        "app.domain.agent.relay_requests.list_open_relays_for_target",
+        "app.domain.agent.relay_requests.mark_relay_delivered",
+        "app.domain.agent.relay_requests.mark_relay_responded",
         # tasks context
         "app.domain.tasks.templates.read",
         # cd-147o: ``read_many`` is the bulk-read sidecar used by

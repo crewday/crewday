@@ -63,15 +63,13 @@ _PINNED = datetime(2026, 4, 24, 12, 0, 0, tzinfo=UTC)
 # ---------------------------------------------------------------------------
 
 
-# LLM tables must stay in the workspace-scoped registry. The sibling
+# LLM usage/budget tables must stay in the workspace-scoped registry. The sibling
 # unit test ``tests/unit/test_tenancy_orm_filter.py`` wipes the
 # process-wide registry in an autouse fixture; without this repair
 # the tenant filter silently drops off our LLM queries when the full
 # suite runs. Same pattern as
 # ``tests/domain/llm/conftest.py::_ensure_llm_registered``.
 _LLM_TABLES: tuple[str, ...] = (
-    "llm_assignment",
-    "llm_capability_inheritance",
     "llm_usage",
     "budget_ledger",
 )

@@ -70,8 +70,6 @@ _PINNED = datetime(2026, 4, 26, 12, 0, 0, tzinfo=UTC)
 def _ensure_registered() -> None:
     """Belt-and-braces — same pattern as the LLM integration tests."""
     for table in (
-        "llm_assignment",
-        "llm_capability_inheritance",
         "llm_usage",
         "budget_ledger",
         "audit_log",
@@ -312,7 +310,7 @@ def _seed_llm_assignment(session: Session, *, workspace_id: str) -> None:
     session.flush()
     assignment = LlmAssignment(
         id=new_ulid(),
-        workspace_id=workspace_id,
+        workspace_id=None,
         capability="chat.manager",
         model_id=pm_id,
         provider="fake",

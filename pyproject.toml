@@ -796,5 +796,6 @@ ignore_imports = [
     "crewday._overrides.admin -> app.admin.rotate_root_key",
     "crewday._overrides.admin -> app.admin.rotate_secrets",
     "crewday._overrides.admin -> app.domain.privacy",
+    "crewday._overrides.admin -> app.worker.tasks.workspace_purge",
 ]
 unmatched_ignore_imports_alerting = "none"

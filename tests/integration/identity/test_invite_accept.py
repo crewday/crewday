@@ -236,8 +236,18 @@ def _seed_work_role(
     """Insert a live :class:`WorkRole` and return its id."""
     from app.util.ulid import new_ulid
 
-    role_id = new_ulid(clock=clock)
     with tenant_agnostic():
+        existing = session.scalar(
+            select(WorkRole.id).where(
+                WorkRole.workspace_id == workspace_id,
+                WorkRole.key == key,
+                WorkRole.deleted_at.is_(None),
+            )
+        )
+        if existing is not None:
+            return existing
+
+        role_id = new_ulid()
         session.add(
             WorkRole(
                 id=role_id,

@@ -29,7 +29,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db import session as db_session_module
@@ -1552,11 +1552,15 @@ def test_agent_message_unexpected_turn_failure_revokes_default_uow_token(
             f"/w/{workspace.slug}/api/v1/agent/manager/message",
             json={"body": "Hello"},
         )
-        assert response.status_code == 500, response.text
+        assert response.status_code == 201, response.text
+        assert response.json()["body"] == "Hello"
 
         log_response = client.get(f"/w/{workspace.slug}/api/v1/agent/manager/log")
         assert log_response.status_code == 200, log_response.text
-        assert [row["body"] for row in log_response.json()] == ["Hello"]
+        rows = log_response.json()
+        assert [row["kind"] for row in rows] == ["user", "agent"]
+        assert rows[0]["body"] == "Hello"
+        assert "cannot reply right now" in rows[1]["body"]
 
         with factory() as check, tenant_agnostic():
             token_rows = list(check.scalars(select(ApiToken)).all())
@@ -1582,6 +1586,11 @@ def test_agent_message_endpoint_surfaces_unassigned_capability_in_log(
     )
     set_current(ctx)
     _seed_budget_ledger(db_session, workspace_id=workspace.id)
+    with tenant_agnostic():
+        db_session.execute(
+            delete(LlmAssignment).where(LlmAssignment.capability == "chat.manager")
+        )
+        db_session.flush()
     invalidate_llm_router_cache(workspace_id=workspace.id)
     bus = EventBus()
     events: list[object] = []

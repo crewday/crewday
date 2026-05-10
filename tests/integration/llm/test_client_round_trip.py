@@ -47,6 +47,7 @@ from app.adapters.db.workspace.models import Workspace
 from app.adapters.llm.openrouter import OpenRouterClient
 from app.domain.llm.budget import WINDOW_DAYS
 from app.domain.llm.client import LLMClient, LLMResult
+from app.domain.llm.router import invalidate_cache
 from app.domain.llm.usage_recorder import AgentAttribution
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.tenancy.current import reset_current, set_current
@@ -192,7 +193,7 @@ def _seed_assignment(
     pm = _seed_provider_model(session, api_model_id=api_model_id)
     row = LlmAssignment(
         id=new_ulid(),
-        workspace_id=workspace_id,
+        workspace_id=None,
         capability=capability,
         model_id=pm.id,
         provider="openrouter",
@@ -206,6 +207,7 @@ def _seed_assignment(
     )
     session.add(row)
     session.flush()
+    invalidate_cache(workspace_id=workspace_id)
     return row
 
 
@@ -278,10 +280,11 @@ class TestRoundTripAgainstOpenRouter:
     def test_first_rung_success_writes_one_ok_row(self, db_session: Session) -> None:
         ws = _seed_workspace(db_session, slug=f"ws-{new_ulid().lower()[:8]}")
         ctx = _build_context(ws)
+        capability = f"test.chat.manager.{ws.id.lower()[:8]}"
         _seed_assignment(
             db_session,
             workspace_id=ws.id,
-            capability=_CAPABILITY,
+            capability=capability,
             api_model_id="primary/model",
         )
         _seed_ledger(db_session, workspace_id=ws.id, cap_cents=500)
@@ -302,7 +305,7 @@ class TestRoundTripAgainstOpenRouter:
                 client.chat(
                     db_session,
                     ctx,
-                    capability=_CAPABILITY,
+                    capability=capability,
                     messages=[{"role": "user", "content": "ping"}],
                     attribution=_attribution(),
                     consents=ConsentSet.none(),
@@ -340,17 +343,18 @@ class TestRoundTripAgainstOpenRouter:
         """
         ws = _seed_workspace(db_session, slug=f"ws-{new_ulid().lower()[:8]}")
         ctx = _build_context(ws)
+        capability = f"test.chat.manager.{ws.id.lower()[:8]}"
         _seed_assignment(
             db_session,
             workspace_id=ws.id,
-            capability=_CAPABILITY,
+            capability=capability,
             api_model_id="primary/model",
             priority=0,
         )
         _seed_assignment(
             db_session,
             workspace_id=ws.id,
-            capability=_CAPABILITY,
+            capability=capability,
             api_model_id="secondary/model",
             priority=1,
         )
@@ -377,7 +381,7 @@ class TestRoundTripAgainstOpenRouter:
                 client.chat(
                     db_session,
                     ctx,
-                    capability=_CAPABILITY,
+                    capability=capability,
                     messages=[{"role": "user", "content": "ping"}],
                     attribution=_attribution(),
                     consents=ConsentSet.none(),

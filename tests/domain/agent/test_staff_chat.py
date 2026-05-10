@@ -158,6 +158,8 @@ def test_staff_chat_turn_uses_employee_capability_and_worker_channel(
 
     assert captured_events.names() == [
         "agent.turn.started",
+        "agent.tool.started",
+        "agent.tool.finished",
         "agent.message.appended",
         "agent.turn.finished",
     ]

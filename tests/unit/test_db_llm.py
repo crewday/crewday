@@ -80,29 +80,21 @@ class TestLlmAssignmentModel:
         assert LlmAssignment.__tablename__ == "llm_assignment"
 
     def test_priority_index_present(self) -> None:
-        """cd-u84y: composite ``(workspace_id, capability, priority)`` index.
+        """Deployment-level ``(capability, priority)`` resolver index.
 
-        Replaces the cd-cm5 unique index on ``(workspace_id,
-        capability)``. Non-unique — a capability may carry many
+        Replaces the cd-cm5 workspace-scoped unique index. Non-unique —
+        a capability may carry many
         assignments (the §11 fallback chain). The index backs the
-        resolver's sorted scan; the leading ``workspace_id`` carries
-        the tenant filter and the ``(workspace_id, capability)`` prefix
-        still serves per-capability lookup.
+        deployment-level resolver's sorted scan.
         """
         indexes = [i for i in LlmAssignment.__table_args__ if isinstance(i, Index)]
         names = [i.name for i in indexes]
-        assert "ix_llm_assignment_workspace_capability_priority" in names
+        assert "ix_llm_assignment_capability_priority" in names
         target = next(
-            i
-            for i in indexes
-            if i.name == "ix_llm_assignment_workspace_capability_priority"
+            i for i in indexes if i.name == "ix_llm_assignment_capability_priority"
         )
         assert target.unique is False
-        assert [c.name for c in target.columns] == [
-            "workspace_id",
-            "capability",
-            "priority",
-        ]
+        assert [c.name for c in target.columns] == ["capability", "priority"]
 
     def test_old_unique_index_removed(self) -> None:
         """The cd-cm5 unique index no longer lands on the model.
@@ -164,19 +156,17 @@ class TestLlmCapabilityInheritanceModel:
         assert "inherits_from" in sql
 
     def test_unique_workspace_capability_index_present(self) -> None:
-        """Unique ``(workspace_id, capability)`` — one parent per child per ws."""
+        """Unique capability — one deployment-level parent per child."""
         indexes = [
             i for i in LlmCapabilityInheritance.__table_args__ if isinstance(i, Index)
         ]
         names = [i.name for i in indexes]
-        assert "uq_llm_capability_inheritance_workspace_capability" in names
+        assert "uq_llm_capability_inheritance_capability" in names
         target = next(
-            i
-            for i in indexes
-            if i.name == "uq_llm_capability_inheritance_workspace_capability"
+            i for i in indexes if i.name == "uq_llm_capability_inheritance_capability"
         )
         assert target.unique is True
-        assert [c.name for c in target.columns] == ["workspace_id", "capability"]
+        assert [c.name for c in target.columns] == ["capability"]
 
 
 class TestAgentTokenModel:
@@ -549,24 +539,26 @@ class TestPackageReExports:
 
 
 class TestRegistryIntent:
-    """Every LLM table is registered as workspace-scoped.
+    """Every workspace-scoped LLM table is registered as workspace-scoped.
 
     The assertions call :func:`app.tenancy.registry.register` directly
     rather than relying on the import-time side effect of
     ``app.adapters.db.llm``: a sibling ``test_tenancy_orm_filter``
     autouse fixture calls :func:`registry._reset_for_tests` which
     wipes the process-wide set, so asserting presence after that
-    reset would be flaky. The tests below encode the invariant —
-    "every LLM table is scoped" — without over-coupling to import
-    ordering. Mirrors the pattern in ``tests/unit/test_db_messaging.py``.
+    reset would be flaky. The tests below encode the invariant without
+    over-coupling to import ordering. Mirrors the pattern in
+    ``tests/unit/test_db_messaging.py``.
     """
 
-    _TABLES: tuple[str, ...] = (
-        "llm_assignment",
+    _WORKSPACE_TABLES: tuple[str, ...] = (
         "agent_token",
         "approval_request",
         "llm_usage",
         "budget_ledger",
+    )
+    _DEPLOYMENT_TABLES: tuple[str, ...] = (
+        "llm_assignment",
         "llm_capability_inheritance",
     )
 
@@ -574,21 +566,25 @@ class TestRegistryIntent:
         from app.tenancy import registry
 
         registry._reset_for_tests()
-        for table in self._TABLES:
+        for table in self._WORKSPACE_TABLES:
             registry.register(table)
         scoped = registry.scoped_tables()
-        for table in self._TABLES:
+        for table in self._WORKSPACE_TABLES:
             assert table in scoped, f"{table} must be scoped"
+        for table in self._DEPLOYMENT_TABLES:
+            assert table not in scoped, f"{table} must stay deployment-scoped"
 
     def test_is_scoped_reports_true(self) -> None:
         """``is_scoped`` agrees with ``scoped_tables`` membership."""
         from app.tenancy import registry
 
         registry._reset_for_tests()
-        for table in self._TABLES:
+        for table in self._WORKSPACE_TABLES:
             registry.register(table)
-        for table in self._TABLES:
+        for table in self._WORKSPACE_TABLES:
             assert registry.is_scoped(table) is True
+        for table in self._DEPLOYMENT_TABLES:
+            assert registry.is_scoped(table) is False
 
     def test_reimport_is_idempotent(self) -> None:
         """Re-importing ``app.adapters.db.llm`` does not raise.
@@ -605,7 +601,7 @@ class TestRegistryIntent:
         import app.adapters.db.llm as llm_pkg
 
         importlib.reload(llm_pkg)
-        for table in self._TABLES:
+        for table in self._WORKSPACE_TABLES:
             assert llm_pkg.__name__ == "app.adapters.db.llm"
             # Re-register directly — exercises the same code path the
             # module body runs at import. Idempotent by set semantics.
@@ -614,6 +610,8 @@ class TestRegistryIntent:
             registry.register(table)
             registry.register(table)
             assert registry.is_scoped(table) is True
+        for table in self._DEPLOYMENT_TABLES:
+            assert registry.is_scoped(table) is False
 
 
 class TestSanityInterval:
