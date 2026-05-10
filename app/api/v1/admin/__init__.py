@@ -35,8 +35,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.workspace.models import UserWorkspace
-from app.api.deps import current_workspace_context, db_session
+from app.adapters.storage.ports import Storage
+from app.api.deps import current_workspace_context, db_session, get_storage
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.audit import write_audit
 from app.auth.passkey import (
     LastPasskeyCredential,
     PasskeyNotFound,
@@ -44,12 +46,84 @@ from app.auth.passkey import (
 )
 from app.auth.webauthn import base64url_to_bytes
 from app.authz.owners import is_owner_member
+from app.services.workspace.export_service import (
+    WORKSPACE_EXPORT_MEDIA_TYPE,
+    build_workspace_export,
+)
+from app.services.workspace.settings_service import OwnersOnlyError
 from app.tenancy import WorkspaceContext, tenant_agnostic
 
 _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]
 _Db = Annotated[Session, Depends(db_session)]
+_Storage = Annotated[Storage, Depends(get_storage)]
 
 router = APIRouter(tags=["workspace_admin"], responses=IDENTITY_PROBLEM_RESPONSES)
+
+
+@router.post(
+    "/workspace/export",
+    operation_id="workspace_admin.workspace.export",
+    summary="Download a full workspace export",
+    response_class=Response,
+    responses={
+        status.HTTP_200_OK: {
+            "content": {
+                WORKSPACE_EXPORT_MEDIA_TYPE: {
+                    "schema": {"type": "string", "format": "binary"}
+                }
+            },
+            "description": "ZIP workspace export artifact.",
+        }
+    },
+    openapi_extra={
+        "x-cli": {
+            "group": "workspace-admin",
+            "verb": "workspace-export",
+            "summary": "Download a full workspace export artifact",
+            "mutates": False,
+        },
+        "x-owner-only": True,
+    },
+)
+def export_workspace(ctx: _Ctx, session: _Db, storage: _Storage) -> Response:
+    try:
+        artifact = build_workspace_export(
+            session,
+            ctx,
+            storage=storage,
+        )
+    except OwnersOnlyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": "owners_only"},
+        ) from exc
+
+    file_count = len(artifact.manifest["files"])
+    missing_file_count = len(artifact.manifest["missing_files"])
+    write_audit(
+        session,
+        ctx,
+        entity_kind="workspace",
+        entity_id=ctx.workspace_id,
+        action="workspace.export_requested",
+        diff={
+            "filename": artifact.filename,
+            "content_type": artifact.content_type,
+            "size_bytes": len(artifact.content),
+            "table_count": len(artifact.manifest["tables"]),
+            "file_count": file_count,
+            "missing_file_count": missing_file_count,
+        },
+        via="api",
+    )
+
+    return Response(
+        content=artifact.content,
+        media_type=artifact.content_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{artifact.filename}"',
+        },
+    )
 
 
 def _assert_current_workspace_membership(
