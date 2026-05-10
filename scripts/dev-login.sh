@@ -21,9 +21,9 @@
 #      ``scripts/`` on sys.path instead of the repo root and the
 #      ``from app.…`` imports miss.
 #
-#   2. Host-side. Uses local Python when deps are present; if imports
-#      or host-only dev config are missing, falls back to the running
-#      dev-stack container:
+#   2. Host-side. Uses local Python when deps are present; if imports,
+#      host-only dev config, or host SQLite schema drift block the run,
+#      falls back to the running dev-stack container:
 #
 #        CREWDAY_DEV_AUTH=1 ./scripts/dev-login.sh me@dev.local dev
 #
@@ -103,21 +103,30 @@ if CREWDAY_PROFILE=dev "$PY" -m scripts.dev_login \
   --output curl \
   "${@:3}" 2>"$err_file"; then
   exit 0
+else
+  status=$?
 fi
 
-status=$?
-if ! grep -Eq "ModuleNotFoundError: No module named|ImportError: No module named|settings.root_key is not set|CREWDAY_ROOT_KEY" "$err_file"; then
+fallback_reason=""
+if grep -Eq "ModuleNotFoundError: No module named|ImportError: No module named|settings.root_key is not set|CREWDAY_ROOT_KEY" "$err_file"; then
+  fallback_reason="host Python is missing app dependencies or dev auth config"
+elif grep -Eq "sqlalchemy\.exc\.OperationalError:.*sqlite3\.OperationalError|sqlite3\.OperationalError.*sqlalchemy\.exc\.OperationalError" "$err_file" &&
+  grep -Eq "no such column:|no such table:|table .* has no column named|database schema has changed" "$err_file"; then
+  fallback_reason="host SQLite schema looks stale"
+fi
+
+if [[ -z "$fallback_reason" ]]; then
   cat "$err_file" >&2
   exit "$status"
 fi
 
 if ! command -v docker >/dev/null 2>&1; then
   cat "$err_file" >&2
-  echo "error: dev-login host Python is missing dependencies and docker is not on PATH for container fallback" >&2
+  echo "error: dev-login $fallback_reason and docker is not on PATH for container fallback" >&2
   exit "$status"
 fi
 
-echo "dev-login: host Python is missing app dependencies or dev auth config; falling back to the app-api container" >&2
+echo "dev-login: $fallback_reason; falling back to the app-api container" >&2
 docker compose -f docker-compose.dev.yml exec -T app-api \
   python -m scripts.dev_login \
     --email "$1" \

@@ -29,7 +29,8 @@ exists only because of this loopback constraint.
    The wrapper forces `CREWDAY_PROFILE=dev` for the login subprocess,
    uses host Python when the local environment is synced, and falls
    back to the running `app-api` container when host imports or
-   host-only dev auth config are missing. Do not add
+   host-only dev auth config are missing, or when the host SQLite
+   schema is stale while the dev stack is healthy. Do not add
    `CREWDAY_PROFILE=dev` or `CREWDAY_ROOT_KEY` by hand unless you are
    debugging the helper itself.
 
