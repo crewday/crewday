@@ -42,6 +42,8 @@ export interface LlmProvider {
   priority: number;
   is_enabled: boolean;
   provider_model_count: number;
+  spend_usd_30d: number;
+  calls_30d: number;
 }
 
 export interface LlmModel {
@@ -57,6 +59,8 @@ export interface LlmModel {
   is_active: boolean;
   notes: string | null;
   provider_model_count: number;
+  spend_usd_30d: number;
+  calls_30d: number;
 }
 
 export interface LlmProviderModel {
@@ -74,6 +78,8 @@ export interface LlmProviderModel {
   price_source_override: LlmPriceSourceOverride;
   price_last_synced_at: string | null;
   is_enabled: boolean;
+  spend_usd_30d: number;
+  calls_30d: number;
 }
 
 export interface LlmAssignment {
@@ -90,6 +96,10 @@ export interface LlmAssignment {
   last_used_at: string | null;
   spend_usd_30d: number;
   calls_30d: number;
+  direct_spend_usd_30d: number;
+  direct_calls_30d: number;
+  inherited_spend_usd_30d: number;
+  inherited_calls_30d: number;
   is_deployment_default?: boolean;
 }
 
@@ -97,6 +107,12 @@ export interface LlmCapabilityEntry {
   key: string;
   description: string;
   required_capabilities: string[];
+  spend_usd_30d: number;
+  calls_30d: number;
+  direct_spend_usd_30d: number;
+  direct_calls_30d: number;
+  inherited_spend_usd_30d: number;
+  inherited_calls_30d: number;
 }
 
 export interface LlmCapabilityInheritance {

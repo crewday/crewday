@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -108,6 +108,7 @@ def client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[TestClient]:
     monkeypatch.setattr("app.auth.session.get_settings", lambda: pinned_settings)
+    monkeypatch.setattr("app.api.admin.llm._now", lambda: _PINNED)
     app = create_app(settings=pinned_settings)
     with TestClient(
         app,
@@ -297,6 +298,98 @@ def _seed_llm_graph(session_factory: sessionmaker[Session]) -> SeededLlm:
                 created_at=_PINNED,
             )
         )
+        s.add(
+            LlmUsage(
+                id=new_ulid(),
+                workspace_id=workspace_id,
+                capability="chat.admin",
+                provider_model_id=provider_model_id,
+                tokens_in=10,
+                tokens_out=4,
+                cost_cents=0,
+                cost_usd=Decimal("0.000400"),
+                latency_ms=180,
+                status="ok",
+                correlation_id=new_ulid(),
+                attempt=0,
+                assignment_id=assignment_id,
+                fallback_attempts=0,
+                finish_reason="stop",
+                actor_user_id=None,
+                token_id=None,
+                agent_label=None,
+                created_at=_PINNED - timedelta(minutes=1),
+            )
+        )
+        s.add(
+            LlmUsage(
+                id=new_ulid(),
+                workspace_id=workspace_id,
+                capability="chat.manager",
+                provider_model_id=provider_model_id,
+                tokens_in=1,
+                tokens_out=1,
+                cost_cents=0,
+                cost_usd=Decimal("0.000006"),
+                latency_ms=120,
+                status="ok",
+                correlation_id=new_ulid(),
+                attempt=0,
+                assignment_id=assignment_id,
+                fallback_attempts=0,
+                finish_reason="stop",
+                actor_user_id=None,
+                token_id=None,
+                agent_label=None,
+                created_at=_PINNED - timedelta(days=30),
+            )
+        )
+        s.add(
+            LlmUsage(
+                id=new_ulid(),
+                workspace_id=workspace_id,
+                capability="chat.manager",
+                provider_model_id=provider_model_id,
+                tokens_in=1,
+                tokens_out=1,
+                cost_cents=50,
+                cost_usd=Decimal("0.500000"),
+                latency_ms=120,
+                status="ok",
+                correlation_id=new_ulid(),
+                attempt=0,
+                assignment_id=assignment_id,
+                fallback_attempts=0,
+                finish_reason="stop",
+                actor_user_id=None,
+                token_id=None,
+                agent_label=None,
+                created_at=_PINNED - timedelta(days=30, microseconds=1),
+            )
+        )
+        s.add(
+            LlmUsage(
+                id=new_ulid(),
+                workspace_id=workspace_id,
+                capability="chat.manager",
+                provider_model_id="retired-provider-model",
+                tokens_in=20,
+                tokens_out=8,
+                cost_cents=1,
+                cost_usd=Decimal("0.010000"),
+                latency_ms=190,
+                status="ok",
+                correlation_id=new_ulid(),
+                attempt=0,
+                assignment_id=None,
+                fallback_attempts=0,
+                finish_reason="stop",
+                actor_user_id=None,
+                token_id=None,
+                agent_label=None,
+                created_at=_PINNED - timedelta(minutes=2),
+            )
+        )
         s.commit()
         return SeededLlm(
             workspace_id=workspace_id,
@@ -397,10 +490,41 @@ class TestAdminLlmRoutes:
             body = graph.json()
             assert body["providers"][0]["id"] == seeded.provider_id
             assert body["providers"][0]["api_key_status"] == "present"
+            assert body["providers"][0]["spend_usd_30d"] == 0.174606
+            assert body["providers"][0]["calls_30d"] == 3
             assert body["models"][0]["id"] == seeded.model_id
+            assert body["models"][0]["spend_usd_30d"] == 0.174606
+            assert body["models"][0]["calls_30d"] == 3
             assert body["provider_models"][0]["id"] == seeded.provider_model_id
+            assert body["provider_models"][0]["spend_usd_30d"] == 0.174606
+            assert body["provider_models"][0]["calls_30d"] == 3
             assert body["assignments"][0]["id"] == seeded.assignment_id
-            assert body["assignments"][0]["spend_usd_30d"] == 0.17
+            assert body["assignments"][0]["spend_usd_30d"] == 0.174606
+            assert body["assignments"][0]["calls_30d"] == 3
+            assert body["assignments"][0]["direct_spend_usd_30d"] == 0.174206
+            assert body["assignments"][0]["direct_calls_30d"] == 2
+            assert body["assignments"][0]["inherited_spend_usd_30d"] == 0.0004
+            assert body["assignments"][0]["inherited_calls_30d"] == 1
+            chat_manager = next(
+                entry
+                for entry in body["capabilities"]
+                if entry["key"] == "chat.manager"
+            )
+            assert chat_manager["spend_usd_30d"] == 0.174606
+            assert chat_manager["calls_30d"] == 3
+            assert chat_manager["direct_spend_usd_30d"] == 0.174206
+            assert chat_manager["direct_calls_30d"] == 2
+            assert chat_manager["inherited_spend_usd_30d"] == 0.0004
+            assert chat_manager["inherited_calls_30d"] == 1
+            chat_admin = next(
+                entry for entry in body["capabilities"] if entry["key"] == "chat.admin"
+            )
+            assert chat_admin["spend_usd_30d"] == 0.0004
+            assert chat_admin["calls_30d"] == 1
+            assert chat_admin["direct_spend_usd_30d"] == 0.0004
+            assert chat_admin["direct_calls_30d"] == 1
+            assert chat_admin["inherited_spend_usd_30d"] == 0
+            assert chat_admin["inherited_calls_30d"] == 0
             default_assignments = [
                 assignment
                 for assignment in body["assignments"]
@@ -416,7 +540,8 @@ class TestAdminLlmRoutes:
                 "inherits_from": "default",
                 "source": "implicit_default",
             } in body["inheritance"]
-            assert body["totals"]["calls_30d"] == 1
+            assert body["totals"]["spend_usd_30d"] == 0.174606
+            assert body["totals"]["calls_30d"] == 3
 
             calls = client.get("/admin/api/v1/llm/calls")
             assert calls.status_code == 200, calls.text
@@ -437,6 +562,13 @@ class TestAdminLlmRoutes:
                 "fallback_attempts": 0,
                 "raw_response_available": False,
             }
+            retired_call = next(
+                call
+                for call in calls.json()
+                if call["model_id"] == "retired-provider-model"
+            )
+            assert retired_call["provider_model_id"] is None
+            assert retired_call["cost_usd"] == "0.010000"
 
             prompts = client.get("/admin/api/v1/llm/prompts")
             assert prompts.status_code == 200, prompts.text

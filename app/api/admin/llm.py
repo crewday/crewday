@@ -152,6 +152,8 @@ class LlmProviderResponse(BaseModel):
     priority: int
     is_enabled: bool
     provider_model_count: int
+    spend_usd_30d: float = 0.0
+    calls_30d: int = 0
 
 
 class LlmModelResponse(BaseModel):
@@ -167,6 +169,8 @@ class LlmModelResponse(BaseModel):
     is_active: bool
     notes: str | None
     provider_model_count: int
+    spend_usd_30d: float = 0.0
+    calls_30d: int = 0
 
 
 class LlmProviderModelResponse(BaseModel):
@@ -184,12 +188,20 @@ class LlmProviderModelResponse(BaseModel):
     price_source_override: Literal["", "none", "openrouter"]
     price_last_synced_at: str | None
     is_enabled: bool
+    spend_usd_30d: float = 0.0
+    calls_30d: int = 0
 
 
 class LlmCapabilityEntry(BaseModel):
     key: str
     description: str
     required_capabilities: list[str]
+    spend_usd_30d: float = 0.0
+    calls_30d: int = 0
+    direct_spend_usd_30d: float = 0.0
+    direct_calls_30d: int = 0
+    inherited_spend_usd_30d: float = 0.0
+    inherited_calls_30d: int = 0
 
 
 class LlmCapabilityInheritanceResponse(BaseModel):
@@ -212,6 +224,10 @@ class LlmAssignmentResponse(BaseModel):
     last_used_at: str | None
     spend_usd_30d: float
     calls_30d: int
+    direct_spend_usd_30d: float = 0.0
+    direct_calls_30d: int = 0
+    inherited_spend_usd_30d: float = 0.0
+    inherited_calls_30d: int = 0
     is_deployment_default: bool = False
 
 
@@ -464,6 +480,10 @@ def _money(value: Decimal | int | float | None) -> float:
     return float(value)
 
 
+def _spend_usd(value: Decimal) -> float:
+    return round(float(value), 6)
+
+
 def _hash_body(body: str) -> str:
     return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
 
@@ -489,8 +509,12 @@ def _endpoint(provider: LlmProvider) -> str:
 
 
 def _provider_response(
-    provider: LlmProvider, provider_model_counts: Counter[str]
+    provider: LlmProvider,
+    provider_model_counts: Counter[str],
+    *,
+    usage: dict[str, tuple[int, Decimal]] | None = None,
 ) -> LlmProviderResponse:
+    calls, spend = (usage or {}).get(provider.id, (0, Decimal("0.000000")))
     api_key_status: Literal["present", "missing", "rotating"] = (
         "present" if provider.api_key_envelope_ref else "missing"
     )
@@ -507,12 +531,18 @@ def _provider_response(
         priority=provider.priority,
         is_enabled=provider.is_enabled,
         provider_model_count=provider_model_counts[provider.id],
+        spend_usd_30d=_spend_usd(spend),
+        calls_30d=calls,
     )
 
 
 def _model_response(
-    model: LlmModel, provider_model_counts: Counter[str]
+    model: LlmModel,
+    provider_model_counts: Counter[str],
+    *,
+    usage: dict[str, tuple[int, Decimal]] | None = None,
 ) -> LlmModelResponse:
+    calls, spend = (usage or {}).get(model.id, (0, Decimal("0.000000")))
     return LlmModelResponse(
         id=model.id,
         canonical_name=model.canonical_name,
@@ -526,10 +556,17 @@ def _model_response(
         is_active=model.is_active,
         notes=model.notes,
         provider_model_count=provider_model_counts[model.id],
+        spend_usd_30d=_spend_usd(spend),
+        calls_30d=calls,
     )
 
 
-def _provider_model_response(row: LlmProviderModel) -> LlmProviderModelResponse:
+def _provider_model_response(
+    row: LlmProviderModel,
+    *,
+    usage: dict[str, tuple[int, Decimal]] | None = None,
+) -> LlmProviderModelResponse:
+    calls, spend = (usage or {}).get(row.id, (0, Decimal("0.000000")))
     return LlmProviderModelResponse(
         id=row.id,
         provider_id=row.provider_id,
@@ -545,26 +582,70 @@ def _provider_model_response(row: LlmProviderModel) -> LlmProviderModelResponse:
         price_source_override=row.price_source_override or "",
         price_last_synced_at=_iso(row.price_last_synced_at),
         is_enabled=row.is_enabled,
+        spend_usd_30d=_spend_usd(spend),
+        calls_30d=calls,
     )
 
 
-def _capabilities() -> list[LlmCapabilityEntry]:
+def _capabilities(
+    *,
+    direct_usage: dict[str, tuple[int, Decimal]] | None = None,
+    inherited_usage: dict[str, tuple[int, Decimal]] | None = None,
+) -> list[LlmCapabilityEntry]:
+    direct_usage = direct_usage or {}
+    inherited_usage = inherited_usage or {}
     return [
-        LlmCapabilityEntry(
+        _capability_response(
             key=key,
             description=description,
-            required_capabilities=list(required),
+            required=required,
+            direct_usage=direct_usage,
+            inherited_usage=inherited_usage,
         )
         for key, description, required in _CAPABILITIES
     ]
 
 
+def _capability_response(
+    *,
+    key: str,
+    description: str,
+    required: tuple[str, ...],
+    direct_usage: dict[str, tuple[int, Decimal]],
+    inherited_usage: dict[str, tuple[int, Decimal]],
+) -> LlmCapabilityEntry:
+    direct_calls, direct_spend = direct_usage.get(key, (0, Decimal("0.000000")))
+    inherited_calls, inherited_spend = inherited_usage.get(
+        key, (0, Decimal("0.000000"))
+    )
+    return LlmCapabilityEntry(
+        key=key,
+        description=description,
+        required_capabilities=list(required),
+        spend_usd_30d=_spend_usd(direct_spend + inherited_spend),
+        calls_30d=direct_calls + inherited_calls,
+        direct_spend_usd_30d=_spend_usd(direct_spend),
+        direct_calls_30d=direct_calls,
+        inherited_spend_usd_30d=_spend_usd(inherited_spend),
+        inherited_calls_30d=inherited_calls,
+    )
+
+
 def _assignment_response(
     row: LlmAssignment,
     *,
-    usage: dict[str, tuple[int, int]],
+    direct_usage: dict[str, tuple[int, Decimal]] | None = None,
+    inherited_usage: dict[str, tuple[int, Decimal]] | None = None,
+    usage: dict[str, tuple[int, Decimal]] | None = None,
 ) -> LlmAssignmentResponse:
-    calls, spend_cents = usage.get(row.id, (0, 0))
+    if usage is not None:
+        direct_usage = usage
+    direct_usage = direct_usage or {}
+    inherited_usage = inherited_usage or {}
+    direct_calls, direct_spend = direct_usage.get(row.id, (0, Decimal("0.000000")))
+    inherited_calls, inherited_spend = inherited_usage.get(
+        row.id, (0, Decimal("0.000000"))
+    )
     return LlmAssignmentResponse(
         id=row.id,
         capability=row.capability,
@@ -577,8 +658,12 @@ def _assignment_response(
         required_capabilities=list(row.required_capabilities or []),
         is_enabled=row.enabled,
         last_used_at=None,
-        spend_usd_30d=round(spend_cents / 100, 2),
-        calls_30d=calls,
+        spend_usd_30d=_spend_usd(direct_spend + inherited_spend),
+        calls_30d=direct_calls + inherited_calls,
+        direct_spend_usd_30d=_spend_usd(direct_spend),
+        direct_calls_30d=direct_calls,
+        inherited_spend_usd_30d=_spend_usd(inherited_spend),
+        inherited_calls_30d=inherited_calls,
     )
 
 
@@ -622,21 +707,72 @@ def _prompt_response(
     )
 
 
-def _assignment_usage(session: Session, cutoff: datetime) -> dict[str, tuple[int, int]]:
+def _add_usage(
+    rollups: dict[str, tuple[int, Decimal]], key: str, spend: Decimal
+) -> None:
+    calls, total_spend = rollups.get(key, (0, Decimal("0.000000")))
+    rollups[key] = (calls + 1, total_spend + spend)
+
+
+def _assignment_usage(
+    session: Session, cutoff: datetime
+) -> dict[str, tuple[int, Decimal]]:
     rows = session.execute(
         select(
             LlmUsage.assignment_id,
             func.count(LlmUsage.id),
-            func.coalesce(func.sum(LlmUsage.cost_cents), 0),
+            func.coalesce(func.sum(LlmUsage.cost_usd), Decimal("0.000000")),
         )
         .where(LlmUsage.created_at >= cutoff, LlmUsage.assignment_id.is_not(None))
         .group_by(LlmUsage.assignment_id)
     ).all()
     return {
-        str(assignment_id): (int(count or 0), int(spend or 0))
+        str(assignment_id): (int(count or 0), spend or Decimal("0.000000"))
         for assignment_id, count, spend in rows
         if assignment_id is not None
     }
+
+
+def _recent_usage(session: Session, cutoff: datetime) -> list[LlmUsage]:
+    return list(
+        session.scalars(
+            select(LlmUsage)
+            .where(LlmUsage.created_at >= cutoff)
+            .order_by(LlmUsage.created_at.desc(), LlmUsage.id.desc())
+        ).all()
+    )
+
+
+def _capability_inherits_from(
+    capability: str,
+    ancestor: str,
+    inheritance: dict[str, str],
+) -> bool:
+    seen: set[str] = set()
+    current = capability
+    for _ in range(16):
+        parent = inheritance.get(current)
+        if parent is None or parent in seen:
+            return False
+        if parent == ancestor:
+            return True
+        seen.add(parent)
+        current = parent
+    return False
+
+
+def _ancestor_capabilities(capability: str, inheritance: dict[str, str]) -> list[str]:
+    ancestors: list[str] = []
+    seen: set[str] = set()
+    current = capability
+    for _ in range(16):
+        parent = inheritance.get(current)
+        if parent is None or parent in seen:
+            return ancestors
+        ancestors.append(parent)
+        seen.add(parent)
+        current = parent
+    return ancestors
 
 
 def _capability_has_chain(
@@ -745,7 +881,7 @@ def _load_graph(session: Session) -> LlmGraphPayload:
                 .order_by(LlmCapabilityInheritance.capability)
             ).all()
         )
-        usage = _assignment_usage(session, cutoff)
+        usage_rows = _recent_usage(session, cutoff)
 
     provider_counts: Counter[str] = Counter(row.provider_id for row in provider_models)
     model_counts: Counter[str] = Counter(row.model_id for row in provider_models)
@@ -756,9 +892,7 @@ def _load_graph(session: Session) -> LlmGraphPayload:
         row.capability: row.inherits_from for row in inheritance
     }
 
-    assignment_responses = [
-        _assignment_response(row, usage=usage) for row in assignments
-    ]
+    enabled_assignment_caps = {row.capability for row in assignments if row.enabled}
     deployment_default_pm = _deployment_default_provider_model(
         provider_models, providers_by_id, models_by_id
     )
@@ -767,31 +901,6 @@ def _load_graph(session: Session) -> LlmGraphPayload:
         if deployment_default_pm is not None
         else None
     )
-    default_has_priority_zero = any(
-        row.capability == DEFAULT_LLM_CAPABILITY and row.enabled and row.priority == 0
-        for row in assignments
-    )
-    if deployment_default_assignment is not None and not default_has_priority_zero:
-        assignment_responses.append(deployment_default_assignment)
-    assignment_responses.sort(key=lambda row: (row.capability, row.priority, row.id))
-    issues: list[LlmAssignmentIssue] = []
-    for assignment in assignment_responses:
-        missing = _missing_model_capabilities(
-            assignment=assignment,
-            provider_models_by_id=provider_models_by_id,
-            models_by_id=models_by_id,
-            required_capabilities=assignment.required_capabilities,
-        )
-        if missing:
-            issues.append(
-                LlmAssignmentIssue(
-                    assignment_id=assignment.id,
-                    capability=assignment.capability,
-                    missing_capabilities=missing,
-                )
-            )
-
-    enabled_assignment_caps = {row.capability for row in assignments if row.enabled}
     if deployment_default_assignment is not None:
         enabled_assignment_caps.add(DEFAULT_LLM_CAPABILITY)
     capability_keys = [entry.key for entry in _capabilities()]
@@ -805,6 +914,87 @@ def _load_graph(session: Session) -> LlmGraphPayload:
         ):
             effective_inheritance[capability] = DEFAULT_LLM_CAPABILITY
 
+    provider_model_usage: dict[str, tuple[int, Decimal]] = {}
+    provider_usage: dict[str, tuple[int, Decimal]] = {}
+    model_usage: dict[str, tuple[int, Decimal]] = {}
+    assignment_direct_usage: dict[str, tuple[int, Decimal]] = {}
+    assignment_inherited_usage: dict[str, tuple[int, Decimal]] = {}
+    capability_direct_usage: dict[str, tuple[int, Decimal]] = {}
+    capability_inherited_usage: dict[str, tuple[int, Decimal]] = {}
+    provider_model_ids = set(provider_models_by_id)
+    provider_model_ids_by_api_model_id = {
+        row.api_model_id: row.id for row in provider_models
+    }
+    assignments_by_id = {row.id: row for row in assignments}
+    capability_key_set = set(capability_keys)
+    for usage_row in usage_rows:
+        spend = usage_row.cost_usd
+        resolved_provider_model_id = _llm_usage_provider_model_id(
+            usage_row,
+            provider_model_ids=provider_model_ids,
+            provider_model_ids_by_api_model_id=provider_model_ids_by_api_model_id,
+        )
+        if resolved_provider_model_id is None:
+            continue
+        provider_model = provider_models_by_id.get(resolved_provider_model_id)
+        if provider_model is None:
+            continue
+        _add_usage(provider_model_usage, provider_model.id, spend)
+        _add_usage(provider_usage, provider_model.provider_id, spend)
+        _add_usage(model_usage, provider_model.model_id, spend)
+        if usage_row.capability in capability_key_set:
+            _add_usage(capability_direct_usage, usage_row.capability, spend)
+        for ancestor in _ancestor_capabilities(
+            usage_row.capability, effective_inheritance
+        ):
+            if ancestor in capability_key_set:
+                _add_usage(capability_inherited_usage, ancestor, spend)
+        if usage_row.assignment_id is None:
+            continue
+        assignment = assignments_by_id.get(usage_row.assignment_id)
+        if assignment is None:
+            continue
+        if usage_row.capability == assignment.capability:
+            _add_usage(assignment_direct_usage, assignment.id, spend)
+        elif _capability_inherits_from(
+            usage_row.capability,
+            assignment.capability,
+            effective_inheritance,
+        ):
+            _add_usage(assignment_inherited_usage, assignment.id, spend)
+
+    assignment_responses = [
+        _assignment_response(
+            row,
+            direct_usage=assignment_direct_usage,
+            inherited_usage=assignment_inherited_usage,
+        )
+        for row in assignments
+    ]
+    default_has_priority_zero = any(
+        row.capability == DEFAULT_LLM_CAPABILITY and row.enabled and row.priority == 0
+        for row in assignments
+    )
+    if deployment_default_assignment is not None and not default_has_priority_zero:
+        assignment_responses.append(deployment_default_assignment)
+    assignment_responses.sort(key=lambda row: (row.capability, row.priority, row.id))
+    issues: list[LlmAssignmentIssue] = []
+    for assignment_response in assignment_responses:
+        missing = _missing_model_capabilities(
+            assignment=assignment_response,
+            provider_models_by_id=provider_models_by_id,
+            models_by_id=models_by_id,
+            required_capabilities=assignment_response.required_capabilities,
+        )
+        if missing:
+            issues.append(
+                LlmAssignmentIssue(
+                    assignment_id=assignment_response.id,
+                    capability=assignment_response.capability,
+                    missing_capabilities=missing,
+                )
+            )
+
     inherited_caps = {
         capability
         for capability in capability_keys
@@ -812,16 +1002,16 @@ def _load_graph(session: Session) -> LlmGraphPayload:
         and capability in effective_inheritance
     }
     assignments_by_capability: dict[str, list[LlmAssignmentResponse]] = {}
-    for assignment in assignment_responses:
-        assignments_by_capability.setdefault(assignment.capability, []).append(
-            assignment
+    for assignment_response in assignment_responses:
+        assignments_by_capability.setdefault(assignment_response.capability, []).append(
+            assignment_response
         )
     for capability in inherited_caps:
         parent = effective_inheritance[capability]
         required = _CAPABILITY_REQUIRED.get(capability, [])
-        for assignment in assignments_by_capability.get(parent, []):
+        for assignment_response in assignments_by_capability.get(parent, []):
             missing = _missing_model_capabilities(
-                assignment=assignment,
+                assignment=assignment_response,
                 provider_models_by_id=provider_models_by_id,
                 models_by_id=models_by_id,
                 required_capabilities=required,
@@ -829,18 +1019,32 @@ def _load_graph(session: Session) -> LlmGraphPayload:
             if missing:
                 issues.append(
                     LlmAssignmentIssue(
-                        assignment_id=assignment.id,
+                        assignment_id=assignment_response.id,
                         capability=capability,
                         missing_capabilities=missing,
                     )
                 )
-    total_calls = sum(calls for calls, _spend in usage.values())
-    total_spend = sum(spend for _calls, spend in usage.values())
+    total_calls = sum(calls for calls, _spend in provider_model_usage.values())
+    total_spend = sum(
+        (spend for _calls, spend in provider_model_usage.values()),
+        Decimal("0.000000"),
+    )
     return LlmGraphPayload(
-        providers=[_provider_response(row, provider_counts) for row in providers],
-        models=[_model_response(row, model_counts) for row in models],
-        provider_models=[_provider_model_response(row) for row in provider_models],
-        capabilities=_capabilities(),
+        providers=[
+            _provider_response(row, provider_counts, usage=provider_usage)
+            for row in providers
+        ],
+        models=[
+            _model_response(row, model_counts, usage=model_usage) for row in models
+        ],
+        provider_models=[
+            _provider_model_response(row, usage=provider_model_usage)
+            for row in provider_models
+        ],
+        capabilities=_capabilities(
+            direct_usage=capability_direct_usage,
+            inherited_usage=capability_inherited_usage,
+        ),
         inheritance=[
             LlmCapabilityInheritanceResponse(
                 capability=capability,
@@ -854,7 +1058,7 @@ def _load_graph(session: Session) -> LlmGraphPayload:
         assignments=assignment_responses,
         assignment_issues=issues,
         totals=LlmGraphTotals(
-            spend_usd_30d=round(total_spend / 100, 2),
+            spend_usd_30d=_spend_usd(total_spend),
             calls_30d=total_calls,
             provider_count=len(providers),
             model_count=len(models),
