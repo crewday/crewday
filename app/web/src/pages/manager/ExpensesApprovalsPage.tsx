@@ -11,6 +11,7 @@ import { useDecideMutation } from "@/lib/useDecideMutation";
 import { formatMoney } from "@/lib/money";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
+import FormField from "@/components/FormField";
 import { Camera, ReceiptText, ShieldCheck } from "lucide-react";
 import { Chip, EmptyState, Loading, StatCard } from "@/components/common";
 import { EXPENSE_STATUS_TONE } from "@/lib/tones";
@@ -170,13 +171,13 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
       </button>
 
       <dialog
-        className="modal"
+        className="modal modal--sheet sheet-form-dialog"
         ref={dialogRef}
         onClose={reset}
         aria-label={`Correct ${expense.vendor}`}
       >
         <form
-          className="modal__body"
+          className="expense-correction-form sheet-form"
           onSubmit={(event) => {
             event.preventDefault();
             setFormError(null);
@@ -193,14 +194,28 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
             approveWithEdits.mutate(body);
           }}
         >
-          <h3 className="modal__title">Correct and approve</h3>
-          <p className="modal__sub">
-            This approves the claim with corrected values. The submitted claim is not
-            rewritten; the approval audit row records the before and after values.
-          </p>
+          <header className="expense-correction-form__head sheet-form__head">
+            <div>
+              <p className="expense-correction-form__eyebrow sheet-form__eyebrow">Expense approval</p>
+              <h3 className="expense-correction-form__title sheet-form__title">Correct and approve</h3>
+              <p className="expense-correction-form__sub sheet-form__sub">
+                This approves the claim with corrected values. The submitted claim is not
+                rewritten; the approval audit row records the before and after values.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="expense-correction-form__close sheet-form__close"
+              onClick={() => dialogRef.current?.close()}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </header>
 
-          <label className="field">
-            <span>Amount</span>
+          <div className="expense-correction-form__body sheet-form__body">
+          <div className="expense-correction-form__grid sheet-form__grid">
+          <FormField label="Amount" requirement="required" className="expense-correction-form__field sheet-form__field">
             <input
               inputMode="decimal"
               required
@@ -213,15 +228,14 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
               }
               onChange={(event) => setAmount(event.target.value)}
             />
-          </label>
           {amountError !== null && (
             <p id={`expense-correction-amount-error-${expense.id}`} className="form-field-error">
               {amountError}
             </p>
           )}
+          </FormField>
 
-          <label className="field">
-            <span>Currency</span>
+          <FormField label="Currency" requirement="required" className="expense-correction-form__field sheet-form__field">
             <input
               maxLength={3}
               required
@@ -234,15 +248,15 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
               }
               onChange={(event) => setCurrency(event.target.value)}
             />
-          </label>
           {currencyError !== null && (
             <p id={`expense-correction-currency-error-${expense.id}`} className="form-field-error">
               {currencyError}
             </p>
           )}
+          </FormField>
+          </div>
 
-          <label className="field">
-            <span>Category</span>
+          <FormField label="Category" requirement="required" className="expense-correction-form__field sheet-form__field">
             <select
               value={category}
               aria-invalid={categoryError !== null}
@@ -257,20 +271,21 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
                 <option key={value} value={value}>{expenseCategoryLabel(value)}</option>
               ))}
             </select>
-          </label>
           {categoryError !== null && (
             <p id={`expense-correction-category-error-${expense.id}`} className="form-field-error">
               {categoryError}
             </p>
           )}
+          </FormField>
 
           {formError !== null && (
             <p className="login__notice login__notice--danger" role="alert">
               {formError}
             </p>
           )}
+          </div>
 
-          <div className="modal__actions">
+          <footer className="expense-correction-form__footer sheet-form__footer">
             <button
               type="button"
               className="btn btn--ghost"
@@ -285,7 +300,7 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
             >
               {approveWithEdits.isPending ? "Approving..." : "Approve corrected claim"}
             </button>
-          </div>
+          </footer>
         </form>
       </dialog>
     </>

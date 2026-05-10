@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import FormField from "@/components/FormField";
 import type { Booking } from "@/types/api";
 
 export function BookingProposeDialog({
@@ -65,9 +66,9 @@ export function BookingProposeDialog({
   if (!iso) return null;
 
   return (
-    <dialog className="modal" ref={dialogRef} onClose={onClose}>
+    <dialog className="modal modal--sheet sheet-form-dialog" ref={dialogRef} onClose={onClose}>
       <form
-        className="modal__body"
+        className="booking-propose-form sheet-form"
         onSubmit={(e) => {
           e.preventDefault();
           if (!propertyId || !starts || !ends || ends <= starts) return;
@@ -79,13 +80,26 @@ export function BookingProposeDialog({
           });
         }}
       >
-        <h3 className="modal__title">Propose ad-hoc booking</h3>
-        <p className="modal__sub">
-          {iso} · Sent to your manager for approval.
-        </p>
+        <header className="booking-propose-form__head sheet-form__head">
+          <div>
+            <p className="booking-propose-form__eyebrow sheet-form__eyebrow">Schedule change</p>
+            <h3 className="booking-propose-form__title sheet-form__title">Propose ad-hoc booking</h3>
+            <p className="booking-propose-form__sub sheet-form__sub">
+              {iso} · Sent to your manager for approval.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="booking-propose-form__close sheet-form__close"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
 
-        <label className="field">
-          <span>Property</span>
+        <div className="booking-propose-form__body sheet-form__body">
+        <FormField label="Property" requirement="required" className="booking-propose-form__field sheet-form__field">
           <select
             value={propertyId}
             onChange={(e) => setPropertyId(e.target.value)}
@@ -95,34 +109,32 @@ export function BookingProposeDialog({
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
           </select>
-        </label>
+        </FormField>
 
-        <div className="avail-hours">
-          <label className="field">
-            <span>From</span>
+        <div className="booking-propose-form__grid sheet-form__grid">
+          <FormField label="From" requirement="required" className="booking-propose-form__field sheet-form__field">
             <input type="time" value={starts} onChange={(e) => setStarts(e.target.value)} required />
-          </label>
-          <label className="field">
-            <span>Until</span>
+          </FormField>
+          <FormField label="Until" requirement="required" className="booking-propose-form__field sheet-form__field">
             <input type="time" value={ends} onChange={(e) => setEnds(e.target.value)} required />
-          </label>
+          </FormField>
         </div>
 
-        <label className="field">
-          <span>Notes (optional)</span>
+        <FormField label="Notes" requirement="optional" className="booking-propose-form__field sheet-form__field">
           <input
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Swung by for forgotten laundry…"
           />
-        </label>
+        </FormField>
+        </div>
 
-        <div className="modal__actions">
+        <footer className="booking-propose-form__footer sheet-form__footer">
           <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>
           <button type="submit" className="btn btn--moss" disabled={m.isPending}>
             {m.isPending ? "Submitting…" : "Propose"}
           </button>
-        </div>
+        </footer>
       </form>
     </dialog>
   );

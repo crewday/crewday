@@ -223,9 +223,9 @@ describe("<InstructionDetailPage>", () => {
       expect(screen.getByText("Use the silver key.")).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-      const markdown = screen.getByLabelText("Markdown");
+      const markdown = screen.getByLabelText(/^Markdown\b/);
       fireEvent.change(markdown, { target: { value: "Use the brass key." } });
-      fireEvent.change(screen.getByLabelText("Change note"), {
+      fireEvent.change(screen.getByLabelText(/^Change note\b/), {
         target: { value: "updated key material" },
       });
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -257,9 +257,9 @@ describe("<InstructionDetailPage>", () => {
 
       expect(await screen.findByRole("heading", { name: "Entry code" })).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-      fireEvent.change(screen.getByLabelText("Scope"), { target: { value: "area" } });
+      fireEvent.change(screen.getByLabelText(/^Scope\b/), { target: { value: "area" } });
 
-      const area = await screen.findByLabelText("Area");
+      const area = await screen.findByLabelText(/^Area\b/);
       await waitFor(() => expect(area).not.toBeDisabled());
       fireEvent.change(area, { target: { value: "area_1" } });
       fireEvent.click(screen.getByRole("button", { name: "Save" }));

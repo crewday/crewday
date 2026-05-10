@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import FormField from "@/components/FormField";
 import { Avatar, Chip, Loading } from "@/components/common";
 import type { Employee, Property, Schedule, TaskTemplate } from "@/types/api";
 import { type ListEnvelope } from "@/lib/listResponse";
@@ -301,20 +302,35 @@ function ScheduleCreateDialog(props: ScheduleCreateDialogProps) {
     : "Create a task template before adding schedules.";
 
   return (
-    <dialog className="modal" open={props.open} onClose={props.onClose} aria-label="New schedule">
-      <form className="modal__body" onSubmit={props.onSubmit}>
-        <h3 className="modal__title">
-          {"New schedule"
-          } // code-health: ignore[nloc] Schedule-create form fields are intentionally explicit and ordered like the API payload.
-        </h3>
-        <p className="modal__sub">Create recurring tasks from a task template.</p>
+    <dialog className="modal modal--sheet sheet-form-dialog" open={props.open} onClose={props.onClose} aria-label="New schedule">
+      <form className="schedule-create-form sheet-form" onSubmit={props.onSubmit}>
+        <header className="schedule-create-form__head sheet-form__head">
+          <div>
+            <p className="schedule-create-form__eyebrow sheet-form__eyebrow">Recurring work</p>
+            <h3 className="schedule-create-form__title sheet-form__title">
+              {"New schedule"
+              } // code-health: ignore[nloc] Schedule-create form fields are intentionally explicit and ordered like the API payload.
+            </h3>
+            <p className="schedule-create-form__sub sheet-form__sub">
+              Create recurring tasks from a task template.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="schedule-create-form__close sheet-form__close"
+            onClick={props.onClose}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
 
+        <div className="schedule-create-form__body sheet-form__body">
         {unavailable ? (
-          <p role="status" className="modal__sub">{unavailableMessage}</p>
+          <p role="status" className="sheet-form__sub">{unavailableMessage}</p>
         ) : (
           <>
-            <label className="field">
-              <span>Name</span>
+            <FormField label="Name" requirement="required" className="schedule-create-form__field sheet-form__field">
               <input
                 autoFocus
                 required
@@ -322,9 +338,8 @@ function ScheduleCreateDialog(props: ScheduleCreateDialogProps) {
                 onChange={(e) => props.onName(e.target.value)}
                 placeholder="Weekly turnover"
               />
-            </label>
-            <label className="field">
-              <span>Template</span>
+            </FormField>
+            <FormField label="Template" requirement="required" className="schedule-create-form__field sheet-form__field">
               <select
                 required
                 value={props.templateId || props.templates[0]?.id || ""}
@@ -334,64 +349,62 @@ function ScheduleCreateDialog(props: ScheduleCreateDialogProps) {
                   <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
                 ))}
               </select>
-            </label>
-            <label className="field">
-              <span>Property</span>
+            </FormField>
+            <FormField label="Property" requirement="optional" className="schedule-create-form__field sheet-form__field">
               <select value={props.propertyId} onChange={(e) => props.onPropertyId(e.target.value)}>
                 <option value="">Any property</option>
                 {props.properties.map((property) => (
                   <option key={property.id} value={property.id}>{property.name}</option>
                 ))}
               </select>
-            </label>
-            <label className="field">
-              <span>Default assignee</span>
+            </FormField>
+            <FormField label="Default assignee" requirement="optional" className="schedule-create-form__field sheet-form__field">
               <select value={props.assigneeId} onChange={(e) => props.onAssigneeId(e.target.value)}>
                 <option value="">Unassigned</option>
                 {props.employees.map((employee) => (
                   <option key={employee.id} value={employee.id}>{employee.name}</option>
                 ))}
               </select>
-            </label>
-            <label className="field">
-              <span>Starts on</span>
+            </FormField>
+            <div className="schedule-create-form__grid sheet-form__grid">
+            <FormField label="Starts on" requirement="required" className="schedule-create-form__field sheet-form__field">
               <input
                 type="date"
                 required
                 value={props.activeFrom}
                 onChange={(e) => props.onActiveFrom(e.target.value)}
               />
-            </label>
-            <label className="field">
-              <span>Start time</span>
+            </FormField>
+            <FormField label="Start time" requirement="required" className="schedule-create-form__field sheet-form__field">
               <input
                 type="time"
                 required
                 value={props.startsAt}
                 onChange={(e) => props.onStartsAt(e.target.value)}
               />
-            </label>
-            <label className="field">
-              <span>Repeats</span>
+            </FormField>
+            </div>
+            <FormField label="Repeats" requirement="required" className="schedule-create-form__field sheet-form__field">
               <select value={props.frequency} onChange={(e) => props.onFrequency(e.target.value)}>
                 <option value="DAILY">Daily</option>
                 <option value="WEEKLY">Weekly</option>
                 <option value="MONTHLY">Monthly</option>
               </select>
-            </label>
+            </FormField>
           </>
         )}
 
         {props.error && <p role="alert" className="tokens-form__error">{props.error}</p>}
+        </div>
 
-        <div className="modal__actions">
+        <footer className="schedule-create-form__footer sheet-form__footer">
           <button type="button" className="btn btn--ghost" onClick={props.onClose}>
             Cancel
           </button>
           <button type="submit" className="btn btn--moss" disabled={props.pending || unavailable}>
             {props.pending ? "Creating..." : "Create schedule"}
           </button>
-        </div>
+        </footer>
       </form>
     </dialog>
   );

@@ -164,10 +164,10 @@ describe("<EmployeesPage> invite action", () => {
     );
     fireEvent.click(await screen.findByRole("button", { name: "+ Invite employee" }));
     const dialog = screen.getByRole("dialog", { name: "Invite employee" });
-    fireEvent.change(within(dialog).getByLabelText("Full name"), {
+    fireEvent.change(within(dialog).getByLabelText(/^Full name\b/), {
       target: { value: "Riley Chen" },
     });
-    fireEvent.change(within(dialog).getByLabelText("Email"), {
+    fireEvent.change(within(dialog).getByLabelText(/^Email\b/), {
       target: { value: "riley@example.test" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Send invite" }));
@@ -207,10 +207,10 @@ describe("<EmployeesPage> invite action", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Invite employee" }));
     const dialog = screen.getByRole("dialog", { name: "Invite employee" });
-    fireEvent.change(within(dialog).getByLabelText("Full name"), {
+    fireEvent.change(within(dialog).getByLabelText(/^Full name\b/), {
       target: { value: "Riley Chen" },
     });
-    fireEvent.change(within(dialog).getByLabelText("Email"), {
+    fireEvent.change(within(dialog).getByLabelText(/^Email\b/), {
       target: { value: "riley@example.test" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Send invite" }));
@@ -246,10 +246,10 @@ describe("<EmployeesPage> invite action", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Invite employee" }));
     const dialog = screen.getByRole("dialog", { name: "Invite employee" });
-    fireEvent.change(within(dialog).getByLabelText("Full name"), {
+    fireEvent.change(within(dialog).getByLabelText(/^Full name\b/), {
       target: { value: "Riley Chen" },
     });
-    fireEvent.change(within(dialog).getByLabelText("Email"), {
+    fireEvent.change(within(dialog).getByLabelText(/^Email\b/), {
       target: { value: "riley@example.test" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Send invite" }));
@@ -279,10 +279,10 @@ describe("<EmployeesPage> invite action", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Invite employee" }));
     const dialog = screen.getByRole("dialog", { name: "Invite employee" });
-    fireEvent.change(within(dialog).getByLabelText("Full name"), {
+    fireEvent.change(within(dialog).getByLabelText(/^Full name\b/), {
       target: { value: "Riley Chen" },
     });
-    fireEvent.change(within(dialog).getByLabelText("Email"), {
+    fireEvent.change(within(dialog).getByLabelText(/^Email\b/), {
       target: { value: "riley@example.test" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Send invite" }));
@@ -363,10 +363,10 @@ describe("<EmployeesPage> work-role catalog", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Add role" }));
     const dialog = screen.getByRole("dialog", { name: "Add work role" });
-    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Pool technician" } });
-    fireEvent.change(within(dialog).getByLabelText("Key"), { target: { value: "pool_tech" } });
-    fireEvent.change(within(dialog).getByLabelText("Icon name"), { target: { value: "Waves" } });
-    fireEvent.change(within(dialog).getByLabelText("Description"), {
+    fireEvent.change(within(dialog).getByLabelText(/^Name\b/), { target: { value: "Pool technician" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Key\b/), { target: { value: "pool_tech" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Icon name\b/), { target: { value: "Waves" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Description\b/), {
       target: { value: "Handles weekly pool checks." },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
@@ -398,8 +398,8 @@ describe("<EmployeesPage> work-role catalog", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Add role" }));
     const dialog = screen.getByRole("dialog", { name: "Add work role" });
-    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Housekeeper" } });
-    fireEvent.change(within(dialog).getByLabelText("Key"), { target: { value: "housekeeper" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Name\b/), { target: { value: "Housekeeper" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Key\b/), { target: { value: "housekeeper" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
 
     expect(await within(dialog).findByRole("button", { name: "Saving..." })).toBeDisabled();
@@ -424,8 +424,8 @@ describe("<EmployeesPage> work-role catalog", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Add role" }));
     const dialog = screen.getByRole("dialog", { name: "Add work role" });
-    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Housekeeper" } });
-    fireEvent.change(within(dialog).getByLabelText("Key"), { target: { value: "housekeeper" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Name\b/), { target: { value: "Housekeeper" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Key\b/), { target: { value: "housekeeper" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
 
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(
@@ -453,8 +453,8 @@ describe("<EmployeesPage> work-role catalog", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Add role" }));
     const dialog = screen.getByRole("dialog", { name: "Add work role" });
-    const keyInput = within(dialog).getByLabelText("Key");
-    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Night manager" } });
+    const keyInput = within(dialog).getByLabelText(/^Key\b/);
+    fireEvent.change(within(dialog).getByLabelText(/^Name\b/), { target: { value: "Night manager" } });
     fireEvent.change(keyInput, { target: { value: "Night Manager" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
 
@@ -483,8 +483,8 @@ describe("<EmployeesPage> work-role catalog", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Add role" }));
     const dialog = screen.getByRole("dialog", { name: "Add work role" });
-    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Driver" } });
-    fireEvent.change(within(dialog).getByLabelText("Key"), { target: { value: "driver" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Name\b/), { target: { value: "Driver" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Key\b/), { target: { value: "driver" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
 
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(
@@ -511,8 +511,8 @@ describe("<EmployeesPage> work-role catalog", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const dialog = screen.getByRole("dialog", { name: "Edit work role" });
-    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Lead housekeeper" } });
-    fireEvent.change(within(dialog).getByLabelText("Key"), { target: { value: "lead_housekeeper" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Name\b/), { target: { value: "Lead housekeeper" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Key\b/), { target: { value: "lead_housekeeper" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
 
     expect(await screen.findByText("Lead housekeeper")).toBeInTheDocument();

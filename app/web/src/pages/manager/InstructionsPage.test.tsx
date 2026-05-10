@@ -187,21 +187,21 @@ describe("<InstructionsPage>", () => {
     const dialog = screen.getByRole("dialog", { name: "Create instruction" });
     expect(within(dialog).getByRole("button", { name: "Create" })).toBeDisabled();
 
-    fireEvent.change(within(dialog).getByLabelText("Title"), {
+    fireEvent.change(within(dialog).getByLabelText(/^Title\b/), {
       target: { value: "Dishwasher reset" },
     });
-    fireEvent.change(within(dialog).getByLabelText("Markdown"), {
+    fireEvent.change(within(dialog).getByLabelText(/^Markdown\b/), {
       target: { value: "Hold the reset button for five seconds." },
     });
-    fireEvent.change(within(dialog).getByLabelText("Scope"), { target: { value: "area" } });
-    fireEvent.change(within(dialog).getByLabelText("Property"), {
+    fireEvent.change(within(dialog).getByLabelText(/^Scope\b/), { target: { value: "area" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Property\b/), {
       target: { value: "prop_1" },
     });
 
-    const area = await within(dialog).findByLabelText("Area");
+    const area = await within(dialog).findByLabelText(/^Area\b/);
     await waitFor(() => expect(area).not.toBeDisabled());
     fireEvent.change(area, { target: { value: "area_kitchen" } });
-    fireEvent.change(within(dialog).getByLabelText("Tags"), {
+    fireEvent.change(within(dialog).getByLabelText(/^Tags\b/), {
       target: { value: "kitchen, appliance" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
@@ -241,13 +241,13 @@ describe("<InstructionsPage>", () => {
     fireEvent.click(await screen.findByRole("button", { name: "+ New instruction" }));
     const dialog = screen.getByRole("dialog", { name: "Create instruction" });
 
-    fireEvent.change(within(dialog).getByLabelText("Title"), {
+    fireEvent.change(within(dialog).getByLabelText(/^Title\b/), {
       target: { value: "Pool rules" },
     });
-    fireEvent.change(within(dialog).getByLabelText("Markdown"), {
+    fireEvent.change(within(dialog).getByLabelText(/^Markdown\b/), {
       target: { value: "Close the cover after service." },
     });
-    fireEvent.change(within(dialog).getByLabelText("Scope"), { target: { value: "property" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Scope\b/), { target: { value: "property" } });
 
     const createButton = within(dialog).getByRole("button", { name: "Create" });
     expect(createButton).toBeDisabled();

@@ -493,7 +493,7 @@ describe("TodayPage", () => {
 
       fireEvent.click(await screen.findByRole("button", { name: "+ New task" }));
       const dialog = screen.getByRole("dialog");
-      fireEvent.change(within(dialog).getByLabelText("Title"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Title\b/), {
         target: { value: "QA smoke personal task" },
       });
       await waitFor(() => {
@@ -574,13 +574,13 @@ describe("TodayPage", () => {
 
       fireEvent.click(await screen.findByRole("button", { name: "+ New task" }));
       const dialog = screen.getByRole("dialog");
-      fireEvent.change(within(dialog).getByLabelText("Title"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Title\b/), {
         target: { value: "Property area task" },
       });
-      fireEvent.change(within(dialog).getByLabelText("Property"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Property\b/), {
         target: { value: "p1" },
       });
-      fireEvent.change(await within(dialog).findByLabelText("Area (optional)"), {
+      fireEvent.change(await within(dialog).findByLabelText(/^Area\b/), {
         target: { value: "area_kitchen" },
       });
       fireEvent.click(within(dialog).getByRole("button", { name: "Add task" }));
@@ -634,7 +634,7 @@ describe("TodayPage", () => {
 
       fireEvent.click(await screen.findByRole("button", { name: "+ New task" }));
       const dialog = screen.getByRole("dialog");
-      fireEvent.change(within(dialog).getByLabelText("Title"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Title\b/), {
         target: { value: "QA smoke personal task" },
       });
       await waitFor(() => {

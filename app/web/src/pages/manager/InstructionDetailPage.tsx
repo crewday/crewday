@@ -8,6 +8,7 @@ import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
+import FormField from "@/components/FormField";
 import { Chip, Loading } from "@/components/common";
 import { INSTRUCTION_SCOPE_TONE } from "@/lib/tones";
 import type { Instruction, Property } from "@/types/api";
@@ -279,22 +280,34 @@ export default function InstructionDetailPage() {
       {editing && (
         <dialog
           ref={editDialogRef}
-          className="modal modal--sheet"
+          className="modal modal--sheet sheet-form-dialog"
           onClose={() => setEditing(false)}
         >
-          <form className="modal__body form" onSubmit={submitEdit}>
-            <h3 className="modal__title">Edit instruction</h3>
-            <label className="field">
-              <span>Title</span>
+          <form className="instruction-edit-form sheet-form" onSubmit={submitEdit}>
+            <header className="instruction-edit-form__head sheet-form__head">
+              <div>
+                <p className="instruction-edit-form__eyebrow sheet-form__eyebrow">Knowledge base</p>
+                <h3 className="instruction-edit-form__title sheet-form__title">Edit instruction</h3>
+              </div>
+              <button
+                type="button"
+                className="instruction-edit-form__close sheet-form__close"
+                onClick={closeEdit}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </header>
+            <div className="instruction-edit-form__body sheet-form__body">
+            <FormField label="Title" requirement="required" className="instruction-edit-form__field sheet-form__field">
               <input
                 value={draft.title}
                 onChange={(event) => setDraft({ ...draft, title: event.currentTarget.value })}
                 required
               />
-            </label>
-            <div className="form-grid form-grid--two">
-              <label className="field">
-                <span>Scope</span>
+            </FormField>
+            <div className="instruction-edit-form__grid sheet-form__grid">
+              <FormField label="Scope" requirement="required" className="instruction-edit-form__field sheet-form__field">
                 <select
                   value={draft.scope}
                   onChange={(event) => {
@@ -311,9 +324,8 @@ export default function InstructionDetailPage() {
                   <option value="property">Property</option>
                   <option value="area">Area</option>
                 </select>
-              </label>
-              <label className="field">
-                <span>Property</span>
+              </FormField>
+              <FormField label="Property" requirement={draft.scope === "global" ? "optional" : "required"} className="instruction-edit-form__field sheet-form__field">
                 <select
                   value={draft.property_id ?? ""}
                   onChange={(event) =>
@@ -331,11 +343,10 @@ export default function InstructionDetailPage() {
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </select>
-              </label>
+              </FormField>
             </div>
             {draft.scope === "area" && (
-              <label className="field">
-                <span>Area</span>
+              <FormField label="Area" requirement="required" className="instruction-edit-form__field sheet-form__field">
                 <select
                   value={draft.area_id ?? ""}
                   onChange={(event) =>
@@ -351,36 +362,34 @@ export default function InstructionDetailPage() {
                     <option key={area.id} value={area.id}>{area.name}</option>
                   ))}
                 </select>
-              </label>
+              </FormField>
             )}
-            <label className="field">
-              <span>Markdown</span>
+            <FormField label="Markdown" requirement="required" className="instruction-edit-form__field sheet-form__field">
               <textarea
                 value={draft.body_md}
                 onChange={(event) => setDraft({ ...draft, body_md: event.currentTarget.value })}
                 rows={10}
               />
-            </label>
-            <label className="field">
-              <span>Tags</span>
+            </FormField>
+            <FormField label="Tags" requirement="optional" className="instruction-edit-form__field sheet-form__field">
               <input
                 value={draft.tags.join(", ")}
                 onChange={(event) =>
                   setDraft({ ...draft, tags: parseTags(event.currentTarget.value) })
                 }
               />
-            </label>
-            <label className="field">
-              <span>Change note</span>
+            </FormField>
+            <FormField label="Change note" requirement="optional" className="instruction-edit-form__field sheet-form__field">
               <input
                 value={draft.change_note}
                 onChange={(event) =>
                   setDraft({ ...draft, change_note: event.currentTarget.value })
                 }
               />
-            </label>
+            </FormField>
             {save.isError && <p className="form-error">Failed to save.</p>}
-            <div className="modal__actions">
+            </div>
+            <footer className="instruction-edit-form__footer sheet-form__footer">
               <button type="button" className="btn btn--ghost" onClick={closeEdit}>
                 Cancel
               </button>
@@ -391,7 +400,7 @@ export default function InstructionDetailPage() {
               >
                 Save
               </button>
-            </div>
+            </footer>
           </form>
         </dialog>
       )}

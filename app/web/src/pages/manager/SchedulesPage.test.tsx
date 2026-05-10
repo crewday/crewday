@@ -180,8 +180,8 @@ describe("<SchedulesPage> New schedule action", () => {
       fireEvent.click(screen.getByRole("button", { name: "+ New schedule" }));
 
       const dialog = screen.getByRole("dialog", { name: "New schedule" });
-      expect(within(dialog).getByLabelText("Template")).toHaveValue(TEMPLATE.id);
-      expect(within(dialog).getByLabelText("Property")).toHaveValue("");
+      expect(within(dialog).getByLabelText(/^Template\b/)).toHaveValue(TEMPLATE.id);
+      expect(within(dialog).getByLabelText(/^Property\b/)).toHaveValue("");
       expect(within(dialog).getByRole("button", { name: "Create schedule" })).toBeEnabled();
     } finally {
       harness.restore();
@@ -246,19 +246,19 @@ describe("<SchedulesPage> New schedule action", () => {
       fireEvent.click(screen.getByRole("button", { name: "+ New schedule" }));
 
       const dialog = screen.getByRole("dialog", { name: "New schedule" });
-      fireEvent.change(within(dialog).getByLabelText("Name"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
         target: { value: "Friday turnover" },
       });
-      fireEvent.change(within(dialog).getByLabelText("Property"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Property\b/), {
         target: { value: PROPERTY.id },
       });
-      fireEvent.change(within(dialog).getByLabelText("Default assignee"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Default assignee\b/), {
         target: { value: EMPLOYEE.id },
       });
-      fireEvent.change(within(dialog).getByLabelText("Starts on"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Starts on\b/), {
         target: { value: "2026-05-08" },
       });
-      fireEvent.change(within(dialog).getByLabelText("Start time"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Start time\b/), {
         target: { value: "10:30" },
       });
       fireEvent.click(within(dialog).getByRole("button", { name: "Create schedule" }));
@@ -294,7 +294,7 @@ describe("<SchedulesPage> New schedule action", () => {
       fireEvent.click(screen.getByRole("button", { name: "+ New schedule" }));
 
       const dialog = screen.getByRole("dialog", { name: "New schedule" });
-      const startsOn = within(dialog).getByLabelText("Starts on");
+      const startsOn = within(dialog).getByLabelText(/^Starts on\b/);
       const form = startsOn.closest("form");
       if (!form) throw new Error("Schedule form was not rendered");
       fireEvent.change(startsOn, { target: { value: "" } });

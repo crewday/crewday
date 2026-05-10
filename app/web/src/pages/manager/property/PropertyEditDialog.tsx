@@ -228,22 +228,37 @@ export default function PropertyEditDialog(props: PropertyEditDialogProps) {
   return (
     <dialog
       ref={dialogRef}
-      className="modal modal--sheet"
+      className="modal modal--sheet sheet-form-dialog"
       aria-labelledby="property-edit-dialog-title"
       onCancel={(event) => {
         if (saving) event.preventDefault();
       }}
       onClose={onClose}
     >
-      <form className="modal__body form property-edit-dialog" onSubmit={submit}>
-        <h3 id="property-edit-dialog-title" className="modal__title">
-          {mode === "create" ? "Add property" : "Edit property"}
-        </h3>
-        <div className="form-grid form-grid--two">
+      <form className="property-edit-dialog sheet-form" onSubmit={submit}>
+        <header className="property-edit-dialog__head sheet-form__head">
+          <div>
+            <p className="property-edit-dialog__eyebrow sheet-form__eyebrow">Property</p>
+            <h3 id="property-edit-dialog-title" className="property-edit-dialog__title sheet-form__title">
+              {mode === "create" ? "Add property" : "Edit property"}
+            </h3>
+          </div>
+          <button
+            type="button"
+            className="property-edit-dialog__close sheet-form__close"
+            disabled={saving}
+            onClick={() => dialogRef.current?.close()}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+        <div className="property-edit-dialog__body sheet-form__body">
+        <div className="property-edit-dialog__grid sheet-form__grid">
           <FormField
             label="Name"
             requirement="required"
-            className="property-edit-dialog__identity-field"
+            className="property-edit-dialog__identity-field property-edit-dialog__field sheet-form__field"
           >
             <input
               value={draft.name}
@@ -254,7 +269,7 @@ export default function PropertyEditDialog(props: PropertyEditDialogProps) {
           <FormField
             label="Kind"
             requirement="optional"
-            className="property-edit-dialog__identity-field"
+            className="property-edit-dialog__identity-field property-edit-dialog__field sheet-form__field"
           >
             <select
               value={draft.kind}
@@ -267,31 +282,31 @@ export default function PropertyEditDialog(props: PropertyEditDialogProps) {
               ))}
             </select>
           </FormField>
-          <FormField label="Address line 1" requirement="optional">
+          <FormField label="Address line 1" requirement="optional" className="property-edit-dialog__field sheet-form__field">
             <input
               value={draft.line1}
               onChange={(event) => setDraft({ ...draft, line1: event.currentTarget.value })}
             />
           </FormField>
-          <FormField label="Address line 2" requirement="optional">
+          <FormField label="Address line 2" requirement="optional" className="property-edit-dialog__field sheet-form__field">
             <input
               value={draft.line2}
               onChange={(event) => setDraft({ ...draft, line2: event.currentTarget.value })}
             />
           </FormField>
-          <FormField label="City" requirement="optional">
+          <FormField label="City" requirement="optional" className="property-edit-dialog__field sheet-form__field">
             <input
               value={draft.city}
               onChange={(event) => setDraft({ ...draft, city: event.currentTarget.value })}
             />
           </FormField>
-          <FormField label="State / province" requirement="optional">
+          <FormField label="State / province" requirement="optional" className="property-edit-dialog__field sheet-form__field">
             <input
               value={draft.state_province}
               onChange={(event) => setDraft({ ...draft, state_province: event.currentTarget.value })}
             />
           </FormField>
-          <FormField label="Postal code" requirement="optional">
+          <FormField label="Postal code" requirement="optional" className="property-edit-dialog__field sheet-form__field">
             <input
               value={draft.postal_code}
               onChange={(event) => setDraft({ ...draft, postal_code: event.currentTarget.value })}
@@ -309,13 +324,13 @@ export default function PropertyEditDialog(props: PropertyEditDialogProps) {
             required
             requirement="required"
           />
-          <FormField label="Locale" requirement="optional">
+          <FormField label="Locale" requirement="optional" className="property-edit-dialog__field sheet-form__field">
             <input
               value={draft.locale}
               onChange={(event) => setDraft({ ...draft, locale: event.currentTarget.value })}
             />
           </FormField>
-          <FormField label="Default currency" requirement="optional">
+          <FormField label="Default currency" requirement="optional" className="property-edit-dialog__field sheet-form__field">
             <input
               value={draft.default_currency}
               onChange={(event) => setDraft({ ...draft, default_currency: event.currentTarget.value })}
@@ -323,7 +338,7 @@ export default function PropertyEditDialog(props: PropertyEditDialogProps) {
             />
           </FormField>
         </div>
-        <FormField label="Notes" requirement="optional">
+        <FormField label="Notes" requirement="optional" className="property-edit-dialog__field sheet-form__field">
           <textarea
             value={draft.property_notes_md}
             onChange={(event) => setDraft({ ...draft, property_notes_md: event.currentTarget.value })}
@@ -331,7 +346,8 @@ export default function PropertyEditDialog(props: PropertyEditDialogProps) {
           />
         </FormField>
         {error && <p className="form-error" role="alert">{error}</p>}
-        <div className="modal__actions">
+        </div>
+        <footer className="property-edit-dialog__footer sheet-form__footer">
           <button
             type="button"
             className="btn btn--ghost"
@@ -343,7 +359,7 @@ export default function PropertyEditDialog(props: PropertyEditDialogProps) {
           <button type="submit" className="btn btn--moss" disabled={saving}>
             {saving ? "Saving..." : mode === "create" ? "Create property" : "Save property"}
           </button>
-        </div>
+        </footer>
       </form>
     </dialog>
   );

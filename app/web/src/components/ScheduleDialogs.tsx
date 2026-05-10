@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import FormField from "@/components/FormField";
 import type {
   AvailabilityOverride,
   Leave,
@@ -105,9 +106,9 @@ export function OverrideDialog({
   if (!iso) return null;
 
   return (
-    <dialog className="modal" ref={dialogRef} onClose={onClose}>
+    <dialog className="modal modal--sheet sheet-form-dialog" ref={dialogRef} onClose={onClose}>
       <form
-        className="modal__body"
+        className="availability-override-form sheet-form"
         onSubmit={(e) => {
           e.preventDefault();
           m.mutate({
@@ -119,19 +120,33 @@ export function OverrideDialog({
           });
         }}
       >
-        <h3 className="modal__title">Adjust this day</h3>
-        <p className="modal__sub">
-          {iso} · {wouldNarrow ? (
-            <span className="avail-note avail-note--warn">
-              You're reducing availability — this needs manager approval.
-            </span>
-          ) : (
-            <span className="avail-note avail-note--ok">
-              You're adding availability — this is auto-approved.
-            </span>
-          )}
-        </p>
+        <header className="availability-override-form__head sheet-form__head">
+          <div>
+            <p className="availability-override-form__eyebrow sheet-form__eyebrow">Availability</p>
+            <h3 className="availability-override-form__title sheet-form__title">Adjust this day</h3>
+            <p className="availability-override-form__sub sheet-form__sub">
+              {iso} · {wouldNarrow ? (
+                <span className="avail-note avail-note--warn">
+                  You're reducing availability - this needs manager approval.
+                </span>
+              ) : (
+                <span className="avail-note avail-note--ok">
+                  You're adding availability - this is auto-approved.
+                </span>
+              )}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="availability-override-form__close sheet-form__close"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
 
+        <div className="availability-override-form__body sheet-form__body">
         <fieldset className="avail-toggle">
           <label>
             <input
@@ -154,33 +169,31 @@ export function OverrideDialog({
         </fieldset>
 
         {available && (
-          <div className="avail-hours">
-            <label className="field">
-              <span>From</span>
+          <div className="availability-override-form__grid sheet-form__grid">
+            <FormField label="From" requirement="required" className="availability-override-form__field sheet-form__field">
               <input type="time" value={starts} onChange={(e) => setStarts(e.target.value)} />
-            </label>
-            <label className="field">
-              <span>Until</span>
+            </FormField>
+            <FormField label="Until" requirement="required" className="availability-override-form__field sheet-form__field">
               <input type="time" value={ends} onChange={(e) => setEnds(e.target.value)} />
-            </label>
+            </FormField>
           </div>
         )}
 
-        <label className="field">
-          <span>Reason (optional)</span>
+        <FormField label="Reason" requirement="optional" className="availability-override-form__field sheet-form__field">
           <input
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder="Doctor appointment, covering Maria…"
           />
-        </label>
+        </FormField>
+        </div>
 
-        <div className="modal__actions">
+        <footer className="availability-override-form__footer sheet-form__footer">
           <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>
           <button type="submit" className="btn btn--moss" disabled={m.isPending}>
             {m.isPending ? "Submitting…" : wouldNarrow ? "Request change" : "Save"}
           </button>
-        </div>
+        </footer>
       </form>
     </dialog>
   );
@@ -231,49 +244,62 @@ export function LeaveDialog({
   if (!iso) return null;
 
   return (
-    <dialog className="modal" ref={dialogRef} onClose={onClose}>
+    <dialog className="modal modal--sheet sheet-form-dialog" ref={dialogRef} onClose={onClose}>
       <form
-        className="modal__body"
+        className="leave-request-form sheet-form"
         onSubmit={(e) => {
           e.preventDefault();
           if (!starts || !ends || ends < starts) return;
           m.mutate({ category, starts_on: starts, ends_on: ends, note_md: note.trim() || null });
         }}
       >
-        <h3 className="modal__title">Request leave</h3>
-        <p className="modal__sub">Approval required. Your manager will get a notification.</p>
+        <header className="leave-request-form__head sheet-form__head">
+          <div>
+            <p className="leave-request-form__eyebrow sheet-form__eyebrow">Leave</p>
+            <h3 className="leave-request-form__title sheet-form__title">Request leave</h3>
+            <p className="leave-request-form__sub sheet-form__sub">
+              Approval required. Your manager will get a notification.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="leave-request-form__close sheet-form__close"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
 
-        <div className="avail-hours">
-          <label className="field">
-            <span>From</span>
+        <div className="leave-request-form__body sheet-form__body">
+        <div className="leave-request-form__grid sheet-form__grid">
+          <FormField label="From" requirement="required" className="leave-request-form__field sheet-form__field">
             <input type="date" value={starts} required onChange={(e) => setStarts(e.target.value)} />
-          </label>
-          <label className="field">
-            <span>Until</span>
+          </FormField>
+          <FormField label="Until" requirement="required" className="leave-request-form__field sheet-form__field">
             <input type="date" value={ends} required onChange={(e) => setEnds(e.target.value)} />
-          </label>
+          </FormField>
         </div>
 
-        <label className="field">
-          <span>Category</span>
+        <FormField label="Category" requirement="required" className="leave-request-form__field sheet-form__field">
           <select value={category} onChange={(e) => setCategory(e.target.value as Leave["category"])}>
             {LEAVE_CATEGORIES.map((c) => (
               <option key={c.value} value={c.value}>{c.label}</option>
             ))}
           </select>
-        </label>
+        </FormField>
 
-        <label className="field">
-          <span>Note (optional)</span>
+        <FormField label="Note" requirement="optional" className="leave-request-form__field sheet-form__field">
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Family visit, medical…" />
-        </label>
+        </FormField>
+        </div>
 
-        <div className="modal__actions">
+        <footer className="leave-request-form__footer sheet-form__footer">
           <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>
           <button type="submit" className="btn btn--moss" disabled={m.isPending}>
             {m.isPending ? "Submitting…" : "Request leave"}
           </button>
-        </div>
+        </footer>
       </form>
     </dialog>
   );

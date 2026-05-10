@@ -4,6 +4,7 @@ import { ApiError, fetchJson } from "@/lib/api";
 import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import type { Me, Property, Task } from "@/types/api";
+import FormField from "@/components/FormField";
 import { Checkbox } from "@/components/common";
 
 // §06 quick-add. Clicking the button opens a <dialog> (same pattern as
@@ -98,7 +99,7 @@ export default function NewTaskButton() {
       </button>
 
       <dialog
-        className="modal"
+        className="modal modal--sheet sheet-form-dialog"
         ref={ref}
         onCancel={(e) => {
           if (submitLocked.current || create.isPending) e.preventDefault();
@@ -106,7 +107,7 @@ export default function NewTaskButton() {
         onClose={reset}
       >
         <form
-          className="modal__body"
+          className="new-task-form sheet-form"
           onSubmit={(e) => {
             e.preventDefault();
             if (submitLocked.current || create.isPending) return;
@@ -132,15 +133,29 @@ export default function NewTaskButton() {
             });
           }}
         >
-          <h3 className="modal__title">New task</h3>
-          <p className="modal__sub">
-            {personal
-              ? "Personal — only you can see this."
-              : "Team task — visible to your manager."}
-          </p>
+          <header className="new-task-form__head sheet-form__head">
+            <div>
+              <p className="new-task-form__eyebrow sheet-form__eyebrow">Quick add</p>
+              <h3 className="new-task-form__title sheet-form__title">New task</h3>
+              <p className="new-task-form__sub sheet-form__sub">
+                {personal
+                  ? "Personal - only you can see this."
+                  : "Team task - visible to your manager."}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="new-task-form__close sheet-form__close"
+              disabled={create.isPending}
+              onClick={() => ref.current?.close()}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </header>
 
-          <label className="field">
-            <span>Title</span>
+          <div className="new-task-form__body sheet-form__body">
+          <FormField label="Title" requirement="required" className="new-task-form__field sheet-form__field">
             <input
               autoFocus
               required
@@ -151,10 +166,9 @@ export default function NewTaskButton() {
               }}
               placeholder="e.g. Call back Maria about the stay"
             />
-          </label>
+          </FormField>
 
-          <label className="field">
-            <span>Due</span>
+          <FormField label="Due" requirement="required" className="new-task-form__field sheet-form__field">
             <input
               type="date"
               required
@@ -164,10 +178,9 @@ export default function NewTaskButton() {
                 setFormError(null);
               }}
             />
-          </label>
+          </FormField>
 
-          <label className="field">
-            <span>Property</span>
+          <FormField label="Property" requirement="optional" className="new-task-form__field sheet-form__field">
             <select
               value={propertyId}
               onChange={(e) => {
@@ -181,11 +194,10 @@ export default function NewTaskButton() {
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
-          </label>
+          </FormField>
 
           {propertyId && (areasQ.data ?? []).length > 0 && (
-            <label className="field">
-              <span>Area (optional)</span>
+            <FormField label="Area" requirement="optional" className="new-task-form__field sheet-form__field">
               <select
                 value={areaId}
                 onChange={(e) => {
@@ -198,7 +210,7 @@ export default function NewTaskButton() {
                   <option key={area.id} value={area.id}>{area.name}</option>
                 ))}
               </select>
-            </label>
+            </FormField>
           )}
 
           <Checkbox
@@ -211,8 +223,9 @@ export default function NewTaskButton() {
           />
 
           {formError && <p className="form-error" role="alert">{formError}</p>}
+          </div>
 
-          <div className="modal__actions">
+          <footer className="new-task-form__footer sheet-form__footer">
             <button
               type="button"
               className="btn btn--ghost"
@@ -228,7 +241,7 @@ export default function NewTaskButton() {
             >
               {create.isPending ? "Adding…" : "Add task"}
             </button>
-          </div>
+          </footer>
         </form>
       </dialog>
     </>

@@ -4,6 +4,7 @@ import { ApiError, fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
+import FormField from "@/components/FormField";
 import { Chip, Loading } from "@/components/common";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import type {
@@ -638,10 +639,10 @@ export default function StaysPage() {
         },
       ]}
     >
-      <dialog className="modal modal--sheet" ref={manualDialogRef} aria-label="Add stay">
+      <dialog className="modal modal--sheet sheet-form-dialog" ref={manualDialogRef} aria-label="Add stay">
         {manualForm ? (
           <form
-            className="modal__body form"
+            className="stay-create-form sheet-form"
             onSubmit={submitManualStay}
             aria-describedby={describedBy(
               !canShareManualGuestName && manualPrivacyId,
@@ -651,14 +652,27 @@ export default function StaysPage() {
             )}
             noValidate
           >
-            <h3 className="modal__title">Add stay</h3>
-            <p className="modal__sub">
-              Manual stays save to the reservation API and use the selected unit for conflict checks.
-            </p>
+            <header className="stay-create-form__head sheet-form__head">
+              <div>
+                <p className="stay-create-form__eyebrow sheet-form__eyebrow">Reservations</p>
+                <h3 className="stay-create-form__title sheet-form__title">Add stay</h3>
+                <p className="stay-create-form__sub sheet-form__sub">
+                  Manual stays save to the reservation API and use the selected unit for conflict checks.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="stay-create-form__close sheet-form__close"
+                onClick={() => manualDialogRef.current?.close()}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </header>
 
-            <div className="stays-form-grid">
-              <label className="field">
-                <span>Property</span>
+            <div className="stay-create-form__body sheet-form__body">
+            <div className="stay-create-form__grid sheet-form__grid">
+              <FormField label="Property" requirement="required" className="stay-create-form__field sheet-form__field">
                 <select
                   value={manualForm.propertyId}
                   onChange={(event) => updateManualProperty(event.target.value)}
@@ -667,10 +681,9 @@ export default function StaysPage() {
                     <option key={property.id} value={property.id}>{property.name}</option>
                   ))}
                 </select>
-              </label>
+              </FormField>
 
-              <label className="field">
-                <span>Unit</span>
+              <FormField label="Unit" requirement="required" className="stay-create-form__field sheet-form__field">
                 <select
                   value={manualForm.unitId}
                   onChange={(event) => setManualForm({ ...manualForm, unitId: event.target.value })}
@@ -681,28 +694,25 @@ export default function StaysPage() {
                     <option key={unit.id} value={unit.id}>{unit.name}</option>
                   ))}
                 </select>
-              </label>
+              </FormField>
 
-              <label className="field">
-                <span>Check-in</span>
+              <FormField label="Check-in" requirement="required" className="stay-create-form__field sheet-form__field">
                 <input
                   type="date"
                   value={manualForm.checkIn}
                   onChange={(event) => setManualForm({ ...manualForm, checkIn: event.target.value })}
                 />
-              </label>
+              </FormField>
 
-              <label className="field">
-                <span>Check-out</span>
+              <FormField label="Check-out" requirement="required" className="stay-create-form__field sheet-form__field">
                 <input
                   type="date"
                   value={manualForm.checkOut}
                   onChange={(event) => setManualForm({ ...manualForm, checkOut: event.target.value })}
                 />
-              </label>
+              </FormField>
 
-              <label className="field">
-                <span>Guest name</span>
+              <FormField label="Guest name" requirement="optional" className="stay-create-form__field sheet-form__field">
                 <input
                   type="text"
                   value={canShareManualGuestName ? manualForm.guestName : ""}
@@ -711,20 +721,18 @@ export default function StaysPage() {
                   aria-describedby={!canShareManualGuestName ? manualPrivacyId : undefined}
                   onChange={(event) => setManualForm({ ...manualForm, guestName: event.target.value })}
                 />
-              </label>
+              </FormField>
 
-              <label className="field">
-                <span>Guests</span>
+              <FormField label="Guests" requirement="required" className="stay-create-form__field sheet-form__field">
                 <input
                   type="number"
                   min="1"
                   value={manualForm.guestCount}
                   onChange={(event) => setManualForm({ ...manualForm, guestCount: event.target.value })}
                 />
-              </label>
+              </FormField>
 
-              <label className="field">
-                <span>Status</span>
+              <FormField label="Status" requirement="required" className="stay-create-form__field sheet-form__field">
                 <select
                   value={manualForm.status}
                   onChange={(event) => setManualForm({ ...manualForm, status: event.target.value as StayStatus })}
@@ -732,7 +740,7 @@ export default function StaysPage() {
                   <option value="tentative">Tentative</option>
                   <option value="confirmed">Confirmed</option>
                 </select>
-              </label>
+              </FormField>
             </div>
 
             {!canShareManualGuestName ? (
@@ -749,23 +757,24 @@ export default function StaysPage() {
                 {manualNotice.text}
               </p>
             ) : null}
+            </div>
 
-            <div className="modal__actions">
+            <footer className="stay-create-form__footer sheet-form__footer">
               <button type="button" className="btn btn--ghost" onClick={() => manualDialogRef.current?.close()}>
                 Cancel
               </button>
               <button type="submit" className="btn btn--moss" disabled={createStay.isPending}>
                 {createStay.isPending ? "Creating..." : "Create stay"}
               </button>
-            </div>
+            </footer>
           </form>
         ) : null}
       </dialog>
 
-      <dialog className="modal modal--sheet" ref={icalDialogRef} aria-label="Import iCal">
+      <dialog className="modal modal--sheet sheet-form-dialog" ref={icalDialogRef} aria-label="Import iCal">
         {icalForm ? (
           <form
-            className="modal__body form"
+            className="ical-feed-form sheet-form"
             onSubmit={submitIcalFeed}
             aria-describedby={describedBy(
               selectedIcalUnits.length === 0 && icalUnitErrorId,
@@ -774,14 +783,27 @@ export default function StaysPage() {
             )}
             noValidate
           >
-            <h3 className="modal__title">Import iCal</h3>
-            <p className="modal__sub">
-              Add a provider export URL, map it to a unit, and crew.day will probe it before enabling the feed.
-            </p>
+            <header className="ical-feed-form__head sheet-form__head">
+              <div>
+                <p className="ical-feed-form__eyebrow sheet-form__eyebrow">Calendar feed</p>
+                <h3 className="ical-feed-form__title sheet-form__title">Import iCal</h3>
+                <p className="ical-feed-form__sub sheet-form__sub">
+                  Add a provider export URL, map it to a unit, and crew.day will probe it before enabling the feed.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="ical-feed-form__close sheet-form__close"
+                onClick={() => icalDialogRef.current?.close()}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </header>
 
-            <div className="stays-form-grid">
-              <label className="field">
-                <span>Property</span>
+            <div className="ical-feed-form__body sheet-form__body">
+            <div className="ical-feed-form__grid sheet-form__grid">
+              <FormField label="Property" requirement="required" className="ical-feed-form__field sheet-form__field">
                 <select
                   value={icalForm.propertyId}
                   onChange={(event) => updateIcalProperty(event.target.value)}
@@ -790,10 +812,9 @@ export default function StaysPage() {
                     <option key={property.id} value={property.id}>{property.name}</option>
                   ))}
                 </select>
-              </label>
+              </FormField>
 
-              <label className="field">
-                <span>Unit</span>
+              <FormField label="Unit" requirement="required" className="ical-feed-form__field sheet-form__field">
                 <select
                   value={icalForm.unitId}
                   onChange={(event) => setIcalForm({ ...icalForm, unitId: event.target.value })}
@@ -804,10 +825,9 @@ export default function StaysPage() {
                     <option key={unit.id} value={unit.id}>{unit.name}</option>
                   ))}
                 </select>
-              </label>
+              </FormField>
 
-              <label className="field">
-                <span>Provider</span>
+              <FormField label="Provider" requirement="required" className="ical-feed-form__field sheet-form__field">
                 <select
                   value={icalForm.provider}
                   onChange={(event) => setIcalForm({ ...icalForm, provider: event.target.value as IcalProvider })}
@@ -816,10 +836,9 @@ export default function StaysPage() {
                     <option key={provider.value} value={provider.value}>{provider.label}</option>
                   ))}
                 </select>
-              </label>
+              </FormField>
 
-              <label className="field stays-form-grid__wide">
-                <span>Feed URL</span>
+              <FormField label="Feed URL" requirement="required" className="ical-feed-form__field sheet-form__field">
                 <input
                   type="url"
                   inputMode="url"
@@ -829,7 +848,7 @@ export default function StaysPage() {
                   aria-describedby={describedBy(icalDuplicate && icalDuplicateId, icalNotice && icalNoticeId)}
                   onChange={(event) => setIcalForm({ ...icalForm, url: event.target.value })}
                 />
-              </label>
+              </FormField>
             </div>
 
             {selectedIcalUnits.length === 0 ? (
@@ -841,15 +860,16 @@ export default function StaysPage() {
                 {icalNotice.text}
               </p>
             ) : null}
+            </div>
 
-            <div className="modal__actions">
+            <footer className="ical-feed-form__footer sheet-form__footer">
               <button type="button" className="btn btn--ghost" onClick={() => icalDialogRef.current?.close()}>
                 Close
               </button>
               <button type="submit" className="btn btn--moss" disabled={createIcalFeed.isPending}>
                 {createIcalFeed.isPending ? "Testing..." : "Add feed"}
               </button>
-            </div>
+            </footer>
           </form>
         ) : null}
       </dialog>

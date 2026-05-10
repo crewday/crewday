@@ -7,6 +7,7 @@ import { fetchAllList } from "@/lib/fetchAllList";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
+import FormField from "@/components/FormField";
 import { Avatar, Chip, EmptyState, Loading } from "@/components/common";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { Booking, Employee, Me, Property, WorkRole } from "@/types/api";
@@ -338,7 +339,7 @@ function WorkRoleCatalogManager() {
       )}
 
       <dialog
-        className="modal modal--sheet"
+        className="modal modal--sheet sheet-form-dialog"
         ref={dialogRef}
         aria-labelledby="work-role-dialog-title"
         onCancel={(event) => {
@@ -353,16 +354,30 @@ function WorkRoleCatalogManager() {
           saveRole.reset();
         }}
       >
-        <form className="modal__body form work-role-form" onSubmit={submitForm} noValidate>
-          <h3 id="work-role-dialog-title" className="modal__title">
-            {editingRole ? "Edit work role" : "Add work role"}
-          </h3>
-          <p className="modal__sub">
-            Keys are stable slugs used by assignments and integrations. Rename with care.
-          </p>
+        <form className="work-role-form sheet-form" onSubmit={submitForm} noValidate>
+          <header className="work-role-form__head sheet-form__head">
+            <div>
+              <p className="work-role-form__eyebrow sheet-form__eyebrow">Work role</p>
+              <h3 id="work-role-dialog-title" className="work-role-form__title sheet-form__title">
+                {editingRole ? "Edit work role" : "Add work role"}
+              </h3>
+              <p className="work-role-form__sub sheet-form__sub">
+                Keys are stable slugs used by assignments and integrations. Rename with care.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="work-role-form__close sheet-form__close"
+              aria-label="Close"
+              disabled={saveRole.isPending}
+              onClick={() => dialogRef.current?.close()}
+            >
+              ×
+            </button>
+          </header>
 
-          <label className="field">
-            <span>Name</span>
+          <div className="work-role-form__body sheet-form__body">
+          <FormField label="Name" requirement="required" className="work-role-form__field sheet-form__field">
             <input
               autoFocus
               required
@@ -373,10 +388,9 @@ function WorkRoleCatalogManager() {
               placeholder="e.g. Housekeeper"
             />
             {fieldErrors.name ? <span id="work-role-name-error" className="form-field-error">{fieldErrors.name}</span> : null}
-          </label>
+          </FormField>
 
-          <label className="field">
-            <span>Key</span>
+          <FormField label="Key" requirement="required" className="work-role-form__field sheet-form__field">
             <input
               required
               value={form.key}
@@ -386,10 +400,9 @@ function WorkRoleCatalogManager() {
               placeholder="e.g. housekeeper"
             />
             {fieldErrors.key ? <span id="work-role-key-error" className="form-field-error">{fieldErrors.key}</span> : null}
-          </label>
+          </FormField>
 
-          <label className="field">
-            <span>Icon name</span>
+          <FormField label="Icon name" requirement="optional" className="work-role-form__field sheet-form__field">
             <input
               value={form.icon_name}
               aria-invalid={fieldErrors.icon_name ? "true" : undefined}
@@ -400,10 +413,9 @@ function WorkRoleCatalogManager() {
             {fieldErrors.icon_name ? (
               <span id="work-role-icon-error" className="form-field-error">{fieldErrors.icon_name}</span>
             ) : null}
-          </label>
+          </FormField>
 
-          <label className="field">
-            <span>Description</span>
+          <FormField label="Description" requirement="optional" className="work-role-form__field sheet-form__field">
             <textarea
               rows={4}
               value={form.description_md}
@@ -415,11 +427,12 @@ function WorkRoleCatalogManager() {
             {fieldErrors.description_md ? (
               <span id="work-role-description-error" className="form-field-error">{fieldErrors.description_md}</span>
             ) : null}
-          </label>
+          </FormField>
 
           {formError ? <p className="form-error" role="alert">{formError}</p> : null}
+          </div>
 
-          <div className="modal__actions">
+          <footer className="work-role-form__footer sheet-form__footer">
             <button
               type="button"
               className="btn btn--ghost"
@@ -435,12 +448,12 @@ function WorkRoleCatalogManager() {
             >
               {saveRole.isPending ? "Saving..." : "Save role"}
             </button>
-          </div>
+          </footer>
         </form>
       </dialog>
 
       <dialog
-        className="modal"
+        className="modal modal--sheet sheet-form-dialog"
         ref={deleteDialogRef}
         aria-labelledby="work-role-delete-title"
         onCancel={(event) => {
@@ -551,7 +564,7 @@ function InviteEmployeeAction() {
         onClose={reset}
       >
         <form
-          className="modal__body"
+          className="invite-employee-form sheet-form"
           onSubmit={(event) => {
             event.preventDefault();
             if (invite.isPending || sentInvite) return;
@@ -583,11 +596,28 @@ function InviteEmployeeAction() {
             });
           }}
         >
-          <h3 id="invite-employee-title" className="modal__title">Invite employee</h3>
-          <p className="modal__sub">
-            Send a click-to-accept invite for this workspace.
-          </p>
+          <header className="invite-employee-form__head sheet-form__head">
+            <div>
+              <p className="invite-employee-form__eyebrow sheet-form__eyebrow">Employee invite</p>
+              <h3 id="invite-employee-title" className="invite-employee-form__title sheet-form__title">
+                Invite employee
+              </h3>
+              <p className="invite-employee-form__sub sheet-form__sub">
+                Send a click-to-accept invite for this workspace.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="invite-employee-form__close sheet-form__close"
+              aria-label="Close"
+              disabled={invite.isPending}
+              onClick={() => dialogRef.current?.close()}
+            >
+              ×
+            </button>
+          </header>
 
+          <div className="invite-employee-form__body sheet-form__body">
           {sentInvite ? (
             <>
               <p className="form-notice form-notice--success" role="status">
@@ -597,8 +627,7 @@ function InviteEmployeeAction() {
             </>
           ) : (
             <>
-              <label className="field">
-                <span>Full name</span>
+              <FormField label="Full name" requirement="required" className="invite-employee-form__field sheet-form__field">
                 <input
                   autoFocus
                   required
@@ -609,10 +638,9 @@ function InviteEmployeeAction() {
                   }}
                   placeholder="e.g. Riley Chen"
                 />
-              </label>
+              </FormField>
 
-              <label className="field">
-                <span>Email</span>
+              <FormField label="Email" requirement="required" className="invite-employee-form__field sheet-form__field">
                 <input
                   type="email"
                   required
@@ -623,7 +651,7 @@ function InviteEmployeeAction() {
                   }}
                   placeholder="riley@example.com"
                 />
-              </label>
+              </FormField>
             </>
           )}
 
@@ -633,8 +661,9 @@ function InviteEmployeeAction() {
             </p>
           )}
           {formError && <p className="form-error" role="alert">{formError}</p>}
+          </div>
 
-          <div className="modal__actions">
+          <footer className="invite-employee-form__footer sheet-form__footer">
             <button
               type="button"
               className="btn btn--ghost"
@@ -652,7 +681,7 @@ function InviteEmployeeAction() {
                 {invite.isPending ? "Sending..." : "Send invite"}
               </button>
             )}
-          </div>
+          </footer>
         </form>
       </dialog>
     </>

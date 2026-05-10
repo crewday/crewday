@@ -141,7 +141,7 @@ export default function TemplatesPage() {
   const createDialog = (
     <dialog
       ref={createTemplateRef}
-      className="modal modal--sheet"
+      className="modal modal--sheet sheet-form-dialog"
       aria-labelledby="template-create-title"
       onClose={() => setCreatingTemplate(false)}
     >
@@ -327,64 +327,80 @@ function NewTemplateForm({
   }
 
   return (
-    <form className="modal__body form" onSubmit={submit} noValidate>
-      <h3 id="template-create-title" className="modal__title">New template</h3>
-      <p className="modal__sub">
-        Create a reusable task definition. Property and area scope default to any.
-      </p>
-      <FormField label="Name" requirement="required">
-        <input
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          required
-          maxLength={200}
-          aria-invalid={clientError === "Name is required."}
-          aria-describedby={errorId}
-        />
-      </FormField>
-      <FormField label="Description" requirement="optional">
-        <textarea
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          rows={4}
-        />
-      </FormField>
-      <FormField label="Role" requirement="optional">
-        <select value={roleId} onChange={(event) => setRoleId(event.target.value)}>
-          <option value="">Any role</option>
-          {roles.map((role) => (
-            <option key={role.id} value={role.id}>{role.name}</option>
-          ))}
-        </select>
-      </FormField>
-      <div className="form-grid form-grid--two">
-        <FormField label="Duration" requirement="required">
+    <form className="template-create-form sheet-form" onSubmit={submit} noValidate>
+      <header className="template-create-form__head sheet-form__head">
+        <div>
+          <p className="template-create-form__eyebrow sheet-form__eyebrow">Task template</p>
+          <h3 id="template-create-title" className="template-create-form__title sheet-form__title">
+            New template
+          </h3>
+          <p className="template-create-form__sub sheet-form__sub">
+            Create a reusable task definition. Property and area scope default to any.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="template-create-form__close sheet-form__close"
+          onClick={onClose}
+          aria-label="Close"
+        >
+          ×
+        </button>
+      </header>
+      <div className="template-create-form__body sheet-form__body">
+        <FormField label="Name" requirement="required" className="template-create-form__field sheet-form__field">
           <input
-            className="mono"
-            type="number"
-            min="1"
-            max="1440"
-            step="1"
-            value={durationMinutes}
-            onChange={(event) => setDurationMinutes(event.target.value)}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
             required
-            aria-invalid={clientError === "Duration must be between 1 and 1440 minutes."}
+            maxLength={200}
+            aria-invalid={clientError === "Name is required."}
             aria-describedby={errorId}
           />
         </FormField>
-        <FormField label="Priority" requirement="required">
-          <select
-            value={priority}
-            onChange={(event) => setPriority(event.target.value as TaskPriority)}
-          >
-            <option value="low">Low</option>
-            <option value="normal">Normal</option>
-            <option value="high">High</option>
-            <option value="urgent">Urgent</option>
+        <FormField label="Description" requirement="optional" className="template-create-form__field sheet-form__field">
+          <textarea
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            rows={4}
+          />
+        </FormField>
+        <FormField label="Role" requirement="optional" className="template-create-form__field sheet-form__field">
+          <select value={roleId} onChange={(event) => setRoleId(event.target.value)}>
+            <option value="">Any role</option>
+            {roles.map((role) => (
+              <option key={role.id} value={role.id}>{role.name}</option>
+            ))}
           </select>
         </FormField>
-      </div>
-      <FormField label="Photo evidence" requirement="required">
+        <div className="template-create-form__grid sheet-form__grid">
+          <FormField label="Duration" requirement="required" className="template-create-form__field sheet-form__field">
+            <input
+              className="mono"
+              type="number"
+              min="1"
+              max="1440"
+              step="1"
+              value={durationMinutes}
+              onChange={(event) => setDurationMinutes(event.target.value)}
+              required
+              aria-invalid={clientError === "Duration must be between 1 and 1440 minutes."}
+              aria-describedby={errorId}
+            />
+          </FormField>
+          <FormField label="Priority" requirement="required" className="template-create-form__field sheet-form__field">
+            <select
+              value={priority}
+              onChange={(event) => setPriority(event.target.value as TaskPriority)}
+            >
+              <option value="low">Low</option>
+              <option value="normal">Normal</option>
+              <option value="high">High</option>
+              <option value="urgent">Urgent</option>
+            </select>
+          </FormField>
+        </div>
+        <FormField label="Photo evidence" requirement="required" className="template-create-form__field sheet-form__field">
         <select
           value={photoEvidence}
           onChange={(event) => setPhotoEvidence(event.target.value as PhotoEvidence)}
@@ -397,6 +413,7 @@ function NewTemplateForm({
       <FormField
         label="Agent guidance"
         requirement="optional"
+        className="template-create-form__field sheet-form__field"
         helpId={AGENT_GUIDANCE_HELP_ID}
         helpText="Agents use this when drafting or discussing tasks from this template."
       >
@@ -426,14 +443,15 @@ function NewTemplateForm({
           {visibleError}
         </p>
       )}
-      <div className="modal__actions">
+      </div>
+      <footer className="template-create-form__footer sheet-form__footer">
         <button type="button" className="btn btn--ghost" onClick={onClose} disabled={saving}>
           Cancel
         </button>
         <button type="submit" className="btn btn--moss" disabled={saving}>
           Create template
         </button>
-      </div>
+      </footer>
     </form>
   );
 }

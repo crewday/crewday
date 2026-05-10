@@ -11,6 +11,7 @@ import ChatLog from "@/components/chat/ChatLog";
 import ChatComposer from "@/components/chat/ChatComposer";
 import DateTime from "@/components/DateTime";
 import FileDropZone from "@/components/FileDropZone";
+import FormField from "@/components/FormField";
 import PageHeader from "@/components/PageHeader";
 import type {
   AgentMessage,
@@ -591,23 +592,39 @@ export default function TaskDetailPage() {
         </div>
       )}
 
-      <dialog id="skip-modal" className="modal" ref={modalRef}>
+      <dialog id="skip-modal" className="modal modal--sheet sheet-form-dialog" ref={modalRef}>
         <form
-          className="modal__body"
+          className="task-skip-form sheet-form"
           onSubmit={(e) => { e.preventDefault(); skip.mutate(skipReason); }}
         >
-          <h3 className="modal__title">Skip this task?</h3>
-          <p className="modal__sub">Give a quick reason so the manager knows. It'll go in the audit log.</p>
-          <label className="field">
-            <span>Reason</span>
+          <header className="task-skip-form__head sheet-form__head">
+            <div>
+              <p className="task-skip-form__eyebrow sheet-form__eyebrow">Task exception</p>
+              <h3 className="task-skip-form__title sheet-form__title">Skip this task?</h3>
+              <p className="task-skip-form__sub sheet-form__sub">
+                Give a quick reason so the manager knows. It'll go in the audit log.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="task-skip-form__close sheet-form__close"
+              onClick={() => modalRef.current?.close()}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </header>
+          <div className="task-skip-form__body sheet-form__body">
+          <FormField label="Reason" requirement="required" className="task-skip-form__field sheet-form__field">
             <AutoGrowTextarea
               required
               placeholder="e.g. Guest still in the room — came back early from their day."
               value={skipReason}
               onChange={(e) => setSkipReason(e.target.value)}
             />
-          </label>
-          <div className="modal__actions">
+          </FormField>
+          </div>
+          <footer className="task-skip-form__footer sheet-form__footer">
             <button
               className="btn btn--ghost"
               type="button"
@@ -616,7 +633,7 @@ export default function TaskDetailPage() {
               Cancel
             </button>
             <button className="btn btn--rust" type="submit">Skip task</button>
-          </div>
+          </footer>
         </form>
       </dialog>
       </section>

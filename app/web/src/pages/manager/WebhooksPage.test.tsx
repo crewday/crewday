@@ -208,11 +208,11 @@ describe("<WebhooksPage>", () => {
       render(<Harness />);
 
       fireEvent.click(await screen.findByRole("button", { name: "+ New subscription" }));
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ops bridge" } });
-      fireEvent.change(screen.getByLabelText("URL"), {
+      fireEvent.change(screen.getByLabelText(/^Name\b/), { target: { value: "Ops bridge" } });
+      fireEvent.change(screen.getByLabelText(/^URL\b/), {
         target: { value: "https://ops.example.test/crewday" },
       });
-      fireEvent.change(screen.getByLabelText("Events"), {
+      fireEvent.change(screen.getByLabelText(/^Events\b/), {
         target: { value: "task.completed, issue.reported" },
       });
       fireEvent.click(screen.getByRole("button", { name: "Create subscription" }));

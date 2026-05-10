@@ -14,6 +14,7 @@ import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import { useDecideMutation } from "@/lib/useDecideMutation";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
+import FormField from "@/components/FormField";
 import NewTaskButton from "@/components/NewTaskModal";
 import { Avatar, Checkbox, Chip, EmptyState, Loading, Panel, StatCard } from "@/components/common";
 import {
@@ -150,21 +151,35 @@ export default function DashboardPage() {
         },
       ]}
     >
-      <dialog className="modal modal--sheet" ref={broadcastRef} onClose={resetBroadcast} aria-label="Broadcast message">
+      <dialog className="modal modal--sheet sheet-form-dialog" ref={broadcastRef} onClose={resetBroadcast} aria-label="Broadcast message">
         <form
-          className="modal__body"
+          className="broadcast-message-form sheet-form"
           onSubmit={(e) => {
             e.preventDefault();
             if (!broadcastSubject.trim() || !broadcastBody.trim() || recipientCount < 1) return;
             sendBroadcast.mutate();
           }}
         >
-          <h3 className="modal__title">Broadcast message</h3>
-          <p className="modal__sub">
-            {recipientCount} recipient{recipientCount === 1 ? "" : "s"}
-            {recipientCount > 1 ? " · approval required before fanout" : ""}
-          </p>
+          <header className="broadcast-message-form__head sheet-form__head">
+            <div>
+              <p className="broadcast-message-form__eyebrow sheet-form__eyebrow">Staff message</p>
+              <h3 className="broadcast-message-form__title sheet-form__title">Broadcast message</h3>
+              <p className="broadcast-message-form__sub sheet-form__sub">
+                {recipientCount} recipient{recipientCount === 1 ? "" : "s"}
+                {recipientCount > 1 ? " · approval required before fanout" : ""}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="broadcast-message-form__close sheet-form__close"
+              onClick={() => broadcastRef.current?.close()}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </header>
 
+          <div className="broadcast-message-form__body sheet-form__body">
           {broadcastNotice && (
             <div className="form-notice form-notice--success" role="status">
               {broadcastNotice}
@@ -244,8 +259,7 @@ export default function DashboardPage() {
             </div>
           )}
 
-          <label className="field">
-            <span>Subject</span>
+          <FormField label="Subject" requirement="required" className="broadcast-message-form__field sheet-form__field">
             <input
               required
               maxLength={160}
@@ -253,10 +267,9 @@ export default function DashboardPage() {
               onChange={(e) => setBroadcastSubject(e.target.value)}
               placeholder="e.g. Storm watch"
             />
-          </label>
+          </FormField>
 
-          <label className="field">
-            <span>Body</span>
+          <FormField label="Body" requirement="required" className="broadcast-message-form__field sheet-form__field">
             <textarea
               required
               rows={6}
@@ -265,9 +278,10 @@ export default function DashboardPage() {
               onChange={(e) => setBroadcastBody(e.target.value)}
               placeholder="Write the message staff will receive."
             />
-          </label>
+          </FormField>
+          </div>
 
-          <div className="modal__actions">
+          <footer className="broadcast-message-form__footer sheet-form__footer">
             <button type="button" className="btn btn--ghost" onClick={() => broadcastRef.current?.close()}>
               Cancel
             </button>
@@ -290,7 +304,7 @@ export default function DashboardPage() {
                     ? "Request approval"
                     : "Send"}
             </button>
-          </div>
+          </footer>
         </form>
       </dialog>
 

@@ -5,6 +5,7 @@ import { qk } from "@/lib/queryKeys";
 import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
+import FormField from "@/components/FormField";
 import { Chip, Loading } from "@/components/common";
 import type { Webhook, WebhookDelivery } from "@/types/api";
 
@@ -260,17 +261,31 @@ function CreateDialog(props: CreateDialogProps) {
   } = props;
 
   return (
-    <dialog className="modal" open={open} onClose={onClose} aria-label="New webhook subscription">
-      <form className="modal__body" onSubmit={onSubmit}>
-        <h3 className="modal__title">New subscription</h3>
-        <p className="modal__sub">Create an HMAC-signed endpoint for workspace events.</p>
+    <dialog className="modal modal--sheet sheet-form-dialog" open={open} onClose={onClose} aria-label="New webhook subscription">
+      <form className="webhook-subscription-form sheet-form" onSubmit={onSubmit}>
+        <header className="webhook-subscription-form__head sheet-form__head">
+          <div>
+            <p className="webhook-subscription-form__eyebrow sheet-form__eyebrow">Webhook</p>
+            <h3 className="webhook-subscription-form__title sheet-form__title">New subscription</h3>
+            <p className="webhook-subscription-form__sub sheet-form__sub">
+              Create an HMAC-signed endpoint for workspace events.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="webhook-subscription-form__close sheet-form__close"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
 
-        <label className="field">
-          <span>Name</span>
+        <div className="webhook-subscription-form__body sheet-form__body">
+        <FormField label="Name" requirement="required" className="webhook-subscription-form__field sheet-form__field">
           <input value={name} onChange={(e) => onName(e.target.value)} placeholder="hermes-prod" required />
-        </label>
-        <label className="field">
-          <span>URL</span>
+        </FormField>
+        <FormField label="URL" requirement="required" className="webhook-subscription-form__field sheet-form__field">
           <input
             type="url"
             value={url}
@@ -278,31 +293,31 @@ function CreateDialog(props: CreateDialogProps) {
             placeholder="https://example.com/crewday"
             required
           />
-        </label>
-        <label className="field">
-          <span>Events</span>
+        </FormField>
+        <FormField label="Events" requirement="required" className="webhook-subscription-form__field sheet-form__field">
           <textarea
             value={events}
             onChange={(e) => onEvents(e.target.value)}
             placeholder="task.completed, approval.pending"
             required
           />
-        </label>
+        </FormField>
         <label className="field--inline">
           <input type="checkbox" checked={active} onChange={(e) => onActive(e.target.checked)} />
           <span>Active</span>
         </label>
 
         {error && <p className="tokens-form__error">{error}</p>}
+        </div>
 
-        <div className="modal__actions">
+        <footer className="webhook-subscription-form__footer sheet-form__footer">
           <button type="button" className="btn btn--ghost" onClick={onClose}>
             Cancel
           </button>
           <button type="submit" className="btn btn--moss" disabled={pending || splitEvents(events).length === 0}>
             {pending ? "Creating…" : "Create subscription"}
           </button>
-        </div>
+        </footer>
       </form>
     </dialog>
   );

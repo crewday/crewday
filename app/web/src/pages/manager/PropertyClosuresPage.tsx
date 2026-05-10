@@ -7,6 +7,7 @@ import { type ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
+import FormField from "@/components/FormField";
 import { Chip, EmptyState, Loading } from "@/components/common";
 import type { Me, Property, PropertyClosure, Stay } from "@/types/api";
 import {
@@ -346,35 +347,50 @@ export default function PropertyClosuresPage() {
         </div>
       </div>
 
-      <dialog className="modal" ref={dialogRef} onClose={() => setFormError(null)}>
+      <dialog className="modal modal--sheet sheet-form-dialog" ref={dialogRef} onClose={() => setFormError(null)}>
         <form
-          className="modal__body"
+          className="property-closure-form sheet-form"
           onSubmit={(event) => {
             event.preventDefault();
             saveClosure.mutate(form);
           }}
         >
-          <h3 className="modal__title">{form.id ? "Edit closure" : "Add closure"}</h3>
-          <label>
-            <span>Start</span>
+          <header className="property-closure-form__head sheet-form__head">
+            <div>
+              <p className="property-closure-form__eyebrow sheet-form__eyebrow">Property calendar</p>
+              <h3 className="property-closure-form__title sheet-form__title">
+                {form.id ? "Edit closure" : "Add closure"}
+              </h3>
+            </div>
+            <button
+              type="button"
+              className="property-closure-form__close sheet-form__close"
+              onClick={() => dialogRef.current?.close()}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </header>
+          <div className="property-closure-form__body sheet-form__body">
+          <div className="property-closure-form__grid sheet-form__grid">
+          <FormField label="Start" requirement="required" className="property-closure-form__field sheet-form__field">
             <input
               type="date"
               value={form.starts_on}
               onChange={(event) => setForm((prev) => ({ ...prev, starts_on: event.target.value }))}
               required
             />
-          </label>
-          <label>
-            <span>End</span>
+          </FormField>
+          <FormField label="End" requirement="required" className="property-closure-form__field sheet-form__field">
             <input
               type="date"
               value={form.ends_on}
               onChange={(event) => setForm((prev) => ({ ...prev, ends_on: event.target.value }))}
               required
             />
-          </label>
-          <label>
-            <span>Reason</span>
+          </FormField>
+          </div>
+          <FormField label="Reason" requirement="required" className="property-closure-form__field sheet-form__field">
             <select
               value={form.reason}
               onChange={(event) =>
@@ -388,9 +404,10 @@ export default function PropertyClosuresPage() {
                 <option key={reason} value={reason}>{reason}</option>
               ))}
             </select>
-          </label>
+          </FormField>
           {formError && <p className="form-error">{formError}</p>}
-          <div className="modal__actions">
+          </div>
+          <footer className="property-closure-form__footer sheet-form__footer">
             {form.id && (
               <button
                 type="button"
@@ -411,7 +428,7 @@ export default function PropertyClosuresPage() {
             >
               Save
             </button>
-          </div>
+          </footer>
         </form>
       </dialog>
     </DeskPage>

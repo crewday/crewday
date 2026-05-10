@@ -402,18 +402,34 @@ export default function EmployeeDetailPage() {
 
       <dialog
         ref={roleDialogRef}
-        className="modal"
+        className="modal modal--sheet sheet-form-dialog"
         aria-labelledby="employee-role-dialog-title"
         onClose={() => {
           setRoleDialogOpen(false);
           roleSave.reset();
         }}
       >
-        <form className="modal__body" onSubmit={submitRoleDialog}>
-          <h3 id="employee-role-dialog-title" className="modal__title">Edit work roles</h3>
-          <p className="modal__sub">
-            These are scheduling and assignment roles from the workspace work-role catalog.
-          </p>
+        <form className="employee-role-form sheet-form" onSubmit={submitRoleDialog}>
+          <header className="employee-role-form__head sheet-form__head">
+            <div>
+              <p className="employee-role-form__eyebrow sheet-form__eyebrow">Employee roles</p>
+              <h3 id="employee-role-dialog-title" className="employee-role-form__title sheet-form__title">
+                Edit work roles
+              </h3>
+              <p className="employee-role-form__sub sheet-form__sub">
+                These are scheduling and assignment roles from the workspace work-role catalog.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="employee-role-form__close sheet-form__close"
+              aria-label="Close"
+              onClick={closeRoleDialog}
+            >
+              ×
+            </button>
+          </header>
+          <div className="employee-role-form__body sheet-form__body">
           {workRolesQ.isPending || userWorkRolesQ.isPending ? (
             <Loading />
           ) : workRolesQ.isError || userWorkRolesQ.isError ? (
@@ -423,8 +439,11 @@ export default function EmployeeDetailPage() {
           ) : roleRows.length === 0 ? (
             <p className="muted">No work roles exist in this workspace.</p>
           ) : (
-            <fieldset className="field">
-              <legend>Work roles</legend>
+            <fieldset className="field form-field form-field--optional employee-role-form__field sheet-form__field">
+              <legend className="form-field__label">
+                Work roles <span className="form-field__requirement form-field__requirement--optional">Optional</span>
+              </legend>
+              <div className="employee-role-form__checks">
               {roleRows.map((role) => (
                 <label key={role.id} className="field--inline">
                   <input
@@ -436,6 +455,7 @@ export default function EmployeeDetailPage() {
                   <code className="inline-code">{role.key}</code>
                 </label>
               ))}
+              </div>
             </fieldset>
           )}
           {roleSave.isError ? (
@@ -443,7 +463,8 @@ export default function EmployeeDetailPage() {
               {roleErrorMessage(roleSave.error)}
             </p>
           ) : null}
-          <div className="modal__actions">
+          </div>
+          <footer className="employee-role-form__footer sheet-form__footer">
             <button type="button" className="btn btn--ghost" onClick={closeRoleDialog}>
               Cancel
             </button>
@@ -460,7 +481,7 @@ export default function EmployeeDetailPage() {
             >
               {roleSave.isPending ? "Saving..." : "Save roles"}
             </button>
-          </div>
+          </footer>
         </form>
       </dialog>
 

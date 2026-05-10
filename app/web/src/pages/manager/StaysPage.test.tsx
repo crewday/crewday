@@ -348,15 +348,15 @@ describe("<StaysPage>", () => {
       fireEvent.click(screen.getByRole("menuitem", { name: "Add stay" }));
 
       const dialog = await screen.findByRole("dialog", { name: "Add stay" });
-      fireEvent.change(within(dialog).getByLabelText("Guest name"), { target: { value: "Bea Guest" } });
-      fireEvent.change(within(dialog).getByLabelText("Guests"), { target: { value: "3" } });
-      fireEvent.change(within(dialog).getByLabelText("Check-in"), { target: { value: "2026-04-19" } });
-      fireEvent.change(within(dialog).getByLabelText("Check-out"), { target: { value: "2026-04-21" } });
+      fireEvent.change(within(dialog).getByLabelText(/^Guest name\b/), { target: { value: "Bea Guest" } });
+      fireEvent.change(within(dialog).getByLabelText(/^Guests\b/), { target: { value: "3" } });
+      fireEvent.change(within(dialog).getByLabelText(/^Check-in\b/), { target: { value: "2026-04-19" } });
+      fireEvent.change(within(dialog).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-21" } });
 
       expect(within(dialog).getByText(/Overlaps Ada Existing/)).toBeInTheDocument();
 
-      fireEvent.change(within(dialog).getByLabelText("Check-in"), { target: { value: "2026-04-21" } });
-      fireEvent.change(within(dialog).getByLabelText("Check-out"), { target: { value: "2026-04-23" } });
+      fireEvent.change(within(dialog).getByLabelText(/^Check-in\b/), { target: { value: "2026-04-21" } });
+      fireEvent.change(within(dialog).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-23" } });
       const reservationFetchesBeforeCreate = fake.requests.filter(
         (request) => request.path === "/w/acme/api/v1/stays/reservations?limit=500",
       ).length;
@@ -400,17 +400,17 @@ describe("<StaysPage>", () => {
       fireEvent.click(screen.getByRole("menuitem", { name: "Add stay" }));
 
       const dialog = await screen.findByRole("dialog", { name: "Add stay" });
-      expect(within(dialog).getByLabelText("Guest name")).toBeDisabled();
+      expect(within(dialog).getByLabelText(/^Guest name\b/)).toBeDisabled();
 
-      fireEvent.change(within(dialog).getByLabelText("Check-in"), { target: { value: "2026-04-19" } });
-      fireEvent.change(within(dialog).getByLabelText("Check-out"), { target: { value: "2026-04-21" } });
+      fireEvent.change(within(dialog).getByLabelText(/^Check-in\b/), { target: { value: "2026-04-19" } });
+      fireEvent.change(within(dialog).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-21" } });
       expect(within(dialog).queryByText(/Overlaps/)).not.toBeInTheDocument();
 
-      fireEvent.change(within(dialog).getByLabelText("Unit"), { target: { value: "unit_2" } });
+      fireEvent.change(within(dialog).getByLabelText(/^Unit\b/), { target: { value: "unit_2" } });
       expect(within(dialog).getByText(/Overlaps Hidden guest/)).toBeInTheDocument();
 
-      fireEvent.change(within(dialog).getByLabelText("Check-in"), { target: { value: "2026-04-21" } });
-      fireEvent.change(within(dialog).getByLabelText("Check-out"), { target: { value: "2026-04-23" } });
+      fireEvent.change(within(dialog).getByLabelText(/^Check-in\b/), { target: { value: "2026-04-21" } });
+      fireEvent.change(within(dialog).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-23" } });
       fireEvent.click(within(dialog).getByRole("button", { name: "Create stay" }));
 
       await waitFor(() => expect(fake.requests.some((request) => request.method === "POST")).toBe(true));
@@ -429,8 +429,8 @@ describe("<StaysPage>", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Import iCal" }));
 
       const dialog = await screen.findByRole("dialog", { name: "Import iCal" });
-      fireEvent.change(within(dialog).getByLabelText("Provider"), { target: { value: "gcal" } });
-      fireEvent.change(within(dialog).getByLabelText("Feed URL"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Provider\b/), { target: { value: "gcal" } });
+      fireEvent.change(within(dialog).getByLabelText(/^Feed URL\b/), {
         target: { value: "https://calendar.google.com/calendar/ical/abc.ics" },
       });
       const feedFetchesBeforeCreate = fake.requests.filter(
@@ -503,18 +503,18 @@ describe("<StaysPage>", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Import iCal" }));
       const dialog = await screen.findByRole("dialog", { name: "Import iCal" });
 
-      fireEvent.change(within(dialog).getByLabelText("Feed URL"), { target: { value: "not a url" } });
+      fireEvent.change(within(dialog).getByLabelText(/^Feed URL\b/), { target: { value: "not a url" } });
       fireEvent.click(within(dialog).getByRole("button", { name: "Add feed" }));
       expect(await within(dialog).findByText("Enter a valid https:// iCal feed URL.")).toBeInTheDocument();
 
-      fireEvent.change(within(dialog).getByLabelText("Feed URL"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Feed URL\b/), {
         target: { value: "https://calendar.airbnb.com/calendar/ical/duplicate.ics" },
       });
       expect(within(dialog).getByText("A feed from this host is already mapped to that unit.")).toBeInTheDocument();
       fireEvent.click(within(dialog).getByRole("button", { name: "Add feed" }));
       expect(await within(dialog).findByText("This iCal feed already exists for the selected property or unit.")).toBeInTheDocument();
 
-      fireEvent.change(within(dialog).getByLabelText("Feed URL"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Feed URL\b/), {
         target: { value: "https://bad.example.test/feed.ics" },
       });
       fireEvent.click(within(dialog).getByRole("button", { name: "Add feed" }));
