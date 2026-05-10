@@ -4,16 +4,10 @@ import { useSearchParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk, type AdminAuditFilter } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
-import DateTime from "@/components/DateTime";
-import { Chip, FilterChipGroup, Loading } from "@/components/common";
+import { FilterChipGroup, Loading } from "@/components/common";
+import { AdminAuditRow } from "@/pages/admin/AdminAuditRow";
 import { displayAuditRow } from "@/pages/admin/auditRows";
-import type { AdminAuditListResponse, AuditEntry } from "@/types/api";
-
-const ACTOR_TONE: Record<AuditEntry["actor_kind"], "moss" | "sky" | "ghost"> = {
-  user: "moss",
-  agent: "sky",
-  system: "ghost",
-};
+import type { AdminAuditListResponse } from "@/types/api";
 
 const ACTOR_KIND_OPTIONS: {
   value: NonNullable<AdminAuditFilter["actor_kind"]>;
@@ -222,7 +216,7 @@ export default function AdminAuditPage() {
               : "No deployment-scope audit rows yet."}
           </p>
         ) : (
-          <table className="table table--roomy">
+          <table className="table table--roomy admin-audit-table">
             <thead>
               <tr>
                 <th>When</th>
@@ -235,23 +229,7 @@ export default function AdminAuditPage() {
             </thead>
             <tbody>
               {rows.map((row, idx) => (
-                <tr key={idx}>
-                  <td><DateTime value={row.at} showTime className="mono" /></td>
-                  <td>
-                    <Chip tone={ACTOR_TONE[row.actor_kind]} size="sm">{row.actor_kind}</Chip>{" "}
-                    {row.actor}
-                    {row.actor_was_owner_member ? <span className="muted"> · owner</span> : null}
-                  </td>
-                  <td>
-                    <code className="inline-code">{row.action}</code>
-                    {row.actor_action_key && (
-                      <div className="table__sub">via {row.actor_action_key}</div>
-                    )}
-                  </td>
-                  <td className="mono">{row.target}</td>
-                  <td className="muted">{row.via}</td>
-                  <td className="muted">{row.reason ?? "—"}</td>
-                </tr>
+                <AdminAuditRow key={idx} row={row} showVia />
               ))}
             </tbody>
           </table>

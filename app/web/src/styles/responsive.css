@@ -224,6 +224,40 @@
   .panel { padding: 16px; overflow-x: auto; }
   .panel--article { padding: 20px; }
   .table { min-width: 520px; }
+  .admin-audit-table {
+    min-width: 0;
+  }
+  .admin-audit-table thead {
+    display: none;
+  }
+  .admin-audit-table,
+  .admin-audit-table tbody,
+  .admin-audit-table tr,
+  .admin-audit-table td {
+    display: block;
+  }
+  .admin-audit-table tr {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .admin-audit-table tr:last-child {
+    border-bottom: 0;
+  }
+  .admin-audit-table td {
+    display: grid;
+    grid-template-columns: 74px minmax(0, 1fr);
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 0;
+  }
+  .admin-audit-table td::before {
+    content: attr(data-label);
+    color: var(--ink-3);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
 
   /* Dashboard grids collapse to a single column. */
   .grid--stats,

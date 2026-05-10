@@ -11,6 +11,40 @@ interface FakeResponse {
   body: unknown;
 }
 
+function dashboardPayloads(auditRows: unknown[] = []): Record<string, FakeResponse[]> {
+  return {
+    "/admin/api/v1/usage/summary": [
+      {
+        body: {
+          window_label: "rolling 30 days",
+          deployment_spend_cents_30d: 2500,
+          deployment_calls_30d: 50,
+          workspace_count: 1,
+          paused_workspace_count: 0,
+          per_capability: [],
+        },
+      },
+    ],
+    "/admin/api/v1/usage/workspaces": [
+      {
+        body: {
+          workspaces: [],
+        },
+      },
+    ],
+    "/admin/api/v1/workspaces": [
+      {
+        body: {
+          workspaces: [],
+        },
+      },
+    ],
+    "/admin/api/v1/audit": [
+      { body: { data: auditRows, next_cursor: null, has_more: false } },
+    ],
+  };
+}
+
 function installFetch(scripted: Record<string, FakeResponse[]>): () => void {
   const original = globalThis.fetch;
   const queues: Record<string, FakeResponse[]> = {};
@@ -54,6 +88,42 @@ afterEach(() => {
 });
 
 describe("Admin DashboardPage", () => {
+  it("renders recent audit actor and target cells through the readable admin audit row", async () => {
+    const actorId = "01KR5S2VJ5TGPKGXWYW9C9951M";
+    const entityId = "01KR8B7KBHXE03FQMXZ6XBVRQE";
+    const restore = installFetch(
+      dashboardPayloads([
+        {
+          id: "row-readable",
+          actor_id: actorId,
+          actor_kind: "user",
+          actor_grant_role: "admin",
+          actor_was_owner_member: true,
+          entity_kind: "admin_agent_message",
+          entity_id: entityId,
+          action: "admin.agent.message.created.with.a.very.long.audit.action.value",
+          diff: {},
+          correlation_id: "mock",
+          created_at: "2026-04-18T12:00:00+00:00",
+        },
+      ]),
+    );
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("User")).toBeInTheDocument();
+      expect(screen.getByText("Admin")).toBeInTheDocument();
+      expect(screen.getByText("Owner")).toBeInTheDocument();
+      expect(screen.getByText(actorId)).toBeInTheDocument();
+      expect(screen.getByText("Admin agent message")).toBeInTheDocument();
+      expect(screen.getByText(entityId)).toBeInTheDocument();
+      expect(screen.queryByText(`user ${actorId} · owner`)).not.toBeInTheDocument();
+      expect(screen.queryByText(`admin_agent_message:${entityId}`)).not.toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
   it("excludes archived workspaces from pressure rows", async () => {
     // code-health: ignore[nloc] Integration fixture spells out all dashboard API payloads for this route case.
     const restore = installFetch({

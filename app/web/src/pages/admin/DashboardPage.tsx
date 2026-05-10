@@ -4,8 +4,8 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
 import DeskPage from "@/components/DeskPage";
-import DateTime from "@/components/DateTime";
 import { Chip, Loading, ProgressBar, StatCard } from "@/components/common";
+import { AdminAuditRow } from "@/pages/admin/AdminAuditRow";
 import { displayAuditRow } from "@/pages/admin/auditRows";
 import type {
   AdminAuditListResponse,
@@ -142,7 +142,7 @@ export default function AdminDashboardPage() {
           <h2>Recent deployment audit</h2>
           <Link className="btn btn--ghost" to="/admin/audit">Open Audit log</Link>
         </header>
-        <table className="table">
+        <table className="table admin-audit-table">
           <thead>
             <tr>
               <th>When</th>
@@ -154,13 +154,7 @@ export default function AdminDashboardPage() {
           </thead>
           <tbody>
             {audit.map((row, idx) => (
-              <tr key={idx}>
-                <td><DateTime value={row.at} showTime className="mono" /></td>
-                <td>{row.actor}</td>
-                <td><code className="inline-code">{row.action}</code></td>
-                <td className="mono">{row.target}</td>
-                <td className="muted">{row.reason ?? "—"}</td>
-              </tr>
+              <AdminAuditRow key={idx} row={row} />
             ))}
           </tbody>
         </table>

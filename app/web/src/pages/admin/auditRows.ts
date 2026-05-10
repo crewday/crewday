@@ -14,5 +14,9 @@ export function displayAuditRow(row: AdminAuditEntry): AuditEntry {
     actor_action_key: null,
     actor_id: row.actor_id,
     agent_label: null,
+    entity_kind: row.entity_kind,
+    entity_id: row.entity_id,
+    correlation_id: row.correlation_id,
+    diff: row.diff,
   };
 }

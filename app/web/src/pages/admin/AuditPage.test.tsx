@@ -113,6 +113,36 @@ describe("Admin AuditPage", () => {
     }
   });
 
+  it("renders deployment audit actor and target cells with readable labels and raw IDs demoted", async () => {
+    const actorId = "01KR5S2VJ5TGPKGXWYW9C9951M";
+    const entityId = "01KR8B7KBHXE03FQMXZ6XBVRQE";
+    const fake = installFetch([
+      row({
+        actor_id: actorId,
+        actor_kind: "user",
+        actor_grant_role: "admin",
+        actor_was_owner_member: true,
+        entity_kind: "admin_agent_message",
+        entity_id: entityId,
+        action: "admin.agent.message.created.with.a.very.long.audit.action.value",
+      }),
+    ]);
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText(actorId)).toBeInTheDocument();
+      expect(screen.getAllByText("User").length).toBeGreaterThan(0);
+      expect(screen.getByText("Admin")).toBeInTheDocument();
+      expect(screen.getByText("Owner")).toBeInTheDocument();
+      expect(screen.getByText("Admin agent message")).toBeInTheDocument();
+      expect(screen.getByText(entityId)).toBeInTheDocument();
+      expect(screen.queryByText(`user ${actorId} · owner`)).not.toBeInTheDocument();
+      expect(screen.queryByText(`admin_agent_message:${entityId}`)).not.toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("emits since/until as UTC ISO so the picker's local day is preserved across timezones", async () => {
     const fake = installFetch([row({ id: "x", action: "deployment.budget.updated" })]);
     try {
