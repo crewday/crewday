@@ -51,6 +51,7 @@ from app.domain.agent.runtime import (
     ToolResult,
     run_turn,
 )
+from app.domain.llm.router import invalidate_cache as invalidate_llm_router_cache
 from app.domain.messaging.notifications import NotificationKind, NotificationService
 from app.events import NotificationCreated
 from app.events.bus import EventBus
@@ -91,6 +92,15 @@ def _reset_ctx() -> Iterator[None]:
         yield
     finally:
         reset_current(token)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_llm_router_cache() -> Iterator[None]:
+    invalidate_llm_router_cache()
+    try:
+        yield
+    finally:
+        invalidate_llm_router_cache()
 
 
 @pytest.fixture
@@ -324,6 +334,7 @@ def _seed_llm_assignment(session: Session, *, workspace_id: str) -> None:
     )
     session.add(assignment)
     session.flush()
+    invalidate_llm_router_cache(workspace_id=workspace_id)
 
 
 def _seed_budget_ledger(session: Session, *, workspace_id: str) -> None:
@@ -360,6 +371,7 @@ def _seed_channel(session: Session, *, workspace_id: str) -> str:
 
 def test_manager_turn_writes_audit_with_real_delegated_token(
     db_session: Session,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     workspace, user = _seed_workspace_and_user(db_session)
     ctx = WorkspaceContext(
@@ -420,6 +432,11 @@ def test_manager_turn_writes_audit_with_real_delegated_token(
     )
 
     assert outcome.outcome == "replied"
+    assert [
+        record
+        for record in caplog.records
+        if getattr(record, "event", "") == "agent.runtime.error_reply"
+    ] == []
     assert outcome.tool_calls_made == 1
     assert outcome.llm_calls_made == 2
     assert dispatcher.captured
