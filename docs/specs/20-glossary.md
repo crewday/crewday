@@ -16,6 +16,13 @@ fix the offender.
   agent described in §11. Default model `google/gemma-4-31b-it`;
   tool surface is the full CLI + REST surface of the delegating user
   (no filtered catalog). Voice input is capability-gated.
+- **Agent-mediated relay.** v1 path for a concrete user-to-user
+  request carried by embedded agents rather than by direct human chat.
+  The requester asks their own agent; the target sees agent-authored
+  copy from the target's own agent; the target replies in normal agent
+  chat; the runtime correlates the open relay and summarizes the reply
+  back to the requester's agent thread. See §11 "Agent-mediated user
+  requests" and §10 "Agent-message delivery".
 - **Agent preferences.** Free-form Markdown guidance that shapes
   how the composition/conversation LLM capabilities in §11 talk
   back. Three layers stacked broadest-first: workspace →

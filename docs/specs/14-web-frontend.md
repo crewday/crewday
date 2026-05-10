@@ -290,6 +290,13 @@ page is open. `#settings` is the employee-scoped settings override
 surface; the other non-overview tabs are reserved chrome until their
 own page bodies land.
 
+The employee detail overflow menu does not include a `Message` action
+in v1. Direct manager-to-worker messaging remains absent; managers who
+need to ask a worker something use the persistent `.desk__agent` rail
+or `/chat` page to create an agent-mediated relay (§11), which delivers
+through the worker's own agent chat instead of opening a direct human
+conversation.
+
 No separate workspace-admin SPA pages exist in v1. The
 `/w/<slug>/api/v1/admin/*` tree (OpenAPI tag `workspace_admin`,
 CLI group `workspace-admin` per §13) backs owner-facing workspace

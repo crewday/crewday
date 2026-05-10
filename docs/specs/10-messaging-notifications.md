@@ -23,6 +23,17 @@ reserved in the REST contract and returns `501 push_unavailable`
 until the native app ships. Together, push + WhatsApp + email form
 the fallback chain for agent-initiated outbound (next subsection).
 
+Agent-mediated user requests (§11 "Agent-mediated user requests") are
+in v1 but are not a second human chat channel. A manager-side agent may
+relay a concrete request to a visible workspace worker by posting
+agent-authored copy into the worker's own agent thread; the worker's
+reply returns through that same relay and is summarized back into the
+requester's agent thread. The human-visible example is Sunday
+availability: "Vincent is asking if you are available to work on
+Sunday" to Maria, followed by "Maria responded that she is available
+2-6pm on Sunday" to Vincent. No direct manager-to-worker thread is
+created.
+
 ## Email
 
 ### Provider
@@ -282,10 +293,13 @@ thread on the desktop chat surface (§14); workers read and reply
 through the worker chat page. Human `@mentions` resolve to workspace
 members and still trigger email fallback for offline recipients.
 
-There are still no DMs and no group chats outside a task thread.
-If a manager wants a free-form conversation, they use the right-
-sidebar workspace agent (§14), whose actions are audited like any
-other agent write.
+There are still no DMs and no group chats outside a task thread. If a
+manager wants a free-form request to a worker, they ask the right-
+sidebar workspace agent (§14) to open an agent-mediated relay (§11);
+the worker sees the request from their own agent, replies in their
+normal agent chat, and the manager receives a summarized answer in the
+original agent thread. This preserves the no-direct-DM stance while
+letting agents coordinate concrete requests.
 
 ### Agent-message delivery
 
@@ -349,6 +363,19 @@ threads into the same conversation. Opt-in is **implicit in the
 capability**: a push token registered by the native app means push
 is on; a WhatsApp binding means WhatsApp is on. No separate
 "preferred channel" toggle — the chain is the preference.
+
+Agent-mediated relays use this exact chain. The target-side request is
+an agent message in the target's existing agent thread; if the target
+is live it arrives via `agent.message.appended`, otherwise the fixed
+fallback chain decides push / WhatsApp / email as configured. The
+target's reply is correlated to the open relay request and summarized
+back as a new agent message in the requester's existing agent thread.
+The visible message bodies remain ordinary `chat_message` records in
+those two existing agent threads. The relay audit record stores only
+the relay id, requester/target ids, thread/message references,
+relay-safe request and answer summaries, state, and timestamps;
+hidden prompts, raw provider output, and unrelated chat history are
+not copied into delivery payloads or notification records.
 
 Notification timing is the user's device's job (OS-level do-not-
 disturb, WhatsApp's own mute). The product does not carry its own

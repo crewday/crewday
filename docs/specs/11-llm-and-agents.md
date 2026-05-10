@@ -165,6 +165,72 @@ Default model: `google/gemma-4-31b-it`. Capability keys
 `chat.employee` (default on for workers) and `voice.employee`
 (default off).
 
+### Agent-mediated user requests
+
+v1 includes an **agent-mediated relay** for user-to-user requests.
+This is not a direct human DM, not a group chat, and not a manager
+chat thread with a worker. The requester talks to their own embedded
+agent; the target sees a message from the target's own embedded agent
+in the normal agent chat surface.
+
+Canonical example:
+
+1. Vincent asks the manager-side agent, "Ask Maria if she can work on
+   Sunday."
+2. Maria sees her own worker-side agent say, "Vincent is asking if you
+   are available to work on Sunday. Are you available, and if so what
+   hours?"
+3. Maria replies in her normal agent chat, "I can do 2-6pm."
+4. Vincent's manager-side agent posts back in Vincent's agent thread,
+   "Maria responded that she is available 2-6pm on Sunday."
+
+Visible-copy contract:
+
+- **Requester side.** The requester's agent confirms that it is asking
+  the target and later summarizes the target's response. It does not
+  expose the target's hidden prompts, chain-of-thought, unrelated chat
+  history, or raw provider output.
+- **Target side.** The target sees agent-authored copy from their own
+  agent, phrased as a relayed request that names the human requester
+  and the concrete ask. The target does not see the requester's hidden
+  prompts, unrelated manager chat, or any privileged context beyond
+  what is necessary to answer.
+- **Reply side.** The target replies in the existing agent chat
+  composer. The runtime recognizes the open relay, summarizes the
+  target's answer, and appends the result back to the requester's
+  original agent thread.
+
+Authorization is deliberately narrow in v1. Owner/manager-side agents
+may create relay requests only to users visible to that
+owner/manager in the current workspace as live workers or active
+work-engagement users. The agent must reject relay attempts to users
+outside the current workspace visibility set, to clients/guests, to
+deployment admins reached through `/admin`, and to arbitrary phone or
+email recipients. Worker-to-worker and worker-to-manager relays are
+deferred: worker-side agents may explain that the worker should use the
+existing task thread, schedule/availability flow, or ask a manager
+directly, but they do not open a cross-user relay in v1.
+
+The relay is persisted as a correlated request, not as a direct
+message transcript. Store at minimum: relay id/correlation id,
+workspace id, requester user id, target user id, requester agent
+thread/message reference, target agent thread/message reference,
+relay-safe request summary, relay-safe answer summary when present,
+state (`open | answered | expired | cancelled | failed`), and
+created / sent / answered / closed timestamps. Retention follows the
+workspace's normal chat/audit retention settings: human-visible message
+bodies live in the existing agent-thread `chat_message` rows, while the
+relay row is only the correlation/audit index. Hidden prompts,
+chain-of-thought, raw provider output, unrelated chat history, and
+unrelated retrieved context are not copied onto the relay row.
+
+Agent-message delivery (§10) is the only delivery path. Opening a
+relay appends an agent message into the target's normal agent thread
+and emits the usual `agent.message.appended` event / fallback chain.
+Returning the summarized answer does the same in the requester's
+agent thread. No new direct-message surface, inbox, or manager-to-
+worker chat route is introduced.
+
 ### Admin-side agent
 
 On the `/admin` shell (§14), the same shared `.desk__agent`
