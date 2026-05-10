@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.audit.models import AuditLog
+from app.adapters.db.llm.models import ApprovalRequest
 from app.adapters.llm.ports import Tool
 from app.domain.agent.runtime import GateDecision, ToolResult
 from app.domain.agent.staff_chat import (
@@ -21,7 +22,12 @@ from app.domain.agent.staff_chat import (
     suggest_staff_chat_tool,
 )
 from app.events.bus import EventBus
-from app.events.types import AgentTurnFinished, AgentTurnStarted
+from app.events.types import (
+    AgentActionPending,
+    AgentToolFinished,
+    AgentTurnFinished,
+    AgentTurnStarted,
+)
 from app.tenancy import WorkspaceContext
 from app.tenancy.current import set_current
 from app.util.clock import FrozenClock
@@ -245,12 +251,41 @@ def test_mark_task_done_keeps_existing_policy_gating(
 
     assert outcome.outcome == "action"
     assert outcome.approval_request_id is not None
+    assert outcome.chat_message_id is None
     assert dispatcher.is_gated_calls[0].name == "mark_task_done"
     assert dispatcher.captured == []
-    finished = captured_events.events[-1]
+    assert list(db_session.scalars(select(AuditLog)).all()) == []
+    approval = db_session.get(ApprovalRequest, outcome.approval_request_id)
+    assert approval is not None
+    assert approval.status == "pending"
+    payload = approval.action_json
+    assert isinstance(payload, dict)
+    assert payload["tool_name"] == "mark_task_done"
+    assert payload["card_summary"] == "Mark kitchen task done?"
+    assert payload["card_risk"] == "low"
+    assert payload["pre_approval_source"] == "workspace_policy"
+    assert payload["agent_correlation_id"] == outcome.correlation_id
+    assert approval.inline_channel == STAFF_CHAT_CHANNEL
+    assert approval.for_user_id == ctx.actor_id
+    assert captured_events.names() == [
+        "agent.turn.started",
+        "agent.tool.started",
+        "agent.action.pending",
+        "agent.turn.finished",
+        "agent.tool.finished",
+    ]
+    pending = captured_events.events[-3]
+    assert isinstance(pending, AgentActionPending)
+    assert pending.approval_request_id == outcome.approval_request_id
+    assert pending.scope == STAFF_CHAT_SCOPE
+    finished = captured_events.events[-2]
     assert isinstance(finished, AgentTurnFinished)
     assert finished.outcome == "action"
     assert finished.scope == STAFF_CHAT_SCOPE
+    tool_finished = captured_events.events[-1]
+    assert isinstance(tool_finished, AgentToolFinished)
+    assert tool_finished.status == "approval_required"
+    assert tool_finished.scope == STAFF_CHAT_SCOPE
 
 
 def test_allowed_staff_chat_mutation_writes_worker_audit_attribution(
