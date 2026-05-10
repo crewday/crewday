@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import DateTime from "@/components/DateTime";
+import ChatMessageBody from "@/components/chat/ChatMessageBody";
 import type { AgentMessage } from "@/types/api";
 
 type ActionDecision = "approve" | "details";
@@ -70,7 +71,11 @@ export default function ChatLog({
         }
         return (
           <div key={idx} className={"chat-msg chat-msg--" + m.kind}>
-            <span className="chat-msg__body">{m.body}</span>
+            {m.kind === "agent" ? (
+              <ChatMessageBody body={m.body} className="chat-msg__body" />
+            ) : (
+              <span className="chat-msg__body">{m.body}</span>
+            )}
             <DateTime value={m.at} showTime className="chat-msg__time" />
           </div>
         );

@@ -28,6 +28,77 @@ afterEach(() => {
 });
 
 describe("AgentSidebar", () => {
+  it("renders basic markdown in agent responses", async () => {
+    const env = installFetchRouteHandlers([
+      {
+        path: "/w/crewday/api/v1/agent/employee/log",
+        respond: {
+          body: [
+            {
+              at: "2026-05-10T10:00:00Z",
+              kind: "agent",
+              body:
+                "Plan:\n\n- **Open windows**\n- Check `linen`\n\nRead [guide](https://example.com).",
+            },
+          ],
+        },
+      },
+    ]);
+
+    try {
+      renderWithProviders(
+        <MemoryRouter initialEntries={["/w/crewday/today"]}>
+          <AgentSidebar role="employee" />
+        </MemoryRouter>,
+        { queryClient: makeTestQueryClient() },
+      );
+
+      expect(await screen.findByText("Open windows")).toBeInTheDocument();
+      expect(screen.getByText("Open windows").tagName).toBe("STRONG");
+      expect(screen.getByText("linen").tagName).toBe("CODE");
+      expect(screen.getByRole("link", { name: "guide" })).toHaveAttribute(
+        "href",
+        "https://example.com",
+      );
+      expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    } finally {
+      env.restore();
+    }
+  });
+
+  it("does not inject raw HTML from sidebar agent responses", async () => {
+    const env = installFetchRouteHandlers([
+      {
+        path: "/w/crewday/api/v1/agent/employee/log",
+        respond: {
+          body: [
+            {
+              at: "2026-05-10T10:00:00Z",
+              kind: "agent",
+              body: "<script>alert(1)</script>\n\n[bad](javascript:alert(1))",
+            },
+          ],
+        },
+      },
+    ]);
+
+    try {
+      const { container } = renderWithProviders(
+        <MemoryRouter initialEntries={["/w/crewday/today"]}>
+          <AgentSidebar role="employee" />
+        </MemoryRouter>,
+        { queryClient: makeTestQueryClient() },
+      );
+
+      expect(await screen.findByText(/<script>alert\(1\)<\/script>/u)).toBeInTheDocument();
+      expect(screen.getByText("bad")).toBeInTheDocument();
+      expect(container.querySelector("script")).toBeNull();
+      expect(container.querySelector("a")).toBeNull();
+    } finally {
+      env.restore();
+    }
+  });
+
   it("sends workspace agent messages through the shared API URL path", async () => {
     const sentAt = "2026-05-06T12:00:00Z";
     let messages: Array<{ at: string; kind: "user"; body: string }> = [];

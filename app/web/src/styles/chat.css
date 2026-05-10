@@ -48,6 +48,49 @@
   word-wrap: break-word;
 }
 .chat-msg__body { display: block; }
+.chat-markdown {
+  display: grid;
+  gap: 6px;
+}
+.chat-markdown__paragraph {
+  margin: 0;
+}
+.chat-markdown__list {
+  margin: 0;
+  padding-left: 18px;
+}
+.chat-markdown__list li + li {
+  margin-top: 3px;
+}
+.chat-markdown code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.92em;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.chat-markdown__code {
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.9em;
+  line-height: 1.45;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+  border-radius: 6px;
+  padding: 8px;
+}
+.chat-markdown__code code {
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+}
+.chat-markdown a {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .chat-msg--agent {
   background: var(--card); color: var(--ink);
   align-self: flex-start; border-bottom-left-radius: 4px;

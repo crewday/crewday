@@ -8,6 +8,7 @@ import { qk } from "@/lib/queryKeys";
 import { initialAgentCollapsed, persistAgentCollapsed } from "@/lib/preferences";
 import { useAgentTyping } from "@/lib/agentTyping";
 import ChatComposer from "@/components/chat/ChatComposer";
+import ChatMessageBody from "@/components/chat/ChatMessageBody";
 import DateTime from "@/components/DateTime";
 import type { AgentAction, AgentMessage, AgentTurnScope, Role } from "@/types/api";
 
@@ -178,7 +179,11 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
         <div className="agent-log" ref={logRef} role="log" aria-live="polite">
           {log.data?.map((msg, i) => (
             <div key={i} className={"agent-msg agent-msg--" + msg.kind}>
-              <span className="agent-msg__body">{msg.body}</span>
+              {msg.kind === "agent" ? (
+                <ChatMessageBody body={msg.body} className="agent-msg__body" />
+              ) : (
+                <span className="agent-msg__body">{msg.body}</span>
+              )}
               <DateTime value={msg.at} showTime className="agent-msg__time" />
             </div>
           ))}
