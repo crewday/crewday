@@ -33,6 +33,7 @@ export default function ChatMessageBody({
   body,
   className,
 }: ChatMessageBodyProps): ReactElement {
+  // code-health: ignore[ccn,nloc] Lizard's TSX parser attributes the module's helper functions to this tiny component wrapper.
   const blocks = parseBlocks(body);
 
   return (

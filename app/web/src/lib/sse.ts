@@ -238,6 +238,7 @@ export interface AgentActivityState {
 }
 
 function typingKeySignature(scope: AgentTurnScope, taskId?: string): string {
+  // code-health: ignore[params] Tiny two-argument helper is misread as many parameters by lizard's TypeScript parser.
   return scope === "task" && taskId ? `task:${taskId}` : scope;
 }
 
