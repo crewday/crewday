@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { CalendarX } from "lucide-react";
@@ -8,6 +8,7 @@ import { qk } from "@/lib/queryKeys";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
 import FormField from "@/components/FormField";
+import FormModal, { FormModalGrid } from "@/components/FormModal";
 import { Chip, EmptyState, Loading } from "@/components/common";
 import type { Me, Property, PropertyClosure, Stay } from "@/types/api";
 import {
@@ -137,7 +138,7 @@ export default function PropertyClosuresPage() {
   const { pid = "" } = useParams<{ pid: string }>();
   const { pathname } = useLocation();
   const queryClient = useQueryClient();
-  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState<ClosureFormState>(() => emptyForm("2026-04-01"));
   const [formError, setFormError] = useState<string | null>(null);
   const dataQ = useQuery({
@@ -169,7 +170,7 @@ export default function PropertyClosuresPage() {
     },
     onSuccess: async () => {
       setFormError(null);
-      dialogRef.current?.close();
+      setDialogOpen(false);
       await queryClient.invalidateQueries({ queryKey: qk.propertyClosures(pid) });
     },
     onError: (err) => {
@@ -182,7 +183,7 @@ export default function PropertyClosuresPage() {
       fetchJson<null>("/api/v1/property_closures/" + id, { method: "DELETE" }),
     onSuccess: async () => {
       setFormError(null);
-      dialogRef.current?.close();
+      setDialogOpen(false);
       await queryClient.invalidateQueries({ queryKey: qk.propertyClosures(pid) });
     },
     onError: (err) => {
@@ -193,7 +194,7 @@ export default function PropertyClosuresPage() {
   function openForm(next: ClosureFormState) {
     setForm(next);
     setFormError(null);
-    dialogRef.current?.showModal();
+    setDialogOpen(true);
   }
 
   if (dataQ.isPending || meQ.isPending) {
@@ -347,32 +348,45 @@ export default function PropertyClosuresPage() {
         </div>
       </div>
 
-      <dialog className="modal modal--sheet sheet-form-dialog" ref={dialogRef} onClose={() => setFormError(null)}>
-        <form
-          className="property-closure-form sheet-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            saveClosure.mutate(form);
-          }}
-        >
-          <header className="property-closure-form__head sheet-form__head">
-            <div>
-              <p className="property-closure-form__eyebrow sheet-form__eyebrow">Property calendar</p>
-              <h3 className="property-closure-form__title sheet-form__title">
-                {form.id ? "Edit closure" : "Add closure"}
-              </h3>
-            </div>
-            <button
-              type="button"
-              className="property-closure-form__close sheet-form__close"
-              onClick={() => dialogRef.current?.close()}
-              aria-label="Close"
-            >
-              ×
+      <FormModal
+        open={dialogOpen}
+        title={form.id ? "Edit closure" : "Add closure"}
+        eyebrow="Property calendar"
+        formClassName="property-closure-form"
+        onClose={() => {
+          setDialogOpen(false);
+          setFormError(null);
+        }}
+        onSubmit={(event) => {
+          event.preventDefault();
+          saveClosure.mutate(form);
+        }}
+        actions={
+          <>
+            {form.id && (
+              <button
+                type="button"
+                className="btn btn--rust"
+                disabled={deleteClosure.isPending || saveClosure.isPending}
+                onClick={() => deleteClosure.mutate(form.id ?? "")}
+              >
+                Delete
+              </button>
+            )}
+            <button type="button" className="btn btn--ghost" onClick={() => setDialogOpen(false)}>
+              Cancel
             </button>
-          </header>
-          <div className="property-closure-form__body sheet-form__body">
-          <div className="property-closure-form__grid sheet-form__grid">
+            <button
+              type="submit"
+              className="btn btn--moss"
+              disabled={saveClosure.isPending || deleteClosure.isPending}
+            >
+              Save
+            </button>
+          </>
+        }
+      >
+          <FormModalGrid className="property-closure-form__grid">
           <FormField label="Start" requirement="required" className="property-closure-form__field sheet-form__field">
             <input
               type="date"
@@ -389,7 +403,7 @@ export default function PropertyClosuresPage() {
               required
             />
           </FormField>
-          </div>
+          </FormModalGrid>
           <FormField label="Reason" requirement="required" className="property-closure-form__field sheet-form__field">
             <select
               value={form.reason}
@@ -406,31 +420,7 @@ export default function PropertyClosuresPage() {
             </select>
           </FormField>
           {formError && <p className="form-error">{formError}</p>}
-          </div>
-          <footer className="property-closure-form__footer sheet-form__footer">
-            {form.id && (
-              <button
-                type="button"
-                className="btn btn--rust"
-                disabled={deleteClosure.isPending || saveClosure.isPending}
-                onClick={() => deleteClosure.mutate(form.id ?? "")}
-              >
-                Delete
-              </button>
-            )}
-            <button type="button" className="btn btn--ghost" onClick={() => dialogRef.current?.close()}>
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn--moss"
-              disabled={saveClosure.isPending || deleteClosure.isPending}
-            >
-              Save
-            </button>
-          </footer>
-        </form>
-      </dialog>
+      </FormModal>
     </DeskPage>
   );
 }

@@ -1,10 +1,11 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useMemo, useRef, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 import { ApiError, fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import FormField from "@/components/FormField";
+import FormModal, { FormModalGrid } from "@/components/FormModal";
 import { Chip, Loading } from "@/components/common";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import type {
@@ -390,8 +391,6 @@ export default function StaysPage() {
   const { workspaceId } = useWorkspace();
   const isPhone = useIsPhone();
   const queryClient = useQueryClient();
-  const manualDialogRef = useRef<HTMLDialogElement | null>(null);
-  const icalDialogRef = useRef<HTMLDialogElement | null>(null);
   const today = useMemo(() => new Date(), []);
   const todayIso = useMemo(() => isoDate(today), [today]);
   const [manualForm, setManualForm] = useState<ManualStayForm | null>(null);
@@ -461,7 +460,7 @@ export default function StaysPage() {
       });
       void queryClient.invalidateQueries({ queryKey: qk.stays() });
       setManualNotice({ tone: "success", text: "Stay created and added to the list." });
-      manualDialogRef.current?.close();
+      setManualForm(null);
     },
     onError: (error) => {
       setManualNotice({
@@ -563,7 +562,6 @@ export default function StaysPage() {
     setManualForm(next);
     setManualNotice(null);
     createStay.reset();
-    manualDialogRef.current?.showModal();
   }
 
   function openIcalDialog(): void {
@@ -571,7 +569,6 @@ export default function StaysPage() {
     setIcalForm(next);
     setIcalNotice(null);
     createIcalFeed.reset();
-    icalDialogRef.current?.showModal();
   }
 
   function updateManualProperty(propertyId: string): void {
@@ -639,39 +636,39 @@ export default function StaysPage() {
         },
       ]}
     >
-      <dialog className="modal modal--sheet sheet-form-dialog" ref={manualDialogRef} aria-label="Add stay">
+      <FormModal
+        open={manualForm !== null}
+        title="Add stay"
+        eyebrow="Reservations"
+        subtitle="Manual stays save to the reservation API and use the selected unit for conflict checks."
+        formClassName="stay-create-form"
+        onClose={() => setManualForm(null)}
+        onSubmit={submitManualStay}
+        describedBy={
+          manualForm
+            ? describedBy(
+                !canShareManualGuestName && manualPrivacyId,
+                selectedManualUnits.length === 0 && manualUnitErrorId,
+                manualOverlap && manualOverlapId,
+                manualNotice && manualNoticeId,
+              )
+            : undefined
+        }
+        noValidate
+        actions={
+          <>
+            <button type="button" className="btn btn--ghost" onClick={() => setManualForm(null)}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn--moss" disabled={createStay.isPending}>
+              {createStay.isPending ? "Creating..." : "Create stay"}
+            </button>
+          </>
+        }
+      >
         {manualForm ? (
-          <form
-            className="stay-create-form sheet-form"
-            onSubmit={submitManualStay}
-            aria-describedby={describedBy(
-              !canShareManualGuestName && manualPrivacyId,
-              selectedManualUnits.length === 0 && manualUnitErrorId,
-              manualOverlap && manualOverlapId,
-              manualNotice && manualNoticeId,
-            )}
-            noValidate
-          >
-            <header className="stay-create-form__head sheet-form__head">
-              <div>
-                <p className="stay-create-form__eyebrow sheet-form__eyebrow">Reservations</p>
-                <h3 className="stay-create-form__title sheet-form__title">Add stay</h3>
-                <p className="stay-create-form__sub sheet-form__sub">
-                  Manual stays save to the reservation API and use the selected unit for conflict checks.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="stay-create-form__close sheet-form__close"
-                onClick={() => manualDialogRef.current?.close()}
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </header>
-
-            <div className="stay-create-form__body sheet-form__body">
-            <div className="stay-create-form__grid sheet-form__grid">
+          <>
+            <FormModalGrid className="stay-create-form__grid">
               <FormField label="Property" requirement="required" className="stay-create-form__field sheet-form__field">
                 <select
                   value={manualForm.propertyId}
@@ -741,7 +738,7 @@ export default function StaysPage() {
                   <option value="confirmed">Confirmed</option>
                 </select>
               </FormField>
-            </div>
+            </FormModalGrid>
 
             {!canShareManualGuestName ? (
               <p id={manualPrivacyId} className="stays-form-note">
@@ -757,52 +754,42 @@ export default function StaysPage() {
                 {manualNotice.text}
               </p>
             ) : null}
-            </div>
-
-            <footer className="stay-create-form__footer sheet-form__footer">
-              <button type="button" className="btn btn--ghost" onClick={() => manualDialogRef.current?.close()}>
-                Cancel
-              </button>
-              <button type="submit" className="btn btn--moss" disabled={createStay.isPending}>
-                {createStay.isPending ? "Creating..." : "Create stay"}
-              </button>
-            </footer>
-          </form>
+          </>
         ) : null}
-      </dialog>
+      </FormModal>
 
-      <dialog className="modal modal--sheet sheet-form-dialog" ref={icalDialogRef} aria-label="Import iCal">
+      <FormModal
+        open={icalForm !== null}
+        title="Import iCal"
+        eyebrow="Calendar feed"
+        subtitle="Add a provider export URL, map it to a unit, and crew.day will probe it before enabling the feed."
+        formClassName="ical-feed-form"
+        onClose={() => setIcalForm(null)}
+        onSubmit={submitIcalFeed}
+        describedBy={
+          icalForm
+            ? describedBy(
+                selectedIcalUnits.length === 0 && icalUnitErrorId,
+                icalDuplicate && icalDuplicateId,
+                icalNotice && icalNoticeId,
+              )
+            : undefined
+        }
+        noValidate
+        actions={
+          <>
+            <button type="button" className="btn btn--ghost" onClick={() => setIcalForm(null)}>
+              Close
+            </button>
+            <button type="submit" className="btn btn--moss" disabled={createIcalFeed.isPending}>
+              {createIcalFeed.isPending ? "Testing..." : "Add feed"}
+            </button>
+          </>
+        }
+      >
         {icalForm ? (
-          <form
-            className="ical-feed-form sheet-form"
-            onSubmit={submitIcalFeed}
-            aria-describedby={describedBy(
-              selectedIcalUnits.length === 0 && icalUnitErrorId,
-              icalDuplicate && icalDuplicateId,
-              icalNotice && icalNoticeId,
-            )}
-            noValidate
-          >
-            <header className="ical-feed-form__head sheet-form__head">
-              <div>
-                <p className="ical-feed-form__eyebrow sheet-form__eyebrow">Calendar feed</p>
-                <h3 className="ical-feed-form__title sheet-form__title">Import iCal</h3>
-                <p className="ical-feed-form__sub sheet-form__sub">
-                  Add a provider export URL, map it to a unit, and crew.day will probe it before enabling the feed.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="ical-feed-form__close sheet-form__close"
-                onClick={() => icalDialogRef.current?.close()}
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </header>
-
-            <div className="ical-feed-form__body sheet-form__body">
-            <div className="ical-feed-form__grid sheet-form__grid">
+          <>
+            <FormModalGrid className="ical-feed-form__grid">
               <FormField label="Property" requirement="required" className="ical-feed-form__field sheet-form__field">
                 <select
                   value={icalForm.propertyId}
@@ -849,7 +836,7 @@ export default function StaysPage() {
                   onChange={(event) => setIcalForm({ ...icalForm, url: event.target.value })}
                 />
               </FormField>
-            </div>
+            </FormModalGrid>
 
             {selectedIcalUnits.length === 0 ? (
               <p id={icalUnitErrorId} className="form-error" role="alert">No units are available for this property.</p>
@@ -860,19 +847,9 @@ export default function StaysPage() {
                 {icalNotice.text}
               </p>
             ) : null}
-            </div>
-
-            <footer className="ical-feed-form__footer sheet-form__footer">
-              <button type="button" className="btn btn--ghost" onClick={() => icalDialogRef.current?.close()}>
-                Close
-              </button>
-              <button type="submit" className="btn btn--moss" disabled={createIcalFeed.isPending}>
-                {createIcalFeed.isPending ? "Testing..." : "Add feed"}
-              </button>
-            </footer>
-          </form>
+          </>
         ) : null}
-      </dialog>
+      </FormModal>
 
       <div className="panel">
         <table className="table table--roomy">

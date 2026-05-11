@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { PackageSearch, SearchX } from "lucide-react";
@@ -6,6 +6,7 @@ import { ApiError, fetchJson, resolveApiPath } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import FileDropZone from "@/components/FileDropZone";
+import FormModal, { FormModalGrid } from "@/components/FormModal";
 import { Checkbox, Chip, EmptyState, FilterChipGroup, Loading } from "@/components/common";
 import { AssetIcon } from "@/components/AssetIcon";
 import { ASSET_CONDITION_TONE, ASSET_STATUS_TONE } from "@/lib/tones";
@@ -158,7 +159,6 @@ function NewAssetButton({
   activePropertyId: string;
 }) {
   // code-health: ignore[ccn nloc] Asset creation is a boundary dialog: form state, retryable document uploads, and field copy stay together.
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState("");
@@ -210,7 +210,7 @@ function NewAssetButton({
       await queryClient.invalidateQueries({ queryKey: qk.assets() });
       await queryClient.invalidateQueries({ queryKey: qk.documents() });
       await queryClient.invalidateQueries({ queryKey: qk.asset(asset.id) });
-      dialogRef.current?.close();
+      setDialogOpen(false);
     },
     onError: (error) => {
       if (error instanceof AssetDocumentUploadError) {
@@ -264,7 +264,6 @@ function NewAssetButton({
       activePropertyIsAvailable ? activePropertyId : fallbackPropertyId,
     );
     setDialogOpen(true);
-    dialogRef.current?.showModal();
   }
 
   function submit(event: FormEvent<HTMLFormElement>): void {
@@ -364,36 +363,43 @@ function NewAssetButton({
         + New asset
       </button>
 
-      <dialog
-        className="modal modal--sheet asset-create-dialog"
-        ref={dialogRef}
-        aria-labelledby="new-asset-title"
+      <FormModal
+        open={dialogOpen}
+        title="New asset"
+        titleId="new-asset-title"
+        eyebrow="Asset record"
+        subtitle="Track equipment identity, location, purchase details, and guest visibility."
+        width="default"
+        className="asset-create-dialog"
+        formClassName="asset-create"
+        bodyClassName="asset-create__body"
+        onClose={reset}
+        onSubmit={submit}
+        noValidate
         onCancel={(event) => {
           if (create.isPending) event.preventDefault();
         }}
-        onClose={reset}
-      >
-        <form className="asset-create" onSubmit={submit} noValidate>
-          <header className="asset-create__head">
-            <div>
-              <p className="asset-create__eyebrow">Asset record</p>
-              <h3 id="new-asset-title" className="asset-create__title">New asset</h3>
-              <p className="asset-create__sub">
-                Track equipment identity, location, purchase details, and guest visibility.
-              </p>
-            </div>
+        closeDisabled={create.isPending}
+        actions={
+          <>
             <button
               type="button"
-              className="asset-create__close"
+              className="btn btn--ghost"
               disabled={create.isPending}
-              onClick={() => dialogRef.current?.close()}
-              aria-label="Close"
+              onClick={reset}
             >
-              ×
+              Cancel
             </button>
-          </header>
-
-          <div className="asset-create__body">
+            <button
+              type="submit"
+              className="btn btn--moss"
+              disabled={create.isPending}
+            >
+              {submitLabel}
+            </button>
+          </>
+        }
+      >
             <section className="asset-create__section" aria-labelledby="asset-create-basics">
               <h4 id="asset-create-basics" className="asset-create__section-title">
                 Basics and location
@@ -413,7 +419,7 @@ function NewAssetButton({
                   placeholder="e.g. Kitchen fridge"
                 />
               </label>
-              <div className="asset-create__grid">
+              <FormModalGrid className="asset-create__grid">
                 <label className="field asset-create__field">
                   <span>Property</span>
                   <select
@@ -449,8 +455,8 @@ function NewAssetButton({
                     ))}
                   </select>
                 </label>
-              </div>
-              <div className="asset-create__grid">
+              </FormModalGrid>
+              <FormModalGrid className="asset-create__grid">
                 <label className="field asset-create__field">
                   <span>Type</span>
                   <select
@@ -477,14 +483,14 @@ function NewAssetButton({
                     ))}
                   </select>
                 </label>
-              </div>
+              </FormModalGrid>
             </section>
 
             <section className="asset-create__section" aria-labelledby="asset-create-identity">
               <h4 id="asset-create-identity" className="asset-create__section-title">
                 Identity
               </h4>
-              <div className="asset-create__grid">
+              <FormModalGrid className="asset-create__grid">
                 <label className="field asset-create__field">
                   <span>Make</span>
                   <input value={make} onChange={(event) => setMake(event.target.value)} />
@@ -493,8 +499,8 @@ function NewAssetButton({
                   <span>Model</span>
                   <input value={model} onChange={(event) => setModel(event.target.value)} />
                 </label>
-              </div>
-              <div className="asset-create__grid">
+              </FormModalGrid>
+              <FormModalGrid className="asset-create__grid">
                 <label className="field asset-create__field">
                   <span>Serial number</span>
                   <input
@@ -513,14 +519,14 @@ function NewAssetButton({
                     ))}
                   </select>
                 </label>
-              </div>
+              </FormModalGrid>
             </section>
 
             <section className="asset-create__section" aria-labelledby="asset-create-purchase">
               <h4 id="asset-create-purchase" className="asset-create__section-title">
                 Purchase and warranty
               </h4>
-              <div className="asset-create__grid">
+              <FormModalGrid className="asset-create__grid">
                 <label className="field asset-create__field">
                   <span>Installed on</span>
                   <input
@@ -537,8 +543,8 @@ function NewAssetButton({
                     onChange={(event) => setPurchasedOn(event.target.value)}
                   />
                 </label>
-              </div>
-              <div className="asset-create__grid">
+              </FormModalGrid>
+              <FormModalGrid className="asset-create__grid">
                 <label className="field asset-create__field">
                   <span>Purchase price</span>
                   <input
@@ -563,8 +569,8 @@ function NewAssetButton({
                     maxLength={3}
                   />
                 </label>
-              </div>
-              <div className="asset-create__grid">
+              </FormModalGrid>
+              <FormModalGrid className="asset-create__grid">
                 <label className="field asset-create__field">
                   <span>Vendor</span>
                   <input
@@ -580,7 +586,7 @@ function NewAssetButton({
                     onChange={(event) => setWarrantyExpiresOn(event.target.value)}
                   />
                 </label>
-              </div>
+              </FormModalGrid>
               <label className="field asset-create__field asset-create__field--short">
                 <span>Expected lifespan years</span>
                 <input
@@ -649,7 +655,7 @@ function NewAssetButton({
                         <strong>{doc.file.name}</strong>
                         <span>{formatFileSize(doc.file.size)}</span>
                       </div>
-                      <div className="asset-create__grid">
+                      <FormModalGrid className="asset-create__grid">
                         <label className="field asset-create__field">
                           <span>Kind</span>
                           <select
@@ -677,7 +683,7 @@ function NewAssetButton({
                             }
                           />
                         </label>
-                      </div>
+                      </FormModalGrid>
                       <button
                         type="button"
                         className="btn btn--ghost"
@@ -702,27 +708,7 @@ function NewAssetButton({
                 {formError}
               </p>
             )}
-          </div>
-
-          <footer className="asset-create__footer">
-            <button
-              type="button"
-              className="btn btn--ghost"
-              disabled={create.isPending}
-              onClick={() => dialogRef.current?.close()}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn--moss"
-              disabled={create.isPending}
-            >
-              {submitLabel}
-            </button>
-          </footer>
-        </form>
-      </dialog>
+      </FormModal>
     </>
   );
 }

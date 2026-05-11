@@ -1,4 +1,4 @@
-import { Fragment, type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, type FormEvent, type ReactNode, useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
@@ -9,6 +9,7 @@ import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
+import FormModal, { FormModalGrid } from "@/components/FormModal";
 import { Chip, Loading } from "@/components/common";
 import { INSTRUCTION_SCOPE_TONE } from "@/lib/tones";
 import type { Instruction, Property } from "@/types/api";
@@ -118,7 +119,6 @@ export default function InstructionDetailPage() {
   const { iid } = useParams<{ iid: string }>();
   const { pathname } = useLocation();
   const queryClient = useQueryClient();
-  const editDialogRef = useRef<HTMLDialogElement>(null);
   const [editing, setEditing] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [draft, setDraft] = useState<InstructionPatch>(EMPTY_PATCH);
@@ -172,19 +172,6 @@ export default function InstructionDetailPage() {
     },
   });
 
-  useEffect(() => {
-    const dialog = editDialogRef.current;
-    if (!editing || !dialog) return;
-    if (typeof dialog.showModal === "function") {
-      try {
-        if (!dialog.open) dialog.showModal();
-      } catch {
-        if (!dialog.open) dialog.setAttribute("open", "");
-      }
-      return;
-    }
-    if (!dialog.open) dialog.setAttribute("open", "");
-  }, [editing]);
   useCloseOnEscape(closeVersions, versionsOpen);
 
   if (!iid) return <DeskPage title="Instruction">Missing instruction id.</DeskPage>;
@@ -235,11 +222,6 @@ export default function InstructionDetailPage() {
   }
 
   function closeEdit() {
-    const dialog = editDialogRef.current;
-    if (dialog?.open && typeof dialog.close === "function") {
-      dialog.close();
-      return;
-    }
     setEditing(false);
   }
 
@@ -278,27 +260,28 @@ export default function InstructionDetailPage() {
       </section>
 
       {editing && (
-        <dialog
-          ref={editDialogRef}
-          className="modal modal--sheet sheet-form-dialog"
+        <FormModal
+          open={editing}
+          title="Edit instruction"
+          eyebrow="Knowledge base"
+          formClassName="instruction-edit-form"
           onClose={() => setEditing(false)}
-        >
-          <form className="instruction-edit-form sheet-form" onSubmit={submitEdit}>
-            <header className="instruction-edit-form__head sheet-form__head">
-              <div>
-                <p className="instruction-edit-form__eyebrow sheet-form__eyebrow">Knowledge base</p>
-                <h3 className="instruction-edit-form__title sheet-form__title">Edit instruction</h3>
-              </div>
-              <button
-                type="button"
-                className="instruction-edit-form__close sheet-form__close"
-                onClick={closeEdit}
-                aria-label="Close"
-              >
-                ×
+          onSubmit={submitEdit}
+          actions={
+            <>
+              <button type="button" className="btn btn--ghost" onClick={closeEdit}>
+                Cancel
               </button>
-            </header>
-            <div className="instruction-edit-form__body sheet-form__body">
+              <button
+                type="submit"
+                className="btn btn--moss"
+                disabled={save.isPending || !canSubmitPatch(draft)}
+              >
+                Save
+              </button>
+            </>
+          }
+        >
             <FormField label="Title" requirement="required" className="instruction-edit-form__field sheet-form__field">
               <input
                 value={draft.title}
@@ -306,7 +289,7 @@ export default function InstructionDetailPage() {
                 required
               />
             </FormField>
-            <div className="instruction-edit-form__grid sheet-form__grid">
+            <FormModalGrid className="instruction-edit-form__grid">
               <FormField label="Scope" requirement="required" className="instruction-edit-form__field sheet-form__field">
                 <select
                   value={draft.scope}
@@ -344,7 +327,7 @@ export default function InstructionDetailPage() {
                   ))}
                 </select>
               </FormField>
-            </div>
+            </FormModalGrid>
             {draft.scope === "area" && (
               <FormField label="Area" requirement="required" className="instruction-edit-form__field sheet-form__field">
                 <select
@@ -388,21 +371,7 @@ export default function InstructionDetailPage() {
               />
             </FormField>
             {save.isError && <p className="form-error">Failed to save.</p>}
-            </div>
-            <footer className="instruction-edit-form__footer sheet-form__footer">
-              <button type="button" className="btn btn--ghost" onClick={closeEdit}>
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="btn btn--moss"
-                disabled={save.isPending || !canSubmitPatch(draft)}
-              >
-                Save
-              </button>
-            </footer>
-          </form>
-        </dialog>
+        </FormModal>
       )}
 
       {versionsOpen && (

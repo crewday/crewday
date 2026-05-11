@@ -99,6 +99,35 @@ describe("FormModal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("falls back to the open attribute when native dialog methods throw", () => {
+    HTMLDialogElement.prototype.showModal = function showModal() {
+      throw new Error("dialog not available");
+    };
+    HTMLDialogElement.prototype.close = function close() {
+      throw new Error("dialog not available");
+    };
+    const { rerender } = render(
+      <FormModal open title="Create item" onClose={vi.fn()}>
+        <FormModalField label="Name" requirement="required">
+          <input required />
+        </FormModalField>
+      </FormModal>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Create item" });
+    expect(dialog).toHaveAttribute("open");
+
+    rerender(
+      <FormModal open={false} title="Create item" onClose={vi.fn()}>
+        <FormModalField label="Name" requirement="required">
+          <input required />
+        </FormModalField>
+      </FormModal>,
+    );
+
+    expect(dialog).not.toHaveAttribute("open");
+  });
+
   it("labels the dialog and fields accessibly", () => {
     renderModal();
 

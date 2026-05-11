@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { qk } from "@/lib/queryKeys";
 import { fetchJson, openApiDownload } from "@/lib/api";
@@ -12,6 +12,7 @@ import { formatMoney } from "@/lib/money";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
+import FormModal, { FormModalGrid } from "@/components/FormModal";
 import { Camera, ReceiptText, ShieldCheck } from "lucide-react";
 import { Chip, EmptyState, Loading, StatCard } from "@/components/common";
 import { EXPENSE_STATUS_TONE } from "@/lib/tones";
@@ -94,8 +95,8 @@ function expensesExportPath(expenses: Expense[]): string | null {
 }
 
 function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButtonProps) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState(amountInputValue(expense.total_amount_cents));
   const [currency, setCurrency] = useState(expense.currency);
   const [category, setCategory] = useState(
@@ -128,7 +129,7 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
       qc.invalidateQueries({ queryKey: qk.expenses("all") });
       qc.invalidateQueries({ queryKey: qk.dashboard() });
       onApproved(updated);
-      dialogRef.current?.close();
+      setOpen(false);
     },
     onError: (error) => {
       setFormError(error instanceof Error ? error.message : "Could not approve the correction.");
@@ -165,56 +166,54 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
       <button
         className="btn btn--ghost"
         type="button"
-        onClick={() => dialogRef.current?.showModal()}
+        onClick={() => setOpen(true)}
       >
         Correct and approve
       </button>
 
-      <dialog
-        className="modal modal--sheet sheet-form-dialog"
-        ref={dialogRef}
-        onClose={reset}
-        aria-label={`Correct ${expense.vendor}`}
-      >
-        <form
-          className="expense-correction-form sheet-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setFormError(null);
-            if (validationError !== null) {
-              setFormError(validationError);
-              return;
-            }
-            if (!hasEdits) {
-              setFormError(
-                "Change the amount, currency, or category before approving with corrections.",
-              );
-              return;
-            }
-            approveWithEdits.mutate(body);
-          }}
-        >
-          <header className="expense-correction-form__head sheet-form__head">
-            <div>
-              <p className="expense-correction-form__eyebrow sheet-form__eyebrow">Expense approval</p>
-              <h3 className="expense-correction-form__title sheet-form__title">Correct and approve</h3>
-              <p className="expense-correction-form__sub sheet-form__sub">
-                This approves the claim with corrected values. The submitted claim is not
-                rewritten; the approval audit row records the before and after values.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="expense-correction-form__close sheet-form__close"
-              onClick={() => dialogRef.current?.close()}
-              aria-label="Close"
-            >
-              ×
+      <FormModal
+        open={open}
+        title={`Correct ${expense.vendor}`}
+        eyebrow="Expense approval"
+        subtitle={
+          "This approves the claim with corrected values. The submitted claim is not rewritten; the approval audit row records the before and after values."
+        }
+        formClassName="expense-correction-form"
+        onClose={() => {
+          setOpen(false);
+          reset();
+        }}
+        onSubmit={(event) => {
+          event.preventDefault();
+          setFormError(null);
+          if (validationError !== null) {
+            setFormError(validationError);
+            return;
+          }
+          if (!hasEdits) {
+            setFormError(
+              "Change the amount, currency, or category before approving with corrections.",
+            );
+            return;
+          }
+          approveWithEdits.mutate(body);
+        }}
+        actions={
+          <>
+            <button type="button" className="btn btn--ghost" onClick={() => setOpen(false)}>
+              Cancel
             </button>
-          </header>
-
-          <div className="expense-correction-form__body sheet-form__body">
-          <div className="expense-correction-form__grid sheet-form__grid">
+            <button
+              type="submit"
+              className="btn btn--moss"
+              disabled={approveWithEdits.isPending || validationError !== null || !hasEdits}
+            >
+              {approveWithEdits.isPending ? "Approving..." : "Approve corrected claim"}
+            </button>
+          </>
+        }
+      >
+          <FormModalGrid className="expense-correction-form__grid">
           <FormField label="Amount" requirement="required" className="expense-correction-form__field sheet-form__field">
             <input
               inputMode="decimal"
@@ -254,7 +253,7 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
             </p>
           )}
           </FormField>
-          </div>
+          </FormModalGrid>
 
           <FormField label="Category" requirement="required" className="expense-correction-form__field sheet-form__field">
             <select
@@ -283,26 +282,7 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
               {formError}
             </p>
           )}
-          </div>
-
-          <footer className="expense-correction-form__footer sheet-form__footer">
-            <button
-              type="button"
-              className="btn btn--ghost"
-              onClick={() => dialogRef.current?.close()}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn--moss"
-              disabled={approveWithEdits.isPending || validationError !== null || !hasEdits}
-            >
-              {approveWithEdits.isPending ? "Approving..." : "Approve corrected claim"}
-            </button>
-          </footer>
-        </form>
-      </dialog>
+      </FormModal>
     </>
   );
 }

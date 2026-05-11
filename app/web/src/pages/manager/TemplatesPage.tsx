@@ -6,6 +6,7 @@ import { ArrowDown, ArrowUp, Camera, Globe, GripVertical, Hash, Map as MapIcon, 
 import { Chip, Loading } from "@/components/common";
 import DeskPage from "@/components/DeskPage";
 import FormField from "@/components/FormField";
+import FormModal, { FormModalGrid } from "@/components/FormModal";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
@@ -94,7 +95,6 @@ function plainPreview(md: string): string {
 export default function TemplatesPage() {
   const queryClient = useQueryClient();
   const [creatingTemplate, setCreatingTemplate] = useState(false);
-  const createTemplateRef = useRef<HTMLDialogElement>(null);
   const tplQ = useQuery({
     queryKey: qk.taskTemplates(),
     queryFn: () =>
@@ -116,12 +116,6 @@ export default function TemplatesPage() {
     },
   });
 
-  useEffect(() => {
-    const dialog = createTemplateRef.current;
-    if (creatingTemplate && dialog && !dialog.open) dialog.showModal();
-    if (!creatingTemplate && dialog?.open) dialog.close();
-  }, [creatingTemplate]);
-
   function openCreateTemplate(): void {
     createTemplate.reset();
     setCreatingTemplate(true);
@@ -138,28 +132,20 @@ export default function TemplatesPage() {
       + New template
     </button>
   );
-  const createDialog = (
-    <dialog
-      ref={createTemplateRef}
-      className="modal modal--sheet sheet-form-dialog"
-      aria-labelledby="template-create-title"
-      onClose={() => setCreatingTemplate(false)}
-    >
-      {creatingTemplate && (
-        <NewTemplateForm
-          roles={rolesQ.data?.data ?? []}
-          saving={createTemplate.isPending}
-          error={
-            createTemplate.error instanceof Error
-              ? createTemplate.error.message
-              : null
-          }
-          onClose={closeCreateTemplate}
-          onSubmit={(body) => createTemplate.mutate(body)}
-        />
-      )}
-    </dialog>
-  );
+  const createDialog = creatingTemplate ? (
+    <NewTemplateForm
+      open
+      roles={rolesQ.data?.data ?? []}
+      saving={createTemplate.isPending}
+      error={
+        createTemplate.error instanceof Error
+          ? createTemplate.error.message
+          : null
+      }
+      onClose={closeCreateTemplate}
+      onSubmit={(body) => createTemplate.mutate(body)}
+    />
+  ) : null;
 
   if (tplQ.isPending || rolesQ.isPending) {
     return (
@@ -269,12 +255,14 @@ export default function TemplatesPage() {
 }
 
 function NewTemplateForm({
+  open,
   roles,
   saving,
   error,
   onClose,
   onSubmit,
 }: {
+  open: boolean;
   roles: WorkRole[];
   saving: boolean;
   error: string | null;
@@ -327,27 +315,28 @@ function NewTemplateForm({
   }
 
   return (
-    <form className="template-create-form sheet-form" onSubmit={submit} noValidate>
-      <header className="template-create-form__head sheet-form__head">
-        <div>
-          <p className="template-create-form__eyebrow sheet-form__eyebrow">Task template</p>
-          <h3 id="template-create-title" className="template-create-form__title sheet-form__title">
-            New template
-          </h3>
-          <p className="template-create-form__sub sheet-form__sub">
-            Create a reusable task definition. Property and area scope default to any.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="template-create-form__close sheet-form__close"
-          onClick={onClose}
-          aria-label="Close"
-        >
-          ×
-        </button>
-      </header>
-      <div className="template-create-form__body sheet-form__body">
+    <FormModal
+      open={open}
+      title="New template"
+      titleId="template-create-title"
+      eyebrow="Task template"
+      subtitle="Create a reusable task definition. Property and area scope default to any."
+      formClassName="template-create-form"
+      onClose={onClose}
+      onSubmit={submit}
+      noValidate
+      closeDisabled={saving}
+      actions={
+        <>
+          <button type="button" className="btn btn--ghost" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn--moss" disabled={saving}>
+            Create template
+          </button>
+        </>
+      }
+    >
         <FormField label="Name" requirement="required" className="template-create-form__field sheet-form__field">
           <input
             value={name}
@@ -373,7 +362,7 @@ function NewTemplateForm({
             ))}
           </select>
         </FormField>
-        <div className="template-create-form__grid sheet-form__grid">
+        <FormModalGrid className="template-create-form__grid">
           <FormField label="Duration" requirement="required" className="template-create-form__field sheet-form__field">
             <input
               className="mono"
@@ -399,7 +388,7 @@ function NewTemplateForm({
               <option value="urgent">Urgent</option>
             </select>
           </FormField>
-        </div>
+        </FormModalGrid>
         <FormField label="Photo evidence" requirement="required" className="template-create-form__field sheet-form__field">
         <select
           value={photoEvidence}
@@ -443,16 +432,7 @@ function NewTemplateForm({
           {visibleError}
         </p>
       )}
-      </div>
-      <footer className="template-create-form__footer sheet-form__footer">
-        <button type="button" className="btn btn--ghost" onClick={onClose} disabled={saving}>
-          Cancel
-        </button>
-        <button type="submit" className="btn btn--moss" disabled={saving}>
-          Create template
-        </button>
-      </footer>
-    </form>
+    </FormModal>
   );
 }
 

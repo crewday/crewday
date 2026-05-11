@@ -8,6 +8,7 @@ import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
+import FormModal from "@/components/FormModal";
 import { AssetIcon, isAssetIconName } from "@/components/AssetIcon";
 import IconSelector from "@/components/IconSelector";
 import { Avatar, Chip, EmptyState, Loading } from "@/components/common";
@@ -168,7 +169,6 @@ export default function EmployeesPage() {
 }
 
 function WorkRoleCatalogManager() {
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
   const queryClient = useQueryClient();
   const rolesQ = useQuery({
@@ -176,6 +176,7 @@ function WorkRoleCatalogManager() {
     queryFn: () => fetchAllList<WorkRole>("/api/v1/work_roles"),
   });
   const [editingRole, setEditingRole] = useState<WorkRole | null>(null);
+  const [roleDialogOpen, setRoleDialogOpen] = useState(false);
   const [roleToDelete, setRoleToDelete] = useState<WorkRole | null>(null);
   const [form, setForm] = useState<WorkRoleFormState>(EMPTY_WORK_ROLE_FORM);
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<WorkRoleField, string>>>({});
@@ -209,7 +210,7 @@ function WorkRoleCatalogManager() {
     },
     onSuccess: async () => {
       await invalidateRoleDependents();
-      dialogRef.current?.close();
+      setRoleDialogOpen(false);
     },
     onError: (error) => {
       const nextFieldErrors = workRoleFieldErrors(error);
@@ -235,7 +236,7 @@ function WorkRoleCatalogManager() {
     setFieldErrors({});
     setFormError(null);
     saveRole.reset();
-    dialogRef.current?.showModal();
+    setRoleDialogOpen(true);
   }
 
   function openEditDialog(role: WorkRole): void {
@@ -249,7 +250,7 @@ function WorkRoleCatalogManager() {
     setFieldErrors({});
     setFormError(null);
     saveRole.reset();
-    dialogRef.current?.showModal();
+    setRoleDialogOpen(true);
   }
 
   function openDeleteDialog(role: WorkRole): void {
@@ -361,45 +362,48 @@ function WorkRoleCatalogManager() {
         </ul>
       )}
 
-      <dialog
-        className="modal modal--sheet sheet-form-dialog"
-        ref={dialogRef}
-        aria-labelledby="work-role-dialog-title"
-        onCancel={(event) => {
-          if (saveRole.isPending) event.preventDefault();
-        }}
+      <FormModal
+        open={roleDialogOpen}
+        title={editingRole ? "Edit work role" : "Add work role"}
+        titleId="work-role-dialog-title"
+        eyebrow="Work role"
+        subtitle="Keys are stable slugs used by assignments and integrations. Rename with care."
+        formClassName="work-role-form"
         onClose={() => {
           if (saveRole.isPending) return;
+          setRoleDialogOpen(false);
           setEditingRole(null);
           setForm(EMPTY_WORK_ROLE_FORM);
           setFieldErrors({});
           setFormError(null);
           saveRole.reset();
         }}
-      >
-        <form className="work-role-form sheet-form" onSubmit={submitForm} noValidate>
-          <header className="work-role-form__head sheet-form__head">
-            <div>
-              <p className="work-role-form__eyebrow sheet-form__eyebrow">Work role</p>
-              <h3 id="work-role-dialog-title" className="work-role-form__title sheet-form__title">
-                {editingRole ? "Edit work role" : "Add work role"}
-              </h3>
-              <p className="work-role-form__sub sheet-form__sub">
-                Keys are stable slugs used by assignments and integrations. Rename with care.
-              </p>
-            </div>
+        onSubmit={submitForm}
+        noValidate
+        closeDisabled={saveRole.isPending}
+        onCancel={(event) => {
+          if (saveRole.isPending) event.preventDefault();
+        }}
+        actions={
+          <>
             <button
               type="button"
-              className="work-role-form__close sheet-form__close"
-              aria-label="Close"
+              className="btn btn--ghost"
               disabled={saveRole.isPending}
-              onClick={() => dialogRef.current?.close()}
+              onClick={() => setRoleDialogOpen(false)}
             >
-              ×
+              Cancel
             </button>
-          </header>
-
-          <div className="work-role-form__body sheet-form__body">
+            <button
+              type="submit"
+              className="btn btn--moss"
+              disabled={saveRole.isPending || !form.name.trim() || !form.key.trim()}
+            >
+              {saveRole.isPending ? "Saving..." : "Save role"}
+            </button>
+          </>
+        }
+      >
           <FormField label="Name" requirement="required" className="work-role-form__field sheet-form__field">
             <input
               autoFocus
@@ -449,30 +453,11 @@ function WorkRoleCatalogManager() {
           </FormField>
 
           {formError ? <p className="form-error" role="alert">{formError}</p> : null}
-          </div>
-
-          <footer className="work-role-form__footer sheet-form__footer">
-            <button
-              type="button"
-              className="btn btn--ghost"
-              disabled={saveRole.isPending}
-              onClick={() => dialogRef.current?.close()}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn--moss"
-              disabled={saveRole.isPending || !form.name.trim() || !form.key.trim()}
-            >
-              {saveRole.isPending ? "Saving..." : "Save role"}
-            </button>
-          </footer>
-        </form>
-      </dialog>
+      </FormModal>
 
       <dialog
-        className="modal modal--sheet sheet-form-dialog"
+        // Exemption: confirmation-only delete dialog; it has no structured data-entry fields.
+        className="modal"
         ref={deleteDialogRef}
         aria-labelledby="work-role-delete-title"
         onCancel={(event) => {
@@ -522,7 +507,6 @@ function WorkRoleCatalogManager() {
 }
 
 function InviteEmployeeAction() {
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const queryClient = useQueryClient();
   const meQ = useQuery({
     queryKey: qk.me(),
@@ -530,6 +514,7 @@ function InviteEmployeeAction() {
   });
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [sentInvite, setSentInvite] = useState<InviteEmployeeResponse | null>(null);
 
@@ -563,80 +548,86 @@ function InviteEmployeeAction() {
     invite.reset();
   }
 
+  function submitInvite(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    if (invite.isPending || sentInvite) return;
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+    if (!trimmedName) {
+      setFormError("Enter the employee's full name before sending the invite.");
+      return;
+    }
+    if (!trimmedEmail) {
+      setFormError("Enter the employee's email address before sending the invite.");
+      return;
+    }
+    if (!workspaceId) {
+      setFormError("Workspace context is still loading. Wait a moment and try again.");
+      return;
+    }
+    setFormError(null);
+    invite.mutate({
+      email: trimmedEmail,
+      display_name: trimmedName,
+      grants: [
+        {
+          scope_kind: "workspace",
+          scope_id: workspaceId,
+          grant_role: "worker",
+        },
+      ],
+    });
+  }
+
   return (
     <>
       <button
         type="button"
         className="btn btn--moss"
-        onClick={() => dialogRef.current?.showModal()}
+        onClick={() => setInviteDialogOpen(true)}
       >
         + Invite employee
       </button>
 
-      <dialog
-        className="modal"
-        ref={dialogRef}
-        aria-labelledby="invite-employee-title"
+      <FormModal
+        open={inviteDialogOpen}
+        title="Invite employee"
+        titleId="invite-employee-title"
+        eyebrow="Employee invite"
+        subtitle="Send a click-to-accept invite for this workspace."
+        formClassName="invite-employee-form"
+        onClose={() => {
+          setInviteDialogOpen(false);
+          reset();
+        }}
         onCancel={(event) => {
           if (invite.isPending) event.preventDefault();
         }}
-        onClose={reset}
-      >
-        <form
-          className="invite-employee-form sheet-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (invite.isPending || sentInvite) return;
-            const trimmedName = name.trim();
-            const trimmedEmail = email.trim();
-            if (!trimmedName) {
-              setFormError("Enter the employee's full name before sending the invite.");
-              return;
-            }
-            if (!trimmedEmail) {
-              setFormError("Enter the employee's email address before sending the invite.");
-              return;
-            }
-            if (!workspaceId) {
-              setFormError("Workspace context is still loading. Wait a moment and try again.");
-              return;
-            }
-            setFormError(null);
-            invite.mutate({
-              email: trimmedEmail,
-              display_name: trimmedName,
-              grants: [
-                {
-                  scope_kind: "workspace",
-                  scope_id: workspaceId,
-                  grant_role: "worker",
-                },
-              ],
-            });
-          }}
-        >
-          <header className="invite-employee-form__head sheet-form__head">
-            <div>
-              <p className="invite-employee-form__eyebrow sheet-form__eyebrow">Employee invite</p>
-              <h3 id="invite-employee-title" className="invite-employee-form__title sheet-form__title">
-                Invite employee
-              </h3>
-              <p className="invite-employee-form__sub sheet-form__sub">
-                Send a click-to-accept invite for this workspace.
-              </p>
-            </div>
+        onSubmit={submitInvite}
+        closeDisabled={invite.isPending}
+        actions={
+          <>
             <button
               type="button"
-              className="invite-employee-form__close sheet-form__close"
-              aria-label="Close"
+              className="btn btn--ghost"
               disabled={invite.isPending}
-              onClick={() => dialogRef.current?.close()}
+              onClick={() => setInviteDialogOpen(false)}
             >
-              ×
+              {sentInvite ? "Done" : "Cancel"}
             </button>
-          </header>
-
-          <div className="invite-employee-form__body sheet-form__body">
+            {!sentInvite && (
+              <button
+                type="submit"
+                className="btn btn--moss"
+                disabled={invite.isPending || !name.trim() || !email.trim() || !workspaceId}
+              >
+                {invite.isPending ? "Sending..." : "Send invite"}
+              </button>
+            )}
+          </>
+        }
+      >
+        <>
           {sentInvite ? (
             <>
               <p className="form-notice form-notice--success" role="status">
@@ -680,29 +671,8 @@ function InviteEmployeeAction() {
             </p>
           )}
           {formError && <p className="form-error" role="alert">{formError}</p>}
-          </div>
-
-          <footer className="invite-employee-form__footer sheet-form__footer">
-            <button
-              type="button"
-              className="btn btn--ghost"
-              disabled={invite.isPending}
-              onClick={() => dialogRef.current?.close()}
-            >
-              {sentInvite ? "Done" : "Cancel"}
-            </button>
-            {!sentInvite && (
-              <button
-                type="submit"
-                className="btn btn--moss"
-                disabled={invite.isPending || !name.trim() || !email.trim() || !workspaceId}
-              >
-                {invite.isPending ? "Sending..." : "Send invite"}
-              </button>
-            )}
-          </footer>
-        </form>
-      </dialog>
+        </>
+      </FormModal>
     </>
   );
 }

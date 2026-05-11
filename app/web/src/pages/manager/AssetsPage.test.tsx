@@ -10,6 +10,7 @@ import type { Asset, AssetType, Property } from "@/types/api";
 import AssetsPage from "./AssetsPage";
 import appSource from "../../App.tsx?raw";
 import managerPanelsCss from "@/styles/manager-panels.css?raw";
+import formsCss from "@/styles/forms.css?raw";
 import tasksCss from "@/styles/tasks.css?raw";
 import { jsonResponse } from "@/test/helpers";
 
@@ -490,7 +491,7 @@ describe("<AssetsPage>", () => {
       expect(
         within(dialog)
           .getByRole("button", { name: "Create asset" })
-          .closest(".asset-create__footer"),
+          .closest(".form-modal__footer"),
       ).toBeInTheDocument();
       fireEvent.click(within(dialog).getByRole("button", { name: "Create asset" }));
 
@@ -787,26 +788,17 @@ describe("<AssetsPage>", () => {
     }
   });
 
-  it("styles the new asset form with responsive grids and design-system control radius", () => {
-    expect(managerPanelsCss).toContain(".asset-create__grid");
-    expect(managerPanelsCss).toMatch(
-      /\.asset-create-dialog\.modal--sheet\[open\] \{[\s\S]*max-height: min\(86dvh, 820px\);[\s\S]*overflow: hidden;/,
-    );
-    expect(managerPanelsCss).toMatch(
-      /\.asset-create__body \{[\s\S]*flex: 1 1 auto;[\s\S]*overflow-y: auto;/,
-    );
-    expect(managerPanelsCss).toMatch(
-      /\.asset-create__field input,\n\.asset-create__field select,\n\.asset-create__field textarea \{[^}]*border-radius: 6px;/,
-    );
-    expect(managerPanelsCss).toMatch(
-      /\.asset-create__field input\[aria-invalid="true"\],[\s\S]*border-color: var\(--rust\);/,
-    );
+  it("styles the new asset form through the shared FormModal shell", () => {
+    expect(formsCss).toContain(".form-modal-dialog.modal--sheet[open]");
+    expect(formsCss).toContain(".form-modal__grid");
+    expect(formsCss).toContain(".form-modal__body");
+    expect(formsCss).toContain(".form-modal__footer");
+    expect(managerPanelsCss).not.toContain(".asset-create__footer");
+    expect(managerPanelsCss).not.toContain(".asset-create__close");
+    expect(managerPanelsCss).not.toMatch(/\.asset-create__field input,\n\.asset-create__field select,\n\.asset-create__field textarea/);
     expect(managerPanelsCss).toContain(".asset-create__upload");
     expect(tasksCss).toContain(".upload-dropzone");
     expect(tasksCss).toContain(".upload-dropzone--active");
     expect(managerPanelsCss).toContain(".asset-create__document");
-    expect(managerPanelsCss).toMatch(
-      /@media \(max-width: 560px\) \{[\s\S]*\.asset-create__grid \{\n    grid-template-columns: 1fr;/,
-    );
   });
 });

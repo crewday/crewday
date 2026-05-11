@@ -4,6 +4,7 @@ import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import FormField from "@/components/FormField";
+import FormModal, { FormModalGrid } from "@/components/FormModal";
 import { Avatar, Chip, Loading } from "@/components/common";
 import type { Employee, Property, Schedule, TaskTemplate } from "@/types/api";
 import { type ListEnvelope } from "@/lib/listResponse";
@@ -302,32 +303,27 @@ function ScheduleCreateDialog(props: ScheduleCreateDialogProps) {
     : "Create a task template before adding schedules.";
 
   return (
-    <dialog className="modal modal--sheet sheet-form-dialog" open={props.open} onClose={props.onClose} aria-label="New schedule">
-      <form className="schedule-create-form sheet-form" onSubmit={props.onSubmit}>
-        <header className="schedule-create-form__head sheet-form__head">
-          <div>
-            <p className="schedule-create-form__eyebrow sheet-form__eyebrow">Recurring work</p>
-            <h3 className="schedule-create-form__title sheet-form__title">
-              {"New schedule"
-              } // code-health: ignore[nloc] Schedule-create form fields are intentionally explicit and ordered like the API payload.
-            </h3>
-            <p className="schedule-create-form__sub sheet-form__sub">
-              Create recurring tasks from a task template.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="schedule-create-form__close sheet-form__close"
-            onClick={props.onClose}
-            aria-label="Close"
-          >
-            ×
+    <FormModal
+      open={props.open}
+      title="New schedule"
+      eyebrow="Recurring work"
+      subtitle="Create recurring tasks from a task template."
+      formClassName="schedule-create-form"
+      onClose={props.onClose}
+      onSubmit={props.onSubmit}
+      actions={
+        <>
+          <button type="button" className="btn btn--ghost" onClick={props.onClose}>
+            Cancel
           </button>
-        </header>
-
-        <div className="schedule-create-form__body sheet-form__body">
+          <button type="submit" className="btn btn--moss" disabled={props.pending || unavailable}>
+            {props.pending ? "Creating..." : "Create schedule"}
+          </button>
+        </>
+      }
+    >
         {unavailable ? (
-          <p role="status" className="sheet-form__sub">{unavailableMessage}</p>
+          <p role="status" className="form-modal__sub">{unavailableMessage}</p>
         ) : (
           <>
             <FormField label="Name" requirement="required" className="schedule-create-form__field sheet-form__field">
@@ -366,7 +362,7 @@ function ScheduleCreateDialog(props: ScheduleCreateDialogProps) {
                 ))}
               </select>
             </FormField>
-            <div className="schedule-create-form__grid sheet-form__grid">
+            <FormModalGrid className="schedule-create-form__grid">
             <FormField label="Starts on" requirement="required" className="schedule-create-form__field sheet-form__field">
               <input
                 type="date"
@@ -383,7 +379,7 @@ function ScheduleCreateDialog(props: ScheduleCreateDialogProps) {
                 onChange={(e) => props.onStartsAt(e.target.value)}
               />
             </FormField>
-            </div>
+            </FormModalGrid>
             <FormField label="Repeats" requirement="required" className="schedule-create-form__field sheet-form__field">
               <select value={props.frequency} onChange={(e) => props.onFrequency(e.target.value)}>
                 <option value="DAILY">Daily</option>
@@ -395,17 +391,6 @@ function ScheduleCreateDialog(props: ScheduleCreateDialogProps) {
         )}
 
         {props.error && <p role="alert" className="tokens-form__error">{props.error}</p>}
-        </div>
-
-        <footer className="schedule-create-form__footer sheet-form__footer">
-          <button type="button" className="btn btn--ghost" onClick={props.onClose}>
-            Cancel
-          </button>
-          <button type="submit" className="btn btn--moss" disabled={props.pending || unavailable}>
-            {props.pending ? "Creating..." : "Create schedule"}
-          </button>
-        </footer>
-      </form>
-    </dialog>
+    </FormModal>
   );
 }

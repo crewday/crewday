@@ -189,6 +189,7 @@ export default function SharingPanel({
         )}
       </div>
 
+      {/* Exemption: confirmation-only sharing revoke dialog; no structured form fields. */}
       <dialog className="modal" ref={dialogRef} onClose={() => setConfirm(null)}>
         {confirm && (
           <div className="modal__body">

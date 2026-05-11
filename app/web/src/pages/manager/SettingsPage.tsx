@@ -627,6 +627,8 @@ function WorkspaceLifecycleDialog({
   const inputId = `workspace-${action}-confirmation`;
 
   return (
+    <>
+    {/* Exemption: destructive lifecycle confirmation intentionally uses a narrow danger dialog with a typed confirmation gate. */}
     <dialog
       ref={ref}
       className="modal workspace-danger-dialog"
@@ -670,6 +672,7 @@ function WorkspaceLifecycleDialog({
         </div>
       </form>
     </dialog>
+    </>
   );
 }
 

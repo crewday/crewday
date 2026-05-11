@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 import {
@@ -15,6 +15,7 @@ import { useDecideMutation } from "@/lib/useDecideMutation";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
+import FormModal from "@/components/FormModal";
 import NewTaskButton from "@/components/NewTaskModal";
 import { Avatar, Checkbox, Chip, EmptyState, Loading, Panel, StatCard } from "@/components/common";
 import {
@@ -50,7 +51,6 @@ export default function DashboardPage() {
   const d = useQuery({ queryKey: qk.dashboard(), queryFn: () => fetchJson<Dashboard>("/api/v1/dashboard") });
   const me = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
   const qc = useQueryClient();
-  const broadcastRef = useRef<HTMLDialogElement>(null);
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [broadcastTarget, setBroadcastTarget] = useState<"all_staff" | "selected">("all_staff");
   const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
@@ -101,7 +101,7 @@ export default function DashboardPage() {
         setBroadcastNotice(`Queued for approval before sending to ${result.recipient_count} recipients.`);
         return;
       }
-      broadcastRef.current?.close();
+      setBroadcastOpen(false);
     },
   });
 
@@ -119,7 +119,6 @@ export default function DashboardPage() {
     setBroadcastNotice(null);
     sendBroadcast.reset();
     setBroadcastOpen(true);
-    broadcastRef.current?.showModal();
   };
 
   if (d.isPending || me.isPending) return <DeskPage title="Dashboard"><Loading /></DeskPage>;
@@ -151,35 +150,50 @@ export default function DashboardPage() {
         },
       ]}
     >
-      <dialog className="modal modal--sheet sheet-form-dialog" ref={broadcastRef} onClose={resetBroadcast} aria-label="Broadcast message">
-        <form
-          className="broadcast-message-form sheet-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!broadcastSubject.trim() || !broadcastBody.trim() || recipientCount < 1) return;
-            sendBroadcast.mutate();
-          }}
-        >
-          <header className="broadcast-message-form__head sheet-form__head">
-            <div>
-              <p className="broadcast-message-form__eyebrow sheet-form__eyebrow">Staff message</p>
-              <h3 className="broadcast-message-form__title sheet-form__title">Broadcast message</h3>
-              <p className="broadcast-message-form__sub sheet-form__sub">
-                {recipientCount} recipient{recipientCount === 1 ? "" : "s"}
-                {recipientCount > 1 ? " · approval required before fanout" : ""}
-              </p>
-            </div>
-            <button
-              type="button"
-              className="broadcast-message-form__close sheet-form__close"
-              onClick={() => broadcastRef.current?.close()}
-              aria-label="Close"
-            >
-              ×
+      <FormModal
+        open={broadcastOpen}
+        title="Broadcast message"
+        eyebrow="Staff message"
+        subtitle={
+          <>
+            {recipientCount} recipient{recipientCount === 1 ? "" : "s"}
+            {recipientCount > 1 ? " · approval required before fanout" : ""}
+          </>
+        }
+        formClassName="broadcast-message-form"
+        onClose={resetBroadcast}
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!broadcastSubject.trim() || !broadcastBody.trim() || recipientCount < 1) return;
+          sendBroadcast.mutate();
+        }}
+        actions={
+          <>
+            <button type="button" className="btn btn--ghost" onClick={() => setBroadcastOpen(false)}>
+              Cancel
             </button>
-          </header>
-
-          <div className="broadcast-message-form__body sheet-form__body">
+            <button
+              type="submit"
+              className="btn btn--moss"
+              disabled={
+                sendBroadcast.isPending ||
+                broadcastNotice !== null ||
+                !broadcastSubject.trim() ||
+                !broadcastBody.trim() ||
+                recipientCount < 1
+              }
+            >
+              {sendBroadcast.isPending
+                ? "Sending..."
+                : broadcastNotice !== null
+                  ? "Queued"
+                  : recipientCount > 1
+                    ? "Request approval"
+                    : "Send"}
+            </button>
+          </>
+        }
+      >
           {broadcastNotice && (
             <div className="form-notice form-notice--success" role="status">
               {broadcastNotice}
@@ -279,34 +293,7 @@ export default function DashboardPage() {
               placeholder="Write the message staff will receive."
             />
           </FormField>
-          </div>
-
-          <footer className="broadcast-message-form__footer sheet-form__footer">
-            <button type="button" className="btn btn--ghost" onClick={() => broadcastRef.current?.close()}>
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn--moss"
-              disabled={
-                sendBroadcast.isPending ||
-                broadcastNotice !== null ||
-                !broadcastSubject.trim() ||
-                !broadcastBody.trim() ||
-                recipientCount < 1
-              }
-            >
-              {sendBroadcast.isPending
-                ? "Sending..."
-                : broadcastNotice !== null
-                  ? "Queued"
-                  : recipientCount > 1
-                    ? "Request approval"
-                    : "Send"}
-            </button>
-          </footer>
-        </form>
-      </dialog>
+      </FormModal>
 
       <section className="grid grid--stats">
         <StatCard

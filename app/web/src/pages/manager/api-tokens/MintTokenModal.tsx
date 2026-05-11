@@ -5,6 +5,7 @@ import TokenCreateForm, {
   type TokenCreatePayload,
   type TokenScopeOption,
 } from "@/components/TokenCreateForm";
+import FormModal from "@/components/FormModal";
 import type { ApiTokenCreated } from "@/types/api";
 import { WORKSPACE_SCOPES } from "./lib/tokenStatus";
 
@@ -32,11 +33,16 @@ export default function MintTokenModal({ onCreated, onCancel }: MintTokenModalPr
   const scopeOptions: TokenScopeOption[] = WORKSPACE_SCOPES.map((key) => ({ key }));
 
   return (
-    <section className="panel">
-      <header className="panel__head">
-        <h2>New workspace token</h2>
-      </header>
-
+    <FormModal
+      open
+      title="New workspace token"
+      eyebrow="API token"
+      subtitle="Create a scoped or delegated bearer token for this workspace."
+      contentElement="section"
+      onClose={onCancel}
+      formClassName="tokens-create-modal"
+      bodyClassName="tokens-create-modal__body"
+    >
       <TokenCreateForm
         labelId="tok-label"
         initialLabel="my-script"
@@ -51,6 +57,6 @@ export default function MintTokenModal({ onCreated, onCancel }: MintTokenModalPr
         onSubmit={submitCreate}
         onCancel={onCancel}
       />
-    </section>
+    </FormModal>
   );
 }

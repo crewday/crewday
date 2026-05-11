@@ -1,10 +1,11 @@
-import { useMemo, useRef, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
+import FormModal, { FormModalGrid } from "@/components/FormModal";
 import { Chip, Loading } from "@/components/common";
 import { formatMoney } from "@/lib/money";
 import type {
@@ -254,7 +255,7 @@ function NewOrganizationButton({
   workspaceId: string;
   onCreated: (organization: Organization) => void;
 }) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<OrganizationCreateDraft>(() => emptyOrganizationDraft());
   const [formError, setFormError] = useState<string | null>(null);
@@ -265,14 +266,14 @@ function NewOrganizationButton({
       await queryClient.invalidateQueries({ queryKey: qk.organizations(workspaceId) });
       await queryClient.invalidateQueries({ queryKey: qk.organization(organization.id) });
       onCreated(organization);
-      dialogRef.current?.close();
+      setDialogOpen(false);
     },
     onError: (error) => setFormError(organizationCreateErrorMessage(error)),
   });
 
   function openDialog(): void {
     setFormError(null);
-    dialogRef.current?.showModal();
+    setDialogOpen(true);
   }
 
   function reset(): void {
@@ -312,43 +313,45 @@ function NewOrganizationButton({
         + New organization
       </button>
 
-      <dialog
-        className="modal modal--sheet asset-create-dialog"
-        ref={dialogRef}
-        aria-labelledby="new-organization-title"
+      <FormModal
+        open={dialogOpen}
+        title="New organization"
+        titleId="new-organization-title"
+        eyebrow="Billing organization"
+        subtitle="Add a client, supplier, or mixed counterparty for billing."
+        className="organization-create-dialog"
+        formClassName="asset-create organization-create-form"
+        onClose={() => {
+          setDialogOpen(false);
+          reset();
+        }}
+        onSubmit={submit}
+        noValidate
+        closeDisabled={create.isPending}
         onCancel={(event) => {
           if (create.isPending) event.preventDefault();
         }}
-        onClose={reset}
-      >
-        <form className="asset-create" onSubmit={submit} noValidate>
-          <header className="asset-create__head">
-            <div>
-              <p className="asset-create__eyebrow">Billing organization</p>
-              <h3 id="new-organization-title" className="asset-create__title">
-                New organization
-              </h3>
-              <p className="asset-create__sub">
-                Add a client, supplier, or mixed counterparty for billing.
-              </p>
-            </div>
+        actions={
+          <>
             <button
               type="button"
-              className="asset-create__close"
+              className="btn btn--ghost"
               disabled={create.isPending}
-              onClick={() => dialogRef.current?.close()}
-              aria-label="Close"
+              onClick={() => setDialogOpen(false)}
             >
-              ×
+              Cancel
             </button>
-          </header>
-
-          <div className="asset-create__body">
+            <button type="submit" className="btn btn--moss" disabled={create.isPending}>
+              {create.isPending ? "Creating..." : "Create organization"}
+            </button>
+          </>
+        }
+      >
             <section className="asset-create__section" aria-labelledby="organization-create-basics">
               <h4 id="organization-create-basics" className="asset-create__section-title">
                 Basics
               </h4>
-              <div className="asset-create__grid">
+              <FormModalGrid className="asset-create__grid">
                 <label className="field asset-create__field">
                   <span>Kind</span>
                   <select
@@ -374,7 +377,7 @@ function NewOrganizationButton({
                     autoCapitalize="characters"
                   />
                 </label>
-              </div>
+              </FormModalGrid>
               <label className="field asset-create__field">
                 <span>Display name</span>
                 <input
@@ -417,7 +420,7 @@ function NewOrganizationButton({
                   autoComplete="address-line2"
                 />
               </label>
-              <div className="asset-create__grid">
+              <FormModalGrid className="asset-create__grid">
                 <label className="field asset-create__field">
                   <span>City or locality</span>
                   <input
@@ -434,8 +437,8 @@ function NewOrganizationButton({
                     autoComplete="address-level1"
                   />
                 </label>
-              </div>
-              <div className="asset-create__grid">
+              </FormModalGrid>
+              <FormModalGrid className="asset-create__grid">
                 <label className="field asset-create__field">
                   <span>Postal code</span>
                   <input
@@ -453,7 +456,7 @@ function NewOrganizationButton({
                     placeholder="US"
                   />
                 </label>
-              </div>
+              </FormModalGrid>
             </section>
 
             {formError && (
@@ -461,23 +464,7 @@ function NewOrganizationButton({
                 {formError}
               </p>
             )}
-          </div>
-
-          <footer className="asset-create__footer">
-            <button
-              type="button"
-              className="btn btn--ghost"
-              disabled={create.isPending}
-              onClick={() => dialogRef.current?.close()}
-            >
-              Cancel
-            </button>
-            <button type="submit" className="btn btn--moss" disabled={create.isPending}>
-              {create.isPending ? "Creating..." : "Create organization"}
-            </button>
-          </footer>
-        </form>
-      </dialog>
+      </FormModal>
     </>
   );
 }

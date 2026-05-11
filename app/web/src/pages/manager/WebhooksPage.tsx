@@ -6,6 +6,7 @@ import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
+import FormModal from "@/components/FormModal";
 import { Chip, Loading } from "@/components/common";
 import type { Webhook, WebhookDelivery } from "@/types/api";
 
@@ -261,27 +262,25 @@ function CreateDialog(props: CreateDialogProps) {
   } = props;
 
   return (
-    <dialog className="modal modal--sheet sheet-form-dialog" open={open} onClose={onClose} aria-label="New webhook subscription">
-      <form className="webhook-subscription-form sheet-form" onSubmit={onSubmit}>
-        <header className="webhook-subscription-form__head sheet-form__head">
-          <div>
-            <p className="webhook-subscription-form__eyebrow sheet-form__eyebrow">Webhook</p>
-            <h3 className="webhook-subscription-form__title sheet-form__title">New subscription</h3>
-            <p className="webhook-subscription-form__sub sheet-form__sub">
-              Create an HMAC-signed endpoint for workspace events.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="webhook-subscription-form__close sheet-form__close"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            ×
+    <FormModal
+      open={open}
+      title="New subscription"
+      eyebrow="Webhook"
+      subtitle="Create an HMAC-signed endpoint for workspace events."
+      formClassName="webhook-subscription-form"
+      onClose={onClose}
+      onSubmit={onSubmit}
+      actions={
+        <>
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            Cancel
           </button>
-        </header>
-
-        <div className="webhook-subscription-form__body sheet-form__body">
+          <button type="submit" className="btn btn--moss" disabled={pending || splitEvents(events).length === 0}>
+            {pending ? "Creating..." : "Create subscription"}
+          </button>
+        </>
+      }
+    >
         <FormField label="Name" requirement="required" className="webhook-subscription-form__field sheet-form__field">
           <input value={name} onChange={(e) => onName(e.target.value)} placeholder="hermes-prod" required />
         </FormField>
@@ -308,18 +307,7 @@ function CreateDialog(props: CreateDialogProps) {
         </label>
 
         {error && <p className="tokens-form__error">{error}</p>}
-        </div>
-
-        <footer className="webhook-subscription-form__footer sheet-form__footer">
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="submit" className="btn btn--moss" disabled={pending || splitEvents(events).length === 0}>
-            {pending ? "Creating…" : "Create subscription"}
-          </button>
-        </footer>
-      </form>
-    </dialog>
+    </FormModal>
   );
 }
 

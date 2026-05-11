@@ -20,6 +20,7 @@ interface FormModalProps {
   eyebrow?: ReactNode;
   subtitle?: ReactNode;
   titleId?: string;
+  describedBy?: string;
   width?: FormModalWidth;
   className?: string;
   formClassName?: string;
@@ -56,6 +57,7 @@ export default function FormModal(props: FormModalProps) {
     eyebrow,
     subtitle,
     titleId,
+    describedBy,
     width = "default",
     className,
     formClassName,
@@ -74,8 +76,28 @@ export default function FormModal(props: FormModalProps) {
 
   useEffect(() => {
     const dialog = dialogRef.current;
-    if (open && dialog && !dialog.open) dialog.showModal();
-    if (!open && dialog?.open) dialog.close();
+    if (open && dialog && !dialog.open) {
+      if (typeof dialog.showModal === "function") {
+        try {
+          dialog.showModal();
+        } catch {
+          dialog.setAttribute("open", "");
+        }
+      } else {
+        dialog.setAttribute("open", "");
+      }
+    }
+    if (!open && dialog?.open) {
+      if (typeof dialog.close === "function") {
+        try {
+          dialog.close();
+        } catch {
+          dialog.removeAttribute("open");
+        }
+      } else {
+        dialog.removeAttribute("open");
+      }
+    }
   }, [open]);
 
   return (
@@ -87,6 +109,7 @@ export default function FormModal(props: FormModalProps) {
         className,
       )}
       aria-labelledby={resolvedTitleId}
+      aria-describedby={describedBy}
       onCancel={onCancel}
       onClose={onClose}
     >

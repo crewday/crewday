@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
@@ -8,6 +8,7 @@ import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
+import FormModal, { FormModalGrid } from "@/components/FormModal";
 import { Chip, Loading } from "@/components/common";
 import { INSTRUCTION_SCOPE_TONE } from "@/lib/tones";
 import type { Instruction, Property } from "@/types/api";
@@ -99,7 +100,6 @@ export default function InstructionsPage() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const createDialogRef = useRef<HTMLDialogElement>(null);
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState<InstructionCreateDraft>(EMPTY_CREATE_DRAFT);
 
@@ -142,20 +142,6 @@ export default function InstructionsPage() {
     },
   });
 
-  useEffect(() => {
-    const dialog = createDialogRef.current;
-    if (!creating || !dialog) return;
-    if (typeof dialog.showModal === "function") {
-      try {
-        if (!dialog.open) dialog.showModal();
-      } catch {
-        if (!dialog.open) dialog.setAttribute("open", "");
-      }
-      return;
-    }
-    if (!dialog.open) dialog.setAttribute("open", "");
-  }, [creating]);
-
   const sub = "The house knowledge base. Global rules, property quirks, area-specific tips. Staff see the ones that apply to their task.";
   const actions = (
     <button
@@ -177,11 +163,6 @@ export default function InstructionsPage() {
   }
 
   function closeCreate() {
-    const dialog = createDialogRef.current;
-    if (dialog?.open && typeof dialog.close === "function") {
-      dialog.close();
-      return;
-    }
     setCreating(false);
   }
 
@@ -189,28 +170,28 @@ export default function InstructionsPage() {
     // code-health: ignore[ccn nloc] Create-dialog JSX keeps scope/property/area dependencies adjacent to the mutation it submits.
     if (!creating) return null;
     return (
-      <dialog
-        ref={createDialogRef}
-        className="modal modal--sheet sheet-form-dialog"
-        aria-label="Create instruction"
+      <FormModal
+        open={creating}
+        title="Create instruction"
+        eyebrow="Knowledge base"
+        formClassName="instruction-create-form"
         onClose={() => setCreating(false)}
-      >
-        <form className="instruction-create-form sheet-form" onSubmit={submitCreate}>
-          <header className="instruction-create-form__head sheet-form__head">
-            <div>
-              <p className="instruction-create-form__eyebrow sheet-form__eyebrow">Knowledge base</p>
-              <h3 className="instruction-create-form__title sheet-form__title">Create instruction</h3>
-            </div>
-            <button
-              type="button"
-              className="instruction-create-form__close sheet-form__close"
-              onClick={closeCreate}
-              aria-label="Close"
-            >
-              ×
+        onSubmit={submitCreate}
+        actions={
+          <>
+            <button type="button" className="btn btn--ghost" onClick={closeCreate}>
+              Cancel
             </button>
-          </header>
-          <div className="instruction-create-form__body sheet-form__body">
+            <button
+              type="submit"
+              className="btn btn--moss"
+              disabled={create.isPending || !canSubmitCreate(draft)}
+            >
+              Create
+            </button>
+          </>
+        }
+      >
           <FormField label="Title" requirement="required" className="instruction-create-form__field sheet-form__field">
             <input
               value={draft.title}
@@ -218,7 +199,7 @@ export default function InstructionsPage() {
               required
             />
           </FormField>
-          <div className="instruction-create-form__grid sheet-form__grid">
+          <FormModalGrid className="instruction-create-form__grid">
             <FormField label="Scope" requirement="required" className="instruction-create-form__field sheet-form__field">
               <select
                 value={draft.scope}
@@ -256,7 +237,7 @@ export default function InstructionsPage() {
                 ))}
               </select>
             </FormField>
-          </div>
+          </FormModalGrid>
           {draft.scope === "area" && (
             <FormField label="Area" requirement="required" className="instruction-create-form__field sheet-form__field">
               <select
@@ -293,21 +274,7 @@ export default function InstructionsPage() {
             />
           </FormField>
           {create.isError && <p className="form-error">Failed to create instruction.</p>}
-          </div>
-          <footer className="instruction-create-form__footer sheet-form__footer">
-            <button type="button" className="btn btn--ghost" onClick={closeCreate}>
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn--moss"
-              disabled={create.isPending || !canSubmitCreate(draft)}
-            >
-              Create
-            </button>
-          </footer>
-        </form>
-      </dialog>
+      </FormModal>
     );
   }
 

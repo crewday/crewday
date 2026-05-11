@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarOff, ClipboardList, ReceiptText } from "lucide-react";
 import { useParams } from "react-router-dom";
@@ -13,6 +13,7 @@ import {
 import { ForbiddenPanel } from "@/auth/RequirePermission";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
+import FormModal from "@/components/FormModal";
 import PageTabs, { type PageTab } from "@/components/PageTabs";
 import { Chip, EmptyState, Loading } from "@/components/common";
 import { fmtDayMonYear, inclusiveDays } from "./leaveDisplay";
@@ -250,7 +251,6 @@ export default function EmployeeDetailPage() {
   const [activeTab, setActiveTab] = useState<Tab>(() => tabFromHash(window.location.hash));
   const [roleDialogOpen, setRoleDialogOpen] = useState(false);
   const [selectedRoleIds, setSelectedRoleIds] = useState<Set<string>>(new Set());
-  const roleDialogRef = useRef<HTMLDialogElement>(null);
   const qc = useQueryClient();
 
   useEffect(() => {
@@ -294,7 +294,7 @@ export default function EmployeeDetailPage() {
     onError: invalidateEmployeeRoleQueries,
     onSuccess: async () => {
       await invalidateEmployeeRoleQueries();
-      roleDialogRef.current?.close();
+      setRoleDialogOpen(false);
     },
   });
 
@@ -348,11 +348,10 @@ export default function EmployeeDetailPage() {
   function openRoleDialog() {
     setRoleDialogOpen(true);
     roleSave.reset();
-    roleDialogRef.current?.showModal();
   }
 
   function closeRoleDialog() {
-    roleDialogRef.current?.close();
+    setRoleDialogOpen(false);
   }
 
   function toggleRole(roleId: string, checked: boolean) {
@@ -400,36 +399,39 @@ export default function EmployeeDetailPage() {
         onSelect={selectTab}
       />
 
-      <dialog
-        ref={roleDialogRef}
-        className="modal modal--sheet sheet-form-dialog"
-        aria-labelledby="employee-role-dialog-title"
+      <FormModal
+        open={roleDialogOpen}
+        title="Edit work roles"
+        titleId="employee-role-dialog-title"
+        eyebrow="Employee roles"
+        subtitle="These are scheduling and assignment roles from the workspace work-role catalog."
+        formClassName="employee-role-form"
         onClose={() => {
           setRoleDialogOpen(false);
           roleSave.reset();
         }}
-      >
-        <form className="employee-role-form sheet-form" onSubmit={submitRoleDialog}>
-          <header className="employee-role-form__head sheet-form__head">
-            <div>
-              <p className="employee-role-form__eyebrow sheet-form__eyebrow">Employee roles</p>
-              <h3 id="employee-role-dialog-title" className="employee-role-form__title sheet-form__title">
-                Edit work roles
-              </h3>
-              <p className="employee-role-form__sub sheet-form__sub">
-                These are scheduling and assignment roles from the workspace work-role catalog.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="employee-role-form__close sheet-form__close"
-              aria-label="Close"
-              onClick={closeRoleDialog}
-            >
-              ×
+        onSubmit={submitRoleDialog}
+        actions={
+          <>
+            <button type="button" className="btn btn--ghost" onClick={closeRoleDialog}>
+              Cancel
             </button>
-          </header>
-          <div className="employee-role-form__body sheet-form__body">
+            <button
+              type="submit"
+              className="btn btn--moss"
+              disabled={
+                roleSave.isPending ||
+                workRolesQ.isPending ||
+                userWorkRolesQ.isPending ||
+                workRolesQ.isError ||
+                userWorkRolesQ.isError
+              }
+            >
+              {roleSave.isPending ? "Saving..." : "Save roles"}
+            </button>
+          </>
+        }
+      >
           {workRolesQ.isPending || userWorkRolesQ.isPending ? (
             <Loading />
           ) : workRolesQ.isError || userWorkRolesQ.isError ? (
@@ -463,27 +465,7 @@ export default function EmployeeDetailPage() {
               {roleErrorMessage(roleSave.error)}
             </p>
           ) : null}
-          </div>
-          <footer className="employee-role-form__footer sheet-form__footer">
-            <button type="button" className="btn btn--ghost" onClick={closeRoleDialog}>
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn--moss"
-              disabled={
-                roleSave.isPending ||
-                workRolesQ.isPending ||
-                userWorkRolesQ.isPending ||
-                workRolesQ.isError ||
-                userWorkRolesQ.isError
-              }
-            >
-              {roleSave.isPending ? "Saving..." : "Save roles"}
-            </button>
-          </footer>
-        </form>
-      </dialog>
+      </FormModal>
 
       {activeTab === "overview" && (
         <section id={panelIdFor("overview")} className="grid grid--split" role="tabpanel">

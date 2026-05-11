@@ -377,6 +377,7 @@ export default function InventoryPage() {
         />
       )}
 
+      {/* Exemption: stocktake is a dense line-item operational sheet, not the compact structured record form covered by FormModal. */}
       <dialog
         ref={stocktakeRef}
         className="modal modal--sheet"

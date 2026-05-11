@@ -283,6 +283,7 @@ export default function PayPage() {
 
   return (
     <DeskPage title="Pay" sub={sub} actions={actions} overflow={exportOverflow}>
+      {/* Exemption: confirmation-only payroll close dialog; it submits the selected period without collecting structured input. */}
       <dialog
         className="modal"
         ref={closeDialogRef}

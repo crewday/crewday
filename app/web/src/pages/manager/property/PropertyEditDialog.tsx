@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import CountrySelect from "@/components/CountrySelect";
 import FormField from "@/components/FormField";
+import FormModal, { FormModalGrid } from "@/components/FormModal";
 import TimezoneSelect from "@/components/TimezoneSelect";
 import type { Property } from "@/types/api";
 import type { PropertyAddress, PropertyRecord } from "./types";
@@ -195,7 +196,6 @@ export default function PropertyEditDialog(props: PropertyEditDialogProps) {
     onSubmit,
     onClose,
   } = props;
-  const dialogRef = useRef<HTMLDialogElement | null>(null);
   const [draft, setDraft] = useState<PropertyEditDraft>(() =>
     property ? draftFromProperty(property) : blankPropertyDraft(initialDraft)
   );
@@ -204,57 +204,41 @@ export default function PropertyEditDialog(props: PropertyEditDialogProps) {
     if (open) setDraft(property ? draftFromProperty(property) : blankPropertyDraft(initialDraft));
   }, [initialDraft, open, property]);
 
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (open) {
-      if (typeof dialog.showModal === "function") {
-        if (!dialog.open) dialog.showModal();
-      } else if (!dialog.open) {
-        dialog.setAttribute("open", "");
-      }
-    } else if (dialog.open && typeof dialog.close === "function") {
-      dialog.close();
-    } else if (!open) {
-      dialog.removeAttribute("open");
-    }
-  }, [open]);
-
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     onSubmit(draft);
   }
 
   return (
-    <dialog
-      ref={dialogRef}
-      className="modal modal--sheet sheet-form-dialog"
-      aria-labelledby="property-edit-dialog-title"
+    <FormModal
+      open={open}
+      title={mode === "create" ? "Add property" : "Edit property"}
+      titleId="property-edit-dialog-title"
+      eyebrow="Property"
+      formClassName="property-edit-dialog"
       onCancel={(event) => {
         if (saving) event.preventDefault();
       }}
       onClose={onClose}
-    >
-      <form className="property-edit-dialog sheet-form" onSubmit={submit}>
-        <header className="property-edit-dialog__head sheet-form__head">
-          <div>
-            <p className="property-edit-dialog__eyebrow sheet-form__eyebrow">Property</p>
-            <h3 id="property-edit-dialog-title" className="property-edit-dialog__title sheet-form__title">
-              {mode === "create" ? "Add property" : "Edit property"}
-            </h3>
-          </div>
+      onSubmit={submit}
+      closeDisabled={saving}
+      actions={
+        <>
           <button
             type="button"
-            className="property-edit-dialog__close sheet-form__close"
+            className="btn btn--ghost"
             disabled={saving}
-            onClick={() => dialogRef.current?.close()}
-            aria-label="Close"
+            onClick={onClose}
           >
-            ×
+            Cancel
           </button>
-        </header>
-        <div className="property-edit-dialog__body sheet-form__body">
-        <div className="property-edit-dialog__grid sheet-form__grid">
+          <button type="submit" className="btn btn--moss" disabled={saving}>
+            {saving ? "Saving..." : mode === "create" ? "Create property" : "Save property"}
+          </button>
+        </>
+      }
+    >
+        <FormModalGrid className="property-edit-dialog__grid">
           <FormField
             label="Name"
             requirement="required"
@@ -337,7 +321,7 @@ export default function PropertyEditDialog(props: PropertyEditDialogProps) {
               maxLength={3}
             />
           </FormField>
-        </div>
+        </FormModalGrid>
         <FormField label="Notes" requirement="optional" className="property-edit-dialog__field sheet-form__field">
           <textarea
             value={draft.property_notes_md}
@@ -346,21 +330,6 @@ export default function PropertyEditDialog(props: PropertyEditDialogProps) {
           />
         </FormField>
         {error && <p className="form-error" role="alert">{error}</p>}
-        </div>
-        <footer className="property-edit-dialog__footer sheet-form__footer">
-          <button
-            type="button"
-            className="btn btn--ghost"
-            disabled={saving}
-            onClick={() => dialogRef.current?.close()}
-          >
-            Cancel
-          </button>
-          <button type="submit" className="btn btn--moss" disabled={saving}>
-            {saving ? "Saving..." : mode === "create" ? "Create property" : "Save property"}
-          </button>
-        </footer>
-      </form>
-    </dialog>
+    </FormModal>
   );
 }
