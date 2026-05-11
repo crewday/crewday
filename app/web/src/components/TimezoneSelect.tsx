@@ -1,3 +1,4 @@
+import type { AriaAttributes, ReactNode } from "react";
 import { useMemo } from "react";
 import type { FieldRequirement } from "@/components/FormField";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
@@ -5,8 +6,17 @@ import SearchableSelect, { type SearchableSelectOption } from "@/components/Sear
 interface TimezoneSelectProps {
   value: string;
   onChange: (value: string) => void;
+  id?: string;
+  name?: string;
+  disabled?: boolean;
   required?: boolean;
   requirement?: FieldRequirement;
+  className?: string;
+  inputClassName?: string;
+  helpId?: string;
+  helpText?: ReactNode;
+  "aria-describedby"?: string;
+  "aria-invalid"?: AriaAttributes["aria-invalid"];
 }
 
 const FALLBACK_TIMEZONES = [
@@ -51,8 +61,17 @@ type IntlWithSupportedValues = typeof Intl & {
 export default function TimezoneSelect({
   value,
   onChange,
+  id,
+  name,
+  disabled = false,
   required = false,
   requirement,
+  className,
+  inputClassName,
+  helpId,
+  helpText,
+  "aria-describedby": ariaDescribedBy,
+  "aria-invalid": ariaInvalid,
 }: TimezoneSelectProps) {
   const options = useMemo(timezoneOptions, []);
   return (
@@ -61,10 +80,19 @@ export default function TimezoneSelect({
       value={value}
       options={options}
       onChange={onChange}
+      id={id}
+      name={name}
+      disabled={disabled}
       required={required}
       requirement={requirement}
+      className={className}
+      inputClassName={inputClassName}
+      helpId={helpId}
+      helpText={helpText}
       placeholder="Search timezone"
       noResultsLabel="No timezones found"
+      aria-describedby={ariaDescribedBy}
+      aria-invalid={ariaInvalid}
     />
   );
 }

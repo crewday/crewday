@@ -470,18 +470,27 @@
 .searchable-select {
   position: relative;
 }
+.searchable-select--disabled {
+  opacity: 0.55;
+}
+.searchable-select__input {
+  width: 100%;
+}
+.searchable-select--disabled .searchable-select__input {
+  cursor: not-allowed;
+}
 .searchable-select__popover {
   position: absolute;
   z-index: 20;
   inset-inline: 0;
-  top: calc(100% + 4px);
+  top: calc(100% + var(--space-2));
 }
 .searchable-select__list {
   list-style: none;
   max-height: 240px;
   overflow-y: auto;
-  margin: 0;
-  padding: 4px;
+  margin: var(--space-0);
+  padding: var(--space-2);
   background: var(--card);
   border: 1px solid var(--line-strong);
   border-radius: 10px;
@@ -491,9 +500,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-6);
   min-height: 38px;
-  padding: 8px 10px;
+  padding: var(--space-4) var(--space-5);
   border-radius: 8px;
   color: var(--ink);
   cursor: pointer;
@@ -516,7 +525,7 @@
   color: var(--ink-3);
 }
 .searchable-select__empty {
-  padding: 10px;
+  padding: var(--space-5);
   color: var(--ink-3);
 }
 .field--warn input,

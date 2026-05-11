@@ -1,3 +1,4 @@
+import type { AriaAttributes, ReactNode } from "react";
 import { useMemo } from "react";
 import type { FieldRequirement } from "@/components/FormField";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
@@ -5,8 +6,17 @@ import SearchableSelect, { type SearchableSelectOption } from "@/components/Sear
 interface CountrySelectProps {
   value: string;
   onChange: (value: string) => void;
+  id?: string;
+  name?: string;
+  disabled?: boolean;
   required?: boolean;
   requirement?: FieldRequirement;
+  className?: string;
+  inputClassName?: string;
+  helpId?: string;
+  helpText?: ReactNode;
+  "aria-describedby"?: string;
+  "aria-invalid"?: AriaAttributes["aria-invalid"];
 }
 
 const COUNTRY_CODES = [
@@ -39,8 +49,17 @@ type IntlWithDisplayNames = typeof Intl & {
 export default function CountrySelect({
   value,
   onChange,
+  id,
+  name,
+  disabled = false,
   required = false,
   requirement,
+  className,
+  inputClassName,
+  helpId,
+  helpText,
+  "aria-describedby": ariaDescribedBy,
+  "aria-invalid": ariaInvalid,
 }: CountrySelectProps) {
   const options = useMemo(countryOptions, []);
   return (
@@ -49,10 +68,19 @@ export default function CountrySelect({
       value={value}
       options={options}
       onChange={onChange}
+      id={id}
+      name={name}
+      disabled={disabled}
       required={required}
       requirement={requirement}
+      className={className}
+      inputClassName={inputClassName}
+      helpId={helpId}
+      helpText={helpText}
       placeholder="Search country"
       noResultsLabel="No countries found"
+      aria-describedby={ariaDescribedBy}
+      aria-invalid={ariaInvalid}
     />
   );
 }
