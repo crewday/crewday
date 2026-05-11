@@ -73,6 +73,7 @@
   color: var(--moss);
 }
 .form-field__requirement--optional {
+  display: none;
   color: var(--ink-3);
 }
 .form-field__help {

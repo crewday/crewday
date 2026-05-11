@@ -4,7 +4,7 @@ import FormField from "./FormField";
 import formsCss from "@/styles/forms.css?raw";
 
 describe("FormField", () => {
-  it("keeps requirement text in accessible labels while exposing state hooks", () => {
+  it("keeps requirement text in labels while exposing state hooks", () => {
     render(
       <form>
         <FormField label="Name" requirement="required">
@@ -17,7 +17,7 @@ describe("FormField", () => {
     );
 
     const requiredInput = screen.getByLabelText("Name Required");
-    const optionalTextarea = screen.getByLabelText("Notes Optional");
+    const optionalTextarea = screen.getByLabelText(/^Notes\b/);
 
     expect(requiredInput.closest("label")).toHaveClass("form-field--required");
     expect(optionalTextarea.closest("label")).toHaveClass("form-field--optional");
@@ -33,12 +33,12 @@ describe("FormField", () => {
     expect(screen.getByLabelText(/^Notes\b/)).toBe(optionalTextarea);
   });
 
-  it("uses design tokens for distinct requirement marker colors", () => {
+  it("keeps optional markers intentionally hidden but easy to re-show", () => {
     expect(formsCss).toMatch(
       /\.form-field__requirement--required\s*{\s*color: var\(--moss\);/m,
     );
     expect(formsCss).toMatch(
-      /\.form-field__requirement--optional\s*{\s*color: var\(--ink-3\);/m,
+      /\.form-field__requirement--optional\s*{\s*display: none;\s*color: var\(--ink-3\);/m,
     );
   });
 
