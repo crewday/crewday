@@ -1,5 +1,12 @@
-import { Check, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Check, Pencil, X } from "lucide-react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import {
   ASSET_ICON_NAMES,
   AssetIcon,
@@ -44,9 +51,15 @@ export default function IconSelector({
   errorId,
 }: IconSelectorProps) {
   const [query, setQuery] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
+  const [popoverPlacement, setPopoverPlacement] = useState<"above" | "below">("above");
+  const controlId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const selectedName = isAssetIconName(value) ? value : "";
-  const selectedLabel = selectedName ? labelForIconName(selectedName) : "No icon";
   const hasUnknownValue = value.trim() !== "" && !selectedName;
+  const selectedLabel = hasUnknownValue ? "Unknown icon" : selectedName ? labelForIconName(selectedName) : "No icon";
   const normalizedQuery = normalizeSearchText(query);
   const visibleOptions = useMemo(() => {
     if (!normalizedQuery) return ICON_OPTIONS;
@@ -65,14 +78,52 @@ export default function IconSelector({
     setQuery("");
   }, [value]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    setQuery("");
+    const previewRect = previewRef.current?.getBoundingClientRect();
+    setPopoverPlacement(previewRect && previewRect.top < 300 ? "below" : "above");
+    searchRef.current?.focus();
+    searchRef.current?.select();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    function closeFromOutside(event: PointerEvent): void {
+      const target = event.target;
+      if (target instanceof Node && rootRef.current?.contains(target)) return;
+      setIsOpen(false);
+    }
+
+    document.addEventListener("pointerdown", closeFromOutside);
+    return () => document.removeEventListener("pointerdown", closeFromOutside);
+  }, [isOpen]);
+
   function chooseIcon(nextName: string): void {
     if (!nextName || isAssetIconName(nextName)) {
       onChange(nextName);
+      setIsOpen(false);
+      previewRef.current?.focus();
     }
   }
 
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    if (!isOpen || event.key !== "Escape") return;
+    event.stopPropagation();
+    setIsOpen(false);
+    previewRef.current?.focus();
+  }
+
+  function handlePreviewKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>): void {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    setIsOpen(true);
+  }
+
   return (
-    <div className={classes}>
+    <div className={classes} ref={rootRef} onKeyDown={handleKeyDown}>
       <span className="form-field__label">
         {label}{" "}
         <span className={`form-field__requirement form-field__requirement--${requirement}`}>
@@ -80,73 +131,96 @@ export default function IconSelector({
         </span>
       </span>
 
-      <div className="icon-selector__selected" aria-live="polite">
-        <span className="icon-selector__selected-mark">
-          {selectedName ? <AssetIcon name={selectedName} size={18} /> : <X size={16} aria-hidden="true" />}
-        </span>
-        <span className="icon-selector__selected-copy">
-          <span className="icon-selector__selected-kicker">Selected icon</span>
-          <strong>{selectedLabel}</strong>
-          {hasUnknownValue ? (
-            <span className="icon-selector__selected-note">
-              Saved icon is unavailable. Choose a replacement or clear it.
-            </span>
-          ) : null}
-        </span>
-      </div>
-
-      <SearchField
-        value={query}
-        disabled={disabled}
-        invalid={Boolean(error)}
-        aria-label={`Search ${label.toLocaleLowerCase()} choices`}
-        aria-describedby={error ? errorId : undefined}
-        onChange={(event) => setQuery(event.currentTarget.value)}
-        placeholder="Search icons"
-      />
-
-      <div className="icon-selector__grid" role="group" aria-label={`${label} choices`}>
-        {allowEmpty ? (
-          <button
-            type="button"
-            className={selectedName ? "icon-selector__choice" : "icon-selector__choice is-selected"}
-            aria-pressed={!selectedName}
-            disabled={disabled}
-            onClick={() => chooseIcon("")}
-          >
-            <span className="icon-selector__choice-mark">
-              <X size={16} aria-hidden="true" />
-            </span>
-            <span>No icon</span>
-            {!selectedName ? <Check size={14} aria-hidden="true" /> : null}
-          </button>
+      <div className="icon-selector__control">
+        <button
+          type="button"
+          ref={previewRef}
+          className="icon-selector__selected"
+          aria-haspopup="dialog"
+          aria-expanded={isOpen}
+          aria-controls={isOpen ? controlId : undefined}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? errorId : hasUnknownValue ? `${controlId}-unknown` : undefined}
+          aria-label={`${label}: ${selectedLabel}. Edit icon`}
+          disabled={disabled}
+          onKeyDown={handlePreviewKeyDown}
+          onClick={() => setIsOpen((open) => !open)}
+        >
+          <span className="icon-selector__selected-mark">
+            {selectedName ? <AssetIcon name={selectedName} size={18} /> : <X size={16} aria-hidden="true" />}
+          </span>
+          <strong className="icon-selector__selected-name">{selectedLabel}</strong>
+          <Pencil className="icon-selector__selected-edit" size={16} aria-hidden="true" />
+        </button>
+        {hasUnknownValue ? (
+          <span id={`${controlId}-unknown`} className="sr-only">
+            Saved icon is unavailable. Choose a replacement or clear it.
+          </span>
         ) : null}
 
-        {visibleOptions.map((option) => {
-          const selected = option.name === selectedName;
-          return (
-            <button
-              type="button"
-              key={option.name}
-              className={selected ? "icon-selector__choice is-selected" : "icon-selector__choice"}
-              aria-pressed={selected}
-              aria-label={`Select ${option.label} icon`}
+        {isOpen ? (
+          <div
+            id={controlId}
+            className={`icon-selector__popover icon-selector__popover--${popoverPlacement}`}
+            role="dialog"
+            aria-label={`${label} choices`}
+          >
+            <SearchField
+              ref={searchRef}
+              value={query}
               disabled={disabled}
-              onClick={() => chooseIcon(option.name)}
-            >
-              <span className="icon-selector__choice-mark">
-                <AssetIcon name={option.name} size={16} />
-              </span>
-              <span>{option.label}</span>
-              {selected ? <Check size={14} aria-hidden="true" /> : null}
-            </button>
-          );
-        })}
+              invalid={Boolean(error)}
+              aria-label={`Search ${label.toLocaleLowerCase()} choices`}
+              aria-describedby={error ? errorId : undefined}
+              onChange={(event) => setQuery(event.currentTarget.value)}
+              placeholder="Search icons"
+            />
 
-        {visibleOptions.length === 0 ? (
-          <p className="icon-selector__empty" role="status">
-            No matching icons.
-          </p>
+            <div className="icon-selector__grid" role="group" aria-label={`${label} choices`}>
+              {allowEmpty ? (
+                <button
+                  type="button"
+                  className={selectedName ? "icon-selector__choice" : "icon-selector__choice is-selected"}
+                  aria-pressed={!selectedName}
+                  disabled={disabled}
+                  onClick={() => chooseIcon("")}
+                >
+                  <span className="icon-selector__choice-mark">
+                    <X size={16} aria-hidden="true" />
+                  </span>
+                  <span className="icon-selector__choice-label">No icon</span>
+                  {!selectedName ? <Check className="icon-selector__choice-check" size={14} aria-hidden="true" /> : null}
+                </button>
+              ) : null}
+
+              {visibleOptions.map((option) => {
+                const selected = option.name === selectedName;
+                return (
+                  <button
+                    type="button"
+                    key={option.name}
+                    className={selected ? "icon-selector__choice is-selected" : "icon-selector__choice"}
+                    aria-pressed={selected}
+                    aria-label={`Select ${option.label} icon`}
+                    disabled={disabled}
+                    onClick={() => chooseIcon(option.name)}
+                  >
+                    <span className="icon-selector__choice-mark">
+                      <AssetIcon name={option.name} size={16} />
+                    </span>
+                    <span className="icon-selector__choice-label">{option.label}</span>
+                    {selected ? <Check className="icon-selector__choice-check" size={14} aria-hidden="true" /> : null}
+                  </button>
+                );
+              })}
+
+              {visibleOptions.length === 0 ? (
+                <p className="icon-selector__empty" role="status">
+                  No matching icons.
+                </p>
+              ) : null}
+            </div>
+          </div>
         ) : null}
       </div>
 

@@ -902,10 +902,12 @@ the platform must guarantee*.
   SVG, no icon fonts.
 - **Data fields that reference an icon store the Lucide name**
   (PascalCase string, e.g. `Snowflake`, `Refrigerator`,
-  `BrushCleaning`). The web renders them through a small whitelist
+  `BrushCleaning`). The web renders them through a curated catalog
   (`components/AssetIcon.tsx`) — unknown names fall back to a
-  generic glyph. This keeps server payloads string-based and keeps
-  the bundle from pulling every Lucide icon.
+  generic glyph. Common asset icons are kept in the ordinary bundle;
+  additional selector choices resolve through explicit per-icon lazy
+  imports so importing `AssetIcon` or `IconSelector` does not pull the
+  generated full Lucide collection into normal pages.
 - **Typographic unicode** (`✓`, `⊘`, `←`, `→`, `·`) is allowed —
   these are font glyphs, not decorative emoji, and they colour with
   `currentColor`. Prefer a Lucide icon when the glyph lives in JSX

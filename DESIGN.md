@@ -460,7 +460,8 @@ Every UI glyph is a [Lucide](https://lucide.dev) icon via
 fonts. Decorative icons get `aria-hidden="true"`; semantic ones
 get an `aria-label` on the parent. Data fields that reference an
 icon store the **PascalCase Lucide name** (e.g. `"Snowflake"`),
-rendered through a whitelist (`components/AssetIcon.tsx`).
+rendered through the curated eager + lazy catalog in
+`components/AssetIcon.tsx`.
 
 Typographic unicode (`✓`, `⊘`, `←`, `→`, `·`) is allowed for CSS
 `::before`/`::after` content and directional affordances — they

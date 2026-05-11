@@ -408,6 +408,7 @@ describe("<EmployeesPage> work-role catalog", () => {
     fireEvent.change(within(dialog).getByLabelText(/^Name\b/), { target: { value: "Pool technician" } });
     fireEvent.change(within(dialog).getByLabelText(/^Key\b/), { target: { value: "pool_tech" } });
     expect(within(dialog).queryByLabelText(/^Icon name\b/)).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Icon: No icon. Edit icon" }));
     fireEvent.change(within(dialog).getByLabelText("Search icon choices"), { target: { value: "waves" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Select Waves icon" }));
     fireEvent.change(within(dialog).getByLabelText(/^Description\b/), {
@@ -555,8 +556,8 @@ describe("<EmployeesPage> work-role catalog", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const dialog = screen.getByRole("dialog", { name: "Edit work role" });
-    expect(within(dialog).getByText("Selected icon")).toBeInTheDocument();
-    expect(within(dialog).getAllByText("Brush Cleaning").length).toBeGreaterThan(0);
+    expect(within(dialog).queryByText("Selected icon")).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Icon: Brush Cleaning. Edit icon" })).toBeInTheDocument();
     fireEvent.change(within(dialog).getByLabelText(/^Name\b/), { target: { value: "Lead housekeeper" } });
     fireEvent.change(within(dialog).getByLabelText(/^Key\b/), { target: { value: "lead_housekeeper" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
@@ -590,6 +591,7 @@ describe("<EmployeesPage> work-role catalog", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const dialog = screen.getByRole("dialog", { name: "Edit work role" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Icon: Brush Cleaning. Edit icon" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "No icon" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
 
@@ -623,7 +625,7 @@ describe("<EmployeesPage> work-role catalog", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const dialog = screen.getByRole("dialog", { name: "Edit work role" });
-    expect(within(dialog).getByText(/Saved icon is unavailable/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Icon: Unknown icon. Edit icon" })).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
 
     expect(await screen.findByText("Legacy role")).toBeInTheDocument();
