@@ -1,5 +1,5 @@
 import type { DragEvent, FormEvent, ReactElement } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Camera, Globe, GripVertical, Hash, Map as MapIcon, Sparkles, Timer } from "lucide-react";
 
@@ -7,6 +7,7 @@ import { Chip, Loading } from "@/components/common";
 import DeskPage from "@/components/DeskPage";
 import FormField from "@/components/FormField";
 import FormModal, { FormModalGrid } from "@/components/FormModal";
+import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
@@ -90,6 +91,15 @@ function plainPreview(md: string): string {
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function roleOption(role: WorkRole): SearchableSelectOption {
+  return {
+    value: role.id,
+    label: role.name,
+    secondaryText: role.key,
+    searchText: [role.name, role.key, role.description_md].filter(Boolean).join(" "),
+  };
 }
 
 export default function TemplatesPage() {
@@ -278,6 +288,7 @@ function NewTemplateForm({
   const [autoShift, setAutoShift] = useState(false);
   const [llmHints, setLlmHints] = useState("");
   const [clientError, setClientError] = useState<string | null>(null);
+  const roleOptions = useMemo(() => roles.map(roleOption), [roles]);
 
   const visibleError = clientError ?? error;
   const errorId = visibleError ? "template-create-error" : undefined;
@@ -354,14 +365,15 @@ function NewTemplateForm({
             rows={4}
           />
         </FormField>
-        <FormField label="Role" requirement="optional" className="template-create-form__field sheet-form__field">
-          <select value={roleId} onChange={(event) => setRoleId(event.target.value)}>
-            <option value="">Any role</option>
-            {roles.map((role) => (
-              <option key={role.id} value={role.id}>{role.name}</option>
-            ))}
-          </select>
-        </FormField>
+        <SearchableSelect
+          label="Role"
+          requirement="optional"
+          className="template-create-form__field sheet-form__field"
+          value={roleId}
+          options={roleOptions}
+          blankOption={{ label: "Any role" }}
+          onChange={setRoleId}
+        />
         <FormModalGrid className="template-create-form__grid">
           <FormField label="Duration" requirement="required" className="template-create-form__field sheet-form__field">
             <input

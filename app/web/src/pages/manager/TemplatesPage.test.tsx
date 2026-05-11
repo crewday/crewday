@@ -8,6 +8,7 @@ import {
   type FakeResponse,
   type FetchCall,
 } from "@/test/helpers";
+import { chooseSearchableOption } from "@/test/searchableSelect";
 
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { __resetApiProvidersForTests } from "@/lib/api";
@@ -361,8 +362,10 @@ describe("<TemplatesPage> create flow", () => {
       const dialog = await screen.findByRole("dialog", { name: "New template" });
       expect(within(dialog).getByLabelText(/^Name\b/)).toBeInTheDocument();
       expect(within(dialog).getByLabelText(/^Duration\b/)).toHaveValue(30);
-      expect(within(dialog).getByLabelText(/^Role\b/)).toHaveValue("");
-      expect(within(dialog).getByRole("option", { name: "Housekeeping" })).toBeInTheDocument();
+      const role = within(dialog).getByRole("combobox", { name: /^Role\b/ });
+      expect(role).toHaveValue("Any role");
+      fireEvent.focus(role);
+      expect(await within(dialog).findByRole("option", { name: /Housekeeping/i })).toBeInTheDocument();
     } finally {
       harness.restore();
     }
@@ -407,9 +410,7 @@ describe("<TemplatesPage> create flow", () => {
       fireEvent.change(within(dialog).getByLabelText(/^Description\b/), {
         target: { value: "Close down common areas." },
       });
-      fireEvent.change(within(dialog).getByLabelText(/^Role\b/), {
-        target: { value: "role_1" },
-      });
+      await chooseSearchableOption(dialog, /^Role\b/, /Housekeeping/i);
       fireEvent.change(within(dialog).getByLabelText(/^Duration\b/), {
         target: { value: "45" },
       });
@@ -465,6 +466,35 @@ describe("<TemplatesPage> create flow", () => {
       });
       await waitFor(() => {
         expect(screen.queryByRole("dialog", { name: "New template" })).not.toBeInTheDocument();
+      });
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("posts the any-role sentinel as a null role while native enums keep defaults", async () => {
+    const harness = installFetch();
+    const client = makeClient();
+    try {
+      render(<Harness client={client} />);
+      await screen.findByText("First step");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New template" }));
+      const dialog = await screen.findByRole("dialog", { name: "New template" });
+      expect(within(dialog).getByRole("combobox", { name: /^Role\b/ })).toHaveValue("Any role");
+      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
+        target: { value: "Common area reset" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create template" }));
+
+      await waitFor(() => {
+        expect(postCalls(harness.calls)).toHaveLength(1);
+      });
+      expect(JSON.parse(String(postCalls(harness.calls)[0]!.init.body))).toMatchObject({
+        name: "Common area reset",
+        role_id: null,
+        priority: "normal",
+        photo_evidence: "disabled",
       });
     } finally {
       harness.restore();

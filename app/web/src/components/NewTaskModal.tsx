@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, fetchJson } from "@/lib/api";
 import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
@@ -6,6 +6,7 @@ import { qk } from "@/lib/queryKeys";
 import type { Me, Property, Task } from "@/types/api";
 import FormModal, { FormModalField } from "@/components/FormModal";
 import { Checkbox } from "@/components/common";
+import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 
 // §06 quick-add. Clicking the button opens a <dialog> (same pattern as
 // the task skip modal in TaskDetailPage) and POSTs to /api/v1/tasks.
@@ -54,6 +55,14 @@ export default function NewTaskButton() {
   const [formError, setFormError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const submitLocked = useRef(false);
+  const propertyOptions = useMemo(
+    () => (propsQ.data ?? []).map(propertyOption),
+    [propsQ.data],
+  );
+  const areaOptions = useMemo(
+    () => (areasQ.data ?? []).map(areaOption),
+    [areasQ.data],
+  );
 
   useEffect(() => {
     setDue((current) => (current === systemTodayIso ? defaultDue : current));
@@ -191,37 +200,33 @@ export default function NewTaskButton() {
           />
         </FormModalField>
 
-        <FormModalField label="Property" requirement="optional" className="new-task-form__field">
-          <select
-            value={propertyId}
-            onChange={(e) => {
-              setPropertyId(e.target.value);
-              setAreaId("");
+        <SearchableSelect
+          label="Property"
+          requirement="optional"
+          className="form-modal__field new-task-form__field"
+          value={propertyId}
+          options={propertyOptions}
+          blankOption={{ label: "No property" }}
+          onChange={(value) => {
+            setPropertyId(value);
+            setAreaId("");
+            setFormError(null);
+          }}
+        />
+
+        {propertyId && areaOptions.length > 0 && (
+          <SearchableSelect
+            label="Area"
+            requirement="optional"
+            className="form-modal__field new-task-form__field"
+            value={areaId}
+            options={areaOptions}
+            blankOption={{ label: "No area" }}
+            onChange={(value) => {
+              setAreaId(value);
               setFormError(null);
             }}
-          >
-            <option value="">No property</option>
-            {(propsQ.data ?? []).map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-        </FormModalField>
-
-        {propertyId && (areasQ.data ?? []).length > 0 && (
-          <FormModalField label="Area" requirement="optional" className="new-task-form__field">
-            <select
-              value={areaId}
-              onChange={(e) => {
-                setAreaId(e.target.value);
-                setFormError(null);
-              }}
-            >
-              <option value="">No area</option>
-              {(areasQ.data ?? []).map((area) => (
-                <option key={area.id} value={area.id}>{area.name}</option>
-              ))}
-            </select>
-          </FormModalField>
+          />
         )}
 
         <Checkbox
@@ -271,4 +276,20 @@ function fieldErrorLabel(loc: readonly (string | number)[] | undefined): string 
   if (field === "property_id") return "Property";
   if (field === "area_id") return "Area";
   return null;
+}
+
+function propertyOption(property: Property): SearchableSelectOption {
+  return {
+    value: property.id,
+    label: property.name,
+    secondaryText: property.city || property.timezone,
+    searchText: [property.name, property.city, property.timezone].filter(Boolean).join(" "),
+  };
+}
+
+function areaOption(area: Area): SearchableSelectOption {
+  return {
+    value: area.id,
+    label: area.name,
+  };
 }

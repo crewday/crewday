@@ -1,10 +1,11 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import FormField from "@/components/FormField";
 import FormModal, { FormModalGrid } from "@/components/FormModal";
+import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { Avatar, Chip, Loading } from "@/components/common";
 import type { Employee, Property, Schedule, TaskTemplate } from "@/types/api";
 import { type ListEnvelope } from "@/lib/listResponse";
@@ -47,6 +48,33 @@ function weekdayFor(date: string): string {
 function rruleFor(frequency: string, activeFrom: string): string {
   if (frequency === "WEEKLY") return `RRULE:FREQ=WEEKLY;BYDAY=${weekdayFor(activeFrom)}`;
   return `RRULE:FREQ=${frequency}`;
+}
+
+function templateOption(template: TaskTemplate): SearchableSelectOption {
+  return {
+    value: template.id,
+    label: template.name,
+    secondaryText: `${template.duration_minutes} min`,
+    searchText: [template.name, template.description_md].filter(Boolean).join(" "),
+  };
+}
+
+function propertyOption(property: Property): SearchableSelectOption {
+  return {
+    value: property.id,
+    label: property.name,
+    secondaryText: property.city || property.timezone,
+    searchText: [property.name, property.city, property.timezone].filter(Boolean).join(" "),
+  };
+}
+
+function employeeOption(employee: Employee): SearchableSelectOption {
+  return {
+    value: employee.id,
+    label: employee.name,
+    secondaryText: employee.email || undefined,
+    searchText: [employee.name, employee.email].filter(Boolean).join(" "),
+  };
 }
 
 function scheduleErrorMessage(error: unknown): string {
@@ -301,6 +329,10 @@ function ScheduleCreateDialog(props: ScheduleCreateDialogProps) {
   const unavailableMessage = props.templatesFailed
     ? "Task templates could not be loaded. Reload before creating a schedule."
     : "Create a task template before adding schedules.";
+  const templateOptions = useMemo(() => props.templates.map(templateOption), [props.templates]);
+  const propertyOptions = useMemo(() => props.properties.map(propertyOption), [props.properties]);
+  const assigneeOptions = useMemo(() => props.employees.map(employeeOption), [props.employees]);
+  const selectedTemplateId = props.templateId || props.templates[0]?.id || "";
 
   return (
     <FormModal
@@ -335,33 +367,32 @@ function ScheduleCreateDialog(props: ScheduleCreateDialogProps) {
                 placeholder="Weekly turnover"
               />
             </FormField>
-            <FormField label="Template" requirement="required" className="schedule-create-form__field sheet-form__field">
-              <select
-                required
-                value={props.templateId || props.templates[0]?.id || ""}
-                onChange={(e) => props.onTemplateId(e.target.value)}
-              >
-                {props.templates.map((tpl) => (
-                  <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
-                ))}
-              </select>
-            </FormField>
-            <FormField label="Property" requirement="optional" className="schedule-create-form__field sheet-form__field">
-              <select value={props.propertyId} onChange={(e) => props.onPropertyId(e.target.value)}>
-                <option value="">Any property</option>
-                {props.properties.map((property) => (
-                  <option key={property.id} value={property.id}>{property.name}</option>
-                ))}
-              </select>
-            </FormField>
-            <FormField label="Default assignee" requirement="optional" className="schedule-create-form__field sheet-form__field">
-              <select value={props.assigneeId} onChange={(e) => props.onAssigneeId(e.target.value)}>
-                <option value="">Unassigned</option>
-                {props.employees.map((employee) => (
-                  <option key={employee.id} value={employee.id}>{employee.name}</option>
-                ))}
-              </select>
-            </FormField>
+            <SearchableSelect
+              label="Template"
+              required
+              className="schedule-create-form__field sheet-form__field"
+              value={selectedTemplateId}
+              options={templateOptions}
+              onChange={props.onTemplateId}
+            />
+            <SearchableSelect
+              label="Property"
+              requirement="optional"
+              className="schedule-create-form__field sheet-form__field"
+              value={props.propertyId}
+              options={propertyOptions}
+              blankOption={{ label: "Any property" }}
+              onChange={props.onPropertyId}
+            />
+            <SearchableSelect
+              label="Default assignee"
+              requirement="optional"
+              className="schedule-create-form__field sheet-form__field"
+              value={props.assigneeId}
+              options={assigneeOptions}
+              blankOption={{ label: "Unassigned" }}
+              onChange={props.onAssigneeId}
+            />
             <FormModalGrid className="schedule-create-form__grid">
             <FormField label="Starts on" requirement="required" className="schedule-create-form__field sheet-form__field">
               <input

@@ -12,6 +12,7 @@ import {
   installFetchRouteHandlers,
   type FetchRouteRequest,
 } from "@/test/helpers";
+import { chooseSearchableOption } from "@/test/searchableSelect";
 import type { Employee, Property, Schedule, TaskTemplate } from "@/types/api";
 
 import SchedulesPage from "./SchedulesPage";
@@ -180,8 +181,9 @@ describe("<SchedulesPage> New schedule action", () => {
       fireEvent.click(screen.getByRole("button", { name: "+ New schedule" }));
 
       const dialog = screen.getByRole("dialog", { name: "New schedule" });
-      expect(within(dialog).getByLabelText(/^Template\b/)).toHaveValue(TEMPLATE.id);
-      expect(within(dialog).getByLabelText(/^Property\b/)).toHaveValue("");
+      expect(within(dialog).getByRole("combobox", { name: /^Template\b/ })).toHaveValue(TEMPLATE.name);
+      expect(within(dialog).getByRole("combobox", { name: /^Property\b/ })).toHaveValue("Any property");
+      expect(within(dialog).getByRole("combobox", { name: /^Default assignee\b/ })).toHaveValue("Unassigned");
       expect(within(dialog).getByRole("button", { name: "Create schedule" })).toBeEnabled();
     } finally {
       harness.restore();
@@ -249,12 +251,8 @@ describe("<SchedulesPage> New schedule action", () => {
       fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
         target: { value: "Friday turnover" },
       });
-      fireEvent.change(within(dialog).getByLabelText(/^Property\b/), {
-        target: { value: PROPERTY.id },
-      });
-      fireEvent.change(within(dialog).getByLabelText(/^Default assignee\b/), {
-        target: { value: EMPLOYEE.id },
-      });
+      await chooseSearchableOption(dialog, /^Property\b/, /Casa Verde/i);
+      await chooseSearchableOption(dialog, /^Default assignee\b/, /Mina Silva/i);
       fireEvent.change(within(dialog).getByLabelText(/^Starts on\b/), {
         target: { value: "2026-05-08" },
       });
@@ -277,6 +275,42 @@ describe("<SchedulesPage> New schedule action", () => {
       });
       await waitFor(() => {
         expect(screen.queryByRole("dialog", { name: "New schedule" })).not.toBeInTheDocument();
+      });
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("submits optional sentinels as omitted schedule fields", async () => {
+    const postRequests: FetchRouteRequest[] = [];
+    const harness = installSchedulesFetch({ postRequests });
+    try {
+      render(<Harness client={makeClient()} />);
+      await waitFor(() => {
+        expect(screen.getAllByText("Existing turnover").length).toBeGreaterThan(0);
+      });
+      fireEvent.click(screen.getByRole("button", { name: "+ New schedule" }));
+
+      const dialog = screen.getByRole("dialog", { name: "New schedule" });
+      expect(within(dialog).getByRole("combobox", { name: /^Property\b/ })).toHaveValue("Any property");
+      expect(within(dialog).getByRole("combobox", { name: /^Default assignee\b/ })).toHaveValue("Unassigned");
+      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
+        target: { value: "Workspace-wide schedule" },
+      });
+      fireEvent.change(within(dialog).getByLabelText(/^Starts on\b/), {
+        target: { value: "2026-05-08" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create schedule" }));
+
+      await waitFor(() => {
+        expect(postRequests).toHaveLength(1);
+      });
+      expect(postRequests[0]?.body).toEqual({
+        name: "Workspace-wide schedule",
+        template_id: TEMPLATE.id,
+        rrule: "RRULE:FREQ=WEEKLY;BYDAY=FR",
+        dtstart_local: "2026-05-08T09:00:00",
+        active_from: "2026-05-08",
       });
     } finally {
       harness.restore();
