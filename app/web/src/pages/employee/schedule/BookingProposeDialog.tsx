@@ -4,11 +4,13 @@
 // approves or rejects. The mock implements the minimum viable form;
 // the production shell will expand it to match the full §09 body.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import FormModal, { FormModalField, FormModalGrid } from "@/components/FormModal";
+import SearchableSelect from "@/components/SearchableSelect";
+import { propertySelectOption } from "@/lib/propertySelectOptions";
 import type { Booking } from "@/types/api";
 
 export function BookingProposeDialog({
@@ -25,6 +27,7 @@ export function BookingProposeDialog({
   const [starts, setStarts] = useState<string>("09:00");
   const [ends, setEnds] = useState<string>("12:00");
   const [notes, setNotes] = useState<string>("");
+  const propertyOptions = useMemo(() => properties.map(propertySelectOption), [properties]);
 
   // Re-init only when the dialog OPENS (iso flips from null to a date).
   // We deliberately don't depend on `properties`: once the dialog is
@@ -86,17 +89,16 @@ export function BookingProposeDialog({
         </>
       }
     >
-      <FormModalField label="Property" requirement="required" className="booking-propose-form__field">
-        <select
-          value={propertyId}
-          onChange={(e) => setPropertyId(e.target.value)}
-          required
-        >
-          {properties.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-      </FormModalField>
+      <SearchableSelect
+        label="Property"
+        name="property_id"
+        requirement="required"
+        className="form-modal__field booking-propose-form__field"
+        value={propertyId}
+        options={propertyOptions}
+        onChange={setPropertyId}
+        required
+      />
 
       <FormModalGrid className="booking-propose-form__grid">
         <FormModalField label="From" requirement="required" className="booking-propose-form__field">

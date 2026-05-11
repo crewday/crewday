@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
@@ -7,7 +7,9 @@ import { Camera } from "lucide-react";
 import { Loading } from "@/components/common";
 import PageHeader from "@/components/PageHeader";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
+import SearchableSelect from "@/components/SearchableSelect";
 import { useNavHistory } from "@/context/NavHistoryContext";
+import { propertySelectOption } from "@/lib/propertySelectOptions";
 import { cap } from "@/lib/strings";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { Issue, Property } from "@/types/api";
@@ -78,13 +80,14 @@ export default function IssueNewPage() {
       sub="Tell the manager something is broken, missing, or unsafe. The more specific the better."
     />
   );
+  const properties = propsQ.data ?? [];
+  const propertyOptions = useMemo(() => properties.map(propertySelectOption), [properties]);
 
   if (propsQ.isPending) return <>{header}<section className="phone__section"><Loading /></section></>;
   if (propsQ.isError || !propsQ.data) {
     return <>{header}<section className="phone__section"><p className="muted">Failed to load.</p></section></>;
   }
 
-  const properties = propsQ.data;
   const activePropertyId = propertyId || properties[0]?.id || "";
 
   return (
@@ -121,19 +124,14 @@ export default function IssueNewPage() {
           />
         </label>
 
-        <label className="field">
-          <span>Property</span>
-          <select
-            name="property_id"
-            required
-            value={activePropertyId}
-            onChange={(e) => setPropertyId(e.target.value)}
-          >
-            {properties.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-        </label>
+        <SearchableSelect
+          label="Property"
+          name="property_id"
+          value={activePropertyId}
+          options={propertyOptions}
+          onChange={setPropertyId}
+          required
+        />
 
         <label className="field">
           <span>Area</span>

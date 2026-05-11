@@ -8,6 +8,7 @@ import {
   registerWorkspaceSlugGetter,
 } from "@/lib/api";
 import { installFetchRoutes } from "@/test/helpers";
+import { chooseSearchableOption } from "@/test/searchableSelect";
 import IssueNewPage from "./IssueNewPage";
 
 // `IssueNewPage` mounts inside a `<Routes>` tree so the redirect to
@@ -33,11 +34,11 @@ function LocationProbe(): ReactElement {
   return <span data-testid="location">{loc.pathname}</span>;
 }
 
-function property(): unknown {
+function property(id = "prop_1", name = "Villa Sud", city = "Nice"): unknown {
   return {
-    id: "prop_1",
-    name: "Villa Sud",
-    city: "Nice",
+    id,
+    name,
+    city,
     timezone: "Europe/Paris",
     color: "moss",
     kind: "str",
@@ -80,14 +81,19 @@ describe("IssueNewPage", () => {
   it("submits a worker issue to the real JSON API contract", async () => {
     const env = installFetchRoutes(
       {
-        "/api/v1/properties": [{ body: [property()] }],
+        "/api/v1/properties": [{ body: [property(), property("prop_2", "Maison Nord", "Lyon")] }],
         "/api/v1/issues": [{ status: 201, body: issue() }],
       },
       { match: "endsWith" },
     );
     render(<Harness />);
 
-    await screen.findByText("Villa Sud");
+    const propertyControl = await screen.findByRole("combobox", { name: /^Property\b/ });
+    const form = propertyControl.closest("form") as HTMLFormElement;
+    const propertyInput = form.querySelector<HTMLInputElement>('input[type="hidden"][name="property_id"]');
+    expect(propertyControl).toHaveValue("Villa Sud");
+    expect(propertyControl).toBeRequired();
+    expect(propertyInput).toHaveValue("prop_1");
     fireEvent.change(screen.getByLabelText("Short title"), {
       target: { value: "Bathroom tap dripping" },
     });
@@ -99,6 +105,8 @@ describe("IssueNewPage", () => {
     fireEvent.change(screen.getByLabelText("What happened?"), {
       target: { value: "Water is leaking under the sink." },
     });
+    await chooseSearchableOption(document.body, /^Property\b/, /Maison Nord/i);
+    expect(propertyInput).toHaveValue("prop_2");
 
     expect(screen.getByRole("button", { name: "Attach photo" })).toBeInTheDocument();
     const input = screen.getByLabelText("Photo file") as HTMLInputElement;
@@ -115,7 +123,7 @@ describe("IssueNewPage", () => {
       title: "Bathroom tap dripping",
       severity: "urgent",
       category: "safety",
-      property_id: "prop_1",
+      property_id: "prop_2",
       area: "Master bathroom",
       body: "Water is leaking under the sink.",
     });

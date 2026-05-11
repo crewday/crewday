@@ -1,4 +1,7 @@
+import { useMemo } from "react";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
+import SearchableSelect from "@/components/SearchableSelect";
+import { propertySelectOption } from "@/lib/propertySelectOptions";
 import type { Property } from "@/types/api";
 import ConfidenceChip from "./ConfidenceChip";
 import { CATEGORIES, confidenceClass } from "./lib/expenseHelpers";
@@ -15,6 +18,7 @@ interface SubmitExpenseFieldsProps {
 export function SubmitExpenseFields(props: SubmitExpenseFieldsProps) {
   // code-health: ignore[nloc] Declarative form field layout is extracted from SubmitExpenseForm and has little branching.
   const { values, confidences, isScanned, properties, onFieldChange } = props;
+  const propertyOptions = useMemo(() => properties.map(propertySelectOption), [properties]);
   return (
     <>
       <TextField
@@ -62,7 +66,7 @@ export function SubmitExpenseFields(props: SubmitExpenseFieldsProps) {
       />
       <PropertyField
         value={values.property_id}
-        properties={properties}
+        propertyOptions={propertyOptions}
         onChange={(value) => onFieldChange("property_id", value)}
       />
       <CategoryField
@@ -136,29 +140,23 @@ function TextField(props: TextFieldProps) {
 
 function PropertyField({
   value,
-  properties,
+  propertyOptions,
   onChange,
 }: {
   value: string;
-  properties: Property[];
+  propertyOptions: ReturnType<typeof propertySelectOption>[];
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="field">
-      <span>Property (optional)</span>
-      <select
-        name="property_id"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">— No property —</option>
-        {properties.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}
-          </option>
-        ))}
-      </select>
-    </label>
+    <SearchableSelect
+      label="Property"
+      name="property_id"
+      requirement="optional"
+      value={value}
+      options={propertyOptions}
+      blankOption={{ label: "No property" }}
+      onChange={onChange}
+    />
   );
 }
 

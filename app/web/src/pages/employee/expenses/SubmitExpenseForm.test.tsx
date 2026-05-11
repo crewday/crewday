@@ -20,6 +20,7 @@ import {
   __resetApiProvidersForTests,
   registerWorkspaceSlugGetter,
 } from "@/lib/api";
+import { chooseSearchableOption } from "@/test/searchableSelect";
 import SubmitExpenseForm from "./SubmitExpenseForm";
 
 interface ScriptedResponse {
@@ -208,10 +209,15 @@ describe("SubmitExpenseForm", () => {
         screen.getByRole("button", { name: /submit expense/i }),
       ).not.toBeDisabled();
     });
-    // Wait for the property list to populate the select.
+    // Wait for the property list to populate the searchable select.
     await waitFor(() => {
-      expect(screen.getByRole("option", { name: "Sunset Villa" })).toBeInTheDocument();
+      expect(screen.getByRole("combobox", { name: /^Property\b/ })).toHaveValue("No property");
     });
+    const propertyControl = screen.getByRole("combobox", { name: /^Property\b/ });
+    const form = propertyControl.closest("form") as HTMLFormElement;
+    const propertyInput = form.querySelector<HTMLInputElement>('input[type="hidden"][name="property_id"]');
+    expect(propertyControl).not.toBeRequired();
+    expect(propertyInput).toHaveValue("");
 
     // Fill the form. Manual-entry path → defaults to today + EUR +
     // category="other"; the test changes the fields whose mapping
@@ -227,15 +233,13 @@ describe("SubmitExpenseForm", () => {
     // rather than the default.
     fireEvent.click(screen.getByLabelText("Supplies"));
     // Pick a property to exercise the property_id branch.
-    const propSelect = screen.getByDisplayValue(
-      "— No property —",
-    ) as HTMLSelectElement;
-    fireEvent.change(propSelect, { target: { value: "prop-1" } });
+    await chooseSearchableOption(document.body, /^Property\b/, /Sunset Villa/i);
+    expect(propertyInput).toHaveValue("prop-1");
     // Type a note so `note_md` shows up on the wire.
     const note = screen.getByPlaceholderText("What it was for") as HTMLTextAreaElement;
     fireEvent.change(note, { target: { value: "Cleaning supplies" } });
 
-    fireEvent.submit(vendor.closest("form") as HTMLFormElement);
+    fireEvent.submit(form);
 
     await waitFor(() => {
       expect(
