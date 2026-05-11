@@ -18,6 +18,7 @@ import {
   registerQueryKeyWorkspaceGetter,
 } from "@/lib/queryKeys";
 import { installFakeIndexedDb } from "@/test/fakeIndexedDb";
+import { chooseSearchableOption } from "@/test/searchableSelect";
 import TodayPage from "./TodayPage";
 
 interface FakeResponse {
@@ -577,12 +578,8 @@ describe("TodayPage", () => {
       fireEvent.change(within(dialog).getByLabelText(/^Title\b/), {
         target: { value: "Property area task" },
       });
-      fireEvent.change(within(dialog).getByLabelText(/^Property\b/), {
-        target: { value: "p1" },
-      });
-      fireEvent.change(await within(dialog).findByLabelText(/^Area\b/), {
-        target: { value: "area_kitchen" },
-      });
+      await chooseSearchableOption(dialog, /^Property\b/, /Villa Sud/i);
+      await chooseSearchableOption(dialog, /^Area\b/, /Kitchen/i);
       fireEvent.click(within(dialog).getByRole("button", { name: "Add task" }));
 
       await waitFor(() => {
