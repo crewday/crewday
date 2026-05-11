@@ -588,6 +588,14 @@
 .searchable-select__option.is-active {
   background: var(--paper-2);
 }
+.searchable-select__option.is-disabled {
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+.searchable-select__option.is-disabled:hover,
+.searchable-select__option.is-disabled.is-active {
+  background: transparent;
+}
 .searchable-select__option[aria-selected="true"] {
   background: var(--moss-softer);
 }

@@ -193,7 +193,7 @@ describe("permissions user display", () => {
       </QueryClientProvider>,
     );
 
-    expect(screen.getByRole("option", { name: "Alice" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /^User/ })).toHaveValue("Alice");
     expect(screen.queryByText("user_1")).not.toBeInTheDocument();
   });
 
