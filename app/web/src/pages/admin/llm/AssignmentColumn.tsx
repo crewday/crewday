@@ -125,13 +125,13 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
                 {inheritedChildren.map((child) => {
                   // code-health: ignore[ccn nloc] Inherited-child row mapping is a compact visual state mapper over one capability edge.
                   const missing = indexes.issuesByCapability.get(child.key) ?? [];
-                  const isExplicit = indexes.explicitInheritanceByChild.has(child.key);
                   const childActive =
                     active?.column === "capability" && active.id === child.key;
                   const childLinked = highlighted.capabilities.has(child.key);
                   return (
-                    <div
+                    <button
                       key={child.key}
+                      type="button"
                       className={[
                         "llm-graph-node__child",
                         childActive ? "is-active" : "",
@@ -146,49 +146,33 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
                         setHover({ column: "capability", id: child.key });
                       }}
                       onMouseLeave={() => setHover(null)}
+                      onFocus={(e) => {
+                        e.stopPropagation();
+                        setHover({ column: "capability", id: child.key });
+                      }}
+                      onBlur={() => setHover(null)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelection({ column: "capability", id: child.key });
+                        onOpenCapability(child.key);
+                      }}
                       title={
                         missing.length
                           ? `Inherited model lacks ${missing.join(", ")}`
                           : `Inherits from ${cap.key}`
                       }
+                      aria-label={`Open assignment and inheritance settings for ${child.key}, inherited from ${cap.key}${
+                        missing.length
+                          ? `, inherited model lacks ${missing.join(", ")}`
+                          : ""
+                      }, ${formatUsageSummary(child.calls_30d, child.spend_usd_30d)}`}
                     >
-                      <button
-                        className="llm-graph-node__child-main"
-                        type="button"
-                        aria-label={`${child.key} inherited capability, ${formatUsageSummary(
-                          child.calls_30d,
-                          child.spend_usd_30d,
-                        )}`}
-                        onFocus={(e) => {
-                          e.stopPropagation();
-                          setHover({ column: "capability", id: child.key });
-                        }}
-                        onBlur={() => setHover(null)}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelection({ column: "capability", id: child.key });
-                          onOpenCapability(child.key);
-                        }}
-                      >
-                        <code className="inline-code">{child.key}</code>
-                        <LlmUsageTotals
-                          spendUsd={child.spend_usd_30d}
-                          calls={child.calls_30d}
-                        />
-                      </button>
-                      <Chip tone={missing.length ? "rust" : "sand"} size="sm">
-                        {isExplicit
-                          ? missing.length
-                            ? "invalid explicit"
-                            : "explicit"
-                          : missing.length
-                            ? "invalid implicit"
-                            : "implicit default"}
-                      </Chip>
-                      <span className="llm-graph-node__inherit-hint">
-                        {isExplicit ? "Edit in modal" : "Set explicit parent"}
-                      </span>
-                    </div>
+                      <code className="inline-code">{child.key}</code>
+                      <LlmUsageTotals
+                        spendUsd={child.spend_usd_30d}
+                        calls={child.calls_30d}
+                      />
+                    </button>
                   );
                 })}
               </div>

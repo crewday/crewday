@@ -20,6 +20,7 @@ interface ModelColumnProps {
   setSelection: SelectionSetter;
   nodeClass: NodeClass;
   setModelRef: ElementRefSetter;
+  setProviderModelRef: ElementRefSetter;
   onEditModel: (modelId: string) => void;
   onEditProviderModel: (providerModelId: string) => void;
   indexes: LlmIndexes;
@@ -32,6 +33,7 @@ export default function ModelColumn(props: ModelColumnProps) {
     setSelection,
     nodeClass,
     setModelRef,
+    setProviderModelRef,
     onEditModel,
     onEditProviderModel,
     indexes,
@@ -92,6 +94,7 @@ export default function ModelColumn(props: ModelColumnProps) {
                     <button
                       key={pm.id}
                       type="button"
+                      ref={setProviderModelRef(pm.id)}
                       className={nodeClass("providerModel", pm.id)}
                       onMouseEnter={(event) => {
                         event.stopPropagation();

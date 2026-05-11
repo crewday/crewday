@@ -113,6 +113,28 @@ function graphBoard(): HTMLElement {
   return board;
 }
 
+function rect(left: number, top: number, width: number, height: number): DOMRect {
+  return {
+    x: left,
+    y: top,
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+function pathEndpoint(d: string): { x: number; y: number } {
+  const values = Array.from(d.matchAll(/-?\d+(?:\.\d+)?/g), (match) =>
+    Number(match[0]),
+  );
+  if (values.length < 2) throw new Error(`Path has no endpoint: ${d}`);
+  return { x: values[values.length - 2]!, y: values[values.length - 1]! };
+}
+
 function expectSharedFormModal(
   dialog: HTMLElement,
   options: { wide?: boolean; section?: boolean; footer?: boolean } = {},
@@ -1201,6 +1223,48 @@ describe("Admin LlmPage", () => {
     }
   });
 
+  it("anchors provider-model graph edges to provider-model subcards", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function getBoundingClientRectMock(this: HTMLElement) {
+        const el = this;
+        const label = el.getAttribute("aria-label") ?? "";
+        if (el.classList.contains("llm-graph")) return rect(0, 0, 900, 600);
+        if (label.startsWith("OpenRouter provider,")) return rect(10, 100, 180, 80);
+        if (label.startsWith("Gemma 4 31B IT model,")) return rect(360, 60, 180, 100);
+        if (label.startsWith("OpenRouter provider model for Gemma 4 31B IT,")) {
+          return rect(380, 210, 160, 40);
+        }
+        if (label.startsWith("OpenRouter provider model for Text Only,")) {
+          return rect(380, 320, 160, 40);
+        }
+        if (label.startsWith("OpenRouter provider model for Fast Chat,")) {
+          return rect(380, 430, 160, 40);
+        }
+        return rect(0, 0, 0, 0);
+      },
+    );
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      await waitFor(() => {
+        const endpoints = Array.from(
+          document.querySelectorAll<SVGPathElement>(".llm-graph__edge--pm"),
+          (path) => pathEndpoint(path.getAttribute("d") ?? ""),
+        );
+        expect(endpoints).toContainEqual({ x: 380, y: 230 });
+      });
+      const pmEndpoints = Array.from(
+        document.querySelectorAll<SVGPathElement>(".llm-graph__edge--pm"),
+        (path) => pathEndpoint(path.getAttribute("d") ?? ""),
+      );
+      expect(pmEndpoints).not.toContainEqual({ x: 360, y: 110 });
+    } finally {
+      fetcher.restore();
+    }
+  });
+
   it("creates, updates, and removes capability inheritance from the modal", async () => {
     // code-health: ignore[nloc] Inheritance modal regression keeps create, update, delete, and graph refresh assertions in one flow.
     const explicitGraph = {
@@ -1253,13 +1317,19 @@ describe("Admin LlmPage", () => {
     try {
       render(<Harness />);
       await findOpenRouterProvider();
-      expect(screen.getByText("invalid implicit")).toBeInTheDocument();
+      const board = within(graphBoard());
+      expect(board.queryByText("implicit default")).not.toBeInTheDocument();
+      expect(board.queryByText("invalid implicit")).not.toBeInTheDocument();
+      expect(board.queryByText("explicit")).not.toBeInTheDocument();
+      expect(board.queryByText("invalid explicit")).not.toBeInTheDocument();
+      expect(board.queryByText("Set explicit parent")).not.toBeInTheDocument();
+      expect(board.queryByText("Edit in modal")).not.toBeInTheDocument();
 
-      fireEvent.click(
-        screen.getByRole("button", {
-          name: /voice.transcribe inherited capability/,
-        }),
-      );
+      const inheritedChild = screen.getByRole("button", {
+        name: /Open assignment and inheritance settings for voice.transcribe/,
+      });
+      expect(inheritedChild).toHaveClass("llm-graph-node__child", "is-error");
+      fireEvent.click(inheritedChild);
       const dialog = assignmentDialog("voice.transcribe");
       fireEvent.change(within(dialog).getByLabelText(/Parent capability/), {
         target: { value: "chat.manager" },

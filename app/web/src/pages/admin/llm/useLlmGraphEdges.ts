@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import type { LlmGraphPayload } from "@/types";
 import type { LlmIndexes } from "./lib/llmIndexes";
 import type { EdgeLayout, Selection } from "./types";
@@ -11,6 +18,7 @@ export function useLlmGraphEdges(
   const graphRef = useRef<HTMLDivElement | null>(null);
   const providerRefs = useRef<Map<string, HTMLElement>>(new Map());
   const modelRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const providerModelRefs = useRef<Map<string, HTMLElement>>(new Map());
   const rungRefs = useRef<Map<string, HTMLElement>>(new Map());
   const frameRef = useRef<number | null>(null);
   const [edges, setEdges] = useState<EdgeLayout[]>([]);
@@ -25,14 +33,14 @@ export function useLlmGraphEdges(
     const issues = new Set(graph.assignment_issues.map((i) => i.assignment_id));
     for (const pm of graph.provider_models) {
       const provider = providerRefs.current.get(pm.provider_id);
-      const model = modelRefs.current.get(pm.model_id);
-      if (!provider || !model) continue;
+      const providerModel = providerModelRefs.current.get(pm.id);
+      if (!provider || !providerModel) continue;
       const pBox = provider.getBoundingClientRect();
-      const mBox = model.getBoundingClientRect();
+      const pmBox = providerModel.getBoundingClientRect();
       const x1 = pBox.right - hostBox.left;
       const y1 = pBox.top + pBox.height / 2 - hostBox.top;
-      const x2 = mBox.left - hostBox.left;
-      const y2 = mBox.top + mBox.height / 2 - hostBox.top;
+      const x2 = pmBox.left - hostBox.left;
+      const y2 = pmBox.top + pmBox.height / 2 - hostBox.top;
       const dx = Math.max(40, (x2 - x1) * 0.55);
       next.push({
         id: "pm-" + pm.id,
@@ -81,11 +89,13 @@ export function useLlmGraphEdges(
   }, [recomputeEdges]);
 
   const setRef = useCallback(
-    (map: typeof providerRefs) => (id: string) => (el: HTMLElement | null) => {
-      if (el) map.current.set(id, el);
-      else map.current.delete(id);
-      requestRecompute();
-    },
+    (map: RefObject<Map<string, HTMLElement>>) =>
+      (id: string) =>
+      (el: HTMLElement | null) => {
+        if (el) map.current.set(id, el);
+        else map.current.delete(id);
+        requestRecompute();
+      },
     [requestRecompute],
   );
 
@@ -101,6 +111,7 @@ export function useLlmGraphEdges(
       if (host) ro.observe(host);
       for (const node of providerRefs.current.values()) ro.observe(node);
       for (const node of modelRefs.current.values()) ro.observe(node);
+      for (const node of providerModelRefs.current.values()) ro.observe(node);
       for (const node of rungRefs.current.values()) ro.observe(node);
     };
     observeAll();
@@ -121,6 +132,7 @@ export function useLlmGraphEdges(
     graphRef,
     providerRefs,
     modelRefs,
+    providerModelRefs,
     rungRefs,
     edges,
     canvas,

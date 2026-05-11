@@ -146,7 +146,7 @@
 }
 .llm-graph-node__child {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(112px, 0.8fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   width: 100%;
@@ -159,44 +159,22 @@
   font: inherit;
   text-align: left;
 }
-.llm-graph-node__child-main {
-  display: grid;
+.llm-graph-node__child code {
   min-width: 0;
-  max-width: 100%;
-  gap: 4px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-}
-.llm-graph-node__child-main code {
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.llm-graph-node__child-main .llm-usage-total {
-  width: 100%;
-  grid-template-columns: minmax(0, 1fr);
-  justify-items: start;
-}
-.llm-graph-node__inherit-hint {
-  border: 1px solid var(--rust);
-  border-radius: 6px;
-  background: var(--rust-soft);
-  color: var(--rust);
-  font-size: 12px;
-  padding: 4px 7px;
-  white-space: nowrap;
+.llm-graph-node__child .llm-usage-total {
+  justify-self: end;
 }
 .llm-graph-node__child:hover {
   border-color: var(--moss);
   color: var(--ink);
 }
-.llm-graph-node__child:focus-within {
+.llm-graph-node__child:focus-visible {
   border-color: var(--moss);
   box-shadow: 0 0 0 2px var(--moss-soft);
+  outline: 0;
 }
 .llm-graph-node__child.is-linked {
   border-color: var(--moss);
@@ -643,9 +621,7 @@
     grid-column: 2;
     justify-self: start;
   }
-  .llm-graph-node__child-main,
-  .llm-graph-node__child > .chip,
-  .llm-graph-node__inherit-hint {
+  .llm-graph-node__child .llm-usage-total {
     grid-column: 1;
     justify-self: start;
   }

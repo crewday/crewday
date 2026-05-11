@@ -50,8 +50,16 @@ export default function AdminLlmPage() {
   }, [graph, indexes, active]);
 
   const hasActive = active !== null;
-  const { graphRef, providerRefs, modelRefs, rungRefs, edges, canvas, setRef } =
-    useLlmGraphEdges(graph, indexes, active);
+  const {
+    graphRef,
+    providerRefs,
+    modelRefs,
+    providerModelRefs,
+    rungRefs,
+    edges,
+    canvas,
+    setRef,
+  } = useLlmGraphEdges(graph, indexes, active);
 
   const edgeIsHighlighted = (e: EdgeLayout): boolean => {
     if (!active) return false;
@@ -210,6 +218,7 @@ export default function AdminLlmPage() {
           setSelection={setSelection}
           nodeClass={nodeClass}
           setModelRef={setRef(modelRefs)}
+          setProviderModelRef={setRef(providerModelRefs)}
           onEditModel={(id) => setRegistryDialog({ kind: "model", mode: "edit", id })}
           onEditProviderModel={(id) =>
             setRegistryDialog({ kind: "providerModel", mode: "edit", id })
