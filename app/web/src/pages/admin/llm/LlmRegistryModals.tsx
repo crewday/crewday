@@ -5,6 +5,7 @@ import FormModal, {
   FormModalField,
   FormModalGrid,
 } from "@/components/FormModal";
+import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import type {
@@ -157,6 +158,62 @@ function describedBy(...ids: (string | undefined)[]): string | undefined {
   return present.length ? present.join(" ") : undefined;
 }
 
+function providerOption(provider: LlmProvider): SearchableSelectOption {
+  return {
+    value: provider.id,
+    label: provider.name,
+    secondaryText: provider.provider_type,
+    searchText: [
+      provider.name,
+      provider.provider_type,
+      provider.endpoint ?? "",
+      provider.id,
+    ].join(" "),
+  };
+}
+
+function modelOption(model: LlmModel): SearchableSelectOption {
+  const capabilities = model.capabilities.join(", ");
+  return {
+    value: model.id,
+    label: model.display_name,
+    secondaryText: [model.vendor, capabilities].filter(Boolean).join(" - "),
+    searchText: [
+      model.display_name,
+      model.canonical_name,
+      model.vendor,
+      capabilities,
+      model.id,
+    ].join(" "),
+  };
+}
+
+function providerModelOption(
+  pm: LlmProviderModel,
+  models: readonly LlmModel[],
+  provider?: LlmProvider,
+): SearchableSelectOption {
+  const model = models.find((item) => item.id === pm.model_id);
+  const capabilities = model?.capabilities.join(", ");
+  return {
+    value: pm.id,
+    label: `${model?.display_name ?? pm.api_model_id} (${pm.api_model_id})`,
+    secondaryText: [
+      provider?.name,
+      model?.canonical_name,
+      capabilities,
+    ].filter(Boolean).join(" - "),
+    searchText: [
+      provider?.name,
+      model?.display_name,
+      model?.canonical_name,
+      pm.api_model_id,
+      capabilities,
+      pm.id,
+    ].filter(Boolean).join(" "),
+  };
+}
+
 export default function LlmRegistryModals(props: RegistryModalsProps) {
   // code-health: ignore[ccn nloc] Lizard misattributes the registry form bodies to this modal dispatcher; each form is implemented below.
   const { dialog, providers, models, providerModels, indexes, onClose } = props;
@@ -223,12 +280,7 @@ function ProviderForm(props: ProviderFormProps) {
     if (!provider) return [];
     return providerModels
       .filter((pm) => pm.provider_id === provider.id)
-      .map((pm) => ({
-        id: pm.id,
-        label:
-          models.find((model) => model.id === pm.model_id)?.display_name ??
-          pm.api_model_id,
-      }));
+      .map((pm) => providerModelOption(pm, models, provider));
   }, [models, provider, providerModels]);
 
   const invalidate = async () => {
@@ -373,20 +425,16 @@ function ProviderForm(props: ProviderFormProps) {
         <FormModalField label="API key envelope ref" requirement="optional">
           <input value={apiKeyRef} onChange={(e) => setApiKeyRef(e.target.value)} />
         </FormModalField>
-        <FormModalField label="Default provider-model" requirement="optional">
-          <select
-            value={defaultModel}
-            onChange={(e) => setDefaultModel(e.target.value)}
-            disabled={defaultModelOptions.length === 0}
-          >
-            <option value="">None</option>
-            {defaultModelOptions.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </FormModalField>
+        <SearchableSelect
+          label="Default provider-model"
+          requirement="optional"
+          className="form-modal__field"
+          value={defaultModel}
+          options={defaultModelOptions}
+          blankOption={{ label: "None" }}
+          onChange={setDefaultModel}
+          disabled={defaultModelOptions.length === 0}
+        />
         <FormModalGrid>
           <FormModalField label="Timeout seconds" requirement="required">
             <input
@@ -721,6 +769,8 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   const [enabled, setEnabled] = useState(providerModel?.is_enabled ?? true);
   const [clientErr, setClientErr] = useState<string | null>(null);
   const [serverErr, setServerErr] = useState<string | null>(null);
+  const providerOptions = useMemo(() => providers.map(providerOption), [providers]);
+  const modelOptions = useMemo(() => models.map(modelOption), [models]);
 
   const invalidate = async () => {
     await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
@@ -855,36 +905,28 @@ function ProviderModelForm(props: ProviderModelFormProps) {
       }
     >
         <FormModalGrid>
-          <FormModalField label="Provider" requirement="required">
-            <select
-              value={providerId}
-              onChange={(e) => setProviderId(e.target.value)}
-              required
-              aria-invalid={clientErr === "Provider is required."}
-              aria-describedby={errId}
-            >
-              {providers.map((provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.name}
-                </option>
-              ))}
-            </select>
-          </FormModalField>
-          <FormModalField label="Model" requirement="required">
-            <select
-              value={modelId}
-              onChange={(e) => setModelId(e.target.value)}
-              required
-              aria-invalid={clientErr === "Model is required."}
-              aria-describedby={errId}
-            >
-              {models.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.display_name}
-                </option>
-              ))}
-            </select>
-          </FormModalField>
+          <SearchableSelect
+            label="Provider"
+            requirement="required"
+            className="form-modal__field"
+            value={providerId}
+            options={providerOptions}
+            onChange={setProviderId}
+            required
+            aria-invalid={clientErr === "Provider is required."}
+            aria-describedby={errId}
+          />
+          <SearchableSelect
+            label="Model"
+            requirement="required"
+            className="form-modal__field"
+            value={modelId}
+            options={modelOptions}
+            onChange={setModelId}
+            required
+            aria-invalid={clientErr === "Model is required."}
+            aria-describedby={errId}
+          />
         </FormModalGrid>
         <FormModalField label="API model id" requirement="required">
           <input

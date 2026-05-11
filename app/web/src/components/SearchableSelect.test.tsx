@@ -238,6 +238,69 @@ describe("SearchableSelect", () => {
     expect(input).not.toHaveAttribute("aria-invalid");
   });
 
+  it("shows disabled options without allowing them to be selected", () => {
+    const onChange = vi.fn();
+    render(
+      <SearchableSelect
+        label="Country"
+        value="DE"
+        options={[
+          { value: "DE", label: "Germany" },
+          { value: "FR", label: "France", disabled: true, secondaryText: "Unavailable" },
+          { value: "US", label: "United States" },
+        ]}
+        onChange={onChange}
+      />,
+    );
+
+    const input = screen.getByRole("combobox", { name: /country/i });
+    fireEvent.focus(input);
+
+    const disabledOption = screen.getByRole("option", { name: /france/i });
+    const selectedOption = screen.getByRole("option", { name: /germany/i });
+    expect(disabledOption).toHaveAttribute("aria-disabled", "true");
+
+    fireEvent.mouseEnter(disabledOption);
+    expect(input).toHaveAttribute("aria-activedescendant", selectedOption.id);
+
+    fireEvent.mouseDown(disabledOption);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input).toHaveValue("Germany");
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input).toHaveAttribute(
+      "aria-activedescendant",
+      screen.getByRole("option", { name: /united states/i }).id,
+    );
+  });
+
+  it("skips a disabled filtered option when committing from the keyboard", () => {
+    const onChange = vi.fn();
+    render(
+      <SearchableSelect
+        label="Country"
+        value="DE"
+        options={[
+          { value: "DE", label: "Germany" },
+          { value: "FR", label: "France", disabled: true },
+          { value: "FRA", label: "Frankfurt" },
+        ]}
+        onChange={onChange}
+      />,
+    );
+
+    const input = screen.getByRole("combobox", { name: /country/i });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "fr" } });
+
+    const enabledOption = screen.getByRole("option", { name: /frankfurt/i });
+    expect(input).toHaveAttribute("aria-activedescendant", enabledOption.id);
+
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onChange).toHaveBeenCalledWith("FRA");
+  });
+
   it("keeps long labels and secondary text inside the popover", () => {
     expect(formsCss).toMatch(
       /\.searchable-select__label \{[\s\S]*overflow-wrap: anywhere;[\s\S]*\}/m,

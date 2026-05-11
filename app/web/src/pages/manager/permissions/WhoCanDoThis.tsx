@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import FormField from "@/components/FormField";
+import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { Chip, Loading } from "@/components/common";
@@ -25,6 +25,8 @@ export default function WhoCanDoThis({
   // code-health: ignore[nloc] Permission explanation panel is declarative render composition over computed rows.
   const [userId, setUserId] = useState<string>(users[0]?.id ?? "");
   const [actionKey, setActionKey] = useState<string>(actions[0]?.key ?? "");
+  const userOptions = useMemo(() => users.map(userOption), [users]);
+  const actionOptions = useMemo(() => actions.map(actionOption), [actions]);
 
   useEffect(() => {
     if (users.length === 0) {
@@ -68,24 +70,20 @@ export default function WhoCanDoThis({
     <div className="permissions__resolver">
       <h4>Who can do this?</h4>
       <div className="permissions__resolver-fields">
-        <FormField label="User" requirement="required">
-          <select value={userId} onChange={(e) => setUserId(e.target.value)}>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.display_name}
-              </option>
-            ))}
-          </select>
-        </FormField>
-        <FormField label="Action" requirement="required">
-          <select value={actionKey} onChange={(e) => setActionKey(e.target.value)}>
-            {actions.map((a) => (
-              <option key={a.key} value={a.key}>
-                {a.key}
-              </option>
-            ))}
-          </select>
-        </FormField>
+        <SearchableSelect
+          label="User"
+          value={userId}
+          options={userOptions}
+          onChange={setUserId}
+          required
+        />
+        <SearchableSelect
+          label="Action"
+          value={actionKey}
+          options={actionOptions}
+          onChange={setActionKey}
+          required
+        />
       </div>
       {resolved.isPending ? (
         <Loading />
@@ -113,4 +111,23 @@ export default function WhoCanDoThis({
       ) : null}
     </div>
   );
+}
+
+function userOption(user: UserIndexRow): SearchableSelectOption {
+  return {
+    value: user.id,
+    label: user.display_name,
+    secondaryText: user.email,
+    searchText: [user.display_name, user.email, user.id].filter(Boolean).join(" "),
+  };
+}
+
+function actionOption(action: ActionCatalogEntry): SearchableSelectOption {
+  const scopes = action.valid_scope_kinds.join(", ");
+  return {
+    value: action.key,
+    label: action.key,
+    secondaryText: scopes,
+    searchText: `${action.key} ${scopes}`,
+  };
 }

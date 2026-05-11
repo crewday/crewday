@@ -6,6 +6,7 @@ import FormModal, {
   FormModalField,
   FormModalGrid,
 } from "@/components/FormModal";
+import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { Chip } from "@/components/common";
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -202,6 +203,38 @@ function providerModelLabel(pm: LlmProviderModel, indexes: LlmIndexes): string {
   return `${model?.display_name ?? pm.api_model_id} via ${provider?.name ?? "provider"} (${pm.api_model_id})`;
 }
 
+function providerModelOption(
+  pm: LlmProviderModel,
+  required: string[],
+  indexes: LlmIndexes,
+): SearchableSelectOption {
+  const model = indexes.modelsById.get(pm.model_id);
+  const provider = indexes.providersById.get(pm.provider_id);
+  const capabilities = model?.capabilities ?? [];
+  const missing = compatibleMissing(pm, required, indexes);
+  const missingText = missing.length ? `missing ${missing.join(", ")}` : "";
+  return {
+    value: pm.id,
+    label: providerModelLabel(pm, indexes),
+    secondaryText: [
+      provider?.name,
+      model?.canonical_name,
+      capabilities.join(", "),
+      missingText,
+    ].filter(Boolean).join(" - "),
+    searchText: [
+      provider?.name,
+      model?.display_name,
+      model?.canonical_name,
+      pm.api_model_id,
+      capabilities.join(" "),
+      missingText,
+      pm.id,
+    ].filter(Boolean).join(" "),
+    disabled: missing.length > 0,
+  };
+}
+
 export default function LlmAssignmentModal({
   capabilityKey,
   graph,
@@ -336,13 +369,6 @@ export default function LlmAssignmentModal({
     onError: (error: Error) =>
       setServerErr(apiErrorCopy(error, "Inheritance delete failed.")),
   });
-
-  const providerModelGroups = useMemo(() => {
-    return graph.models.map((model) => ({
-      model,
-      providerModels: graph.provider_models.filter((pm) => pm.model_id === model.id),
-    }));
-  }, [graph.models, graph.provider_models]);
 
   const parentOptions = graph.capabilities.filter((cap) => cap.key !== capabilityKey);
   const err = clientErr ?? serverErr;
@@ -494,7 +520,7 @@ export default function LlmAssignmentModal({
                     draft={draft}
                     index={index}
                     indexes={indexes}
-                    groups={providerModelGroups}
+                    providerModels={graph.provider_models}
                     onChange={updateDraft}
                     onSubmit={submitRung}
                     onDelete={(id) => {
@@ -577,7 +603,7 @@ interface AssignmentRungFormProps {
   draft: DraftRung;
   index: number;
   indexes: LlmIndexes;
-  groups: { model: LlmGraphPayload["models"][number]; providerModels: LlmProviderModel[] }[];
+  providerModels: LlmProviderModel[];
   onChange: (key: string, patch: Partial<DraftRung>) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>, draft: DraftRung) => void;
   onDelete: (assignmentId: string) => void;
@@ -592,7 +618,7 @@ function AssignmentRungForm(props: AssignmentRungFormProps) {
     draft,
     index,
     indexes,
-    groups,
+    providerModels,
     onChange,
     onSubmit,
     onDelete,
@@ -604,6 +630,10 @@ function AssignmentRungForm(props: AssignmentRungFormProps) {
   const selected = indexes.pmById.get(draft.providerModelId);
   const missing = compatibleMissing(selected, required, indexes);
   const readOnly = draft.readOnly;
+  const providerModelOptions = useMemo(
+    () => providerModels.map((pm) => providerModelOption(pm, required, indexes)),
+    [indexes, providerModels, required],
+  );
 
   return (
     <form className="llm-assignment-editor__form" onSubmit={(event) => onSubmit(event, draft)}>
@@ -621,36 +651,17 @@ function AssignmentRungForm(props: AssignmentRungFormProps) {
           </Chip>
         ) : null}
       </header>
-      <FormModalField label="Provider-model" requirement="required">
-        <select
-          value={draft.providerModelId}
-          disabled={readOnly}
-          aria-invalid={missing.length > 0}
-          onChange={(event) =>
-            onChange(draft.key, { providerModelId: event.target.value })
-          }
-        >
-          {groups.map(({ model, providerModels }) => (
-            <optgroup key={model.id} label={model.display_name}>
-              {providerModels.map((pm) => {
-                const optionMissing = compatibleMissing(pm, required, indexes);
-                return (
-                  <option
-                    key={pm.id}
-                    value={pm.id}
-                    disabled={optionMissing.length > 0}
-                  >
-                    {providerModelLabel(pm, indexes)}
-                    {optionMissing.length
-                      ? ` - missing ${optionMissing.join(", ")}`
-                      : ""}
-                  </option>
-                );
-              })}
-            </optgroup>
-          ))}
-        </select>
-      </FormModalField>
+      <SearchableSelect
+        label="Provider-model"
+        requirement="required"
+        className="form-modal__field"
+        value={draft.providerModelId}
+        options={providerModelOptions}
+        disabled={readOnly}
+        required
+        aria-invalid={missing.length > 0}
+        onChange={(value) => onChange(draft.key, { providerModelId: value })}
+      />
       <FormModalGrid>
         <FormModalField label="Max tokens" requirement="optional">
           <input

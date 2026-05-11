@@ -944,9 +944,11 @@ describe("Admin LlmPage", () => {
       });
 
       fireEvent.click(within(dialog).getByRole("button", { name: /Add rung/ }));
-      fireEvent.change(within(dialog).getAllByLabelText(/Provider-model/).at(-1)!, {
-        target: { value: "pm_fast" },
-      });
+      const newProviderModelInput = within(dialog).getAllByRole("combobox", {
+        name: /Provider-model/,
+      }).at(-1)!;
+      fireEvent.change(newProviderModelInput, { target: { value: "fast" } });
+      fireEvent.mouseDown(within(dialog).getByRole("option", { name: /Fast Chat/ }));
       fireEvent.click(within(dialog).getByRole("button", { name: "Create rung" }));
 
       await waitFor(() => {

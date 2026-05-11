@@ -6,6 +6,7 @@ export interface SearchableSelectOption {
   label: string;
   secondaryText?: string;
   searchText?: string;
+  disabled?: boolean;
 }
 
 interface SearchableSelectBlankOption {
@@ -108,7 +109,7 @@ export default function SearchableSelect({
   }, [invalidSelection, label]);
 
   function commit(option: SearchableSelectOption) {
-    if (disabled) return;
+    if (disabled || option.disabled) return;
     onChange(option.value);
     setQuery(option.label);
     setOpen(false);
@@ -121,7 +122,31 @@ export default function SearchableSelect({
 
   function openAtSelected() {
     setOpen(true);
+    if (selectedOption?.disabled) {
+      setActiveIndex(
+        firstEnabledIndex(
+          selectOptions.slice(
+            selectedOpenStartIndex,
+            selectedOpenStartIndex + MAX_VISIBLE_OPTIONS,
+          ),
+        ),
+      );
+      return;
+    }
     setActiveIndex(selectedOpenActiveIndex);
+  }
+
+  function moveActive(direction: -1 | 1) {
+    setOpen(true);
+    setActiveIndex((index) => {
+      const maxIndex = Math.max(visibleOptions.length - 1, 0);
+      const startIndex = open
+        ? index
+        : direction === -1 && selectedOptionIndex < 0
+          ? maxIndex
+          : selectedOpenActiveIndex;
+      return nextEnabledIndex(visibleOptions, startIndex, direction, maxIndex);
+    });
   }
 
   return (
@@ -155,28 +180,23 @@ export default function SearchableSelect({
         }}
         onBlur={resetToSelected}
         onChange={(event) => {
-          setQuery(event.currentTarget.value);
+          const nextQuery = event.currentTarget.value;
+          setQuery(nextQuery);
           setOpen(true);
-          setActiveIndex(0);
+          setActiveIndex(
+            firstEnabledIndex(
+              filterOptions(selectOptions, nextQuery).slice(0, MAX_VISIBLE_OPTIONS),
+            ),
+          );
         }}
         onKeyDown={(event) => {
           if (disabled) return;
           if (event.key === "ArrowDown") {
             event.preventDefault();
-            setOpen(true);
-            setActiveIndex((index) => {
-              const maxIndex = Math.max(visibleOptions.length - 1, 0);
-              const startIndex = open ? index : selectedOpenActiveIndex;
-              return Math.min(Math.max(startIndex, 0) + 1, maxIndex);
-            });
+            moveActive(1);
           } else if (event.key === "ArrowUp") {
             event.preventDefault();
-            setOpen(true);
-            setActiveIndex((index) => {
-              const maxIndex = Math.max(visibleOptions.length - 1, 0);
-              const startIndex = open ? index : selectedOptionIndex >= 0 ? selectedOpenActiveIndex : maxIndex;
-              return Math.max(Math.min(startIndex, maxIndex) - 1, 0);
-            });
+            moveActive(-1);
           } else if (event.key === "Enter" && open) {
             event.preventDefault();
             const option = visibleOptions[activeIndex];
@@ -199,8 +219,15 @@ export default function SearchableSelect({
                   key={option.value}
                   role="option"
                   aria-selected={option.value === selectedOption?.value}
-                  className={index === activeIndex ? "searchable-select__option is-active" : "searchable-select__option"}
-                  onMouseEnter={() => setActiveIndex(index)}
+                  aria-disabled={option.disabled || undefined}
+                  className={[
+                    "searchable-select__option",
+                    index === activeIndex ? "is-active" : null,
+                    option.disabled ? "is-disabled" : null,
+                  ].filter(Boolean).join(" ")}
+                  onMouseEnter={() => {
+                    if (!option.disabled) setActiveIndex(index);
+                  }}
                   onMouseDown={(event) => {
                     event.preventDefault();
                     commit(option);
@@ -255,6 +282,27 @@ function normalizeSearchText(value: string): string {
 
 function optionId(listboxId: string, index: number): string {
   return `${listboxId}-option-${index}`;
+}
+
+function nextEnabledIndex(
+  options: readonly SearchableSelectOption[],
+  startIndex: number,
+  direction: -1 | 1,
+  maxIndex: number,
+): number {
+  if (options.length === 0) return 0;
+  let index = Math.min(Math.max(startIndex, 0), maxIndex);
+  for (let steps = 0; steps < options.length; steps += 1) {
+    index = Math.min(Math.max(index + direction, 0), maxIndex);
+    if (!options[index]?.disabled) return index;
+    if (index === 0 || index === maxIndex) break;
+  }
+  return Math.min(Math.max(startIndex, 0), maxIndex);
+}
+
+function firstEnabledIndex(options: readonly SearchableSelectOption[]): number {
+  const index = options.findIndex((option) => !option.disabled);
+  return index >= 0 ? index : 0;
 }
 
 function joinedIds(...ids: Array<string | false | undefined>): string | undefined {
