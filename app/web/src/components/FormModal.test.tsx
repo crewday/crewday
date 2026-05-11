@@ -1,10 +1,127 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, extname, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import FormModal, { FormModalField, FormModalGrid } from "./FormModal";
 import formsCss from "@/styles/forms.css?raw";
 
+const TEST_DIR = dirname(fileURLToPath(import.meta.url));
+const APP_SRC_ROOT = resolve(TEST_DIR, "..");
+const FORM_MODAL_SOURCE_DIRS = ["components", "pages"];
+const FORM_MODAL_SHELL_ALLOWLIST = new Map<string, string>([
+  ["components/FormModal.tsx", "Shared FormModal owns the structured form modal shell."],
+]);
+const FORBIDDEN_FORM_MODAL_SHELL_CLASSES = [
+  {
+    className: "llm-registry-form__close",
+    reason: "Legacy admin LLM form close buttons must use FormModal.",
+  },
+  {
+    className: "llm-registry-form__head",
+    reason: "Legacy admin LLM form headers must use FormModal.",
+  },
+  {
+    className: "llm-registry-form__body",
+    reason: "Legacy admin LLM form bodies must use FormModal.",
+  },
+  {
+    className: "llm-registry-form__footer",
+    reason: "Legacy admin LLM form footers must use FormModal.",
+  },
+  {
+    className: "inv-create__head",
+    reason: "Inventory-derived form headers must come from FormModal.",
+  },
+  {
+    className: "inv-create__close",
+    reason: "Inventory-derived form close buttons must come from FormModal.",
+  },
+  {
+    className: "inv-create__body",
+    reason: "Inventory-derived form bodies must come from FormModal.",
+  },
+  {
+    className: "inv-create__footer",
+    reason: "Inventory-derived form footers must come from FormModal.",
+  },
+  {
+    className: "sheet-form__head",
+    reason: "Direct sheet form headers must use FormModal.",
+  },
+  {
+    className: "sheet-form__close",
+    reason: "Direct sheet form close buttons must use FormModal.",
+  },
+  {
+    className: "sheet-form__body",
+    reason: "Direct sheet form bodies must use FormModal.",
+  },
+  {
+    className: "sheet-form__footer",
+    reason: "Direct sheet form footers must use FormModal.",
+  },
+] as const;
+
 let originalClose: typeof HTMLDialogElement.prototype.close;
 let originalShowModal: typeof HTMLDialogElement.prototype.showModal;
+
+function sourceFiles(root: string): string[] {
+  const files: string[] = [];
+  const visit = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      const path = join(dir, entry);
+      const stat = statSync(path);
+      if (stat.isDirectory()) {
+        visit(path);
+        continue;
+      }
+      const ext = extname(path);
+      if (
+        (ext === ".ts" || ext === ".tsx")
+        && !path.endsWith(".test.ts")
+        && !path.endsWith(".test.tsx")
+        && !path.endsWith(".spec.ts")
+        && !path.endsWith(".spec.tsx")
+        && !path.endsWith(".d.ts")
+      ) {
+        files.push(path);
+      }
+    }
+  };
+  visit(root);
+  return files;
+}
+
+function relativeSourcePath(file: string): string {
+  return relative(APP_SRC_ROOT, file).split(sep).join("/");
+}
+
+function lineNumber(source: string, index: number): number {
+  return source.slice(0, index).split("\n").length;
+}
+
+function escapedRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function adHocFormModalShellViolations(): string[] {
+  return FORM_MODAL_SOURCE_DIRS.flatMap((dir) => {
+    return sourceFiles(resolve(APP_SRC_ROOT, dir)).flatMap((file) => {
+      const relativePath = relativeSourcePath(file);
+      const allowlistReason = FORM_MODAL_SHELL_ALLOWLIST.get(relativePath);
+      if (allowlistReason != null) return [];
+
+      const source = readFileSync(file, "utf8");
+      return FORBIDDEN_FORM_MODAL_SHELL_CLASSES.flatMap(({ className, reason }) => {
+        const classPattern = new RegExp(`\\b${escapedRegExp(className)}\\b`, "g");
+        return Array.from(source.matchAll(classPattern), (match) => {
+          return `${relativePath}:${lineNumber(source, match.index)} uses .${className}: ${reason}`;
+        });
+      });
+    });
+  });
+}
 
 function renderModal(onClose = vi.fn()) {
   render(
@@ -63,6 +180,24 @@ afterEach(() => {
 });
 
 describe("FormModal", () => {
+  it("keeps structured form modal shells centralized in the shared component", () => {
+    const violations = adHocFormModalShellViolations();
+    const allowlist = Array.from(
+      FORM_MODAL_SHELL_ALLOWLIST,
+      ([file, reason]) => `${file}: ${reason}`,
+    );
+
+    expect(
+      violations,
+      [
+        "Structured form modal shells in app/web/src/pages and app/web/src/components must use FormModal.",
+        "This guard only blocks legacy shell classes, so confirmation dialogs, menus, and media editors stay out of scope.",
+        "Allowed shell owners:",
+        ...allowlist,
+      ].join("\n"),
+    ).toEqual([]);
+  });
+
   it("renders the shared structured modal contract", () => {
     renderModal();
 
