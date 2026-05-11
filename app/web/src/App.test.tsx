@@ -18,6 +18,7 @@ const mockRenders = vi.hoisted(() => ({
   adminDashboardPage: vi.fn(),
   adminLayout: vi.fn(),
   adminLlmPage: vi.fn(),
+  adminLlmUsagePage: vi.fn(),
   clientBillableHoursPage: vi.fn(),
   clientInvoicesPage: vi.fn(),
   clientLayout: vi.fn(),
@@ -139,6 +140,13 @@ vi.mock("@/pages/admin/LlmPage", () => ({
   default: function MockAdminLlmPage(): ReactElement {
     mockRenders.adminLlmPage();
     return <main data-testid="admin-llm-graph">Admin LLM graph</main>;
+  },
+}));
+
+vi.mock("@/pages/admin/LlmUsagePage", () => ({
+  default: function MockAdminLlmUsagePage(): ReactElement {
+    mockRenders.adminLlmUsagePage();
+    return <main data-testid="admin-llm-usage">Admin LLM usage</main>;
   },
 }));
 
@@ -625,6 +633,16 @@ describe("App public root and protected deep links", () => {
     });
     expect(await screen.findByTestId("admin-llm-graph")).toBeInTheDocument();
     expect(mockRenders.adminLlmPage).toHaveBeenCalled();
+  });
+
+  it("renders the dedicated admin LLM usage route directly", async () => {
+    renderAppAt("/admin/llm/usage", "manager");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/admin/llm/usage");
+    });
+    expect(await screen.findByTestId("admin-llm-usage")).toBeInTheDocument();
+    expect(mockRenders.adminLlmUsagePage).toHaveBeenCalled();
   });
 
   it("keeps the authenticated workspace picker on the bare host", async () => {

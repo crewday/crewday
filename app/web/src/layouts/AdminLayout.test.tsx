@@ -171,6 +171,9 @@ describe("<AdminLayout> — role guard (closes cd-28s7)", () => {
       const graph = screen.getByRole("link", { name: /Graph\/config/ });
       expect(graph).toHaveAttribute("href", "/admin/llm/graph");
       expect(graph).toHaveClass("nav-link--active");
+      const llmUsage = screen.getByRole("link", { name: /LLM usage/ });
+      expect(llmUsage).toHaveAttribute("href", "/admin/llm/usage");
+      expect(llmUsage).not.toHaveClass("nav-link--active");
       expect(screen.getByRole("link", { name: /Prompts\/docs/ })).toHaveAttribute(
         "href",
         "/admin/agent-docs",
