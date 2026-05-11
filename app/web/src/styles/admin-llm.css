@@ -222,11 +222,6 @@
   align-items: center;
   gap: 6px 8px;
 }
-.llm-capability-total__breakout,
-.llm-graph-chain__usage-breakout {
-  color: var(--ink-3);
-  font-size: 11.5px;
-}
 .llm-provider-model-list {
   display: flex;
   flex-direction: column;
@@ -251,7 +246,7 @@
 }
 .llm-usage-total {
   display: inline-grid;
-  grid-template-columns: auto auto auto;
+  grid-template-columns: auto auto;
   align-items: baseline;
   gap: 5px;
   max-width: 100%;
@@ -261,9 +256,6 @@
   background: var(--card-raised);
   color: var(--ink-2);
   font-size: 11.5px;
-}
-.llm-usage-total__label {
-  color: var(--ink-3);
 }
 .llm-usage-total__money {
   color: var(--ink);
