@@ -14,9 +14,9 @@ type FormModalWidth = "default" | "narrow" | "wide";
 interface FormModalProps {
   open: boolean;
   title: ReactNode;
-  actions: ReactNode;
   children: ReactNode;
   onClose: () => void;
+  actions?: ReactNode;
   eyebrow?: ReactNode;
   subtitle?: ReactNode;
   titleId?: string;
@@ -27,6 +27,7 @@ interface FormModalProps {
   footerClassName?: string;
   closeLabel?: string;
   closeDisabled?: boolean;
+  contentElement?: "form" | "section";
   noValidate?: boolean;
   onSubmit?: FormEventHandler<HTMLFormElement>;
   onCancel?: ReactEventHandler<HTMLDialogElement>;
@@ -62,6 +63,7 @@ export default function FormModal(props: FormModalProps) {
     footerClassName,
     closeLabel = "Close",
     closeDisabled = false,
+    contentElement = "form",
     noValidate = false,
     onSubmit,
     onCancel,
@@ -88,41 +90,104 @@ export default function FormModal(props: FormModalProps) {
       onCancel={onCancel}
       onClose={onClose}
     >
-      {open ? (
+      {open && contentElement === "section" ? (
+        <section className={classes("form-modal", formClassName)}>
+          <FormModalContent
+            title={title}
+            actions={actions}
+            onClose={onClose}
+            eyebrow={eyebrow}
+            subtitle={subtitle}
+            titleId={resolvedTitleId}
+            bodyClassName={bodyClassName}
+            footerClassName={footerClassName}
+            closeLabel={closeLabel}
+            closeDisabled={closeDisabled}
+          >
+            {children}
+          </FormModalContent>
+        </section>
+      ) : null}
+      {open && contentElement === "form" ? (
         <form
           className={classes("form-modal", formClassName)}
           onSubmit={onSubmit}
           noValidate={noValidate}
         >
-          <header className="form-modal__head">
-            <div>
-              {eyebrow ? <p className="form-modal__eyebrow">{eyebrow}</p> : null}
-              <h3 id={resolvedTitleId} className="form-modal__title">
-                {title}
-              </h3>
-              {subtitle ? <p className="form-modal__sub">{subtitle}</p> : null}
-            </div>
-            <button
-              type="button"
-              className="form-modal__close"
-              disabled={closeDisabled}
-              onClick={onClose}
-              aria-label={closeLabel}
-            >
-              ×
-            </button>
-          </header>
-
-          <div className={classes("form-modal__body", bodyClassName)}>
+          <FormModalContent
+            title={title}
+            actions={actions}
+            onClose={onClose}
+            eyebrow={eyebrow}
+            subtitle={subtitle}
+            titleId={resolvedTitleId}
+            bodyClassName={bodyClassName}
+            footerClassName={footerClassName}
+            closeLabel={closeLabel}
+            closeDisabled={closeDisabled}
+          >
             {children}
-          </div>
-
-          <footer className={classes("form-modal__footer", footerClassName)}>
-            {actions}
-          </footer>
+          </FormModalContent>
         </form>
       ) : null}
     </dialog>
+  );
+}
+
+function FormModalContent({
+  title,
+  actions,
+  children,
+  onClose,
+  eyebrow,
+  subtitle,
+  titleId,
+  bodyClassName,
+  footerClassName,
+  closeLabel,
+  closeDisabled,
+}: Pick<
+  FormModalProps,
+  | "title"
+  | "actions"
+  | "children"
+  | "onClose"
+  | "eyebrow"
+  | "subtitle"
+  | "bodyClassName"
+  | "footerClassName"
+  | "closeLabel"
+  | "closeDisabled"
+> & { titleId: string }) {
+  return (
+    <>
+      <header className="form-modal__head">
+        <div>
+          {eyebrow ? <p className="form-modal__eyebrow">{eyebrow}</p> : null}
+          <h3 id={titleId} className="form-modal__title">
+            {title}
+          </h3>
+          {subtitle ? <p className="form-modal__sub">{subtitle}</p> : null}
+        </div>
+        <button
+          type="button"
+          className="form-modal__close"
+          disabled={closeDisabled}
+          onClick={onClose}
+          aria-label={closeLabel}
+        >
+          ×
+        </button>
+      </header>
+
+      <div className={classes("form-modal__body", bodyClassName)}>{children}</div>
+
+      {actions != null ? (
+        <footer className={classes("form-modal__footer", footerClassName)}>
+          {actions}
+        </footer>
+      ) : null}
+    </>
   );
 }
 

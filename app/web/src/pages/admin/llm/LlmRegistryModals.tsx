@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import FormField from "@/components/FormField";
+import FormModal, {
+  FormModalField,
+  FormModalGrid,
+} from "@/components/FormModal";
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import type {
@@ -157,23 +160,11 @@ function describedBy(...ids: (string | undefined)[]): string | undefined {
 export default function LlmRegistryModals(props: RegistryModalsProps) {
   // code-health: ignore[ccn nloc] Lizard misattributes the registry form bodies to this modal dispatcher; each form is implemented below.
   const { dialog, providers, models, providerModels, indexes, onClose } = props;
-  const dialogRef = useRef<HTMLDialogElement>(null);
-
-  useEffect(() => {
-    const element = dialogRef.current;
-    if (dialog && element && !element.open) element.showModal();
-    if (!dialog && element?.open) element.close();
-  }, [dialog]);
 
   const titleId = dialog ? `llm-${dialog.kind}-${dialog.mode}-title` : undefined;
 
   return (
-    <dialog
-      ref={dialogRef}
-      className="modal modal--sheet llm-registry-dialog"
-      aria-labelledby={titleId}
-      onClose={onClose}
-    >
+    <>
       {dialog?.kind === "provider" ? (
         <ProviderForm
           mode={dialog.mode}
@@ -206,7 +197,7 @@ export default function LlmRegistryModals(props: RegistryModalsProps) {
           onClose={onClose}
         />
       ) : null}
-    </dialog>
+    </>
   );
 }
 
@@ -307,27 +298,40 @@ function ProviderForm(props: ProviderFormProps) {
   }
 
   return (
-    <form className="llm-registry-form" onSubmit={submit} noValidate>
-      <header className="llm-registry-form__head">
-        <div>
-          <p className="llm-registry-form__eyebrow">
-            {mode === "create" ? "New provider" : "Edit provider"}
-          </p>
-          <h3 id={titleId} className="llm-registry-form__title">
-            {mode === "create" ? "Create provider" : provider?.name}
-          </h3>
-        </div>
-        <button
-          type="button"
-          className="llm-registry-form__close"
-          onClick={onClose}
-          aria-label="Close"
-        >
-          ×
-        </button>
-      </header>
-      <div className="llm-registry-form__body">
-        <FormField label="Name" requirement="required" className="llm-registry-form__field">
+    <FormModal
+      open
+      title={mode === "create" ? "Create provider" : provider?.name}
+      titleId={titleId}
+      eyebrow={mode === "create" ? "New provider" : "Edit provider"}
+      onClose={onClose}
+      onSubmit={submit}
+      noValidate
+      actions={
+        <>
+          {mode === "edit" ? (
+            <button
+              type="button"
+              className="btn btn--rust llm-registry-form__delete"
+              onClick={() => remove.mutate()}
+              disabled={remove.isPending || save.isPending}
+            >
+              {remove.isPending ? "Deleting…" : "Delete provider"}
+            </button>
+          ) : null}
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="btn btn--moss"
+            disabled={save.isPending || remove.isPending}
+          >
+            {save.isPending ? "Saving…" : mode === "create" ? "Create provider" : "Save provider"}
+          </button>
+        </>
+      }
+    >
+        <FormModalField label="Name" requirement="required">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -335,9 +339,9 @@ function ProviderForm(props: ProviderFormProps) {
             aria-invalid={clientErr === "Name is required."}
             aria-describedby={errId}
           />
-        </FormField>
-        <div className="llm-registry-form__grid">
-          <FormField label="Type" requirement="required" className="llm-registry-form__field">
+        </FormModalField>
+        <FormModalGrid>
+          <FormModalField label="Type" requirement="required">
             <select
               value={providerType}
               onChange={(e) => setProviderType(e.target.value as LlmProviderType)}
@@ -347,16 +351,16 @@ function ProviderForm(props: ProviderFormProps) {
               <option value="openai_compatible">OpenAI compatible</option>
               <option value="fake">Fake</option>
             </select>
-          </FormField>
-          <FormField label="Enabled" requirement="required" className="llm-registry-form__field">
+          </FormModalField>
+          <FormModalField label="Enabled" requirement="required">
             <input
               type="checkbox"
               checked={enabled}
               onChange={(e) => setEnabled(e.target.checked)}
             />
-          </FormField>
-        </div>
-        <FormField label="API endpoint" requirement="optional" className="llm-registry-form__field">
+          </FormModalField>
+        </FormModalGrid>
+        <FormModalField label="API endpoint" requirement="optional">
           <input
             value={apiEndpoint}
             onChange={(e) => setApiEndpoint(e.target.value)}
@@ -365,11 +369,11 @@ function ProviderForm(props: ProviderFormProps) {
             }
             aria-describedby={errId}
           />
-        </FormField>
-        <FormField label="API key envelope ref" requirement="optional" className="llm-registry-form__field">
+        </FormModalField>
+        <FormModalField label="API key envelope ref" requirement="optional">
           <input value={apiKeyRef} onChange={(e) => setApiKeyRef(e.target.value)} />
-        </FormField>
-        <FormField label="Default provider-model" requirement="optional" className="llm-registry-form__field">
+        </FormModalField>
+        <FormModalField label="Default provider-model" requirement="optional">
           <select
             value={defaultModel}
             onChange={(e) => setDefaultModel(e.target.value)}
@@ -382,9 +386,9 @@ function ProviderForm(props: ProviderFormProps) {
               </option>
             ))}
           </select>
-        </FormField>
-        <div className="llm-registry-form__grid">
-          <FormField label="Timeout seconds" requirement="required" className="llm-registry-form__field">
+        </FormModalField>
+        <FormModalGrid>
+          <FormModalField label="Timeout seconds" requirement="required">
             <input
               type="number"
               min="1"
@@ -394,8 +398,8 @@ function ProviderForm(props: ProviderFormProps) {
               aria-invalid={clientErr === "Timeout must be at least 1 second."}
               aria-describedby={errId}
             />
-          </FormField>
-          <FormField label="Requests per minute" requirement="required" className="llm-registry-form__field">
+          </FormModalField>
+          <FormModalField label="Requests per minute" requirement="required">
             <input
               type="number"
               min="1"
@@ -405,9 +409,9 @@ function ProviderForm(props: ProviderFormProps) {
               aria-invalid={clientErr === "Requests per minute must be at least 1."}
               aria-describedby={errId}
             />
-          </FormField>
-        </div>
-        <FormField label="Priority" requirement="required" className="llm-registry-form__field">
+          </FormModalField>
+        </FormModalGrid>
+        <FormModalField label="Priority" requirement="required">
           <input
             type="number"
             min="0"
@@ -417,36 +421,13 @@ function ProviderForm(props: ProviderFormProps) {
             aria-invalid={clientErr === "Priority must be zero or more."}
             aria-describedby={errId}
           />
-        </FormField>
+        </FormModalField>
         {err ? (
           <p id="llm-provider-error" className="form-error" role="alert">
             {err}
           </p>
         ) : null}
-      </div>
-      <footer className="llm-registry-form__footer">
-        {mode === "edit" ? (
-          <button
-            type="button"
-            className="btn btn--rust"
-            onClick={() => remove.mutate()}
-            disabled={remove.isPending || save.isPending}
-          >
-            {remove.isPending ? "Deleting…" : "Delete provider"}
-          </button>
-        ) : null}
-        <button type="button" className="btn btn--ghost" onClick={onClose}>
-          Cancel
-        </button>
-        <button
-          type="submit"
-          className="btn btn--moss"
-          disabled={save.isPending || remove.isPending}
-        >
-          {save.isPending ? "Saving…" : mode === "create" ? "Create provider" : "Save provider"}
-        </button>
-      </footer>
-    </form>
+    </FormModal>
   );
 }
 
@@ -554,27 +535,40 @@ function ModelForm({
   }
 
   return (
-    <form className="llm-registry-form" onSubmit={submit} noValidate>
-      <header className="llm-registry-form__head">
-        <div>
-          <p className="llm-registry-form__eyebrow">
-            {mode === "create" ? "New model" : "Edit model"}
-          </p>
-          <h3 id={titleId} className="llm-registry-form__title">
-            {mode === "create" ? "Create model" : model?.display_name}
-          </h3>
-        </div>
-        <button
-          type="button"
-          className="llm-registry-form__close"
-          onClick={onClose}
-          aria-label="Close"
-        >
-          ×
-        </button>
-      </header>
-      <div className="llm-registry-form__body">
-        <FormField label="Canonical name" requirement="required" className="llm-registry-form__field">
+    <FormModal
+      open
+      title={mode === "create" ? "Create model" : model?.display_name}
+      titleId={titleId}
+      eyebrow={mode === "create" ? "New model" : "Edit model"}
+      onClose={onClose}
+      onSubmit={submit}
+      noValidate
+      actions={
+        <>
+          {mode === "edit" ? (
+            <button
+              type="button"
+              className="btn btn--rust llm-registry-form__delete"
+              onClick={() => remove.mutate()}
+              disabled={remove.isPending || save.isPending}
+            >
+              {remove.isPending ? "Deleting…" : "Delete model"}
+            </button>
+          ) : null}
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="btn btn--moss"
+            disabled={save.isPending || remove.isPending}
+          >
+            {save.isPending ? "Saving…" : mode === "create" ? "Create model" : "Save model"}
+          </button>
+        </>
+      }
+    >
+        <FormModalField label="Canonical name" requirement="required">
           <input
             value={canonicalName}
             onChange={(e) => setCanonicalName(e.target.value)}
@@ -582,9 +576,9 @@ function ModelForm({
             aria-invalid={clientErr === "Canonical name is required."}
             aria-describedby={errId}
           />
-        </FormField>
-        <div className="llm-registry-form__grid">
-          <FormField label="Display name" requirement="required" className="llm-registry-form__field">
+        </FormModalField>
+        <FormModalGrid>
+          <FormModalField label="Display name" requirement="required">
             <input
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
@@ -592,8 +586,8 @@ function ModelForm({
               aria-invalid={clientErr === "Display name is required."}
               aria-describedby={errId}
             />
-          </FormField>
-          <FormField label="Vendor" requirement="required" className="llm-registry-form__field">
+          </FormModalField>
+          <FormModalField label="Vendor" requirement="required">
             <input
               value={vendor}
               onChange={(e) => setVendor(e.target.value)}
@@ -601,8 +595,8 @@ function ModelForm({
               aria-invalid={clientErr === "Vendor is required."}
               aria-describedby={errId}
             />
-          </FormField>
-        </div>
+          </FormModalField>
+        </FormModalGrid>
         <fieldset className="llm-registry-form__fieldset">
           <legend>Capabilities</legend>
           <div className="llm-registry-form__checks">
@@ -618,8 +612,8 @@ function ModelForm({
             ))}
           </div>
         </fieldset>
-        <div className="llm-registry-form__grid">
-          <FormField label="Context window" requirement="optional" className="llm-registry-form__field">
+        <FormModalGrid>
+          <FormModalField label="Context window" requirement="optional">
             <input
               type="number"
               min="1"
@@ -628,8 +622,8 @@ function ModelForm({
               aria-invalid={clientErr === "Context window must be a positive whole number."}
               aria-describedby={errId}
             />
-          </FormField>
-          <FormField label="Max output tokens" requirement="optional" className="llm-registry-form__field">
+          </FormModalField>
+          <FormModalField label="Max output tokens" requirement="optional">
             <input
               type="number"
               min="1"
@@ -638,10 +632,10 @@ function ModelForm({
               aria-invalid={clientErr === "Max output tokens must be a positive whole number."}
               aria-describedby={errId}
             />
-          </FormField>
-        </div>
-        <div className="llm-registry-form__grid">
-          <FormField label="Price source" requirement="required" className="llm-registry-form__field">
+          </FormModalField>
+        </FormModalGrid>
+        <FormModalGrid>
+          <FormModalField label="Price source" requirement="required">
             <select
               value={priceSource}
               onChange={(e) => setPriceSource(e.target.value as LlmPriceSource)}
@@ -650,53 +644,30 @@ function ModelForm({
               <option value="openrouter">OpenRouter</option>
               <option value="manual">Manual</option>
             </select>
-          </FormField>
-          <FormField label="Price source model id" requirement="optional" className="llm-registry-form__field">
+          </FormModalField>
+          <FormModalField label="Price source model id" requirement="optional">
             <input
               value={priceSourceModel}
               onChange={(e) => setPriceSourceModel(e.target.value)}
             />
-          </FormField>
-        </div>
-        <FormField label="Active" requirement="required" className="llm-registry-form__field">
+          </FormModalField>
+        </FormModalGrid>
+        <FormModalField label="Active" requirement="required">
           <input
             type="checkbox"
             checked={active}
             onChange={(e) => setActive(e.target.checked)}
           />
-        </FormField>
-        <FormField label="Notes" requirement="optional" className="llm-registry-form__field">
+        </FormModalField>
+        <FormModalField label="Notes" requirement="optional">
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
-        </FormField>
+        </FormModalField>
         {err ? (
           <p id="llm-model-error" className="form-error" role="alert">
             {err}
           </p>
         ) : null}
-      </div>
-      <footer className="llm-registry-form__footer">
-        {mode === "edit" ? (
-          <button
-            type="button"
-            className="btn btn--rust"
-            onClick={() => remove.mutate()}
-            disabled={remove.isPending || save.isPending}
-          >
-            {remove.isPending ? "Deleting…" : "Delete model"}
-          </button>
-        ) : null}
-        <button type="button" className="btn btn--ghost" onClick={onClose}>
-          Cancel
-        </button>
-        <button
-          type="submit"
-          className="btn btn--moss"
-          disabled={save.isPending || remove.isPending}
-        >
-          {save.isPending ? "Saving…" : mode === "create" ? "Create model" : "Save model"}
-        </button>
-      </footer>
-    </form>
+    </FormModal>
   );
 }
 
@@ -846,28 +817,45 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   }
 
   return (
-    <form className="llm-registry-form" onSubmit={submit} noValidate>
-      <header className="llm-registry-form__head">
-        <div>
-          <p className="llm-registry-form__eyebrow">
-            {mode === "create" ? "New provider-model" : "Edit provider-model"}
-          </p>
-          <h3 id={titleId} className="llm-registry-form__title">
-            {mode === "create" ? "Create provider-model" : providerModel?.api_model_id}
-          </h3>
-        </div>
-        <button
-          type="button"
-          className="llm-registry-form__close"
-          onClick={onClose}
-          aria-label="Close"
-        >
-          ×
-        </button>
-      </header>
-      <div className="llm-registry-form__body">
-        <div className="llm-registry-form__grid">
-          <FormField label="Provider" requirement="required" className="llm-registry-form__field">
+    <FormModal
+      open
+      title={mode === "create" ? "Create provider-model" : providerModel?.api_model_id}
+      titleId={titleId}
+      eyebrow={mode === "create" ? "New provider-model" : "Edit provider-model"}
+      onClose={onClose}
+      onSubmit={submit}
+      noValidate
+      actions={
+        <>
+          {mode === "edit" ? (
+            <button
+              type="button"
+              className="btn btn--rust llm-registry-form__delete"
+              onClick={() => remove.mutate()}
+              disabled={remove.isPending || save.isPending}
+            >
+              {remove.isPending ? "Deleting…" : "Delete provider-model"}
+            </button>
+          ) : null}
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="btn btn--moss"
+            disabled={save.isPending || remove.isPending}
+          >
+            {save.isPending
+              ? "Saving…"
+              : mode === "create"
+                ? "Create provider-model"
+                : "Save provider-model"}
+          </button>
+        </>
+      }
+    >
+        <FormModalGrid>
+          <FormModalField label="Provider" requirement="required">
             <select
               value={providerId}
               onChange={(e) => setProviderId(e.target.value)}
@@ -881,8 +869,8 @@ function ProviderModelForm(props: ProviderModelFormProps) {
                 </option>
               ))}
             </select>
-          </FormField>
-          <FormField label="Model" requirement="required" className="llm-registry-form__field">
+          </FormModalField>
+          <FormModalField label="Model" requirement="required">
             <select
               value={modelId}
               onChange={(e) => setModelId(e.target.value)}
@@ -896,9 +884,9 @@ function ProviderModelForm(props: ProviderModelFormProps) {
                 </option>
               ))}
             </select>
-          </FormField>
-        </div>
-        <FormField label="API model id" requirement="required" className="llm-registry-form__field">
+          </FormModalField>
+        </FormModalGrid>
+        <FormModalField label="API model id" requirement="required">
           <input
             value={apiModelId}
             onChange={(e) => setApiModelId(e.target.value)}
@@ -906,9 +894,9 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             aria-invalid={clientErr === "API model id is required."}
             aria-describedby={errId}
           />
-        </FormField>
-        <div className="llm-registry-form__grid">
-          <FormField label="Input cost per 1M" requirement="required" className="llm-registry-form__field">
+        </FormModalField>
+        <FormModalGrid>
+          <FormModalField label="Input cost per 1M" requirement="required">
             <input
               type="number"
               min="0"
@@ -922,8 +910,8 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               }
               aria-describedby={errId}
             />
-          </FormField>
-          <FormField label="Output cost per 1M" requirement="required" className="llm-registry-form__field">
+          </FormModalField>
+          <FormModalField label="Output cost per 1M" requirement="required">
             <input
               type="number"
               min="0"
@@ -937,10 +925,10 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               }
               aria-describedby={errId}
             />
-          </FormField>
-        </div>
-        <div className="llm-registry-form__grid">
-          <FormField label="Fixed cost per call" requirement="optional" className="llm-registry-form__field">
+          </FormModalField>
+        </FormModalGrid>
+        <FormModalGrid>
+          <FormModalField label="Fixed cost per call" requirement="optional">
             <input
               type="number"
               min="0"
@@ -950,8 +938,8 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               aria-invalid={clientErr === "Fixed cost must be zero or more."}
               aria-describedby={errId}
             />
-          </FormField>
-          <FormField label="Reasoning effort" requirement="optional" className="llm-registry-form__field">
+          </FormModalField>
+          <FormModalField label="Reasoning effort" requirement="optional">
             <select
               value={reasoningEffort}
               onChange={(e) => setReasoningEffort(e.target.value as LlmReasoningEffort)}
@@ -961,10 +949,10 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               <option value="medium">Medium</option>
               <option value="high">High</option>
             </select>
-          </FormField>
-        </div>
-        <div className="llm-registry-form__grid">
-          <FormField label="Max tokens override" requirement="optional" className="llm-registry-form__field">
+          </FormModalField>
+        </FormModalGrid>
+        <FormModalGrid>
+          <FormModalField label="Max tokens override" requirement="optional">
             <input
               type="number"
               min="1"
@@ -973,8 +961,8 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               aria-invalid={clientErr === "Max tokens override must be a positive whole number."}
               aria-describedby={errId}
             />
-          </FormField>
-          <FormField label="Temperature override" requirement="optional" className="llm-registry-form__field">
+          </FormModalField>
+          <FormModalField label="Temperature override" requirement="optional">
             <input
               type="number"
               min="0"
@@ -985,10 +973,10 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               aria-invalid={clientErr === "Temperature override must be between 0 and 2."}
               aria-describedby={errId}
             />
-          </FormField>
-        </div>
-        <div className="llm-registry-form__grid">
-          <FormField label="Price source override" requirement="optional" className="llm-registry-form__field">
+          </FormModalField>
+        </FormModalGrid>
+        <FormModalGrid>
+          <FormModalField label="Price source override" requirement="optional">
             <select
               value={priceSourceOverride}
               onChange={(e) =>
@@ -999,14 +987,14 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               <option value="openrouter">OpenRouter</option>
               <option value="none">Manual / pinned</option>
             </select>
-          </FormField>
-          <FormField label="Price source model override" requirement="optional" className="llm-registry-form__field">
+          </FormModalField>
+          <FormModalField label="Price source model override" requirement="optional">
             <input
               value={priceSourceModelOverride}
               onChange={(e) => setPriceSourceModelOverride(e.target.value)}
             />
-          </FormField>
-        </div>
+          </FormModalField>
+        </FormModalGrid>
         <fieldset className="llm-registry-form__fieldset">
           <legend>Provider support overrides</legend>
           <div className="llm-registry-form__checks">
@@ -1036,10 +1024,9 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             </label>
           </div>
         </fieldset>
-        <FormField
+        <FormModalField
           label="Extra API params"
           requirement="optional"
-          className="llm-registry-form__field"
           helpId={extraHelpId}
           helpText="JSON object merged into provider requests for this row."
         >
@@ -1054,39 +1041,12 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             }
             aria-describedby={describedBy(extraHelpId, errId)}
           />
-        </FormField>
+        </FormModalField>
         {err ? (
           <p id="llm-provider-model-error" className="form-error" role="alert">
             {err}
           </p>
         ) : null}
-      </div>
-      <footer className="llm-registry-form__footer">
-        {mode === "edit" ? (
-          <button
-            type="button"
-            className="btn btn--rust"
-            onClick={() => remove.mutate()}
-            disabled={remove.isPending || save.isPending}
-          >
-            {remove.isPending ? "Deleting…" : "Delete provider-model"}
-          </button>
-        ) : null}
-        <button type="button" className="btn btn--ghost" onClick={onClose}>
-          Cancel
-        </button>
-        <button
-          type="submit"
-          className="btn btn--moss"
-          disabled={save.isPending || remove.isPending}
-        >
-          {save.isPending
-            ? "Saving…"
-            : mode === "create"
-              ? "Create provider-model"
-              : "Save provider-model"}
-        </button>
-      </footer>
-    </form>
+    </FormModal>
   );
 }

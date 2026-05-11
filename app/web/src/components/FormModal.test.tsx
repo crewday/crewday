@@ -130,4 +130,24 @@ describe("FormModal", () => {
       /\.form-modal__footer,\n\.sheet-form__footer \{[\s\S]*justify-content: flex-end;/m,
     );
   });
+
+  it("supports actionless section content without rendering an empty footer", () => {
+    render(
+      <FormModal
+        open
+        title="Assignment chain"
+        titleId="assignment-chain-title"
+        eyebrow="Assignment chain"
+        contentElement="section"
+        onClose={vi.fn()}
+      >
+        <p>Fallback rungs</p>
+      </FormModal>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Assignment chain" });
+    expect(dialog.querySelector("section.form-modal")).toBeInTheDocument();
+    expect(dialog.querySelector("form")).not.toBeInTheDocument();
+    expect(dialog.querySelector(".form-modal__footer")).not.toBeInTheDocument();
+  });
 });

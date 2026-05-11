@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DateTime from "@/components/DateTime";
-import FormField from "@/components/FormField";
+import FormModal, { FormModalField } from "@/components/FormModal";
 import { Chip } from "@/components/common";
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -108,7 +108,6 @@ function promptErrorCopy(error: unknown, fallback: string): string {
 
 function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
   // code-health: ignore[ccn nloc] Lizard misattributes the prompt editor TSX body to the preceding error-copy helper.
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const qc = useQueryClient();
   const [template, setTemplate] = useState("");
   const [notes, setNotes] = useState("");
@@ -126,11 +125,6 @@ function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
         `/admin/api/v1/llm/prompts/${prompt.id}/revisions`,
       ),
   });
-
-  useEffect(() => {
-    const element = dialogRef.current;
-    if (element && !element.open) element.showModal();
-  }, []);
 
   useEffect(() => {
     if (!detailQ.data) return;
@@ -185,30 +179,38 @@ function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
   }
 
   return (
-    <dialog
-      ref={dialogRef}
-      className="modal modal--sheet llm-registry-dialog llm-prompt-dialog"
-      aria-labelledby="llm-prompt-editor-title"
+    <FormModal
+      open
+      title={prompt.name}
+      titleId="llm-prompt-editor-title"
+      eyebrow="Prompt template"
+      width="wide"
       onClose={onClose}
-    >
-      <form className="llm-registry-form" onSubmit={submit} noValidate>
-        <header className="llm-registry-form__head">
-          <div>
-            <p className="llm-registry-form__eyebrow">Prompt template</p>
-            <h3 id="llm-prompt-editor-title" className="llm-registry-form__title">
-              {prompt.name}
-            </h3>
-          </div>
+      onSubmit={submit}
+      noValidate
+      actions={
+        <>
           <button
             type="button"
-            className="llm-registry-form__close"
-            onClick={onClose}
-            aria-label="Close"
+            className="btn btn--rust llm-registry-form__delete"
+            onClick={() => reset.mutate()}
+            disabled={reset.isPending || save.isPending}
           >
-            ×
+            {reset.isPending ? "Resetting…" : "Reset to default"}
           </button>
-        </header>
-        <div className="llm-registry-form__body">
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="btn btn--moss"
+            disabled={save.isPending || reset.isPending}
+          >
+            {save.isPending ? "Saving…" : "Save prompt"}
+          </button>
+        </>
+      }
+    >
           <div className="llm-prompt-dialog__meta">
             <code className="inline-code">{prompt.capability}</code>
             <span>v{detail?.version ?? prompt.version}</span>
@@ -229,7 +231,7 @@ function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
           </div>
           {detailQ.isPending ? <p className="muted">Loading prompt body…</p> : null}
           {detailQ.isError ? <p className="form-error">Prompt body failed to load.</p> : null}
-          <FormField label="Active template body" requirement="required" className="llm-registry-form__field">
+          <FormModalField label="Active template body" requirement="required">
             <textarea
               value={template}
               onChange={(e) => setTemplate(e.target.value)}
@@ -238,10 +240,10 @@ function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
               aria-invalid={clientErr === "Prompt body is required."}
               aria-describedby={errId}
             />
-          </FormField>
-          <FormField label="Notes" requirement="optional" className="llm-registry-form__field">
+          </FormModalField>
+          <FormModalField label="Notes" requirement="optional">
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
-          </FormField>
+          </FormModalField>
           <section className="llm-prompt-revisions" aria-label="Prompt revision history">
             <h4>Revision history</h4>
             {revisionsQ.isPending ? <p className="muted">Loading revisions…</p> : null}
@@ -265,28 +267,6 @@ function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
               {err}
             </p>
           ) : null}
-        </div>
-        <footer className="llm-registry-form__footer">
-          <button
-            type="button"
-            className="btn btn--rust"
-            onClick={() => reset.mutate()}
-            disabled={reset.isPending || save.isPending}
-          >
-            {reset.isPending ? "Resetting…" : "Reset to default"}
-          </button>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className="btn btn--moss"
-            disabled={save.isPending || reset.isPending}
-          >
-            {save.isPending ? "Saving…" : "Save prompt"}
-          </button>
-        </footer>
-      </form>
-    </dialog>
+    </FormModal>
   );
 }

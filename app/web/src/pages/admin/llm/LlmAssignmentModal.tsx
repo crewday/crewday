@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
-import FormField from "@/components/FormField";
+import FormModal, {
+  FormModalField,
+  FormModalGrid,
+} from "@/components/FormModal";
 import { Chip } from "@/components/common";
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -205,7 +208,6 @@ export default function LlmAssignmentModal({
   indexes,
   onClose,
 }: AssignmentModalProps) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const qc = useQueryClient();
   const capability = capabilityKey
     ? indexes.capabilitiesByKey.get(capabilityKey)
@@ -229,12 +231,6 @@ export default function LlmAssignmentModal({
   const [inheritParent, setInheritParent] = useState("");
   const [clientErr, setClientErr] = useState<string | null>(null);
   const [serverErr, setServerErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    const element = dialogRef.current;
-    if (capabilityKey && element && !element.open) element.showModal();
-    if (!capabilityKey && element?.open) element.close();
-  }, [capabilityKey]);
 
   useEffect(() => {
     setDrafts(chain.map(assignmentToDraft));
@@ -441,30 +437,21 @@ export default function LlmAssignmentModal({
   }
 
   return (
-    <dialog
-      ref={dialogRef}
-      className="modal modal--sheet llm-assignment-dialog"
-      aria-labelledby={titleId}
+    <FormModal
+      open={capabilityKey !== null}
+      title={capabilityKey ?? "Capability"}
+      titleId={titleId}
+      eyebrow="Assignment chain"
+      width="wide"
+      bodyClassName="llm-assignment-dialog__body"
+      contentElement="section"
       onClose={onClose}
+      actions={null}
     >
-      <section className="llm-registry-form" aria-busy={saveAssignment.isPending}>
-        <header className="llm-registry-form__head">
-          <div>
-            <p className="llm-registry-form__eyebrow">Assignment chain</p>
-            <h3 id={titleId} className="llm-registry-form__title">
-              {capabilityKey ?? "Capability"}
-            </h3>
-          </div>
-          <button
-            type="button"
-            className="llm-registry-form__close"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </header>
-        <div className="llm-registry-form__body llm-assignment-dialog__body">
+      <section
+        className="llm-assignment-dialog__content"
+        aria-busy={saveAssignment.isPending}
+      >
           {capability ? (
             <div className="llm-assignment-dialog__intro">
               <p>{capability.description}</p>
@@ -546,11 +533,7 @@ export default function LlmAssignmentModal({
                 <p>Children: {inheritedChildren.join(", ")}</p>
               ) : null}
             </div>
-            <FormField
-              label="Parent capability"
-              requirement="optional"
-              className="llm-registry-form__field"
-            >
+            <FormModalField label="Parent capability" requirement="optional">
               <select
                 value={inheritParent}
                 onChange={(event) => setInheritParent(event.target.value)}
@@ -562,7 +545,7 @@ export default function LlmAssignmentModal({
                   </option>
                 ))}
               </select>
-            </FormField>
+            </FormModalField>
             <div className="llm-assignment-dialog__inherit-actions">
               <button
                 type="submit"
@@ -585,9 +568,8 @@ export default function LlmAssignmentModal({
               </button>
             </div>
           </form>
-        </div>
       </section>
-    </dialog>
+    </FormModal>
   );
 }
 
@@ -639,11 +621,7 @@ function AssignmentRungForm(props: AssignmentRungFormProps) {
           </Chip>
         ) : null}
       </header>
-      <FormField
-        label="Provider-model"
-        requirement="required"
-        className="llm-registry-form__field"
-      >
+      <FormModalField label="Provider-model" requirement="required">
         <select
           value={draft.providerModelId}
           disabled={readOnly}
@@ -672,13 +650,9 @@ function AssignmentRungForm(props: AssignmentRungFormProps) {
             </optgroup>
           ))}
         </select>
-      </FormField>
-      <div className="llm-registry-form__grid">
-        <FormField
-          label="Max tokens"
-          requirement="optional"
-          className="llm-registry-form__field"
-        >
+      </FormModalField>
+      <FormModalGrid>
+        <FormModalField label="Max tokens" requirement="optional">
           <input
             type="number"
             min="1"
@@ -686,12 +660,8 @@ function AssignmentRungForm(props: AssignmentRungFormProps) {
             disabled={readOnly}
             onChange={(event) => onChange(draft.key, { maxTokens: event.target.value })}
           />
-        </FormField>
-        <FormField
-          label="Temperature"
-          requirement="optional"
-          className="llm-registry-form__field"
-        >
+        </FormModalField>
+        <FormModalField label="Temperature" requirement="optional">
           <input
             type="number"
             min="0"
@@ -703,13 +673,9 @@ function AssignmentRungForm(props: AssignmentRungFormProps) {
               onChange(draft.key, { temperature: event.target.value })
             }
           />
-        </FormField>
-      </div>
-      <FormField
-        label="Required capabilities"
-        requirement="optional"
-        className="llm-registry-form__field"
-      >
+        </FormModalField>
+      </FormModalGrid>
+      <FormModalField label="Required capabilities" requirement="optional">
         <input
           value={draft.requiredCapabilities}
           disabled={readOnly}
@@ -717,12 +683,8 @@ function AssignmentRungForm(props: AssignmentRungFormProps) {
             onChange(draft.key, { requiredCapabilities: event.target.value })
           }
         />
-      </FormField>
-      <FormField
-        label="Extra API params"
-        requirement="optional"
-        className="llm-registry-form__field"
-      >
+      </FormModalField>
+      <FormModalField label="Extra API params" requirement="optional">
         <textarea
           rows={3}
           value={draft.extraApiParams}
@@ -731,7 +693,7 @@ function AssignmentRungForm(props: AssignmentRungFormProps) {
             onChange(draft.key, { extraApiParams: event.target.value })
           }
         />
-      </FormField>
+      </FormModalField>
       <label className="llm-registry-form__check">
         <input
           type="checkbox"

@@ -105,6 +105,27 @@ function assignmentDialog(name: string): HTMLElement {
   return screen.getByRole("dialog", { name });
 }
 
+function expectSharedFormModal(
+  dialog: HTMLElement,
+  options: { wide?: boolean; section?: boolean; footer?: boolean } = {},
+): void {
+  expect(dialog).toHaveClass("modal", "modal--sheet", "form-modal-dialog");
+  if (options.wide) expect(dialog).toHaveClass("form-modal-dialog--wide");
+  expect(dialog).not.toHaveClass("llm-registry-dialog", "llm-assignment-dialog");
+  expect(dialog.querySelector(".llm-registry-form__close")).not.toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: "Close" })).toHaveClass(
+    "form-modal__close",
+  );
+  expect(
+    dialog.querySelector(options.section ? "section.form-modal" : "form.form-modal"),
+  ).toBeInTheDocument();
+  if (options.footer === false) {
+    expect(dialog.querySelector(".form-modal__footer")).not.toBeInTheDocument();
+  } else {
+    expect(dialog.querySelector(".form-modal__footer")).toBeInTheDocument();
+  }
+}
+
 function modelButton(name: string): HTMLElement {
   return screen.getByRole("button", { name: new RegExp(`${name} model`) });
 }
@@ -296,6 +317,7 @@ describe("Admin LlmPage", () => {
       fireEvent.click(within(promptDrawer).getByRole("button", { name: /Manager chat/ }));
 
       const dialog = await screen.findByRole("dialog", { name: "Manager chat" });
+      expectSharedFormModal(dialog, { wide: true });
       expect(await within(dialog).findByLabelText(/Active template body/)).toHaveValue(
         "You are the manager assistant.",
       );
@@ -371,6 +393,7 @@ describe("Admin LlmPage", () => {
       await findOpenRouterProvider();
 
       fireEvent.click(screen.getAllByRole("button", { name: "+ New provider" })[0]!);
+      expectSharedFormModal(screen.getByRole("dialog", { name: "Create provider" }));
       fireEvent.change(screen.getByLabelText(/Name/), {
         target: { value: "Fake provider" },
       });
@@ -469,6 +492,7 @@ describe("Admin LlmPage", () => {
       await findOpenRouterProvider();
 
       fireEvent.click(screen.getByRole("button", { name: "+ New model" }));
+      expectSharedFormModal(screen.getByRole("dialog", { name: "Create model" }));
       fireEvent.change(screen.getByLabelText(/Canonical name/), {
         target: { value: "test/new" },
       });
@@ -574,6 +598,7 @@ describe("Admin LlmPage", () => {
       fireEvent.click(
         screen.getByRole("button", { name: "+ New provider-model" }),
       );
+      expectSharedFormModal(screen.getByRole("dialog", { name: "Create provider-model" }));
       fireEvent.change(screen.getByLabelText(/API model id/), {
         target: { value: "test/new-wire" },
       });
@@ -805,6 +830,7 @@ describe("Admin LlmPage", () => {
 
       fireEvent.click(chatManagerRung());
       const dialog = assignmentDialog("chat.manager");
+      expectSharedFormModal(dialog, { wide: true, section: true, footer: false });
       fireEvent.change(within(dialog).getAllByLabelText(/Max tokens/)[0]!, {
         target: { value: "2048" },
       });
