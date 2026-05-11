@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import type { ReactElement } from "react";
@@ -122,6 +122,21 @@ function selectFile(file: File): void {
     configurable: true,
   });
   fireEvent.change(input);
+}
+
+function installDialogPolyfillForTest(): () => void {
+  const originalShowModal = HTMLDialogElement.prototype.showModal;
+  const originalClose = HTMLDialogElement.prototype.close;
+  HTMLDialogElement.prototype.showModal = function showModal() {
+    this.open = true;
+  };
+  HTMLDialogElement.prototype.close = function close() {
+    this.open = false;
+  };
+  return () => {
+    HTMLDialogElement.prototype.showModal = originalShowModal;
+    HTMLDialogElement.prototype.close = originalClose;
+  };
 }
 
 beforeEach(() => {
@@ -481,6 +496,62 @@ describe("TaskDetailPage", () => {
       );
     } finally {
       env.restore();
+    }
+  });
+
+  it("opens the skip dialog with the shared form shell and posts the reason", async () => {
+    const restoreDialog = installDialogPolyfillForTest();
+    const env = installFetch({
+      "/api/v1/tasks/t1/detail": [
+        { body: baseTask({ photo_evidence: "disabled" }) },
+        { body: baseTask({ photo_evidence: "disabled", state: "skipped" }) },
+      ],
+      "/api/v1/tasks/t1/evidence": [{ body: emptyEvidence() }],
+      "/api/v1/tasks/t1/comments": [{ body: emptyComments() }],
+      "/api/v1/tasks/t1/skip": [
+        {
+          body: {
+            task_id: "t1",
+            state: "skipped",
+            completed_at: null,
+            completed_by_user_id: null,
+            reason: "Guest is still in the room.",
+          },
+        },
+      ],
+    });
+
+    try {
+      render(<Harness />);
+      await screen.findByText("Reset guest room");
+
+      fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Skip this task" }));
+
+      const dialog = screen.getByRole("dialog", { name: "Skip this task?" });
+      expect(dialog).toHaveClass("modal", "modal--sheet", "form-modal-dialog");
+      expect(dialog.querySelector("form")).toHaveClass("form-modal", "task-skip-form");
+      expect(dialog.querySelector(".sheet-form__head")).not.toBeInTheDocument();
+      expect(dialog.querySelector(".task-skip-form__close")).not.toBeInTheDocument();
+
+      fireEvent.change(within(dialog).getByLabelText(/^Reason\b/), {
+        target: { value: "Guest is still in the room." },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Skip task" }));
+
+      await waitFor(() => {
+        const skipCall = env.calls.find((call) =>
+          call.url.endsWith("/api/v1/tasks/t1/skip"),
+        );
+        expect(skipCall).toBeDefined();
+        expect(skipCall!.init.body).toBe(
+          JSON.stringify({ reason_md: "Guest is still in the room." }),
+        );
+      });
+      expect(screen.queryByRole("dialog", { name: "Skip this task?" })).not.toBeInTheDocument();
+    } finally {
+      env.restore();
+      restoreDialog();
     }
   });
 

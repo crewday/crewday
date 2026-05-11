@@ -4,7 +4,7 @@ import { ApiError, fetchJson } from "@/lib/api";
 import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import type { Me, Property, Task } from "@/types/api";
-import FormField from "@/components/FormField";
+import FormModal, { FormModalField } from "@/components/FormModal";
 import { Checkbox } from "@/components/common";
 
 // §06 quick-add. Clicking the button opens a <dialog> (same pattern as
@@ -28,7 +28,6 @@ interface Area {
 
 export default function NewTaskButton() {
   // code-health: ignore[ccn nloc] Quick-add task dialog keeps compact form state, validation, and mutation beside the button that opens it.
-  const ref = useRef<HTMLDialogElement>(null);
   const qc = useQueryClient();
   const propsQ = useQuery({
     queryKey: qk.properties(),
@@ -53,6 +52,7 @@ export default function NewTaskButton() {
   const [areaId, setAreaId] = useState("");
   const [personal, setPersonal] = useState(true);
   const [formError, setFormError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
   const submitLocked = useRef(false);
 
   useEffect(() => {
@@ -75,7 +75,7 @@ export default function NewTaskButton() {
       qc.invalidateQueries({ queryKey: qk.today() });
       qc.invalidateQueries({ queryKey: qk.week() });
       qc.invalidateQueries({ queryKey: qk.tasks() });
-      ref.current?.close();
+      setOpen(false);
       reset();
     },
     onError: (error) => {
@@ -87,150 +87,72 @@ export default function NewTaskButton() {
   });
 
   const currentUserId = meQ.data?.user_id ?? "";
+  const closeForm = () => {
+    if (submitLocked.current || create.isPending) return;
+    setOpen(false);
+    reset();
+  };
+  const handleDialogClose = () => {
+    setOpen(false);
+    reset();
+  };
 
   return (
     <>
       <button
         type="button"
         className="btn btn--moss"
-        onClick={() => ref.current?.showModal()}
+        onClick={() => setOpen(true)}
       >
         + New task
       </button>
 
-      <dialog
-        className="modal modal--sheet sheet-form-dialog"
-        ref={ref}
+      <FormModal
+        open={open}
+        title="New task"
+        eyebrow="Quick add"
+        subtitle={
+          personal
+            ? "Personal - only you can see this."
+            : "Team task - visible to your manager."
+        }
+        formClassName="new-task-form"
+        onClose={handleDialogClose}
         onCancel={(e) => {
           if (submitLocked.current || create.isPending) e.preventDefault();
         }}
-        onClose={reset}
-      >
-        <form
-          className="new-task-form sheet-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (submitLocked.current || create.isPending) return;
-            const trimmed = title.trim();
-            if (!trimmed) return;
-            if (!due) {
-              setFormError("Choose a due date before adding the task.");
-              return;
-            }
-            if (personal && !currentUserId) {
-              setFormError("Your profile is still loading. Wait a moment and try again.");
-              return;
-            }
-            submitLocked.current = true;
-            setFormError(null);
-            create.mutate({
-              title: trimmed,
-              scheduled_for_local: due + "T09:00:00",
-              property_id: propertyId || undefined,
-              area_id: areaId || undefined,
-              assigned_user_id: personal ? currentUserId : undefined,
-              is_personal: personal,
-            });
-          }}
-        >
-          <header className="new-task-form__head sheet-form__head">
-            <div>
-              <p className="new-task-form__eyebrow sheet-form__eyebrow">Quick add</p>
-              <h3 className="new-task-form__title sheet-form__title">New task</h3>
-              <p className="new-task-form__sub sheet-form__sub">
-                {personal
-                  ? "Personal - only you can see this."
-                  : "Team task - visible to your manager."}
-              </p>
-            </div>
-            <button
-              type="button"
-              className="new-task-form__close sheet-form__close"
-              disabled={create.isPending}
-              onClick={() => ref.current?.close()}
-              aria-label="Close"
-            >
-              ×
-            </button>
-          </header>
-
-          <div className="new-task-form__body sheet-form__body">
-          <FormField label="Title" requirement="required" className="new-task-form__field sheet-form__field">
-            <input
-              autoFocus
-              required
-              value={title}
-              onChange={(e) => {
-                setTitle(e.target.value);
-                setFormError(null);
-              }}
-              placeholder="e.g. Call back Maria about the stay"
-            />
-          </FormField>
-
-          <FormField label="Due" requirement="required" className="new-task-form__field sheet-form__field">
-            <input
-              type="date"
-              required
-              value={due}
-              onChange={(e) => {
-                setDue(e.target.value);
-                setFormError(null);
-              }}
-            />
-          </FormField>
-
-          <FormField label="Property" requirement="optional" className="new-task-form__field sheet-form__field">
-            <select
-              value={propertyId}
-              onChange={(e) => {
-                setPropertyId(e.target.value);
-                setAreaId("");
-                setFormError(null);
-              }}
-            >
-              <option value="">No property</option>
-              {(propsQ.data ?? []).map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </FormField>
-
-          {propertyId && (areasQ.data ?? []).length > 0 && (
-            <FormField label="Area" requirement="optional" className="new-task-form__field sheet-form__field">
-              <select
-                value={areaId}
-                onChange={(e) => {
-                  setAreaId(e.target.value);
-                  setFormError(null);
-                }}
-              >
-                <option value="">No area</option>
-                {(areasQ.data ?? []).map((area) => (
-                  <option key={area.id} value={area.id}>{area.name}</option>
-                ))}
-              </select>
-            </FormField>
-          )}
-
-          <Checkbox
-            checked={personal}
-            onChange={(e) => {
-              setPersonal(e.target.checked);
-              setFormError(null);
-            }}
-            label="Keep this personal (only I can see it)"
-          />
-
-          {formError && <p className="form-error" role="alert">{formError}</p>}
-          </div>
-
-          <footer className="new-task-form__footer sheet-form__footer">
+        closeDisabled={create.isPending}
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (submitLocked.current || create.isPending) return;
+          const trimmed = title.trim();
+          if (!trimmed) return;
+          if (!due) {
+            setFormError("Choose a due date before adding the task.");
+            return;
+          }
+          if (personal && !currentUserId) {
+            setFormError("Your profile is still loading. Wait a moment and try again.");
+            return;
+          }
+          submitLocked.current = true;
+          setFormError(null);
+          create.mutate({
+            title: trimmed,
+            scheduled_for_local: due + "T09:00:00",
+            property_id: propertyId || undefined,
+            area_id: areaId || undefined,
+            assigned_user_id: personal ? currentUserId : undefined,
+            is_personal: personal,
+          });
+        }}
+        actions={
+          <>
             <button
               type="button"
               className="btn btn--ghost"
               disabled={create.isPending}
-              onClick={() => ref.current?.close()}
+              onClick={closeForm}
             >
               Cancel
             </button>
@@ -241,9 +163,78 @@ export default function NewTaskButton() {
             >
               {create.isPending ? "Adding…" : "Add task"}
             </button>
-          </footer>
-        </form>
-      </dialog>
+          </>
+        }
+      >
+        <FormModalField label="Title" requirement="required" className="new-task-form__field">
+          <input
+            autoFocus
+            required
+            value={title}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              setFormError(null);
+            }}
+            placeholder="e.g. Call back Maria about the stay"
+          />
+        </FormModalField>
+
+        <FormModalField label="Due" requirement="required" className="new-task-form__field">
+          <input
+            type="date"
+            required
+            value={due}
+            onChange={(e) => {
+              setDue(e.target.value);
+              setFormError(null);
+            }}
+          />
+        </FormModalField>
+
+        <FormModalField label="Property" requirement="optional" className="new-task-form__field">
+          <select
+            value={propertyId}
+            onChange={(e) => {
+              setPropertyId(e.target.value);
+              setAreaId("");
+              setFormError(null);
+            }}
+          >
+            <option value="">No property</option>
+            {(propsQ.data ?? []).map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </FormModalField>
+
+        {propertyId && (areasQ.data ?? []).length > 0 && (
+          <FormModalField label="Area" requirement="optional" className="new-task-form__field">
+            <select
+              value={areaId}
+              onChange={(e) => {
+                setAreaId(e.target.value);
+                setFormError(null);
+              }}
+            >
+              <option value="">No area</option>
+              {(areasQ.data ?? []).map((area) => (
+                <option key={area.id} value={area.id}>{area.name}</option>
+              ))}
+            </select>
+          </FormModalField>
+        )}
+
+        <Checkbox
+          checked={personal}
+          onChange={(e) => {
+            setPersonal(e.target.checked);
+            setFormError(null);
+          }}
+          label="Keep this personal (only I can see it)"
+        />
+
+        {formError && <p className="form-error" role="alert">{formError}</p>}
+      </FormModal>
     </>
   );
 }

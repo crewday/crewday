@@ -11,7 +11,7 @@ import ChatLog from "@/components/chat/ChatLog";
 import ChatComposer from "@/components/chat/ChatComposer";
 import DateTime from "@/components/DateTime";
 import FileDropZone from "@/components/FileDropZone";
-import FormField from "@/components/FormField";
+import FormModal, { FormModalField } from "@/components/FormModal";
 import PageHeader from "@/components/PageHeader";
 import type {
   AgentMessage,
@@ -109,9 +109,9 @@ const STATUS_TONE: Record<RenderTaskStatus, "moss" | "sky" | "ghost" | "rust"> =
 export default function TaskDetailPage() {
   const { tid = "" } = useParams();
   const qc = useQueryClient();
-  const modalRef = useRef<HTMLDialogElement>(null);
   const previewUrls = useRef<string[]>([]);
   const [skipReason, setSkipReason] = useState("");
+  const [skipOpen, setSkipOpen] = useState(false);
   const [chatDraft, setChatDraft] = useState("");
   const [localEvidence, setLocalEvidence] = useState<LocalEvidence[]>([]);
   const [evidenceError, setEvidenceError] = useState<string | null>(null);
@@ -238,7 +238,7 @@ export default function TaskDetailPage() {
         body: { reason_md: reason },
       }),
     onSuccess: () => {
-      modalRef.current?.close();
+      setSkipOpen(false);
       setSkipReason("");
       qc.invalidateQueries({ queryKey: qk.task(tid) });
       qc.invalidateQueries({ queryKey: qk.today() });
@@ -360,7 +360,7 @@ export default function TaskDetailPage() {
                 {
                   label: "Skip this task",
                   icon: <SkipForward size={18} strokeWidth={1.8} aria-hidden="true" />,
-                  onSelect: () => modalRef.current?.showModal(),
+                  onSelect: () => setSkipOpen(true),
                   destructive: true,
                 },
               ]
@@ -592,50 +592,39 @@ export default function TaskDetailPage() {
         </div>
       )}
 
-      <dialog id="skip-modal" className="modal modal--sheet sheet-form-dialog" ref={modalRef}>
-        <form
-          className="task-skip-form sheet-form"
-          onSubmit={(e) => { e.preventDefault(); skip.mutate(skipReason); }}
-        >
-          <header className="task-skip-form__head sheet-form__head">
-            <div>
-              <p className="task-skip-form__eyebrow sheet-form__eyebrow">Task exception</p>
-              <h3 className="task-skip-form__title sheet-form__title">Skip this task?</h3>
-              <p className="task-skip-form__sub sheet-form__sub">
-                Give a quick reason so the manager knows. It'll go in the audit log.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="task-skip-form__close sheet-form__close"
-              onClick={() => modalRef.current?.close()}
-              aria-label="Close"
-            >
-              ×
-            </button>
-          </header>
-          <div className="task-skip-form__body sheet-form__body">
-          <FormField label="Reason" requirement="required" className="task-skip-form__field sheet-form__field">
-            <AutoGrowTextarea
-              required
-              placeholder="e.g. Guest still in the room — came back early from their day."
-              value={skipReason}
-              onChange={(e) => setSkipReason(e.target.value)}
-            />
-          </FormField>
-          </div>
-          <footer className="task-skip-form__footer sheet-form__footer">
+      <FormModal
+        open={skipOpen}
+        title="Skip this task?"
+        eyebrow="Task exception"
+        subtitle="Give a quick reason so the manager knows. It'll go in the audit log."
+        formClassName="task-skip-form"
+        onClose={() => setSkipOpen(false)}
+        onSubmit={(e) => {
+          e.preventDefault();
+          skip.mutate(skipReason);
+        }}
+        actions={
+          <>
             <button
               className="btn btn--ghost"
               type="button"
-              onClick={() => modalRef.current?.close()}
+              onClick={() => setSkipOpen(false)}
             >
               Cancel
             </button>
             <button className="btn btn--rust" type="submit">Skip task</button>
-          </footer>
-        </form>
-      </dialog>
+          </>
+        }
+      >
+        <FormModalField label="Reason" requirement="required" className="task-skip-form__field">
+          <AutoGrowTextarea
+            required
+            placeholder="e.g. Guest still in the room — came back early from their day."
+            value={skipReason}
+            onChange={(e) => setSkipReason(e.target.value)}
+          />
+        </FormModalField>
+      </FormModal>
       </section>
     </>
   );
