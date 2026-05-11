@@ -12,7 +12,10 @@ import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import DeskPage from "@/components/DeskPage";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import DateTime from "@/components/DateTime";
-import FormField from "@/components/FormField";
+import FormModal, {
+  FormModalField,
+  FormModalGrid,
+} from "@/components/FormModal";
 import { Chip, Loading } from "@/components/common";
 import type { Property } from "@/types/api";
 
@@ -225,19 +228,12 @@ export default function InventoryPage() {
   const [stocktakePid, setStocktakePid] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const stocktakeRef = useRef<HTMLDialogElement>(null);
-  const createItemRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     if (!stocktakePid) return;
     const dialog = stocktakeRef.current;
     if (dialog && !dialog.open) dialog.showModal();
   }, [stocktakePid]);
-
-  useEffect(() => {
-    const dialog = createItemRef.current;
-    if (creating && dialog && !dialog.open) dialog.showModal();
-    if (!creating && dialog?.open) dialog.close();
-  }, [creating]);
 
   function closeStocktake() {
     stocktakeRef.current?.close();
@@ -396,27 +392,21 @@ export default function InventoryPage() {
         )}
       </dialog>
 
-      <dialog
-        ref={createItemRef}
-        className="modal modal--sheet inv-create-dialog"
-        aria-labelledby="inventory-create-title"
+      <NewInventoryItemForm
+        open={creating}
+        properties={propsQ.data}
         onClose={() => setCreating(false)}
-      >
-        {creating && (
-          <NewInventoryItemForm
-            properties={propsQ.data}
-            onClose={() => setCreating(false)}
-          />
-        )}
-      </dialog>
+      />
     </DeskPage>
   );
 }
 
 function NewInventoryItemForm({
+  open,
   properties,
   onClose,
 }: {
+  open: boolean;
   properties: Property[];
   onClose: () => void;
 }) {
@@ -430,6 +420,7 @@ function NewInventoryItemForm({
   const [reorderTarget, setReorderTarget] = useState("");
   const [clientErr, setClientErr] = useState<string | null>(null);
   const [serverErr, setServerErr] = useState<string | null>(null);
+  const wasOpenRef = useRef(false);
 
   const create = useMutation({
     mutationFn: (body: InventoryItemCreateBody) =>
@@ -443,12 +434,40 @@ function NewInventoryItemForm({
     onSuccess: async () => {
       setServerErr(null);
       await qc.invalidateQueries({ queryKey: qk.inventory() });
+      resetDraft();
       onClose();
     },
     onError: (error: Error) => {
       setServerErr(errorCopy(error, "Item creation failed"));
     },
   });
+
+  useEffect(() => {
+    if (open && !wasOpenRef.current) resetFields();
+    wasOpenRef.current = open;
+  }, [open]);
+
+  function resetFields() {
+    setPropertyId(properties[0]?.id ?? "");
+    setName("");
+    setUnit("each");
+    setSku("");
+    setBarcode("");
+    setReorderPoint("0");
+    setReorderTarget("");
+    setClientErr(null);
+    setServerErr(null);
+  }
+
+  function resetDraft() {
+    resetFields();
+    create.reset();
+  }
+
+  function closeForm() {
+    resetDraft();
+    onClose();
+  }
 
   function optionalText(value: string): string | null {
     const trimmed = value.trim();
@@ -511,141 +530,136 @@ function NewInventoryItemForm({
   }
 
   return (
-    <form className="inv-create" onSubmit={submit} noValidate>
-      <header className="inv-create__head">
-        <div>
-          <p className="inv-drawer__eyebrow">New inventory item</p>
-          <h3 id="inventory-create-title" className="inv-create__title">
+    <FormModal
+      open={open}
+      title="Create item"
+      titleId="inventory-create-title"
+      eyebrow="New inventory item"
+      width="narrow"
+      className="inv-create-dialog"
+      formClassName="inv-create"
+      onClose={closeForm}
+      onSubmit={submit}
+      noValidate
+      actions={
+        <>
+          <button type="button" className="btn btn--ghost" onClick={closeForm}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn--moss" disabled={create.isPending}>
             Create item
-          </h3>
-        </div>
-        <button
-          type="button"
-          className="inv-drawer__close"
-          onClick={onClose}
-          aria-label="Close"
-        >
-          ×
-        </button>
-      </header>
-
-      <div className="inv-create__body">
-        {properties.length > 1 && (
-          <FormField label="Property" requirement="required" className="inv-create__field">
-            <select
-              value={propertyId}
-              onChange={(e) => setPropertyId(e.target.value)}
-              required
-              aria-invalid={clientErr === "Choose a property."}
-              aria-describedby={errId}
-            >
-              {properties.map((property) => (
-                <option key={property.id} value={property.id}>
-                  {property.name}
-                </option>
-              ))}
-            </select>
-          </FormField>
-        )}
-        <FormField label="Name" requirement="required" className="inv-create__field">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+          </button>
+        </>
+      }
+    >
+      {properties.length > 1 && (
+        <FormModalField label="Property" requirement="required">
+          <select
+            value={propertyId}
+            onChange={(e) => setPropertyId(e.target.value)}
             required
-            aria-invalid={clientErr === "Name is required."}
+            aria-invalid={clientErr === "Choose a property."}
             aria-describedby={errId}
-          />
-        </FormField>
-        <div className="inv-create__grid">
-          <FormField label="Unit" requirement="required" className="inv-create__field">
-            <input
-              value={unit}
-              onChange={(e) => setUnit(e.target.value)}
-              required
-              list="inventory-unit-options"
-              aria-invalid={clientErr === "Unit is required."}
-              aria-describedby={errId}
-            />
-            <datalist id="inventory-unit-options">
-              <option value="each" />
-              <option value="roll" />
-              <option value="pack" />
-              <option value="bottle" />
-              <option value="kg" />
-              <option value="L" />
-            </datalist>
-          </FormField>
-          <FormField label="SKU" requirement="optional" className="inv-create__field">
-            <input
-              value={sku}
-              onChange={(e) => setSku(e.target.value)}
-              aria-invalid={serverErr === "SKU already exists for this property."}
-              aria-describedby={errId}
-            />
-          </FormField>
-        </div>
-        <FormField label="Barcode" requirement="optional" className="inv-create__field">
+          >
+            {properties.map((property) => (
+              <option key={property.id} value={property.id}>
+                {property.name}
+              </option>
+            ))}
+          </select>
+        </FormModalField>
+      )}
+      <FormModalField label="Name" requirement="required">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+          aria-invalid={clientErr === "Name is required."}
+          aria-describedby={errId}
+        />
+      </FormModalField>
+      <FormModalGrid>
+        <FormModalField label="Unit" requirement="required">
           <input
-            value={barcode}
-            onChange={(e) => setBarcode(e.target.value)}
-            aria-invalid={serverErr === "Barcode already exists for this property."}
+            value={unit}
+            onChange={(e) => setUnit(e.target.value)}
+            required
+            list="inventory-unit-options"
+            aria-invalid={clientErr === "Unit is required."}
             aria-describedby={errId}
           />
-        </FormField>
-        <div className="inv-create__grid">
-          <FormField label="Reorder point" requirement="required" className="inv-create__field">
-            <input
-              className="mono"
-              type="number"
-              step="0.01"
-              min="0"
-              value={reorderPoint}
-              onChange={(e) => setReorderPoint(e.target.value)}
-              required
-              aria-invalid={clientErr === "Reorder point must be zero or more."}
-              aria-describedby={describedBy(reorderPointHelpId, errId)}
-            />
-            <span id={reorderPointHelpId} className="inv-create__help">
-              Items at or below this threshold are low stock and can trigger
-              procurement work.
-            </span>
-          </FormField>
-          <FormField label="Reorder target" requirement="optional" className="inv-create__field">
-            <input
-              className="mono"
-              type="number"
-              step="0.01"
-              min="0"
-              value={reorderTarget}
-              onChange={(e) => setReorderTarget(e.target.value)}
-              aria-invalid={
-                clientErr === "Reorder target must be zero or more." ||
-                clientErr === "Reorder target must be at least the reorder point."
-              }
-              aria-describedby={describedBy(reorderTargetHelpId, errId)}
-            />
-            <span id={reorderTargetHelpId} className="inv-create__help">
-              Optional desired refill level; when provided, it must be at least
-              the reorder point.
-            </span>
-          </FormField>
-        </div>
-        {err && (
-          <p id="inventory-create-error" className="form-error" role="alert">
-            {err}
-          </p>
-        )}
-      </div>
-
-      <footer className="inv-create__footer">
-        <button type="button" className="btn btn--ghost" onClick={onClose}>
-          Cancel
-        </button>
-        <button type="submit" className="btn btn--moss" disabled={create.isPending}>
-          Create item
-        </button>
-      </footer>
-    </form>
+          <datalist id="inventory-unit-options">
+            <option value="each" />
+            <option value="roll" />
+            <option value="pack" />
+            <option value="bottle" />
+            <option value="kg" />
+            <option value="L" />
+          </datalist>
+        </FormModalField>
+        <FormModalField label="SKU" requirement="optional">
+          <input
+            value={sku}
+            onChange={(e) => setSku(e.target.value)}
+            aria-invalid={serverErr === "SKU already exists for this property."}
+            aria-describedby={errId}
+          />
+        </FormModalField>
+      </FormModalGrid>
+      <FormModalField label="Barcode" requirement="optional">
+        <input
+          value={barcode}
+          onChange={(e) => setBarcode(e.target.value)}
+          aria-invalid={serverErr === "Barcode already exists for this property."}
+          aria-describedby={errId}
+        />
+      </FormModalField>
+      <FormModalGrid>
+        <FormModalField
+          label="Reorder point"
+          requirement="required"
+          helpId={reorderPointHelpId}
+          helpText="Items at or below this threshold are low stock and can trigger procurement work."
+        >
+          <input
+            className="mono"
+            type="number"
+            step="0.01"
+            min="0"
+            value={reorderPoint}
+            onChange={(e) => setReorderPoint(e.target.value)}
+            required
+            aria-invalid={clientErr === "Reorder point must be zero or more."}
+            aria-describedby={describedBy(reorderPointHelpId, errId)}
+          />
+        </FormModalField>
+        <FormModalField
+          label="Reorder target"
+          requirement="optional"
+          helpId={reorderTargetHelpId}
+          helpText="Optional desired refill level; when provided, it must be at least the reorder point."
+        >
+          <input
+            className="mono"
+            type="number"
+            step="0.01"
+            min="0"
+            value={reorderTarget}
+            onChange={(e) => setReorderTarget(e.target.value)}
+            aria-invalid={
+              clientErr === "Reorder target must be zero or more." ||
+              clientErr === "Reorder target must be at least the reorder point."
+            }
+            aria-describedby={describedBy(reorderTargetHelpId, errId)}
+          />
+        </FormModalField>
+      </FormModalGrid>
+      {err && (
+        <p id="inventory-create-error" className="form-error" role="alert">
+          {err}
+        </p>
+      )}
+    </FormModal>
   );
 }
 

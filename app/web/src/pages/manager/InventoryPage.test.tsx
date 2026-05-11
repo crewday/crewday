@@ -16,7 +16,7 @@ import * as preferences from "@/lib/preferences";
 import type { Property } from "@/types/api";
 import InventoryPage from "./InventoryPage";
 import appSource from "../../App.tsx?raw";
-import inventoryCss from "@/styles/inventory.css?raw";
+import formsCss from "@/styles/forms.css?raw";
 import { installFetchRouteHandlers } from "@/test/helpers";
 
 const PROPERTIES: Property[] = [
@@ -304,6 +304,14 @@ describe("<InventoryPage>", () => {
       fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
 
       const dialog = await screen.findByRole("dialog", { name: "Create item" });
+      expect(dialog).toHaveClass(
+        "modal",
+        "modal--sheet",
+        "form-modal-dialog",
+        "form-modal-dialog--narrow",
+        "inv-create-dialog",
+      );
+      expect(dialog.querySelector("form")).toHaveClass("form-modal", "inv-create");
       expect(within(dialog).getByRole("heading", { name: "Create item" })).toBeInTheDocument();
       expect(within(dialog).getByLabelText(/^Property\b/)).toHaveValue("prop_1");
       expect(within(dialog).getByRole("option", { name: "Casa Azul" })).toBeInTheDocument();
@@ -376,9 +384,12 @@ describe("<InventoryPage>", () => {
     }
   });
 
-  it("keeps new item controls on the design-system radius", () => {
-    expect(inventoryCss).toMatch(
-      /\.inv-create__field input,\n\.inv-create__field select \{[^}]*border-radius: 6px;/,
+  it("keeps structured form controls aligned to DESIGN.md tokens", () => {
+    expect(formsCss).toMatch(
+      /\.field input, \.field textarea, \.field select,[\s\S]*border: 1px solid var\(--line-strong\);[\s\S]*border-radius: 6px;/m,
+    );
+    expect(formsCss).not.toMatch(
+      /\.field input:focus, \.field textarea:focus, \.field select:focus,/,
     );
   });
 
@@ -400,6 +411,40 @@ describe("<InventoryPage>", () => {
       expect(
         fake.requests.some((r) => r.method === "POST" && r.path.includes("/inventory/properties/")),
       ).toBe(false);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("reopens the new item form with a fresh draft", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+      await screen.findByText("Paper towels");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
+      const dialog = await screen.findByRole("dialog", { name: "Create item" });
+      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
+        target: { value: "Draft towels" },
+      });
+      fireEvent.change(within(dialog).getByLabelText(/^Unit\b/), {
+        target: { value: "" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create item" }));
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+        "Unit is required.",
+      );
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name: "Create item" })).not.toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
+
+      const reopened = await screen.findByRole("dialog", { name: "Create item" });
+      expect(within(reopened).queryByRole("alert")).not.toBeInTheDocument();
+      expect(within(reopened).getByLabelText(/^Name\b/)).toHaveValue("");
+      expect(within(reopened).getByLabelText(/^Unit\b/)).toHaveValue("each");
     } finally {
       fake.restore();
     }

@@ -52,6 +52,11 @@
 
 .form { display: flex; flex-direction: column; gap: 12px; }
 .field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ink-2); }
+.form-error {
+  color: var(--rust);
+  font-size: 13px;
+  margin: 0;
+}
 .form-field__label {
   display: flex;
   flex-wrap: wrap;
@@ -84,17 +89,26 @@
   line-height: 1.45;
 }
 
+.form-modal-dialog.modal--sheet[open],
 .sheet-form-dialog.modal--sheet[open] {
   width: min(640px, calc(100vw - 24px));
   max-height: min(86dvh, 820px);
   overflow: hidden;
 }
+.form-modal-dialog--narrow.modal--sheet[open] {
+  width: min(560px, calc(100vw - 24px));
+}
+.form-modal-dialog--wide.modal--sheet[open] {
+  width: min(760px, calc(100vw - 24px));
+}
+.form-modal,
 .sheet-form {
   display: flex;
   flex-direction: column;
   min-width: 0;
   max-height: inherit;
 }
+.form-modal__head,
 .sheet-form__head {
   display: flex;
   justify-content: space-between;
@@ -103,6 +117,7 @@
   padding: 22px 24px 14px;
   border-bottom: 1px solid var(--line);
 }
+.form-modal__eyebrow,
 .sheet-form__eyebrow {
   margin: 0;
   color: var(--ink-3);
@@ -111,13 +126,21 @@
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
+.form-modal__eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 400;
+  letter-spacing: 0.22em;
+}
+.form-modal__title,
 .sheet-form__title {
   font-family: "Fraunces", ui-serif, serif;
   font-size: 1.35rem;
   line-height: 1.1;
   margin: 2px 0 0;
   color: var(--ink);
+  overflow-wrap: anywhere;
 }
+.form-modal__sub,
 .sheet-form__sub {
   margin: 6px 0 0;
   max-width: 54ch;
@@ -125,6 +148,7 @@
   font-size: 13px;
   line-height: 1.45;
 }
+.form-modal__close,
 .sheet-form__close {
   flex-shrink: 0;
   width: 34px;
@@ -138,11 +162,13 @@
   line-height: 1;
   transition: transform 140ms ease, color 140ms ease, border-color 140ms ease;
 }
+.form-modal__close:hover,
 .sheet-form__close:hover {
   color: var(--ink);
   border-color: var(--ink-2);
   transform: rotate(90deg);
 }
+.form-modal__body,
 .sheet-form__body {
   display: flex;
   flex-direction: column;
@@ -152,17 +178,29 @@
   overflow-y: auto;
   padding: 20px 24px;
 }
+.form-modal__body {
+  gap: 14px;
+}
+.form-modal__grid,
 .sheet-form__grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
 }
+.form-modal__field,
 .sheet-form__field {
   min-width: 0;
 }
+.form-modal__field textarea,
 .sheet-form__field textarea {
   min-height: 96px;
 }
+.form-modal__field .form-field__help {
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.form-modal__footer,
 .sheet-form__footer {
   display: flex;
   justify-content: flex-end;
@@ -173,25 +211,33 @@
 }
 
 @media (max-width: 560px) {
+  .form-modal-dialog.modal--sheet[open],
   .sheet-form-dialog.modal--sheet[open] {
     width: 100vw;
     max-width: 100vw;
     max-height: 100dvh;
   }
+  .form-modal,
   .sheet-form {
     max-height: inherit;
   }
+  .form-modal__head,
+  .form-modal__body,
+  .form-modal__footer,
   .sheet-form__head,
   .sheet-form__body,
   .sheet-form__footer {
     padding-inline: 18px;
   }
+  .form-modal__grid,
   .sheet-form__grid {
     grid-template-columns: 1fr;
   }
+  .form-modal__footer,
   .sheet-form__footer {
     flex-direction: column-reverse;
   }
+  .form-modal__footer .btn,
   .sheet-form__footer .btn {
     width: 100%;
   }
@@ -380,8 +426,9 @@
 .me-chat-channels__field input {
   padding: 10px 12px;
   background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  min-height: 44px;
   font: inherit; color: inherit;
   font-family: "Inter Tight", sans-serif;
 }
@@ -390,11 +437,11 @@
 .agent-prefs__textarea {
   resize: none; min-height: 44px; overflow-y: auto;
 }
-.field input:focus, .field textarea:focus, .field select:focus,
-.comment__compose textarea:focus,
-.agent-prefs__textarea:focus,
-.me-chat-channels__field input:focus {
-  outline: 2px solid var(--moss); outline-offset: -1px;
+.field input[aria-invalid="true"],
+.field textarea[aria-invalid="true"],
+.field select[aria-invalid="true"] {
+  border-color: var(--rust);
+  box-shadow: 0 0 0 3px rgba(154, 73, 43, 0.14);
 }
 .searchable-select {
   position: relative;
@@ -453,11 +500,6 @@
 .field--warn select {
   border-color: var(--sand);
   background: var(--sand-soft);
-}
-.field--warn input:focus,
-.field--warn textarea:focus,
-.field--warn select:focus {
-  outline-color: var(--sand);
 }
 .form__row { display: flex; gap: 8px; justify-content: space-between; align-items: center; }
 .form__row .field--grow { flex: 1; }
