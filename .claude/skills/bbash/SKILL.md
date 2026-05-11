@@ -1,6 +1,6 @@
 ---
 name: bbash
-description: Interactive bug bashing session for crew.day. Verifies reports, clarifies only when needed, and creates paired Beads bug tasks for async implementation.
+description: Interactive bug bashing session for crew.day. Verifies reports, asks until non-obvious user intent is unambiguous, and creates paired Beads bug tasks for async implementation.
 ---
 
 # Bug Bash Skill
@@ -28,12 +28,36 @@ the loopback dev app.
 1. Listen to bug reports from the user.
 2. Verify the bug yourself with `curl`, repo wrappers, Playwright, or a
    focused script.
-3. Ask clarifying questions only when verification is insufficient or
-   user-specific context is required.
+3. Ask clarifying questions until every non-obvious piece of user intent
+   is clean and unambiguous.
 4. Create well-documented Beads tasks for fixes.
 5. Pair every created non-selfreview task with the local `$beads`
    selfreview task pattern.
 6. Continue the session; implementation happens asynchronously.
+
+## Intent Clarity Gate
+
+Verification proves what happened; questions establish what should
+happen. For anything non-obvious, ask as many concise questions as
+necessary before creating a Beads task or making a quick fix. Use
+`AskUserQuestion`, `AskQuestionTool`, or the current runtime's equivalent
+when available. If no question tool exists, ask directly in chat.
+
+Ask after you have checked the obvious evidence yourself, but do not
+encode guesses about intended behavior, affected role, data sensitivity,
+priority, or task scope. Continue until the expected behavior,
+environment, affected user/workspace, severity, and success criteria are
+unambiguous.
+
+Each question should give the user enough context to answer quickly:
+
+- **Context**: what you observed and what the specs/code suggest.
+- **Recommendation**: the choice you would make and why.
+- **Decision needed**: the smallest answer that unblocks the report.
+
+Keep the exchange concise. Prefer one focused question; batch up to
+three related questions only when they are independent. Do not ask for
+facts you can discover with repo search, logs, curl, or Playwright.
 
 ## Critical Rules
 
@@ -72,7 +96,9 @@ atomic Beads tasks and keep the bug bash moving. This includes:
 
 Autonomous verification is preferred over asking. Ask only when you
 cannot reproduce the issue, cannot infer the intended behavior from
-specs/code, or need data that is private to the user.
+specs/code with high confidence, need data that is private to the user,
+or see any other non-obvious ambiguity that would change the task or
+fix.
 
 ## Verification Tools
 
@@ -142,7 +168,8 @@ User reports bug
     v
 Verify with curl / agent-curl / Playwright / focused script
     |
-    +-- Not reproduced or needs user context -> ask a short clarifying question
+    +-- Non-obvious intent remains -> ask concise questions with context
+        and a recommendation until unambiguous
     |
     +-- Confirmed
         |

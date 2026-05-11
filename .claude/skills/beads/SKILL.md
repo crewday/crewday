@@ -13,12 +13,50 @@ asynchronously.
 
 1. **Analyse** the user's prompt.
 2. **Research** the codebase and specs to gather context.
-3. **Break down** work into atomic, independent tasks.
-4. **Create tasks** with full context, clear acceptance criteria, and a
+3. **Clarify intent** until every non-obvious requirement is clean and
+   unambiguous.
+4. **Break down** work into atomic, independent tasks.
+5. **Create tasks** with full context, clear acceptance criteria, and a
    test plan.
-5. **Link dependencies** when tasks must be completed in order.
-6. **Pair every non-selfreview task with a `/selfreview` autofix task**
+6. **Link dependencies** when tasks must be completed in order.
+7. **Pair every non-selfreview task with a `/selfreview` autofix task**
    (see below).
+
+## Intent clarity gate
+
+Before creating any task for non-obvious work, ask as many concise
+questions as necessary to remove ambiguity. Use `AskUserQuestion`,
+`AskQuestionTool`, or the current runtime's equivalent when available.
+If no question tool exists, ask directly in chat.
+
+Ask after enough research to avoid wasting the user's time, but before
+encoding assumptions into Beads. Continue the loop until the task scope,
+expected behavior, priority, success criteria, and any privacy/auth/data
+impact are unambiguous.
+
+Each question should include:
+
+- **Context**: what you found in the prompt, specs, code, or existing
+  Beads task.
+- **Recommendation**: the option you would choose and why.
+- **Decision needed**: the smallest answer that unblocks task creation.
+
+Keep questions batched and concise. Prefer one short question when
+possible; use up to three related questions when several decisions are
+independent. Do not ask about obvious or discoverable facts; research
+those yourself.
+
+Examples of non-obvious ambiguity that require questions:
+
+- The requested behavior conflicts with specs, code, or another Beads
+  task.
+- The task could reasonably target different surfaces, roles,
+  workspaces, or environments.
+- Acceptance criteria would differ depending on product intent.
+- The work touches auth, permissions, PII, payroll, billing, deletion,
+  migrations, or irreversible data changes.
+- Several reasonable implementation boundaries exist and would produce
+  different task breakdowns.
 
 ## Task quality standards
 
@@ -215,12 +253,15 @@ USER prompt
     ▼
 Analyse the request
     │
+    ▼
+Research specs + code for context
+    │
+    ▼
+Clarify non-obvious intent until unambiguous
+    │
     ├─► Simple single task → 1 task (+ self-review pair)
     │
     └─► Complex / multi-part → break down
-            │
-            ▼
-        Research specs + code for context
             │
             ▼
         Identify dependencies
