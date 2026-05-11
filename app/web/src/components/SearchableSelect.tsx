@@ -82,7 +82,7 @@ export default function SearchableSelect({
     : 0;
   const selectedOpenActiveIndex = selectedOptionIndex >= 0 ? selectedOptionIndex - selectedOpenStartIndex : 0;
   const hasUncommittedQuery = query.trim() !== "" && query !== selectedOptionLabel;
-  const invalidSelection = required && (
+  const invalidSelection = !disabled && required && (
     !selectedOption ||
     selectedOption.value === "" ||
     query.trim() === "" ||

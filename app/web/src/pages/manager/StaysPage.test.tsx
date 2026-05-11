@@ -218,6 +218,17 @@ function Harness({ queryClient }: { queryClient?: QueryClient } = {}) {
   );
 }
 
+async function chooseSearchableOption(
+  container: HTMLElement,
+  label: RegExp,
+  query: string,
+): Promise<void> {
+  const input = within(container).getByRole("combobox", { name: label });
+  fireEvent.change(input, { target: { value: query } });
+  await within(container).findByText(query);
+  fireEvent.keyDown(input, { key: "Enter" });
+}
+
 beforeEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
@@ -414,7 +425,7 @@ describe("<StaysPage>", () => {
       fireEvent.change(within(dialog).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-21" } });
       expect(within(dialog).queryByText(/Overlaps/)).not.toBeInTheDocument();
 
-      fireEvent.change(within(dialog).getByLabelText(/^Unit\b/), { target: { value: "unit_2" } });
+      await chooseSearchableOption(dialog, /^Unit\b/, "Roof Studio");
       expect(within(dialog).getByText(/Overlaps Hidden guest/)).toBeInTheDocument();
 
       fireEvent.change(within(dialog).getByLabelText(/^Check-in\b/), { target: { value: "2026-04-21" } });

@@ -7,6 +7,7 @@ import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import FileDropZone from "@/components/FileDropZone";
 import FormModal, { FormModalGrid } from "@/components/FormModal";
+import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { Checkbox, Chip, EmptyState, FilterChipGroup, Loading } from "@/components/common";
 import { AssetIcon } from "@/components/AssetIcon";
 import { ASSET_CONDITION_TONE, ASSET_STATUS_TONE } from "@/lib/tones";
@@ -33,6 +34,28 @@ async function fetchList<T>(path: string): Promise<T[]> {
 interface AreaOption {
   id: string;
   name: string;
+}
+
+function propertySelectOption(property: Property): SearchableSelectOption {
+  return {
+    value: property.id,
+    label: property.name,
+    secondaryText: property.city,
+    searchText: `${property.name} ${property.city} ${property.timezone}`,
+  };
+}
+
+function areaSelectOption(area: AreaOption): SearchableSelectOption {
+  return { value: area.id, label: area.name };
+}
+
+function assetTypeSelectOption(assetType: AssetType): SearchableSelectOption {
+  return {
+    value: assetType.id,
+    label: assetType.name,
+    secondaryText: assetType.category,
+    searchText: `${assetType.name} ${assetType.category} ${assetType.key}`,
+  };
 }
 
 interface AssetCreateBody {
@@ -420,58 +443,50 @@ function NewAssetButton({
                 />
               </label>
               <FormModalGrid className="asset-create__grid">
-                <label className="field asset-create__field">
-                  <span>Property</span>
-                  <select
-                    required
-                    aria-invalid={propertyInvalid}
-                    aria-describedby={propertyInvalid ? formErrorId : undefined}
-                    value={propertyId}
-                    onChange={(event) => {
-                      setPropertyId(event.target.value);
-                      setAreaId("");
-                      setFormError(null);
-                    }}
-                  >
-                    <option value="">Choose property</option>
-                    {properties?.map((property) => (
-                      <option key={property.id} value={property.id}>{property.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field asset-create__field">
-                  <span>Area</span>
-                  <select
-                    value={areaId}
-                    disabled={!propertyId || areasQ.isPending || areasQ.isError}
-                    onChange={(event) => {
-                      setAreaId(event.target.value);
-                      setFormError(null);
-                    }}
-                  >
-                    <option value="">No area</option>
-                    {areasQ.data?.map((area) => (
-                      <option key={area.id} value={area.id}>{area.name}</option>
-                    ))}
-                  </select>
-                </label>
+                <SearchableSelect
+                  label="Property"
+                  className="asset-create__field"
+                  value={propertyId}
+                  options={(properties ?? []).map(propertySelectOption)}
+                  required
+                  blankOption={{ label: "Choose property" }}
+                  aria-invalid={propertyInvalid}
+                  aria-describedby={propertyInvalid ? formErrorId : undefined}
+                  onChange={(value) => {
+                    setPropertyId(value);
+                    setAreaId("");
+                    setFormError(null);
+                  }}
+                />
+                <SearchableSelect
+                  label="Area"
+                  requirement="optional"
+                  className="asset-create__field"
+                  value={areaId}
+                  options={(areasQ.data ?? []).map(areaSelectOption)}
+                  disabled={!propertyId || areasQ.isPending || areasQ.isError}
+                  blankOption={{ label: "No area" }}
+                  noResultsLabel="No areas"
+                  renderOptionSecondaryText={() => null}
+                  onChange={(value) => {
+                    setAreaId(value);
+                    setFormError(null);
+                  }}
+                />
               </FormModalGrid>
               <FormModalGrid className="asset-create__grid">
-                <label className="field asset-create__field">
-                  <span>Type</span>
-                  <select
-                    value={assetTypeId}
-                    onChange={(event) => {
-                      setAssetTypeId(event.target.value);
-                      setFormError(null);
-                    }}
-                  >
-                    <option value="">Uncategorized</option>
-                    {assetTypes?.map((assetType) => (
-                      <option key={assetType.id} value={assetType.id}>{assetType.name}</option>
-                    ))}
-                  </select>
-                </label>
+                <SearchableSelect
+                  label="Type"
+                  requirement="optional"
+                  className="asset-create__field"
+                  value={assetTypeId}
+                  options={(assetTypes ?? []).map(assetTypeSelectOption)}
+                  blankOption={{ label: "Uncategorized" }}
+                  onChange={(value) => {
+                    setAssetTypeId(value);
+                    setFormError(null);
+                  }}
+                />
                 <label className="field asset-create__field">
                   <span>Condition</span>
                   <select

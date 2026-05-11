@@ -6,6 +6,7 @@ import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import FormField from "@/components/FormField";
 import FormModal, { FormModalGrid } from "@/components/FormModal";
+import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { Chip, Loading } from "@/components/common";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import type {
@@ -100,6 +101,22 @@ const PROVIDERS: { value: IcalProvider; label: string }[] = [
   { value: "gcal", label: "Google Calendar" },
   { value: "generic", label: "Generic ICS" },
 ];
+
+function propertySelectOption(property: Property): SearchableSelectOption {
+  return {
+    value: property.id,
+    label: property.name,
+    secondaryText: property.city,
+    searchText: `${property.name} ${property.city} ${property.timezone}`,
+  };
+}
+
+function unitSelectOption(unit: UnitPayload): SearchableSelectOption {
+  return {
+    value: unit.id,
+    label: unit.name,
+  };
+}
 
 const manualNoticeId = "manual-stay-form-notice";
 const manualPrivacyId = "manual-stay-privacy-note";
@@ -669,29 +686,27 @@ export default function StaysPage() {
         {manualForm ? (
           <>
             <FormModalGrid className="stay-create-form__grid">
-              <FormField label="Property" requirement="required" className="stay-create-form__field sheet-form__field">
-                <select
-                  value={manualForm.propertyId}
-                  onChange={(event) => updateManualProperty(event.target.value)}
-                >
-                  {properties.map((property) => (
-                    <option key={property.id} value={property.id}>{property.name}</option>
-                  ))}
-                </select>
-              </FormField>
+              <SearchableSelect
+                label="Property"
+                className="stay-create-form__field sheet-form__field"
+                value={manualForm.propertyId}
+                options={properties.map(propertySelectOption)}
+                required
+                onChange={updateManualProperty}
+              />
 
-              <FormField label="Unit" requirement="required" className="stay-create-form__field sheet-form__field">
-                <select
-                  value={manualForm.unitId}
-                  onChange={(event) => setManualForm({ ...manualForm, unitId: event.target.value })}
-                  aria-invalid={selectedManualUnits.length === 0}
-                  aria-describedby={selectedManualUnits.length === 0 ? manualUnitErrorId : undefined}
-                >
-                  {selectedManualUnits.map((unit) => (
-                    <option key={unit.id} value={unit.id}>{unit.name}</option>
-                  ))}
-                </select>
-              </FormField>
+              <SearchableSelect
+                label="Unit"
+                className="stay-create-form__field sheet-form__field"
+                value={manualForm.unitId}
+                options={selectedManualUnits.map(unitSelectOption)}
+                required
+                aria-invalid={selectedManualUnits.length === 0}
+                aria-describedby={selectedManualUnits.length === 0 ? manualUnitErrorId : undefined}
+                noResultsLabel="No units available"
+                renderOptionSecondaryText={() => null}
+                onChange={(value) => setManualForm({ ...manualForm, unitId: value })}
+              />
 
               <FormField label="Check-in" requirement="required" className="stay-create-form__field sheet-form__field">
                 <input
@@ -790,29 +805,27 @@ export default function StaysPage() {
         {icalForm ? (
           <>
             <FormModalGrid className="ical-feed-form__grid">
-              <FormField label="Property" requirement="required" className="ical-feed-form__field sheet-form__field">
-                <select
-                  value={icalForm.propertyId}
-                  onChange={(event) => updateIcalProperty(event.target.value)}
-                >
-                  {properties.map((property) => (
-                    <option key={property.id} value={property.id}>{property.name}</option>
-                  ))}
-                </select>
-              </FormField>
+              <SearchableSelect
+                label="Property"
+                className="ical-feed-form__field sheet-form__field"
+                value={icalForm.propertyId}
+                options={properties.map(propertySelectOption)}
+                required
+                onChange={updateIcalProperty}
+              />
 
-              <FormField label="Unit" requirement="required" className="ical-feed-form__field sheet-form__field">
-                <select
-                  value={icalForm.unitId}
-                  onChange={(event) => setIcalForm({ ...icalForm, unitId: event.target.value })}
-                  aria-invalid={selectedIcalUnits.length === 0}
-                  aria-describedby={selectedIcalUnits.length === 0 ? icalUnitErrorId : undefined}
-                >
-                  {selectedIcalUnits.map((unit) => (
-                    <option key={unit.id} value={unit.id}>{unit.name}</option>
-                  ))}
-                </select>
-              </FormField>
+              <SearchableSelect
+                label="Unit"
+                className="ical-feed-form__field sheet-form__field"
+                value={icalForm.unitId}
+                options={selectedIcalUnits.map(unitSelectOption)}
+                required
+                aria-invalid={selectedIcalUnits.length === 0}
+                aria-describedby={selectedIcalUnits.length === 0 ? icalUnitErrorId : undefined}
+                noResultsLabel="No units available"
+                renderOptionSecondaryText={() => null}
+                onChange={(value) => setIcalForm({ ...icalForm, unitId: value })}
+              />
 
               <FormField label="Provider" requirement="required" className="ical-feed-form__field sheet-form__field">
                 <select

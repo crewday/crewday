@@ -66,6 +66,20 @@ interface InstallFetchOptions {
   failAreaPost?: boolean;
   failAreasList?: boolean;
   failPropertyPatch?: boolean;
+  availableWorkspaces?: Array<{
+    workspace_id?: string | null;
+    workspace: {
+      id: string;
+      name: string;
+      timezone: string;
+      default_currency: string;
+      default_country: string;
+      default_locale: string;
+    };
+    grant_role: "manager" | "worker" | "client" | "guest" | "admin" | null;
+    binding_org_id: string | null;
+    source: "workspace_grant" | "property_grant" | "org_grant" | "work_engagement";
+  }>;
 }
 
 function parseBody(init?: RequestInit): unknown {
@@ -145,7 +159,7 @@ function installFetch(options: InstallFetchOptions = {}) {
         user_id: "usr_1",
         display_name: "Mina",
         email: "mina@example.com",
-        available_workspaces: [],
+        available_workspaces: options.availableWorkspaces ?? [],
         current_workspace_id: "ws_owner",
       });
     }
@@ -159,6 +173,14 @@ function installFetch(options: InstallFetchOptions = {}) {
           last_seen_at: null,
           settings_override: {},
         },
+        ...(options.availableWorkspaces ?? []).map((entry) => ({
+          workspace_id: entry.workspace_id ?? entry.workspace.id,
+          slug: entry.workspace.id,
+          name: entry.workspace.name,
+          current_role: entry.grant_role,
+          last_seen_at: null,
+          settings_override: {},
+        })),
       ]);
     }
     if (resolved === "/w/acme/api/v1/properties") {
@@ -318,6 +340,18 @@ function installFetch(options: InstallFetchOptions = {}) {
       });
     }
     if (resolved === "/w/acme/api/v1/properties/prop_1/share") {
+      if (method === "POST") {
+        const request = body as { workspace_slug?: string; membership_role?: string };
+        return jsonResponse({
+          property_id: "prop_1",
+          workspace_id: request.workspace_slug ?? "",
+          label: "Agency Partners",
+          membership_role: request.membership_role ?? "managed_workspace",
+          status: "active",
+          share_guest_identity: false,
+          created_at: "2026-05-05T10:00:00Z",
+        }, 201);
+      }
       return jsonResponse({
         data: [
           {
@@ -463,6 +497,17 @@ function SwitchingHarness() {
       </MemoryRouter>
     </QueryClientProvider>
   );
+}
+
+async function chooseSearchableOption(
+  container: HTMLElement,
+  label: RegExp,
+  query: string,
+): Promise<void> {
+  const input = within(container).getByRole("combobox", { name: label });
+  fireEvent.change(input, { target: { value: query } });
+  await within(container).findByText(query);
+  fireEvent.keyDown(input, { key: "Enter" });
 }
 
 beforeEach(() => {
@@ -639,6 +684,9 @@ describe("<PropertyDetailPage>", () => {
       fireEvent.change(screen.getByLabelText("Kind"), {
         target: { value: "outdoor" },
       });
+      const createAreaPanel = screen.getByRole("heading", { name: "Create area" }).closest(".panel");
+      if (!createAreaPanel) throw new Error("create area panel missing");
+      await chooseSearchableOption(createAreaPanel as HTMLElement, /^Parent\b/, "Kitchen");
       fireEvent.change(screen.getByLabelText("Order"), {
         target: { value: "3" },
       });
@@ -669,9 +717,56 @@ describe("<PropertyDetailPage>", () => {
         expect(screen.queryByText("Pool deck")).not.toBeInTheDocument();
       });
 
-      expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/properties/prop_1/areas" && call.method === "POST")).toBe(true);
+      expect(fake.calls.find((call) => call.url === "/w/acme/api/v1/properties/prop_1/areas" && call.method === "POST")?.body).toMatchObject({
+        parent_area_id: "area_1",
+      });
       expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/areas/area_3" && call.method === "PATCH")).toBe(true);
       expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/areas/area_3" && call.method === "DELETE")).toBe(true);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("invites a linked workspace through the searchable sharing control", async () => {
+    const fake = installFetch({
+      availableWorkspaces: [
+        {
+          workspace_id: "ws_agency",
+          workspace: {
+            id: "agency",
+            name: "Agency Partners",
+            timezone: "Europe/Lisbon",
+            default_currency: "EUR",
+            default_country: "PT",
+            default_locale: "pt-PT",
+          },
+          grant_role: "manager",
+          binding_org_id: null,
+          source: "workspace_grant",
+        },
+      ],
+    });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Tasks for this property")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "Sharing & client" }));
+
+      const panel = await screen.findByText("Billing client").then((node) => node.closest(".panel"));
+      if (!panel) throw new Error("sharing panel missing");
+      await chooseSearchableOption(panel as HTMLElement, /^Workspace\b/, "Agency Partners");
+      fireEvent.click(within(panel as HTMLElement).getByRole("button", { name: "Invite as agency" }));
+
+      const dialog = await screen.findByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Invite" }));
+
+      await waitFor(() => {
+        expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/properties/prop_1/share" && call.method === "POST")).toBe(true);
+      });
+      expect(fake.calls.find((call) => call.url === "/w/acme/api/v1/properties/prop_1/share" && call.method === "POST")?.body).toEqual({
+        workspace_slug: "agency",
+        membership_role: "managed_workspace",
+      });
     } finally {
       fake.restore();
     }

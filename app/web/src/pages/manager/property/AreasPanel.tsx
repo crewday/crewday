@@ -4,6 +4,7 @@ import { MapPinned } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
+import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { EmptyState, Loading } from "@/components/common";
 
 type AreaKind = "indoor_room" | "outdoor" | "service";
@@ -66,6 +67,10 @@ function draftFromArea(area: Area): AreaDraft {
     parent_area_id: area.parent_area_id ?? "",
     notes_md: area.notes_md,
   };
+}
+
+function areaSelectOption(area: Area): SearchableSelectOption {
+  return { value: area.id, label: area.name };
 }
 
 function bodyFromDraft(draft: AreaDraft): AreaWriteBody {
@@ -284,18 +289,15 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
                   ))}
                 </select>
               </label>
-              <label className="field">
-                <span>Parent</span>
-                <select
-                  value={draft.parent_area_id}
-                  onChange={(event) => setDraft({ ...draft, parent_area_id: event.currentTarget.value })}
-                >
-                  <option value="">Property-level</option>
-                  {parentOptions.map((area) => (
-                    <option key={area.id} value={area.id}>{area.name}</option>
-                  ))}
-                </select>
-              </label>
+              <SearchableSelect
+                label="Parent"
+                requirement="optional"
+                value={draft.parent_area_id}
+                options={parentOptions.map(areaSelectOption)}
+                blankOption={{ label: "Property-level" }}
+                renderOptionSecondaryText={() => null}
+                onChange={(value) => setDraft({ ...draft, parent_area_id: value })}
+              />
               <label className="field">
                 <span>Order</span>
                 <input

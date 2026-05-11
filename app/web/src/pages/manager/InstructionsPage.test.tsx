@@ -150,6 +150,17 @@ function renderInstructions(routes: FetchRoute[] = []) {
   return { ...view, ...fetchEnv, queryClient };
 }
 
+async function chooseSearchableOption(
+  container: HTMLElement,
+  label: RegExp,
+  query: string,
+): Promise<void> {
+  const input = within(container).getByRole("combobox", { name: label });
+  fireEvent.change(input, { target: { value: query } });
+  await within(container).findByText(query);
+  fireEvent.keyDown(input, { key: "Enter" });
+}
+
 beforeEach(() => {
   HTMLDialogElement.prototype.showModal = vi.fn(function showModal(this: HTMLDialogElement) {
     this.setAttribute("open", "");
@@ -194,13 +205,11 @@ describe("<InstructionsPage>", () => {
       target: { value: "Hold the reset button for five seconds." },
     });
     fireEvent.change(within(dialog).getByLabelText(/^Scope\b/), { target: { value: "area" } });
-    fireEvent.change(within(dialog).getByLabelText(/^Property\b/), {
-      target: { value: "prop_1" },
-    });
+    await chooseSearchableOption(dialog, /^Property\b/, "Villa Rosa");
 
-    const area = await within(dialog).findByLabelText(/^Area\b/);
+    const area = await within(dialog).findByRole("combobox", { name: /^Area\b/ });
     await waitFor(() => expect(area).not.toBeDisabled());
-    fireEvent.change(area, { target: { value: "area_kitchen" } });
+    await chooseSearchableOption(dialog, /^Area\b/, "Kitchen");
     fireEvent.change(within(dialog).getByLabelText(/^Tags\b/), {
       target: { value: "kitchen, appliance" },
     });

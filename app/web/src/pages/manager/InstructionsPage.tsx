@@ -9,6 +9,7 @@ import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
 import FormModal, { FormModalGrid } from "@/components/FormModal";
+import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { Chip, Loading } from "@/components/common";
 import { INSTRUCTION_SCOPE_TONE } from "@/lib/tones";
 import type { Instruction, Property } from "@/types/api";
@@ -40,6 +41,19 @@ interface InstructionEnvelope {
 interface AreaOption {
   id: string;
   name: string;
+}
+
+function propertySelectOption(property: Property): SearchableSelectOption {
+  return {
+    value: property.id,
+    label: property.name,
+    secondaryText: property.city,
+    searchText: `${property.name} ${property.city} ${property.timezone}`,
+  };
+}
+
+function areaSelectOption(area: AreaOption): SearchableSelectOption {
+  return { value: area.id, label: area.name };
 }
 
 interface InstructionCreateDraft {
@@ -218,44 +232,39 @@ export default function InstructionsPage() {
                 <option value="area">Area</option>
               </select>
             </FormField>
-            <FormField label="Property" requirement={draft.scope === "global" ? "optional" : "required"} className="instruction-create-form__field sheet-form__field">
-              <select
-                value={draft.property_id ?? ""}
-                onChange={(event) =>
-                  setDraft({
-                    ...draft,
-                    property_id: event.currentTarget.value || null,
-                    area_id: null,
-                  })
-                }
-                disabled={draft.scope === "global"}
-                required={draft.scope !== "global"}
-              >
-                <option value="">House-wide</option>
-                {(propsQ.data ?? []).map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </FormField>
+            <SearchableSelect
+              label="Property"
+              requirement={draft.scope === "global" ? "optional" : "required"}
+              className="instruction-create-form__field sheet-form__field"
+              value={draft.property_id ?? ""}
+              options={(propsQ.data ?? []).map(propertySelectOption)}
+              disabled={draft.scope === "global"}
+              required={draft.scope !== "global"}
+              blankOption={{ label: "House-wide" }}
+              onChange={(value) =>
+                setDraft({
+                  ...draft,
+                  property_id: value || null,
+                  area_id: null,
+                })
+              }
+            />
           </FormModalGrid>
           {draft.scope === "area" && (
-            <FormField label="Area" requirement="required" className="instruction-create-form__field sheet-form__field">
-              <select
-                value={draft.area_id ?? ""}
-                onChange={(event) =>
-                  setDraft({ ...draft, area_id: event.currentTarget.value || null })
-                }
-                disabled={!draft.property_id || areasQ.isPending}
-                required
-              >
-                <option value="">
-                  {draft.property_id ? "Select area" : "Select property first"}
-                </option>
-                {areasQ.data?.map((area) => (
-                  <option key={area.id} value={area.id}>{area.name}</option>
-                ))}
-              </select>
-            </FormField>
+            <SearchableSelect
+              label="Area"
+              className="instruction-create-form__field sheet-form__field"
+              value={draft.area_id ?? ""}
+              options={(areasQ.data ?? []).map(areaSelectOption)}
+              disabled={!draft.property_id || areasQ.isPending}
+              required
+              blankOption={{ label: draft.property_id ? "Select area" : "Select property first" }}
+              noResultsLabel="No areas"
+              renderOptionSecondaryText={() => null}
+              onChange={(value) =>
+                setDraft({ ...draft, area_id: value || null })
+              }
+            />
           )}
           <FormField label="Markdown" requirement="required" className="instruction-create-form__field sheet-form__field">
             <textarea

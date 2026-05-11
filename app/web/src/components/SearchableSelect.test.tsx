@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import SearchableSelect, { type SearchableSelectOption } from "./SearchableSelect";
+import formsCss from "@/styles/forms.css?raw";
 
 const OPTIONS: readonly SearchableSelectOption[] = [
   { value: "DE", label: "Germany" },
@@ -226,6 +227,24 @@ describe("SearchableSelect", () => {
 
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     expect(new FormData(form).has("country")).toBe(false);
+  });
+
+  it("does not mark disabled required blanks invalid", () => {
+    render(<SearchableSelectHarness disabled initialValue="" required />);
+
+    const input = screen.getByRole("combobox", { name: /country/i });
+
+    expect(input).toBeDisabled();
+    expect(input).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("keeps long labels and secondary text inside the popover", () => {
+    expect(formsCss).toMatch(
+      /\.searchable-select__label \{[\s\S]*overflow-wrap: anywhere;[\s\S]*\}/m,
+    );
+    expect(formsCss).toMatch(
+      /\.searchable-select__value \{[\s\S]*max-width: 45%;[\s\S]*overflow-wrap: anywhere;[\s\S]*\}/m,
+    );
   });
 });
 

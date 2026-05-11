@@ -284,6 +284,17 @@ function dropDocuments(dialog: HTMLElement, files: File[]): void {
   });
 }
 
+async function chooseSearchableOption(
+  container: HTMLElement,
+  label: RegExp,
+  query: string,
+): Promise<void> {
+  const input = within(container).getByRole("combobox", { name: label });
+  fireEvent.change(input, { target: { value: query } });
+  await within(container).findByText(query);
+  fireEvent.keyDown(input, { key: "Enter" });
+}
+
 function Harness({ initial = "/w/acme/assets" }: { initial?: string }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
@@ -542,13 +553,8 @@ describe("<AssetsPage>", () => {
       fireEvent.change(expectedLifespan, {
         target: { value: "2" },
       });
-      await within(dialog).findByRole("option", { name: "Entry" });
-      fireEvent.change(within(dialog).getByLabelText("Area"), {
-        target: { value: "area_entry" },
-      });
-      fireEvent.change(within(dialog).getByLabelText("Type"), {
-        target: { value: "type_pump" },
-      });
+      await chooseSearchableOption(dialog, /^Area\b/, "Entry");
+      await chooseSearchableOption(dialog, /^Type\b/, "Pool pump");
       fireEvent.change(purchasePrice, {
         target: { value: "12.34" },
       });
@@ -782,7 +788,7 @@ describe("<AssetsPage>", () => {
       fireEvent.click(screen.getByRole("button", { name: "+ New asset" }));
 
       const dialog = screen.getByRole("dialog", { name: "New asset" });
-      expect(within(dialog).getByLabelText("Property")).toHaveValue("prop_1");
+      expect(within(dialog).getByRole("combobox", { name: /^Property\b/ })).toHaveValue("Villa Rosa");
     } finally {
       restore();
     }

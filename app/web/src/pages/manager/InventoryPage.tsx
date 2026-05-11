@@ -16,6 +16,7 @@ import FormModal, {
   FormModalField,
   FormModalGrid,
 } from "@/components/FormModal";
+import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { Chip, Loading } from "@/components/common";
 import type { Property } from "@/types/api";
 
@@ -102,6 +103,15 @@ function toInventoryItem(item: WireInventoryItem): InventoryItem {
     unit: item.unit,
     area: item.tags[0] ?? "General",
     reorder_target: item.reorder_target,
+  };
+}
+
+function propertySelectOption(property: Property): SearchableSelectOption {
+  return {
+    value: property.id,
+    label: property.name,
+    secondaryText: property.city,
+    searchText: `${property.name} ${property.city} ${property.timezone}`,
   };
 }
 
@@ -554,21 +564,16 @@ function NewInventoryItemForm({
       }
     >
       {properties.length > 1 && (
-        <FormModalField label="Property" requirement="required">
-          <select
-            value={propertyId}
-            onChange={(e) => setPropertyId(e.target.value)}
-            required
-            aria-invalid={clientErr === "Choose a property."}
-            aria-describedby={errId}
-          >
-            {properties.map((property) => (
-              <option key={property.id} value={property.id}>
-                {property.name}
-              </option>
-            ))}
-          </select>
-        </FormModalField>
+        <SearchableSelect
+          label="Property"
+          className="form-modal__field"
+          value={propertyId}
+          options={properties.map(propertySelectOption)}
+          onChange={setPropertyId}
+          required
+          aria-invalid={clientErr === "Choose a property."}
+          aria-describedby={errId}
+        />
       )}
       <FormModalField label="Name" requirement="required">
         <input

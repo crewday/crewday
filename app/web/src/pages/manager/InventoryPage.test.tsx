@@ -213,6 +213,17 @@ function Harness() {
   );
 }
 
+async function chooseSearchableOption(
+  container: HTMLElement,
+  label: RegExp,
+  query: string,
+): Promise<void> {
+  const input = within(container).getByRole("combobox", { name: label });
+  fireEvent.change(input, { target: { value: query } });
+  await within(container).findByText(query);
+  fireEvent.keyDown(input, { key: "Enter" });
+}
+
 beforeEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
@@ -313,8 +324,10 @@ describe("<InventoryPage>", () => {
       );
       expect(dialog.querySelector("form")).toHaveClass("form-modal", "inv-create");
       expect(within(dialog).getByRole("heading", { name: "Create item" })).toBeInTheDocument();
-      expect(within(dialog).getByLabelText(/^Property\b/)).toHaveValue("prop_1");
-      expect(within(dialog).getByRole("option", { name: "Casa Azul" })).toBeInTheDocument();
+      const property = within(dialog).getByRole("combobox", { name: /^Property\b/ });
+      expect(property).toHaveValue("Villa Rosa");
+      fireEvent.focus(property);
+      expect(await within(dialog).findByText("Casa Azul")).toBeInTheDocument();
       expect(within(dialog).getByLabelText(/^Name\b/)).toBeInTheDocument();
       expect(within(dialog).getByLabelText(/^Unit\b/)).toHaveValue("each");
       expect(within(dialog).getByLabelText(/^SKU\b/)).toBeInTheDocument();
@@ -517,9 +530,7 @@ describe("<InventoryPage>", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
       const dialog = await screen.findByRole("dialog", { name: "Create item" });
-      fireEvent.change(within(dialog).getByLabelText(/^Property\b/), {
-        target: { value: "prop_2" },
-      });
+      await chooseSearchableOption(dialog, /^Property\b/, "Casa Azul");
       fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
         target: { value: "Olive oil" },
       });

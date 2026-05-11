@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DateTime from "@/components/DateTime";
+import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { Chip } from "@/components/common";
 import type { AvailableWorkspace, PropertyWorkspace } from "@/types/api";
 import type { PropertyDetail } from "./types";
@@ -18,6 +19,15 @@ const MEMBERSHIP_TONE: Record<string, "moss" | "sky" | "ghost"> = {
   managed_workspace: "sky",
   observer_workspace: "ghost",
 };
+
+function workspaceSelectOption(candidate: AvailableWorkspace): SearchableSelectOption {
+  return {
+    value: candidate.workspace.id,
+    label: candidate.workspace.name,
+    secondaryText: candidate.grant_role ?? undefined,
+    searchText: `${candidate.workspace.name} ${candidate.workspace.id} ${candidate.grant_role ?? ""}`,
+  };
+}
 
 export default function SharingPanel({
   detail,
@@ -87,20 +97,15 @@ export default function SharingPanel({
         <h2>Sharing &amp; client</h2>
         {isOwnerSurface && shareCandidates.length > 0 && (
           <div className="sharing-add">
-            <label className="field field--inline">
-              <span className="muted">Workspace</span>
-              <select
-                value={shareTarget}
-                onChange={(e) => setShareTarget(e.target.value)}
-              >
-                <option value="">Invite a workspace…</option>
-                {shareCandidates.map((c) => (
-                  <option key={c.workspace.id} value={c.workspace.id}>
-                    {c.workspace.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <SearchableSelect
+              label="Workspace"
+              requirement="optional"
+              className="field--inline"
+              value={shareTarget}
+              options={shareCandidates.map(workspaceSelectOption)}
+              blankOption={{ label: "Invite a workspace…" }}
+              onChange={setShareTarget}
+            />
             <button
               type="button"
               className="btn btn--moss btn--sm"
