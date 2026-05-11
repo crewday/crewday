@@ -6,6 +6,7 @@ import type { ReactElement } from "react";
 import { __resetApiProvidersForTests } from "@/lib/api";
 import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
 import LlmPage from "./LlmPage";
+import LlmUsagePage from "./LlmUsagePage";
 import { calls, graph, prompts } from "./LlmPage.testData";
 
 interface FakeResponse {
@@ -59,12 +60,13 @@ function installFetch(scripted: Record<string, FakeResponse[]>): {
   };
 }
 
-function Harness(): ReactElement {
+function Harness({ page = "graph" }: { page?: "graph" | "usage" }): ReactElement {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const element = page === "usage" ? <LlmUsagePage /> : <LlmPage />;
   return (
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={["/admin/llm/graph"]}>
-        <LlmPage />
+      <MemoryRouter initialEntries={[`/admin/llm/${page}`]}>
+        {element}
       </MemoryRouter>
     </QueryClientProvider>
   );
@@ -156,16 +158,48 @@ afterEach(() => {
 });
 
 describe("Admin LlmPage", () => {
-  it("renders graph columns, pricing, recent calls, and the prompt drawer", async () => {
+  it("renders graph columns without usage panels and keeps the prompt drawer reachable", async () => {
     const fetcher = installPageFetch();
     try {
       render(<Harness />);
 
       expect(await findOpenRouterProvider()).toBeInTheDocument();
       expect(screen.getByText("LLM graph")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Usage" })).toHaveAttribute(
+        "href",
+        "/admin/llm/usage",
+      );
       expect(screen.getByText("Gemma 4 31B IT")).toBeInTheDocument();
       expect(screen.getAllByText("voice.transcribe").length).toBeGreaterThan(0);
-      expect(screen.getByText("Provider-model pricing")).toBeInTheDocument();
+      expect(screen.queryByText("Spend (30d)")).not.toBeInTheDocument();
+      expect(screen.queryByText("Provider-model pricing")).not.toBeInTheDocument();
+      expect(screen.queryByText("Recent calls")).not.toBeInTheDocument();
+      expect(fetcher.calls.some((call) => call.url === "/admin/api/v1/llm/calls")).toBe(
+        false,
+      );
+
+      openOverflowItem("Prompts");
+      const drawer = await screen.findByText("Prompt library");
+      expect(drawer).toBeInTheDocument();
+      expect(screen.getByText("Manager chat")).toBeInTheDocument();
+      expect(screen.getByText("You are the manager assistant.")).toBeInTheDocument();
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("renders the usage page support panels together", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness page="usage" />);
+
+      expect(await screen.findByText("LLM usage")).toBeInTheDocument();
+      expect(await screen.findByText("Provider-model pricing")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Graph" })).toHaveAttribute(
+        "href",
+        "/admin/llm/graph",
+      );
+      expect(screen.getByText("Spend (30d)")).toBeInTheDocument();
       expect(screen.getByText("Recent calls")).toBeInTheDocument();
       const recentCalls = screen.getByText("Recent calls").closest(".panel");
       if (!(recentCalls instanceof HTMLElement)) throw new Error("Recent calls panel not found");
@@ -173,12 +207,6 @@ describe("Admin LlmPage", () => {
       expect(subCentCost).toHaveClass("mono");
       expect(within(recentCalls).getByText("$0.03")).toHaveClass("mono");
       expect(within(recentCalls).queryByText("$0.00")).not.toBeInTheDocument();
-
-      openOverflowItem("Prompts");
-      const drawer = await screen.findByText("Prompt library");
-      expect(drawer).toBeInTheDocument();
-      expect(screen.getByText("Manager chat")).toBeInTheDocument();
-      expect(screen.getByText("You are the manager assistant.")).toBeInTheDocument();
     } finally {
       fetcher.restore();
     }
@@ -209,19 +237,28 @@ describe("Admin LlmPage", () => {
       ],
     });
     try {
-      render(<Harness />);
-      await findOpenRouterProvider();
+      render(<Harness page="usage" />);
+      expect(await screen.findByText("Provider-model pricing")).toBeInTheDocument();
 
       const pricingPanel = screen.getByText("Provider-model pricing").closest(".panel");
       if (!(pricingPanel instanceof HTMLElement)) throw new Error("pricing panel not found");
       fireEvent.click(within(pricingPanel).getByRole("button", { name: "Sync pricing" }));
 
-      expect(await screen.findByText("Pricing sync:")).toBeInTheDocument();
-      expect(within(pricingPanel).getByText(/Last result: 1 updated, 2 skipped, 0 errors/)).toBeInTheDocument();
+      expect(
+        await within(pricingPanel).findByText(/Last result: 1 updated, 2 skipped, 0 errors/),
+      ).toBeInTheDocument();
       expect(
         within(pricingPanel).getByLabelText("Pricing sync deltas"),
       ).toHaveTextContent("google/gemma-4-31b-it");
       expect(fetcher.calls.some((call) => call.url === "/admin/api/v1/llm/sync-pricing")).toBe(true);
+      await waitFor(() => {
+        expect(
+          fetcher.calls.filter((call) => call.url === "/admin/api/v1/llm/graph"),
+        ).toHaveLength(2);
+        expect(
+          fetcher.calls.filter((call) => call.url === "/admin/api/v1/llm/calls"),
+        ).toHaveLength(2);
+      });
     } finally {
       fetcher.restore();
     }

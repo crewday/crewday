@@ -50,6 +50,7 @@ import SettingsPage from "@/pages/manager/SettingsPage";
 import AdminDashboardPage from "@/pages/admin/DashboardPage";
 import AdminChatGatewayPage from "@/pages/admin/ChatGatewayPage";
 import AdminLlmPage from "@/pages/admin/LlmPage";
+import AdminLlmUsagePage from "@/pages/admin/LlmUsagePage";
 import AdminAgentDocsPage from "@/pages/admin/AgentDocsPage";
 import AdminUsagePage from "@/pages/admin/UsagePage";
 import AdminWorkspacesPage from "@/pages/admin/WorkspacesPage";
@@ -481,6 +482,7 @@ export default function App() {
               <Route path="/admin/chat-gateway" element={<AdminChatGatewayPage />} />
               <Route path="/admin/llm" element={<Navigate to="/admin/llm/graph" replace />} />
               <Route path="/admin/llm/graph" element={<AdminLlmPage />} />
+              <Route path="/admin/llm/usage" element={<AdminLlmUsagePage />} />
               <Route path="/admin/agent-docs" element={<AdminAgentDocsPage />} />
               <Route path="/admin/usage" element={<AdminUsagePage />} />
               <Route path="/admin/workspaces" element={<AdminWorkspacesPage />} />

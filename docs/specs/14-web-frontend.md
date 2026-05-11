@@ -148,7 +148,8 @@ workspace once and the rest of the tree is unaware of the prefix.
 /admin                     → redirects to /admin/dashboard
 /admin/dashboard           → operator landing page: deployment health, recent audit, usage
 /admin/llm                 → redirects to /admin/llm/graph
-/admin/llm/graph           → LLM providers, capability → model, pricing, deployment-wide spend
+/admin/llm/graph           → LLM providers and capability → model graph/config
+/admin/llm/usage           → LLM summary cards, pricing sync, recent calls, deployment-wide spend
 /admin/agent-docs          → system-side virtual files (§11 "Agent knowledge tools" — agent_doc table, §02)
 /admin/chat-gateway        → deployment-default WhatsApp provider, templates, webhook, overrides (§23)
 /admin/usage               → per-workspace spend, cap adjust, pause state
@@ -616,7 +617,8 @@ ranking the user sees is the relevance ranking the agent sees.
 
 The former `/w/<slug>/llm` page is gone in v1 — LLM provider and
 capability config is a deployment-level concern rendered on
-`/admin/llm/graph` (§11, "Admin shell" below). Workspace managers
+`/admin/llm/graph`, with spend/pricing support panels on
+`/admin/llm/usage` (§11, "Admin shell" below). Workspace managers
 still see the "Agent usage — N%" tile on `/settings` (§11).
 
 ### Administration link

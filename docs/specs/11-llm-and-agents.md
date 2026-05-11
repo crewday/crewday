@@ -1213,7 +1213,10 @@ the `app/config/llm_pricing.yml` file from earlier drafts is retired.
   sync skips it, and the admin becomes the price authority for that
   combo. The UI surfaces pinned rows with a small "manual" badge.
 - `crewday admin llm sync-pricing` triggers a sync from the host
-  shell, with the same plumbing as the scheduled job. It prints
+  shell, with the same plumbing as the scheduled job. The
+  `/admin/llm/usage` page exposes the same action for deployment
+  admins and shows the latest per-row result. Both paths refresh the
+  admin graph/pricing data after a successful run. The CLI prints
   per-row deltas and exits non-zero on any network error.
 - Missing prices (row present, price source returns nothing) log a
   `WARNING` per call and keep the existing value. Unknown model IDs
@@ -1232,6 +1235,12 @@ visual graph (providers → models → assignments), modelled on fj2's
 `admin/llm_graph/` interface. The tabular page from earlier drafts is
 retired. `/admin/llm` redirects here so old bookmarks and agent page
 refs land on the graph intentionally.
+
+The `/admin/llm/usage` page carries the supporting operational panels:
+the top-level 30-day summary cards, provider-model pricing with manual
+sync, and the recent-call table. Both LLM pages expose the prompt
+library drawer so prompt template edits stay reachable from the admin
+LLM area.
 
 - **Column 1 — Providers.** One card per `llm_provider`; shows type,
   endpoint host, enabled state, API-key status (present / missing /
@@ -2181,7 +2190,7 @@ low-token calls may therefore carry `cost_usd > 0` while
 `cost_cents = 0`. The background worker aggregates `cost_cents` into
 the rolling meter used by the **workspace usage budget** (§ "Workspace
 usage budget" below), preserving the existing cent-denominated cap
-contract, while `/admin/llm/graph` per-call reporting surfaces `cost_usd`.
+contract, while `/admin/llm/usage` per-call reporting surfaces `cost_usd`.
 Per-call `max_tokens` caps live on the assignment / provider-model /
 model cascade; the workspace envelope is enforced before the client
 picks a chain rung, as an envelope over every capability.
@@ -2334,12 +2343,13 @@ the call for telemetry but the cost contribution is zero.
     maths keeps the precise ratio for the at-cap decision.
   - Accessible to every user whose grant role passes the existing
     `settings.view` action (owners and managers by default; §05).
-- **Admin LLM graph page** (`/admin/llm/graph`; `/admin/llm`
-  redirects here). The three-column graph
-  (providers → models → assignments) plus the prompt-library
-  slide-over, dollar amounts, token counts, per-capability spend,
-  per-workspace spend, provider key status, and the sync-pricing
-  trigger all live here (§ "LLM graph admin"). Gated by
+- **Admin LLM pages** (`/admin/llm/graph`; `/admin/llm` redirects
+  there; `/admin/llm/usage`). The graph page holds the three-column
+  registry (providers → models → assignments) plus provider key status
+  and per-capability graph spend. The usage page holds top-level
+  dollars, token/call telemetry, provider-model pricing, and the
+  sync-pricing trigger (§ "LLM graph admin"). Both expose the
+  prompt-library slide-over. Gated by
   `deployment.llm.view` / `deployment.llm.edit` (§05). This is the
   sole operator-visibility surface for LLM internals in v1; it
   replaces the per-workspace `/settings/llm` page from the earlier
@@ -2378,8 +2388,9 @@ reported `usage.total_tokens` and the cost estimate computed from the
 serving `llm_provider_model`. The background worker aggregates daily
 totals into `llm_usage_daily` (one row per `(day, workspace_id,
 capability, provider_model_id)`), which powers the per-capability
-breakdowns on the `/admin/llm/graph` page and the rolling 30-day meter. The
-per-capability daily dollar caps remain a useful throttle on a single
+breakdowns on the `/admin/llm/graph` page, the `/admin/llm/usage`
+summary, and the rolling 30-day meter. The per-capability daily
+dollar caps remain a useful throttle on a single
 noisy capability; they run **after** the workspace envelope check so
 the workspace-level refusal wins when both would fire.
 

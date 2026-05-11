@@ -94,6 +94,7 @@ export const AUTHENTICATED_ROUTES = [
   "/admin/chat-gateway",
   "/admin/llm",
   "/admin/llm/graph",
+  "/admin/llm/usage",
   "/admin/agent-docs",
   "/admin/usage",
   "/admin/workspaces",

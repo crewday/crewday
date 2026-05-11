@@ -1,50 +1,35 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import DeskPage from "@/components/DeskPage";
 import { Loading } from "@/components/common";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
-import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
-import type {
-  LLMCall,
-  LlmGraphPayload,
-  LlmPromptTemplate,
-  LlmSyncPricingResult,
-} from "@/types";
+import type { LlmGraphPayload } from "@/types";
 import AssignmentColumn from "./AssignmentColumn";
 import LlmAssignmentModal from "./LlmAssignmentModal";
 import LlmAlerts from "./LlmAlerts";
 import LlmRegistryModals from "./LlmRegistryModals";
-import LlmStats from "./LlmStats";
+import LlmRouteTabs from "./LlmRouteTabs";
 import ModelColumn from "./ModelColumn";
-import PromptLibraryDrawer from "./PromptLibraryDrawer";
 import ProviderColumn from "./ProviderColumn";
-import ProviderModelPricing from "./ProviderModelPricing";
-import RecentCalls from "./RecentCalls";
 import { buildHighlighted, emptyHighlighted } from "./lib/highlight";
 import { buildLlmIndexes } from "./lib/llmIndexes";
 import { useLlmGraphEdges } from "./useLlmGraphEdges";
+import { useAdminLlmPromptDrawer } from "./useAdminLlmPromptDrawer";
 import type { Column, EdgeLayout, Selection } from "./types";
 import type { RegistryDialogState } from "./LlmRegistryModals";
 
 const sub =
-  "Deployment-wide LLM graph/config: providers, models, provider-model pricing, capability assignment chains, and the prompt library. Shared by every workspace.";
+  "Deployment-wide LLM graph/config: providers, models, capability assignment chains, and the prompt library. Shared by every workspace.";
 const title = "LLM graph";
 
 export default function AdminLlmPage() {
-  // code-health: ignore[nloc] LLM graph route already delegates columns, alerts, stats, pricing, calls, and drawers.
+  // code-health: ignore[nloc] LLM graph route already delegates columns, alerts, registry modals, assignments, and drawers.
   const graphQ = useQuery({
     queryKey: qk.adminLlmGraph(),
     queryFn: () => fetchJson<LlmGraphPayload>("/admin/api/v1/llm/graph"),
   });
-  const callsQ = useQuery({
-    queryKey: qk.adminLlmCalls(),
-    queryFn: () => fetchJson<LLMCall[]>("/admin/api/v1/llm/calls"),
-  });
-  const promptsQ = useQuery({
-    queryKey: qk.adminLlmPrompts(),
-    queryFn: () => fetchJson<LlmPromptTemplate[]>("/admin/api/v1/llm/prompts"),
-  });
+  const { promptsQ, promptOverflow, promptDrawer } = useAdminLlmPromptDrawer();
 
   const [selection, setSelection] = useState<Selection | null>(null);
   const [hover, setHover] = useState<Selection | null>(null);
@@ -54,22 +39,6 @@ export default function AdminLlmPage() {
   const [assignmentDialogCapability, setAssignmentDialogCapability] = useState<
     string | null
   >(null);
-  const [promptsOpen, setPromptsOpen] = useState(false);
-  useCloseOnEscape(() => setPromptsOpen(false), promptsOpen);
-
-  const qc = useQueryClient();
-  const invalidateAdminLlm = () => {
-    void qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
-    void qc.invalidateQueries({ queryKey: qk.adminLlmCalls() });
-    void qc.invalidateQueries({ queryKey: qk.adminLlmPrompts() });
-  };
-  const syncMut = useMutation({
-    mutationFn: () =>
-      fetchJson<LlmSyncPricingResult>("/admin/api/v1/llm/sync-pricing", {
-        method: "POST",
-      }),
-    onSuccess: invalidateAdminLlm,
-  });
 
   const graph = graphQ.data;
   const indexes = useMemo(() => (graph ? buildLlmIndexes(graph) : null), [graph]);
@@ -147,27 +116,16 @@ export default function AdminLlmPage() {
       + New provider
     </button>
   );
-  const overflow = [
-    {
-      label: "Prompts",
-      onSelect: () => setPromptsOpen(true),
-    },
-    {
-      label: syncMut.isPending ? "Syncing…" : "Sync pricing",
-      onSelect: () => {
-        if (!syncMut.isPending) syncMut.mutate();
-      },
-    },
-  ];
+  const overflow = [promptOverflow];
 
-  if (graphQ.isPending || callsQ.isPending || promptsQ.isPending) {
+  if (graphQ.isPending || promptsQ.isPending) {
     return (
       <DeskPage title={title} sub={sub} actions={actions} overflow={overflow}>
         <Loading />
       </DeskPage>
     );
   }
-  if (!graph || !callsQ.data || !promptsQ.data || !indexes) {
+  if (!graph || !promptsQ.data || !indexes) {
     return (
       <DeskPage title={title} sub={sub} actions={actions} overflow={overflow}>
         Failed to load.
@@ -175,14 +133,10 @@ export default function AdminLlmPage() {
     );
   }
 
-  const calls = callsQ.data;
-  const prompts = promptsQ.data;
-  const syncResult = syncMut.data;
-
   return (
     <DeskPage title={title} sub={sub} actions={actions} overflow={overflow}>
-      <LlmStats graph={graph} />
-      <LlmAlerts graph={graph} syncResult={syncResult} />
+      <LlmRouteTabs activeKey="graph" />
+      <LlmAlerts graph={graph} syncResult={undefined} />
 
       <div className="llm-graph" ref={graphRef}>
         <svg
@@ -286,20 +240,7 @@ export default function AdminLlmPage() {
         />
       </div>
 
-      <ProviderModelPricing
-        graph={graph}
-        indexes={indexes}
-        syncResult={syncResult}
-        isSyncing={syncMut.isPending}
-        onSync={() => {
-          if (!syncMut.isPending) syncMut.mutate();
-        }}
-      />
-      <RecentCalls calls={calls} />
-
-      {promptsOpen ? (
-        <PromptLibraryDrawer prompts={prompts} onClose={() => setPromptsOpen(false)} />
-      ) : null}
+      {promptDrawer}
       <LlmRegistryModals
         dialog={registryDialog}
         providers={graph.providers}
