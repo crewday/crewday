@@ -1,7 +1,7 @@
 import { Chip } from "@/components/common";
 import type { LlmCapabilityEntry } from "@/types";
 import CapabilityChain from "./CapabilityChain";
-import LlmUsageTotals from "./LlmUsageTotals";
+import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
 import type { LlmIndexes } from "./lib/llmIndexes";
 import type {
   ElementRefSetter,
@@ -68,7 +68,10 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
             <button
               type="button"
               className="llm-graph-node__button"
-              aria-label={`${cap.key} capability, ${cap.calls_30d.toLocaleString()} calls in 30 days`}
+              aria-label={`${cap.key} capability, ${formatUsageSummary(
+                cap.calls_30d,
+                cap.spend_usd_30d,
+              )}`}
               onFocus={() => setHover({ column: "capability", id: cap.key })}
               onBlur={() => setHover(null)}
               onClick={() =>
@@ -104,10 +107,6 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
               ) : null}
               <div className="llm-capability-total">
                 <LlmUsageTotals spendUsd={cap.spend_usd_30d} calls={cap.calls_30d} />
-                <span className="llm-capability-total__breakout">
-                  direct {cap.direct_calls_30d.toLocaleString()} · inherited{" "}
-                  {cap.inherited_calls_30d.toLocaleString()}
-                </span>
               </div>
             </button>
             <CapabilityChain
@@ -156,7 +155,10 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
                       <button
                         className="llm-graph-node__child-main"
                         type="button"
-                        aria-label={`${child.key} inherited capability, ${child.calls_30d.toLocaleString()} calls in 30 days`}
+                        aria-label={`${child.key} inherited capability, ${formatUsageSummary(
+                          child.calls_30d,
+                          child.spend_usd_30d,
+                        )}`}
                         onFocus={(e) => {
                           e.stopPropagation();
                           setHover({ column: "capability", id: child.key });
@@ -172,7 +174,6 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
                         <LlmUsageTotals
                           spendUsd={child.spend_usd_30d}
                           calls={child.calls_30d}
-                          label="child 30d"
                         />
                       </button>
                       <Chip tone={missing.length ? "rust" : "sand"} size="sm">

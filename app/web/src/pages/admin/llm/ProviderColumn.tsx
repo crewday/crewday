@@ -1,6 +1,6 @@
 import { Chip } from "@/components/common";
 import type { LlmProvider } from "@/types";
-import LlmUsageTotals from "./LlmUsageTotals";
+import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
 import type { ElementRefSetter, NodeClass, SelectionSetter } from "./types";
 
 interface ProviderColumnProps {
@@ -38,7 +38,10 @@ export default function ProviderColumn(props: ProviderColumnProps) {
             setSelection({ column: "provider", id: p.id });
             onEditProvider(p.id);
           }}
-          aria-label={`${p.name} provider, ${p.calls_30d.toLocaleString()} calls in 30 days`}
+          aria-label={`${p.name} provider, ${formatUsageSummary(
+            p.calls_30d,
+            p.spend_usd_30d,
+          )}`}
         >
           <header className="llm-graph-node__head">
             <span className="llm-graph-node__name">{p.name}</span>
@@ -53,10 +56,6 @@ export default function ProviderColumn(props: ProviderColumnProps) {
             </span>
           </div>
           <footer className="llm-graph-node__foot">
-            <span>
-              {p.provider_model_count} model
-              {p.provider_model_count === 1 ? "" : "s"}
-            </span>
             {p.api_key_status === "missing" ? (
               <Chip tone="rust" size="sm">
                 no key

@@ -1244,23 +1244,18 @@ LLM area.
 
 - **Column 1 — Providers.** One card per `llm_provider`; shows type,
   endpoint host, enabled state, API-key status (present / missing /
-  rotating), the count of attached provider-models, and the provider's
-  30-day call/spend total.
+  rotating), and the provider's recent call/spend total.
 - **Column 2 — Models.** One card per `llm_model`; shows vendor,
-  capability tags as chips, context window, and the count of providers
-  offering the model. Cards carry a small modality icon bar
-  (text / vision / audio / reasoning) and the model's 30-day
-  call/spend total.
+  capability tags as chips and context window. Cards carry a small
+  modality icon bar (text / vision / audio / reasoning) and the model's
+  recent call/spend total.
 - **Column 3 — Assignments.** Grouped by capability. Each group is a
   vertical stack of its priority chain, top-to-bottom = highest to
   lowest priority. Drag within a group reorders priority (hits
   `PATCH /admin/api/v1/llm/assignments/reorder`). Drag between groups
-  is disallowed (a row belongs to one capability). Assignment cards show
-  direct 30-day spend/calls separately from inherited child-capability
-  spend/calls; the assignment total is the sum of those two buckets.
-  Capability group totals include direct usage plus descendant
-  capability usage inherited through the graph exactly once per
-  descendant call.
+  is disallowed (a row belongs to one capability). Assignment cards keep
+  recent spend/call totals compact; detailed period and direct/inherited
+  usage breakdowns live on `/admin/llm/usage`.
 - **Hover and selection.**
   - Hover a provider card → every model offered by that provider and
     every assignment that resolves through it highlights; everything

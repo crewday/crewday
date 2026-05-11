@@ -107,34 +107,25 @@ export default function AdminLlmPage() {
     setAssignmentDialogCapability(assignment.capability);
   };
 
-  const actions = (
-    <button
-      type="button"
-      className="btn btn--moss"
-      onClick={() => setRegistryDialog({ kind: "provider", mode: "create" })}
-    >
-      + New provider
-    </button>
-  );
   const overflow = [promptOverflow];
 
   if (graphQ.isPending || promptsQ.isPending) {
     return (
-      <DeskPage title={title} sub={sub} actions={actions} overflow={overflow}>
+      <DeskPage title={title} sub={sub} overflow={overflow}>
         <Loading />
       </DeskPage>
     );
   }
   if (!graph || !promptsQ.data || !indexes) {
     return (
-      <DeskPage title={title} sub={sub} actions={actions} overflow={overflow}>
+      <DeskPage title={title} sub={sub} overflow={overflow}>
         Failed to load.
       </DeskPage>
     );
   }
 
   return (
-    <DeskPage title={title} sub={sub} actions={actions} overflow={overflow}>
+    <DeskPage title={title} sub={sub} overflow={overflow}>
       <LlmRouteTabs activeKey="graph" />
       <LlmAlerts graph={graph} syncResult={undefined} />
 

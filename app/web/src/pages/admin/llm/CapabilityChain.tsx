@@ -1,5 +1,5 @@
 import type { LlmAssignment } from "@/types";
-import LlmUsageTotals from "./LlmUsageTotals";
+import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
 import type { LlmIndexes } from "./lib/llmIndexes";
 import type { ElementRefSetter, Highlighted, Selection, SelectionSetter } from "./types";
 
@@ -74,7 +74,10 @@ export default function CapabilityChain(props: CapabilityChainProps) {
                   ? `Missing required capability: ${missing.join(", ")}`
                   : undefined
               }
-              aria-label={`${a.capability} assignment rung ${a.priority}, ${a.calls_30d.toLocaleString()} calls in 30 days`}
+              aria-label={`${a.capability} assignment rung ${a.priority}, ${formatUsageSummary(
+                a.calls_30d,
+                a.spend_usd_30d,
+              )}`}
             >
               <span className="llm-graph-chain__prio">
                 {a.priority === 0 ? "P" : a.priority}
@@ -87,10 +90,6 @@ export default function CapabilityChain(props: CapabilityChainProps) {
               </span>
               <span className="llm-graph-chain__usage">
                 <LlmUsageTotals spendUsd={a.spend_usd_30d} calls={a.calls_30d} />
-                <span className="llm-graph-chain__usage-breakout">
-                  direct {a.direct_calls_30d.toLocaleString()} · inherited{" "}
-                  {a.inherited_calls_30d.toLocaleString()}
-                </span>
               </span>
             </button>
           </li>

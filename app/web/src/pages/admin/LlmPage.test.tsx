@@ -107,6 +107,12 @@ function assignmentDialog(name: string): HTMLElement {
   return screen.getByRole("dialog", { name });
 }
 
+function graphBoard(): HTMLElement {
+  const board = document.querySelector(".llm-graph");
+  if (!(board instanceof HTMLElement)) throw new Error("LLM graph not found");
+  return board;
+}
+
 function expectSharedFormModal(
   dialog: HTMLElement,
   options: { wide?: boolean; section?: boolean; footer?: boolean } = {},
@@ -169,11 +175,23 @@ describe("Admin LlmPage", () => {
         "href",
         "/admin/llm/usage",
       );
+      expect(screen.getAllByRole("button", { name: "+ New provider" })).toHaveLength(
+        1,
+      );
+      expect(
+        screen.getByRole("button", {
+          name: "OpenRouter provider, 12 calls, $1.25 spend",
+        }),
+      ).toBeInTheDocument();
       expect(screen.getByText("Gemma 4 31B IT")).toBeInTheDocument();
       expect(screen.getAllByText("voice.transcribe").length).toBeGreaterThan(0);
       expect(screen.queryByText("Spend (30d)")).not.toBeInTheDocument();
       expect(screen.queryByText("Provider-model pricing")).not.toBeInTheDocument();
       expect(screen.queryByText("Recent calls")).not.toBeInTheDocument();
+      expect(within(graphBoard()).queryByText(/^\d+ models?$/)).not.toBeInTheDocument();
+      expect(
+        within(graphBoard()).queryByText(/^\d+ providers?$/),
+      ).not.toBeInTheDocument();
       expect(fetcher.calls.some((call) => call.url === "/admin/api/v1/llm/calls")).toBe(
         false,
       );
@@ -429,7 +447,7 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
       await findOpenRouterProvider();
 
-      fireEvent.click(screen.getAllByRole("button", { name: "+ New provider" })[0]!);
+      fireEvent.click(screen.getByRole("button", { name: "+ New provider" }));
       expectSharedFormModal(screen.getByRole("dialog", { name: "Create provider" }));
       fireEvent.change(screen.getByLabelText(/Name/), {
         target: { value: "Fake provider" },
@@ -817,7 +835,7 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
       await findOpenRouterProvider();
 
-      fireEvent.click(screen.getAllByRole("button", { name: "+ New provider" })[0]!);
+      fireEvent.click(screen.getByRole("button", { name: "+ New provider" }));
       fireEvent.change(screen.getByLabelText(/Name/), {
         target: { value: "Slow provider" },
       });
@@ -1120,13 +1138,31 @@ describe("Admin LlmPage", () => {
     try {
       render(<Harness />);
 
-      expect(await screen.findByLabelText("30d 31 calls")).toHaveTextContent("$2.50");
-      expect(screen.getByLabelText("30d 21 calls")).toHaveTextContent("$1.75");
-      expect(screen.getByLabelText("pm 30d 19 calls")).toHaveTextContent("$1.50");
-      expect(screen.getByLabelText("30d 41 calls")).toHaveTextContent("$3.25");
-      expect(screen.getByLabelText("30d 52 calls")).toHaveTextContent("$4.50");
-      expect(screen.getByText("direct 40 · inherited 12")).toBeInTheDocument();
-      expect(screen.getByLabelText("child 30d 5 calls")).toHaveTextContent("$0.75");
+      expect(
+        await screen.findByLabelText("Recent usage: 31 calls, $2.50 spend"),
+      ).toHaveTextContent("$2.50");
+      expect(
+        screen.getByLabelText("Recent usage: 21 calls, $1.75 spend"),
+      ).toHaveTextContent("$1.75");
+      expect(
+        screen.getByLabelText("Recent usage: 19 calls, $1.50 spend"),
+      ).toHaveTextContent("$1.50");
+      expect(
+        screen.getByLabelText("Recent usage: 41 calls, $3.25 spend"),
+      ).toHaveTextContent("$3.25");
+      expect(
+        screen.getByLabelText("Recent usage: 52 calls, $4.50 spend"),
+      ).toHaveTextContent("$4.50");
+      expect(
+        screen.getByLabelText("Recent usage: 5 calls, $0.75 spend"),
+      ).toHaveTextContent("$0.75");
+      const board = within(graphBoard());
+      expect(board.queryByText(/^30d$/)).not.toBeInTheDocument();
+      expect(board.queryByText("pm 30d")).not.toBeInTheDocument();
+      expect(board.queryByText("child 30d")).not.toBeInTheDocument();
+      expect(board.queryByText("direct 40 · inherited 12")).not.toBeInTheDocument();
+      expect(board.queryByLabelText("pm 30d 19 calls")).not.toBeInTheDocument();
+      expect(board.queryByLabelText("child 30d 5 calls")).not.toBeInTheDocument();
     } finally {
       fetcher.restore();
     }

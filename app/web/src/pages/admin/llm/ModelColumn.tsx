@@ -1,6 +1,6 @@
 import { Chip } from "@/components/common";
 import type { LlmModel } from "@/types";
-import LlmUsageTotals from "./LlmUsageTotals";
+import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
 import type { LlmIndexes } from "./lib/llmIndexes";
 import type { ElementRefSetter, NodeClass, SelectionSetter } from "./types";
 
@@ -55,7 +55,10 @@ export default function ModelColumn(props: ModelColumnProps) {
                 setSelection({ column: "model", id: m.id });
                 onEditModel(m.id);
               }}
-              aria-label={`${m.display_name} model, ${m.calls_30d.toLocaleString()} calls in 30 days`}
+              aria-label={`${m.display_name} model, ${formatUsageSummary(
+                m.calls_30d,
+                m.spend_usd_30d,
+              )}`}
             >
               <header className="llm-graph-node__head">
                 <span className="llm-graph-node__name">{m.display_name}</span>
@@ -69,17 +72,13 @@ export default function ModelColumn(props: ModelColumnProps) {
                   </Chip>
                 ))}
               </div>
-              <footer className="llm-graph-node__foot">
-                <span>
-                  {m.provider_model_count} provider
-                  {m.provider_model_count === 1 ? "" : "s"}
-                </span>
-                {m.context_window ? (
+              {m.context_window ? (
+                <footer className="llm-graph-node__foot">
                   <span className="muted">
                     {(m.context_window / 1000).toFixed(0)}k ctx
                   </span>
-                ) : null}
-              </footer>
+                </footer>
+              ) : null}
               <LlmUsageTotals spendUsd={m.spend_usd_30d} calls={m.calls_30d} />
             </button>
             {providerModels.length ? (
@@ -109,7 +108,10 @@ export default function ModelColumn(props: ModelColumnProps) {
                         setSelection({ column: "providerModel", id: pm.id });
                         onEditProviderModel(pm.id);
                       }}
-                      aria-label={`${provider?.name ?? "Unknown provider"} provider model for ${m.display_name}, ${pm.calls_30d.toLocaleString()} calls in 30 days`}
+                      aria-label={`${provider?.name ?? "Unknown provider"} provider model for ${m.display_name}, ${formatUsageSummary(
+                        pm.calls_30d,
+                        pm.spend_usd_30d,
+                      )}`}
                     >
                       <span className="llm-provider-model-list__name">
                         {provider?.name ?? "Unknown provider"}
@@ -117,7 +119,6 @@ export default function ModelColumn(props: ModelColumnProps) {
                       <LlmUsageTotals
                         spendUsd={pm.spend_usd_30d}
                         calls={pm.calls_30d}
-                        label="pm 30d"
                       />
                     </button>
                   );
