@@ -1,5 +1,0 @@
-Total messages: 4 (Errors: 1, Warnings: 0)
-Returning 2 messages for level "info"
-
-[INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:8100/node_modules/.vite/deps/react-dom_client.js?v=c69eee6f:14337
-[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:8100/w/smoke/api/v1/agent_preferences/property/01KR5ZKGQ3HNK1Q6MMRF6541WS:0
