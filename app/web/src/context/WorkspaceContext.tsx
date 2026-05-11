@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useInRouterContext, useLocation } from "react-router-dom";
 import { clearWorkspaceCookie, persistWorkspace, readWorkspaceCookie } from "@/lib/preferences";
 import { registerWorkspaceSlugGetter } from "@/lib/api";
 import { registerQueryKeyWorkspaceGetter } from "@/lib/queryKeys";
@@ -34,19 +35,31 @@ export function clearActiveWorkspaceForRecovery(): void {
   recoveryClearWorkspace?.();
 }
 
-function initialWorkspaceSlug(): string | null {
+function initialWorkspaceSlug(routePathname: string | null): string | null {
+  if (routePathname) return workspaceSlugFromRoutePath(routePathname) ?? readWorkspaceCookie();
   if (typeof window === "undefined") return readWorkspaceCookie();
   return workspaceSlugFromRoutePath(window.location.pathname) ?? readWorkspaceCookie();
 }
 
-function routeWorkspaceSlug(): string | null {
+function fallbackRouteWorkspaceSlug(): string | null {
   if (typeof window === "undefined") return null;
   return workspaceSlugFromRoutePath(window.location.pathname);
 }
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [workspaceId, setWorkspaceIdState] = useState<string | null>(() => initialWorkspaceSlug());
-  const routeWorkspaceId = routeWorkspaceSlug();
+  const inRouter = useInRouterContext();
+  if (inRouter) return <WorkspaceProviderWithRouter>{children}</WorkspaceProviderWithRouter>;
+  return <WorkspaceProviderInner routePathname={null}>{children}</WorkspaceProviderInner>;
+}
+
+function WorkspaceProviderWithRouter({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  return <WorkspaceProviderInner routePathname={location.pathname}>{children}</WorkspaceProviderInner>;
+}
+
+function WorkspaceProviderInner({ children, routePathname }: { children: ReactNode; routePathname: string | null }) {
+  const [workspaceId, setWorkspaceIdState] = useState<string | null>(() => initialWorkspaceSlug(routePathname));
+  const routeWorkspaceId = routePathname ? workspaceSlugFromRoutePath(routePathname) : fallbackRouteWorkspaceSlug();
   const effectiveWorkspaceId = routeWorkspaceId ?? workspaceId;
   const queryClient = useQueryClient();
 

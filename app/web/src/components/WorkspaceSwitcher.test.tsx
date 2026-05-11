@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import WorkspaceSwitcher from "./WorkspaceSwitcher";
 import { fetchJson } from "@/lib/api";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
@@ -22,7 +22,8 @@ const fetchJsonMock = vi.mocked(fetchJson);
 beforeEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
-  vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("acme");
+  window.history.pushState({}, "", "/");
+  vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("beta");
   fetchJsonMock.mockResolvedValue(mePayload());
 });
 
@@ -32,38 +33,55 @@ afterEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.restoreAllMocks();
+  window.history.pushState({}, "", "/");
 });
 
-function renderSwitcher(): QueryClient {
+function renderSwitcher(initialEntry = "/w/acme/dashboard"): QueryClient {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  window.history.pushState({}, "", initialEntry);
   render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={["/w/acme/dashboard"]}>
+      <BrowserRouter>
         <WorkspaceProvider>
           <Routes>
             <Route path="/w/:slug/dashboard" element={<><WorkspaceSwitcher /><LocationProbe /></>} />
             <Route path="/workspaces/new" element={<LocationProbe />} />
           </Routes>
         </WorkspaceProvider>
-      </MemoryRouter>
+      </BrowserRouter>
     </QueryClientProvider>,
   );
   return qc;
 }
 
 describe("WorkspaceSwitcher", () => {
-  it("keeps the desktop sidebar switcher and invalidates data on selection", async () => {
+  it("navigates workspace-prefixed routes to the selected slug and invalidates data", async () => {
     const persistWorkspace = vi.spyOn(preferences, "persistWorkspace");
     const qc = renderSwitcher();
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
 
     fireEvent.click(await screen.findByRole("button", { name: /Acme/i }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/w/acme/dashboard");
     fireEvent.click(screen.getByRole("menuitemradio", { name: /Beta/i }));
 
     await waitFor(() => {
       expect(persistWorkspace).toHaveBeenCalledWith("beta");
     });
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/beta/dashboard");
+    });
     expect(invalidateSpy).toHaveBeenCalled();
+  });
+
+  it("preserves the current search and hash when switching route slugs", async () => {
+    renderSwitcher("/w/acme/dashboard?x#y");
+
+    fireEvent.click(await screen.findByRole("button", { name: /Acme/i }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Beta/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/beta/dashboard?x#y");
+    });
   });
 
   it("opens the menu for single-workspace users and lists the current workspace", async () => {
@@ -110,7 +128,7 @@ describe("WorkspaceSwitcher", () => {
 
 function LocationProbe() {
   const location = useLocation();
-  return <div data-testid="location">{location.pathname}</div>;
+  return <div data-testid="location">{location.pathname + location.search + location.hash}</div>;
 }
 
 function mePayload() {

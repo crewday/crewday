@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, Check, Plus } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { useWorkspace } from "@/context/WorkspaceContext";
+import { workspaceRelativePathname, workspaceRoute, workspaceSlugFromRoutePath } from "@/lib/workspaceRoutes";
 import type { AvailableWorkspace, Me } from "@/types/api";
 
 // §02 — workspace switcher rendered under the brand row in SideNav.
 // Lists every workspace the current user has a grant on (from /me's
-// `available_workspaces`); selecting one writes the cookie and
-// invalidates every query so the next render is in the new tenant.
+// `available_workspaces`); selecting one keeps `/w/<slug>/...` routes
+// canonical while still updating the cookie fallback.
 
 const ROLE_LABEL: Record<string, string> = {
   manager: "Manager",
@@ -23,6 +24,7 @@ export default function WorkspaceSwitcher() {
   // code-health: ignore[ccn] Workspace switcher keeps tenant visibility, outside-click handling, and selected-workspace menu state together.
   const { workspaceId, setWorkspaceId } = useWorkspace();
   const navigate = useNavigate();
+  const location = useLocation();
   const meQ = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -51,7 +53,15 @@ export default function WorkspaceSwitcher() {
 
   const pick = (next: AvailableWorkspace) => {
     setOpen(false);
-    if (next.workspace.id !== activeId) setWorkspaceId(next.workspace.id);
+    if (next.workspace.id === activeId) return;
+    if (workspaceSlugFromRoutePath(location.pathname)) {
+      navigate(workspaceRoute(next.workspace.id, workspaceRelativePathname(location.pathname), {
+        search: location.search,
+        hash: location.hash,
+      }));
+      return;
+    }
+    setWorkspaceId(next.workspace.id);
   };
 
   const createWorkspace = () => {
