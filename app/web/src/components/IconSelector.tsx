@@ -1,4 +1,4 @@
-import { Check, Search, X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   ASSET_ICON_NAMES,
@@ -7,6 +7,7 @@ import {
   type AssetIconName,
 } from "@/components/AssetIcon";
 import type { FieldRequirement } from "@/components/FormField";
+import SearchField from "@/components/SearchField";
 
 interface IconSelectorProps {
   label: string;
@@ -94,19 +95,15 @@ export default function IconSelector({
         </span>
       </div>
 
-      <label className="icon-selector__search">
-        <Search size={15} aria-hidden="true" />
-        <span className="sr-only">Search {label.toLocaleLowerCase()} choices</span>
-        <input
-          type="search"
-          value={query}
-          disabled={disabled}
-          aria-invalid={error ? "true" : undefined}
-          aria-describedby={error ? errorId : undefined}
-          onChange={(event) => setQuery(event.currentTarget.value)}
-          placeholder="Search icons"
-        />
-      </label>
+      <SearchField
+        value={query}
+        disabled={disabled}
+        invalid={Boolean(error)}
+        aria-label={`Search ${label.toLocaleLowerCase()} choices`}
+        aria-describedby={error ? errorId : undefined}
+        onChange={(event) => setQuery(event.currentTarget.value)}
+        placeholder="Search icons"
+      />
 
       <div className="icon-selector__grid" role="group" aria-label={`${label} choices`}>
         {allowEmpty ? (
