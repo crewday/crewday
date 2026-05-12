@@ -166,7 +166,6 @@ class LlmProviderResponse(BaseModel):
     default_model: str | None
     requests_per_minute: int
     timeout_s: int
-    priority: int
     is_enabled: bool
     provider_model_count: int
     spend_usd_30d: float = 0.0
@@ -432,7 +431,6 @@ class ProviderPayload(BaseModel):
     default_model: str | None = None
     timeout_s: int = Field(default=60, ge=1, le=600)
     requests_per_minute: int = Field(default=60, ge=1, le=100_000)
-    priority: int = Field(default=0, ge=0)
     is_enabled: bool = True
 
     @model_validator(mode="after")
@@ -609,7 +607,6 @@ def _provider_response(
         default_model=provider.default_model,
         requests_per_minute=provider.requests_per_minute,
         timeout_s=provider.timeout_s,
-        priority=provider.priority,
         is_enabled=provider.is_enabled,
         provider_model_count=provider_model_counts[provider.id],
         spend_usd_30d=_spend_usd(spend),
@@ -768,27 +765,6 @@ def _assignment_response(
     )
 
 
-def _deployment_default_assignment_response(
-    provider_model: LlmProviderModel,
-) -> LlmAssignmentResponse:
-    return LlmAssignmentResponse(
-        id=f"deployment-default:{provider_model.id}:0",
-        capability=DEFAULT_LLM_CAPABILITY,
-        description=_CAPABILITY_DESCRIPTIONS[DEFAULT_LLM_CAPABILITY],
-        priority=0,
-        provider_model_id=provider_model.id,
-        max_tokens=None,
-        temperature=None,
-        extra_api_params={},
-        required_capabilities=list(_CAPABILITY_REQUIRED[DEFAULT_LLM_CAPABILITY]),
-        is_enabled=True,
-        last_used_at=None,
-        spend_usd_30d=0,
-        calls_30d=0,
-        is_deployment_default=True,
-    )
-
-
 def _prompt_response(
     row: LlmPromptTemplate,
     revisions_count: int,
@@ -897,39 +873,6 @@ def _capability_has_chain(
     return False
 
 
-def _deployment_default_provider_model(
-    provider_models: list[LlmProviderModel],
-    providers_by_id: dict[str, LlmProvider],
-    models_by_id: dict[str, LlmModel],
-) -> LlmProviderModel | None:
-    canonical_order = (
-        "google/gemma-4-31b-it",
-        "google/gemma-3-27b-it",
-        "default/chat-base",
-    )
-    canonical_rank = {name: rank for rank, name in enumerate(canonical_order)}
-    ranked: list[tuple[int, str, LlmProviderModel]] = []
-    required = set(_CAPABILITY_REQUIRED[DEFAULT_LLM_CAPABILITY])
-    for provider_model in provider_models:
-        provider = providers_by_id.get(provider_model.provider_id)
-        model = models_by_id.get(provider_model.model_id)
-        if (
-            provider is None
-            or model is None
-            or not provider.is_enabled
-            or not provider_model.is_enabled
-            or not model.is_active
-        ):
-            continue
-        rank = canonical_rank.get(model.canonical_name)
-        if rank is None or not required.issubset(set(model.capabilities or [])):
-            continue
-        ranked.append((rank, provider_model.id, provider_model))
-    if not ranked:
-        return None
-    return min(ranked, key=lambda item: (item[0], item[1]))[2]
-
-
 def _missing_model_capabilities(
     *,
     assignment: LlmAssignmentResponse,
@@ -949,7 +892,7 @@ def _load_graph(session: Session) -> LlmGraphPayload:
     with tenant_agnostic():
         providers = list(
             session.scalars(
-                select(LlmProvider).order_by(LlmProvider.priority, LlmProvider.name)
+                select(LlmProvider).order_by(LlmProvider.name, LlmProvider.id)
             ).all()
         )
         models = list(
@@ -986,7 +929,6 @@ def _load_graph(session: Session) -> LlmGraphPayload:
 
     provider_counts: Counter[str] = Counter(row.provider_id for row in provider_models)
     model_counts: Counter[str] = Counter(row.model_id for row in provider_models)
-    providers_by_id = {row.id: row for row in providers}
     provider_models_by_id = {row.id: row for row in provider_models}
     models_by_id = {row.id: row for row in models}
     inheritance_by_capability = {
@@ -994,16 +936,6 @@ def _load_graph(session: Session) -> LlmGraphPayload:
     }
 
     enabled_assignment_caps = {row.capability for row in assignments if row.enabled}
-    deployment_default_pm = _deployment_default_provider_model(
-        provider_models, providers_by_id, models_by_id
-    )
-    deployment_default_assignment = (
-        _deployment_default_assignment_response(deployment_default_pm)
-        if deployment_default_pm is not None
-        else None
-    )
-    if deployment_default_assignment is not None:
-        enabled_assignment_caps.add(DEFAULT_LLM_CAPABILITY)
     capability_keys = [entry.key for entry in _capabilities()]
     explicit_inheritance = set(inheritance_by_capability)
     effective_inheritance = dict(inheritance_by_capability)
@@ -1072,12 +1004,6 @@ def _load_graph(session: Session) -> LlmGraphPayload:
         )
         for row in assignments
     ]
-    default_has_priority_zero = any(
-        row.capability == DEFAULT_LLM_CAPABILITY and row.enabled and row.priority == 0
-        for row in assignments
-    )
-    if deployment_default_assignment is not None and not default_has_priority_zero:
-        assignment_responses.append(deployment_default_assignment)
     assignment_responses.sort(key=lambda row: (row.capability, row.priority, row.id))
     issues: list[LlmAssignmentIssue] = []
     for assignment_response in assignment_responses:
@@ -1644,7 +1570,7 @@ def build_admin_llm_router() -> APIRouter:
             provider_models = list(session.scalars(select(LlmProviderModel)).all())
             providers = list(
                 session.scalars(
-                    select(LlmProvider).order_by(LlmProvider.priority, LlmProvider.name)
+                    select(LlmProvider).order_by(LlmProvider.name, LlmProvider.id)
                 ).all()
             )
         counts: Counter[str] = Counter(row.provider_id for row in provider_models)
@@ -1668,7 +1594,6 @@ def build_admin_llm_router() -> APIRouter:
             default_model=payload.default_model,
             timeout_s=payload.timeout_s,
             requests_per_minute=payload.requests_per_minute,
-            priority=payload.priority,
             is_enabled=payload.is_enabled,
             created_at=now,
             updated_at=now,
@@ -1725,7 +1650,6 @@ def build_admin_llm_router() -> APIRouter:
             row.default_model = payload.default_model
             row.timeout_s = payload.timeout_s
             row.requests_per_minute = payload.requests_per_minute
-            row.priority = payload.priority
             row.is_enabled = payload.is_enabled
             row.updated_at = _now()
             row.updated_by_user_id = ctx.user_id

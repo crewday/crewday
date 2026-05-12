@@ -297,7 +297,6 @@ def seed_provider_model(
         provider_type=provider_type,
         timeout_s=60,
         requests_per_minute=60,
-        priority=0,
         is_enabled=True,
         created_at=_PINNED,
         updated_at=_PINNED,

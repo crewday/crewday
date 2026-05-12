@@ -30,10 +30,15 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.llm.models import LlmModel, LlmProvider, LlmProviderModel
+from app.adapters.db.llm.models import (
+    LlmAssignment,
+    LlmModel,
+    LlmProvider,
+    LlmProviderModel,
+)
 from app.domain.llm import router as router_module
 from app.domain.llm.invalidation_bridge import PostgresLlmAssignmentInvalidationBridge
 from app.domain.llm.router import (
@@ -62,6 +67,18 @@ from tests.domain.llm.conftest import (
 )
 
 _SEED_MODEL = "01HWA00000000000000000MDL0"
+
+
+def _default_assignment(session: Session) -> LlmAssignment:
+    row = session.scalar(
+        select(LlmAssignment).where(
+            LlmAssignment.workspace_id.is_(None),
+            LlmAssignment.capability == "default",
+            LlmAssignment.priority == 0,
+        )
+    )
+    assert row is not None
+    return row
 
 
 async def _wait_for(predicate: Callable[[], bool], *, timeout: float = 5.0) -> None:
@@ -108,7 +125,7 @@ class TestHappyPath:
         try:
             pick = resolve_primary(db_session, ctx, "chat.manager", clock=clock)
 
-            assert pick.assignment_id == ""
+            assert pick.assignment_id == _default_assignment(db_session).id
             assert pick.provider_model_id == provider_model.id
             assert pick.api_model_id == provider_model.api_model_id
             assert pick.required_capabilities == ("chat", "function_calling")
@@ -202,6 +219,7 @@ class TestHappyPath:
         ctx = build_context(ws.id)
         token = set_current(ctx)
         try:
+            default_assignment = _default_assignment(db_session)
             fallback = seed_assignment(
                 db_session,
                 workspace_id=ws.id,
@@ -218,7 +236,10 @@ class TestHappyPath:
                 provider_model.id,
                 fallback.model_id,
             ]
-            assert [pick.assignment_id for pick in chain] == ["", fallback.id]
+            assert [pick.assignment_id for pick in chain] == [
+                default_assignment.id,
+                fallback.id,
+            ]
         finally:
             reset_current(token)
 
@@ -230,15 +251,15 @@ class TestHappyPath:
         ctx = build_context(ws.id)
         token = set_current(ctx)
         try:
-            primary = seed_assignment(
+            primary = _default_assignment(db_session)
+            replacement = seed_provider_model(
                 db_session,
-                workspace_id=ws.id,
-                capability="default",
-                priority=0,
-                model_id="01HWA0000000000000000PRIM",
+                provider_model_id="01HWA0000000000000000PRIM",
                 api_model_id="operator/default-primary",
-                required_capabilities=["chat", "function_calling"],
+                model_capabilities=["chat", "function_calling"],
             )
+            primary.model_id = replacement.id
+            db_session.flush()
 
             chain = resolve_model(db_session, ctx, "chat.manager", clock=clock)
 

@@ -66,6 +66,16 @@ class TestSeedDefaultRegistry:
         assert model.capabilities == list(DEFAULT_MODEL_CAPABILITIES)
         assert pm.api_model_id == "default/chat-base"
         assert pm.is_enabled is True
+        assignment = db_session.scalar(
+            select(LlmAssignment).where(
+                LlmAssignment.workspace_id.is_(None),
+                LlmAssignment.capability == "default",
+                LlmAssignment.priority == 0,
+            )
+        )
+        assert assignment is not None
+        assert assignment.model_id == pm.id
+        assert assignment.required_capabilities == ["chat", "function_calling"]
 
     def test_idempotent_re_seed_returns_same_row(self, db_session: Session) -> None:
         """Calling the seed twice does not duplicate the trio."""
@@ -92,6 +102,14 @@ class TestSeedDefaultRegistry:
             select(LlmProviderModel).where(LlmProviderModel.id == first.id)
         ).all()
         assert len(provider_models) == 1
+        default_assignments = db_session.execute(
+            select(LlmAssignment).where(
+                LlmAssignment.workspace_id.is_(None),
+                LlmAssignment.capability == "default",
+                LlmAssignment.priority == 0,
+            )
+        ).all()
+        assert len(default_assignments) == 1
 
     def test_seed_satisfies_chat_manager_assignment(self, db_session: Session) -> None:
         """A workspace assignment can FK at the seeded provider_model.

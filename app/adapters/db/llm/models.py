@@ -1310,9 +1310,9 @@ class LlmProvider(Base):
     and for self-hosted gateways that don't require auth.
 
     ``default_model`` is a soft reference to a
-    :class:`LlmProviderModel.id` — used as a fallback when an
-    assignment lists none. NULL means "no default; assignments must
-    name a row".
+    :class:`LlmProviderModel.id` for adapter setup convenience. It
+    does not participate in routing; all routing order comes from
+    :class:`LlmAssignment.priority`.
 
     NOT workspace-scoped. The :mod:`app.tenancy.registry` registration
     list in :mod:`app.adapters.db.llm.__init__` deliberately excludes
@@ -1344,12 +1344,6 @@ class LlmProvider(Base):
     )
     requests_per_minute: Mapped[int] = mapped_column(
         Integer, nullable=False, default=60, server_default="60"
-    )
-    # Lower = tried first when a provider pool is probed. The
-    # resolver's chain is per-assignment; ``priority`` here ranks
-    # providers when an assignment doesn't pin one.
-    priority: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default="0"
     )
     is_enabled: Mapped[bool] = mapped_column(
         Boolean,

@@ -10,10 +10,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import ValidationError
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.llm.models import LlmProvider, LlmProviderModel
 from app.adapters.llm.ports import (
     ChatMessage,
     LLMClient,
@@ -51,7 +49,9 @@ from app.domain.agent.runtime import (
     ToolResult,
 )
 from app.domain.errors import DomainError, ServiceUnavailable, Validation
+from app.domain.llm.router import CapabilityUnassignedError, resolve_primary
 from app.tenancy import DeploymentContext, tenant_agnostic
+from app.tenancy.context import WorkspaceContext
 from app.util.redact import ConsentSet
 from app.util.ulid import new_ulid
 
@@ -293,13 +293,20 @@ def _prompt(*, message: str, page_context: str) -> list[ChatMessage]:
 
 def _resolve_admin_model_id(session: Session) -> str | None:
     with tenant_agnostic():
-        return session.scalar(
-            select(LlmProviderModel.api_model_id)
-            .join(LlmProvider, LlmProvider.default_model == LlmProviderModel.id)
-            .where(LlmProvider.is_enabled.is_(True))
-            .order_by(LlmProvider.priority.asc(), LlmProvider.id.asc())
-            .limit(1)
+        ctx = WorkspaceContext(
+            workspace_id="__deployment_admin_llm__",
+            workspace_slug="deployment-admin",
+            actor_id="system",
+            actor_kind="system",
+            actor_grant_role="manager",
+            actor_was_owner_member=False,
+            audit_correlation_id="admin-agent-model-resolver",
+            principal_kind="system",
         )
+        try:
+            return resolve_primary(session, ctx, _CAPABILITY).api_model_id
+        except CapabilityUnassignedError:
+            return None
 
 
 def _resolve_tool_call(response: LLMResponse) -> ToolCall | None:

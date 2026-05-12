@@ -165,11 +165,6 @@ _DEFAULT_VISION_CAPABILITIES: frozenset[str] = frozenset({"expenses.autofill"})
 _DEPLOYMENT_INHERITANCE: Mapping[str, str] = MappingProxyType(
     {"chat.admin": "chat.manager"}
 )
-_DEFAULT_MODEL_CANONICAL_ORDER: tuple[str, ...] = (
-    "google/gemma-4-31b-it",
-    "google/gemma-3-27b-it",
-    "default/chat-base",
-)
 _DEFAULT_REQUIRED_CAPABILITIES: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
         DEFAULT_LLM_CAPABILITY: ("chat", "function_calling"),
@@ -369,7 +364,7 @@ def _load_enabled_chain(
     *,
     capability: str,
     required_capabilities: tuple[str, ...] | None,
-) -> tuple[list[ModelPick], bool, bool]:
+) -> tuple[list[ModelPick], bool]:
     """Read enabled assignments for ``capability`` in priority order.
 
     Returns an empty list when the capability has no enabled rows;
@@ -408,9 +403,7 @@ def _load_enabled_chain(
     )
     rows = session.execute(stmt).all()
     picks = []
-    has_priority_zero = False
     for assignment, provider_model, model in rows:
-        has_priority_zero = has_priority_zero or assignment.priority == 0
         required = (
             required_capabilities
             if required_capabilities is not None
@@ -418,65 +411,7 @@ def _load_enabled_chain(
         )
         if set(required).issubset(set(model.capabilities or [])):
             picks.append(_to_pick(assignment, provider_model, model))
-    return picks, bool(rows), has_priority_zero
-
-
-def _load_deployment_default_chain(
-    session: Session,
-    *,
-    capability: str,
-    required_capabilities: tuple[str, ...],
-) -> list[ModelPick]:
-    """Return the code-declared deployment default for ``default``.
-
-    Defaults are read-time fallbacks, not copied workspace rows. The
-    deployment registry still owns the concrete provider/model row; if
-    first-boot seeding has not created one, the capability remains
-    unassigned.
-    """
-    if capability != DEFAULT_LLM_CAPABILITY:
-        return []
-
-    canonical_rank = {
-        canonical_name: rank
-        for rank, canonical_name in enumerate(_DEFAULT_MODEL_CANONICAL_ORDER)
-    }
-    stmt = (
-        select(LlmProviderModel, LlmProvider, LlmModel)
-        .join(LlmProvider, LlmProviderModel.provider_id == LlmProvider.id)
-        .join(LlmModel, LlmProviderModel.model_id == LlmModel.id)
-        .where(
-            LlmProviderModel.is_enabled.is_(True),
-            LlmProvider.is_enabled.is_(True),
-            LlmModel.is_active.is_(True),
-            LlmModel.canonical_name.in_(_DEFAULT_MODEL_CANONICAL_ORDER),
-        )
-        .order_by(
-            LlmProvider.priority.asc(),
-            LlmProviderModel.id.asc(),
-        )
-    )
-    rows = session.execute(stmt).all()
-    ranked_rows = [
-        (canonical_rank[model.canonical_name], provider_model, model)
-        for provider_model, _provider, model in rows
-        if set(required_capabilities).issubset(set(model.capabilities or []))
-    ]
-    if not ranked_rows:
-        return []
-    _rank, provider_model, model = min(ranked_rows, key=lambda item: item[0])
-    return [
-        ModelPick(
-            provider_model_id=provider_model.id,
-            api_model_id=provider_model.api_model_id,
-            max_tokens=None,
-            temperature=None,
-            extra_api_params=MappingProxyType({}),
-            thinking_level=_thinking_level(model.thinking_level),
-            required_capabilities=required_capabilities,
-            assignment_id="",
-        )
-    ]
+    return picks, bool(rows)
 
 
 def _to_pick(
@@ -578,31 +513,15 @@ def _resolve_chain(
         visited.add(current)
         hops += 1
 
-        chain, has_enabled_rows, has_priority_zero = _load_enabled_chain(
+        chain, has_enabled_rows = _load_enabled_chain(
             session,
             capability=current,
             required_capabilities=None if current == capability else requested_required,
         )
-        if current == DEFAULT_LLM_CAPABILITY:
-            deployment_chain = _load_deployment_default_chain(
-                session,
-                capability=current,
-                required_capabilities=requested_required,
-            )
-            if deployment_chain and not has_priority_zero:
-                return deployment_chain + chain
         if chain:
             return chain
         if has_enabled_rows:
             return []
-
-        chain = _load_deployment_default_chain(
-            session,
-            capability=current,
-            required_capabilities=requested_required,
-        )
-        if chain:
-            return chain
 
         parent = _lookup_parent_capability(session, capability=current)
         if parent is None:

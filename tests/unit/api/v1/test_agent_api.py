@@ -217,7 +217,6 @@ def _seed_llm_assignment(
         provider_type="fake",
         timeout_s=60,
         requests_per_minute=60,
-        priority=0,
         is_enabled=True,
         created_at=_PINNED,
         updated_at=_PINNED,

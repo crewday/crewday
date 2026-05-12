@@ -237,7 +237,6 @@ def _seed_llm_graph(session_factory: sessionmaker[Session]) -> SeededLlm:
                 default_model=None,
                 timeout_s=60,
                 requests_per_minute=120,
-                priority=0,
                 is_enabled=True,
                 created_at=_PINNED,
                 updated_at=_PINNED,
@@ -774,22 +773,26 @@ class TestAdminLlmRoutes:
             )
             seeded = _seed_llm_graph(session_factory)
             with session_factory() as s, tenant_agnostic():
-                s.add(
-                    LlmAssignment(
-                        id="default-fallback",
-                        workspace_id=None,
-                        capability="default",
-                        model_id=seeded.provider_model_id,
-                        provider="OpenRouter",
-                        priority=1,
-                        enabled=True,
-                        max_tokens=None,
-                        temperature=None,
-                        extra_api_params={},
-                        required_capabilities=["chat", "function_calling"],
-                        created_at=_PINNED,
+                for assignment_id, priority in (
+                    ("default-primary", 0),
+                    ("default-fallback", 1),
+                ):
+                    s.add(
+                        LlmAssignment(
+                            id=assignment_id,
+                            workspace_id=None,
+                            capability="default",
+                            model_id=seeded.provider_model_id,
+                            provider="OpenRouter",
+                            priority=priority,
+                            enabled=True,
+                            max_tokens=None,
+                            temperature=None,
+                            extra_api_params={},
+                            required_capabilities=["chat", "function_calling"],
+                            created_at=_PINNED,
+                        )
                     )
-                )
                 s.commit()
 
             graph = client.get("/admin/api/v1/llm/graph")
@@ -797,6 +800,7 @@ class TestAdminLlmRoutes:
             body = graph.json()
             assert body["providers"][0]["id"] == seeded.provider_id
             assert body["providers"][0]["api_key_status"] == "present"
+            assert "priority" not in body["providers"][0]
             assert body["providers"][0]["spend_usd_30d"] == 0.174606
             assert body["providers"][0]["calls_30d"] == 3
             assert body["models"][0]["id"] == seeded.model_id
@@ -844,7 +848,14 @@ class TestAdminLlmRoutes:
                 0,
                 1,
             ]
-            assert default_assignments[0]["is_deployment_default"] is True
+            assert [assignment["id"] for assignment in default_assignments] == [
+                "default-primary",
+                "default-fallback",
+            ]
+            assert all(
+                assignment["is_deployment_default"] is False
+                for assignment in default_assignments
+            )
             assert {
                 "capability": "tasks.nl_intake",
                 "inherits_from": "default",
@@ -1122,6 +1133,18 @@ class TestAdminLlmRoutes:
             )
             assert duplicate.status_code == 409, duplicate.text
             assert duplicate.json()["error"] == "provider_name_exists"
+
+            stale_provider_priority = client.post(
+                "/admin/api/v1/llm/providers",
+                json={
+                    "name": "Stale Priority Provider",
+                    "provider_type": "fake",
+                    "priority": 0,
+                },
+            )
+            assert stale_provider_priority.status_code == 422, (
+                stale_provider_priority.text
+            )
 
             override = client.post(
                 "/admin/api/v1/llm/assignments",

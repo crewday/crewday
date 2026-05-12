@@ -28,7 +28,12 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.llm.models import LlmModel, LlmProvider, LlmProviderModel
+from app.adapters.db.llm.models import (
+    LlmAssignment,
+    LlmModel,
+    LlmProvider,
+    LlmProviderModel,
+)
 from app.config import Settings
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -58,6 +63,8 @@ DEFAULT_MODEL_CAPABILITIES: tuple[str, ...] = (
 )
 OPENROUTER_DEFAULT_PROVIDER_NAME: str = "openrouter-default"
 OPENROUTER_DEFAULT_MODEL_CANONICAL_NAME: str = "google/gemma-4-31b-it"
+_DEFAULT_CAPABILITY: str = "default"
+_DEFAULT_REQUIRED_CAPABILITIES: list[str] = ["chat", "function_calling"]
 
 
 def seed_default_registry(
@@ -108,7 +115,6 @@ def seed_default_registry(
             provider_type=provider_type,
             timeout_s=60,
             requests_per_minute=60,
-            priority=0,
             is_enabled=True,
             created_at=now,
             updated_at=now,
@@ -158,6 +164,31 @@ def seed_default_registry(
             updated_at=now,
         )
         session.add(provider_model)
+        session.flush()
+    assignment = session.execute(
+        select(LlmAssignment).where(
+            LlmAssignment.workspace_id.is_(None),
+            LlmAssignment.capability == _DEFAULT_CAPABILITY,
+            LlmAssignment.priority == 0,
+        )
+    ).scalar_one_or_none()
+    if assignment is None:
+        session.add(
+            LlmAssignment(
+                id=new_ulid(c),
+                workspace_id=None,
+                capability=_DEFAULT_CAPABILITY,
+                model_id=provider_model.id,
+                provider=provider.name,
+                priority=0,
+                enabled=True,
+                max_tokens=None,
+                temperature=None,
+                extra_api_params={},
+                required_capabilities=_DEFAULT_REQUIRED_CAPABILITIES,
+                created_at=now,
+            )
+        )
         session.flush()
     return provider_model
 

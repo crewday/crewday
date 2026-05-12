@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.capabilities.models import DeploymentSetting
-from app.adapters.db.llm.models import ApprovalRequest, LlmProvider
+from app.adapters.db.llm.models import ApprovalRequest
 from app.adapters.db.ops.models import AdminAgentAction, AdminAgentChatMessage
 from app.adapters.llm.fake import FakeLLMClient
 from app.adapters.llm.openrouter import OPENROUTER_API_KEY_SETTING
@@ -33,7 +33,8 @@ from app.domain.agent.runtime import (
     ToolCall,
     ToolResult,
 )
-from app.fixtures.llm import DEFAULT_PROVIDER_NAME, seed_default_registry
+from app.domain.llm.router import invalidate_cache
+from app.fixtures.llm import seed_default_registry
 from app.tenancy import tenant_agnostic
 from app.util.ulid import new_ulid
 from tests.unit.api.admin._helpers import (
@@ -204,13 +205,9 @@ def _assert_admin_runtime_fallback_write(
 
 def _seed_admin_model_default(session_factory: sessionmaker[Session]) -> None:
     with session_factory() as session, tenant_agnostic():
-        provider_model = seed_default_registry(session)
-        provider = session.scalar(
-            select(LlmProvider).where(LlmProvider.name == DEFAULT_PROVIDER_NAME)
-        )
-        assert provider is not None
-        provider.default_model = provider_model.id
+        seed_default_registry(session)
         session.commit()
+    invalidate_cache()
 
 
 @contextmanager

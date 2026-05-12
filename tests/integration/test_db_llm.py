@@ -131,7 +131,6 @@ def _seed_registry_trio(
         provider_type="fake",
         timeout_s=60,
         requests_per_minute=60,
-        priority=0,
         is_enabled=True,
         created_at=_PINNED,
         updated_at=_PINNED,
@@ -2819,10 +2818,10 @@ class TestCdU84yMigrationRoundTrip:
                     text(
                         "INSERT INTO llm_provider "
                         "(id, name, provider_type, timeout_s, "
-                        "requests_per_minute, priority, is_enabled, "
+                        "requests_per_minute, is_enabled, "
                         "created_at, updated_at) VALUES "
                         "('01HWA00000000000000000PRVH', 'happy-prov', "
-                        "'fake', 60, 60, 0, 1, "
+                        "'fake', 60, 60, 1, "
                         "'2026-04-24T12:00:00+00:00', "
                         "'2026-04-24T12:00:00+00:00')"
                     )
@@ -2938,10 +2937,10 @@ class TestCdU84yMigrationRoundTrip:
                         text(
                             "INSERT INTO llm_provider "
                             "(id, name, provider_type, timeout_s, "
-                            "requests_per_minute, priority, is_enabled, "
+                            "requests_per_minute, is_enabled, "
                             "created_at, updated_at) VALUES "
                             f"('01HWA00000000000000000PRS{index}', 'sad-prov-{index}', "
-                            "'fake', 60, 60, 0, 1, "
+                            "'fake', 60, 60, 1, "
                             "'2026-04-24T12:00:00+00:00', "
                             "'2026-04-24T12:00:00+00:00')"
                         )
@@ -3427,7 +3426,6 @@ class TestRegistryShape:
             "default_model",
             "timeout_s",
             "requests_per_minute",
-            "priority",
             "is_enabled",
             "created_at",
             "updated_at",
@@ -3576,6 +3574,151 @@ class TestRegistryShape:
             assert "workspace_id" not in cols, (
                 f"{table} has a workspace_id — registry must be deployment-scope"
             )
+
+
+class TestProviderPriorityRemovalMigration:
+    """cd-yvu9l removes provider-level routing priority."""
+
+    @contextmanager
+    def _override_database_url(self, url: str) -> Iterator[None]:
+        original = os.environ.get("CREWDAY_DATABASE_URL")
+        os.environ["CREWDAY_DATABASE_URL"] = url
+
+        from app.config import get_settings
+
+        get_settings.cache_clear()
+        try:
+            yield
+        finally:
+            if original is None:
+                os.environ.pop("CREWDAY_DATABASE_URL", None)
+            else:
+                os.environ["CREWDAY_DATABASE_URL"] = original
+            get_settings.cache_clear()
+
+    def test_upgrade_repairs_default_assignment_and_drops_priority(
+        self, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
+        from alembic import command
+        from alembic.config import Config as AlembicConfig
+        from sqlalchemy import text
+
+        from app.adapters.db.session import make_engine
+
+        db_path = tmp_path_factory.mktemp("cd-yvu9l-mig") / "mig.db"
+        url = f"sqlite:///{db_path}"
+        engine = make_engine(url)
+        try:
+            cfg = AlembicConfig(
+                str(Path(__file__).resolve().parents[2] / "alembic.ini")
+            )
+            cfg.set_main_option("sqlalchemy.url", url)
+            with self._override_database_url(url):
+                command.upgrade(cfg, "cdcgefwthink")
+
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO llm_provider "
+                        "(id, name, provider_type, timeout_s, "
+                        "requests_per_minute, priority, is_enabled, "
+                        "created_at, updated_at) VALUES "
+                        "('01HWA000000000000000PRVYU', 'yvu9l-prov', "
+                        "'fake', 60, 60, 7, 1, "
+                        "'2026-05-12T10:00:00+00:00', "
+                        "'2026-05-12T10:00:00+00:00')"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO llm_model "
+                        "(id, canonical_name, display_name, vendor, capabilities, "
+                        "thinking_level, is_active, price_source, "
+                        "created_at, updated_at) "
+                        "VALUES ('01HWA000000000000000MODYU', "
+                        "'google/gemma-4-31b-it', 'Gemma', 'google', "
+                        "'[\"chat\"]', 'disabled', 1, '', "
+                        "'2026-05-12T10:00:00+00:00', "
+                        "'2026-05-12T10:00:00+00:00')"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO llm_model "
+                        "(id, canonical_name, display_name, vendor, capabilities, "
+                        "thinking_level, is_active, price_source, "
+                        "created_at, updated_at) "
+                        "VALUES ('01HWA000000000000000MDZYU', "
+                        "'google/gemma-3-27b-it', 'Gemma 3', 'google', "
+                        "'[\"chat\", \"function_calling\"]', 'disabled', 1, '', "
+                        "'2026-05-12T10:00:00+00:00', "
+                        "'2026-05-12T10:00:00+00:00')"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO llm_provider_model "
+                        "(id, provider_id, model_id, api_model_id, "
+                        "input_cost_per_million, output_cost_per_million, "
+                        "supports_system_prompt, supports_temperature, "
+                        "extra_api_params, is_enabled, created_at, updated_at) VALUES "
+                        "('01HWA000000000000000PMDYU', "
+                        "'01HWA000000000000000PRVYU', "
+                        "'01HWA000000000000000MODYU', 'google/gemma-4-31b-it', "
+                        "0, 0, 1, 1, '{}', 1, "
+                        "'2026-05-12T10:00:00+00:00', "
+                        "'2026-05-12T10:00:00+00:00')"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO llm_provider_model "
+                        "(id, provider_id, model_id, api_model_id, "
+                        "input_cost_per_million, output_cost_per_million, "
+                        "supports_system_prompt, supports_temperature, "
+                        "extra_api_params, is_enabled, created_at, updated_at) VALUES "
+                        "('01HWA000000000000000PMEYU', "
+                        "'01HWA000000000000000PRVYU', "
+                        "'01HWA000000000000000MDZYU', 'google/gemma-3-27b-it', "
+                        "0, 0, 1, 1, '{}', 1, "
+                        "'2026-05-12T10:00:00+00:00', "
+                        "'2026-05-12T10:00:00+00:00')"
+                    )
+                )
+
+            with self._override_database_url(url):
+                command.upgrade(cfg, "head")
+
+            insp = inspect(engine)
+            assert "priority" not in {
+                c["name"] for c in insp.get_columns("llm_provider")
+            }
+            with engine.begin() as conn:
+                row = conn.execute(
+                    text(
+                        "SELECT id, capability, priority, model_id, "
+                        "required_capabilities "
+                        "FROM llm_assignment WHERE workspace_id IS NULL "
+                        "AND capability = 'default'"
+                    )
+                ).one()
+                assert len(row.id) == 26
+                assert row[1:] == (
+                    "default",
+                    0,
+                    "01HWA000000000000000PMEYU",
+                    '["chat", "function_calling"]',
+                )
+
+            with self._override_database_url(url):
+                command.downgrade(cfg, "cdcgefwthink")
+
+            provider_cols = {
+                c["name"]: c for c in inspect(engine).get_columns("llm_provider")
+            }
+            assert provider_cols["priority"]["nullable"] is False
+        finally:
+            engine.dispose()
 
 
 class TestRegistryFkProtect:
