@@ -5,6 +5,7 @@ import { Loading } from "@/components/common";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import type { LlmGraphPayload } from "@/types";
+import type { MouseEvent } from "react";
 import AssignmentColumn from "./AssignmentColumn";
 import LlmAssignmentModal from "./LlmAssignmentModal";
 import LlmAlerts from "./LlmAlerts";
@@ -115,6 +116,32 @@ export default function AdminLlmPage() {
     setAssignmentDialogCapability(assignment.capability);
   };
 
+  const clearSelectionFromGraphBackground = (event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (
+      target.closest(
+        [
+          "a",
+          "button",
+          "input",
+          "select",
+          "textarea",
+          "[role='button']",
+          "[role='menuitem']",
+          ".llm-graph-node",
+          ".llm-graph-node__child",
+          ".llm-graph-chain__rung",
+          ".llm-graph__col-header",
+        ].join(","),
+      )
+    ) {
+      return;
+    }
+    setHover(null);
+    setSelection(null);
+  };
+
   const overflow = [promptOverflow];
 
   if (graphQ.isPending || promptsQ.isPending) {
@@ -134,130 +161,138 @@ export default function AdminLlmPage() {
 
   return (
     <DeskPage title={title} sub={sub} overflow={overflow}>
-      <LlmRouteTabs activeKey="graph" />
-      <LlmAlerts graph={graph} syncResult={undefined} />
+      <div className="llm-graph-page">
+        <LlmRouteTabs activeKey="graph" />
+        <LlmAlerts graph={graph} syncResult={undefined} />
 
-      <div className="llm-graph" ref={graphRef}>
-        <svg
-          className="llm-graph__edges"
-          width={canvas.w}
-          height={canvas.h}
-          aria-hidden="true"
+        <div
+          className="llm-graph"
+          ref={graphRef}
+          onClick={clearSelectionFromGraphBackground}
         >
-          {edges.map((e) => {
-            const highlighted = edgeIsHighlighted(e);
-            const dim = hasActive && !highlighted;
-            const cls = [
-              "llm-graph__edge",
-              `llm-graph__edge--${e.kind}`,
-              highlighted ? "is-linked" : "",
-              dim ? "is-dim" : "",
-              e.invalid ? "is-error" : "",
-            ]
-              .filter(Boolean)
-              .join(" ");
-            return <path key={e.id} className={cls} d={e.d} />;
-          })}
-        </svg>
+          <svg
+            className="llm-graph__edges"
+            width={canvas.w}
+            height={canvas.h}
+            aria-hidden="true"
+          >
+            {edges.map((e) => {
+              const highlighted = edgeIsHighlighted(e);
+              const dim = hasActive && !highlighted;
+              const cls = [
+                "llm-graph__edge",
+                `llm-graph__edge--${e.kind}`,
+                highlighted ? "is-linked" : "",
+                dim ? "is-dim" : "",
+                e.invalid ? "is-error" : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+              return <path key={e.id} className={cls} d={e.d} />;
+            })}
+          </svg>
 
-        <div className="llm-graph__col-header llm-graph__col-header--providers">
-          <div className="llm-graph__col-heading">
-            <span className="llm-graph__col-title">Providers</span>
-            <span className="llm-graph__col-count">{graph.providers.length}</span>
+          <div className="llm-graph__col-header llm-graph__col-header--providers">
+            <div className="llm-graph__col-heading">
+              <span className="llm-graph__col-title">Providers</span>
+              <span className="llm-graph__col-count">{graph.providers.length}</span>
+            </div>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => setRegistryDialog({ kind: "provider", mode: "create" })}
+            >
+              + New provider
+            </button>
           </div>
-          <button
-            type="button"
-            className="btn btn--ghost btn--sm"
-            onClick={() => setRegistryDialog({ kind: "provider", mode: "create" })}
-          >
-            + New provider
-          </button>
-        </div>
-        <div className="llm-graph__col-header llm-graph__col-header--models">
-          <div className="llm-graph__col-heading">
-            <span className="llm-graph__col-title">Models</span>
-            <span className="llm-graph__col-count">{graph.models.length}</span>
+          <div className="llm-graph__col-header llm-graph__col-header--models">
+            <div className="llm-graph__col-heading">
+              <span className="llm-graph__col-title">Models</span>
+              <span className="llm-graph__col-count">{graph.models.length}</span>
+            </div>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => setRegistryDialog({ kind: "model", mode: "create" })}
+            >
+              + New model
+            </button>
           </div>
-          <button
-            type="button"
-            className="btn btn--ghost btn--sm"
-            onClick={() => setRegistryDialog({ kind: "model", mode: "create" })}
-          >
-            + New model
-          </button>
-        </div>
-        <div className="llm-graph__col-header llm-graph__col-header--assignments">
-          <div className="llm-graph__col-heading">
-            <span className="llm-graph__col-title">Assignments</span>
-            <span className="llm-graph__col-count">
-              {graph.totals.capability_count}
-            </span>
+          <div className="llm-graph__col-header llm-graph__col-header--assignments">
+            <div className="llm-graph__col-heading">
+              <span className="llm-graph__col-title">Assignments</span>
+              <span className="llm-graph__col-count">
+                {graph.totals.capability_count}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() =>
+                setRegistryDialog({ kind: "providerModel", mode: "create" })
+              }
+            >
+              + New provider-model
+            </button>
           </div>
-          <button
-            type="button"
-            className="btn btn--ghost btn--sm"
-            onClick={() =>
-              setRegistryDialog({ kind: "providerModel", mode: "create" })
+
+          <ProviderColumn
+            providers={graph.providers}
+            setHover={setHover}
+            setSelection={setSelection}
+            onEditProvider={(id) =>
+              setRegistryDialog({ kind: "provider", mode: "edit", id })
             }
-          >
-            + New provider-model
-          </button>
+            nodeClass={nodeClass}
+            setProviderRef={setRef(providerRefs)}
+          />
+          <ModelColumn
+            models={graph.models}
+            setHover={setHover}
+            setSelection={setSelection}
+            nodeClass={nodeClass}
+            setModelRef={setRef(modelRefs)}
+            setProviderModelRef={setRef(providerModelRefs)}
+            onEditModel={(id) => setRegistryDialog({ kind: "model", mode: "edit", id })}
+            onEditProviderModel={(id) =>
+              setRegistryDialog({ kind: "providerModel", mode: "edit", id })
+            }
+            indexes={indexes}
+          />
+          <AssignmentColumn
+            capabilities={graph.capabilities}
+            indexes={indexes}
+            active={active}
+            setHover={setHover}
+            setSelection={setSelection}
+            nodeClass={nodeClass}
+            hasActive={hasActive}
+            highlighted={highlighted}
+            setRungRef={setRef(rungRefs)}
+            onOpenCapability={openCapabilityDialog}
+            onOpenAssignment={openAssignmentDialog}
+            onOpenProviderModel={(id) =>
+              setRegistryDialog({ kind: "providerModel", mode: "edit", id })
+            }
+          />
         </div>
 
-        <ProviderColumn
+        {promptDrawer}
+        <LlmRegistryModals
+          dialog={registryDialog}
           providers={graph.providers}
-          setHover={setHover}
-          setSelection={setSelection}
-          onEditProvider={(id) => setRegistryDialog({ kind: "provider", mode: "edit", id })}
-          nodeClass={nodeClass}
-          setProviderRef={setRef(providerRefs)}
-        />
-        <ModelColumn
           models={graph.models}
-          setHover={setHover}
-          setSelection={setSelection}
-          nodeClass={nodeClass}
-          setModelRef={setRef(modelRefs)}
-          setProviderModelRef={setRef(providerModelRefs)}
-          onEditModel={(id) => setRegistryDialog({ kind: "model", mode: "edit", id })}
-          onEditProviderModel={(id) =>
-            setRegistryDialog({ kind: "providerModel", mode: "edit", id })
-          }
+          providerModels={graph.provider_models}
           indexes={indexes}
+          onClose={() => setRegistryDialog(null)}
         />
-        <AssignmentColumn
-          capabilities={graph.capabilities}
+        <LlmAssignmentModal
+          capabilityKey={assignmentDialogCapability}
+          graph={graph}
           indexes={indexes}
-          active={active}
-          setHover={setHover}
-          setSelection={setSelection}
-          nodeClass={nodeClass}
-          hasActive={hasActive}
-          highlighted={highlighted}
-          setRungRef={setRef(rungRefs)}
-          onOpenCapability={openCapabilityDialog}
-          onOpenAssignment={openAssignmentDialog}
-          onOpenProviderModel={(id) =>
-            setRegistryDialog({ kind: "providerModel", mode: "edit", id })
-          }
+          onClose={() => setAssignmentDialogCapability(null)}
         />
       </div>
-
-      {promptDrawer}
-      <LlmRegistryModals
-        dialog={registryDialog}
-        providers={graph.providers}
-        models={graph.models}
-        providerModels={graph.provider_models}
-        indexes={indexes}
-        onClose={() => setRegistryDialog(null)}
-      />
-      <LlmAssignmentModal
-        capabilityKey={assignmentDialogCapability}
-        graph={graph}
-        indexes={indexes}
-        onClose={() => setAssignmentDialogCapability(null)}
-      />
     </DeskPage>
   );
 }

@@ -894,6 +894,8 @@ describe("Admin LlmPage", () => {
       expectSharedFormModal(assignment, { wide: true, section: true, footer: false });
       expect(within(assignment).getByText("Available provider-models")).toBeInTheDocument();
       expect(within(assignment).getByText("Selected chain")).toBeInTheDocument();
+      expect(chatManagerRung()).toHaveClass("is-active");
+      expect(providerModelButton).not.toHaveClass("is-active");
       expect(screen.queryByRole("dialog", { name: "google/gemma-4-31b-it" })).toBeNull();
     } finally {
       fetcher.restore();
@@ -1339,6 +1341,74 @@ describe("Admin LlmPage", () => {
       expect(chatManagerRung()).toHaveClass("is-active");
       expect(gemmaCard).toHaveClass("is-linked");
       expect(textOnlyCard).toHaveClass("is-dim");
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("clears graph selection when empty graph space is clicked", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+
+      const provider = await findOpenRouterProvider();
+
+      fireEvent.click(provider);
+
+      expect(provider).toHaveClass("is-active");
+      expect(graphBoard().querySelector(".is-active")).toBeInTheDocument();
+
+      fireEvent.click(graphBoard());
+
+      expect(provider).not.toHaveClass("is-active");
+      expect(graphBoard().querySelector(".is-active")).not.toBeInTheDocument();
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("clears focus hover fallback when empty graph space is clicked", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+
+      const provider = await findOpenRouterProvider();
+
+      fireEvent.focus(provider);
+
+      expect(provider).toHaveClass("is-active");
+      expect(graphBoard().querySelector(".is-active")).toBeInTheDocument();
+
+      fireEvent.click(graphBoard());
+
+      expect(provider).not.toHaveClass("is-active");
+      expect(graphBoard().querySelector(".is-active")).not.toBeInTheDocument();
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("does not clear graph selection from graph controls or headers", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+
+      const provider = await findOpenRouterProvider();
+      fireEvent.click(provider);
+      expect(provider).toHaveClass("is-active");
+
+      const providerDialog = screen.getByRole("dialog", { name: "OpenRouter" });
+      fireEvent.click(within(providerDialog).getByRole("button", { name: "Close" }));
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name: "OpenRouter" })).toBeNull();
+      });
+
+      fireEvent.click(screen.getByText("Providers"));
+      expect(provider).toHaveClass("is-active");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New provider" }));
+      expect(provider).toHaveClass("is-active");
+      expect(screen.getByRole("dialog", { name: "Create provider" })).toBeInTheDocument();
     } finally {
       fetcher.restore();
     }
