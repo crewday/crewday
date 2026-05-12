@@ -120,11 +120,7 @@ function directAssignments(
   capabilityKey: string | null,
   indexes: LlmIndexes,
 ): LlmAssignment[] {
-  return capabilityKey
-    ? (indexes.assignmentsByCapability.get(capabilityKey) ?? []).filter(
-        (assignment) => assignment.is_deployment_default !== true,
-      )
-    : [];
+  return capabilityKey ? (indexes.assignmentsByCapability.get(capabilityKey) ?? []) : [];
 }
 
 export default function LlmAssignmentModal({
@@ -440,7 +436,7 @@ function InheritanceOnlyPanel({
         </div>
       </div>
       <InheritedChainSummary
-        chain={chain.filter((assignment) => assignment.is_deployment_default !== true)}
+        chain={chain}
         childCapability={capability}
         indexes={indexes}
       />

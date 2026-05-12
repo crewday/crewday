@@ -40,7 +40,6 @@ export interface LlmProvider {
   default_model: string | null;
   requests_per_minute: number;
   timeout_s: number;
-  priority: number;
   is_enabled: boolean;
   provider_model_count: number;
   spend_usd_30d: number;
@@ -138,7 +137,6 @@ export interface LlmAssignment {
   direct_calls_30d: number;
   inherited_spend_usd_30d: number;
   inherited_calls_30d: number;
-  is_deployment_default?: boolean;
 }
 
 export interface LlmCapabilityEntry {

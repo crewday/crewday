@@ -607,7 +607,6 @@ export interface LlmProvider {
   default_model: string | null;
   requests_per_minute: number;
   timeout_s: number;
-  priority: number;
   is_enabled: boolean;
   provider_model_count: number;
 }

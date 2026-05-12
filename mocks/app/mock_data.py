@@ -746,7 +746,6 @@ class LlmProvider:
     default_model: str | None
     requests_per_minute: int
     timeout_s: int
-    priority: int
     is_enabled: bool
 
 
@@ -2631,7 +2630,6 @@ LLM_PROVIDERS: list[LlmProvider] = [
         default_model="google/gemma-4-31b-it",
         requests_per_minute=60,
         timeout_s=60,
-        priority=0,
         is_enabled=True,
     ),
     LlmProvider(
@@ -2644,7 +2642,6 @@ LLM_PROVIDERS: list[LlmProvider] = [
         default_model=None,
         requests_per_minute=60,
         timeout_s=60,
-        priority=1,
         is_enabled=False,
     ),
 ]

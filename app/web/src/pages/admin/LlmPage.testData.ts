@@ -12,7 +12,6 @@ export const graph = {
       default_model: null,
       requests_per_minute: 60,
       timeout_s: 60,
-      priority: 0,
       is_enabled: true,
       provider_model_count: 3,
       spend_usd_30d: 1.25,
@@ -187,7 +186,7 @@ export const graph = {
   ],
   assignments: [
     {
-      id: "deployment-default:pm_gemma:0",
+      id: "assign_default",
       capability: "default",
       description: "Deployment default fallback chain",
       priority: 0,
@@ -204,7 +203,6 @@ export const graph = {
       direct_calls_30d: 0,
       inherited_spend_usd_30d: 0,
       inherited_calls_30d: 0,
-      is_deployment_default: true,
     },
     {
       id: "assign_chat_manager",
@@ -228,7 +226,7 @@ export const graph = {
   ],
   assignment_issues: [
     {
-      assignment_id: "deployment-default:pm_gemma:0",
+      assignment_id: "assign_default",
       capability: "voice.transcribe",
       missing_capabilities: ["audio_input"],
     },
@@ -271,7 +269,7 @@ export const calls = [
     cost_cents: 0,
     latency_ms: 190,
     status: "ok",
-    assignment_id: "deployment-default:pm_gemma:0",
+    assignment_id: "assign_default",
     provider_model_id: "pm_gemma",
     prompt_template_id: null,
     prompt_version: null,

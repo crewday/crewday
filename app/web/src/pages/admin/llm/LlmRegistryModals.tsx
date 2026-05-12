@@ -68,7 +68,6 @@ interface ProviderPayload {
   default_model: string | null;
   timeout_s: number;
   requests_per_minute: number;
-  priority: number;
   is_enabled: boolean;
 }
 
@@ -384,7 +383,6 @@ function ProviderForm(props: ProviderFormProps) {
   const [defaultModel, setDefaultModel] = useState(provider?.default_model ?? "");
   const [timeout, setTimeoutValue] = useState(String(provider?.timeout_s ?? 60));
   const [rpm, setRpm] = useState(String(provider?.requests_per_minute ?? 60));
-  const [priority, setPriority] = useState(String(provider?.priority ?? 0));
   const [enabled, setEnabled] = useState(provider?.is_enabled ?? true);
   const [clientErr, setClientErr] = useState<string | null>(null);
   const [serverErr, setServerErr] = useState<string | null>(null);
@@ -433,7 +431,6 @@ function ProviderForm(props: ProviderFormProps) {
     event.preventDefault();
     const timeoutValue = Number(timeout);
     const rpmValue = Number(rpm);
-    const priorityValue = Number(priority);
     if (!name.trim()) return setClientErr("Name is required.");
     if (providerType === "openai_compatible" && !apiEndpoint.trim()) {
       return setClientErr("OpenAI-compatible providers need an API endpoint.");
@@ -443,9 +440,6 @@ function ProviderForm(props: ProviderFormProps) {
     }
     if (!Number.isInteger(rpmValue) || rpmValue < 1) {
       return setClientErr("Requests per minute must be at least 1.");
-    }
-    if (!Number.isInteger(priorityValue) || priorityValue < 0) {
-      return setClientErr("Priority must be zero or more.");
     }
     setClientErr(null);
     setServerErr(null);
@@ -457,7 +451,6 @@ function ProviderForm(props: ProviderFormProps) {
       default_model: emptyToNull(defaultModel),
       timeout_s: timeoutValue,
       requests_per_minute: rpmValue,
-      priority: priorityValue,
       is_enabled: enabled,
     });
   }
@@ -572,17 +565,6 @@ function ProviderForm(props: ProviderFormProps) {
             />
           </FormModalField>
         </FormModalGrid>
-        <FormModalField label="Priority" requirement="required">
-          <input
-            type="number"
-            min="0"
-            value={priority}
-            onChange={(e) => setPriority(e.target.value)}
-            required
-            aria-invalid={clientErr === "Priority must be zero or more."}
-            aria-describedby={errId}
-          />
-        </FormModalField>
         {err ? (
           <p id="llm-provider-error" className="form-error" role="alert">
             {err}
@@ -1270,8 +1252,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             assignments={assignments.filter(
               (assignment) =>
                 assignment.provider_model_id === providerModel.id &&
-                assignment.is_enabled &&
-                !assignment.is_deployment_default,
+                assignment.is_enabled,
             )}
           />
         ) : null}

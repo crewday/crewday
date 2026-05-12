@@ -117,6 +117,17 @@ function chatManagerAssignmentButton(): HTMLElement {
   });
 }
 
+function defaultCapabilityCard(): HTMLElement {
+  const capability = screen
+    .getAllByText("default")
+    .find((el) => el.classList.contains("llm-graph-node__name"))
+    ?.closest("article");
+  if (!(capability instanceof HTMLElement)) {
+    throw new Error("default capability not found");
+  }
+  return capability;
+}
+
 function assignmentDialog(name: string): HTMLElement {
   return screen.getByRole("dialog", { name });
 }
@@ -492,7 +503,9 @@ describe("Admin LlmPage", () => {
       await findOpenRouterProvider();
 
       fireEvent.click(screen.getByRole("button", { name: "+ New provider" }));
-      expectSharedFormModal(screen.getByRole("dialog", { name: "Create provider" }));
+      const createDialog = screen.getByRole("dialog", { name: "Create provider" });
+      expectSharedFormModal(createDialog);
+      expect(within(createDialog).queryByLabelText(/Priority/)).not.toBeInTheDocument();
       fireEvent.change(screen.getByLabelText(/Name/), {
         target: { value: "Fake provider" },
       });
@@ -517,8 +530,14 @@ describe("Admin LlmPage", () => {
         name: "Fake provider",
         provider_type: "fake",
       });
+      expect(jsonBody(post!)).not.toHaveProperty("priority");
 
       fireEvent.click(await findOpenRouterProvider());
+      expect(
+        within(screen.getByRole("dialog", { name: "OpenRouter" })).queryByLabelText(
+          /Priority/,
+        ),
+      ).not.toBeInTheDocument();
       fireEvent.change(screen.getByLabelText(/Name/), {
         target: { value: "OpenRouter EU" },
       });
@@ -539,6 +558,7 @@ describe("Admin LlmPage", () => {
           call.init.method === "PUT",
       );
       expect(jsonBody(put!)).toMatchObject({ name: "OpenRouter EU" });
+      expect(jsonBody(put!)).not.toHaveProperty("priority");
 
       fireEvent.click(await findOpenRouterProvider());
       fireEvent.click(screen.getByRole("button", { name: "Delete provider" }));
@@ -1139,36 +1159,161 @@ describe("Admin LlmPage", () => {
     }
   });
 
-  it("omits synthetic deployment-default assignment rows from the modal", async () => {
-    const fetcher = installPageFetch();
+  it("adds compatible provider-models to default through the normal assignment API", async () => {
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/assignments": [
+        {
+          body: {
+            ...graph.assignments[0],
+            id: "assign_default_fast",
+            provider_model_id: "pm_fast",
+            priority: 1,
+          },
+        },
+      ],
+    });
     try {
       render(<Harness />);
       await findOpenRouterProvider();
 
-      const defaultCard = screen
-        .getAllByText("default")
-        .find((el) => el.classList.contains("llm-graph-node__name"))
-        ?.closest("article");
-      if (!(defaultCard instanceof HTMLElement)) throw new Error("default card not found");
       fireEvent.click(
-        within(defaultCard).getByRole("button", { name: /default capability/ }),
+        within(defaultCapabilityCard()).getByRole("button", {
+          name: /default capability/,
+        }),
       );
 
       const dialog = assignmentDialog("default");
-      expect(
-        within(dialog).queryByText(/Deployment-default rows are synthetic and read-only/),
-      ).not.toBeInTheDocument();
-      expect(
-        within(dialog).getByText("No direct provider-models selected."),
-      ).toBeInTheDocument();
-      expect(within(dialog).queryByRole("button", { name: "Save rung" })).toBeNull();
-      expect(
-        fetcher.calls.some(
-          (call) =>
-            call.url.startsWith("/admin/api/v1/llm/assignments/") &&
-            call.init.method !== "GET",
-        ),
-      ).toBe(false);
+      expect(within(dialog).getByText("Selected chain")).toBeInTheDocument();
+      expect(within(dialog).getByText("Gemma 4 31B IT")).toBeInTheDocument();
+      expect(within(providerModelRow(dialog, "Text Only")).getByRole("button", {
+        name: "Add",
+      })).toBeDisabled();
+
+      fireEvent.click(within(providerModelRow(dialog, "Fast Chat")).getByRole("button", {
+        name: "Add",
+      }));
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url === "/admin/api/v1/llm/assignments" &&
+              call.init.method === "POST",
+          ),
+        ).toBe(true);
+      });
+      const post = fetcher.calls.find(
+        (call) =>
+          call.url === "/admin/api/v1/llm/assignments" &&
+          call.init.method === "POST",
+      )!;
+      expect(jsonBody(post)).toMatchObject({
+        capability: "default",
+        provider_model_id: "pm_fast",
+        priority: 1,
+        required_capabilities: ["chat", "function_calling"],
+      });
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("reorders default assignment rungs through the normal assignment API", async () => {
+    const twoRungDefaultGraph = {
+      ...graph,
+      assignments: [
+        graph.assignments[0],
+        {
+          ...graph.assignments[0],
+          id: "assign_default_fast",
+          provider_model_id: "pm_fast",
+          priority: 1,
+        },
+        ...graph.assignments.slice(1),
+      ],
+    };
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/graph": [
+        { body: twoRungDefaultGraph },
+        { body: twoRungDefaultGraph },
+        { body: twoRungDefaultGraph },
+      ],
+      "/admin/api/v1/llm/assignments/reorder": [
+        { body: twoRungDefaultGraph.assignments },
+      ],
+    });
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      fireEvent.click(
+        within(defaultCapabilityCard()).getByRole("button", {
+          name: /default capability/,
+        }),
+      );
+
+      const dialog = assignmentDialog("default");
+      fireEvent.click(
+        within(dialog).getByRole("button", {
+          name: "Move Fast Chat via OpenRouter up",
+        }),
+      );
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url === "/admin/api/v1/llm/assignments/reorder" &&
+              call.init.method === "PATCH",
+          ),
+        ).toBe(true);
+      });
+      const reorder = fetcher.calls.find(
+        (call) =>
+          call.url === "/admin/api/v1/llm/assignments/reorder" &&
+          call.init.method === "PATCH",
+      )!;
+      expect(jsonBody(reorder)).toEqual([
+        {
+          capability: "default",
+          ids_in_priority_order: ["assign_default_fast", "assign_default"],
+        },
+      ]);
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("deletes default assignment rungs through the normal assignment API", async () => {
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/assignments/assign_default": [{ status: 204, body: null }],
+    });
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      fireEvent.click(
+        within(defaultCapabilityCard()).getByRole("button", {
+          name: /default capability/,
+        }),
+      );
+
+      const dialog = assignmentDialog("default");
+      fireEvent.click(
+        within(providerModelRow(dialog, "Gemma 4 31B IT")).getByRole("button", {
+          name: "Remove",
+        }),
+      );
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url === "/admin/api/v1/llm/assignments/assign_default" &&
+              call.init.method === "DELETE",
+          ),
+        ).toBe(true);
+      });
     } finally {
       fetcher.restore();
     }

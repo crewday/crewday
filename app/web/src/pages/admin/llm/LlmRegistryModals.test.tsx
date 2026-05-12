@@ -84,9 +84,9 @@ describe("LlmRegistryModals", () => {
     ).toBeInTheDocument();
     fireEvent.click(within(playground).getByRole("button", { name: "Via assignment" }));
     const assignment = within(playground).getByLabelText("Assignment Required");
-    expect(assignment).toHaveValue("assign_chat_manager");
+    expect(assignment).toHaveValue("assign_default");
+    expect(assignment).toHaveTextContent("default priority 0");
     expect(assignment).toHaveTextContent("chat.manager priority 0");
-    expect(assignment).not.toHaveTextContent("Deployment default fallback chain");
     expect(
       within(playground).queryByLabelText("Image URL or data URL Optional"),
     ).not.toBeInTheDocument();
@@ -207,7 +207,7 @@ describe("LlmRegistryModals", () => {
               model_used: "google/gemma-4-31b-it",
               provider_used: "OpenRouter",
               provider_model_id: "pm_gemma",
-              assignment_id: "assign_chat_manager",
+              assignment_id: "assign_default",
               latency_ms: 42,
               input_tokens: 6,
               output_tokens: 2,
@@ -236,7 +236,7 @@ describe("LlmRegistryModals", () => {
     );
     expect(bodyOf(post!)).toMatchObject({
       mode: "assignment",
-      assignment_id: "assign_chat_manager",
+      assignment_id: "assign_default",
       prompt: "Say pong through the assignment.",
     });
   });
