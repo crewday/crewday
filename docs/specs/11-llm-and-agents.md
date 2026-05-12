@@ -678,10 +678,9 @@ llm_provider
 ├── provider_type          text            -- openrouter | openai_compatible | fake
 ├── api_endpoint           text?           -- overrides the type's default URL
 ├── api_key_envelope_ref   text?           -- pointer into secret_envelope (§15); never the ciphertext
-├── default_model          text?           -- fallback model_id when an assignment lists none
+├── default_model          text?           -- adapter default model id; not routing/fallback order
 ├── timeout_s              int             -- default 60
 ├── requests_per_minute    int             -- default 60; enforced client-side
-├── priority               int             -- lower = tried first when a provider pool is probed
 ├── is_enabled             bool
 ├── created_at / updated_at
 └── updated_by_user_id     ULID?
@@ -717,6 +716,14 @@ llm_provider
   `PUT /admin/api/v1/llm/providers/{id}/key`, which generates a new
   envelope ciphertext and updates the ref atomically. This surface is
   `interactive-session-only` (§ "Interactive-session-only endpoints").
+- `default_model` is an adapter setting for direct provider setup and
+  legacy transitional config. Capability resolution never selects from
+  this column; every `llm_assignment` still points at a concrete
+  `llm_provider_model`.
+- Provider rows do **not** define routing order. They describe an
+  endpoint, credentials, rate limits, and operational state. Runtime
+  routing and failover are controlled only by `llm_assignment.priority`
+  over concrete `llm_provider_model` rows.
 
 ### `llm_model`
 
@@ -950,6 +957,8 @@ priority-ordered **fallback chain** — the client walks the chain on
 retryable failures (upstream 5xx, 429, timeout, provider content
 refusal, transport error). This is the "proper failback between models"
 behaviour; fj2 ships the same shape under the name `LLMAssignment`.
+There is no separate endpoint ordering primitive: `llm_assignment.priority`
+is the only routing and fallback order.
 
 ```
 llm_assignment
@@ -1000,6 +1009,15 @@ IS NULL` and the resolver ignores legacy non-NULL rows.
   `503 capability_unassigned` and a `CRITICAL` audit row; the resolver
   never sends a request to a model that lacks the requesting
   capability's required tags.
+- `default` is a normal capability key with normal persisted
+  `llm_assignment` rows. Its assignments are editable, enableable, and
+  reorderable from the same admin graph and CLI paths as any other
+  capability. Resolving `default` loads enabled rows where
+  `capability = 'default'`, sorts them by ascending
+  `llm_assignment.priority`, and attempts each referenced
+  `llm_provider_model` in order. Each provider-model row determines the
+  provider endpoint and API model id used for that attempt; retryable
+  failures walk to the next assignment rung.
 
 ### Capability inheritance
 
