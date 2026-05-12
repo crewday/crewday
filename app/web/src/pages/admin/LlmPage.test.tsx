@@ -734,7 +734,7 @@ describe("Admin LlmPage", () => {
       fireEvent.change(screen.getByLabelText(/Temperature override/), {
         target: { value: "0.7" },
       });
-      fireEvent.change(screen.getByLabelText(/Thinking override/), {
+      fireEvent.change(screen.getByLabelText(/^Thinking/), {
         target: { value: "high" },
       });
       fireEvent.change(screen.getByLabelText(/Price source override/), {

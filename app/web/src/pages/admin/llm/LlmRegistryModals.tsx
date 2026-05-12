@@ -111,6 +111,13 @@ const CAPABILITY_TAGS = [
   "embeddings",
 ] as const;
 
+const THINKING_LEVEL_OPTIONS = [
+  "disabled",
+  "low",
+  "medium",
+  "high",
+] as const satisfies readonly LlmThinkingLevel[];
+
 function emptyToNull(value: string): string | null {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
@@ -159,6 +166,14 @@ function apiErrorCopy(error: unknown, fallback: string): string {
 function describedBy(...ids: (string | undefined)[]): string | undefined {
   const present = ids.filter((id): id is string => id !== undefined);
   return present.length ? present.join(" ") : undefined;
+}
+
+function thinkingLevelLabel(level: LlmThinkingLevel): string {
+  return level;
+}
+
+function isThinkingLevel(value: string): value is LlmThinkingLevel {
+  return (THINKING_LEVEL_OPTIONS as readonly string[]).includes(value);
 }
 
 function providerOption(provider: LlmProvider): SearchableSelectOption {
@@ -693,12 +708,17 @@ function ModelForm({
           <FormModalField label="Thinking level" requirement="required">
             <select
               value={thinkingLevel}
-              onChange={(e) => setThinkingLevel(e.target.value as LlmThinkingLevel)}
+              onChange={(e) => {
+                if (isThinkingLevel(e.target.value)) {
+                  setThinkingLevel(e.target.value);
+                }
+              }}
             >
-              <option value="disabled">Disabled</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
+              {THINKING_LEVEL_OPTIONS.map((level) => (
+                <option key={level} value={level}>
+                  {thinkingLevelLabel(level)}
+                </option>
+              ))}
             </select>
           </FormModalField>
           <FormModalField label="Price source" requirement="required">
@@ -792,6 +812,14 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   const [serverErr, setServerErr] = useState<string | null>(null);
   const providerOptions = useMemo(() => providers.map(providerOption), [providers]);
   const modelOptions = useMemo(() => models.map(modelOption), [models]);
+  const selectedModel = useMemo(
+    () => models.find((item) => item.id === modelId),
+    [modelId, models],
+  );
+  const inheritedThinkingLevel =
+    selectedModel?.thinking_level ?? providerModel?.effective_thinking_level ?? "disabled";
+  const effectiveThinkingLevel =
+    thinkingOverride === "inherit" ? inheritedThinkingLevel : thinkingOverride;
 
   const invalidate = async () => {
     await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
@@ -826,6 +854,8 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   const err = clientErr ?? serverErr;
   const errId = err ? "llm-provider-model-error" : undefined;
   const extraHelpId = "llm-provider-model-extra-help";
+  const thinkingHelpId =
+    thinkingOverride === "inherit" ? "llm-provider-model-thinking-help" : undefined;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     // code-health: ignore[ccn] Provider-model submit intentionally keeps all field validation next to the payload it sends.
@@ -1004,18 +1034,34 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               aria-describedby={errId}
             />
           </FormModalField>
-          <FormModalField label="Thinking override" requirement="optional">
+          <FormModalField
+            label="Thinking"
+            requirement="optional"
+            helpId={thinkingHelpId}
+            helpText={
+              thinkingOverride === "inherit"
+                ? `Inherited model default: ${thinkingLevelLabel(
+                    inheritedThinkingLevel,
+                  )}. Effective: ${thinkingLevelLabel(effectiveThinkingLevel)}.`
+                : undefined
+            }
+          >
             <select
               value={thinkingOverride}
-              onChange={(e) =>
-                setThinkingOverride(e.target.value as LlmThinkingLevel | "inherit")
-              }
+              aria-describedby={describedBy(thinkingHelpId, errId)}
+              onChange={(e) => {
+                const next = e.target.value;
+                if (next === "inherit" || isThinkingLevel(next)) {
+                  setThinkingOverride(next);
+                }
+              }}
             >
-              <option value="inherit">Use model default</option>
-              <option value="disabled">Disabled</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
+              <option value="inherit">Model default</option>
+              {THINKING_LEVEL_OPTIONS.map((level) => (
+                <option key={level} value={level}>
+                  {thinkingLevelLabel(level)}
+                </option>
+              ))}
             </select>
           </FormModalField>
         </FormModalGrid>

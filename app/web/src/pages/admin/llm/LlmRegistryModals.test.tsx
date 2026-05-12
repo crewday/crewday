@@ -52,6 +52,168 @@ function bodyOf(call: FetchCall): unknown {
 const baseGraph = graph as LlmGraphPayload;
 
 describe("LlmRegistryModals", () => {
+  it("saves model thinking defaults from the fixed dropdown values", async () => {
+    const calls = installFetch();
+    renderRegistry(baseGraph, { kind: "model", mode: "edit", id: "model_gemma" });
+
+    const thinking = screen.getByLabelText(/Thinking level/);
+    expect(thinking).toHaveValue("disabled");
+    expect(screen.getByRole("option", { name: "disabled" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "low" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "medium" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "high" })).toBeInTheDocument();
+
+    fireEvent.change(thinking, { target: { value: "medium" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save model" }));
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/models/model_gemma" &&
+            call.init.method === "PUT",
+        ),
+      ).toBe(true);
+    });
+    const put = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/models/model_gemma" &&
+        call.init.method === "PUT",
+    )!;
+    expect(bodyOf(put)).toMatchObject({ thinking_level: "medium" });
+  });
+
+  it("shows inherited provider-model thinking and saves explicit overrides", async () => {
+    const calls = installFetch();
+    const testGraph: LlmGraphPayload = {
+      ...baseGraph,
+      models: baseGraph.models.map((model) =>
+        model.id === "model_gemma" ? { ...model, thinking_level: "medium" } : model,
+      ),
+      provider_models: baseGraph.provider_models.map((pm) =>
+        pm.id === "pm_gemma"
+          ? {
+              ...pm,
+              thinking_level_override: null,
+              effective_thinking_level: "medium",
+            }
+          : pm,
+      ),
+    };
+    renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    const thinking = screen.getByLabelText(/^Thinking/);
+    expect(thinking).toHaveValue("inherit");
+    expect(screen.getByRole("option", { name: "Model default" })).toBeInTheDocument();
+    expect(screen.getByText("Inherited model default: medium. Effective: medium.")).toBeInTheDocument();
+    expect(thinking).toHaveAttribute(
+      "aria-describedby",
+      "llm-provider-model-thinking-help",
+    );
+
+    fireEvent.change(thinking, { target: { value: "high" } });
+    expect(
+      screen.queryByText("Inherited model default: medium. Effective: medium."),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+            call.init.method === "PUT",
+        ),
+      ).toBe(true);
+    });
+    const put = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+        call.init.method === "PUT",
+    )!;
+    expect(bodyOf(put)).toMatchObject({ thinking_level_override: "high" });
+  });
+
+  it("ignores malformed provider-model thinking values before save", async () => {
+    const calls = installFetch();
+    const testGraph: LlmGraphPayload = {
+      ...baseGraph,
+      provider_models: baseGraph.provider_models.map((pm) =>
+        pm.id === "pm_gemma"
+          ? {
+              ...pm,
+              thinking_level_override: "high",
+              effective_thinking_level: "high",
+            }
+          : pm,
+      ),
+    };
+    renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    fireEvent.change(screen.getByLabelText(/^Thinking/), {
+      target: { value: "unsupported" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+            call.init.method === "PUT",
+        ),
+      ).toBe(true);
+    });
+    const put = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+        call.init.method === "PUT",
+    )!;
+    expect(bodyOf(put)).toMatchObject({ thinking_level_override: "high" });
+  });
+
+  it("clears provider-model thinking overrides back to the model default", async () => {
+    const calls = installFetch();
+    const testGraph: LlmGraphPayload = {
+      ...baseGraph,
+      models: baseGraph.models.map((model) =>
+        model.id === "model_gemma" ? { ...model, thinking_level: "medium" } : model,
+      ),
+      provider_models: baseGraph.provider_models.map((pm) =>
+        pm.id === "pm_gemma"
+          ? {
+              ...pm,
+              thinking_level_override: "high",
+              effective_thinking_level: "high",
+            }
+          : pm,
+      ),
+    };
+    renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    const thinking = screen.getByLabelText(/^Thinking/);
+    expect(thinking).toHaveValue("high");
+    fireEvent.change(thinking, { target: { value: "inherit" } });
+    expect(screen.getByText("Inherited model default: medium. Effective: medium.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+            call.init.method === "PUT",
+        ),
+      ).toBe(true);
+    });
+    const put = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+        call.init.method === "PUT",
+    )!;
+    expect(bodyOf(put)).toMatchObject({ thinking_level_override: null });
+  });
+
   it("uses searchable provider and model controls for provider-model joins", async () => {
     const calls = installFetch();
     const backupProvider: LlmProvider = {
