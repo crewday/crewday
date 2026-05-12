@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, KeyboardEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import FormModal, {
   FormModalField,
@@ -9,10 +9,14 @@ import SearchableSelect, { type SearchableSelectOption } from "@/components/Sear
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import type {
+  LlmAssignment,
   LlmModel,
   LlmPriceSource,
   LlmPriceSourceOverride,
   LlmProvider,
+  LlmProviderModelPlaygroundMode,
+  LlmProviderModelPlaygroundRequest,
+  LlmProviderModelPlaygroundResponse,
   LlmProviderModel,
   LlmProviderType,
   LlmReasoningEffort,
@@ -51,6 +55,7 @@ interface ProviderModelFormProps {
   providerModel?: LlmProviderModel;
   providers: LlmProvider[];
   models: LlmModel[];
+  assignments: LlmAssignment[];
   titleId?: string;
   onClose: () => void;
 }
@@ -139,6 +144,27 @@ function optionalNonNegativeNumber(
   return { ok: true, value: parsed };
 }
 
+function optionalPositiveInteger(
+  value: string,
+  label: string,
+): { ok: true; value: number | null } | { ok: false; error: string } {
+  const parsed = numberOrNull(value);
+  if (parsed !== null && (!Number.isInteger(parsed) || parsed < 1)) {
+    return { ok: false, error: `${label} must be a positive whole number.` };
+  }
+  return { ok: true, value: parsed };
+}
+
+function optionalTemperature(
+  value: string,
+): { ok: true; value: number | null } | { ok: false; error: string } {
+  const parsed = numberOrNull(value);
+  if (parsed !== null && (!Number.isFinite(parsed) || parsed < 0 || parsed > 2)) {
+    return { ok: false, error: "Temperature must be between 0 and 2." };
+  }
+  return { ok: true, value: parsed };
+}
+
 function errorCode(error: unknown): string | null {
   if (error instanceof ApiError && typeof error.problem?.error === "string") {
     return error.problem.error;
@@ -163,9 +189,73 @@ function apiErrorCopy(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+function playgroundErrorCopy(error: unknown): string {
+  const code = errorCode(error);
+  if (code === "assignment_not_found" || code === "assignment_provider_model_mismatch") {
+    return "That assignment no longer points at this provider-model.";
+  }
+  if (code === "assignment_disabled") {
+    return "That assignment is disabled.";
+  }
+  if (code === "provider_model_disabled") {
+    return "This provider-model is disabled.";
+  }
+  if (code === "provider_disabled") {
+    return "This provider is disabled.";
+  }
+  if (code === "model_inactive") {
+    return "This model is inactive.";
+  }
+  if (code === "system_prompt_not_supported") {
+    return "This provider-model does not support system prompts.";
+  }
+  if (code === "temperature_not_supported") {
+    return "This provider-model does not support temperature overrides.";
+  }
+  if (code === "image_requires_vision_model") {
+    return "Images require a vision-capable model.";
+  }
+  if (code === "image_playground_not_supported") {
+    return "Image playground runs are not supported yet.";
+  }
+  if (code === "max_tokens_exceeds_model_limit") {
+    return "Max tokens exceeds this model's output limit.";
+  }
+  if (code === "max_tokens_exceeds_playground_limit") {
+    return "Max tokens exceeds the playground limit.";
+  }
+  if (code === "provider_type_not_supported") {
+    return "This provider type is not supported by the playground.";
+  }
+  if (code === "provider_client_unavailable" || code === "provider_api_key_missing") {
+    return "The provider client is not configured for playground runs.";
+  }
+  if (error instanceof ApiError) {
+    return error.title ?? "Playground run failed.";
+  }
+  return "Playground run failed.";
+}
+
 function describedBy(...ids: (string | undefined)[]): string | undefined {
   const present = ids.filter((id): id is string => id !== undefined);
   return present.length ? present.join(" ") : undefined;
+}
+
+function formatNullable(value: string | number | null | undefined, suffix = ""): string {
+  if (value === null || value === undefined || value === "") return "n/a";
+  return `${value}${suffix}`;
+}
+
+function formatPlaygroundCost(value: string | null): string {
+  if (value === null) return "n/a";
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return value;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: numeric === 0 ? 2 : 6,
+    maximumFractionDigits: numeric < 0.01 ? 6 : 2,
+  }).format(numeric);
 }
 
 function thinkingLevelLabel(level: LlmThinkingLevel): string {
@@ -237,6 +327,10 @@ export default function LlmRegistryModals(props: RegistryModalsProps) {
   const { dialog, providers, models, providerModels, indexes, onClose } = props;
 
   const titleId = dialog ? `llm-${dialog.kind}-${dialog.mode}-title` : undefined;
+  const assignments = useMemo(
+    () => Array.from(indexes.assignmentsByCapability.values()).flat(),
+    [indexes],
+  );
 
   return (
     <>
@@ -268,6 +362,7 @@ export default function LlmRegistryModals(props: RegistryModalsProps) {
           }
           providers={providers}
           models={models}
+          assignments={assignments}
           titleId={titleId}
           onClose={onClose}
         />
@@ -759,7 +854,7 @@ function ModelForm({
 
 function ProviderModelForm(props: ProviderModelFormProps) {
   // code-health: ignore[ccn] Provider-model form keeps its pricing, override, capability, and JSON validation next to the save payload.
-  const { mode, providerModel, providers, models, titleId, onClose } = props;
+  const { mode, providerModel, providers, models, assignments, titleId, onClose } = props;
   const qc = useQueryClient();
   const [providerId, setProviderId] = useState(
     providerModel?.provider_id ?? providers[0]?.id ?? "",
@@ -815,6 +910,13 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   const selectedModel = useMemo(
     () => models.find((item) => item.id === modelId),
     [modelId, models],
+  );
+  const persistedModel = useMemo(
+    () =>
+      providerModel
+        ? models.find((item) => item.id === providerModel.model_id)
+        : undefined,
+    [models, providerModel],
   );
   const inheritedThinkingLevel =
     selectedModel?.thinking_level ?? providerModel?.effective_thinking_level ?? "disabled";
@@ -1161,6 +1263,396 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             {err}
           </p>
         ) : null}
+        {mode === "edit" && providerModel ? (
+          <ProviderModelPlayground
+            providerModel={providerModel}
+            model={persistedModel}
+            assignments={assignments.filter(
+              (assignment) =>
+                assignment.provider_model_id === providerModel.id &&
+                assignment.is_enabled &&
+                !assignment.is_deployment_default,
+            )}
+          />
+        ) : null}
     </FormModal>
+  );
+}
+
+function ProviderModelPlayground({
+  providerModel,
+  model,
+  assignments,
+}: {
+  providerModel: LlmProviderModel;
+  model: LlmModel | undefined;
+  assignments: LlmAssignment[];
+}) {
+  const [mode, setMode] = useState<LlmProviderModelPlaygroundMode>("direct");
+  const [assignmentId, setAssignmentId] = useState(assignments[0]?.id ?? "");
+  const [prompt, setPrompt] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [maxTokens, setMaxTokens] = useState(
+    providerModel.max_tokens_override == null
+      ? ""
+      : String(providerModel.max_tokens_override),
+  );
+  const [temperature, setTemperature] = useState(
+    providerModel.temperature_override == null
+      ? ""
+      : String(providerModel.temperature_override),
+  );
+  const [imageUrl, setImageUrl] = useState("");
+  const [clientErr, setClientErr] = useState<string | null>(null);
+  const [result, setResult] =
+    useState<LlmProviderModelPlaygroundResponse | null>(null);
+
+  const hasAssignments = assignments.length > 0;
+  const supportsVision = model?.capabilities.includes("vision") ?? false;
+  const supportsSystemPrompt = providerModel.supports_system_prompt;
+  const supportsTemperature = providerModel.supports_temperature;
+  const selectedAssignment = assignments.find((item) => item.id === assignmentId);
+  const resultId = "llm-provider-model-playground-result";
+  const errId = clientErr ? "llm-provider-model-playground-error" : undefined;
+
+  const playground = useMutation({
+    mutationFn: (body: LlmProviderModelPlaygroundRequest) =>
+      fetchJson<LlmProviderModelPlaygroundResponse>(
+        `/admin/api/v1/llm/provider-models/${providerModel.id}/playground`,
+        { method: "POST", body },
+      ),
+    onSuccess: (response) => {
+      setClientErr(null);
+      setResult(response);
+    },
+    onError: (error: Error) => {
+      setResult(null);
+      setClientErr(playgroundErrorCopy(error));
+    },
+  });
+
+  function runPlayground(): void {
+    if (!prompt.trim()) {
+      setResult(null);
+      setClientErr("Prompt is required.");
+      return;
+    }
+    const parsedMaxTokens = optionalPositiveInteger(maxTokens, "Max tokens");
+    if (!parsedMaxTokens.ok) {
+      setResult(null);
+      setClientErr(parsedMaxTokens.error);
+      return;
+    }
+    const parsedTemperature = optionalTemperature(temperature);
+    if (!parsedTemperature.ok) {
+      setResult(null);
+      setClientErr(parsedTemperature.error);
+      return;
+    }
+    const assignmentMode = mode === "assignment" && hasAssignments;
+    if (assignmentMode && !assignmentId) {
+      setResult(null);
+      setClientErr("Assignment is required.");
+      return;
+    }
+
+    setClientErr(null);
+    playground.mutate({
+      mode: assignmentMode ? "assignment" : "direct",
+      prompt: prompt.trim(),
+      system_prompt: supportsSystemPrompt ? emptyToNull(systemPrompt) : null,
+      max_tokens: parsedMaxTokens.value,
+      temperature: supportsTemperature ? parsedTemperature.value : null,
+      image_url: supportsVision ? emptyToNull(imageUrl) : null,
+      assignment_id: assignmentMode ? assignmentId : null,
+    });
+  }
+
+  function resetPlayground(): void {
+    setMode("direct");
+    setAssignmentId(assignments[0]?.id ?? "");
+    setPrompt("");
+    setSystemPrompt("");
+    setMaxTokens(
+      providerModel.max_tokens_override == null
+        ? ""
+        : String(providerModel.max_tokens_override),
+    );
+    setTemperature(
+      providerModel.temperature_override == null
+        ? ""
+        : String(providerModel.temperature_override),
+    );
+    setImageUrl("");
+    setClientErr(null);
+    setResult(null);
+    playground.reset();
+  }
+
+  function preventAccidentalSave(event: KeyboardEvent<HTMLElement>): void {
+    const target = event.target;
+    if (
+      event.key === "Enter" &&
+      target instanceof HTMLElement &&
+      !(target instanceof HTMLTextAreaElement) &&
+      !(target instanceof HTMLButtonElement)
+    ) {
+      event.preventDefault();
+    }
+  }
+
+  return (
+    <section
+      className="llm-playground"
+      aria-labelledby="llm-provider-model-playground-title"
+      onKeyDownCapture={preventAccidentalSave}
+    >
+      <header className="llm-playground__head">
+        <div>
+          <h4 id="llm-provider-model-playground-title">Playground</h4>
+          <p>Run a stateless smoke test against this provider-model.</p>
+        </div>
+        <span className="llm-playground__target mono">{providerModel.api_model_id}</span>
+      </header>
+
+      {hasAssignments ? (
+        <div className="llm-playground__mode" aria-label="Playground call mode">
+          <button
+            type="button"
+            className={
+              "llm-playground__mode-button" +
+              (mode === "direct" ? " llm-playground__mode-button--active" : "")
+            }
+            aria-pressed={mode === "direct"}
+            onClick={() => setMode("direct")}
+          >
+            Direct call
+          </button>
+          <button
+            type="button"
+            className={
+              "llm-playground__mode-button" +
+              (mode === "assignment" ? " llm-playground__mode-button--active" : "")
+            }
+            aria-pressed={mode === "assignment"}
+            onClick={() => {
+              setMode("assignment");
+              setAssignmentId((current) => current || assignments[0]?.id || "");
+            }}
+          >
+            Via assignment
+          </button>
+        </div>
+      ) : null}
+
+      {mode === "assignment" && hasAssignments ? (
+        <FormModalField label="Assignment" requirement="required">
+          <select
+            value={assignmentId}
+            onChange={(event) => setAssignmentId(event.target.value)}
+            aria-describedby={errId}
+          >
+            {assignments.map((assignment) => (
+              <option key={assignment.id} value={assignment.id}>
+                {assignment.capability} priority {assignment.priority}
+              </option>
+            ))}
+          </select>
+        </FormModalField>
+      ) : null}
+
+      <FormModalField label="Prompt" requirement="required">
+        <textarea
+          value={prompt}
+          onChange={(event) => setPrompt(event.target.value)}
+          rows={4}
+          required
+          aria-invalid={clientErr === "Prompt is required."}
+          aria-describedby={describedBy(errId, result ? resultId : undefined)}
+        />
+      </FormModalField>
+
+      <FormModalField
+        label="System prompt"
+        requirement="optional"
+        helpId={!supportsSystemPrompt ? "llm-playground-system-help" : undefined}
+        helpText={!supportsSystemPrompt ? "Disabled for this provider-model." : undefined}
+      >
+        <textarea
+          value={systemPrompt}
+          onChange={(event) => setSystemPrompt(event.target.value)}
+          rows={3}
+          disabled={!supportsSystemPrompt}
+          aria-describedby={!supportsSystemPrompt ? "llm-playground-system-help" : undefined}
+        />
+      </FormModalField>
+
+      <FormModalGrid>
+        <FormModalField label="Max tokens" requirement="optional">
+          <input
+            type="number"
+            min="1"
+            value={maxTokens}
+            onChange={(event) => setMaxTokens(event.target.value)}
+            aria-invalid={
+              clientErr === "Max tokens must be a positive whole number."
+            }
+            aria-describedby={errId}
+          />
+        </FormModalField>
+        <FormModalField
+          label="Temperature"
+          requirement="optional"
+          helpId={
+            !supportsTemperature ? "llm-playground-temperature-help" : undefined
+          }
+          helpText={
+            !supportsTemperature ? "Disabled for this provider-model." : undefined
+          }
+        >
+          <input
+            type="number"
+            min="0"
+            max="2"
+            step="0.1"
+            value={temperature}
+            onChange={(event) => setTemperature(event.target.value)}
+            disabled={!supportsTemperature}
+            aria-invalid={clientErr === "Temperature must be between 0 and 2."}
+            aria-describedby={describedBy(
+              !supportsTemperature ? "llm-playground-temperature-help" : undefined,
+              errId,
+            )}
+          />
+        </FormModalField>
+      </FormModalGrid>
+
+      {supportsVision ? (
+        <FormModalField label="Image URL or data URL" requirement="optional">
+          <textarea
+            value={imageUrl}
+            onChange={(event) => setImageUrl(event.target.value)}
+            rows={2}
+          />
+        </FormModalField>
+      ) : null}
+
+      {clientErr ? (
+        <p id="llm-provider-model-playground-error" className="form-error" role="alert">
+          {clientErr}
+        </p>
+      ) : null}
+
+      {playground.isPending ? (
+        <p className="llm-playground__status" role="status">
+          Running playground test...
+        </p>
+      ) : null}
+
+      {result ? (
+        <PlaygroundResult
+          id={resultId}
+          result={result}
+          assignment={result.assignment_id ? selectedAssignment : undefined}
+        />
+      ) : null}
+
+      <div className="llm-playground__actions">
+        <button
+          type="button"
+          className="btn btn--moss"
+          onClick={runPlayground}
+          disabled={playground.isPending}
+        >
+          {playground.isPending ? "Running..." : "Run playground"}
+        </button>
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={() => {
+            setClientErr(null);
+            setResult(null);
+            playground.reset();
+          }}
+          disabled={playground.isPending || (!result && !clientErr)}
+        >
+          Clear result
+        </button>
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={resetPlayground}
+          disabled={playground.isPending}
+        >
+          Reset playground
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function PlaygroundResult({
+  id,
+  result,
+  assignment,
+}: {
+  id: string;
+  result: LlmProviderModelPlaygroundResponse;
+  assignment: LlmAssignment | undefined;
+}) {
+  const output =
+    result.status === "ok"
+      ? result.assistant_text || "(empty response)"
+      : result.error_message || "Provider returned an error.";
+  const diagnostics = [
+    ["Provider", result.provider_used],
+    ["Model", result.model_used],
+    ["Latency", formatNullable(result.latency_ms, " ms")],
+    [
+      "Tokens",
+      `${formatNullable(result.input_tokens)} in / ${formatNullable(
+        result.output_tokens,
+      )} out`,
+    ],
+    ["Reasoning tokens", formatNullable(result.reasoning_tokens)],
+    ["Cost", formatPlaygroundCost(result.cost_usd)],
+    ["Stop reason", formatNullable(result.stop_reason ?? result.finish_reason)],
+    [
+      "Assignment",
+      assignment
+        ? `${assignment.capability} priority ${assignment.priority}`
+        : result.assignment_id ?? "Direct",
+    ],
+  ];
+
+  return (
+    <section
+      id={id}
+      className={
+        "llm-playground-result" +
+        (result.status === "error" ? " llm-playground-result--error" : "")
+      }
+      role="status"
+      aria-live="polite"
+    >
+      <header className="llm-playground-result__head">
+        <strong>{result.status === "ok" ? "Success" : "Failure"}</strong>
+      </header>
+      <pre className="llm-playground-result__output">{output}</pre>
+      {result.reasoning_text ? (
+        <details className="llm-playground-result__reasoning">
+          <summary>Reasoning</summary>
+          <pre>{result.reasoning_text}</pre>
+        </details>
+      ) : null}
+      <dl className="llm-playground-result__diagnostics">
+        {diagnostics.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd className="mono">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   );
 }

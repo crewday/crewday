@@ -89,6 +89,37 @@ export interface LlmProviderModel {
   calls_30d: number;
 }
 
+export type LlmProviderModelPlaygroundMode = "direct" | "assignment";
+
+export interface LlmProviderModelPlaygroundRequest {
+  mode: LlmProviderModelPlaygroundMode;
+  prompt: string;
+  system_prompt: string | null;
+  max_tokens: number | null;
+  temperature: number | null;
+  image_url: string | null;
+  assignment_id: string | null;
+}
+
+export interface LlmProviderModelPlaygroundResponse {
+  status: "ok" | "error";
+  assistant_text: string | null;
+  reasoning_text: string | null;
+  model_used: string;
+  provider_used: string;
+  provider_model_id: string;
+  assignment_id: string | null;
+  latency_ms: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  reasoning_tokens: number | null;
+  finish_reason: string | null;
+  stop_reason: string | null;
+  cost_usd: string | null;
+  cost_cents: number | null;
+  error_message: string | null;
+}
+
 export interface LlmAssignment {
   id: string;
   capability: string;

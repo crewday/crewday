@@ -1,5 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { LlmGraphPayload, LlmProvider } from "@/types";
 import { graph } from "@/pages/admin/LlmPage.testData";
@@ -11,15 +18,22 @@ interface FetchCall {
   init: RequestInit;
 }
 
-function installFetch(): FetchCall[] {
+function installFetch(
+  responseFor?: (url: string, init: RequestInit) => { status?: number; body: unknown },
+): FetchCall[] {
   const calls: FetchCall[] = [];
   const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    calls.push({ url: String(url), init: init ?? {} });
+    const resolved = String(url);
+    const requestInit = init ?? {};
+    calls.push({ url: resolved, init: requestInit });
+    const response = responseFor?.(resolved, requestInit) ?? { body: {} };
+    const status = response.status ?? 200;
+    const ok = status >= 200 && status < 300;
     return {
-      ok: true,
-      status: 200,
-      statusText: "OK",
-      text: async () => JSON.stringify({}),
+      ok,
+      status,
+      statusText: ok ? "OK" : "Error",
+      text: async () => JSON.stringify(response.body),
     } as Response;
   });
   (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
@@ -51,7 +65,371 @@ function bodyOf(call: FetchCall): unknown {
 
 const baseGraph = graph as LlmGraphPayload;
 
+function playgroundSection(): HTMLElement {
+  return screen.getByRole("region", { name: "Playground" });
+}
+
 describe("LlmRegistryModals", () => {
+  it("renders the edit-only provider-model playground with usable mode and vision controls", () => {
+    installFetch();
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    const playground = playgroundSection();
+    expect(within(playground).getByLabelText("Prompt Required")).toBeInTheDocument();
+    expect(
+      within(playground).getByRole("button", { name: "Direct call" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      within(playground).getByRole("button", { name: "Via assignment" }),
+    ).toBeInTheDocument();
+    fireEvent.click(within(playground).getByRole("button", { name: "Via assignment" }));
+    const assignment = within(playground).getByLabelText("Assignment Required");
+    expect(assignment).toHaveValue("assign_chat_manager");
+    expect(assignment).toHaveTextContent("chat.manager priority 0");
+    expect(assignment).not.toHaveTextContent("Deployment default fallback chain");
+    expect(
+      within(playground).queryByLabelText("Image URL or data URL Optional"),
+    ).not.toBeInTheDocument();
+
+    cleanup();
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "create" });
+    expect(screen.queryByRole("region", { name: "Playground" })).not.toBeInTheDocument();
+  });
+
+  it("hides assignment mode when no enabled assignment can use the provider-model", () => {
+    installFetch();
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_text" });
+
+    const playground = playgroundSection();
+    expect(
+      within(playground).queryByRole("button", { name: "Via assignment" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(playground).getByRole("button", { name: "Run playground" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows image input for vision-capable provider-models", () => {
+    installFetch();
+    const testGraph: LlmGraphPayload = {
+      ...baseGraph,
+      models: baseGraph.models.map((model) =>
+        model.id === "model_gemma"
+          ? { ...model, capabilities: [...model.capabilities, "vision"] }
+          : model,
+      ),
+    };
+    renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    expect(
+      within(playgroundSection()).getByLabelText("Image URL or data URL Optional"),
+    ).toBeInTheDocument();
+  });
+
+  it("runs a direct playground prompt without saving the provider-model", async () => {
+    const calls = installFetch((url) =>
+      url === "/admin/api/v1/llm/provider-models/pm_gemma/playground"
+        ? {
+            body: {
+              status: "ok",
+              assistant_text: "pong",
+              reasoning_text: "brief check",
+              model_used: "google/gemma-4-31b-it",
+              provider_used: "OpenRouter",
+              provider_model_id: "pm_gemma",
+              assignment_id: null,
+              latency_ms: 42,
+              input_tokens: 6,
+              output_tokens: 1,
+              reasoning_tokens: 0,
+              finish_reason: "stop",
+              stop_reason: "stop",
+              cost_usd: "0.000001",
+              cost_cents: 0,
+              error_message: null,
+            },
+          }
+        : { body: {} },
+    );
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    const playground = playgroundSection();
+    fireEvent.change(within(playground).getByLabelText("Prompt Required"), {
+      target: { value: "Say pong in one word." },
+    });
+    fireEvent.change(within(playground).getByLabelText("Max tokens Optional"), {
+      target: { value: "16" },
+    });
+    fireEvent.keyDown(within(playground).getByLabelText("Max tokens Optional"), {
+      key: "Enter",
+    });
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+          call.init.method === "PUT",
+      ),
+    ).toBe(false);
+    fireEvent.click(within(playground).getByRole("button", { name: "Run playground" }));
+
+    expect(await within(playground).findByText("pong")).toBeInTheDocument();
+    expect(within(playground).getByText("OpenRouter")).toBeInTheDocument();
+    expect(within(playground).getByText("42 ms")).toBeInTheDocument();
+
+    const post = calls.find(
+      (call) => call.url === "/admin/api/v1/llm/provider-models/pm_gemma/playground",
+    );
+    expect(post?.init.method).toBe("POST");
+    expect(bodyOf(post!)).toMatchObject({
+      mode: "direct",
+      prompt: "Say pong in one word.",
+      max_tokens: 16,
+      assignment_id: null,
+      image_url: null,
+    });
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+          call.init.method === "PUT",
+      ),
+    ).toBe(false);
+  });
+
+  it("runs an assignment playground prompt with the selected assignment id", async () => {
+    const calls = installFetch((url) =>
+      url === "/admin/api/v1/llm/provider-models/pm_gemma/playground"
+        ? {
+            body: {
+              status: "ok",
+              assistant_text: "assignment pong",
+              reasoning_text: null,
+              model_used: "google/gemma-4-31b-it",
+              provider_used: "OpenRouter",
+              provider_model_id: "pm_gemma",
+              assignment_id: "assign_chat_manager",
+              latency_ms: 42,
+              input_tokens: 6,
+              output_tokens: 2,
+              reasoning_tokens: null,
+              finish_reason: "stop",
+              stop_reason: "stop",
+              cost_usd: "0.000001",
+              cost_cents: 0,
+              error_message: null,
+            },
+          }
+        : { body: {} },
+    );
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    const playground = playgroundSection();
+    fireEvent.click(within(playground).getByRole("button", { name: "Via assignment" }));
+    fireEvent.change(within(playground).getByLabelText("Prompt Required"), {
+      target: { value: "Say pong through the assignment." },
+    });
+    fireEvent.click(within(playground).getByRole("button", { name: "Run playground" }));
+
+    expect(await within(playground).findByText("assignment pong")).toBeInTheDocument();
+    const post = calls.find(
+      (call) => call.url === "/admin/api/v1/llm/provider-models/pm_gemma/playground",
+    );
+    expect(bodyOf(post!)).toMatchObject({
+      mode: "assignment",
+      assignment_id: "assign_chat_manager",
+      prompt: "Say pong through the assignment.",
+    });
+  });
+
+  it("does not send unsupported system prompt or temperature playground fields", async () => {
+    const calls = installFetch((url) =>
+      url === "/admin/api/v1/llm/provider-models/pm_gemma/playground"
+        ? {
+            body: {
+              status: "ok",
+              assistant_text: "pong",
+              reasoning_text: null,
+              model_used: "google/gemma-4-31b-it",
+              provider_used: "OpenRouter",
+              provider_model_id: "pm_gemma",
+              assignment_id: null,
+              latency_ms: 42,
+              input_tokens: 6,
+              output_tokens: 1,
+              reasoning_tokens: null,
+              finish_reason: "stop",
+              stop_reason: "stop",
+              cost_usd: "0.000001",
+              cost_cents: 0,
+              error_message: null,
+            },
+          }
+        : { body: {} },
+    );
+    const testGraph: LlmGraphPayload = {
+      ...baseGraph,
+      provider_models: baseGraph.provider_models.map((pm) =>
+        pm.id === "pm_gemma"
+          ? {
+              ...pm,
+              supports_system_prompt: false,
+              supports_temperature: false,
+              temperature_override: 0.7,
+            }
+          : pm,
+      ),
+    };
+    renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    const playground = playgroundSection();
+    expect(
+      within(playground).getByRole("textbox", { name: /^System prompt/ }),
+    ).toBeDisabled();
+    expect(
+      within(playground).getByRole("spinbutton", { name: /^Temperature/ }),
+    ).toBeDisabled();
+    fireEvent.change(within(playground).getByLabelText("Prompt Required"), {
+      target: { value: "Say pong." },
+    });
+    fireEvent.click(within(playground).getByRole("button", { name: "Run playground" }));
+
+    expect(await within(playground).findByText("pong")).toBeInTheDocument();
+    const post = calls.find(
+      (call) => call.url === "/admin/api/v1/llm/provider-models/pm_gemma/playground",
+    );
+    expect(bodyOf(post!)).toMatchObject({
+      system_prompt: null,
+      temperature: null,
+    });
+  });
+
+  it("validates playground input and displays provider failures", async () => {
+    const calls = installFetch((url) =>
+      url === "/admin/api/v1/llm/provider-models/pm_gemma/playground"
+        ? {
+            body: {
+              status: "error",
+              assistant_text: null,
+              reasoning_text: null,
+              model_used: "google/gemma-4-31b-it",
+              provider_used: "OpenRouter",
+              provider_model_id: "pm_gemma",
+              assignment_id: null,
+              latency_ms: 90,
+              input_tokens: null,
+              output_tokens: null,
+              reasoning_tokens: null,
+              finish_reason: null,
+              stop_reason: null,
+              cost_usd: null,
+              cost_cents: null,
+              error_message: "Provider rejected the request.",
+            },
+          }
+        : { body: {} },
+    );
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    const playground = playgroundSection();
+    fireEvent.click(within(playground).getByRole("button", { name: "Run playground" }));
+    expect(await within(playground).findByRole("alert")).toHaveTextContent(
+      "Prompt is required.",
+    );
+    expect(
+      calls.some((call) => call.url.endsWith("/playground")),
+    ).toBe(false);
+
+    fireEvent.change(within(playground).getByLabelText("Prompt Required"), {
+      target: { value: "Trigger provider failure." },
+    });
+    fireEvent.click(within(playground).getByRole("button", { name: "Run playground" }));
+
+    expect(await within(playground).findByText("Failure")).toBeInTheDocument();
+    expect(
+      within(playground).getByText("Provider rejected the request."),
+    ).toBeInTheDocument();
+  });
+
+  it("renders playground API failures without exposing raw server detail", async () => {
+    installFetch((url) =>
+      url === "/admin/api/v1/llm/provider-models/pm_gemma/playground"
+        ? {
+            status: 422,
+            body: {
+              type: "https://crewday.dev/errors/validation",
+              title: "Validation error",
+              status: 422,
+              detail: "provider secret sk-live-should-not-render",
+              error: "provider_api_key_missing",
+            },
+          }
+        : { body: {} },
+    );
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    const playground = playgroundSection();
+    fireEvent.change(within(playground).getByLabelText("Prompt Required"), {
+      target: { value: "Say pong." },
+    });
+    fireEvent.click(within(playground).getByRole("button", { name: "Run playground" }));
+
+    expect(await within(playground).findByRole("alert")).toHaveTextContent(
+      "The provider client is not configured for playground runs.",
+    );
+    expect(
+      within(playground).queryByText(/sk-live-should-not-render/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("clears playground results and resets playground inputs", async () => {
+    installFetch((url) =>
+      url === "/admin/api/v1/llm/provider-models/pm_gemma/playground"
+        ? {
+            body: {
+              status: "ok",
+              assistant_text: "pong",
+              reasoning_text: null,
+              model_used: "google/gemma-4-31b-it",
+              provider_used: "OpenRouter",
+              provider_model_id: "pm_gemma",
+              assignment_id: null,
+              latency_ms: 42,
+              input_tokens: 6,
+              output_tokens: 1,
+              reasoning_tokens: null,
+              finish_reason: "stop",
+              stop_reason: "stop",
+              cost_usd: "0.000001",
+              cost_cents: 0,
+              error_message: null,
+            },
+          }
+        : { body: {} },
+    );
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    const playground = playgroundSection();
+    const prompt = within(playground).getByLabelText("Prompt Required");
+    fireEvent.change(prompt, { target: { value: "Say pong." } });
+    fireEvent.change(within(playground).getByLabelText("System prompt Optional"), {
+      target: { value: "Be terse." },
+    });
+    fireEvent.change(within(playground).getByLabelText("Max tokens Optional"), {
+      target: { value: "12" },
+    });
+    fireEvent.click(within(playground).getByRole("button", { name: "Run playground" }));
+    expect(await within(playground).findByText("pong")).toBeInTheDocument();
+
+    fireEvent.click(within(playground).getByRole("button", { name: "Clear result" }));
+    expect(within(playground).queryByText("pong")).not.toBeInTheDocument();
+    expect(prompt).toHaveValue("Say pong.");
+
+    fireEvent.click(within(playground).getByRole("button", { name: "Reset playground" }));
+    expect(prompt).toHaveValue("");
+    expect(within(playground).getByLabelText("System prompt Optional")).toHaveValue("");
+    expect(within(playground).getByLabelText("Max tokens Optional")).toHaveValue(null);
+  });
+
   it("saves model thinking defaults from the fixed dropdown values", async () => {
     const calls = installFetch();
     renderRegistry(baseGraph, { kind: "model", mode: "edit", id: "model_gemma" });

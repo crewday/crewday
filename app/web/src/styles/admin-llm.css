@@ -593,6 +593,168 @@
 .llm-registry-form__delete {
   margin-right: auto;
 }
+
+.llm-playground {
+  display: grid;
+  gap: 12px;
+  margin-top: 4px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+}
+.llm-playground__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.llm-playground__head h4 {
+  margin: 0;
+  color: var(--ink);
+  font-family: Fraunces, var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.llm-playground__head p {
+  margin: 3px 0 0;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.llm-playground__target {
+  max-width: 46%;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink-2);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+.llm-playground__mode {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  width: min(100%, 320px);
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+}
+.llm-playground__mode-button {
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+.llm-playground__mode-button:hover,
+.llm-playground__mode-button:focus-visible {
+  color: var(--ink);
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--moss-soft);
+}
+.llm-playground__mode-button--active {
+  background: var(--moss);
+  color: #fff;
+}
+.llm-playground__mode-button--active:hover,
+.llm-playground__mode-button--active:focus-visible {
+  color: #fff;
+}
+.llm-playground__status {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--sky, #9bb8d9);
+  border-radius: 8px;
+  background: var(--sky-soft, #eaf2fb);
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.llm-playground__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.llm-playground-result {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--moss);
+  border-radius: 8px;
+  background: var(--card);
+}
+.llm-playground-result--error {
+  border-color: var(--rust);
+  background: var(--rust-soft);
+}
+.llm-playground-result__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--ink);
+  font-size: 13.5px;
+}
+.llm-playground-result__output,
+.llm-playground-result__reasoning pre {
+  max-height: 220px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "JetBrains Mono", var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.llm-playground-result__reasoning {
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.llm-playground-result__reasoning summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.llm-playground-result__reasoning pre {
+  margin-top: 8px;
+}
+.llm-playground-result__diagnostics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+.llm-playground-result__diagnostics div {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+}
+.llm-playground-result__diagnostics dt {
+  color: var(--ink-3);
+  font-size: 11.5px;
+}
+.llm-playground-result__diagnostics dd {
+  margin: 2px 0 0;
+  color: var(--ink-2);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
 .llm-assignment-dialog__body {
   gap: 16px;
 }
@@ -851,11 +1013,30 @@
     padding-right: 8px;
     padding-top: 34px;
   }
+  .llm-playground-result__diagnostics {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 560px) {
   .llm-registry-form__delete {
     margin-right: 0;
+  }
+  .llm-playground {
+    padding: 12px;
+  }
+  .llm-playground__head {
+    display: grid;
+  }
+  .llm-playground__target {
+    max-width: 100%;
+  }
+  .llm-playground__mode {
+    width: 100%;
+  }
+  .llm-playground__actions {
+    align-items: stretch;
+    flex-direction: column;
   }
   .llm-assignment-dialog__intro,
   .llm-assignment-picker {
