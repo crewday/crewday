@@ -13,6 +13,7 @@ interface CapabilityChainProps {
   setSelection: SelectionSetter;
   setRungRef: ElementRefSetter;
   onOpenAssignment: (assignmentId: string) => void;
+  onOpenProviderModel: (providerModelId: string) => void;
 }
 
 export default function CapabilityChain(props: CapabilityChainProps) {
@@ -26,6 +27,7 @@ export default function CapabilityChain(props: CapabilityChainProps) {
     setSelection,
     setRungRef,
     onOpenAssignment,
+    onOpenProviderModel,
   } = props;
 
   return (
@@ -50,48 +52,125 @@ export default function CapabilityChain(props: CapabilityChainProps) {
           .join(" ");
         return (
           <li key={a.id} className="llm-graph-chain__item">
-            <button
-              type="button"
+            <div
               ref={setRungRef(a.id)}
               className={rungClass}
               onMouseEnter={(e) => {
                 e.stopPropagation();
-                setHover({ column: "assignment", id: a.id });
+                if (e.target === e.currentTarget) {
+                  setHover({ column: "assignment", id: a.id });
+                }
               }}
               onMouseLeave={() => setHover(null)}
               onFocus={(e) => {
                 e.stopPropagation();
-                setHover({ column: "assignment", id: a.id });
+                if (e.target === e.currentTarget) {
+                  setHover({ column: "assignment", id: a.id });
+                }
               }}
               onBlur={() => setHover(null)}
-              onClick={(e) => {
-                e.stopPropagation();
-                setSelection({ column: "assignment", id: a.id });
-                onOpenAssignment(a.id);
-              }}
               title={
                 missing.length
                   ? `Missing required capability: ${missing.join(", ")}`
                   : undefined
               }
-              aria-label={`${a.capability} assignment rung ${a.priority}, ${formatUsageSummary(
-                a.calls_30d,
-                a.spend_usd_30d,
-              )}`}
             >
-              <span className="llm-graph-chain__prio">
-                {a.priority === 0 ? "P" : a.priority}
-              </span>
-              <span className="llm-graph-chain__model mono">
-                {model?.canonical_name ?? "(missing model)"}
-              </span>
-              <span className="llm-graph-chain__provider muted">
-                via {provider?.name ?? "?"}
-              </span>
-              <span className="llm-graph-chain__usage">
-                <LlmUsageTotals spendUsd={a.spend_usd_30d} calls={a.calls_30d} />
-              </span>
-            </button>
+              <button
+                type="button"
+                className="llm-graph-chain__assignment"
+                onMouseOver={(e) => {
+                  e.stopPropagation();
+                  setHover({ column: "assignment", id: a.id });
+                }}
+                onMouseEnter={(e) => {
+                  e.stopPropagation();
+                  setHover({ column: "assignment", id: a.id });
+                }}
+                onFocus={(e) => {
+                  e.stopPropagation();
+                  setHover({ column: "assignment", id: a.id });
+                }}
+                onBlur={() => setHover(null)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelection({ column: "assignment", id: a.id });
+                  onOpenAssignment(a.id);
+                }}
+                aria-label={`${a.capability} assignment rung ${a.priority}, ${formatUsageSummary(
+                  a.calls_30d,
+                  a.spend_usd_30d,
+                )}`}
+              >
+                <span className="llm-graph-chain__prio">
+                  {a.priority === 0 ? "P" : a.priority}
+                </span>
+                <span className="llm-graph-chain__model mono">
+                  {model?.canonical_name ?? "(missing model)"}
+                </span>
+                <span className="llm-graph-chain__provider muted">
+                  via {provider?.name ?? "?"}
+                </span>
+                <span className="llm-graph-chain__usage">
+                  <LlmUsageTotals spendUsd={a.spend_usd_30d} calls={a.calls_30d} />
+                </span>
+              </button>
+              {pm ? (
+                <button
+                  type="button"
+                  className={[
+                    "llm-graph-chain__provider-model",
+                    active?.column === "providerModel" && active.id === pm.id
+                      ? "is-active"
+                      : "",
+                    highlighted.providerModels.has(pm.id) &&
+                    !(active?.column === "providerModel" && active.id === pm.id)
+                      ? "is-linked"
+                      : "",
+                    hasActive && !highlighted.providerModels.has(pm.id) ? "is-dim" : "",
+                    pm.is_enabled ? "" : "is-disabled",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  onMouseEnter={(e) => {
+                    e.stopPropagation();
+                    setHover({ column: "providerModel", id: pm.id });
+                  }}
+                  onMouseOver={(e) => {
+                    e.stopPropagation();
+                    setHover({ column: "providerModel", id: pm.id });
+                  }}
+                  onMouseLeave={(e) => {
+                    e.stopPropagation();
+                    const nextTarget = e.relatedTarget;
+                    const staysInsideRung =
+                      nextTarget instanceof Node &&
+                      e.currentTarget.parentElement?.contains(nextTarget);
+                    setHover(staysInsideRung ? { column: "assignment", id: a.id } : null);
+                  }}
+                  onFocus={(e) => {
+                    e.stopPropagation();
+                    setHover({ column: "providerModel", id: pm.id });
+                  }}
+                  onBlur={() => setHover(null)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelection({ column: "providerModel", id: pm.id });
+                    onOpenProviderModel(pm.id);
+                  }}
+                  aria-label={`Open provider-model ${pm.api_model_id} for ${a.capability} assignment, ${provider?.name ?? "Unknown provider"}, ${model?.display_name ?? "unknown model"}, ${formatUsageSummary(
+                    pm.calls_30d,
+                    pm.spend_usd_30d,
+                  )}`}
+                >
+                  <span className="llm-graph-chain__pm-name">
+                    {provider?.name ?? "Unknown provider"}
+                  </span>
+                  <span className="llm-graph-chain__pm-model mono">
+                    {pm.api_model_id}
+                  </span>
+                </button>
+              ) : null}
+            </div>
           </li>
         );
       })}

@@ -237,6 +237,9 @@ export default function AdminLlmPage() {
           setRungRef={setRef(rungRefs)}
           onOpenCapability={openCapabilityDialog}
           onOpenAssignment={openAssignmentDialog}
+          onOpenProviderModel={(id) =>
+            setRegistryDialog({ kind: "providerModel", mode: "edit", id })
+          }
         />
       </div>
 

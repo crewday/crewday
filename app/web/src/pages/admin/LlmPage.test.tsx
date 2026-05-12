@@ -98,9 +98,17 @@ function chatManagerRung(): HTMLElement {
   if (!(capability instanceof HTMLElement)) {
     throw new Error("chat.manager capability not found");
   }
-  const rung = within(capability).getByText("google/gemma-4-31b-it").closest(".llm-graph-chain__rung");
+  const rung = within(capability)
+    .getByRole("button", { name: /chat\.manager assignment rung 0/ })
+    .closest(".llm-graph-chain__rung");
   if (!(rung instanceof HTMLElement)) throw new Error("assignment rung not found");
   return rung;
+}
+
+function chatManagerAssignmentButton(): HTMLElement {
+  return within(chatManagerRung()).getByRole("button", {
+    name: /chat\.manager assignment rung 0/,
+  });
 }
 
 function assignmentDialog(name: string): HTMLElement {
@@ -847,6 +855,72 @@ describe("Admin LlmPage", () => {
     }
   });
 
+  it("opens separate provider-model and assignment editors from assignment rungs", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      const rung = chatManagerRung();
+      const providerModelButton = within(rung).getByRole("button", {
+        name: /Open provider-model google\/gemma-4-31b-it for chat\.manager assignment/,
+      });
+      fireEvent.click(providerModelButton);
+
+      const providerModelDialog = await screen.findByRole("dialog", {
+        name: "google/gemma-4-31b-it",
+      });
+      expectSharedFormModal(providerModelDialog);
+      expect(
+        within(providerModelDialog).getByRole("button", { name: "Save provider-model" }),
+      ).toBeInTheDocument();
+      expect(providerModelButton).toHaveClass("is-active");
+      expect(chatManagerRung()).toHaveClass("is-linked");
+      expect(screen.queryByRole("dialog", { name: "chat.manager" })).toBeNull();
+
+      fireEvent.click(within(providerModelDialog).getByRole("button", { name: "Close" }));
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name: "google/gemma-4-31b-it" })).toBeNull();
+      });
+
+      fireEvent.click(chatManagerAssignmentButton());
+      const assignment = assignmentDialog("chat.manager");
+      expectSharedFormModal(assignment, { wide: true, section: true, footer: false });
+      expect(within(assignment).getByRole("button", { name: "Save rung" })).toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: "google/gemma-4-31b-it" })).toBeNull();
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("clears assignment-side provider-model hover when the pointer leaves the rung", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      const providerModelButton = within(chatManagerRung()).getByRole("button", {
+        name: /Open provider-model google\/gemma-4-31b-it for chat\.manager assignment/,
+      });
+
+      fireEvent.mouseOver(providerModelButton);
+      expect(providerModelButton).toHaveClass("is-active");
+      expect(chatManagerRung()).toHaveClass("is-linked");
+
+      fireEvent.mouseLeave(providerModelButton, { relatedTarget: document.body });
+      expect(providerModelButton).not.toHaveClass("is-active");
+      expect(chatManagerRung()).not.toHaveClass("is-linked");
+
+      fireEvent.mouseOver(providerModelButton);
+      fireEvent.mouseLeave(providerModelButton, {
+        relatedTarget: chatManagerAssignmentButton(),
+      });
+      expect(chatManagerRung()).toHaveClass("is-active");
+    } finally {
+      fetcher.restore();
+    }
+  });
+
   it("shows provider save pending state while the create mutation is in flight", async () => {
     const fetcher = installPageFetch({
       "/admin/api/v1/llm/graph": [{ body: graph }, { body: graph }],
@@ -913,7 +987,7 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
       await findOpenRouterProvider();
 
-      fireEvent.click(chatManagerRung());
+      fireEvent.click(chatManagerAssignmentButton());
       const dialog = assignmentDialog("chat.manager");
       expectSharedFormModal(dialog, { wide: true, section: true, footer: false });
       fireEvent.change(within(dialog).getAllByLabelText(/Max tokens/)[0]!, {
@@ -1021,7 +1095,7 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
       await findOpenRouterProvider();
 
-      fireEvent.click(chatManagerRung());
+      fireEvent.click(chatManagerAssignmentButton());
       const dialog = assignmentDialog("chat.manager");
       fireEvent.click(within(dialog).getByRole("button", { name: "Move rung 1 up" }));
 
@@ -1071,7 +1145,7 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
       await findOpenRouterProvider();
 
-      fireEvent.click(chatManagerRung());
+      fireEvent.click(chatManagerAssignmentButton());
       const dialog = assignmentDialog("chat.manager");
       fireEvent.click(within(dialog).getByRole("button", { name: /Add rung/ }));
       expect(within(dialog).getByText("New rung")).toBeInTheDocument();
@@ -1284,7 +1358,7 @@ describe("Admin LlmPage", () => {
       expect(textOnlyCard).toHaveClass("is-dim");
 
       fireEvent.mouseLeave(gemmaProviderModel);
-      fireEvent.click(chatManagerRung());
+      fireEvent.click(chatManagerAssignmentButton());
 
       expect(chatManagerRung()).toHaveClass("is-active");
       expect(gemmaCard).toHaveClass("is-linked");
@@ -1311,7 +1385,10 @@ describe("Admin LlmPage", () => {
         if (label.startsWith("OpenRouter provider model for Fast Chat,")) {
           return rect(380, 430, 160, 40);
         }
-        if (label.startsWith("chat.manager assignment rung")) {
+        if (
+          el.classList.contains("llm-graph-chain__rung") &&
+          el.textContent?.includes("google/gemma-4-31b-it")
+        ) {
           return rect(710, 220, 160, 44);
         }
         return rect(0, 0, 0, 0);

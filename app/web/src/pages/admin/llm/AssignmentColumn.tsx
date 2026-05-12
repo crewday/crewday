@@ -23,6 +23,7 @@ interface AssignmentColumnProps {
   setRungRef: ElementRefSetter;
   onOpenCapability: (capability: string) => void;
   onOpenAssignment: (assignmentId: string) => void;
+  onOpenProviderModel: (providerModelId: string) => void;
 }
 
 export default function AssignmentColumn(props: AssignmentColumnProps) {
@@ -38,6 +39,7 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
     setRungRef,
     onOpenCapability,
     onOpenAssignment,
+    onOpenProviderModel,
   } = props;
   const roots = capabilities.filter((cap) => {
     const hasChain = (indexes.assignmentsByCapability.get(cap.key) ?? []).length > 0;
@@ -62,7 +64,11 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
           <article
             key={cap.key}
             className={nodeClass("capability", cap.key)}
-            onMouseEnter={() => setHover({ column: "capability", id: cap.key })}
+            onMouseEnter={(e) => {
+              if (e.target === e.currentTarget) {
+                setHover({ column: "capability", id: cap.key });
+              }
+            }}
             onMouseLeave={() => setHover(null)}
           >
             <button
@@ -72,6 +78,14 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
                 cap.calls_30d,
                 cap.spend_usd_30d,
               )}`}
+              onMouseEnter={(e) => {
+                e.stopPropagation();
+                setHover({ column: "capability", id: cap.key });
+              }}
+              onMouseOver={(e) => {
+                e.stopPropagation();
+                setHover({ column: "capability", id: cap.key });
+              }}
               onFocus={() => setHover({ column: "capability", id: cap.key })}
               onBlur={() => setHover(null)}
               onClick={() =>
@@ -113,6 +127,7 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
               setSelection={setSelection}
               setRungRef={setRungRef}
               onOpenAssignment={onOpenAssignment}
+              onOpenProviderModel={onOpenProviderModel}
             />
             {inheritedChildren.length ? (
               <div className="llm-graph-node__children">
