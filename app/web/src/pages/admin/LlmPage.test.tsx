@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import type { ReactElement } from "react";
 import { __resetApiProvidersForTests } from "@/lib/api";
 import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
+import adminLlmCss from "@/styles/admin-llm.css?raw";
 import LlmPage from "./LlmPage";
 import LlmUsagePage from "./LlmUsagePage";
 import { calls, graph, prompts } from "./LlmPage.testData";
@@ -136,6 +137,10 @@ function graphBoard(): HTMLElement {
   const board = document.querySelector(".llm-graph");
   if (!(board instanceof HTMLElement)) throw new Error("LLM graph not found");
   return board;
+}
+
+function expectGraphUnmuted(): void {
+  expect(graphBoard().querySelector(".is-dim")).not.toBeInTheDocument();
 }
 
 function rect(left: number, top: number, width: number, height: number): DOMRect {
@@ -1454,7 +1459,19 @@ describe("Admin LlmPage", () => {
     }
   });
 
-  it("emphasizes hovered graph paths and preserves clicked selection", async () => {
+  it("renders graph paths unmuted before a selection", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      expectGraphUnmuted();
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("emphasizes hovered graph paths without muting unrelated cards", async () => {
     const fetcher = installPageFetch();
     try {
       render(<Harness />);
@@ -1474,35 +1491,63 @@ describe("Admin LlmPage", () => {
       expect(gemmaProviderModel).toHaveClass("is-active");
       expect(gemmaCard).toHaveClass("is-linked");
       expect(chatManagerRung()).toHaveClass("is-linked");
-      expect(textOnlyCard).toHaveClass("is-dim");
+      expect(textOnlyCard).not.toHaveClass("is-dim");
+      expectGraphUnmuted();
 
       fireEvent.mouseLeave(gemmaProviderModel);
-      fireEvent.click(chatManagerAssignmentButton());
-
-      expect(chatManagerRung()).toHaveClass("is-active");
-      expect(gemmaCard).toHaveClass("is-linked");
-      expect(textOnlyCard).toHaveClass("is-dim");
+      expectGraphUnmuted();
     } finally {
       fetcher.restore();
     }
   });
 
-  it("clears graph selection when empty graph space is clicked", async () => {
+  it("mutes only cards outside the clicked selection path", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      const gemmaCard = screen.getByText("Gemma 4 31B IT").closest("article");
+      const textOnlyCard = screen.getByText("Text Only").closest("article");
+      if (!(gemmaCard instanceof HTMLElement) || !(textOnlyCard instanceof HTMLElement)) {
+        throw new Error("model cards not found");
+      }
+
+      fireEvent.click(chatManagerAssignmentButton());
+
+      expect(chatManagerRung()).toHaveClass("is-active");
+      expect(gemmaCard).toHaveClass("is-linked");
+      expect(textOnlyCard).toHaveClass("is-dim");
+      await waitFor(() => {
+        expect(
+          document.querySelector(".llm-graph__edge--assign.is-error"),
+        ).toHaveClass("is-dim");
+      });
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("clears graph selection and muted opacity when empty graph space is clicked", async () => {
     const fetcher = installPageFetch();
     try {
       render(<Harness />);
 
-      const provider = await findOpenRouterProvider();
+      await findOpenRouterProvider();
+      const textOnlyCard = screen.getByText("Text Only").closest("article");
+      if (!(textOnlyCard instanceof HTMLElement)) throw new Error("model card not found");
 
-      fireEvent.click(provider);
+      fireEvent.click(chatManagerAssignmentButton());
 
-      expect(provider).toHaveClass("is-active");
+      expect(chatManagerRung()).toHaveClass("is-active");
       expect(graphBoard().querySelector(".is-active")).toBeInTheDocument();
+      expect(textOnlyCard).toHaveClass("is-dim");
 
       fireEvent.click(graphBoard());
 
-      expect(provider).not.toHaveClass("is-active");
+      expect(chatManagerRung()).not.toHaveClass("is-active");
       expect(graphBoard().querySelector(".is-active")).not.toBeInTheDocument();
+      expectGraphUnmuted();
     } finally {
       fetcher.restore();
     }
@@ -1543,13 +1588,49 @@ describe("Admin LlmPage", () => {
       await waitFor(() => {
         expect(screen.queryByRole("dialog", { name: "OpenRouter" })).toBeNull();
       });
+      expect(provider).not.toHaveClass("is-active");
 
+      fireEvent.click(provider);
       fireEvent.click(screen.getByText("Providers"));
       expect(provider).toHaveClass("is-active");
 
       fireEvent.click(screen.getByRole("button", { name: "+ New provider" }));
       expect(provider).toHaveClass("is-active");
       expect(screen.getByRole("dialog", { name: "Create provider" })).toBeInTheDocument();
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("keeps nested graph buttons borderless across focus and active states", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      const gemmaButton = modelButton("Gemma 4 31B IT");
+      const gemmaCard = gemmaButton.closest(".llm-graph-node");
+      if (!(gemmaCard instanceof HTMLElement)) throw new Error("model card not found");
+
+      fireEvent.focus(gemmaButton);
+      expect(gemmaButton).toHaveClass("llm-graph-node__button");
+      expect(gemmaCard).toHaveClass("is-active");
+
+      fireEvent.mouseDown(gemmaButton);
+      fireEvent.click(gemmaButton);
+      expect(gemmaButton).toHaveClass("llm-graph-node__button");
+      expect(gemmaButton).not.toHaveClass("is-active", "is-linked", "is-dim");
+      expect(gemmaCard).toHaveClass("is-active");
+
+      expect(adminLlmCss).toMatch(
+        /\.llm-graph-node:hover,\s*\.llm-graph-node:focus-visible,\s*\.llm-graph-node:focus-within\s*{[\s\S]*border-color: var\(--moss\);/m,
+      );
+      expect(adminLlmCss).toMatch(
+        /\.llm-graph-node__button:focus,\s*\.llm-graph-node__button:focus-visible,\s*\.llm-graph-node__button:active\s*{[\s\S]*border: 0;/m,
+      );
+      expect(adminLlmCss).not.toMatch(
+        /\.llm-graph-node__button:focus-visible\s*{[\s\S]*border-color:/m,
+      );
     } finally {
       fetcher.restore();
     }

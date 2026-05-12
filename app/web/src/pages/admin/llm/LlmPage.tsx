@@ -48,8 +48,12 @@ export default function AdminLlmPage() {
     if (!graph || !indexes || !active) return emptyHighlighted();
     return buildHighlighted(graph, indexes, active);
   }, [graph, indexes, active]);
+  const mutedPath = useMemo(() => {
+    if (!graph || !indexes || !selection) return emptyHighlighted();
+    return buildHighlighted(graph, indexes, selection);
+  }, [graph, indexes, selection]);
 
-  const hasActive = active !== null;
+  const hasSelection = selection !== null;
   const {
     graphRef,
     providerRefs,
@@ -61,21 +65,21 @@ export default function AdminLlmPage() {
     setRef,
   } = useLlmGraphEdges(graph, indexes, active);
 
-  const edgeIsHighlighted = (e: EdgeLayout): boolean => {
-    if (!active) return false;
-    if (active.column === "provider") return e.providerId === active.id;
-    if (active.column === "model") return e.modelId === active.id;
-    if (active.column === "providerModel") return e.providerModelId === active.id;
-    if (active.column === "assignment") {
+  const edgeIsOnPath = (e: EdgeLayout, source: Selection | null): boolean => {
+    if (!source) return false;
+    if (source.column === "provider") return e.providerId === source.id;
+    if (source.column === "model") return e.modelId === source.id;
+    if (source.column === "providerModel") return e.providerModelId === source.id;
+    if (source.column === "assignment") {
+      if (e.kind === "assign") return e.assignmentId === source.id;
       return (
-        e.assignmentId === active.id ||
         e.providerModelId ===
-          graph?.assignments.find((x) => x.id === active.id)?.provider_model_id
+          graph?.assignments.find((x) => x.id === source.id)?.provider_model_id
       );
     }
-    if (active.column === "capability") {
-      if (e.kind === "assign") return e.capability === active.id;
-      const chain = indexes?.assignmentsByCapability.get(active.id) ?? [];
+    if (source.column === "capability") {
+      if (e.kind === "assign") return e.capability === source.id;
+      const chain = indexes?.assignmentsByCapability.get(source.id) ?? [];
       return chain.some((a) => a.provider_model_id === e.providerModelId);
     }
     return false;
@@ -89,9 +93,16 @@ export default function AdminLlmPage() {
       assignment: highlighted.assignments,
       capability: highlighted.capabilities,
     }[col];
+    const mutedSet = {
+      provider: mutedPath.providers,
+      model: mutedPath.models,
+      providerModel: mutedPath.providerModels,
+      assignment: mutedPath.assignments,
+      capability: mutedPath.capabilities,
+    }[col];
     const isOn = set.has(id);
     const isActive = active?.column === col && active.id === id;
-    const dim = hasActive && !isOn;
+    const dim = hasSelection && !mutedSet.has(id);
     return [
       "llm-graph-node",
       `llm-graph-node--${col}`,
@@ -175,8 +186,8 @@ export default function AdminLlmPage() {
             aria-hidden="true"
           >
             {edges.map((e) => {
-              const highlighted = edgeIsHighlighted(e);
-              const dim = hasActive && !highlighted;
+              const highlighted = edgeIsOnPath(e, active);
+              const dim = hasSelection && !edgeIsOnPath(e, selection);
               const cls = [
                 "llm-graph__edge",
                 `llm-graph__edge--${e.kind}`,
@@ -264,8 +275,9 @@ export default function AdminLlmPage() {
             setHover={setHover}
             setSelection={setSelection}
             nodeClass={nodeClass}
-            hasActive={hasActive}
+            hasSelection={hasSelection}
             highlighted={highlighted}
+            mutedPath={mutedPath}
             setRungRef={setRef(rungRefs)}
             onOpenCapability={openCapabilityDialog}
             onOpenAssignment={openAssignmentDialog}
@@ -282,13 +294,21 @@ export default function AdminLlmPage() {
           models={graph.models}
           providerModels={graph.provider_models}
           indexes={indexes}
-          onClose={() => setRegistryDialog(null)}
+          onClose={() => {
+            setHover(null);
+            setSelection(null);
+            setRegistryDialog(null);
+          }}
         />
         <LlmAssignmentModal
           capabilityKey={assignmentDialogCapability}
           graph={graph}
           indexes={indexes}
-          onClose={() => setAssignmentDialogCapability(null)}
+          onClose={() => {
+            setHover(null);
+            setSelection(null);
+            setAssignmentDialogCapability(null);
+          }}
         />
       </div>
     </DeskPage>

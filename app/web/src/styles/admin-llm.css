@@ -75,7 +75,7 @@
 }
 .llm-graph-node:hover,
 .llm-graph-node:focus-visible,
-.llm-graph-node__button:focus-visible {
+.llm-graph-node:focus-within {
   border-color: var(--moss);
   box-shadow: 0 0 0 2px var(--moss-soft), 0 0 0 1px var(--moss) inset;
   outline: 0;
@@ -112,6 +112,13 @@
   cursor: pointer;
   font: inherit;
   text-align: left;
+}
+.llm-graph-node__button:focus,
+.llm-graph-node__button:focus-visible,
+.llm-graph-node__button:active {
+  border: 0;
+  box-shadow: none;
+  outline: 0;
 }
 .llm-graph-node--model > .llm-graph-node__button,
 .llm-graph-node--capability > .llm-graph-node__button {

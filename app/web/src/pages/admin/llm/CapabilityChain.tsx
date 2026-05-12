@@ -7,8 +7,9 @@ interface CapabilityChainProps {
   chain: LlmAssignment[];
   indexes: LlmIndexes;
   active: Selection | null;
-  hasActive: boolean;
+  hasSelection: boolean;
   highlighted: Highlighted;
+  mutedPath: Highlighted;
   setHover: SelectionSetter;
   setSelection: SelectionSetter;
   setRungRef: ElementRefSetter;
@@ -21,8 +22,9 @@ export default function CapabilityChain(props: CapabilityChainProps) {
     chain,
     indexes,
     active,
-    hasActive,
+    hasSelection,
     highlighted,
+    mutedPath,
     setHover,
     setSelection,
     setRungRef,
@@ -44,7 +46,7 @@ export default function CapabilityChain(props: CapabilityChainProps) {
           "llm-graph-chain__rung",
           isActive ? "is-active" : "",
           isLinked && !isActive ? "is-linked" : "",
-          hasActive && !isLinked ? "is-dim" : "",
+          hasSelection && !mutedPath.assignments.has(a.id) ? "is-dim" : "",
           missing.length ? "is-error" : "",
           a.priority === 0 ? "is-primary" : "",
         ]
@@ -126,7 +128,9 @@ export default function CapabilityChain(props: CapabilityChainProps) {
                     !(active?.column === "providerModel" && active.id === pm.id)
                       ? "is-linked"
                       : "",
-                    hasActive && !highlighted.providerModels.has(pm.id) ? "is-dim" : "",
+                    hasSelection && !mutedPath.providerModels.has(pm.id)
+                      ? "is-dim"
+                      : "",
                     pm.is_enabled ? "" : "is-disabled",
                   ]
                     .filter(Boolean)

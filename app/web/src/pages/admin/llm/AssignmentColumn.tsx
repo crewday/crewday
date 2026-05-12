@@ -18,8 +18,9 @@ interface AssignmentColumnProps {
   setHover: SelectionSetter;
   setSelection: SelectionSetter;
   nodeClass: NodeClass;
-  hasActive: boolean;
+  hasSelection: boolean;
   highlighted: Highlighted;
+  mutedPath: Highlighted;
   setRungRef: ElementRefSetter;
   onOpenCapability: (capability: string) => void;
   onOpenAssignment: (assignmentId: string) => void;
@@ -34,8 +35,9 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
     setHover,
     setSelection,
     nodeClass,
-    hasActive,
+    hasSelection,
     highlighted,
+    mutedPath,
     setRungRef,
     onOpenCapability,
     onOpenAssignment,
@@ -121,8 +123,9 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
               chain={chain}
               indexes={indexes}
               active={active}
-              hasActive={hasActive}
+              hasSelection={hasSelection}
               highlighted={highlighted}
+              mutedPath={mutedPath}
               setHover={setHover}
               setSelection={setSelection}
               setRungRef={setRungRef}
@@ -145,7 +148,9 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
                         "llm-graph-node__child",
                         childActive ? "is-active" : "",
                         childLinked && !childActive ? "is-linked" : "",
-                        hasActive && !childLinked ? "is-dim" : "",
+                        hasSelection && !mutedPath.capabilities.has(child.key)
+                          ? "is-dim"
+                          : "",
                         missing.length ? "is-error" : "",
                       ]
                         .filter(Boolean)
