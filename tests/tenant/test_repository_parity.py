@@ -43,7 +43,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import pkgutil
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from types import ModuleType
 
 import pytest
@@ -53,7 +53,7 @@ from sqlalchemy.orm import Session, sessionmaker
 import app.domain as domain_pkg
 from app.adapters.db.tasks.models import TaskTemplate
 from app.domain.tasks import templates as tpl_module
-from app.tenancy import WorkspaceContext, tenant_agnostic
+from app.tenancy import WorkspaceContext, registry, tenant_agnostic
 from app.tenancy.orm_filter import TenantFilterMissing
 from app.util.ulid import new_ulid
 from tests.tenant._optouts import REPOSITORY_METHOD_OPTOUTS
@@ -243,6 +243,63 @@ class TestScopedRowIsolation:
             # Teardown so the B-only row does not pollute later tests.
             # justification: fixture teardown; we deliberately
             # reach into the peer workspace's rows to clean up.
+            with tenant_session_factory() as s, tenant_agnostic():
+                row = s.get(TaskTemplate, template_b_id)
+                if row is not None:
+                    s.delete(row)
+                    s.commit()
+
+    def test_registry_reset_before_case_does_not_disable_filter(
+        self,
+        tenant_session_factory: sessionmaker[Session],
+        tenant_a: TenantSeed,
+        tenant_b: TenantSeed,
+        restore_production_tenant_registry: Callable[[], None],
+    ) -> None:
+        """A prior test's registry wipe cannot turn tenant reads unscoped."""
+        import datetime as _dt
+
+        from app.tenancy.current import reset_current, set_current
+
+        template_b_id = new_ulid()
+        registry._reset_for_tests()
+        restore_production_tenant_registry()
+
+        # justification: inserting a peer workspace row for an isolation
+        # regression after simulating process-global registry pollution.
+        with tenant_session_factory() as s, tenant_agnostic():
+            s.add(
+                TaskTemplate(
+                    id=template_b_id,
+                    workspace_id=tenant_b.workspace_id,
+                    title="B-only template after registry reset",
+                    description_md="",
+                    default_duration_min=30,
+                    property_scope="any",
+                    listed_property_ids=[],
+                    area_scope="any",
+                    listed_area_ids=[],
+                    checklist_template_json=[],
+                    photo_evidence="disabled",
+                    priority="normal",
+                    inventory_consumption_json={},
+                    created_at=_dt.datetime(2026, 4, 20, tzinfo=_dt.UTC),
+                    updated_at=_dt.datetime(2026, 4, 20, tzinfo=_dt.UTC),
+                )
+            )
+            s.commit()
+
+        try:
+            with tenant_session_factory() as s:
+                token = set_current(tenant_a.ctx)
+                try:
+                    rows = s.scalars(select(TaskTemplate)).all()
+                finally:
+                    reset_current(token)
+            assert template_b_id not in {r.id for r in rows}
+            assert all(r.workspace_id == tenant_a.workspace_id for r in rows)
+        finally:
+            # justification: cross-tenant cleanup for the regression seed.
             with tenant_session_factory() as s, tenant_agnostic():
                 row = s.get(TaskTemplate, template_b_id)
                 if row is not None:

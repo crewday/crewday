@@ -19,8 +19,9 @@ test" for the full contract.
 
 from __future__ import annotations
 
+import importlib
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -32,7 +33,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.auth.session import issue as issue_session
 from app.auth.tokens import mint as mint_token
 from app.config import Settings
-from app.tenancy import WorkspaceContext
+from app.tenancy import WorkspaceContext, registry
 from app.tenancy.orm_filter import install_tenant_filter
 from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user, bootstrap_workspace
@@ -70,6 +71,54 @@ db_session = _db_session_fixture
 # Pin the suite to a deterministic UTC moment so ULID ordering and
 # session / token issue timestamps match across re-runs.
 _PINNED_NOW: datetime = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
+
+
+_TENANT_REGISTRY_PACKAGES: tuple[str, ...] = (
+    "app.adapters.db.assets",
+    "app.adapters.db.audit",
+    "app.adapters.db.authz",
+    "app.adapters.db.availability",
+    "app.adapters.db.billing",
+    "app.adapters.db.expenses",
+    "app.adapters.db.holidays",
+    "app.adapters.db.identity",
+    "app.adapters.db.instructions",
+    "app.adapters.db.integrations",
+    "app.adapters.db.inventory",
+    "app.adapters.db.issues",
+    "app.adapters.db.llm",
+    "app.adapters.db.messaging",
+    "app.adapters.db.payroll",
+    "app.adapters.db.places",
+    "app.adapters.db.stays",
+    "app.adapters.db.tasks",
+    "app.adapters.db.time",
+    "app.adapters.db.workspace",
+)
+
+
+def _restore_production_tenant_registry() -> None:
+    """Rebuild the production scoped-table registry after test-local resets."""
+    registry._reset_for_tests()
+    for package_name in _TENANT_REGISTRY_PACKAGES:
+        module = importlib.import_module(package_name)
+        importlib.reload(module)
+
+
+@pytest.fixture
+def restore_production_tenant_registry() -> Callable[[], None]:
+    """Expose the registry rebuild hook for focused pollution regressions."""
+    return _restore_production_tenant_registry
+
+
+@pytest.fixture(autouse=True)
+def _restore_production_tenant_registry_for_test() -> Iterator[None]:
+    """Keep tenant tests independent from registry resets in other test modules."""
+    _restore_production_tenant_registry()
+    try:
+        yield
+    finally:
+        _restore_production_tenant_registry()
 
 
 # ---------------------------------------------------------------------------
