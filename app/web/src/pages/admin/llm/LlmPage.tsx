@@ -10,7 +10,6 @@ import AssignmentColumn from "./AssignmentColumn";
 import LlmAssignmentModal from "./LlmAssignmentModal";
 import LlmAlerts from "./LlmAlerts";
 import LlmRegistryModals from "./LlmRegistryModals";
-import LlmRouteTabs from "./LlmRouteTabs";
 import ModelColumn from "./ModelColumn";
 import ProviderColumn from "./ProviderColumn";
 import { buildHighlighted, emptyHighlighted } from "./lib/highlight";
@@ -162,7 +161,6 @@ export default function AdminLlmPage() {
   return (
     <DeskPage title={title} sub={sub} overflow={overflow}>
       <div className="llm-graph-page">
-        <LlmRouteTabs activeKey="graph" />
         <LlmAlerts graph={graph} syncResult={undefined} />
 
         <div

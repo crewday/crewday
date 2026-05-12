@@ -13,15 +13,9 @@
 //      hasn't resolved yet.
 //
 // What this does NOT cover (and why):
-//   - The full `.desk` chrome / nav rendering — those are visual
-//     concerns owned by Playwright; this test is purely about the
-//     access guard.
-//   - The deployment-admin happy path. Mounting the outlet pulls in
-//     `<AgentSidebar role="admin">` → `<WorkspaceSwitcher>` →
-//     `<WorkspaceProvider>` plus a long tail of other context
-//     providers. The "outlet renders" branch is exercised end-to-end
-//     by Playwright; the unit-level value here is the guard, not
-//     the chrome.
+//   - The full `.desk` chrome visuals — those are owned by Playwright.
+//     These unit tests only assert the role guard and key admin sidebar
+//     route state.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -125,7 +119,7 @@ afterEach(() => {
 // ── Tests ─────────────────────────────────────────────────────────
 
 describe("<AdminLayout> — role guard (closes cd-28s7)", () => {
-  it("groups LLM admin routes and highlights nested graph routes", async () => {
+  it("groups LLM admin routes and highlights the graph sidebar route", async () => {
     const { restore } = installFetch({
       "/api/v1/me": [
         {
@@ -160,9 +154,7 @@ describe("<AdminLayout> — role guard (closes cd-28s7)", () => {
     });
 
     try {
-      render(
-        <Harness initial="/admin/llm/graph/providers" />,
-      );
+      render(<Harness initial="/admin/llm/graph" />);
 
       expect(await screen.findByTestId("admin-agent-sidebar")).toBeInTheDocument();
       expect(screen.getByText("LLM")).toBeInTheDocument();
@@ -189,6 +181,55 @@ describe("<AdminLayout> — role guard (closes cd-28s7)", () => {
       expect(screen.getByRole("link", { name: /Dashboard/ })).not.toHaveClass(
         "nav-link--active",
       );
+    } finally {
+      restore();
+    }
+  });
+
+  it("highlights the LLM usage sidebar route", async () => {
+    const { restore } = installFetch({
+      "/api/v1/me": [
+        {
+          status: 200,
+          body: {
+            role: "manager",
+            theme: "light",
+            agent_sidebar_collapsed: false,
+            employee: { id: "emp_admin", name: "Admin" },
+            manager_name: "Admin",
+            today: "2026-05-02",
+            now: "2026-05-02T10:00:00Z",
+            user_id: "01HZ_ADMIN",
+            agent_approval_mode: "auto",
+            current_workspace_id: "ws_1",
+            available_workspaces: [],
+            client_binding_org_ids: [],
+            is_deployment_admin: true,
+            is_deployment_owner: false,
+          },
+        },
+      ],
+      "/admin/api/v1/me": [
+        {
+          status: 200,
+          body: {
+            display_name: "Deployment Admin",
+            is_owner: false,
+          },
+        },
+      ],
+    });
+
+    try {
+      render(<Harness initial="/admin/llm/usage" />);
+
+      expect(await screen.findByTestId("admin-agent-sidebar")).toBeInTheDocument();
+      const graph = screen.getByRole("link", { name: /Graph\/config/ });
+      expect(graph).toHaveAttribute("href", "/admin/llm/graph");
+      expect(graph).not.toHaveClass("nav-link--active");
+      const llmUsage = screen.getByRole("link", { name: /LLM usage/ });
+      expect(llmUsage).toHaveAttribute("href", "/admin/llm/usage");
+      expect(llmUsage).toHaveClass("nav-link--active");
     } finally {
       restore();
     }

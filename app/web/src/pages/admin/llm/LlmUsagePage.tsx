@@ -5,7 +5,6 @@ import { Loading } from "@/components/common";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import type { LLMCall, LlmGraphPayload, LlmSyncPricingResult } from "@/types";
-import LlmRouteTabs from "./LlmRouteTabs";
 import LlmStats from "./LlmStats";
 import ProviderModelPricing from "./ProviderModelPricing";
 import RecentCalls from "./RecentCalls";
@@ -58,7 +57,6 @@ export default function AdminLlmUsagePage() {
 
   return (
     <DeskPage title={title} sub={sub} overflow={[promptOverflow]}>
-      <LlmRouteTabs activeKey="usage" />
       <LlmStats graph={graph} />
       <ProviderModelPricing
         graph={graph}

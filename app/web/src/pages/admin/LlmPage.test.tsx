@@ -225,11 +225,9 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
 
       expect(await findOpenRouterProvider()).toBeInTheDocument();
-      expect(screen.getByText("LLM graph")).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Usage" })).toHaveAttribute(
-        "href",
-        "/admin/llm/usage",
-      );
+      expect(screen.getByRole("heading", { name: "LLM graph" })).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Graph" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Usage" })).not.toBeInTheDocument();
       expect(screen.getAllByRole("button", { name: "+ New provider" })).toHaveLength(
         1,
       );
@@ -266,12 +264,10 @@ describe("Admin LlmPage", () => {
     try {
       render(<Harness page="usage" />);
 
-      expect(await screen.findByText("LLM usage")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "LLM usage" })).toBeInTheDocument();
       expect(await screen.findByText("Provider-model pricing")).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Graph" })).toHaveAttribute(
-        "href",
-        "/admin/llm/graph",
-      );
+      expect(screen.queryByRole("link", { name: "Graph" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Usage" })).not.toBeInTheDocument();
       expect(screen.getByText("Spend (30d)")).toBeInTheDocument();
       expect(screen.getByText("Recent calls")).toBeInTheDocument();
       const recentCalls = screen.getByText("Recent calls").closest(".panel");
