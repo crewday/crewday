@@ -11,7 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.adapters.db.session as _session_mod
@@ -30,6 +30,12 @@ from app.adapters.db.llm.models import (
     LlmUsage,
 )
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
+from app.adapters.llm.ports import (
+    ChatMessage,
+    LlmProviderError,
+    LLMResponse,
+    LLMUsage,
+)
 from app.api.transport import admin_sse
 from app.auth.session import SESSION_COOKIE_NAME, issue
 from app.config import Settings
@@ -58,6 +64,51 @@ class SeededLlm:
     provider_model_id: str
     assignment_id: str
     prompt_id: str
+
+
+class _FailingLLMClient:
+    def chat(
+        self,
+        *,
+        model_id: str,
+        messages: list[ChatMessage],
+        max_tokens: int = 1024,
+        temperature: float = 0.0,
+        thinking_level: str = "disabled",
+        tools: object = None,
+        consents: object = None,
+    ) -> LLMResponse:
+        del model_id, messages, max_tokens, temperature, thinking_level, tools, consents
+        raise LlmProviderError(
+            "provider rejected Authorization: Bearer sk-test-secret-token"
+        )
+
+
+class _RecordingLLMClient:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def chat(
+        self,
+        *,
+        model_id: str,
+        messages: list[ChatMessage],
+        max_tokens: int = 1024,
+        temperature: float = 0.0,
+        thinking_level: str = "disabled",
+        tools: object = None,
+        consents: object = None,
+    ) -> LLMResponse:
+        del messages, max_tokens, temperature, thinking_level, tools, consents
+        self.calls += 1
+        return LLMResponse(
+            text="ok",
+            usage=LLMUsage(
+                prompt_tokens=1_000, completion_tokens=1_000, total_tokens=2_000
+            ),
+            model_id=model_id,
+            finish_reason="stop",
+        )
 
 
 @pytest.fixture
@@ -453,6 +504,260 @@ class TestAdminLlmRoutes:
                 "assignment_issues",
                 "totals",
             }
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_runs_fake_direct_test(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            seeded = _seed_llm_graph(session_factory)
+            assert (
+                client.post(
+                    f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                    "/playground",
+                    json={"prompt": "hello"},
+                ).status_code
+                == 404
+            )
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                provider.provider_type = "fake"
+                provider.api_key_envelope_ref = None
+                before_usage = s.scalar(select(func.count(LlmUsage.id))) or 0
+                s.commit()
+
+            empty_prompt = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                json={"prompt": "  "},
+            )
+            assert empty_prompt.status_code == 422, empty_prompt.text
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                json={"prompt": "hello playground", "max_tokens": 32},
+            )
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["status"] == "ok"
+            assert body["assistant_text"] == "hello playground"
+            assert body["model_used"] == "google/gemma-3-27b-it"
+            assert body["provider_used"] == "OpenRouter"
+            assert body["provider_model_id"] == seeded.provider_model_id
+            assert body["assignment_id"] is None
+            assert body["input_tokens"] == len("hello playground")
+            assert body["output_tokens"] == len("hello playground")
+            assert body["finish_reason"] == "stop"
+            assert body["cost_usd"] is not None
+            assert body["error_message"] is None
+            with session_factory() as s, tenant_agnostic():
+                after_usage = s.scalar(select(func.count(LlmUsage.id))) or 0
+            assert after_usage == before_usage
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_uses_runtime_client_and_bounds_tokens(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            llm = _RecordingLLMClient()
+            client.app.state.llm = llm
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                provider.api_key_envelope_ref = None
+                s.commit()
+
+            ok = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                json={"prompt": "hello", "max_tokens": 64},
+            )
+            assert ok.status_code == 200, ok.text
+            assert ok.json()["status"] == "ok"
+            assert ok.json()["cost_usd"] == "0.000300"
+            assert ok.json()["cost_cents"] == 0
+            assert llm.calls == 1
+
+            too_many_tokens = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                json={"prompt": "hello", "max_tokens": 8193},
+            )
+            assert too_many_tokens.status_code == 422, too_many_tokens.text
+            assert too_many_tokens.json()["error"] == "max_tokens_exceeds_model_limit"
+            assert llm.calls == 1
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_rejects_disabled_and_assignment_mismatch(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            other_provider_model_id = new_ulid()
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                provider.provider_type = "fake"
+                provider.api_key_envelope_ref = None
+                other_model_id = new_ulid()
+                s.add(
+                    LlmModel(
+                        id=other_model_id,
+                        canonical_name="test/other",
+                        display_name="Other",
+                        vendor="test",
+                        capabilities=["chat"],
+                        context_window=None,
+                        max_output_tokens=None,
+                        thinking_level="disabled",
+                        is_active=True,
+                        price_source="",
+                        price_source_model_id=None,
+                        notes=None,
+                        created_at=_PINNED,
+                        updated_at=_PINNED,
+                        updated_by_user_id=None,
+                    )
+                )
+                s.add(
+                    LlmProviderModel(
+                        id=other_provider_model_id,
+                        provider_id=seeded.provider_id,
+                        model_id=other_model_id,
+                        api_model_id="test/other",
+                        input_cost_per_million=Decimal("0"),
+                        output_cost_per_million=Decimal("0"),
+                        fixed_cost_per_call_usd=None,
+                        max_tokens_override=None,
+                        temperature_override=None,
+                        supports_system_prompt=True,
+                        supports_temperature=True,
+                        thinking_level_override=None,
+                        reasoning_effort="",
+                        extra_api_params={},
+                        price_source_override="",
+                        price_source_model_id_override=None,
+                        price_last_synced_at=None,
+                        is_enabled=True,
+                        created_at=_PINNED,
+                        updated_at=_PINNED,
+                    )
+                )
+                s.commit()
+
+            good_assignment = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                json={
+                    "mode": "assignment",
+                    "assignment_id": seeded.assignment_id,
+                    "prompt": "assignment smoke",
+                },
+            )
+            assert good_assignment.status_code == 200, good_assignment.text
+            assert good_assignment.json()["assignment_id"] == seeded.assignment_id
+
+            mismatch = client.post(
+                f"/admin/api/v1/llm/provider-models/{other_provider_model_id}"
+                "/playground",
+                json={
+                    "mode": "assignment",
+                    "assignment_id": seeded.assignment_id,
+                    "prompt": "assignment smoke",
+                },
+            )
+            assert mismatch.status_code == 422, mismatch.text
+            assert mismatch.json()["error"] == "assignment_provider_model_mismatch"
+
+            with session_factory() as s, tenant_agnostic():
+                provider_model = s.get(LlmProviderModel, seeded.provider_model_id)
+                assert provider_model is not None
+                provider_model.is_enabled = False
+                s.commit()
+            disabled_provider_model = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                json={"prompt": "hello"},
+            )
+            assert disabled_provider_model.status_code == 422
+            assert disabled_provider_model.json()["error"] == "provider_model_disabled"
+
+            with session_factory() as s, tenant_agnostic():
+                provider_model = s.get(LlmProviderModel, seeded.provider_model_id)
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider_model is not None
+                assert provider is not None
+                provider_model.is_enabled = True
+                provider.is_enabled = False
+                s.commit()
+            disabled_provider = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                json={"prompt": "hello"},
+            )
+            assert disabled_provider.status_code == 422
+            assert disabled_provider.json()["error"] == "provider_disabled"
+
+            missing = client.post(
+                f"/admin/api/v1/llm/provider-models/{new_ulid()}/playground",
+                json={"prompt": "hello"},
+            )
+            assert missing.status_code == 404
+            assert missing.json()["error"] == "not_found"
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_redacts_provider_errors(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            client.app.state.llm = _FailingLLMClient()
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                json={"prompt": "hello"},
+            )
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["status"] == "error"
+            assert body["assistant_text"] is None
+            assert "sk-test-secret-token" not in body["error_message"]
+            assert "<redacted:credential>" in body["error_message"]
         finally:
             _wipe(session_factory)
 

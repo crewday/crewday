@@ -1287,6 +1287,22 @@ LLM area.
   "Prompts" opens a slide-over with one row per capability, its
   version, and whether it's currently customised (different body than
   `default_hash`). Editing a prompt opens the revision history.
+- **Provider-model playground.** The provider-model edit drawer can
+  call
+  `POST /admin/api/v1/llm/provider-models/{id}/playground` to run a
+  deployment-admin smoke test before the row is assigned to production
+  capabilities. The endpoint is gated by `deployment.llm:write` because
+  it performs an active upstream call. Direct mode calls the selected
+  provider-model row by its `api_model_id`; assignment mode requires a
+  deployment-level assignment that points at the same provider-model and
+  applies that assignment's tuning defaults. The response is stateless
+  and includes status, assistant text on success, provider/model ids,
+  latency, token counts, finish/stop reason, estimated cost from the
+  provider-model pricing fields, and a secret-redacted provider error on
+  failure. Playground prompts and responses are not persisted to
+  `llm_usage` or prompt history. The request is rejected before the
+  upstream call when `max_tokens` exceeds the selected model's known
+  output-token limit.
 - **Keyboard.** Global `/` focuses the filter input (filters every
   column at once). `N` on a focused column opens "Add" for that
   column. `Esc` closes the drawer. `j/k` navigates cards within a

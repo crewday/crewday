@@ -1197,6 +1197,7 @@ DELETE /admin/api/v1/llm/models/{id}                 # refuses if any provider-m
 GET    /admin/api/v1/llm/provider-models             # list; filters ?provider_id= / ?model_id=
 POST   /admin/api/v1/llm/provider-models             # create
 GET    /admin/api/v1/llm/provider-models/{id}
+POST   /admin/api/v1/llm/provider-models/{id}/playground  # smoke test; requires deployment.llm:write
 PUT    /admin/api/v1/llm/provider-models/{id}
 DELETE /admin/api/v1/llm/provider-models/{id}        # refuses if any enabled assignment references it
 
@@ -1223,6 +1224,43 @@ POST   /admin/api/v1/llm/prompts/{id}/reset-to-default   # writes a revision con
 
 # Pricing sync — replaces pricing/reload from earlier drafts.
 POST   /admin/api/v1/llm/sync-pricing                # trigger the OpenRouter sync; streams per-row deltas
+
+`POST /admin/api/v1/llm/provider-models/{id}/playground` is the
+stateless provider-model smoke-test endpoint used by `/admin/llm/graph`.
+The request body is:
+
+```json
+{
+  "mode": "direct",
+  "prompt": "Reply with ok.",
+  "system_prompt": "Optional system text.",
+  "max_tokens": 64,
+  "temperature": 0.2,
+  "image_url": null,
+  "assignment_id": null
+}
+```
+
+`mode` is `direct` or `assignment`; direct mode calls the selected
+`llm_provider_model` row by its `api_model_id`. Assignment mode requires
+an `assignment_id` whose deployment-level assignment points at that same
+provider-model, then applies that row's tuning defaults. The endpoint
+rejects blank prompts, invalid token/temperature values, missing or
+disabled provider-model/provider/model rows, unsupported image/system
+prompt/temperature combinations, and assignment/provider-model
+mismatches with 4xx validation envelopes before any upstream call.
+`max_tokens` must also fit the selected model's `max_output_tokens`
+when that limit is known.
+
+Responses are typed and stateless: successful calls return
+`status: "ok"`, assistant text, provider/model/provider-model identifiers,
+latency, provider token counts when available, finish/stop reason, and
+an estimated `cost_usd`/`cost_cents` from provider-model pricing.
+Provider failures return `status: "error"` with the same safe diagnostic
+fields and a redacted `error_message`; raw API keys, request headers,
+and secret-looking provider text are never returned. Playground prompts
+and responses are not persisted to `llm_usage` or any prompt/history
+table.
 
 # Agent docs — system-side virtual files for the chat agents (§02 agent_doc, §11).
 GET    /admin/api/v1/agent_docs                      # one row per active slug, with is_customised flag

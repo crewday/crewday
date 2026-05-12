@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -24,6 +25,14 @@ from app.adapters.db.llm.models import (
     LlmProviderModel,
     LlmUsage,
 )
+from app.adapters.llm.fake import FakeLLMClient
+from app.adapters.llm.ports import (
+    ChatMessage,
+    LLMClient,
+    LlmProviderError,
+    LlmRateLimited,
+    LlmTransportError,
+)
 from app.api.admin.deps import require_deployment_scope
 from app.api.deps import db_session
 from app.api.transport import admin_sse
@@ -42,6 +51,7 @@ from app.domain.llm.router import (
 from app.events.bus import bus as default_event_bus
 from app.events.types import LlmAssignmentChanged
 from app.tenancy import DeploymentContext, tenant_agnostic
+from app.util.redact import ConsentSet, scrub_string
 from app.util.ulid import new_ulid
 
 __all__ = ["build_admin_llm_router"]
@@ -355,6 +365,61 @@ class LlmSyncPricingResult(BaseModel):
     updated: int
     skipped: int
     errors: int
+
+
+class LlmProviderModelPlaygroundRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["direct", "assignment"] = "direct"
+    prompt: str = Field(min_length=1, max_length=16_000)
+    system_prompt: str | None = Field(default=None, max_length=8_000)
+    max_tokens: int | None = Field(default=None, ge=1, le=32_000)
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    image_url: str | None = Field(default=None, max_length=262_144)
+    assignment_id: str | None = None
+
+    @field_validator("prompt")
+    @classmethod
+    def _strip_prompt(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("prompt must not be blank")
+        return stripped
+
+    @field_validator("system_prompt", "image_url")
+    @classmethod
+    def _strip_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @model_validator(mode="after")
+    def _validate_mode_assignment(self) -> Self:
+        if self.mode == "assignment" and self.assignment_id is None:
+            raise ValueError("assignment mode requires assignment_id")
+        if self.mode == "direct" and self.assignment_id is not None:
+            raise ValueError("assignment_id requires assignment mode")
+        return self
+
+
+class LlmProviderModelPlaygroundResponse(BaseModel):
+    status: Literal["ok", "error"]
+    assistant_text: str | None = None
+    reasoning_text: str | None = None
+    model_used: str
+    provider_used: str
+    provider_model_id: str
+    assignment_id: str | None = None
+    latency_ms: int
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    finish_reason: str | None = None
+    stop_reason: str | None = None
+    cost_usd: Decimal | None = None
+    cost_cents: int | None = None
+    error_message: str | None = None
 
 
 class ProviderPayload(BaseModel):
@@ -1410,6 +1475,155 @@ def _llm_usage_provider_model_id(
     return provider_model_ids_by_api_model_id.get(row.provider_model_id)
 
 
+def _load_playground_target(
+    session: Session,
+    provider_model_id: str,
+) -> tuple[LlmProviderModel, LlmProvider, LlmModel]:
+    provider_model = session.get(LlmProviderModel, provider_model_id)
+    if provider_model is None:
+        raise _not_found()
+    provider = session.get(LlmProvider, provider_model.provider_id)
+    if provider is None:
+        raise _unprocessable("provider_not_found")
+    model = session.get(LlmModel, provider_model.model_id)
+    if model is None:
+        raise _unprocessable("model_not_found")
+    if not provider.is_enabled:
+        raise _unprocessable("provider_disabled")
+    if not provider_model.is_enabled:
+        raise _unprocessable("provider_model_disabled")
+    if not model.is_active:
+        raise _unprocessable("model_inactive")
+    return provider_model, provider, model
+
+
+def _validate_playground_assignment(
+    session: Session,
+    *,
+    payload: LlmProviderModelPlaygroundRequest,
+    provider_model_id: str,
+) -> LlmAssignment | None:
+    if payload.mode == "direct":
+        return None
+    assert payload.assignment_id is not None
+    assignment = session.get(LlmAssignment, payload.assignment_id)
+    if assignment is None or assignment.workspace_id is not None:
+        raise _unprocessable("assignment_not_found")
+    if assignment.model_id != provider_model_id:
+        raise _unprocessable("assignment_provider_model_mismatch")
+    if not assignment.enabled:
+        raise _unprocessable("assignment_disabled")
+    return assignment
+
+
+def _playground_messages(
+    payload: LlmProviderModelPlaygroundRequest,
+    provider_model: LlmProviderModel,
+    model: LlmModel,
+) -> list[ChatMessage]:
+    if payload.system_prompt is not None and not provider_model.supports_system_prompt:
+        raise _unprocessable("system_prompt_not_supported")
+    if payload.image_url is not None:
+        if "vision" not in set(model.capabilities or []):
+            raise _unprocessable("image_requires_vision_model")
+        raise _unprocessable("image_playground_not_supported")
+    messages: list[ChatMessage] = []
+    if payload.system_prompt is not None:
+        messages.append({"role": "system", "content": payload.system_prompt})
+    messages.append({"role": "user", "content": payload.prompt})
+    return messages
+
+
+def _playground_max_tokens(
+    payload: LlmProviderModelPlaygroundRequest,
+    provider_model: LlmProviderModel,
+    model: LlmModel,
+    assignment: LlmAssignment | None,
+) -> int:
+    value = (
+        payload.max_tokens
+        if payload.max_tokens is not None
+        else (
+            assignment.max_tokens
+            if assignment is not None and assignment.max_tokens is not None
+            else (
+                provider_model.max_tokens_override
+                if provider_model.max_tokens_override is not None
+                else model.max_output_tokens
+            )
+        )
+    )
+    max_tokens = value if value is not None else 1024
+    if max_tokens < 1:
+        raise _unprocessable("max_tokens_invalid")
+    if max_tokens > 32_000:
+        raise _unprocessable("max_tokens_exceeds_playground_limit")
+    if model.max_output_tokens is not None and max_tokens > model.max_output_tokens:
+        raise _unprocessable(
+            "max_tokens_exceeds_model_limit",
+            max_tokens_limit=model.max_output_tokens,
+        )
+    return max_tokens
+
+
+def _playground_temperature(
+    payload: LlmProviderModelPlaygroundRequest,
+    provider_model: LlmProviderModel,
+    assignment: LlmAssignment | None,
+) -> float:
+    if not provider_model.supports_temperature:
+        if payload.temperature is not None:
+            raise _unprocessable("temperature_not_supported")
+        return 0.0
+    value = (
+        payload.temperature
+        if payload.temperature is not None
+        else (
+            assignment.temperature
+            if assignment is not None and assignment.temperature is not None
+            else provider_model.temperature_override
+        )
+    )
+    return value if value is not None else 0.0
+
+
+def _playground_llm(request: Request, provider: LlmProvider) -> LLMClient:
+    if provider.provider_type == "fake":
+        return FakeLLMClient()
+    if provider.provider_type != "openrouter":
+        raise _unprocessable("provider_type_not_supported")
+    llm = getattr(request.app.state, "llm", None)
+    if llm is None:
+        raise _unprocessable("provider_client_unavailable")
+    configured = getattr(llm, "is_configured", None)
+    try:
+        is_configured = bool(configured()) if callable(configured) else True
+    except RuntimeError as exc:
+        raise _unprocessable("provider_client_unavailable") from exc
+    if not is_configured:
+        raise _unprocessable("provider_api_key_missing")
+    return cast(LLMClient, llm)
+
+
+def _playground_cost_usd(
+    provider_model: LlmProviderModel,
+    *,
+    input_tokens: int,
+    output_tokens: int,
+) -> Decimal:
+    cost = (
+        Decimal(input_tokens) * provider_model.input_cost_per_million
+        + Decimal(output_tokens) * provider_model.output_cost_per_million
+    ) / Decimal(1_000_000)
+    if provider_model.fixed_cost_per_call_usd is not None:
+        cost += provider_model.fixed_cost_per_call_usd
+    return cost.quantize(Decimal("0.000001"))
+
+
+def _safe_provider_error(exc: BaseException) -> str:
+    return scrub_string(str(exc))[:500]
+
+
 def build_admin_llm_router() -> APIRouter:
     # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     router = APIRouter(prefix="/llm", tags=["admin", "llm"])
@@ -1764,6 +1978,76 @@ def build_admin_llm_router() -> APIRouter:
             row = _provider_model(session, provider_model_id)
             model = session.get(LlmModel, row.model_id)
         return _provider_model_response(row, model)
+
+    @router.post(
+        "/provider-models/{provider_model_id}/playground",
+        response_model=LlmProviderModelPlaygroundResponse,
+        operation_id="admin.llm.provider_models.playground",
+    )
+    def provider_model_playground(
+        _ctx: _WriteCtx,
+        request: Request,
+        session: _Db,
+        provider_model_id: str,
+        payload: LlmProviderModelPlaygroundRequest,
+    ) -> LlmProviderModelPlaygroundResponse:
+        with tenant_agnostic():
+            provider_model, provider, model = _load_playground_target(
+                session, provider_model_id
+            )
+            assignment = _validate_playground_assignment(
+                session,
+                payload=payload,
+                provider_model_id=provider_model_id,
+            )
+            messages = _playground_messages(payload, provider_model, model)
+            max_tokens = _playground_max_tokens(
+                payload, provider_model, model, assignment
+            )
+            temperature = _playground_temperature(payload, provider_model, assignment)
+        llm = _playground_llm(request, provider)
+        started = time.monotonic()
+        try:
+            response = llm.chat(
+                model_id=provider_model.api_model_id,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                thinking_level=_thinking_level(
+                    provider_model.thinking_level_override or model.thinking_level
+                ),
+                consents=ConsentSet.none(),
+            )
+        except (LlmProviderError, LlmRateLimited, LlmTransportError) as exc:
+            return LlmProviderModelPlaygroundResponse(
+                status="error",
+                model_used=provider_model.api_model_id,
+                provider_used=provider.name,
+                provider_model_id=provider_model.id,
+                assignment_id=assignment.id if assignment is not None else None,
+                latency_ms=max(0, round((time.monotonic() - started) * 1000)),
+                error_message=_safe_provider_error(exc),
+            )
+        cost_usd = _playground_cost_usd(
+            provider_model,
+            input_tokens=response.usage.prompt_tokens,
+            output_tokens=response.usage.completion_tokens,
+        )
+        return LlmProviderModelPlaygroundResponse(
+            status="ok",
+            assistant_text=response.text,
+            model_used=response.model_id or provider_model.api_model_id,
+            provider_used=provider.name,
+            provider_model_id=provider_model.id,
+            assignment_id=assignment.id if assignment is not None else None,
+            latency_ms=max(0, round((time.monotonic() - started) * 1000)),
+            input_tokens=response.usage.prompt_tokens,
+            output_tokens=response.usage.completion_tokens,
+            finish_reason=response.finish_reason,
+            stop_reason=response.finish_reason,
+            cost_usd=cost_usd,
+            cost_cents=int(cost_usd * Decimal(100)),
+        )
 
     @router.put(
         "/provider-models/{provider_model_id}",
