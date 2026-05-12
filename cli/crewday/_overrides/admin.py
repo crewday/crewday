@@ -7,7 +7,7 @@ import json
 import os
 import pathlib
 from importlib.resources import files
-from typing import Any
+from typing import Any, Literal
 
 import click
 from alembic import command
@@ -66,6 +66,17 @@ def _load_app_backup() -> Any:
             "admin commands must run on the server host with app dependencies installed"
         ) from exc
     return admin_backup_mod
+
+
+def _load_workspace_import() -> Any:
+    try:
+        from app.services.workspace import import_service as workspace_import_mod
+    except Exception as exc:
+        raise ConfigError(
+            "admin workspace import must run on the server host with app "
+            "dependencies installed"
+        ) from exc
+    return workspace_import_mod
 
 
 def _load_app_rotate_root_key() -> Any:
@@ -308,6 +319,103 @@ def workspace_purge_due(_ctx: object, *, limit: int | None) -> None:
 
 workspace_purge_due = cli_override("admin workspace", "purge-due", covers=[])(
     workspace_purge_due
+)
+
+
+@click.command(name="import")
+@click.option(
+    "--from",
+    "artifact_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=pathlib.Path),
+    help="Workspace export ZIP artifact to import.",
+)
+@click.option(
+    "--mode",
+    type=click.Choice(["create-new", "replace"]),
+    required=True,
+    help="Create a new workspace or replace an existing workspace.",
+)
+@click.option(
+    "--target-workspace-id",
+    default=None,
+    help="Workspace id to replace. Required with --mode replace.",
+)
+@click.pass_obj
+def workspace_import(
+    _ctx: object,
+    *,
+    artifact_path: pathlib.Path,
+    mode: str,
+    target_workspace_id: str | None,
+) -> None:
+    """Import a full workspace export artifact."""
+    if mode == "replace" and target_workspace_id is None:
+        raise click.UsageError("--target-workspace-id is required with --mode replace")
+    if mode == "create-new" and target_workspace_id is not None:
+        raise click.UsageError(
+            "--target-workspace-id can only be used with --mode replace"
+        )
+    admin_init_mod = _load_app_admin()
+    workspace_import_mod = _load_workspace_import()
+    make_uow = _make_uow()
+    settings = _settings()
+    _refuse_demo(settings, admin_init_mod)
+    if settings.storage_backend != "localfs":
+        raise ConfigError("workspace import currently requires localfs storage")
+    if settings.root_key is None:
+        raise ConfigError("workspace import requires CREWDAY_ROOT_KEY")
+    try:
+        from app.adapters.storage.localfs import LocalFsStorage
+    except Exception as exc:
+        raise ConfigError(
+            "admin workspace import must run on the server host with app "
+            "dependencies installed"
+        ) from exc
+
+    storage = LocalFsStorage(
+        settings.data_dir,
+        signing_key=settings.root_key.get_secret_value().encode("utf-8"),
+    )
+    service_mode: Literal["create_new", "replace"]
+    service_mode = "create_new" if mode == "create-new" else "replace"
+    with make_uow() as session:
+        assert isinstance(session, Session)
+        report = workspace_import_mod.restore_workspace_export(
+            session,
+            artifact_path.read_bytes(),
+            mode=service_mode,
+            target_workspace_id=target_workspace_id,
+            storage=storage,
+        )
+    click.echo(
+        json.dumps(
+            {
+                "mode": report.mode,
+                "workspace_id": report.workspace_id,
+                "workspace_slug": report.workspace_slug,
+                "source_workspace_id": report.source_workspace_id,
+                "source_workspace_slug": report.source_workspace_slug,
+                "restored_tables": report.restored_tables,
+                "restored_files": report.restored_files,
+                "skipped_permissions": [
+                    {
+                        "table": skip.table,
+                        "reason": skip.reason,
+                        "row_id": skip.row_id,
+                        "user_id": skip.user_id,
+                    }
+                    for skip in report.skipped_permissions
+                ],
+                "manual_follow_up_required": report.manual_follow_up_required,
+            },
+            sort_keys=True,
+        )
+    )
+
+
+workspace_import = cli_override("admin workspace", "import", covers=[])(
+    workspace_import
 )
 
 
@@ -963,6 +1071,7 @@ def register(root: click.Group) -> None:
         help_text="host-only workspace admin commands",
     )
     workspace.add_command(workspace_bootstrap)
+    workspace.add_command(workspace_import)
     workspace.add_command(workspace_purge_due)
 
     worker = _ensure_group(

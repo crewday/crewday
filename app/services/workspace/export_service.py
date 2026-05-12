@@ -44,6 +44,7 @@ from app.util.clock import Clock, SystemClock
 
 __all__ = [
     "WORKSPACE_EXPORT_MEDIA_TYPE",
+    "WORKSPACE_EXPORT_TABLES",
     "WorkspaceExportArtifact",
     "build_workspace_export",
 ]
@@ -149,6 +150,7 @@ _WORKSPACE_TABLES: Final[tuple[str, ...]] = (
     "work_order_shift_accrual",
     "work_role",
 )
+WORKSPACE_EXPORT_TABLES: Final[tuple[str, ...]] = _WORKSPACE_TABLES
 _REDACTED_VALUE: Final[str] = "<redacted>"
 _REDACTED_COLUMNS: Final[dict[str, frozenset[str]]] = {
     "asset": frozenset(("qr_token",)),

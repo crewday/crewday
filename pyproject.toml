@@ -773,6 +773,7 @@ forbidden_modules = [
     "app.api",
     "app.adapters",
     "app.domain",
+    "app.services",
     "app.worker",
     "app.web",
     "app.auth",
@@ -791,11 +792,13 @@ ignore_imports = [
     # privacy, and session helpers directly. Keep the exception narrow
     # to this override module so normal CLI commands remain HTTP-only.
     "crewday._overrides.admin -> app.adapters.db.session",
+    "crewday._overrides.admin -> app.adapters.storage.localfs",
     "crewday._overrides.admin -> app.admin.backup",
     "crewday._overrides.admin -> app.admin.init",
     "crewday._overrides.admin -> app.admin.rotate_root_key",
     "crewday._overrides.admin -> app.admin.rotate_secrets",
     "crewday._overrides.admin -> app.domain.privacy",
+    "crewday._overrides.admin -> app.services.workspace.import_service",
     "crewday._overrides.admin -> app.worker.tasks.workspace_purge",
 ]
 unmatched_ignore_imports_alerting = "none"

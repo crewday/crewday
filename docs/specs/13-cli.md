@@ -565,7 +565,8 @@ intentionally separate groups with different security models.
 `rotate-root-key`, `backup`, `restore`, `purge`, `audit verify`,
 `audit export`, `allow-email-domain`, `signup set-ip-cap`,
 `signup allow-ip`, `webhook rotate`, `budget set-cap`,
-`llm sync-pricing`, `workspace create`, `workspace trust`,
+`llm sync-pricing`, `workspace create`, `workspace import`,
+`workspace trust`,
 `settings set`, `version`).
 The earlier `budget reload-pricing` verb is retired — pricing lives
 in the DB now (§11 "Price sync"), and the host-CLI sync helper is
@@ -610,6 +611,18 @@ The host-only deployment CLI also exposes
 due-workspace purge path as the scheduled worker immediately. It
 does not shorten the owner grace period; it only purges rows whose
 persisted `purge_after` deadline has already passed.
+
+The host-only workspace import command accepts the full workspace
+export ZIP from §16:
+
+```
+crewday admin workspace import --from <artifact.zip> --mode create-new
+crewday admin workspace import --from <artifact.zip> --mode replace --target-workspace-id <id>
+```
+
+It returns JSON containing the restored workspace id/slug, restored
+table and file counts, skipped permission rows, and whether manual
+owner remediation is required.
 
 Naming convention reminder: per §12 "`operationId` convention",
 operation ids are dotted and underscored (`workspace_admin.*`);

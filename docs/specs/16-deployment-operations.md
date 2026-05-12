@@ -708,24 +708,43 @@ semantics below are implemented.
   the 30-day slug-reservation grace that starts only after actual
   purge (§03).
 
-### Restore (deferred)
+### Restore / import
 
-Restore is a future workspace-level operation, not a current danger
-zone action. The intended shape is either replace an entire
-workspace from an uploaded export artifact or create a new
-workspace from that artifact. Same-deployment restore may remap
-permissions when stable identifiers match. Cross-deployment restore
-must not silently grant permissions that cannot be proven
-equivalent; unmappable permissions are skipped or held for explicit
-owner review.
+Restore remains absent from the shipped workspace danger-zone UI, but
+the host-side import path accepts the full ZIP artifact produced by
+`POST /w/<slug>/api/v1/admin/workspace/export`.
+
+There are exactly two modes:
+
+- **Create new** allocates a fresh workspace id, rewrites every
+  workspace-scoped row to that id, preserves the exported slug only
+  when it is still available, and restores referenced files from the
+  artifact.
+- **Replace** atomically deletes the target workspace's current
+  workspace-owned rows and inserts the artifact rows remapped to the
+  target workspace id. If any insert fails, the target workspace is
+  left unchanged.
+
+The importer rejects artifacts whose manifest is not the current
+workspace-export manifest shape: schema version, complete table list,
+row counts, workspace row identity, file entries, file sizes, and
+SHA-256 content hashes must all match the ZIP contents. Artifacts
+that list `missing_files` are not restorable because imported rows
+would otherwise point at absent blobs.
+
+Permissions are identity-sensitive. Permission grants and group
+membership rows are restored only when their referenced users exist
+in the target deployment. Rows that cannot be verified are skipped and
+listed in the import report with `manual_follow_up_required = true`.
+Cross-deployment imports therefore do not silently recreate authority
+for identities that have not been proven equivalent.
 
 ### Migration off SaaS (tenant self-rescue)
 
-A tenant may at any time download their export. Re-import remains
-deferred with Restore: when implemented for Recipe A or Recipe B,
-the import assigns a new workspace row and remaps `workspace_id`;
-the slug is preserved unless it collides, and permission mappings
-follow the Restore constraints above.
+A tenant may at any time download their export. Re-import through the
+host-side workspace import path assigns a new workspace row and remaps
+`workspace_id`; the slug is preserved unless it collides, and
+permission mappings follow the Restore / import constraints above.
 
 ## Bootstrap
 

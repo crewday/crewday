@@ -132,6 +132,55 @@ def test_admin_restore_runs_migrations_after_restore(
     assert body["restored_database"] == str(tmp_path / "restored.db")
 
 
+def test_admin_workspace_import_requires_target_for_replace(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    artifact = tmp_path / "workspace.zip"
+    artifact.write_bytes(b"zip")
+    monkeypatch.setattr(
+        admin,
+        "_load_app_admin",
+        lambda: pytest.fail("server dependencies should not be loaded"),
+    )
+
+    result = CliRunner().invoke(
+        admin.workspace_import,
+        ["--from", str(artifact), "--mode", "replace"],
+    )
+
+    assert result.exit_code == 2
+    assert "--target-workspace-id is required" in result.output
+
+
+def test_admin_workspace_import_rejects_target_for_create_new(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    artifact = tmp_path / "workspace.zip"
+    artifact.write_bytes(b"zip")
+    monkeypatch.setattr(
+        admin,
+        "_load_app_admin",
+        lambda: pytest.fail("server dependencies should not be loaded"),
+    )
+
+    result = CliRunner().invoke(
+        admin.workspace_import,
+        [
+            "--from",
+            str(artifact),
+            "--mode",
+            "create-new",
+            "--target-workspace-id",
+            "ws_target",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "--target-workspace-id can only be used" in result.output
+
+
 @pytest.mark.parametrize(
     "command",
     [
