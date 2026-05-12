@@ -13632,6 +13632,16 @@
             "title": "Spend Usd 30D",
             "type": "number"
           },
+          "thinking_level": {
+            "enum": [
+              "disabled",
+              "high",
+              "low",
+              "medium"
+            ],
+            "title": "Thinking Level",
+            "type": "string"
+          },
           "vendor": {
             "title": "Vendor",
             "type": "string"
@@ -13649,6 +13659,7 @@
           "price_source",
           "price_source_model_id",
           "provider_model_count",
+          "thinking_level",
           "vendor"
         ],
         "title": "LlmModelResponse",
@@ -13855,6 +13866,16 @@
             "title": "Calls 30D",
             "type": "integer"
           },
+          "effective_thinking_level": {
+            "enum": [
+              "disabled",
+              "high",
+              "low",
+              "medium"
+            ],
+            "title": "Effective Thinking Level",
+            "type": "string"
+          },
           "extra_api_params": {
             "additionalProperties": true,
             "title": "Extra Api Params",
@@ -13970,10 +13991,28 @@
               }
             ],
             "title": "Temperature Override"
+          },
+          "thinking_level_override": {
+            "anyOf": [
+              {
+                "enum": [
+                  "disabled",
+                  "high",
+                  "low",
+                  "medium"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thinking Level Override"
           }
         },
         "required": [
           "api_model_id",
+          "effective_thinking_level",
           "extra_api_params",
           "fixed_cost_per_call_usd",
           "id",
@@ -13989,7 +14028,8 @@
           "reasoning_effort",
           "supports_system_prompt",
           "supports_temperature",
-          "temperature_override"
+          "temperature_override",
+          "thinking_level_override"
         ],
         "title": "LlmProviderModelResponse",
         "type": "object"
@@ -15335,6 +15375,17 @@
               }
             ],
             "title": "Price Source Model Id"
+          },
+          "thinking_level": {
+            "default": "disabled",
+            "enum": [
+              "disabled",
+              "high",
+              "low",
+              "medium"
+            ],
+            "title": "Thinking Level",
+            "type": "string"
           },
           "vendor": {
             "maxLength": 80,
@@ -18228,6 +18279,23 @@
               }
             ],
             "title": "Temperature Override"
+          },
+          "thinking_level_override": {
+            "anyOf": [
+              {
+                "enum": [
+                  "disabled",
+                  "high",
+                  "low",
+                  "medium"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thinking Level Override"
           }
         },
         "required": [

@@ -734,7 +734,7 @@ describe("Admin LlmPage", () => {
       fireEvent.change(screen.getByLabelText(/Temperature override/), {
         target: { value: "0.7" },
       });
-      fireEvent.change(screen.getByLabelText(/Reasoning effort/), {
+      fireEvent.change(screen.getByLabelText(/Thinking override/), {
         target: { value: "high" },
       });
       fireEvent.change(screen.getByLabelText(/Price source override/), {
@@ -772,7 +772,7 @@ describe("Admin LlmPage", () => {
         temperature_override: 0.7,
         supports_system_prompt: false,
         supports_temperature: false,
-        reasoning_effort: "high",
+        thinking_level_override: "high",
         extra_api_params: { top_p: 0.9 },
         price_source_override: "openrouter",
         price_source_model_id_override: "openrouter/google-gemma",

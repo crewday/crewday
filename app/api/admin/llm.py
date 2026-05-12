@@ -6,7 +6,7 @@ import hashlib
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal, Self, cast
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -137,6 +137,13 @@ _MODEL_CAPABILITY_TAGS = frozenset(
         "embeddings",
     }
 )
+LlmThinkingLevel = Literal["disabled", "low", "medium", "high"]
+
+
+def _thinking_level(value: str | None) -> LlmThinkingLevel:
+    if value in {"disabled", "low", "medium", "high"}:
+        return cast(LlmThinkingLevel, value)
+    return "disabled"
 
 
 class LlmProviderResponse(BaseModel):
@@ -164,6 +171,7 @@ class LlmModelResponse(BaseModel):
     capabilities: list[str]
     context_window: int | None
     max_output_tokens: int | None
+    thinking_level: LlmThinkingLevel
     price_source: Literal["openrouter", "manual", ""]
     price_source_model_id: str | None
     is_active: bool
@@ -185,6 +193,8 @@ class LlmProviderModelResponse(BaseModel):
     temperature_override: float | None
     supports_system_prompt: bool
     supports_temperature: bool
+    thinking_level_override: LlmThinkingLevel | None
+    effective_thinking_level: LlmThinkingLevel
     reasoning_effort: Literal["", "low", "medium", "high"]
     extra_api_params: dict[str, Any]
     price_source_override: Literal["", "none", "openrouter"]
@@ -376,6 +386,7 @@ class ModelPayload(BaseModel):
     capabilities: list[str] = Field(default_factory=list)
     context_window: int | None = Field(default=None, ge=1)
     max_output_tokens: int | None = Field(default=None, ge=1)
+    thinking_level: LlmThinkingLevel = "disabled"
     price_source: Literal["openrouter", "manual", ""] = ""
     price_source_model_id: str | None = Field(default=None, max_length=240)
     is_active: bool = True
@@ -407,6 +418,7 @@ class ProviderModelPayload(BaseModel):
     temperature_override: float | None = Field(default=None, ge=0, le=2)
     supports_system_prompt: bool = True
     supports_temperature: bool = True
+    thinking_level_override: LlmThinkingLevel | None = None
     reasoning_effort: Literal["", "low", "medium", "high"] = ""
     extra_api_params: dict[str, Any] = Field(default_factory=dict)
     price_source_override: Literal["", "none", "openrouter"] = ""
@@ -555,6 +567,7 @@ def _model_response(
         capabilities=list(model.capabilities or []),
         context_window=model.context_window,
         max_output_tokens=model.max_output_tokens,
+        thinking_level=_thinking_level(model.thinking_level),
         price_source=model.price_source,
         price_source_model_id=model.price_source_model_id,
         is_active=model.is_active,
@@ -567,10 +580,16 @@ def _model_response(
 
 def _provider_model_response(
     row: LlmProviderModel,
+    model: LlmModel | None = None,
     *,
     usage: dict[str, tuple[int, Decimal]] | None = None,
 ) -> LlmProviderModelResponse:
     calls, spend = (usage or {}).get(row.id, (0, Decimal("0.000000")))
+    effective_thinking_level = _thinking_level(
+        row.thinking_level_override
+        if row.thinking_level_override is not None
+        else (model.thinking_level if model is not None else None)
+    )
     return LlmProviderModelResponse(
         id=row.id,
         provider_id=row.provider_id,
@@ -587,6 +606,12 @@ def _provider_model_response(
         temperature_override=row.temperature_override,
         supports_system_prompt=row.supports_system_prompt,
         supports_temperature=row.supports_temperature,
+        thinking_level_override=(
+            _thinking_level(row.thinking_level_override)
+            if row.thinking_level_override is not None
+            else None
+        ),
+        effective_thinking_level=effective_thinking_level,
         reasoning_effort=row.reasoning_effort or "",
         extra_api_params=dict(row.extra_api_params or {}),
         price_source_override=row.price_source_override or "",
@@ -1049,7 +1074,9 @@ def _load_graph(session: Session) -> LlmGraphPayload:
             _model_response(row, model_counts, usage=model_usage) for row in models
         ],
         provider_models=[
-            _provider_model_response(row, usage=provider_model_usage)
+            _provider_model_response(
+                row, models_by_id.get(row.model_id), usage=provider_model_usage
+            )
             for row in provider_models
         ],
         capabilities=_capabilities(
@@ -1554,6 +1581,7 @@ def build_admin_llm_router() -> APIRouter:
             capabilities=payload.capabilities,
             context_window=payload.context_window,
             max_output_tokens=payload.max_output_tokens,
+            thinking_level=payload.thinking_level,
             price_source=payload.price_source,
             price_source_model_id=payload.price_source_model_id,
             is_active=payload.is_active,
@@ -1610,6 +1638,7 @@ def build_admin_llm_router() -> APIRouter:
             row.capabilities = payload.capabilities
             row.context_window = payload.context_window
             row.max_output_tokens = payload.max_output_tokens
+            row.thinking_level = payload.thinking_level
             row.price_source = payload.price_source
             row.price_source_model_id = payload.price_source_model_id
             row.is_active = payload.is_active
@@ -1667,7 +1696,18 @@ def build_admin_llm_router() -> APIRouter:
             stmt = stmt.where(LlmProviderModel.model_id == model_id)
         with tenant_agnostic():
             rows = list(session.scalars(stmt).all())
-        return [_provider_model_response(row) for row in rows]
+            models_by_id = {
+                row.id: row
+                for row in session.scalars(
+                    select(LlmModel).where(
+                        LlmModel.id.in_({row.model_id for row in rows})
+                    )
+                ).all()
+            }
+        return [
+            _provider_model_response(row, models_by_id.get(row.model_id))
+            for row in rows
+        ]
 
     @router.post(
         "/provider-models",
@@ -1694,6 +1734,7 @@ def build_admin_llm_router() -> APIRouter:
             temperature_override=payload.temperature_override,
             supports_system_prompt=payload.supports_system_prompt,
             supports_temperature=payload.supports_temperature,
+            thinking_level_override=payload.thinking_level_override,
             reasoning_effort=payload.reasoning_effort,
             extra_api_params=payload.extra_api_params,
             price_source_override=payload.price_source_override,
@@ -1708,7 +1749,8 @@ def build_admin_llm_router() -> APIRouter:
             _commit_or_conflict(session, "provider_model_constraint_violation")
             _publish_deployment_defaults_changed(ctx, request)
             session.refresh(row)
-        return _provider_model_response(row)
+            model = session.get(LlmModel, row.model_id)
+        return _provider_model_response(row, model)
 
     @router.get(
         "/provider-models/{provider_model_id}",
@@ -1720,7 +1762,8 @@ def build_admin_llm_router() -> APIRouter:
     ) -> LlmProviderModelResponse:
         with tenant_agnostic():
             row = _provider_model(session, provider_model_id)
-        return _provider_model_response(row)
+            model = session.get(LlmModel, row.model_id)
+        return _provider_model_response(row, model)
 
     @router.put(
         "/provider-models/{provider_model_id}",
@@ -1753,6 +1796,7 @@ def build_admin_llm_router() -> APIRouter:
             row.temperature_override = payload.temperature_override
             row.supports_system_prompt = payload.supports_system_prompt
             row.supports_temperature = payload.supports_temperature
+            row.thinking_level_override = payload.thinking_level_override
             row.reasoning_effort = payload.reasoning_effort
             row.extra_api_params = payload.extra_api_params
             row.price_source_override = payload.price_source_override
@@ -1762,7 +1806,8 @@ def build_admin_llm_router() -> APIRouter:
             _commit_or_conflict(session, "provider_model_constraint_violation")
             _publish_deployment_defaults_changed(ctx, request)
             session.refresh(row)
-        return _provider_model_response(row)
+            model = session.get(LlmModel, row.model_id)
+        return _provider_model_response(row, model)
 
     @router.delete(
         "/provider-models/{provider_model_id}",

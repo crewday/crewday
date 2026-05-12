@@ -402,6 +402,7 @@ class LLMClient:
                         if model_pick.temperature is not None
                         else 0.0
                     ),
+                    thinking_level=model_pick.thinking_level,
                     tools=tools,
                     consents=effective_consents,
                 )

@@ -37,6 +37,7 @@ from app.adapters.llm.ports import (
     ChatMessage,
     LLMCapabilityMissing,
     LLMResponse,
+    LlmThinkingLevel,
     LLMUsage,
     Tool,
     ToolCall,
@@ -134,9 +135,10 @@ class FakeLLMClient:
         prompt: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        thinking_level: LlmThinkingLevel = "disabled",
         consents: ConsentSet | None = None,
     ) -> LLMResponse:
-        del consents  # in-process fake never reaches an upstream provider
+        del consents, thinking_level  # in-process fake never reaches upstream
         return LLMResponse(
             text=prompt,
             usage=LLMUsage(
@@ -155,11 +157,12 @@ class FakeLLMClient:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        thinking_level: LlmThinkingLevel = "disabled",
         tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> LLMResponse:
         # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
-        del consents  # in-process fake never reaches an upstream provider
+        del consents, thinking_level  # in-process fake never reaches upstream
         last = messages[-1]["content"] if messages else ""
         text = json.dumps(self._ocr_payload) if _OCR_PROMPT_MARKER in last else last
         return LLMResponse(
@@ -191,11 +194,12 @@ class FakeLLMClient:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        thinking_level: LlmThinkingLevel = "disabled",
         tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> Iterator[str]:
         # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
-        del consents  # in-process fake never reaches an upstream provider
+        del consents, thinking_level  # in-process fake never reaches upstream
         last = messages[-1]["content"] if messages else ""
         yield from last.split()
 

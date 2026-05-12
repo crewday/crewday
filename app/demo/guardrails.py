@@ -100,6 +100,7 @@ def demo_free_model_pick(*, capability: str) -> ModelPick:
         max_tokens=None,
         temperature=None,
         extra_api_params={},
+        thinking_level="disabled",
         required_capabilities=(),
         assignment_id=f"demo:{capability}",
     )

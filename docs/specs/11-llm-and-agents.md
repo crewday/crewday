@@ -732,6 +732,7 @@ llm_model
 ├── capabilities           jsonb           -- list[str]; see "Model capability tags" below
 ├── context_window         int?
 ├── max_output_tokens      int?
+├── thinking_level         text            -- disabled | low | medium | high; default disabled
 ├── is_active              bool
 ├── price_source           text            -- '' | 'openrouter' | 'manual'; see "Price sync"
 ├── price_source_model_id  text?           -- override the id used to look up pricing
@@ -789,7 +790,8 @@ llm_provider_model
 ├── temperature_override       float?
 ├── supports_system_prompt     bool            -- some reasoning models reject system prompts
 ├── supports_temperature       bool            -- o-series models forbid temperature
-├── reasoning_effort           text?           -- '' | 'low' | 'medium' | 'high'
+├── thinking_level_override    text?           -- NULL = inherit model thinking_level; otherwise disabled | low | medium | high
+├── reasoning_effort           text?           -- legacy compatibility; prefer thinking_level_override
 ├── extra_api_params           jsonb           -- catch-all for rare/new fields
 ├── price_source_override      text?           -- '' | 'none' | 'openrouter' — per-row override of the model's price_source
 ├── price_source_model_id_override text?
@@ -805,6 +807,13 @@ llm_provider_model
   before the call. `supports_system_prompt = false` folds the system
   prompt into the first user turn. These flags exist because they
   matter in practice on o-series / reasoning-first models.
+- Thinking is configured as a product-level level, not provider wire
+  JSON. `llm_model.thinking_level` is the provider-agnostic default
+  and `llm_provider_model.thinking_level_override` can override it for
+  one provider/model combo. The resolver exposes the effective value
+  (`override ?? model default`) to adapters; adapters map it to their
+  provider-specific API parameters. `disabled` sends no thinking /
+  reasoning parameter.
 
 ## Client abstraction
 

@@ -165,6 +165,13 @@ _AGENT_RELAY_REQUEST_STATUS_VALUES: tuple[str, ...] = (
     "failed",
 )
 
+_LLM_THINKING_LEVEL_VALUES: tuple[str, ...] = (
+    "disabled",
+    "low",
+    "medium",
+    "high",
+)
+
 
 def _in_clause(values: tuple[str, ...]) -> str:
     """Render a ``col IN ('a', 'b', …)`` CHECK body fragment.
@@ -1419,6 +1426,12 @@ class LlmModel(Base):
     )
     context_window: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    thinking_level: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="disabled",
+        server_default="disabled",
+    )
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -1445,6 +1458,10 @@ class LlmModel(Base):
         CheckConstraint(
             f"price_source IN ({_in_clause(_LLM_PRICE_SOURCE_VALUES)})",
             name="price_source",
+        ),
+        CheckConstraint(
+            f"thinking_level IN ({_in_clause(_LLM_THINKING_LEVEL_VALUES)})",
+            name="thinking_level",
         ),
         UniqueConstraint("canonical_name", name="uq_llm_model_canonical_name"),
     )
@@ -1537,6 +1554,7 @@ class LlmProviderModel(Base):
     # ``"" | "low" | "medium" | "high"`` — open enum because the
     # vocabulary varies per reasoning provider.
     reasoning_effort: Mapped[str | None] = mapped_column(String, nullable=True)
+    thinking_level_override: Mapped[str | None] = mapped_column(String, nullable=True)
     # Catch-all for rare / new fields the adapter forwards to the
     # provider unchanged. Merged last over the model defaults.
     extra_api_params: Mapped[dict[str, Any]] = mapped_column(
@@ -1571,6 +1589,11 @@ class LlmProviderModel(Base):
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
+        CheckConstraint(
+            "thinking_level_override IS NULL "
+            f"OR thinking_level_override IN ({_in_clause(_LLM_THINKING_LEVEL_VALUES)})",
+            name="thinking_level_override",
+        ),
         UniqueConstraint(
             "provider_id",
             "model_id",

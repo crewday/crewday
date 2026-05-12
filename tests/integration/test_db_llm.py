@@ -3471,6 +3471,7 @@ class TestRegistryShape:
             "capabilities",
             "context_window",
             "max_output_tokens",
+            "thinking_level",
             "is_active",
             "price_source",
             "price_source_model_id",
@@ -3486,6 +3487,26 @@ class TestRegistryShape:
         uqs = insp.get_unique_constraints("llm_model")
         assert any(uq["column_names"] == ["canonical_name"] for uq in uqs)
 
+    def test_llm_model_thinking_level_constraint(self, db_session: Session) -> None:
+        db_session.add(
+            LlmModel(
+                id="01HWA0000000000000000THNK",
+                canonical_name="thinking/invalid",
+                display_name="Invalid Thinking",
+                vendor="other",
+                capabilities=["chat"],
+                thinking_level="turbo",
+                is_active=True,
+                price_source="",
+                created_at=_PINNED,
+                updated_at=_PINNED,
+            )
+        )
+
+        with pytest.raises(IntegrityError):
+            db_session.flush()
+        db_session.rollback()
+
     def test_llm_provider_model_columns(self, engine: Engine) -> None:
         cols = {c["name"]: c for c in inspect(engine).get_columns("llm_provider_model")}
         expected = {
@@ -3500,6 +3521,7 @@ class TestRegistryShape:
             "temperature_override",
             "supports_system_prompt",
             "supports_temperature",
+            "thinking_level_override",
             "reasoning_effort",
             "extra_api_params",
             "price_source_override",
@@ -3510,6 +3532,20 @@ class TestRegistryShape:
             "updated_at",
         }
         assert set(cols) == expected
+
+    def test_llm_provider_model_thinking_override_constraint(
+        self, db_session: Session
+    ) -> None:
+        pm = _seed_registry_trio(
+            db_session,
+            provider_model_id="01HWA0000000000000000THPM",
+            suffix="THPM",
+        )
+        pm.thinking_level_override = "turbo"
+
+        with pytest.raises(IntegrityError):
+            db_session.flush()
+        db_session.rollback()
 
     def test_llm_provider_model_fks_restrict(self, engine: Engine) -> None:
         """``provider_id`` / ``model_id`` ON DELETE RESTRICT —

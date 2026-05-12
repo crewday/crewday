@@ -37,10 +37,13 @@ __all__ = [
     "LlmContentRefused",
     "LlmProviderError",
     "LlmRateLimited",
+    "LlmThinkingLevel",
     "LlmTransportError",
     "Tool",
     "ToolCall",
 ]
+
+LlmThinkingLevel = Literal["disabled", "low", "medium", "high"]
 
 
 class LLMCapabilityMissing(Exception):
@@ -169,6 +172,7 @@ class LLMClient(Protocol):
         prompt: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        thinking_level: LlmThinkingLevel = "disabled",
         consents: ConsentSet | None = None,
     ) -> LLMResponse:
         """Single-shot text completion."""
@@ -181,6 +185,7 @@ class LLMClient(Protocol):
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        thinking_level: LlmThinkingLevel = "disabled",
         tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> LLMResponse:
@@ -216,6 +221,7 @@ class LLMClient(Protocol):
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        thinking_level: LlmThinkingLevel = "disabled",
         tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> Iterator[str]:

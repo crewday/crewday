@@ -315,6 +315,7 @@ class _StubAdapter:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        thinking_level: str = "disabled",
         tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> LLMResponse:
@@ -324,6 +325,7 @@ class _StubAdapter:
                 "messages": list(messages),
                 "max_tokens": max_tokens,
                 "temperature": temperature,
+                "thinking_level": thinking_level,
                 "tools": list(tools) if tools else None,
                 "consents": consents,
             }
@@ -490,6 +492,43 @@ class TestHappyPath:
 
         assert result.tool_calls == (tool_call,)
         assert result.finish_reason == "tool_calls"
+
+    def test_thinking_level_reaches_adapter(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        ws = _seed_workspace(session)
+        ctx = _build_context(ws.id, slug=ws.slug)
+        assignment = _seed_assignment(
+            session,
+            workspace_id=ws.id,
+            capability=_CAPABILITY,
+            api_model_id="thinking/model",
+        )
+        provider_model = session.get(LlmProviderModel, assignment.model_id)
+        assert provider_model is not None
+        provider_model.thinking_level_override = "high"
+        _seed_ledger(session, workspace_id=ws.id, cap_cents=500)
+
+        adapter = _StubAdapter([_ok_response("hello world")])
+        client = LLMClient(adapter, pricing=_FREE_PRICING)
+
+        token = set_current(ctx)
+        try:
+            _run(
+                client.chat(
+                    session,
+                    ctx,
+                    capability=_CAPABILITY,
+                    messages=[{"role": "user", "content": "hi"}],
+                    attribution=_attribution(),
+                    consents=ConsentSet.none(),
+                    clock=clock,
+                )
+            )
+        finally:
+            reset_current(token)
+
+        assert adapter.calls[0]["thinking_level"] == "high"
 
 
 # ---------------------------------------------------------------------------

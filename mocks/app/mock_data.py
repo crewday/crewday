@@ -759,6 +759,7 @@ class LlmModel:
     capabilities: list[str]                    # chat, vision, audio_input, reasoning, function_calling, json_mode, streaming
     context_window: int | None
     max_output_tokens: int | None
+    thinking_level: Literal["disabled", "low", "medium", "high"]
     price_source: Literal["openrouter", "manual", ""]
     price_source_model_id: str | None
     is_active: bool
@@ -777,6 +778,8 @@ class LlmProviderModel:
     temperature_override: float | None
     supports_system_prompt: bool
     supports_temperature: bool
+    thinking_level_override: Literal["disabled", "low", "medium", "high"] | None
+    effective_thinking_level: Literal["disabled", "low", "medium", "high"]
     reasoning_effort: Literal["", "low", "medium", "high"]
     price_source_override: Literal["", "none", "openrouter"]
     price_last_synced_at: str | None
@@ -2656,6 +2659,7 @@ LLM_MODELS: list[LlmModel] = [
         capabilities=["chat", "vision", "json_mode", "function_calling", "streaming"],
         context_window=128_000,
         max_output_tokens=8192,
+        thinking_level="disabled",
         price_source="openrouter",
         price_source_model_id=None,
         is_active=True,
@@ -2668,6 +2672,7 @@ LLM_MODELS: list[LlmModel] = [
         capabilities=["chat", "vision", "json_mode", "streaming"],
         context_window=128_000,
         max_output_tokens=4096,
+        thinking_level="disabled",
         price_source="openrouter",
         price_source_model_id=None,
         is_active=True,
@@ -2681,6 +2686,7 @@ LLM_MODELS: list[LlmModel] = [
         capabilities=["chat", "vision", "json_mode", "function_calling", "streaming"],
         context_window=200_000,
         max_output_tokens=8192,
+        thinking_level="disabled",
         price_source="openrouter",
         price_source_model_id=None,
         is_active=True,
@@ -2693,6 +2699,7 @@ LLM_MODELS: list[LlmModel] = [
         capabilities=["chat", "json_mode", "function_calling", "streaming"],
         context_window=131_072,
         max_output_tokens=8192,
+        thinking_level="disabled",
         price_source="openrouter",
         price_source_model_id=None,
         is_active=True,
@@ -2705,6 +2712,7 @@ LLM_MODELS: list[LlmModel] = [
         capabilities=["chat", "vision", "json_mode", "function_calling", "streaming"],
         context_window=128_000,
         max_output_tokens=16_384,
+        thinking_level="disabled",
         price_source="openrouter",
         price_source_model_id=None,
         is_active=True,
@@ -2718,6 +2726,7 @@ LLM_MODELS: list[LlmModel] = [
         capabilities=["audio_input"],
         context_window=None,
         max_output_tokens=None,
+        thinking_level="disabled",
         price_source="",
         price_source_model_id=None,
         is_active=False,
@@ -2738,6 +2747,8 @@ LLM_PROVIDER_MODELS: list[LlmProviderModel] = [
         temperature_override=None,
         supports_system_prompt=True,
         supports_temperature=True,
+        thinking_level_override=None,
+        effective_thinking_level="disabled",
         reasoning_effort="",
         price_source_override="",
         price_last_synced_at="2026-04-14T03:00:12Z",
@@ -2754,6 +2765,8 @@ LLM_PROVIDER_MODELS: list[LlmProviderModel] = [
         temperature_override=None,
         supports_system_prompt=True,
         supports_temperature=True,
+        thinking_level_override=None,
+        effective_thinking_level="disabled",
         reasoning_effort="",
         price_source_override="",
         price_last_synced_at="2026-04-14T03:00:12Z",
@@ -2770,6 +2783,8 @@ LLM_PROVIDER_MODELS: list[LlmProviderModel] = [
         temperature_override=0.3,
         supports_system_prompt=True,
         supports_temperature=True,
+        thinking_level_override=None,
+        effective_thinking_level="disabled",
         reasoning_effort="",
         price_source_override="",
         price_last_synced_at="2026-04-14T03:00:12Z",
@@ -2786,6 +2801,8 @@ LLM_PROVIDER_MODELS: list[LlmProviderModel] = [
         temperature_override=None,
         supports_system_prompt=True,
         supports_temperature=True,
+        thinking_level_override=None,
+        effective_thinking_level="disabled",
         reasoning_effort="",
         price_source_override="none",     # Admin has pinned this row; skipped by the sync.
         price_last_synced_at=None,
@@ -2802,6 +2819,8 @@ LLM_PROVIDER_MODELS: list[LlmProviderModel] = [
         temperature_override=None,
         supports_system_prompt=True,
         supports_temperature=True,
+        thinking_level_override=None,
+        effective_thinking_level="disabled",
         reasoning_effort="",
         price_source_override="",
         price_last_synced_at="2026-04-14T03:00:12Z",

@@ -319,6 +319,10 @@ catalog pair (see `permission_rule` below and the catalog in
   `llm_prompt_template`, `llm_prompt_template_revision`, `llm_call`,
   `llm_usage_daily`, `agent_action`, `anomaly_suppression`,
   `agent_preference`, `agent_preference_revision`.
+  `llm_model.thinking_level` is a required
+  `disabled | low | medium | high` default; `llm_provider_model`
+  may carry a nullable `thinking_level_override` with the same enum
+  and NULL meaning "inherit the model default".
 - **Files** (§02 "Shared tables", storage backend in §15): `file` —
   shared blob-reference table used by `evidence`,
   `expense_attachment`, `issue.attachment_file_ids`,

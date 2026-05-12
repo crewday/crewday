@@ -177,9 +177,24 @@ class TestCompleteHappyPath:
         assert body["model"] == _MODEL
         assert body["max_tokens"] == 32
         assert body["temperature"] == 0.1
+        assert "reasoning" not in body
         assert "stream" not in body  # only set when streaming
         messages = cast(list[dict[str, object]], body["messages"])
         assert messages == [{"role": "user", "content": "hello"}]
+
+    def test_thinking_level_maps_to_openrouter_reasoning_effort(self) -> None:
+        handler = _RecordingHandler(
+            responses=[httpx.Response(200, json=_COMPLETE_FIXTURE)]
+        )
+        client = _make_client(handler)
+        client.complete(
+            model_id=_MODEL,
+            prompt="hello",
+            thinking_level="high",
+        )
+
+        body = _json_body(handler.requests[0])
+        assert body["reasoning"] == {"effort": "high"}
 
     def test_request_headers_include_auth_and_attribution(self) -> None:
         handler = _RecordingHandler(

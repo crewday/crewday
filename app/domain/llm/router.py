@@ -96,7 +96,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from types import MappingProxyType
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -108,6 +108,7 @@ from app.adapters.db.llm.models import (
     LlmProvider,
     LlmProviderModel,
 )
+from app.adapters.llm.ports import LlmThinkingLevel
 from app.config import get_settings
 from app.demo.guardrails import demo_free_model_pick, llm_capability_allowed_in_demo
 from app.events.bus import EventBus
@@ -196,6 +197,12 @@ _DEFAULT_REQUIRED_CAPABILITIES: Mapping[str, tuple[str, ...]] = MappingProxyType
 )
 
 
+def _thinking_level(value: str | None) -> LlmThinkingLevel:
+    if value in {"disabled", "low", "medium", "high"}:
+        return cast(LlmThinkingLevel, value)
+    return "disabled"
+
+
 @dataclass(frozen=True, slots=True)
 class ModelPick:
     """One rung of a resolved fallback chain.
@@ -230,6 +237,7 @@ class ModelPick:
     # Merged-last provider-layer params (``top_p``, tool hints, …).
     # Frozen inside the dataclass; callers MUST NOT mutate.
     extra_api_params: Mapping[str, Any] = field(default_factory=dict)
+    thinking_level: LlmThinkingLevel = "disabled"
     # Capability tags copied from the §11 catalogue on save
     # (``vision``, ``json_mode``, …). Adapter cross-checks the
     # target model before dispatch.
@@ -409,7 +417,7 @@ def _load_enabled_chain(
             else tuple(assignment.required_capabilities or ())
         )
         if set(required).issubset(set(model.capabilities or [])):
-            picks.append(_to_pick(assignment, provider_model))
+            picks.append(_to_pick(assignment, provider_model, model))
     return picks, bool(rows), has_priority_zero
 
 
@@ -450,13 +458,13 @@ def _load_deployment_default_chain(
     )
     rows = session.execute(stmt).all()
     ranked_rows = [
-        (canonical_rank[model.canonical_name], provider_model)
+        (canonical_rank[model.canonical_name], provider_model, model)
         for provider_model, _provider, model in rows
         if set(required_capabilities).issubset(set(model.capabilities or []))
     ]
     if not ranked_rows:
         return []
-    _rank, provider_model = min(ranked_rows, key=lambda item: item[0])
+    _rank, provider_model, model = min(ranked_rows, key=lambda item: item[0])
     return [
         ModelPick(
             provider_model_id=provider_model.id,
@@ -464,13 +472,16 @@ def _load_deployment_default_chain(
             max_tokens=None,
             temperature=None,
             extra_api_params=MappingProxyType({}),
+            thinking_level=_thinking_level(model.thinking_level),
             required_capabilities=required_capabilities,
             assignment_id="",
         )
     ]
 
 
-def _to_pick(row: LlmAssignment, provider_model: LlmProviderModel) -> ModelPick:
+def _to_pick(
+    row: LlmAssignment, provider_model: LlmProviderModel, model: LlmModel
+) -> ModelPick:
     """Map an (assignment, provider_model) pair to a frozen :class:`ModelPick`.
 
     JSON columns round-trip as mutable ``dict`` / ``list`` — wrap
@@ -499,12 +510,16 @@ def _to_pick(row: LlmAssignment, provider_model: LlmProviderModel) -> ModelPick:
     )
     extra: Mapping[str, Any] = MappingProxyType(extra_copy)
     required = tuple(row.required_capabilities or ())
+    thinking_level = _thinking_level(
+        provider_model.thinking_level_override or model.thinking_level
+    )
     return ModelPick(
         provider_model_id=provider_model.id,
         api_model_id=provider_model.api_model_id,
         max_tokens=row.max_tokens,
         temperature=row.temperature,
         extra_api_params=extra,
+        thinking_level=thinking_level,
         required_capabilities=required,
         assignment_id=row.id,
     )

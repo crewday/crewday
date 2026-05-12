@@ -76,6 +76,7 @@ from app.adapters.llm.ports import (
     LlmProviderError,
     LlmRateLimited,
     LLMResponse,
+    LlmThinkingLevel,
     LlmTransportError,
     LLMUsage,
     Tool,
@@ -366,6 +367,7 @@ class OpenRouterClient:
         prompt: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        thinking_level: LlmThinkingLevel = "disabled",
         consents: ConsentSet | None = None,
     ) -> LLMResponse:
         """Single-shot text completion. See :class:`LLMClient.complete`.
@@ -382,6 +384,7 @@ class OpenRouterClient:
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
+            thinking_level=thinking_level,
             consents=consents,
         )
 
@@ -392,6 +395,7 @@ class OpenRouterClient:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        thinking_level: LlmThinkingLevel = "disabled",
         tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> LLMResponse:
@@ -412,6 +416,7 @@ class OpenRouterClient:
             messages=list(messages),
             max_tokens=max_tokens,
             temperature=temperature,
+            thinking_level=thinking_level,
             tools=tools,
             consents=consents,
         )
@@ -455,6 +460,7 @@ class OpenRouterClient:
             messages=payload_messages,
             max_tokens=1024,
             temperature=0.0,
+            thinking_level="disabled",
             stream=False,
         )
         response = self._post_with_retry(_redact_body(body, consents))
@@ -468,6 +474,7 @@ class OpenRouterClient:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        thinking_level: LlmThinkingLevel = "disabled",
         tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> Iterator[str]:
@@ -491,6 +498,7 @@ class OpenRouterClient:
             messages=wire_messages,
             max_tokens=max_tokens,
             temperature=temperature,
+            thinking_level=thinking_level,
             stream=True,
             tools=tools,
         )
@@ -507,6 +515,7 @@ class OpenRouterClient:
         messages: list[ChatMessage],
         max_tokens: int,
         temperature: float,
+        thinking_level: LlmThinkingLevel,
         consents: ConsentSet | None,
         tools: Sequence[Tool] | None = None,
     ) -> LLMResponse:
@@ -519,6 +528,7 @@ class OpenRouterClient:
             messages=wire_messages,
             max_tokens=max_tokens,
             temperature=temperature,
+            thinking_level=thinking_level,
             stream=False,
             tools=tools,
         )
@@ -754,6 +764,7 @@ def _build_request_body(
     messages: Sequence[_WireMessage],
     max_tokens: int,
     temperature: float,
+    thinking_level: LlmThinkingLevel,
     stream: bool,
     tools: Sequence[Tool] | None = None,
 ) -> dict[str, object]:
@@ -777,6 +788,8 @@ def _build_request_body(
     }
     if stream:
         body["stream"] = True
+    if thinking_level != "disabled":
+        body["reasoning"] = {"effort": thinking_level}
     if tools:
         body["tools"] = [_serialise_tool(t) for t in tools]
     return body

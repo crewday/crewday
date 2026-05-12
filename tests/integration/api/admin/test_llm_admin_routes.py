@@ -202,6 +202,7 @@ def _seed_llm_graph(session_factory: sessionmaker[Session]) -> SeededLlm:
                 capabilities=["chat", "function_calling", "json_mode", "vision"],
                 context_window=128000,
                 max_output_tokens=8192,
+                thinking_level="medium",
                 is_active=True,
                 price_source="openrouter",
                 price_source_model_id=None,
@@ -225,6 +226,7 @@ def _seed_llm_graph(session_factory: sessionmaker[Session]) -> SeededLlm:
                 temperature_override=None,
                 supports_system_prompt=True,
                 supports_temperature=True,
+                thinking_level_override="high",
                 reasoning_effort="",
                 extra_api_params={},
                 price_source_override="",
@@ -493,9 +495,12 @@ class TestAdminLlmRoutes:
             assert body["providers"][0]["spend_usd_30d"] == 0.174606
             assert body["providers"][0]["calls_30d"] == 3
             assert body["models"][0]["id"] == seeded.model_id
+            assert body["models"][0]["thinking_level"] == "medium"
             assert body["models"][0]["spend_usd_30d"] == 0.174606
             assert body["models"][0]["calls_30d"] == 3
             assert body["provider_models"][0]["id"] == seeded.provider_model_id
+            assert body["provider_models"][0]["thinking_level_override"] == "high"
+            assert body["provider_models"][0]["effective_thinking_level"] == "high"
             assert body["provider_models"][0]["spend_usd_30d"] == 0.174606
             assert body["provider_models"][0]["calls_30d"] == 3
             assert body["assignments"][0]["id"] == seeded.assignment_id
@@ -832,18 +837,49 @@ class TestAdminLlmRoutes:
                     "display_name": "Text Only",
                     "vendor": "test",
                     "capabilities": ["chat"],
+                    "thinking_level": "low",
                 },
             )
             assert model.status_code == 200, model.text
+            assert model.json()["thinking_level"] == "low"
+
+            invalid_model = client.post(
+                "/admin/api/v1/llm/models",
+                json={
+                    "canonical_name": "bad-thinking-test",
+                    "display_name": "Bad Thinking",
+                    "vendor": "test",
+                    "capabilities": ["chat"],
+                    "thinking_level": "turbo",
+                },
+            )
+            assert invalid_model.status_code == 422, invalid_model.text
+
             provider_model = client.post(
                 "/admin/api/v1/llm/provider-models",
                 json={
                     "provider_id": seeded.provider_id,
                     "model_id": model.json()["id"],
                     "api_model_id": "text-only-test",
+                    "thinking_level_override": "high",
                 },
             )
             assert provider_model.status_code == 200, provider_model.text
+            assert provider_model.json()["thinking_level_override"] == "high"
+            assert provider_model.json()["effective_thinking_level"] == "high"
+
+            invalid_provider_model = client.post(
+                "/admin/api/v1/llm/provider-models",
+                json={
+                    "provider_id": seeded.provider_id,
+                    "model_id": model.json()["id"],
+                    "api_model_id": "bad-thinking-test",
+                    "thinking_level_override": "turbo",
+                },
+            )
+            assert invalid_provider_model.status_code == 422, (
+                invalid_provider_model.text
+            )
 
             missing = client.post(
                 "/admin/api/v1/llm/assignments",

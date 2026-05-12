@@ -595,6 +595,7 @@ export type LlmApiKeyStatus = "present" | "missing" | "rotating";
 export type LlmPriceSource = "openrouter" | "manual" | "";
 export type LlmPriceSourceOverride = "" | "none" | "openrouter";
 export type LlmReasoningEffort = "" | "low" | "medium" | "high";
+export type LlmThinkingLevel = "disabled" | "low" | "medium" | "high";
 
 export interface LlmProvider {
   id: string;
@@ -619,6 +620,7 @@ export interface LlmModel {
   capabilities: string[];
   context_window: number | null;
   max_output_tokens: number | null;
+  thinking_level: LlmThinkingLevel;
   price_source: LlmPriceSource;
   price_source_model_id: string | null;
   is_active: boolean;
@@ -637,6 +639,8 @@ export interface LlmProviderModel {
   temperature_override: number | null;
   supports_system_prompt: boolean;
   supports_temperature: boolean;
+  thinking_level_override: LlmThinkingLevel | null;
+  effective_thinking_level: LlmThinkingLevel;
   reasoning_effort: LlmReasoningEffort;
   price_source_override: LlmPriceSourceOverride;
   price_last_synced_at: string | null;

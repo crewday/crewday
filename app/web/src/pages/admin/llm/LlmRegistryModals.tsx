@@ -16,6 +16,7 @@ import type {
   LlmProviderModel,
   LlmProviderType,
   LlmReasoningEffort,
+  LlmThinkingLevel,
 } from "@/types";
 import type { LlmIndexes } from "./lib/llmIndexes";
 
@@ -73,6 +74,7 @@ interface ModelPayload {
   capabilities: string[];
   context_window: number | null;
   max_output_tokens: number | null;
+  thinking_level: LlmThinkingLevel;
   price_source: LlmPriceSource;
   price_source_model_id: string | null;
   is_active: boolean;
@@ -90,6 +92,7 @@ interface ProviderModelPayload {
   temperature_override: number | null;
   supports_system_prompt: boolean;
   supports_temperature: boolean;
+  thinking_level_override: LlmThinkingLevel | null;
   reasoning_effort: LlmReasoningEffort;
   extra_api_params: Record<string, unknown>;
   price_source_override: LlmPriceSourceOverride;
@@ -508,6 +511,9 @@ function ModelForm({
   const [priceSource, setPriceSource] = useState<LlmPriceSource>(
     model?.price_source ?? "",
   );
+  const [thinkingLevel, setThinkingLevel] = useState<LlmThinkingLevel>(
+    model?.thinking_level ?? "disabled",
+  );
   const [priceSourceModel, setPriceSourceModel] = useState(
     model?.price_source_model_id ?? "",
   );
@@ -575,6 +581,7 @@ function ModelForm({
       capabilities,
       context_window: contextValue,
       max_output_tokens: outputValue,
+      thinking_level: thinkingLevel,
       price_source: priceSource,
       price_source_model_id: emptyToNull(priceSourceModel),
       is_active: active,
@@ -683,6 +690,17 @@ function ModelForm({
           </FormModalField>
         </FormModalGrid>
         <FormModalGrid>
+          <FormModalField label="Thinking level" requirement="required">
+            <select
+              value={thinkingLevel}
+              onChange={(e) => setThinkingLevel(e.target.value as LlmThinkingLevel)}
+            >
+              <option value="disabled">Disabled</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </FormModalField>
           <FormModalField label="Price source" requirement="required">
             <select
               value={priceSource}
@@ -755,9 +773,12 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   const [supportsTemperature, setSupportsTemperature] = useState(
     providerModel?.supports_temperature ?? true,
   );
-  const [reasoningEffort, setReasoningEffort] = useState<LlmReasoningEffort>(
+  const [reasoningEffort] = useState<LlmReasoningEffort>(
     providerModel?.reasoning_effort ?? "",
   );
+  const [thinkingOverride, setThinkingOverride] = useState<
+    LlmThinkingLevel | "inherit"
+  >(providerModel?.thinking_level_override ?? "inherit");
   const [priceSourceOverride, setPriceSourceOverride] =
     useState<LlmPriceSourceOverride>(providerModel?.price_source_override ?? "");
   const [priceSourceModelOverride, setPriceSourceModelOverride] = useState(
@@ -858,6 +879,8 @@ function ProviderModelForm(props: ProviderModelFormProps) {
       temperature_override: temperatureValue,
       supports_system_prompt: supportsSystemPrompt,
       supports_temperature: supportsTemperature,
+      thinking_level_override:
+        thinkingOverride === "inherit" ? null : thinkingOverride,
       reasoning_effort: reasoningEffort,
       extra_api_params: parsedExtra,
       price_source_override: priceSourceOverride,
@@ -981,12 +1004,15 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               aria-describedby={errId}
             />
           </FormModalField>
-          <FormModalField label="Reasoning effort" requirement="optional">
+          <FormModalField label="Thinking override" requirement="optional">
             <select
-              value={reasoningEffort}
-              onChange={(e) => setReasoningEffort(e.target.value as LlmReasoningEffort)}
+              value={thinkingOverride}
+              onChange={(e) =>
+                setThinkingOverride(e.target.value as LlmThinkingLevel | "inherit")
+              }
             >
-              <option value="">Provider default</option>
+              <option value="inherit">Use model default</option>
+              <option value="disabled">Disabled</option>
               <option value="low">Low</option>
               <option value="medium">Medium</option>
               <option value="high">High</option>
