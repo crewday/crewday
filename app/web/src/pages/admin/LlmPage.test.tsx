@@ -90,6 +90,12 @@ function jsonBody(call: FetchCall): unknown {
   return JSON.parse(String(call.init.body));
 }
 
+function providerModelRow(dialog: HTMLElement, name: string): HTMLElement {
+  const row = within(dialog).getByText(name).closest(".llm-assignment-provider-model");
+  if (!(row instanceof HTMLElement)) throw new Error(`${name} row not found`);
+  return row;
+}
+
 function chatManagerRung(): HTMLElement {
   const capability = screen
     .getAllByText("chat.manager")
@@ -886,7 +892,8 @@ describe("Admin LlmPage", () => {
       fireEvent.click(chatManagerAssignmentButton());
       const assignment = assignmentDialog("chat.manager");
       expectSharedFormModal(assignment, { wide: true, section: true, footer: false });
-      expect(within(assignment).getByRole("button", { name: "Save rung" })).toBeInTheDocument();
+      expect(within(assignment).getByText("Available provider-models")).toBeInTheDocument();
+      expect(within(assignment).getByText("Selected chain")).toBeInTheDocument();
       expect(screen.queryByRole("dialog", { name: "google/gemma-4-31b-it" })).toBeNull();
     } finally {
       fetcher.restore();
@@ -955,22 +962,13 @@ describe("Admin LlmPage", () => {
     }
   });
 
-  it("updates and creates assignment rungs from the assignment modal", async () => {
+  it("creates assignment rungs from the direct provider-model picker", async () => {
     const fetcher = installPageFetch({
       "/admin/api/v1/llm/graph": [
         { body: graph },
         { body: graph },
         { body: graph },
         { body: graph },
-      ],
-      "/admin/api/v1/llm/assignments/assign_chat_manager": [
-        {
-          body: {
-            ...graph.assignments[1],
-            max_tokens: 2048,
-            temperature: 0.4,
-          },
-        },
       ],
       "/admin/api/v1/llm/assignments": [
         {
@@ -990,48 +988,19 @@ describe("Admin LlmPage", () => {
       fireEvent.click(chatManagerAssignmentButton());
       const dialog = assignmentDialog("chat.manager");
       expectSharedFormModal(dialog, { wide: true, section: true, footer: false });
-      fireEvent.change(within(dialog).getAllByLabelText(/Max tokens/)[0]!, {
-        target: { value: "2048" },
-      });
-      fireEvent.change(within(dialog).getAllByLabelText(/Temperature/)[0]!, {
-        target: { value: "0.4" },
-      });
-      fireEvent.change(within(dialog).getAllByLabelText(/Extra API params/)[0]!, {
-        target: { value: '{"top_p":0.8}' },
-      });
-      fireEvent.click(within(dialog).getByRole("button", { name: "Save rung" }));
+      expect(within(dialog).queryByLabelText(/Max tokens/)).not.toBeInTheDocument();
+      expect(within(dialog).queryByLabelText(/Temperature/)).not.toBeInTheDocument();
+      expect(within(dialog).queryByLabelText(/Extra API params/)).not.toBeInTheDocument();
+      expect(
+        within(dialog).queryByRole("textbox", { name: /Required capabilities/ }),
+      ).not.toBeInTheDocument();
+      expect(within(providerModelRow(dialog, "Text Only")).getByRole("button", {
+        name: "Add",
+      })).toBeDisabled();
 
-      await waitFor(() => {
-        expect(
-          fetcher.calls.some(
-            (call) =>
-              call.url === "/admin/api/v1/llm/assignments/assign_chat_manager" &&
-              call.init.method === "PUT",
-          ),
-        ).toBe(true);
-      });
-      const put = fetcher.calls.find(
-        (call) =>
-          call.url === "/admin/api/v1/llm/assignments/assign_chat_manager" &&
-          call.init.method === "PUT",
-      );
-      expect(put).toBeDefined();
-      expect(jsonBody(put!)).toMatchObject({
-        provider_model_id: "pm_gemma",
-        max_tokens: 2048,
-        temperature: 0.4,
-        extra_api_params: { top_p: 0.8 },
-        required_capabilities: ["chat", "function_calling"],
-        is_enabled: true,
-      });
-
-      fireEvent.click(within(dialog).getByRole("button", { name: /Add rung/ }));
-      const newProviderModelInput = within(dialog).getAllByRole("combobox", {
-        name: /Provider-model/,
-      }).at(-1)!;
-      fireEvent.change(newProviderModelInput, { target: { value: "fast" } });
-      fireEvent.mouseDown(within(dialog).getByRole("option", { name: /Fast Chat/ }));
-      fireEvent.click(within(dialog).getByRole("button", { name: "Create rung" }));
+      fireEvent.click(within(providerModelRow(dialog, "Fast Chat")).getByRole("button", {
+        name: "Add",
+      }));
 
       await waitFor(() => {
         expect(
@@ -1052,14 +1021,13 @@ describe("Admin LlmPage", () => {
         provider_model_id: "pm_fast",
         priority: 1,
       });
-
-      fireEvent.change(within(dialog).getAllByLabelText(/Required capabilities/)[0]!, {
-        target: { value: "audio_input" },
-      });
-      expect(within(dialog).getByText("missing audio_input")).toBeInTheDocument();
       expect(
-        within(dialog).getAllByRole("button", { name: "Save rung" })[0]!,
-      ).toBeDisabled();
+        fetcher.calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/assignments/assign_chat_manager" &&
+            call.init.method === "PUT",
+        ),
+      ).toBe(false);
     } finally {
       fetcher.restore();
     }
@@ -1097,7 +1065,11 @@ describe("Admin LlmPage", () => {
 
       fireEvent.click(chatManagerAssignmentButton());
       const dialog = assignmentDialog("chat.manager");
-      fireEvent.click(within(dialog).getByRole("button", { name: "Move rung 1 up" }));
+      fireEvent.click(
+        within(dialog).getByRole("button", {
+          name: "Move Fast Chat via OpenRouter up",
+        }),
+      );
 
       await waitFor(() => {
         expect(
@@ -1123,7 +1095,11 @@ describe("Admin LlmPage", () => {
         },
       ]);
 
-      fireEvent.click(within(dialog).getAllByRole("button", { name: /Delete/ })[0]!);
+      fireEvent.click(
+        within(providerModelRow(dialog, "Fast Chat")).getByRole("button", {
+          name: "Remove",
+        }),
+      );
       await waitFor(() => {
         expect(
           fetcher.calls.some(
@@ -1139,7 +1115,7 @@ describe("Admin LlmPage", () => {
     }
   });
 
-  it("removes unsaved assignment rungs locally from the assignment modal", async () => {
+  it("does not stage unsaved local assignment rungs in the modal", async () => {
     const fetcher = installPageFetch();
     try {
       render(<Harness />);
@@ -1147,11 +1123,8 @@ describe("Admin LlmPage", () => {
 
       fireEvent.click(chatManagerAssignmentButton());
       const dialog = assignmentDialog("chat.manager");
-      fireEvent.click(within(dialog).getByRole("button", { name: /Add rung/ }));
-      expect(within(dialog).getByText("New rung")).toBeInTheDocument();
-
-      fireEvent.click(within(dialog).getAllByRole("button", { name: /Delete/ }).at(-1)!);
       expect(within(dialog).queryByText("New rung")).not.toBeInTheDocument();
+      expect(within(dialog).queryByRole("button", { name: /Add rung/ })).toBeNull();
       expect(
         fetcher.calls.some(
           (call) =>
@@ -1164,7 +1137,7 @@ describe("Admin LlmPage", () => {
     }
   });
 
-  it("marks deployment-default assignment rows read-only in the modal", async () => {
+  it("omits synthetic deployment-default assignment rows from the modal", async () => {
     const fetcher = installPageFetch();
     try {
       render(<Harness />);
@@ -1181,9 +1154,12 @@ describe("Admin LlmPage", () => {
 
       const dialog = assignmentDialog("default");
       expect(
-        within(dialog).getByText(/Deployment-default rows are synthetic and read-only/),
+        within(dialog).queryByText(/Deployment-default rows are synthetic and read-only/),
+      ).not.toBeInTheDocument();
+      expect(
+        within(dialog).getByText("No direct provider-models selected."),
       ).toBeInTheDocument();
-      expect(within(dialog).getByRole("button", { name: "Save rung" })).toBeDisabled();
+      expect(within(dialog).queryByRole("button", { name: "Save rung" })).toBeNull();
       expect(
         fetcher.calls.some(
           (call) =>
@@ -1513,10 +1489,10 @@ describe("Admin LlmPage", () => {
         inherits_from: "chat.manager",
       });
 
-      fireEvent.change(within(dialog).getByLabelText(/Parent capability/), {
+      fireEvent.change(within(dialog).getByLabelText(/Change inheritance/), {
         target: { value: "default" },
       });
-      fireEvent.click(within(dialog).getByRole("button", { name: "Update inheritance" }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Change inheritance" }));
 
       await waitFor(() => {
         expect(

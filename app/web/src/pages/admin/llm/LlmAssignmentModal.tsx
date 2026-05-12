@@ -1,12 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import type { DragEvent, FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
-import FormModal, {
-  FormModalField,
-  FormModalGrid,
-} from "@/components/FormModal";
-import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
+import { ArrowDown, ArrowUp, GripVertical, Plus, Trash2 } from "lucide-react";
+import FormModal, { FormModalField } from "@/components/FormModal";
 import { Chip } from "@/components/common";
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -16,8 +12,10 @@ import type {
   LlmGraphPayload,
   LlmProviderModel,
 } from "@/types";
-import LlmUsageTotals from "./LlmUsageTotals";
+import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
 import type { LlmIndexes } from "./lib/llmIndexes";
+
+const DEFAULT_LLM_CAPABILITY = "default";
 
 interface AssignmentModalProps {
   capabilityKey: string | null;
@@ -37,49 +35,12 @@ interface AssignmentPayload {
   is_enabled: boolean;
 }
 
-interface AssignmentUpdatePayload {
-  provider_model_id: string;
-  max_tokens: number | null;
-  temperature: number | null;
-  extra_api_params: Record<string, unknown>;
-  required_capabilities: string[] | null;
-  is_enabled: boolean;
-}
-
-interface DraftRung {
-  key: string;
-  id: string | null;
-  providerModelId: string;
-  maxTokens: string;
-  temperature: string;
-  extraApiParams: string;
-  requiredCapabilities: string;
-  enabled: boolean;
-  readOnly: boolean;
-}
-
-type SaveAssignmentInput =
-  | { kind: "create"; draft: DraftRung; priority: number }
-  | { kind: "update"; draft: DraftRung };
-
-interface AssignmentPayloadInput {
-  draft: DraftRung;
-  capability: LlmCapabilityEntry;
-  priority: number;
-  indexes: LlmIndexes;
-}
-
-function formatJson(value: Record<string, unknown>): string {
-  // code-health: ignore[ccn nloc] Lizard misattributes later modal branches to this tiny JSON display helper.
-  return Object.keys(value).length ? JSON.stringify(value, null, 2) : "";
-}
-
 function apiErrorCopy(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
     const code =
       typeof error.problem?.error === "string" ? error.problem.error : undefined;
     if (code === "assignment_missing_capability") {
-      return "That provider-model does not satisfy the capability requirements. Choose a compatible model before saving.";
+      return "That provider-model does not satisfy this capability. Choose a compatible model.";
     }
     if (code === "capability_inheritance_cycle") {
       return "That inheritance change would create a cycle. Choose a different parent.";
@@ -87,79 +48,15 @@ function apiErrorCopy(error: unknown, fallback: string): string {
     if (code === "capability_inheritance_self_loop") {
       return "A capability cannot inherit from itself.";
     }
+    if (code === "default_capability_inheritance_forbidden") {
+      return "The default capability must own the deployment fallback chain.";
+    }
     if (code === "capability_inheritance_exists") {
       return "This capability already has an explicit parent. Change the existing parent instead.";
     }
     return error.detail ?? error.title ?? error.message ?? fallback;
   }
   return error instanceof Error ? error.message : fallback;
-}
-
-function assignmentToDraft(assignment: LlmAssignment): DraftRung {
-  return {
-    key: assignment.id,
-    id: assignment.id,
-    providerModelId: assignment.provider_model_id,
-    maxTokens: assignment.max_tokens === null ? "" : String(assignment.max_tokens),
-    temperature:
-      assignment.temperature === null ? "" : String(assignment.temperature),
-    extraApiParams: formatJson(assignment.extra_api_params),
-    requiredCapabilities: assignment.required_capabilities.join(", "),
-    enabled: assignment.is_enabled,
-    readOnly: assignment.is_deployment_default === true,
-  };
-}
-
-function newDraft(
-  capability: LlmCapabilityEntry,
-  providerModelId: string,
-): DraftRung {
-  return {
-    key: `new-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    id: null,
-    providerModelId,
-    maxTokens: "",
-    temperature: "",
-    extraApiParams: "",
-    requiredCapabilities: capability.required_capabilities.join(", "),
-    enabled: true,
-    readOnly: false,
-  };
-}
-
-function optionalInt(value: string, label: string): number | null {
-  if (value.trim() === "") return null;
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new Error(`${label} must be a whole number greater than zero.`);
-  }
-  return parsed;
-}
-
-function optionalTemperature(value: string): number | null {
-  if (value.trim() === "") return null;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 2) {
-    throw new Error("Temperature must be between 0 and 2.");
-  }
-  return parsed;
-}
-
-function parseRequiredCapabilities(value: string): string[] | null {
-  const tags = value
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter(Boolean);
-  return tags.length ? [...new Set(tags)] : null;
-}
-
-function parseExtraApiParams(value: string): Record<string, unknown> {
-  if (value.trim() === "") return {};
-  const parsed = JSON.parse(value) as unknown;
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Extra API params must be a JSON object.");
-  }
-  return parsed as Record<string, unknown>;
 }
 
 function compatibleMissing(
@@ -173,13 +70,35 @@ function compatibleMissing(
   return required.filter((tag) => !tags.has(tag));
 }
 
-function assignmentPayload(input: AssignmentPayloadInput): AssignmentPayload {
-  const { draft, capability, priority, indexes } = input;
-  const requiredCapabilities =
-    parseRequiredCapabilities(draft.requiredCapabilities) ??
-    capability.required_capabilities;
-  const providerModel = indexes.pmById.get(draft.providerModelId);
-  const missing = compatibleMissing(providerModel, requiredCapabilities, indexes);
+function providerModelLabel(pm: LlmProviderModel, indexes: LlmIndexes): string {
+  const model = indexes.modelsById.get(pm.model_id);
+  const provider = indexes.providersById.get(pm.provider_id);
+  return `${model?.display_name ?? pm.api_model_id} via ${provider?.name ?? "provider"}`;
+}
+
+function thinkingLabel(level: LlmProviderModel["effective_thinking_level"]): string {
+  if (level === "disabled") return "Thinking off";
+  return `Thinking ${level}`;
+}
+
+function providerModelIsAvailable(pm: LlmProviderModel, indexes: LlmIndexes): boolean {
+  const provider = indexes.providersById.get(pm.provider_id);
+  const model = indexes.modelsById.get(pm.model_id);
+  return pm.is_enabled && provider?.is_enabled === true && model?.is_active === true;
+}
+
+function assignmentCreatePayload(
+  capability: LlmCapabilityEntry,
+  providerModelId: string,
+  priority: number,
+  indexes: LlmIndexes,
+): AssignmentPayload {
+  const providerModel = indexes.pmById.get(providerModelId);
+  const missing = compatibleMissing(
+    providerModel,
+    capability.required_capabilities,
+    indexes,
+  );
   if (missing.length) {
     throw new Error(
       `Selected provider-model is missing ${missing.join(", ")} for ${capability.key}.`,
@@ -187,52 +106,25 @@ function assignmentPayload(input: AssignmentPayloadInput): AssignmentPayload {
   }
   return {
     capability: capability.key,
-    provider_model_id: draft.providerModelId,
+    provider_model_id: providerModelId,
     priority,
-    max_tokens: optionalInt(draft.maxTokens, "Max tokens"),
-    temperature: optionalTemperature(draft.temperature),
-    extra_api_params: parseExtraApiParams(draft.extraApiParams),
-    required_capabilities: requiredCapabilities,
-    is_enabled: draft.enabled,
+    max_tokens: null,
+    temperature: null,
+    extra_api_params: {},
+    required_capabilities: capability.required_capabilities,
+    is_enabled: true,
   };
 }
 
-function providerModelLabel(pm: LlmProviderModel, indexes: LlmIndexes): string {
-  const model = indexes.modelsById.get(pm.model_id);
-  const provider = indexes.providersById.get(pm.provider_id);
-  return `${model?.display_name ?? pm.api_model_id} via ${provider?.name ?? "provider"} (${pm.api_model_id})`;
-}
-
-function providerModelOption(
-  pm: LlmProviderModel,
-  required: string[],
+function directAssignments(
+  capabilityKey: string | null,
   indexes: LlmIndexes,
-): SearchableSelectOption {
-  const model = indexes.modelsById.get(pm.model_id);
-  const provider = indexes.providersById.get(pm.provider_id);
-  const capabilities = model?.capabilities ?? [];
-  const missing = compatibleMissing(pm, required, indexes);
-  const missingText = missing.length ? `missing ${missing.join(", ")}` : "";
-  return {
-    value: pm.id,
-    label: providerModelLabel(pm, indexes),
-    secondaryText: [
-      provider?.name,
-      model?.canonical_name,
-      capabilities.join(", "),
-      missingText,
-    ].filter(Boolean).join(" - "),
-    searchText: [
-      provider?.name,
-      model?.display_name,
-      model?.canonical_name,
-      pm.api_model_id,
-      capabilities.join(" "),
-      missingText,
-      pm.id,
-    ].filter(Boolean).join(" "),
-    disabled: missing.length > 0,
-  };
+): LlmAssignment[] {
+  return capabilityKey
+    ? (indexes.assignmentsByCapability.get(capabilityKey) ?? []).filter(
+        (assignment) => assignment.is_deployment_default !== true,
+      )
+    : [];
 }
 
 export default function LlmAssignmentModal({
@@ -246,75 +138,52 @@ export default function LlmAssignmentModal({
     ? indexes.capabilitiesByKey.get(capabilityKey)
     : undefined;
   const chain = useMemo(
-    () =>
-      capabilityKey ? (indexes.assignmentsByCapability.get(capabilityKey) ?? []) : [],
+    () => directAssignments(capabilityKey, indexes),
     [capabilityKey, indexes],
   );
   const explicitParent = capabilityKey
     ? indexes.explicitInheritanceByChild.get(capabilityKey)
     : undefined;
-  const effectiveParent = capabilityKey
-    ? indexes.inheritanceByChild.get(capabilityKey)
-    : undefined;
   const inheritedChildren = capabilityKey
     ? (indexes.childrenByParent.get(capabilityKey) ?? [])
     : [];
-
-  const [drafts, setDrafts] = useState<DraftRung[]>([]);
   const [inheritParent, setInheritParent] = useState("");
+  const [draggedProviderModelId, setDraggedProviderModelId] = useState<string | null>(
+    null,
+  );
+  const [draggedAssignmentId, setDraggedAssignmentId] = useState<string | null>(null);
   const [clientErr, setClientErr] = useState<string | null>(null);
   const [serverErr, setServerErr] = useState<string | null>(null);
 
   useEffect(() => {
-    setDrafts(chain.map(assignmentToDraft));
     setInheritParent(explicitParent ?? "");
+    setDraggedProviderModelId(null);
+    setDraggedAssignmentId(null);
     setClientErr(null);
     setServerErr(null);
-  }, [capabilityKey, chain, explicitParent]);
+  }, [capabilityKey, explicitParent]);
 
   const invalidate = async () => {
     await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
     await qc.invalidateQueries({ queryKey: qk.adminLlmCalls() });
   };
 
-  const saveAssignment = useMutation({
-    mutationFn: (input: SaveAssignmentInput) => {
+  const createAssignment = useMutation({
+    mutationFn: (providerModelId: string) => {
       if (!capability) throw new Error("Capability is missing.");
-      if (input.kind === "create") {
-        const payload = assignmentPayload({
-          draft: input.draft,
+      return fetchJson<LlmAssignment>("/admin/api/v1/llm/assignments", {
+        method: "POST",
+        body: assignmentCreatePayload(
           capability,
-          priority: input.priority,
+          providerModelId,
+          chain.length,
           indexes,
-        });
-        return fetchJson<LlmAssignment>("/admin/api/v1/llm/assignments", {
-          method: "POST",
-          body: payload,
-        });
-      }
-      if (!input.draft.id) throw new Error("Assignment id is missing.");
-      const payload = assignmentPayload({
-        draft: input.draft,
-        capability,
-        priority: 0,
-        indexes,
+        ),
       });
-      const update: AssignmentUpdatePayload = {
-        provider_model_id: payload.provider_model_id,
-        max_tokens: payload.max_tokens,
-        temperature: payload.temperature,
-        extra_api_params: payload.extra_api_params,
-        required_capabilities: payload.required_capabilities,
-        is_enabled: payload.is_enabled,
-      };
-      return fetchJson<LlmAssignment>(
-        `/admin/api/v1/llm/assignments/${input.draft.id}`,
-        { method: "PUT", body: update },
-      );
     },
     onSuccess: invalidate,
     onError: (error: Error) =>
-      setServerErr(apiErrorCopy(error, "Assignment save failed.")),
+      setServerErr(apiErrorCopy(error, "Assignment create failed.")),
   });
 
   const deleteAssignment = useMutation({
@@ -370,80 +239,54 @@ export default function LlmAssignmentModal({
       setServerErr(apiErrorCopy(error, "Inheritance delete failed.")),
   });
 
-  const parentOptions = graph.capabilities.filter((cap) => cap.key !== capabilityKey);
+  const selectedProviderModelIds = new Set(
+    chain.map((assignment) => assignment.provider_model_id),
+  );
+  const availableProviderModels = graph.provider_models.filter(
+    (pm) => providerModelIsAvailable(pm, indexes) && !selectedProviderModelIds.has(pm.id),
+  );
+  const eligibleParentOptions = graph.capabilities.filter(
+    (cap) => cap.key !== capabilityKey && !indexes.inheritanceByChild.has(cap.key),
+  );
   const err = clientErr ?? serverErr;
   const titleId = capabilityKey ? "llm-assignment-modal-title" : undefined;
-  const hasReadOnlyDefault = drafts.some((draft) => draft.readOnly);
+  const pending =
+    createAssignment.isPending ||
+    deleteAssignment.isPending ||
+    reorderAssignments.isPending ||
+    saveInheritance.isPending ||
+    deleteInheritance.isPending;
 
-  function updateDraft(key: string, patch: Partial<DraftRung>): void {
-    // code-health: ignore[ccn nloc] Lizard misattributes later assignment-editor JSX to this tiny draft updater.
-    setDrafts((current) =>
-      current.map((draft) => (draft.key === key ? { ...draft, ...patch } : draft)),
-    );
-  }
-
-  function removeDraft(key: string): void {
-    setClientErr(null);
-    setServerErr(null);
-    setDrafts((current) => current.filter((draft) => draft.key !== key));
-  }
-
-  function addRung(): void {
-    if (!capability) return;
-    const firstCompatible =
-      graph.provider_models.find(
-        (pm) =>
-          compatibleMissing(pm, capability.required_capabilities, indexes).length === 0,
-      ) ?? graph.provider_models[0];
-    if (!firstCompatible) {
-      setClientErr("Add a provider-model before creating assignments.");
-      return;
-    }
-    setDrafts((current) => [...current, newDraft(capability, firstCompatible.id)]);
-  }
-
-  function submitRung(event: FormEvent<HTMLFormElement>, draft: DraftRung): void {
-    event.preventDefault();
-    if (draft.readOnly) return;
+  function addProviderModel(providerModelId: string): void {
     if (!capability) return;
     setClientErr(null);
     setServerErr(null);
+    if (selectedProviderModelIds.has(providerModelId)) return;
     try {
-      assignmentPayload({
-        draft,
-        capability,
-        priority: drafts.indexOf(draft),
-        indexes,
-      });
+      assignmentCreatePayload(capability, providerModelId, chain.length, indexes);
     } catch (error) {
       setClientErr(error instanceof Error ? error.message : "Assignment is invalid.");
       return;
     }
-    saveAssignment.mutate(
-      draft.id
-        ? { kind: "update", draft }
-        : { kind: "create", draft, priority: drafts.indexOf(draft) },
-    );
+    createAssignment.mutate(providerModelId);
   }
 
-  function moveRung(index: number, direction: -1 | 1): void {
+  function moveAssignment(index: number, direction: -1 | 1): void {
     const nextIndex = index + direction;
-    const persisted = drafts.filter((draft) => draft.id && !draft.readOnly);
-    if (
-      nextIndex < 0 ||
-      nextIndex >= drafts.length ||
-      drafts.some((draft) => !draft.id || draft.readOnly) ||
-      persisted.length !== drafts.length
-    ) {
-      setClientErr("Save new rungs before reordering, and deployment-default rows cannot be reordered.");
-      return;
-    }
-    const next = [...drafts];
+    if (nextIndex < 0 || nextIndex >= chain.length) return;
+    const next = [...chain];
     const [moved] = next.splice(index, 1);
     next.splice(nextIndex, 0, moved!);
-    setDrafts(next);
-    const ids = next.map((draft) => draft.id).filter((id): id is string => Boolean(id));
-    reorderAssignments.mutate(ids);
+    reorderAssignments.mutate(next.map((assignment) => assignment.id));
+  }
+
+  function moveAssignmentTo(assignmentId: string, toIndex: number): void {
+    const fromIndex = chain.findIndex((assignment) => assignment.id === assignmentId);
+    if (fromIndex < 0 || fromIndex === toIndex) return;
+    const next = [...chain];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved!);
+    reorderAssignments.mutate(next.map((assignment) => assignment.id));
   }
 
   function submitInheritance(event: FormEvent<HTMLFormElement>): void {
@@ -467,7 +310,7 @@ export default function LlmAssignmentModal({
       open={capabilityKey !== null}
       title={capabilityKey ?? "Capability"}
       titleId={titleId}
-      eyebrow="Assignment chain"
+      eyebrow={explicitParent ? "Inherited assignment chain" : "Direct assignment chain"}
       width="wide"
       bodyClassName="llm-assignment-dialog__body"
       contentElement="section"
@@ -476,285 +319,551 @@ export default function LlmAssignmentModal({
     >
       <section
         className="llm-assignment-dialog__content"
-        aria-busy={saveAssignment.isPending}
+        aria-busy={pending}
       >
-          {capability ? (
-            <div className="llm-assignment-dialog__intro">
-              <p>{capability.description}</p>
-              <div className="llm-assignment-dialog__chips">
-                {capability.required_capabilities.map((tag) => (
-                  <Chip key={tag} tone="sky" size="sm">
-                    {tag}
-                  </Chip>
-                ))}
-              </div>
-              <LlmUsageTotals
-                spendUsd={capability.spend_usd_30d}
-                calls={capability.calls_30d}
-              />
-            </div>
-          ) : null}
-          {err ? (
-            <p className="form-error" role="alert">
-              {err}
-            </p>
-          ) : null}
-          {hasReadOnlyDefault ? (
-            <p className="llm-assignment-dialog__notice">
-              Deployment-default rows are synthetic and read-only here. Change
-              the provider default or create a direct capability assignment
-              instead.
-            </p>
-          ) : null}
-          <div className="llm-assignment-dialog__section-head">
-            <h4>Fallback rungs</h4>
-            <button type="button" className="btn btn--ghost btn--sm" onClick={addRung}>
-              <Plus size={16} aria-hidden="true" /> Add rung
-            </button>
-          </div>
-          {drafts.length ? (
-            <ol className="llm-assignment-editor">
-              {drafts.map((draft, index) => (
-                <li key={draft.key} className="llm-assignment-editor__item">
-                  <AssignmentRungForm
-                    draft={draft}
-                    index={index}
-                    indexes={indexes}
-                    providerModels={graph.provider_models}
-                    onChange={updateDraft}
-                    onSubmit={submitRung}
-                    onDelete={(id) => {
-                      setClientErr(null);
-                      setServerErr(null);
-                      deleteAssignment.mutate(id);
-                    }}
-                    onRemoveDraft={removeDraft}
-                    onMove={moveRung}
-                    pending={
-                      saveAssignment.isPending ||
-                      deleteAssignment.isPending ||
-                      reorderAssignments.isPending
-                    }
-                  />
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p className="llm-assignment-dialog__empty">
-              No direct assignment rungs. Add one or configure inheritance below.
-            </p>
-          )}
-          <form
-            className="llm-assignment-dialog__inheritance"
+        {capability ? <CapabilityHeader capability={capability} /> : null}
+        {err ? (
+          <p className="form-error" role="alert">
+            {err}
+          </p>
+        ) : null}
+        {capability && explicitParent ? (
+          <InheritanceOnlyPanel
+            capability={capability}
+            explicitParent={explicitParent}
+            chain={indexes.assignmentsByCapability.get(explicitParent) ?? []}
+            indexes={indexes}
+            inheritedChildren={inheritedChildren}
+            inheritParent={inheritParent}
+            eligibleParentOptions={eligibleParentOptions}
+            pending={pending}
+            onParentChange={setInheritParent}
             onSubmit={submitInheritance}
-          >
-            <div>
-              <h4>Inheritance</h4>
-              <p>
-                {effectiveParent
-                  ? `Currently resolves through ${effectiveParent}${explicitParent ? " explicitly" : " by default"}.`
-                  : "No parent capability is configured."}
-              </p>
-              {inheritedChildren.length ? (
-                <p>Children: {inheritedChildren.join(", ")}</p>
-              ) : null}
-            </div>
-            <FormModalField label="Parent capability" requirement="optional">
-              <select
-                value={inheritParent}
-                onChange={(event) => setInheritParent(event.target.value)}
-              >
-                <option value="">No explicit parent</option>
-                {parentOptions.map((option) => (
-                  <option key={option.key} value={option.key}>
-                    {option.key}
-                  </option>
-                ))}
-              </select>
-            </FormModalField>
-            <div className="llm-assignment-dialog__inherit-actions">
-              <button
-                type="submit"
-                className="btn btn--moss"
-                disabled={saveInheritance.isPending || !inheritParent}
-              >
-                {explicitParent ? "Update inheritance" : "Create inheritance"}
-              </button>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                disabled={!explicitParent || deleteInheritance.isPending}
-                onClick={() => {
-                  setClientErr(null);
-                  setServerErr(null);
-                  deleteInheritance.mutate();
-                }}
-              >
-                Remove inheritance
-              </button>
-            </div>
-          </form>
+            onRemove={() => {
+              setClientErr(null);
+              setServerErr(null);
+              deleteInheritance.mutate();
+            }}
+          />
+        ) : capability ? (
+          <>
+            <DirectChainPicker
+              capability={capability}
+              chain={chain}
+              availableProviderModels={availableProviderModels}
+              indexes={indexes}
+              pending={pending}
+              draggedProviderModelId={draggedProviderModelId}
+              draggedAssignmentId={draggedAssignmentId}
+              onAdd={addProviderModel}
+              onDelete={(assignmentId) => {
+                setClientErr(null);
+                setServerErr(null);
+                deleteAssignment.mutate(assignmentId);
+              }}
+              onMove={moveAssignment}
+              onMoveTo={moveAssignmentTo}
+              onProviderModelDrag={setDraggedProviderModelId}
+              onAssignmentDrag={setDraggedAssignmentId}
+            />
+            <CreateInheritancePanel
+              capability={capability}
+              chainLength={chain.length}
+              inheritParent={inheritParent}
+              eligibleParentOptions={eligibleParentOptions}
+              pending={pending}
+              onParentChange={setInheritParent}
+              onSubmit={submitInheritance}
+            />
+          </>
+        ) : null}
       </section>
     </FormModal>
   );
 }
 
-interface AssignmentRungFormProps {
-  draft: DraftRung;
-  index: number;
-  indexes: LlmIndexes;
-  providerModels: LlmProviderModel[];
-  onChange: (key: string, patch: Partial<DraftRung>) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>, draft: DraftRung) => void;
-  onDelete: (assignmentId: string) => void;
-  onRemoveDraft: (key: string) => void;
-  onMove: (index: number, direction: -1 | 1) => void;
-  pending: boolean;
+function CapabilityHeader({ capability }: { capability: LlmCapabilityEntry }) {
+  return (
+    <div className="llm-assignment-dialog__intro">
+      <div className="llm-assignment-dialog__intro-main">
+        <p>{capability.description}</p>
+        <div className="llm-assignment-dialog__chips" aria-label="Required capabilities">
+          {capability.required_capabilities.map((tag) => (
+            <Chip key={tag} tone="sky" size="sm">
+              {tag}
+            </Chip>
+          ))}
+        </div>
+      </div>
+      <LlmUsageTotals
+        spendUsd={capability.spend_usd_30d}
+        calls={capability.calls_30d}
+      />
+    </div>
+  );
 }
 
-function AssignmentRungForm(props: AssignmentRungFormProps) {
-  // code-health: ignore[nloc] Assignment rung form keeps all fields for one API rung together so save/delete/reorder controls stay auditable.
-  const {
-    draft,
-    index,
-    indexes,
-    providerModels,
-    onChange,
-    onSubmit,
-    onDelete,
-    onRemoveDraft,
-    onMove,
-    pending,
-  } = props;
-  const required = parseRequiredCapabilities(draft.requiredCapabilities) ?? [];
-  const selected = indexes.pmById.get(draft.providerModelId);
-  const missing = compatibleMissing(selected, required, indexes);
-  const readOnly = draft.readOnly;
-  const providerModelOptions = useMemo(
-    () => providerModels.map((pm) => providerModelOption(pm, required, indexes)),
-    [indexes, providerModels, required],
+function InheritanceOnlyPanel({
+  capability,
+  explicitParent,
+  chain,
+  indexes,
+  inheritedChildren,
+  inheritParent,
+  eligibleParentOptions,
+  pending,
+  onParentChange,
+  onSubmit,
+  onRemove,
+}: {
+  capability: LlmCapabilityEntry;
+  explicitParent: string;
+  chain: LlmAssignment[];
+  indexes: LlmIndexes;
+  inheritedChildren: string[];
+  inheritParent: string;
+  eligibleParentOptions: LlmCapabilityEntry[];
+  pending: boolean;
+  onParentChange: (parent: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <form className="llm-assignment-dialog__inheritance" onSubmit={onSubmit}>
+      <div className="llm-assignment-dialog__section-head">
+        <div>
+          <h4>Inheritance</h4>
+          <p>
+            <code className="inline-code">{capability.key}</code> inherits the chain
+            owned by <code className="inline-code">{explicitParent}</code>.
+          </p>
+        </div>
+      </div>
+      <InheritedChainSummary
+        chain={chain.filter((assignment) => assignment.is_deployment_default !== true)}
+        childCapability={capability}
+        indexes={indexes}
+      />
+      {inheritedChildren.length ? (
+        <p>Children: {inheritedChildren.join(", ")}</p>
+      ) : null}
+      <FormModalField label="Change inheritance" requirement="required">
+        <select
+          value={inheritParent}
+          onChange={(event) => onParentChange(event.target.value)}
+        >
+          <option value="">Choose a parent capability</option>
+          {eligibleParentOptions.map((option) => (
+            <option key={option.key} value={option.key}>
+              {option.key}
+            </option>
+          ))}
+        </select>
+      </FormModalField>
+      <div className="llm-assignment-dialog__inherit-actions">
+        <button
+          type="submit"
+          className="btn btn--moss"
+          disabled={pending || !inheritParent}
+        >
+          Change inheritance
+        </button>
+        <button
+          type="button"
+          className="btn btn--ghost"
+          disabled={pending}
+          onClick={onRemove}
+        >
+          Remove inheritance
+        </button>
+      </div>
+    </form>
   );
+}
+
+function InheritedChainSummary({
+  chain,
+  childCapability,
+  indexes,
+}: {
+  chain: LlmAssignment[];
+  childCapability: LlmCapabilityEntry;
+  indexes: LlmIndexes;
+}) {
+  if (!chain.length) {
+    return (
+      <p className="llm-assignment-dialog__empty">
+        The parent has no direct assignment chain.
+      </p>
+    );
+  }
+  return (
+    <ol className="llm-assignment-chain-summary">
+      {chain.map((assignment, index) => {
+        const pm = indexes.pmById.get(assignment.provider_model_id);
+        const missing = compatibleMissing(
+          pm,
+          childCapability.required_capabilities,
+          indexes,
+        );
+        return (
+          <li key={assignment.id} className="llm-assignment-chain-summary__item">
+            <span className="llm-graph-chain__prio">{index === 0 ? "P" : index}</span>
+            <ProviderModelSummary
+              providerModel={pm}
+              indexes={indexes}
+              missing={missing}
+            />
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function CreateInheritancePanel({
+  capability,
+  chainLength,
+  inheritParent,
+  eligibleParentOptions,
+  pending,
+  onParentChange,
+  onSubmit,
+}: {
+  capability: LlmCapabilityEntry;
+  chainLength: number;
+  inheritParent: string;
+  eligibleParentOptions: LlmCapabilityEntry[];
+  pending: boolean;
+  onParentChange: (parent: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  if (capability.key === DEFAULT_LLM_CAPABILITY) {
+    return null;
+  }
 
   return (
-    <form className="llm-assignment-editor__form" onSubmit={(event) => onSubmit(event, draft)}>
-      <header className="llm-assignment-editor__head">
-        <span className="llm-graph-chain__prio">{index === 0 ? "P" : index}</span>
-        <strong>{draft.id ? `Rung ${index}` : "New rung"}</strong>
-        {readOnly ? (
-          <Chip tone="sand" size="sm">
-            read-only default
+    <form className="llm-assignment-dialog__inheritance" onSubmit={onSubmit}>
+      <div>
+        <h4>Inheritance</h4>
+        <p>
+          Create an explicit parent only for capabilities that should use another
+          direct chain instead of owning one here.
+        </p>
+      </div>
+      <FormModalField label="Parent capability" requirement="optional">
+        <select
+          value={inheritParent}
+          onChange={(event) => onParentChange(event.target.value)}
+          disabled={chainLength > 0}
+        >
+          <option value="">No explicit parent</option>
+          {eligibleParentOptions.map((option) => (
+            <option key={option.key} value={option.key}>
+              {option.key}
+            </option>
+          ))}
+        </select>
+      </FormModalField>
+      <div className="llm-assignment-dialog__inherit-actions">
+        <button
+          type="submit"
+          className="btn btn--ghost"
+          disabled={pending || chainLength > 0 || !inheritParent}
+        >
+          Create inheritance
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function DirectChainPicker({
+  capability,
+  chain,
+  availableProviderModels,
+  indexes,
+  pending,
+  draggedProviderModelId,
+  draggedAssignmentId,
+  onAdd,
+  onDelete,
+  onMove,
+  onMoveTo,
+  onProviderModelDrag,
+  onAssignmentDrag,
+}: {
+  capability: LlmCapabilityEntry;
+  chain: LlmAssignment[];
+  availableProviderModels: LlmProviderModel[];
+  indexes: LlmIndexes;
+  pending: boolean;
+  draggedProviderModelId: string | null;
+  draggedAssignmentId: string | null;
+  onAdd: (providerModelId: string) => void;
+  onDelete: (assignmentId: string) => void;
+  onMove: (index: number, direction: -1 | 1) => void;
+  onMoveTo: (assignmentId: string, toIndex: number) => void;
+  onProviderModelDrag: (providerModelId: string | null) => void;
+  onAssignmentDrag: (assignmentId: string | null) => void;
+}) {
+  function handleSelectedDrop(event: DragEvent<HTMLOListElement>): void {
+    event.preventDefault();
+    if (draggedProviderModelId) onAdd(draggedProviderModelId);
+    onProviderModelDrag(null);
+  }
+
+  function handleAvailableDrop(event: DragEvent<HTMLDivElement>): void {
+    event.preventDefault();
+    if (draggedAssignmentId) onDelete(draggedAssignmentId);
+    onAssignmentDrag(null);
+  }
+
+  return (
+    <div className="llm-assignment-picker" aria-label="Direct provider-model chain">
+      <section
+        className="llm-assignment-picker__column"
+        onDragOver={(event) => {
+          if (draggedAssignmentId) event.preventDefault();
+        }}
+        onDrop={handleAvailableDrop}
+      >
+        <div className="llm-assignment-dialog__section-head">
+          <div>
+            <h4>Available provider-models</h4>
+            <p>Enabled provider-models not already in this chain.</p>
+          </div>
+        </div>
+        <ul className="llm-assignment-picker__list">
+          {availableProviderModels.map((pm) => {
+            const missing = compatibleMissing(
+              pm,
+              capability.required_capabilities,
+              indexes,
+            );
+            const incompatible = missing.length > 0;
+            return (
+              <li key={pm.id}>
+                <ProviderModelRow
+                  providerModel={pm}
+                  indexes={indexes}
+                  missing={missing}
+                  draggable={!incompatible && !pending}
+                  disabled={incompatible || pending}
+                  actionLabel="Add"
+                  onDragStart={(event) => {
+                    onProviderModelDrag(pm.id);
+                    event.dataTransfer.effectAllowed = "copy";
+                    event.dataTransfer.setData("text/plain", pm.id);
+                  }}
+                  onDragEnd={() => onProviderModelDrag(null)}
+                  onAction={() => onAdd(pm.id)}
+                />
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+      <section className="llm-assignment-picker__column">
+        <div className="llm-assignment-dialog__section-head">
+          <div>
+            <h4>Selected chain</h4>
+            <p>Top to bottom is the runtime fallback order.</p>
+          </div>
+        </div>
+        {chain.length ? (
+          <ol
+            className="llm-assignment-picker__list"
+            onDragOver={(event) => {
+              if (draggedProviderModelId) event.preventDefault();
+            }}
+            onDrop={handleSelectedDrop}
+          >
+            {chain.map((assignment, index) => {
+              const pm = indexes.pmById.get(assignment.provider_model_id);
+              const missing = compatibleMissing(
+                pm,
+                capability.required_capabilities,
+                indexes,
+              );
+              return (
+                <li
+                  key={assignment.id}
+                  className="llm-assignment-picker__selected"
+                  onDragOver={(event) => {
+                    if (draggedAssignmentId) event.preventDefault();
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    if (draggedAssignmentId) onMoveTo(draggedAssignmentId, index);
+                    onAssignmentDrag(null);
+                  }}
+                >
+                  <span className="llm-graph-chain__prio">
+                    {index === 0 ? "P" : index}
+                  </span>
+                  <ProviderModelRow
+                    providerModel={pm}
+                    indexes={indexes}
+                    missing={missing}
+                    draggable={!pending}
+                    disabled={pending}
+                    actionLabel="Remove"
+                    onDragStart={(event) => {
+                      onAssignmentDrag(assignment.id);
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", assignment.id);
+                    }}
+                    onDragEnd={() => onAssignmentDrag(null)}
+                    onAction={() => onDelete(assignment.id)}
+                  />
+                  <div className="llm-assignment-picker__row-actions">
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      disabled={pending || index === 0}
+                      onClick={() => onMove(index, -1)}
+                      aria-label={`Move ${providerModelLabelOrUnknown(pm, indexes)} up`}
+                    >
+                      <ArrowUp size={16} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      disabled={pending || index === chain.length - 1}
+                      onClick={() => onMove(index, 1)}
+                      aria-label={`Move ${providerModelLabelOrUnknown(pm, indexes)} down`}
+                    >
+                      <ArrowDown size={16} aria-hidden="true" />
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        ) : (
+          <div
+            className="llm-assignment-dialog__empty"
+            onDragOver={(event) => {
+              if (draggedProviderModelId) event.preventDefault();
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              if (draggedProviderModelId) onAdd(draggedProviderModelId);
+              onProviderModelDrag(null);
+            }}
+          >
+            No direct provider-models selected.
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function ProviderModelRow({
+  providerModel,
+  indexes,
+  missing,
+  draggable,
+  disabled,
+  actionLabel,
+  onDragStart,
+  onDragEnd,
+  onAction,
+}: {
+  providerModel: LlmProviderModel | undefined;
+  indexes: LlmIndexes;
+  missing: string[];
+  draggable: boolean;
+  disabled: boolean;
+  actionLabel: "Add" | "Remove";
+  onDragStart: (event: DragEvent<HTMLElement>) => void;
+  onDragEnd: () => void;
+  onAction: () => void;
+}) {
+  return (
+    <article
+      className={[
+        "llm-assignment-provider-model",
+        missing.length ? "is-incompatible" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+    >
+      <span className="llm-assignment-provider-model__handle" aria-hidden="true">
+        <GripVertical size={15} />
+      </span>
+      <ProviderModelSummary
+        providerModel={providerModel}
+        indexes={indexes}
+        missing={missing}
+      />
+      <button
+        type="button"
+        className="btn btn--ghost btn--sm"
+        disabled={disabled}
+        onClick={onAction}
+      >
+        {actionLabel === "Add" ? (
+          <Plus size={16} aria-hidden="true" />
+        ) : (
+          <Trash2 size={16} aria-hidden="true" />
+        )}
+        {actionLabel}
+      </button>
+    </article>
+  );
+}
+
+function ProviderModelSummary({
+  providerModel,
+  indexes,
+  missing,
+}: {
+  providerModel: LlmProviderModel | undefined;
+  indexes: LlmIndexes;
+  missing: string[];
+}) {
+  if (!providerModel) {
+    return <span className="llm-assignment-provider-model__main">Unknown provider-model</span>;
+  }
+  const model = indexes.modelsById.get(providerModel.model_id);
+  const provider = indexes.providersById.get(providerModel.provider_id);
+  return (
+    <span className="llm-assignment-provider-model__main">
+      <strong>{model?.display_name ?? providerModel.api_model_id}</strong>
+      <span className="llm-assignment-provider-model__meta">
+        {provider?.name ?? "Provider"} · {providerModel.api_model_id} ·{" "}
+        {thinkingLabel(providerModel.effective_thinking_level)} ·{" "}
+        {formatUsageSummary(providerModel.calls_30d, providerModel.spend_usd_30d)}
+      </span>
+      <span className="llm-assignment-provider-model__chips">
+        {(model?.capabilities ?? []).map((tag) => (
+          <Chip key={tag} tone="ghost" size="sm">
+            {tag}
           </Chip>
-        ) : null}
+        ))}
         {missing.length ? (
           <Chip tone="rust" size="sm">
             missing {missing.join(", ")}
           </Chip>
-        ) : null}
-      </header>
-      <SearchableSelect
-        label="Provider-model"
-        requirement="required"
-        className="form-modal__field"
-        value={draft.providerModelId}
-        options={providerModelOptions}
-        disabled={readOnly}
-        required
-        aria-invalid={missing.length > 0}
-        onChange={(value) => onChange(draft.key, { providerModelId: value })}
-      />
-      <FormModalGrid>
-        <FormModalField label="Max tokens" requirement="optional">
-          <input
-            type="number"
-            min="1"
-            value={draft.maxTokens}
-            disabled={readOnly}
-            onChange={(event) => onChange(draft.key, { maxTokens: event.target.value })}
-          />
-        </FormModalField>
-        <FormModalField label="Temperature" requirement="optional">
-          <input
-            type="number"
-            min="0"
-            max="2"
-            step="0.1"
-            value={draft.temperature}
-            disabled={readOnly}
-            onChange={(event) =>
-              onChange(draft.key, { temperature: event.target.value })
-            }
-          />
-        </FormModalField>
-      </FormModalGrid>
-      <FormModalField label="Required capabilities" requirement="optional">
-        <input
-          value={draft.requiredCapabilities}
-          disabled={readOnly}
-          onChange={(event) =>
-            onChange(draft.key, { requiredCapabilities: event.target.value })
-          }
-        />
-      </FormModalField>
-      <FormModalField label="Extra API params" requirement="optional">
-        <textarea
-          rows={3}
-          value={draft.extraApiParams}
-          disabled={readOnly}
-          onChange={(event) =>
-            onChange(draft.key, { extraApiParams: event.target.value })
-          }
-        />
-      </FormModalField>
-      <label className="llm-registry-form__check">
-        <input
-          type="checkbox"
-          checked={draft.enabled}
-          disabled={readOnly}
-          onChange={(event) => onChange(draft.key, { enabled: event.target.checked })}
-        />
-        Enabled
-      </label>
-      <footer className="llm-assignment-editor__actions">
-        <button
-          type="button"
-          className="btn btn--ghost btn--sm"
-          disabled={readOnly || pending}
-          onClick={() => onMove(index, -1)}
-          aria-label={`Move rung ${index} up`}
-        >
-          <ArrowUp size={16} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className="btn btn--ghost btn--sm"
-          disabled={readOnly || pending}
-          onClick={() => onMove(index, 1)}
-          aria-label={`Move rung ${index} down`}
-        >
-          <ArrowDown size={16} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className="btn btn--ghost btn--sm"
-          disabled={readOnly || pending}
-          onClick={() => {
-            if (draft.id) {
-              onDelete(draft.id);
-            } else {
-              onRemoveDraft(draft.key);
-            }
-          }}
-        >
-          <Trash2 size={16} aria-hidden="true" /> Delete
-        </button>
-        <button
-          type="submit"
-          className="btn btn--moss btn--sm"
-          disabled={readOnly || pending || missing.length > 0}
-        >
-          {draft.id ? "Save rung" : "Create rung"}
-        </button>
-      </footer>
-    </form>
+        ) : (
+          <Chip tone="moss" size="sm">
+            compatible
+          </Chip>
+        )}
+      </span>
+    </span>
   );
+}
+
+function providerModelLabelOrUnknown(
+  providerModel: LlmProviderModel | undefined,
+  indexes: LlmIndexes,
+): string {
+  return providerModel ? providerModelLabel(providerModel, indexes) : "provider-model";
 }
