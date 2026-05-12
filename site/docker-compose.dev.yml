@@ -2,7 +2,7 @@ services:
   site-web-dev:
     image: node:24-alpine
     working_dir: /src
-    command: sh -c "npm ci && npm run dev:docker"
+    command: sh -c "npm ci --min-release-age=7 && npm run dev:docker"
     profiles: ["dev"]
     environment:
       ASTRO_TELEMETRY_DISABLED: "1"

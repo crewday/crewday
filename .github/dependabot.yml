@@ -3,9 +3,51 @@
 
 version: 2
 updates:
+  # Python dependencies (app + CLI, uv/pip)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "friday"
+      time: "09:00"
+      timezone: "Europe/Paris"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "deps(python)"
+    labels:
+      - "dependencies"
+      - "python"
+    groups:
+      python-all:
+        patterns:
+          - "*"
+
   # Python dependencies (mocks FastAPI app, uv/pip)
   - package-ecosystem: "pip"
     directory: "/mocks"
+    schedule:
+      interval: "weekly"
+      day: "friday"
+      time: "09:00"
+      timezone: "Europe/Paris"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "deps(python)"
+    labels:
+      - "dependencies"
+      - "python"
+    groups:
+      python-all:
+        patterns:
+          - "*"
+
+  # Python dependencies (public-site API, uv/pip)
+  - package-ecosystem: "pip"
+    directory: "/site/api"
     schedule:
       interval: "weekly"
       day: "friday"
@@ -45,9 +87,51 @@ updates:
         patterns:
           - "*"
 
+  # npm dependencies (production SPA under app/web)
+  - package-ecosystem: "npm"
+    directory: "/app/web"
+    schedule:
+      interval: "weekly"
+      day: "friday"
+      time: "09:00"
+      timezone: "Europe/Paris"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "deps(npm)"
+    labels:
+      - "dependencies"
+      - "npm"
+    groups:
+      npm-all:
+        patterns:
+          - "*"
+
   # npm dependencies (Vite + React SPA under mocks/web)
   - package-ecosystem: "npm"
     directory: "/mocks/web"
+    schedule:
+      interval: "weekly"
+      day: "friday"
+      time: "09:00"
+      timezone: "Europe/Paris"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "deps(npm)"
+    labels:
+      - "dependencies"
+      - "npm"
+    groups:
+      npm-all:
+        patterns:
+          - "*"
+
+  # npm dependencies (public-site Astro app)
+  - package-ecosystem: "npm"
+    directory: "/site/web"
     schedule:
       interval: "weekly"
       day: "friday"

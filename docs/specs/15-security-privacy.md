@@ -1283,9 +1283,13 @@ See §11 redaction details. Additional rules:
 
 ## Dependency supply chain
 
-- `uv` lockfile committed.
+- `uv` lockfiles committed; lock refreshes use `make deps-lock`, which passes
+  `uv --exclude-newer` with a seven-day cutoff by default.
+- npm package roots set `min-release-age=7`; dev containers pass the same
+  resolver gate for container-side installs.
 - `osv-scanner` in CI; findings are blockers (§17).
-- Dependabot / Renovate for weekly PRs.
+- Dependabot / Renovate for weekly PRs, with a seven-day cooldown before
+  update PRs are opened.
 - SBOM (CycloneDX) generated in release artifacts.
 - Container images built with Python 3.14 slim + pinned digests.
 - No `pip install` at runtime.

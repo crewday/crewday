@@ -4,7 +4,7 @@ WORKDIR /src
 ARG PUBLIC_CREWDAY_APP_ORIGIN=https://app.crew.day
 ENV PUBLIC_CREWDAY_APP_ORIGIN=$PUBLIC_CREWDAY_APP_ORIGIN
 COPY site/web/package.json site/web/package-lock.json ./
-RUN npm ci
+RUN npm ci --min-release-age=7
 COPY site/web/ .
 COPY mocks/web/src/styles/tokens.css /mocks/web/src/styles/tokens.css
 RUN npm run build

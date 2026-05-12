@@ -1,4 +1,4 @@
-.PHONY: lint fmt type test coverage schemathesis i18n-extract i18n-check openapi openapi-check codegen codegen-check
+.PHONY: lint fmt type test coverage schemathesis i18n-extract i18n-check openapi openapi-check codegen codegen-check deps-lock deps-sync
 
 lint:
 	uv run ruff check .
@@ -51,3 +51,9 @@ codegen-check:
 # §"API contract" + §"Quality gates".
 schemathesis:
 	bash scripts/schemathesis_run.sh
+
+deps-lock:
+	bash scripts/dependency-age-gate.sh lock
+
+deps-sync:
+	bash scripts/dependency-age-gate.sh sync

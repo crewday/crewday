@@ -182,7 +182,7 @@ services:
     # the mocks/web graph; the app/web graph currently has none of
     # those but the flag is harmless when there's nothing to resolve
     # optimistically.
-    command: sh -lc "npm install --no-audit --no-fund --no-package-lock --legacy-peer-deps && npm run dev -- --host 0.0.0.0"
+    command: sh -lc "npm install --no-audit --no-fund --no-package-lock --legacy-peer-deps --min-release-age=7 && npm run dev -- --host 0.0.0.0"
     environment:
       # The browser never talks to Vite directly anymore (FastAPI is
       # the front door), so Vite's ``server.proxy`` config is
@@ -255,7 +255,7 @@ services:
     # ``mocks/web/package-lock.json`` because npm resolves with
     # ``--legacy-peer-deps`` inside the container and without it on
     # the host.
-    command: sh -lc "npm install --no-audit --no-fund --no-package-lock --legacy-peer-deps && npm run dev -- --host 0.0.0.0 --base /mocks/"
+    command: sh -lc "npm install --no-audit --no-fund --no-package-lock --legacy-peer-deps --min-release-age=7 && npm run dev -- --host 0.0.0.0 --base /mocks/"
     environment:
       VITE_BACKEND_URL: "http://mocks-api:8000"
     volumes:

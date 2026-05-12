@@ -73,6 +73,18 @@ uv sync --all-groups
 
 Do not install ad hoc Python packages outside the project dependency files.
 
+Dependency refreshes should use the repo age-gated wrapper so newly published
+packages are skipped for seven days by default:
+
+```bash
+make deps-lock
+make deps-sync
+```
+
+Set `CREWDAY_DEPENDENCY_MIN_AGE_DAYS` only when intentionally changing that
+window. The npm package roots also commit `min-release-age=7` in `.npmrc`, and
+the dev containers pass the same flag for container-side installs.
+
 ## New Agent Checklist
 
 1. Read `AGENTS.md` for collaboration and coding rules.
