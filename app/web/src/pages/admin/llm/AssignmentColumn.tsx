@@ -92,11 +92,7 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
                   <Chip tone="sand" size="sm">
                     inherits
                   </Chip>
-                ) : (
-                  <Chip tone="moss" size="sm">
-                    {chain.length} rung{chain.length === 1 ? "" : "s"}
-                  </Chip>
-                )}
+                ) : null}
               </header>
               <div className="llm-graph-node__meta">{cap.description}</div>
               {isInheriting ? (
@@ -105,9 +101,7 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
                   <code className="inline-code">{inheritsFrom}</code>
                 </div>
               ) : null}
-              <div className="llm-capability-total">
-                <LlmUsageTotals spendUsd={cap.spend_usd_30d} calls={cap.calls_30d} />
-              </div>
+              <LlmUsageTotals spendUsd={cap.spend_usd_30d} calls={cap.calls_30d} />
             </button>
             <CapabilityChain
               chain={chain}

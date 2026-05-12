@@ -44,7 +44,15 @@ export default function ModelColumn(props: ModelColumnProps) {
       {models.map((m) => {
         const providerModels = indexes.providerModelsByModelId.get(m.id) ?? [];
         return (
-          <article key={m.id} className={nodeClass("model", m.id)}>
+          <article
+            key={m.id}
+            className={[
+              nodeClass("model", m.id),
+              m.is_active ? "" : "is-disabled",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+          >
             <button
               type="button"
               ref={setModelRef(m.id)}
@@ -64,7 +72,6 @@ export default function ModelColumn(props: ModelColumnProps) {
             >
               <header className="llm-graph-node__head">
                 <span className="llm-graph-node__name">{m.display_name}</span>
-                <span className="llm-graph-node__vendor">{m.vendor}</span>
               </header>
               <div className="llm-graph-node__meta mono">{m.canonical_name}</div>
               <div className="llm-graph-node__tags">
@@ -95,7 +102,12 @@ export default function ModelColumn(props: ModelColumnProps) {
                       key={pm.id}
                       type="button"
                       ref={setProviderModelRef(pm.id)}
-                      className={nodeClass("providerModel", pm.id)}
+                      className={[
+                        nodeClass("providerModel", pm.id),
+                        pm.is_enabled ? "" : "is-disabled",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
                       onMouseEnter={(event) => {
                         event.stopPropagation();
                         setHover({ column: "providerModel", id: pm.id });

@@ -70,6 +70,9 @@
   text-align: left;
   transition: opacity 120ms ease, border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
 }
+.llm-graph-node--provider {
+  padding-right: clamp(118px, 34%, 156px);
+}
 .llm-graph-node:hover,
 .llm-graph-node:focus-visible,
 .llm-graph-node__button:focus-visible {
@@ -87,7 +90,19 @@
   box-shadow: 0 0 0 2px var(--moss) inset;
 }
 .llm-graph-node.is-dim { opacity: 0.35; }
+.llm-graph-node.is-disabled:not(.is-active):not(.is-linked) {
+  opacity: 0.64;
+}
+.llm-graph-node.is-disabled:not(.is-active):not(.is-linked):not(.is-dim) {
+  background: var(--card);
+}
+.llm-graph-node.is-disabled .llm-graph-node__name,
+.llm-graph-node.is-disabled .llm-provider-model-list__name,
+.llm-graph-node.is-disabled .llm-graph-chain__model {
+  color: var(--ink-2);
+}
 .llm-graph-node__button {
+  position: relative;
   display: block;
   width: 100%;
   padding: 0;
@@ -97,6 +112,10 @@
   cursor: pointer;
   font: inherit;
   text-align: left;
+}
+.llm-graph-node--model > .llm-graph-node__button,
+.llm-graph-node--capability > .llm-graph-node__button {
+  padding-right: clamp(118px, 34%, 156px);
 }
 
 .llm-graph-node__head {
@@ -145,12 +164,14 @@
   gap: 5px;
 }
 .llm-graph-node__child {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 5px 7px;
+  min-height: 34px;
+  padding: 6px clamp(112px, 42%, 146px) 6px 7px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--card);
@@ -190,17 +211,8 @@
   border-color: var(--rust);
   background: var(--rust-soft);
 }
-.llm-capability-total,
 .llm-provider-model-list {
   margin-top: 10px;
-}
-.llm-capability-total {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 8px;
-}
-.llm-provider-model-list {
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -208,11 +220,13 @@
   border-top: 1px solid var(--line);
 }
 .llm-provider-model-list .llm-graph-node {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
+  min-height: 34px;
+  padding: 7px clamp(112px, 42%, 146px) 7px 8px;
   border-radius: 6px;
   background: var(--card);
 }
@@ -234,6 +248,17 @@
   background: var(--card-raised);
   color: var(--ink-2);
   font-size: 11.5px;
+  white-space: nowrap;
+}
+.llm-graph-node > .llm-usage-total,
+.llm-graph-node__button > .llm-usage-total,
+.llm-provider-model-list .llm-usage-total,
+.llm-graph-chain__usage,
+.llm-graph-node__child .llm-usage-total {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
 }
 .llm-usage-total__money {
   color: var(--ink);
@@ -253,12 +278,14 @@
   padding: 0;
 }
 .llm-graph-chain__rung {
+  position: relative;
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto minmax(108px, auto);
+  grid-template-columns: 22px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 6px 8px;
+  min-height: 42px;
+  padding: 7px clamp(116px, 30%, 148px) 7px 8px;
   border: 1px dashed var(--line);
   border-radius: 6px;
   background: var(--card);
@@ -309,9 +336,7 @@
 .llm-graph-chain__model { overflow-wrap: anywhere; }
 .llm-graph-chain__provider { font-size: 11.5px; white-space: nowrap; }
 .llm-graph-chain__usage {
-  display: grid;
-  justify-items: end;
-  gap: 3px;
+  display: block;
 }
 
 /* Prompt-library slide-over. */
@@ -612,22 +637,28 @@
   .llm-graph__edges { display: none; }
   .llm-graph-chain__rung {
     grid-template-columns: 22px minmax(0, 1fr);
+    padding-right: 8px;
+    padding-top: 36px;
   }
   .llm-graph-node__child {
     grid-template-columns: minmax(0, 1fr);
+    padding-right: 7px;
+    padding-top: 34px;
   }
   .llm-graph-chain__provider,
   .llm-graph-chain__usage {
     grid-column: 2;
     justify-self: start;
   }
-  .llm-graph-node__child .llm-usage-total {
-    grid-column: 1;
-    justify-self: start;
+  .llm-graph-node--provider,
+  .llm-graph-node--model > .llm-graph-node__button,
+  .llm-graph-node--capability > .llm-graph-node__button {
+    padding-right: 14px;
+    padding-top: 42px;
   }
-  .llm-provider-model-list .llm-graph-node,
-  .llm-usage-total {
-    grid-template-columns: minmax(0, 1fr);
+  .llm-provider-model-list .llm-graph-node {
+    padding-right: 8px;
+    padding-top: 34px;
   }
 }
 

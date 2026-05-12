@@ -29,7 +29,12 @@ export default function ProviderColumn(props: ProviderColumnProps) {
           key={p.id}
           type="button"
           ref={setProviderRef(p.id)}
-          className={nodeClass("provider", p.id)}
+          className={[
+            nodeClass("provider", p.id),
+            p.is_enabled ? "" : "is-disabled",
+          ]
+            .filter(Boolean)
+            .join(" ")}
           onMouseEnter={() => setHover({ column: "provider", id: p.id })}
           onMouseLeave={() => setHover(null)}
           onFocus={() => setHover({ column: "provider", id: p.id })}
@@ -45,9 +50,6 @@ export default function ProviderColumn(props: ProviderColumnProps) {
         >
           <header className="llm-graph-node__head">
             <span className="llm-graph-node__name">{p.name}</span>
-            <Chip tone={p.is_enabled ? "moss" : "ghost"} size="sm">
-              {p.is_enabled ? "on" : "off"}
-            </Chip>
           </header>
           <div className="llm-graph-node__meta">
             <span className="llm-graph-node__type">{p.provider_type}</span>

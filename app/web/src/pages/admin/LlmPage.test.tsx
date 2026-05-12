@@ -135,6 +135,14 @@ function pathEndpoint(d: string): { x: number; y: number } {
   return { x: values[values.length - 2]!, y: values[values.length - 1]! };
 }
 
+function pathStart(d: string): { x: number; y: number } {
+  const values = Array.from(d.matchAll(/-?\d+(?:\.\d+)?/g), (match) =>
+    Number(match[0]),
+  );
+  if (values.length < 2) throw new Error(`Path has no start: ${d}`);
+  return { x: values[0]!, y: values[1]! };
+}
+
 function expectSharedFormModal(
   dialog: HTMLElement,
   options: { wide?: boolean; section?: boolean; footer?: boolean } = {},
@@ -1192,6 +1200,67 @@ describe("Admin LlmPage", () => {
     }
   });
 
+  it("keeps graph badges usage-first while preserving disabled visual states", async () => {
+    const disabledGraph = {
+      ...graph,
+      providers: [{ ...graph.providers[0], is_enabled: false }],
+      models: [{ ...graph.models[0], is_active: false }, ...graph.models.slice(1)],
+      provider_models: [
+        { ...graph.provider_models[0], is_enabled: false },
+        ...graph.provider_models.slice(1),
+      ],
+      capabilities: [
+        ...graph.capabilities,
+        {
+          key: "documents.ocr",
+          description: "Read receipt images",
+          required_capabilities: ["vision"],
+          spend_usd_30d: 0,
+          calls_30d: 0,
+          direct_spend_usd_30d: 0,
+          direct_calls_30d: 0,
+          inherited_spend_usd_30d: 0,
+          inherited_calls_30d: 0,
+        },
+      ],
+    };
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/graph": [
+        { body: disabledGraph },
+        { body: disabledGraph },
+        { body: disabledGraph },
+      ],
+    });
+    try {
+      render(<Harness />);
+
+      const provider = await findOpenRouterProvider();
+      expect(provider).toHaveClass("is-disabled");
+      expect(within(provider).queryByText(/^on$/)).not.toBeInTheDocument();
+      expect(within(provider).queryByText(/^off$/)).not.toBeInTheDocument();
+      expect(within(provider).getByLabelText("Recent usage: 12 calls, $1.25 spend")).toHaveClass(
+        "llm-usage-total",
+      );
+
+      const model = screen.getByText("Gemma 4 31B IT").closest("article");
+      if (!(model instanceof HTMLElement)) throw new Error("model card not found");
+      expect(model).toHaveClass("is-disabled");
+      expect(within(model).queryByText("Google")).not.toBeInTheDocument();
+
+      const providerModel = screen.getByRole("button", {
+        name: /OpenRouter provider model for Gemma 4 31B IT/,
+      });
+      expect(providerModel).toHaveClass("is-disabled");
+
+      const board = within(graphBoard());
+      expect(board.queryByText(/^1 rung$/)).not.toBeInTheDocument();
+      expect(board.queryByText(/^\d+ rungs$/)).not.toBeInTheDocument();
+      expect(board.getByText("unassigned")).toBeInTheDocument();
+    } finally {
+      fetcher.restore();
+    }
+  });
+
   it("emphasizes hovered graph paths and preserves clicked selection", async () => {
     const fetcher = installPageFetch();
     try {
@@ -1242,6 +1311,9 @@ describe("Admin LlmPage", () => {
         if (label.startsWith("OpenRouter provider model for Fast Chat,")) {
           return rect(380, 430, 160, 40);
         }
+        if (label.startsWith("chat.manager assignment rung")) {
+          return rect(710, 220, 160, 44);
+        }
         return rect(0, 0, 0, 0);
       },
     );
@@ -1262,6 +1334,13 @@ describe("Admin LlmPage", () => {
         (path) => pathEndpoint(path.getAttribute("d") ?? ""),
       );
       expect(pmEndpoints).not.toContainEqual({ x: 360, y: 110 });
+
+      const assignStarts = Array.from(
+        document.querySelectorAll<SVGPathElement>(".llm-graph__edge--assign"),
+        (path) => pathStart(path.getAttribute("d") ?? ""),
+      );
+      expect(assignStarts).toContainEqual({ x: 540, y: 230 });
+      expect(assignStarts).not.toContainEqual({ x: 540, y: 110 });
     } finally {
       fetcher.restore();
     }

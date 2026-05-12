@@ -55,13 +55,13 @@ export function useLlmGraphEdges(
     for (const a of graph.assignments) {
       const pm = indexes.pmById.get(a.provider_model_id);
       if (!pm) continue;
-      const model = modelRefs.current.get(pm.model_id);
+      const providerModel = providerModelRefs.current.get(a.provider_model_id);
       const rung = rungRefs.current.get(a.id);
-      if (!model || !rung) continue;
-      const mBox = model.getBoundingClientRect();
+      if (!providerModel || !rung) continue;
+      const pmBox = providerModel.getBoundingClientRect();
       const rBox = rung.getBoundingClientRect();
-      const x1 = mBox.right - hostBox.left;
-      const y1 = mBox.top + mBox.height / 2 - hostBox.top;
+      const x1 = pmBox.right - hostBox.left;
+      const y1 = pmBox.top + pmBox.height / 2 - hostBox.top;
       const x2 = rBox.left - hostBox.left;
       const y2 = rBox.top + rBox.height / 2 - hostBox.top;
       const dx = Math.max(40, (x2 - x1) * 0.55);
