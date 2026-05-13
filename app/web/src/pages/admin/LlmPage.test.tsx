@@ -2053,9 +2053,12 @@ describe("Admin LlmPage", () => {
         inherits_from: "chat.manager",
       });
 
-      fireEvent.change(within(dialog).getByLabelText(/Change inheritance/), {
-        target: { value: "default" },
+      const parentPicker = within(dialog).getByRole("combobox", {
+        name: /Change inheritance/,
       });
+      fireEvent.focus(parentPicker);
+      fireEvent.change(parentPicker, { target: { value: "default" } });
+      fireEvent.mouseDown(within(dialog).getByRole("option", { name: /default/ }));
       fireEvent.click(within(dialog).getByRole("button", { name: "Change inheritance" }));
 
       await waitFor(() => {

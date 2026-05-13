@@ -26,6 +26,27 @@ function installFetch(): FetchCall[] {
   return calls;
 }
 
+function installPendingFetch(): { calls: FetchCall[]; resolve: () => void } {
+  const calls: FetchCall[] = [];
+  let resolve: () => void = () => undefined;
+  const pending = new Promise<Response>((done) => {
+    resolve = () => {
+      done({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: async () => JSON.stringify({}),
+      } as Response);
+    };
+  });
+  const spy = vi.fn((url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), init: init ?? {} });
+    return pending;
+  });
+  (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
+  return { calls, resolve };
+}
+
 function renderAssignment(capabilityKey: string, testGraph: LlmGraphPayload = baseGraph) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
@@ -106,19 +127,28 @@ describe("LlmAssignmentModal", () => {
 
     expect(within(dialog).getByText(/inherits the chain owned by/)).toBeInTheDocument();
     expect(within(dialog).getByText("Gemma 4 31B IT")).toBeInTheDocument();
-    expect(within(dialog).getByLabelText(/Change inheritance/)).toHaveValue(
-      "chat.manager",
-    );
+    expect(dialog.querySelector(".llm-graph-chain__prio")).not.toBeInTheDocument();
+    const parentPicker = within(dialog).getByRole("combobox", {
+      name: /Change inheritance/,
+    });
+    expect(parentPicker).toHaveValue("chat.manager");
+    expect(dialog.querySelector("select")).not.toBeInTheDocument();
     expect(
       within(dialog).queryByLabelText("Direct provider-model chain"),
     ).not.toBeInTheDocument();
     expect(within(dialog).queryByText("Available provider-models")).not.toBeInTheDocument();
-    const parentValues = Array.from(
-      within(dialog).getByLabelText(/Change inheritance/).querySelectorAll("option"),
-      (option) => option.value,
-    );
-    expect(parentValues).not.toContain("voice.transcribe");
-    expect(parentValues).not.toContain("chat.admin");
+    fireEvent.focus(parentPicker);
+    expect(
+      within(dialog).queryByRole("option", { name: /voice\.transcribe/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole("option", { name: /chat\.admin/ }),
+    ).not.toBeInTheDocument();
+    fireEvent.change(parentPicker, { target: { value: "default" } });
+    expect(within(dialog).getByRole("option", { name: /default/ })).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole("option", { name: /chat\.manager/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("changes and removes explicit inheritance through the inheritance endpoints", async () => {
@@ -126,10 +156,19 @@ describe("LlmAssignmentModal", () => {
     renderAssignment("chat.admin", inheritedGraph);
     const dialog = screen.getByRole("dialog", { name: "chat.admin" });
 
-    fireEvent.change(within(dialog).getByLabelText(/Change inheritance/), {
-      target: { value: "default" },
+    const parentPicker = within(dialog).getByRole("combobox", {
+      name: /Change inheritance/,
     });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Change inheritance" }));
+    fireEvent.focus(parentPicker);
+    fireEvent.change(parentPicker, { target: { value: "default" } });
+    fireEvent.mouseDown(within(dialog).getByRole("option", { name: /default/ }));
+    expect(parentPicker).toHaveValue("default");
+
+    const changeButton = within(dialog).getByRole("button", {
+      name: "Change inheritance",
+    });
+    expect(changeButton.closest(".form-modal__footer")).toBeInTheDocument();
+    fireEvent.click(changeButton);
 
     await waitFor(() => {
       expect(
@@ -147,7 +186,11 @@ describe("LlmAssignmentModal", () => {
     )!;
     expect(bodyOf(put)).toEqual({ inherits_from: "default" });
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "Remove inheritance" }));
+    const removeButton = within(dialog).getByRole("button", {
+      name: "Remove inheritance",
+    });
+    expect(removeButton.closest(".form-modal__footer")).toBeInTheDocument();
+    fireEvent.click(removeButton);
 
     await waitFor(() => {
       expect(
@@ -165,6 +208,39 @@ describe("LlmAssignmentModal", () => {
           call.init.method === "POST",
       ),
     ).toBe(false);
+  });
+
+  it("disables inherited assignment controls while an inheritance update is pending", async () => {
+    const fetcher = installPendingFetch();
+    renderAssignment("chat.admin", inheritedGraph);
+    const dialog = screen.getByRole("dialog", { name: "chat.admin" });
+
+    const parentPicker = within(dialog).getByRole("combobox", {
+      name: /Change inheritance/,
+    });
+    fireEvent.focus(parentPicker);
+    fireEvent.change(parentPicker, { target: { value: "default" } });
+    fireEvent.mouseDown(within(dialog).getByRole("option", { name: /default/ }));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Change inheritance" }));
+
+    await waitFor(() => {
+      expect(fetcher.calls).toHaveLength(1);
+    });
+    expect(parentPicker).toBeDisabled();
+    expect(
+      within(dialog).getByRole("button", { name: "Change inheritance" }),
+    ).toBeDisabled();
+    expect(
+      within(dialog).getByRole("button", { name: "Remove inheritance" }),
+    ).toBeDisabled();
+
+    fetcher.resolve();
+    await waitFor(() => {
+      expect(
+        within(dialog).getByRole("button", { name: "Change inheritance" }),
+      ).toBeEnabled();
+    });
   });
 
   it("adds compatible direct provider-models and prevents incompatible additions", async () => {

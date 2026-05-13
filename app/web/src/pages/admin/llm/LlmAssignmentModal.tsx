@@ -3,6 +3,7 @@ import type { DragEvent, FormEvent, KeyboardEvent, ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { GripVertical, Plus, Trash2 } from "lucide-react";
 import FormModal, { FormModalField } from "@/components/FormModal";
+import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { Chip } from "@/components/common";
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -17,6 +18,7 @@ import LlmUsageTotals from "./LlmUsageTotals";
 import type { LlmIndexes } from "./lib/llmIndexes";
 
 const DEFAULT_LLM_CAPABILITY = "default";
+const INHERITANCE_FORM_ID = "llm-assignment-inheritance-form";
 
 interface AssignmentModalProps {
   capabilityKey: string | null;
@@ -85,6 +87,19 @@ function providerModelLabel(pm: LlmProviderModel, indexes: LlmIndexes): string {
   const model = indexes.modelsById.get(pm.model_id);
   const provider = indexes.providersById.get(pm.provider_id);
   return `${model?.display_name ?? pm.api_model_id} via ${provider?.name ?? "provider"}`;
+}
+
+function capabilityOption(capability: LlmCapabilityEntry): SearchableSelectOption {
+  return {
+    value: capability.key,
+    label: capability.key,
+    secondaryText: capability.description,
+    searchText: [
+      capability.key,
+      capability.description,
+      capability.required_capabilities.join(" "),
+    ].join(" "),
+  };
 }
 
 function thinkingLabel(level: LlmThinkingLevel): string {
@@ -339,7 +354,32 @@ export default function LlmAssignmentModal({
       bodyClassName="llm-assignment-dialog__body"
       contentElement="section"
       onClose={onClose}
-      actions={null}
+      actions={
+        capability && explicitParent ? (
+          <>
+            <button
+              type="submit"
+              form={INHERITANCE_FORM_ID}
+              className="btn btn--moss"
+              disabled={pending || !inheritParent}
+            >
+              Change inheritance
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              disabled={pending}
+              onClick={() => {
+                setClientErr(null);
+                setServerErr(null);
+                deleteInheritance.mutate();
+              }}
+            >
+              Remove inheritance
+            </button>
+          </>
+        ) : null
+      }
     >
       <section
         className="llm-assignment-dialog__content"
@@ -363,11 +403,6 @@ export default function LlmAssignmentModal({
             pending={pending}
             onParentChange={setInheritParent}
             onSubmit={submitInheritance}
-            onRemove={() => {
-              setClientErr(null);
-              setServerErr(null);
-              deleteInheritance.mutate();
-            }}
           />
         ) : capability ? (
           <>
@@ -442,7 +477,6 @@ function InheritanceOnlyPanel({
   pending,
   onParentChange,
   onSubmit,
-  onRemove,
 }: {
   capability: LlmCapabilityEntry;
   explicitParent: string;
@@ -454,10 +488,18 @@ function InheritanceOnlyPanel({
   pending: boolean;
   onParentChange: (parent: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onRemove: () => void;
 }) {
+  const parentOptions = useMemo(
+    () => eligibleParentOptions.map(capabilityOption),
+    [eligibleParentOptions],
+  );
+
   return (
-    <form className="llm-assignment-dialog__inheritance" onSubmit={onSubmit}>
+    <form
+      id={INHERITANCE_FORM_ID}
+      className="llm-assignment-dialog__inheritance"
+      onSubmit={onSubmit}
+    >
       <div className="llm-assignment-dialog__section-head">
         <div>
           <h4>Inheritance</h4>
@@ -475,36 +517,18 @@ function InheritanceOnlyPanel({
       {inheritedChildren.length ? (
         <p>Children: {inheritedChildren.join(", ")}</p>
       ) : null}
-      <FormModalField label="Change inheritance" requirement="required">
-        <select
-          value={inheritParent}
-          onChange={(event) => onParentChange(event.target.value)}
-        >
-          <option value="">Choose a parent capability</option>
-          {eligibleParentOptions.map((option) => (
-            <option key={option.key} value={option.key}>
-              {option.key}
-            </option>
-          ))}
-        </select>
-      </FormModalField>
-      <div className="llm-assignment-dialog__inherit-actions">
-        <button
-          type="submit"
-          className="btn btn--moss"
-          disabled={pending || !inheritParent}
-        >
-          Change inheritance
-        </button>
-        <button
-          type="button"
-          className="btn btn--ghost"
-          disabled={pending}
-          onClick={onRemove}
-        >
-          Remove inheritance
-        </button>
-      </div>
+      <SearchableSelect
+        label="Change inheritance"
+        requirement="required"
+        className="form-modal__field"
+        value={inheritParent}
+        options={parentOptions}
+        onChange={onParentChange}
+        disabled={pending}
+        required
+        blankOption={{ label: "Choose a parent capability" }}
+        placeholder="Search parent capabilities..."
+      />
     </form>
   );
 }
@@ -527,7 +551,7 @@ function InheritedChainSummary({
   }
   return (
     <ol className="llm-assignment-chain-summary">
-      {chain.map((assignment, index) => {
+      {chain.map((assignment) => {
         const pm = indexes.pmById.get(assignment.provider_model_id);
         const missing = compatibleMissing(
           pm,
@@ -536,7 +560,6 @@ function InheritedChainSummary({
         );
         return (
           <li key={assignment.id} className="llm-assignment-chain-summary__item">
-            <span className="llm-graph-chain__prio">{index === 0 ? "P" : index}</span>
             <ProviderModelSummary
               variant="available"
               providerModel={pm}

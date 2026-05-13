@@ -1059,9 +1059,6 @@
   min-height: 36px;
   font-size: 12.5px;
 }
-.llm-assignment-chain-summary__item {
-  grid-template-columns: auto minmax(0, 1fr);
-}
 .llm-assignment-chain-summary__item .llm-assignment-provider-model__main {
   padding: 9px 10px;
   border: 1px solid var(--line);
