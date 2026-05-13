@@ -740,6 +740,7 @@ llm_model
 ├── context_window         int?
 ├── max_output_tokens      int?
 ├── thinking_level         text            -- disabled | low | medium | high; default disabled
+├── thinking_strategy      text            -- none | gemma_system_token | glm_extra_body | openrouter_extra_body; default none
 ├── is_active              bool
 ├── price_source           text            -- '' | 'openrouter' | 'manual'; see "Price sync"
 ├── price_source_model_id  text?           -- override the id used to look up pricing
@@ -798,6 +799,7 @@ llm_provider_model
 ├── supports_system_prompt     bool            -- some reasoning models reject system prompts
 ├── supports_temperature       bool            -- o-series models forbid temperature
 ├── thinking_level_override    text?           -- NULL = inherit model thinking_level; otherwise disabled | low | medium | high
+├── thinking_strategy_override text?           -- NULL/empty = inherit model thinking_strategy; otherwise none | gemma_system_token | glm_extra_body | openrouter_extra_body
 ├── reasoning_effort           text?           -- legacy compatibility; prefer thinking_level_override
 ├── extra_api_params           jsonb           -- catch-all for rare/new fields
 ├── price_source_override      text?           -- '' | 'none' | 'openrouter' — per-row override of the model's price_source
@@ -814,15 +816,27 @@ llm_provider_model
   before the call. `supports_system_prompt = false` folds the system
   prompt into the first user turn. These flags exist because they
   matter in practice on o-series / reasoning-first models.
-- Thinking is configured as a product-level level, not provider wire
-  JSON. `llm_model.thinking_level` is the provider-agnostic default,
-  `llm_provider_model.thinking_level_override` can override it for one
-  provider/model combo, and `llm_assignment.thinking_level_override`
-  can override both for one capability-chain rung. The resolver exposes
-  the effective value (`assignment override ?? provider-model override
-  ?? model default`) to adapters; adapters map it to their
-  provider-specific API parameters. `disabled` sends no thinking /
-  reasoning parameter.
+- Thinking is configured in two parts. `thinking_level` is the
+  product-level intensity vocabulary (`disabled`, `low`, `medium`,
+  `high`). `llm_model.thinking_level` is the provider-agnostic
+  default, `llm_provider_model.thinking_level_override` can override
+  it for one provider/model combo, and
+  `llm_assignment.thinking_level_override` can override both for one
+  capability-chain rung. The resolver exposes the effective value
+  (`assignment override ?? provider-model override ?? model default`)
+  to adapters.
+- `thinking_strategy` records how a non-disabled thinking level is
+  represented on the wire. Allowed values are `none` (send no explicit
+  thinking control), `gemma_system_token` (inject the model-specific
+  Gemma system token), `glm_extra_body` (send the GLM extra-body
+  control), and `openrouter_extra_body` (send OpenRouter's
+  extra-body reasoning control). `llm_model.thinking_strategy` is the
+  default for the canonical model.
+  `llm_provider_model.thinking_strategy_override` may set a
+  provider/model-specific strategy; `NULL` or empty string inherits
+  the model default. Adapters send no thinking / reasoning parameter
+  when the effective level is `disabled` or the effective strategy is
+  `none`.
 
 ## Client abstraction
 
@@ -1261,9 +1275,11 @@ the `app/config/llm_pricing.yml` file from earlier drafts is retired.
   call, as before.
 
 The sync job does **not** mutate the model registry — new models
-announced by OpenRouter do not auto-appear. Operators import models
-explicitly via `/admin/llm/graph` or `crewday admin llm model create`. This
-keeps the model catalogue small and intentional.
+announced by OpenRouter do not auto-appear, and there is no scheduled
+all-model catalogue auto-sync. Operators import one explicit model at a
+time via `/admin/llm/graph` or `crewday admin llm model create`. This
+keeps the model catalogue small and intentional while still letting the
+admin flow use OpenRouter metadata for a selected id.
 
 ## LLM graph admin
 
@@ -1284,17 +1300,42 @@ LLM area.
   rotating), and the provider's recent call/spend total.
 - **Column 2 — Models.** One card per `llm_model`; shows vendor,
   capability tags as chips and context window. Cards carry a small
-  modality icon bar (text / vision / audio / reasoning) and the model's
-  recent call/spend total.
+  modality icon bar (text / vision / audio / reasoning), thinking
+  level/strategy, and the model's recent call/spend total. The model
+  create/edit drawer exposes separate controls for thinking level and
+  thinking strategy.
+- **Create model / OpenRouter metadata load.** The Model column's
+  "Create model" drawer accepts manual fields or an optional
+  OpenRouter model id. When the admin enters an id and clicks "Load
+  metadata", the server fetches that exact id from OpenRouter's model
+  catalogue and returns a prefilled, editable draft; it does not import
+  the whole catalogue or create rows until the admin saves. Saving may
+  create or update the curated `llm_model` row and the selected
+  OpenRouter `llm_provider_model` rows. Imported metadata maps into
+  capability tags, `context_window`, `max_output_tokens`,
+  `price_source = 'openrouter'`, `price_source_model_id`,
+  provider-model `api_model_id`, `price_source_override`,
+  `price_source_model_id_override`, input/output pricing for the
+  selected OpenRouter provider-model rows, `supports_system_prompt`,
+  `supports_temperature`, and thinking fields (`thinking_level`,
+  `thinking_strategy`, plus provider-model overrides) where the source
+  data makes them inferable. Any inferred value remains editable before
+  save; unknown fields stay blank or at their explicit defaults rather
+  than being guessed.
+- **Provider-model editing.** Provider-model subcards expose pricing,
+  support flags, thinking-level override, thinking-strategy override,
+  and their effective inherited thinking values. Override controls use
+  `inherit` for the nullable/empty state and otherwise offer the same
+  values as the model-level fields.
 - **Column 3 — Assignments.** Grouped by capability. Each group is a
   vertical stack of its priority chain, top-to-bottom = highest to
   lowest priority. Drag within a group reorders priority (hits
   `PATCH /admin/api/v1/llm/assignments/reorder`). Drag between groups
   is disallowed (a row belongs to one capability). Assignment cards keep
   recent spend/call totals compact and expose both the nullable
-  assignment thinking override and the effective thinking level used for
-  routed calls; detailed period and direct/inherited usage breakdowns
-  live on `/admin/llm/usage`.
+  assignment thinking override and the effective thinking level/strategy
+  used for routed calls; detailed period and direct/inherited usage
+  breakdowns live on `/admin/llm/usage`.
 - **Direct assignment chain modal.** Selected rows show the model
   display name, drag handle, icon-only remove action, missing-required-
   capability pills when applicable, and a per-assignment thinking
@@ -1336,13 +1377,13 @@ LLM area.
   it performs an active upstream call. Direct mode calls the selected
   provider-model row by its `api_model_id`; assignment mode requires a
   deployment-level assignment that points at the same provider-model and
-  applies that assignment's tuning defaults, including its thinking
-  override before falling back to the provider-model/model effective
-  thinking level. The response is stateless and includes status,
-  assistant text on success, provider/model ids, latency, token counts,
-  finish/stop reason, estimated cost from the provider-model pricing
-  fields, and a secret-redacted provider error on failure. Playground
-  prompts and responses are not persisted to
+  applies that assignment's tuning defaults, including its
+  thinking-level override before falling back to the provider-model/model
+  effective thinking level and strategy. The response is stateless and
+  includes status, assistant text on success, provider/model ids,
+  latency, token counts, finish/stop reason, estimated cost from the
+  provider-model pricing fields, and a secret-redacted provider error on
+  failure. Playground prompts and responses are not persisted to
   `llm_usage` or prompt history. The request is rejected before the
   upstream call when `max_tokens` exceeds the selected model's known
   output-token limit.
@@ -2503,9 +2544,12 @@ the workspace-level refusal wins when both would fire.
 - `image_generation` and `embedding` capability tags. Neither has
   a shipping consumer; both join the closed capability enum the
   day one does.
-- Auto-import of models from OpenRouter's `/models` endpoint. The
-  weekly sync touches prices only; the model catalogue is curated by
-  hand via `/admin/llm/graph`.
+- Scheduled or bulk auto-import of models from OpenRouter's `/models`
+  endpoint. The weekly sync touches prices only. `/admin/llm/graph`
+  may load one admin-supplied OpenRouter model id to prefill the
+  Create model form and save curated registry rows, but newly
+  announced OpenRouter models never appear without an explicit admin
+  import.
 - A Redis dependency. Rolling meter, daily summaries, and
   `raw_response_json` all live in the DB with worker-driven TTL
   sweeps. If a deployment grows past SQLite's comfort, the migration

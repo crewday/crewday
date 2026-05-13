@@ -731,6 +731,12 @@ fix the offender.
   falls back to (0, 0) and logs a WARNING every call. See §11 "Price
   sync"; the on-disk `llm_pricing.yml` from earlier drafts is
   retired.
+- **OpenRouter model import.** Admin-triggered metadata load from
+  `/admin/llm/graph` Create model, keyed by one explicit OpenRouter
+  model id. It pre-fills editable `llm_model` and selected
+  OpenRouter `llm_provider_model` fields before save; it is separate
+  from the weekly price-only sync and is not a scheduled all-model
+  catalogue auto-import. See §11 "LLM graph admin".
 - **LLM provider.** One `llm_provider` row per upstream service. Fields:
   `provider_type ∈ {openrouter, openai_compatible, fake}`, endpoint,
   envelope-stored API key, default model, rate limits. Deployment-
@@ -739,13 +745,18 @@ fix the offender.
 - **LLM model.** One `llm_model` row per provider-agnostic model
   (e.g. `google/gemma-3-27b-it`). Carries the `capabilities` array
   (chat, vision, audio_input, reasoning, function_calling, json_mode,
-  streaming) that assignment-time validation checks against the
-  capability's `required_capabilities`. See §11.
+  streaming), product-level `thinking_level`, and model-level
+  `thinking_strategy` (`none`, `gemma_system_token`,
+  `glm_extra_body`, `openrouter_extra_body`). Assignment-time
+  validation checks the capability tags; routing uses the thinking
+  fields to derive provider call parameters. See §11.
 - **LLM provider-model.** The `llm_provider_model` join between
   provider and model — where `api_model_id`, per-million pricing,
-  per-combo overrides, and the per-row price-source pin live. Same
-  canonical model can be priced and tuned differently across
-  providers. See §11.
+  per-combo overrides, nullable `thinking_level_override`, nullable
+  `thinking_strategy_override`, and the per-row price-source pin live.
+  Empty thinking overrides inherit from the canonical model. Same
+  canonical model can be priced and tuned differently across providers.
+  See §11.
 - **LLM assignment chain.** The priority-ordered list of
   `llm_assignment` rows bound to a capability. `default` is the
   first-class deployment fallback chain; catalogue capabilities with
