@@ -1022,6 +1022,11 @@
   display: inline-flex;
   color: var(--ink-3);
 }
+.llm-assignment-provider-model__content {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
 .llm-assignment-provider-model__main {
   display: grid;
   gap: 4px;
@@ -1042,6 +1047,17 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+.llm-assignment-provider-model__thinking {
+  gap: 4px;
+}
+.llm-assignment-provider-model__thinking .form-field__label {
+  font-size: 10.5px;
+  letter-spacing: 0;
+}
+.llm-assignment-provider-model__thinking select {
+  min-height: 36px;
+  font-size: 12.5px;
 }
 .llm-assignment-chain-summary__item {
   grid-template-columns: auto minmax(0, 1fr);

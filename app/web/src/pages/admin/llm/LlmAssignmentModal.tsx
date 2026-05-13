@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { DragEvent, FormEvent, KeyboardEvent } from "react";
+import type { DragEvent, FormEvent, KeyboardEvent, ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { GripVertical, Plus, Trash2 } from "lucide-react";
 import FormModal, { FormModalField } from "@/components/FormModal";
@@ -760,15 +760,16 @@ function DirectChainPicker({
                       }
                     }}
                     onAction={() => onDelete(assignment.id)}
-                  />
-                  <AssignmentThinkingSelect
-                    assignment={assignment}
-                    label={label}
-                    disabled={pending}
-                    onChange={(thinkingOverride) =>
-                      onThinkingChange(assignment.id, thinkingOverride)
-                    }
-                  />
+                  >
+                    <AssignmentThinkingSelect
+                      assignment={assignment}
+                      label={label}
+                      disabled={pending}
+                      onChange={(thinkingOverride) =>
+                        onThinkingChange(assignment.id, thinkingOverride)
+                      }
+                    />
+                  </ProviderModelRow>
                 </li>
               );
             })}
@@ -806,6 +807,7 @@ function ProviderModelRow({
   onDragEnd,
   onKeyDown,
   onAction,
+  children,
 }: {
   providerModel: LlmProviderModel | undefined;
   indexes: LlmIndexes;
@@ -819,6 +821,7 @@ function ProviderModelRow({
   onDragEnd: () => void;
   onKeyDown?: (event: KeyboardEvent<HTMLElement>) => void;
   onAction: () => void;
+  children?: ReactNode;
 }) {
   const label = providerModelLabelOrUnknown(providerModel, indexes);
   return (
@@ -841,12 +844,15 @@ function ProviderModelRow({
       <span className="llm-assignment-provider-model__handle" aria-hidden="true">
         <GripVertical size={15} />
       </span>
-      <ProviderModelSummary
-        variant={variant}
-        providerModel={providerModel}
-        indexes={indexes}
-        missing={missing}
-      />
+      <span className="llm-assignment-provider-model__content">
+        <ProviderModelSummary
+          variant={variant}
+          providerModel={providerModel}
+          indexes={indexes}
+          missing={missing}
+        />
+        {children}
+      </span>
       <button
         type="button"
         className="btn btn--ghost btn--sm"
@@ -883,10 +889,10 @@ function ProviderModelSummary({
   const provider = indexes.providersById.get(providerModel.provider_id);
   return (
     <span className="llm-assignment-provider-model__main">
-      <strong>{model?.display_name ?? providerModel.api_model_id}</strong>
+      <strong>{model?.display_name ?? "Unknown model"}</strong>
       {variant === "available" ? (
         <span className="llm-assignment-provider-model__meta">
-          {provider?.name ?? "Provider"} · {providerModel.api_model_id} ·{" "}
+          {provider?.name ?? "Provider"} ·{" "}
           {thinkingLabel(providerModel.effective_thinking_level)}
         </span>
       ) : null}
@@ -914,8 +920,10 @@ function AssignmentThinkingSelect({
 }) {
   const value: ThinkingOverrideValue = assignment.thinking_level_override ?? "inherit";
   return (
-    <FormModalField label={`Thinking override for ${label}`} requirement="optional">
+    <label className="field form-field form-field--optional llm-assignment-provider-model__thinking">
+      <span className="form-field__label">Thinking</span>
       <select
+        aria-label={`Thinking override for ${label}`}
         value={value}
         disabled={disabled}
         onChange={(event) => {
@@ -932,7 +940,7 @@ function AssignmentThinkingSelect({
           </option>
         ))}
       </select>
-    </FormModalField>
+    </label>
   );
 }
 

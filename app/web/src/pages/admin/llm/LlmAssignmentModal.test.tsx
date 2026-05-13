@@ -182,14 +182,21 @@ describe("LlmAssignmentModal", () => {
     expect(within(dialog).queryByLabelText(/Extra API params/)).not.toBeInTheDocument();
     expect(within(dialog).queryByText("compatible")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("google/gemma-4-31b-it")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("test/fast-chat")).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/11 calls/)).not.toBeInTheDocument();
 
     const textOnly = providerModelRow(dialog, "Text Only");
     expect(within(textOnly).getByText("missing function_calling")).toBeInTheDocument();
     expect(within(textOnly).getByRole("button", { name: /Add Text Only/ })).toBeDisabled();
 
+    const fastChat = providerModelRow(dialog, "Fast Chat");
+    expect(fastChat).not.toHaveTextContent("test/fast-chat");
+    expect(
+      within(fastChat).getByRole("button", { name: /Add Fast Chat via OpenRouter/ }),
+    ).toBeEnabled();
+
     fireEvent.click(
-      within(providerModelRow(dialog, "Fast Chat")).getByRole("button", {
+      within(fastChat).getByRole("button", {
         name: /Add Fast Chat/,
       }),
     );
@@ -281,11 +288,17 @@ describe("LlmAssignmentModal", () => {
       "aria-keyshortcuts",
       "Alt+ArrowUp Alt+ArrowDown",
     );
+    const fastChat = providerModelRow(dialog, "Fast Chat");
+    const fastChatThinking = within(fastChat).getByLabelText(
+      /Thinking override for Fast Chat via OpenRouter/,
+    );
+    expect(fastChatThinking).toHaveValue("high");
     expect(
-      within(dialog).getByLabelText(
-        /Thinking override for Fast Chat via OpenRouter/,
-      ),
-    ).toHaveValue("high");
+      within(fastChat).getByText("Thinking", { selector: ".form-field__label" }),
+    ).toBeInTheDocument();
+    expect(
+      within(fastChat).queryByText(/Thinking override for Fast Chat/),
+    ).not.toBeInTheDocument();
 
     const [firstThinkingOverride] = within(dialog).getAllByLabelText(
       /Thinking override/,
@@ -312,14 +325,9 @@ describe("LlmAssignmentModal", () => {
     )!;
     expect(bodyOf(thinkingPut)).toEqual({ thinking_level_override: "medium" });
 
-    fireEvent.change(
-      within(dialog).getByLabelText(
-        /Thinking override for Fast Chat via OpenRouter/,
-      ),
-      {
-        target: { value: "inherit" },
-      },
-    );
+    fireEvent.change(fastChatThinking, {
+      target: { value: "inherit" },
+    });
 
     await waitFor(() => {
       expect(
