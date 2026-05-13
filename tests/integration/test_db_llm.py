@@ -248,12 +248,18 @@ class TestMigrationShape:
             "enabled",
             "max_tokens",
             "temperature",
+            "thinking_level_override",
             "extra_api_params",
             "required_capabilities",
             "created_at",
         }
         assert set(cols) == expected
-        nullable = {"workspace_id", "max_tokens", "temperature"}
+        nullable = {
+            "workspace_id",
+            "max_tokens",
+            "temperature",
+            "thinking_level_override",
+        }
         for col in nullable:
             assert cols[col]["nullable"] is True, f"{col} must be NULLABLE"
         for notnull in expected - nullable:
@@ -296,6 +302,36 @@ class TestMigrationShape:
         # absent.
         assert "uq_llm_assignment_workspace_capability" not in indexes
         assert "ix_llm_assignment_workspace_capability_priority" not in indexes
+
+    def test_llm_assignment_thinking_override_constraint(
+        self, db_session: Session
+    ) -> None:
+        pm = _seed_registry_trio(
+            db_session,
+            provider_model_id="01HWA0000000000000000THAS",
+            suffix="THAS",
+        )
+        db_session.add(
+            LlmAssignment(
+                id="01HWA0000000000000000ATHS",
+                workspace_id=None,
+                capability="chat.manager",
+                model_id=pm.id,
+                provider="OpenRouter",
+                priority=0,
+                enabled=True,
+                max_tokens=None,
+                temperature=None,
+                thinking_level_override="turbo",
+                extra_api_params={},
+                required_capabilities=["chat"],
+                created_at=_PINNED,
+            )
+        )
+
+        with pytest.raises(IntegrityError):
+            db_session.flush()
+        db_session.rollback()
 
     def test_agent_token_columns(self, engine: Engine) -> None:
         cols = {c["name"]: c for c in inspect(engine).get_columns("agent_token")}

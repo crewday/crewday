@@ -359,6 +359,37 @@ class TestHappyPath:
         finally:
             reset_current(token)
 
+    def test_thinking_level_assignment_override_wins(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            provider_model = seed_provider_model(
+                db_session,
+                provider_model_id="01HWA00000000000000000THD3",
+                model_capabilities=["chat", "function_calling"],
+            )
+            model = db_session.get(LlmModel, provider_model.model_id)
+            assert model is not None
+            model.thinking_level = "low"
+            provider_model.thinking_level_override = "high"
+            seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="chat.manager",
+                model_id=provider_model.id,
+                thinking_level_override="disabled",
+                required_capabilities=["chat", "function_calling"],
+            )
+
+            pick = resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+
+            assert pick.thinking_level == "disabled"
+        finally:
+            reset_current(token)
+
     def test_chain_returns_priority_ascending(
         self, db_session: Session, clock: FrozenClock
     ) -> None:

@@ -299,6 +299,7 @@ def _seed_llm_graph(session_factory: sessionmaker[Session]) -> SeededLlm:
                 enabled=True,
                 max_tokens=2048,
                 temperature=0.2,
+                thinking_level_override=None,
                 extra_api_params={"top_p": 0.9},
                 required_capabilities=["chat", "function_calling"],
                 created_at=_PINNED,
@@ -813,6 +814,8 @@ class TestAdminLlmRoutes:
             assert body["provider_models"][0]["spend_usd_30d"] == 0.174606
             assert body["provider_models"][0]["calls_30d"] == 3
             assert body["assignments"][0]["id"] == seeded.assignment_id
+            assert body["assignments"][0]["thinking_level_override"] is None
+            assert body["assignments"][0]["effective_thinking_level"] == "high"
             assert body["assignments"][0]["spend_usd_30d"] == 0.174606
             assert body["assignments"][0]["calls_30d"] == 3
             assert body["assignments"][0]["direct_spend_usd_30d"] == 0.174206
@@ -944,6 +947,7 @@ class TestAdminLlmRoutes:
                     "capability": "tasks.assist",
                     "provider_model_id": seeded.provider_model_id,
                     "priority": 0,
+                    "thinking_level_override": "disabled",
                     "is_enabled": True,
                 },
             )
@@ -951,6 +955,8 @@ class TestAdminLlmRoutes:
             body = resp.json()
             assert body["capability"] == "tasks.assist"
             assert body["required_capabilities"] == ["chat"]
+            assert body["thinking_level_override"] == "disabled"
+            assert body["effective_thinking_level"] == "disabled"
             assert [event.workspace_id for event in published] == [
                 DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID
             ]
@@ -1248,6 +1254,28 @@ class TestAdminLlmRoutes:
             assert cleared.json()["max_tokens"] is None
             assert cleared.json()["temperature"] is None
             assert cleared.json()["extra_api_params"] == {}
+
+            override = client.put(
+                f"/admin/api/v1/llm/assignments/{seeded.assignment_id}",
+                json={"thinking_level_override": "low"},
+            )
+            assert override.status_code == 200, override.text
+            assert override.json()["thinking_level_override"] == "low"
+            assert override.json()["effective_thinking_level"] == "low"
+
+            inherited = client.put(
+                f"/admin/api/v1/llm/assignments/{seeded.assignment_id}",
+                json={"thinking_level_override": None},
+            )
+            assert inherited.status_code == 200, inherited.text
+            assert inherited.json()["thinking_level_override"] is None
+            assert inherited.json()["effective_thinking_level"] == "high"
+
+            invalid = client.put(
+                f"/admin/api/v1/llm/assignments/{seeded.assignment_id}",
+                json={"thinking_level_override": "turbo"},
+            )
+            assert invalid.status_code == 422, invalid.text
 
             added = client.post(
                 "/admin/api/v1/llm/assignments",

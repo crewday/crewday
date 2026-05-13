@@ -815,10 +815,12 @@ llm_provider_model
   prompt into the first user turn. These flags exist because they
   matter in practice on o-series / reasoning-first models.
 - Thinking is configured as a product-level level, not provider wire
-  JSON. `llm_model.thinking_level` is the provider-agnostic default
-  and `llm_provider_model.thinking_level_override` can override it for
-  one provider/model combo. The resolver exposes the effective value
-  (`override ?? model default`) to adapters; adapters map it to their
+  JSON. `llm_model.thinking_level` is the provider-agnostic default,
+  `llm_provider_model.thinking_level_override` can override it for one
+  provider/model combo, and `llm_assignment.thinking_level_override`
+  can override both for one capability-chain rung. The resolver exposes
+  the effective value (`assignment override ?? provider-model override
+  ?? model default`) to adapters; adapters map it to their
   provider-specific API parameters. `disabled` sends no thinking /
   reasoning parameter.
 
@@ -969,6 +971,7 @@ llm_assignment
 ├── provider_model_id           ULID FK llm_provider_model ON DELETE PROTECT
 ├── max_tokens                  int?            -- overrides provider_model + model defaults
 ├── temperature                 float?
+├── thinking_level_override     text?           -- NULL = inherit provider-model/model; otherwise disabled | low | medium | high
 ├── system_prompt_override      text?           -- rare one-off; prefer llm_prompt_template
 ├── extra_api_params            jsonb           -- merged last, wins over provider_model params
 ├── required_capabilities       jsonb           -- copied from the catalog; recomputed on save
@@ -983,6 +986,13 @@ llm_assignment
 same capability/priority chain. `workspace_id` is a nullable legacy
 column kept only for migration safety; active rows have `workspace_id
 IS NULL` and the resolver ignores legacy non-NULL rows.
+
+`thinking_level_override` is per-assignment. `NULL` inherits the
+provider-model effective thinking level, which itself may inherit the
+canonical model default. An explicit assignment value (`disabled`,
+`low`, `medium`, or `high`) wins for calls routed through that
+assignment, so the same provider-model can run with thinking disabled
+for one capability and high thinking for another.
 
 - A capability can have `(priority=0, primary)`, `(priority=1,
   fallback)`, etc. deployment-wide. Reordering is
@@ -1281,8 +1291,10 @@ LLM area.
   lowest priority. Drag within a group reorders priority (hits
   `PATCH /admin/api/v1/llm/assignments/reorder`). Drag between groups
   is disallowed (a row belongs to one capability). Assignment cards keep
-  recent spend/call totals compact; detailed period and direct/inherited
-  usage breakdowns live on `/admin/llm/usage`.
+  recent spend/call totals compact and expose both the nullable
+  assignment thinking override and the effective thinking level used for
+  routed calls; detailed period and direct/inherited usage breakdowns
+  live on `/admin/llm/usage`.
 - **Hover and selection.**
   - Hover a provider card → every model offered by that provider and
     every assignment that resolves through it highlights; everything
@@ -1313,11 +1325,13 @@ LLM area.
   it performs an active upstream call. Direct mode calls the selected
   provider-model row by its `api_model_id`; assignment mode requires a
   deployment-level assignment that points at the same provider-model and
-  applies that assignment's tuning defaults. The response is stateless
-  and includes status, assistant text on success, provider/model ids,
-  latency, token counts, finish/stop reason, estimated cost from the
-  provider-model pricing fields, and a secret-redacted provider error on
-  failure. Playground prompts and responses are not persisted to
+  applies that assignment's tuning defaults, including its thinking
+  override before falling back to the provider-model/model effective
+  thinking level. The response is stateless and includes status,
+  assistant text on success, provider/model ids, latency, token counts,
+  finish/stop reason, estimated cost from the provider-model pricing
+  fields, and a secret-redacted provider error on failure. Playground
+  prompts and responses are not persisted to
   `llm_usage` or prompt history. The request is rejected before the
   upstream call when `max_tokens` exceeds the selected model's known
   output-token limit.

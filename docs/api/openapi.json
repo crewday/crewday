@@ -4784,6 +4784,23 @@
               }
             ],
             "title": "Temperature"
+          },
+          "thinking_level_override": {
+            "anyOf": [
+              {
+                "enum": [
+                  "disabled",
+                  "high",
+                  "low",
+                  "medium"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thinking Level Override"
           }
         },
         "required": [
@@ -4955,6 +4972,23 @@
               }
             ],
             "title": "Temperature"
+          },
+          "thinking_level_override": {
+            "anyOf": [
+              {
+                "enum": [
+                  "disabled",
+                  "high",
+                  "low",
+                  "medium"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thinking Level Override"
           }
         },
         "title": "AssignmentUpdatePayload",
@@ -13135,6 +13169,16 @@
             "title": "Direct Spend Usd 30D",
             "type": "number"
           },
+          "effective_thinking_level": {
+            "enum": [
+              "disabled",
+              "high",
+              "low",
+              "medium"
+            ],
+            "title": "Effective Thinking Level",
+            "type": "string"
+          },
           "extra_api_params": {
             "additionalProperties": true,
             "title": "Extra Api Params",
@@ -13214,12 +13258,30 @@
               }
             ],
             "title": "Temperature"
+          },
+          "thinking_level_override": {
+            "anyOf": [
+              {
+                "enum": [
+                  "disabled",
+                  "high",
+                  "low",
+                  "medium"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thinking Level Override"
           }
         },
         "required": [
           "calls_30d",
           "capability",
           "description",
+          "effective_thinking_level",
           "extra_api_params",
           "id",
           "is_enabled",
@@ -13229,7 +13291,8 @@
           "provider_model_id",
           "required_capabilities",
           "spend_usd_30d",
-          "temperature"
+          "temperature",
+          "thinking_level_override"
         ],
         "title": "LlmAssignmentResponse",
         "type": "object"

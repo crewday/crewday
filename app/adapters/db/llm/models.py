@@ -300,6 +300,7 @@ class LlmAssignment(Base):
     # model default.
     max_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
+    thinking_level_override: Mapped[str | None] = mapped_column(String, nullable=True)
     # Extra provider-layer params (``top_p``, ``frequency_penalty``,
     # tool / function-call hints, …). Merged last over the provider-
     # model defaults at call time. Empty mapping default matches the
@@ -332,6 +333,11 @@ class LlmAssignment(Base):
         # (0, 1, 2, …); this guard survives a buggy direct-insert
         # path the API doesn't own.
         CheckConstraint("priority >= 0", name="priority_non_negative"),
+        CheckConstraint(
+            "thinking_level_override IS NULL "
+            f"OR thinking_level_override IN ({_in_clause(_LLM_THINKING_LEVEL_VALUES)})",
+            name="thinking_level_override",
+        ),
         # Sorted scan: ``(capability, priority)`` backs the §11
         # resolver's deployment-wide "enabled assignments for this
         # capability, in priority order" query. Non-unique — multiple

@@ -446,7 +446,9 @@ def _to_pick(
     extra: Mapping[str, Any] = MappingProxyType(extra_copy)
     required = tuple(row.required_capabilities or ())
     thinking_level = _thinking_level(
-        provider_model.thinking_level_override or model.thinking_level
+        row.thinking_level_override
+        if row.thinking_level_override is not None
+        else (provider_model.thinking_level_override or model.thinking_level)
     )
     return ModelPick(
         provider_model_id=provider_model.id,

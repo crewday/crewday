@@ -240,6 +240,8 @@ class LlmAssignmentResponse(BaseModel):
     provider_model_id: str
     max_tokens: int | None
     temperature: float | None
+    thinking_level_override: LlmThinkingLevel | None
+    effective_thinking_level: LlmThinkingLevel
     extra_api_params: dict[str, Any]
     required_capabilities: list[str]
     is_enabled: bool
@@ -497,6 +499,7 @@ class AssignmentPayload(BaseModel):
     priority: int = Field(default=0, ge=0)
     max_tokens: int | None = Field(default=None, ge=1)
     temperature: float | None = Field(default=None, ge=0, le=2)
+    thinking_level_override: LlmThinkingLevel | None = None
     extra_api_params: dict[str, Any] = Field(default_factory=dict)
     required_capabilities: list[str] | None = None
     is_enabled: bool = True
@@ -509,6 +512,7 @@ class AssignmentUpdatePayload(BaseModel):
     provider_model_id: str | None = None
     max_tokens: int | None = Field(default=None, ge=1)
     temperature: float | None = Field(default=None, ge=0, le=2)
+    thinking_level_override: LlmThinkingLevel | None = None
     extra_api_params: dict[str, Any] | None = None
     required_capabilities: list[str] | None = None
     is_enabled: bool | None = None
@@ -732,6 +736,8 @@ def _capability_response(
 def _assignment_response(
     row: LlmAssignment,
     *,
+    provider_models_by_id: dict[str, LlmProviderModel] | None = None,
+    models_by_id: dict[str, LlmModel] | None = None,
     direct_usage: dict[str, tuple[int, Decimal]] | None = None,
     inherited_usage: dict[str, tuple[int, Decimal]] | None = None,
     usage: dict[str, tuple[int, Decimal]] | None = None,
@@ -744,6 +750,22 @@ def _assignment_response(
     inherited_calls, inherited_spend = inherited_usage.get(
         row.id, (0, Decimal("0.000000"))
     )
+    provider_model = (provider_models_by_id or {}).get(row.model_id)
+    model = (
+        (models_by_id or {}).get(provider_model.model_id)
+        if provider_model is not None
+        else None
+    )
+    effective_thinking_level = _thinking_level(
+        row.thinking_level_override
+        if row.thinking_level_override is not None
+        else (
+            provider_model.thinking_level_override
+            if provider_model is not None
+            and provider_model.thinking_level_override is not None
+            else (model.thinking_level if model is not None else None)
+        )
+    )
     return LlmAssignmentResponse(
         id=row.id,
         capability=row.capability,
@@ -752,6 +774,12 @@ def _assignment_response(
         provider_model_id=row.model_id,
         max_tokens=row.max_tokens,
         temperature=row.temperature,
+        thinking_level_override=(
+            _thinking_level(row.thinking_level_override)
+            if row.thinking_level_override is not None
+            else None
+        ),
+        effective_thinking_level=effective_thinking_level,
         extra_api_params=dict(row.extra_api_params or {}),
         required_capabilities=list(row.required_capabilities or []),
         is_enabled=row.enabled,
@@ -763,6 +791,26 @@ def _assignment_response(
         inherited_spend_usd_30d=_spend_usd(inherited_spend),
         inherited_calls_30d=inherited_calls,
     )
+
+
+def _assignment_response_context(
+    session: Session, rows: list[LlmAssignment]
+) -> tuple[dict[str, LlmProviderModel], dict[str, LlmModel]]:
+    provider_model_ids = {row.model_id for row in rows}
+    if not provider_model_ids:
+        return {}, {}
+    provider_models = list(
+        session.scalars(
+            select(LlmProviderModel).where(LlmProviderModel.id.in_(provider_model_ids))
+        ).all()
+    )
+    model_ids = {row.model_id for row in provider_models}
+    models = (
+        list(session.scalars(select(LlmModel).where(LlmModel.id.in_(model_ids))).all())
+        if model_ids
+        else []
+    )
+    return {row.id: row for row in provider_models}, {row.id: row for row in models}
 
 
 def _prompt_response(
@@ -999,6 +1047,8 @@ def _load_graph(session: Session) -> LlmGraphPayload:
     assignment_responses = [
         _assignment_response(
             row,
+            provider_models_by_id=provider_models_by_id,
+            models_by_id=models_by_id,
             direct_usage=assignment_direct_usage,
             inherited_usage=assignment_inherited_usage,
         )
@@ -1938,7 +1988,12 @@ def build_admin_llm_router() -> APIRouter:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 thinking_level=_thinking_level(
-                    provider_model.thinking_level_override or model.thinking_level
+                    assignment.thinking_level_override
+                    if assignment is not None
+                    and assignment.thinking_level_override is not None
+                    else (
+                        provider_model.thinking_level_override or model.thinking_level
+                    )
                 ),
                 consents=ConsentSet.none(),
             )
@@ -2058,7 +2113,18 @@ def build_admin_llm_router() -> APIRouter:
                 ).all()
             )
             usage = _assignment_usage(session, cutoff)
-        return [_assignment_response(row, usage=usage) for row in rows]
+            provider_models_by_id, models_by_id = _assignment_response_context(
+                session, rows
+            )
+        return [
+            _assignment_response(
+                row,
+                provider_models_by_id=provider_models_by_id,
+                models_by_id=models_by_id,
+                usage=usage,
+            )
+            for row in rows
+        ]
 
     @router.get(
         "/inheritance",
@@ -2200,6 +2266,7 @@ def build_admin_llm_router() -> APIRouter:
                 enabled=payload.is_enabled,
                 max_tokens=payload.max_tokens,
                 temperature=payload.temperature,
+                thinking_level_override=payload.thinking_level_override,
                 extra_api_params=payload.extra_api_params,
                 required_capabilities=required_capabilities,
                 created_at=now,
@@ -2209,7 +2276,15 @@ def build_admin_llm_router() -> APIRouter:
             _publish_assignment_changed(ctx, request)
             _commit_or_conflict(session, "assignment_constraint_violation")
             session.refresh(row)
-        return _assignment_response(row, usage={})
+            provider_models_by_id, models_by_id = _assignment_response_context(
+                session, [row]
+            )
+        return _assignment_response(
+            row,
+            provider_models_by_id=provider_models_by_id,
+            models_by_id=models_by_id,
+            usage={},
+        )
 
     @router.patch(
         "/assignments/reorder",
@@ -2267,7 +2342,18 @@ def build_admin_llm_router() -> APIRouter:
                     )
                 ).all()
             )
-        return [_assignment_response(row, usage={}) for row in all_rows]
+            provider_models_by_id, models_by_id = _assignment_response_context(
+                session, all_rows
+            )
+        return [
+            _assignment_response(
+                row,
+                provider_models_by_id=provider_models_by_id,
+                models_by_id=models_by_id,
+                usage={},
+            )
+            for row in all_rows
+        ]
 
     @router.get(
         "/assignments/{assignment_id}",
@@ -2281,7 +2367,15 @@ def build_admin_llm_router() -> APIRouter:
         with tenant_agnostic():
             row = _assignment(session, assignment_id)
             usage = _assignment_usage(session, cutoff)
-        return _assignment_response(row, usage=usage)
+            provider_models_by_id, models_by_id = _assignment_response_context(
+                session, [row]
+            )
+        return _assignment_response(
+            row,
+            provider_models_by_id=provider_models_by_id,
+            models_by_id=models_by_id,
+            usage=usage,
+        )
 
     @router.put(
         "/assignments/{assignment_id}",
@@ -2342,6 +2436,8 @@ def build_admin_llm_router() -> APIRouter:
                 row.max_tokens = payload.max_tokens
             if "temperature" in sent:
                 row.temperature = payload.temperature
+            if "thinking_level_override" in sent:
+                row.thinking_level_override = payload.thinking_level_override
             if "extra_api_params" in sent:
                 row.extra_api_params = payload.extra_api_params or {}
             if "required_capabilities" in sent or "provider_model_id" in sent:
@@ -2354,7 +2450,15 @@ def build_admin_llm_router() -> APIRouter:
             _publish_assignment_changed(ctx, request)
             _commit_or_conflict(session, "assignment_constraint_violation")
             session.refresh(row)
-        return _assignment_response(row, usage={})
+            provider_models_by_id, models_by_id = _assignment_response_context(
+                session, [row]
+            )
+        return _assignment_response(
+            row,
+            provider_models_by_id=provider_models_by_id,
+            models_by_id=models_by_id,
+            usage={},
+        )
 
     @router.delete(
         "/assignments/{assignment_id}",

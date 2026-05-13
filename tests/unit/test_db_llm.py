@@ -65,6 +65,7 @@ class TestLlmAssignmentModel:
             enabled=False,
             max_tokens=4096,
             temperature=0.2,
+            thinking_level_override="high",
             extra_api_params=extra,
             required_capabilities=req_caps,
             created_at=_PINNED,
@@ -73,6 +74,7 @@ class TestLlmAssignmentModel:
         assert row.enabled is False
         assert row.max_tokens == 4096
         assert row.temperature == 0.2
+        assert row.thinking_level_override == "high"
         assert row.extra_api_params == extra
         assert row.required_capabilities == req_caps
 
@@ -119,6 +121,20 @@ class TestLlmAssignmentModel:
         sql = str(checks[0].sqltext)
         assert "priority" in sql
         assert ">=" in sql or ">= 0" in sql
+
+    def test_thinking_override_check_present(self) -> None:
+        checks = [
+            c
+            for c in LlmAssignment.__table_args__
+            if isinstance(c, CheckConstraint)
+            and c.name is not None
+            and str(c.name).endswith("thinking_level_override")
+        ]
+        assert len(checks) == 1
+        sql = str(checks[0].sqltext)
+        assert "thinking_level_override" in sql
+        assert "disabled" in sql
+        assert "high" in sql
 
 
 class TestLlmCapabilityInheritanceModel:

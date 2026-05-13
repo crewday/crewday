@@ -343,6 +343,7 @@ def seed_assignment(
     enabled: bool = True,
     max_tokens: int | None = None,
     temperature: float | None = None,
+    thinking_level_override: str | None = None,
     extra_api_params: dict[str, object] | None = None,
     required_capabilities: list[str] | None = None,
 ) -> LlmAssignment:
@@ -389,6 +390,7 @@ def seed_assignment(
         enabled=enabled,
         max_tokens=max_tokens,
         temperature=temperature,
+        thinking_level_override=thinking_level_override,
         extra_api_params=dict(extra_api_params or {}),
         required_capabilities=list(required_capabilities or []),
         created_at=_PINNED,
