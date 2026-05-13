@@ -287,7 +287,12 @@ describe("LlmAssignmentModal", () => {
       ),
     ).toHaveValue("high");
 
-    fireEvent.change(within(dialog).getAllByLabelText(/Thinking override/)[0], {
+    const [firstThinkingOverride] = within(dialog).getAllByLabelText(
+      /Thinking override/,
+    );
+    if (!firstThinkingOverride) throw new Error("Expected a thinking override control.");
+
+    fireEvent.change(firstThinkingOverride, {
       target: { value: "medium" },
     });
 

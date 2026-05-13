@@ -3,6 +3,7 @@ import type { LlmModel } from "@/types";
 import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
 import { shouldOpenGraphEditor } from "./lib/clickTargets";
 import type { LlmIndexes } from "./lib/llmIndexes";
+import { thinkingStrategyLabel } from "./lib/llmThinking";
 import type { ElementRefSetter, NodeClass, SelectionSetter } from "./types";
 
 const CAPABILITY_TAG_LABEL: Record<string, string> = {
@@ -91,8 +92,17 @@ export default function ModelColumn(props: ModelColumnProps) {
                   <span className="muted">
                     {(m.context_window / 1000).toFixed(0)}k ctx
                   </span>
+                  <span className="llm-graph-node__thinking">
+                    Thinking {m.thinking_level} /{" "}
+                    {thinkingStrategyLabel(m.thinking_strategy)}
+                  </span>
                 </footer>
-              ) : null}
+              ) : (
+                <div className="llm-graph-node__thinking">
+                  Thinking {m.thinking_level} /{" "}
+                  {thinkingStrategyLabel(m.thinking_strategy)}
+                </div>
+              )}
               <LlmUsageTotals spendUsd={m.spend_usd_30d} calls={m.calls_30d} />
             </button>
             {providerModels.length ? (
@@ -135,6 +145,18 @@ export default function ModelColumn(props: ModelColumnProps) {
                     >
                       <span className="llm-provider-model-list__name">
                         {provider?.name ?? "Unknown provider"}
+                      </span>
+                      <span className="llm-provider-model-list__thinking">
+                        Level{" "}
+                        {pm.thinking_level_override
+                          ? pm.thinking_level_override
+                          : `inherits ${pm.effective_thinking_level}`}{" "}
+                        / Strategy{" "}
+                        {pm.thinking_strategy_override
+                          ? thinkingStrategyLabel(pm.thinking_strategy_override)
+                          : `inherits ${thinkingStrategyLabel(
+                              pm.effective_thinking_strategy,
+                            )}`}
                       </span>
                       <LlmUsageTotals
                         spendUsd={pm.spend_usd_30d}

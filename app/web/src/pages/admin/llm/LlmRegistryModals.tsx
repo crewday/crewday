@@ -21,8 +21,17 @@ import type {
   LlmProviderType,
   LlmReasoningEffort,
   LlmThinkingLevel,
+  LlmThinkingStrategy,
 } from "@/types";
 import type { LlmIndexes } from "./lib/llmIndexes";
+import {
+  THINKING_LEVEL_OPTIONS,
+  THINKING_STRATEGY_OPTIONS,
+  isThinkingLevel,
+  isThinkingStrategy,
+  thinkingLevelLabel,
+  thinkingStrategyLabel,
+} from "./lib/llmThinking";
 
 export type RegistryDialogState =
   | { kind: "provider"; mode: "create" }
@@ -79,6 +88,7 @@ interface ModelPayload {
   context_window: number | null;
   max_output_tokens: number | null;
   thinking_level: LlmThinkingLevel;
+  thinking_strategy: LlmThinkingStrategy;
   price_source: LlmPriceSource;
   price_source_model_id: string | null;
   is_active: boolean;
@@ -97,6 +107,7 @@ interface ProviderModelPayload {
   supports_system_prompt: boolean;
   supports_temperature: boolean;
   thinking_level_override: LlmThinkingLevel | null;
+  thinking_strategy_override: LlmThinkingStrategy | null;
   reasoning_effort: LlmReasoningEffort;
   extra_api_params: Record<string, unknown>;
   price_source_override: LlmPriceSourceOverride;
@@ -114,13 +125,6 @@ const CAPABILITY_TAGS = [
   "streaming",
   "embeddings",
 ] as const;
-
-const THINKING_LEVEL_OPTIONS = [
-  "disabled",
-  "low",
-  "medium",
-  "high",
-] as const satisfies readonly LlmThinkingLevel[];
 
 function emptyToNull(value: string): string | null {
   const trimmed = value.trim();
@@ -255,14 +259,6 @@ function formatPlaygroundCost(value: string | null): string {
     minimumFractionDigits: numeric === 0 ? 2 : 6,
     maximumFractionDigits: numeric < 0.01 ? 6 : 2,
   }).format(numeric);
-}
-
-function thinkingLevelLabel(level: LlmThinkingLevel): string {
-  return level;
-}
-
-function isThinkingLevel(value: string): value is LlmThinkingLevel {
-  return (THINKING_LEVEL_OPTIONS as readonly string[]).includes(value);
 }
 
 function providerOption(provider: LlmProvider): SearchableSelectOption {
@@ -606,6 +602,9 @@ function ModelForm({
   const [thinkingLevel, setThinkingLevel] = useState<LlmThinkingLevel>(
     model?.thinking_level ?? "disabled",
   );
+  const [thinkingStrategy, setThinkingStrategy] = useState<LlmThinkingStrategy>(
+    model?.thinking_strategy ?? "none",
+  );
   const [priceSourceModel, setPriceSourceModel] = useState(
     model?.price_source_model_id ?? "",
   );
@@ -674,6 +673,7 @@ function ModelForm({
       context_window: contextValue,
       max_output_tokens: outputValue,
       thinking_level: thinkingLevel,
+      thinking_strategy: thinkingStrategy,
       price_source: priceSource,
       price_source_model_id: emptyToNull(priceSourceModel),
       is_active: active,
@@ -798,6 +798,24 @@ function ModelForm({
               ))}
             </select>
           </FormModalField>
+          <FormModalField label="Thinking strategy" requirement="required">
+            <select
+              value={thinkingStrategy}
+              onChange={(e) => {
+                if (isThinkingStrategy(e.target.value)) {
+                  setThinkingStrategy(e.target.value);
+                }
+              }}
+            >
+              {THINKING_STRATEGY_OPTIONS.map((strategy) => (
+                <option key={strategy} value={strategy}>
+                  {thinkingStrategyLabel(strategy)}
+                </option>
+              ))}
+            </select>
+          </FormModalField>
+        </FormModalGrid>
+        <FormModalGrid>
           <FormModalField label="Price source" requirement="required">
             <select
               value={priceSource}
@@ -876,6 +894,9 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   const [thinkingOverride, setThinkingOverride] = useState<
     LlmThinkingLevel | "inherit"
   >(providerModel?.thinking_level_override ?? "inherit");
+  const [thinkingStrategyOverride, setThinkingStrategyOverride] = useState<
+    LlmThinkingStrategy | "inherit"
+  >(providerModel?.thinking_strategy_override ?? "inherit");
   const [priceSourceOverride, setPriceSourceOverride] =
     useState<LlmPriceSourceOverride>(providerModel?.price_source_override ?? "");
   const [priceSourceModelOverride, setPriceSourceModelOverride] = useState(
@@ -904,6 +925,14 @@ function ProviderModelForm(props: ProviderModelFormProps) {
     selectedModel?.thinking_level ?? providerModel?.effective_thinking_level ?? "disabled";
   const effectiveThinkingLevel =
     thinkingOverride === "inherit" ? inheritedThinkingLevel : thinkingOverride;
+  const inheritedThinkingStrategy =
+    selectedModel?.thinking_strategy ??
+    providerModel?.effective_thinking_strategy ??
+    "none";
+  const effectiveThinkingStrategy =
+    thinkingStrategyOverride === "inherit"
+      ? inheritedThinkingStrategy
+      : thinkingStrategyOverride;
 
   const invalidate = async () => {
     await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
@@ -940,6 +969,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   const extraHelpId = "llm-provider-model-extra-help";
   const thinkingHelpId =
     thinkingOverride === "inherit" ? "llm-provider-model-thinking-help" : undefined;
+  const thinkingStrategyHelpId = "llm-provider-model-thinking-strategy-help";
 
   function submit(event: FormEvent<HTMLFormElement>) {
     // code-health: ignore[ccn] Provider-model submit intentionally keeps all field validation next to the payload it sends.
@@ -995,6 +1025,8 @@ function ProviderModelForm(props: ProviderModelFormProps) {
       supports_temperature: supportsTemperature,
       thinking_level_override:
         thinkingOverride === "inherit" ? null : thinkingOverride,
+      thinking_strategy_override:
+        thinkingStrategyOverride === "inherit" ? null : thinkingStrategyOverride,
       reasoning_effort: reasoningEffort,
       extra_api_params: parsedExtra,
       price_source_override: priceSourceOverride,
@@ -1119,7 +1151,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             />
           </FormModalField>
           <FormModalField
-            label="Thinking"
+            label="Thinking level"
             requirement="optional"
             helpId={thinkingHelpId}
             helpText={
@@ -1149,6 +1181,38 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             </select>
           </FormModalField>
         </FormModalGrid>
+        <FormModalField
+          label="Thinking strategy"
+          requirement="optional"
+          helpId={thinkingStrategyHelpId}
+          helpText={
+            thinkingStrategyOverride === "inherit"
+              ? `Inherited model default: ${thinkingStrategyLabel(
+                  inheritedThinkingStrategy,
+                )}. Effective: ${thinkingStrategyLabel(effectiveThinkingStrategy)}.`
+              : `Model default: ${thinkingStrategyLabel(
+                  inheritedThinkingStrategy,
+                )}. Effective: ${thinkingStrategyLabel(effectiveThinkingStrategy)}.`
+          }
+        >
+          <select
+            value={thinkingStrategyOverride}
+            aria-describedby={describedBy(thinkingStrategyHelpId, errId)}
+            onChange={(e) => {
+              const next = e.target.value;
+              if (next === "inherit" || isThinkingStrategy(next)) {
+                setThinkingStrategyOverride(next);
+              }
+            }}
+          >
+            <option value="inherit">Model default</option>
+            {THINKING_STRATEGY_OPTIONS.map((strategy) => (
+              <option key={strategy} value={strategy}>
+                {thinkingStrategyLabel(strategy)}
+              </option>
+            ))}
+          </select>
+        </FormModalField>
         <FormModalGrid>
           <FormModalField label="Max tokens override" requirement="optional">
             <input

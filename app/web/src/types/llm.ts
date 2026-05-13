@@ -29,6 +29,11 @@ export type LlmPriceSource = "openrouter" | "manual" | "";
 export type LlmPriceSourceOverride = "" | "none" | "openrouter";
 export type LlmReasoningEffort = "" | "low" | "medium" | "high";
 export type LlmThinkingLevel = "disabled" | "low" | "medium" | "high";
+export type LlmThinkingStrategy =
+  | "none"
+  | "gemma_system_token"
+  | "glm_extra_body"
+  | "openrouter_extra_body";
 
 export interface LlmProvider {
   id: string;
@@ -55,6 +60,7 @@ export interface LlmModel {
   context_window: number | null;
   max_output_tokens: number | null;
   thinking_level: LlmThinkingLevel;
+  thinking_strategy: LlmThinkingStrategy;
   price_source: LlmPriceSource;
   price_source_model_id: string | null;
   is_active: boolean;
@@ -78,6 +84,8 @@ export interface LlmProviderModel {
   supports_temperature: boolean;
   thinking_level_override: LlmThinkingLevel | null;
   effective_thinking_level: LlmThinkingLevel;
+  thinking_strategy_override: LlmThinkingStrategy | null;
+  effective_thinking_strategy: LlmThinkingStrategy;
   reasoning_effort: LlmReasoningEffort;
   extra_api_params: Record<string, unknown>;
   price_source_override: LlmPriceSourceOverride;
@@ -129,6 +137,7 @@ export interface LlmAssignment {
   temperature: number | null;
   thinking_level_override: LlmThinkingLevel | null;
   effective_thinking_level: LlmThinkingLevel;
+  effective_thinking_strategy: LlmThinkingStrategy;
   extra_api_params: Record<string, unknown>;
   required_capabilities: string[];
   is_enabled: boolean;

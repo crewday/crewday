@@ -660,11 +660,15 @@ describe("Admin LlmPage", () => {
         canonical_name: "test/new",
         display_name: "New model",
         capabilities: ["chat"],
+        thinking_strategy: "none",
       });
 
       fireEvent.click(modelEditTarget("Gemma 4 31B IT"));
       fireEvent.change(screen.getByLabelText(/Display name/), {
         target: { value: "Gemma admin" },
+      });
+      fireEvent.change(screen.getByLabelText(/Thinking strategy/), {
+        target: { value: "gemma_system_token" },
       });
       fireEvent.click(screen.getByRole("button", { name: "Save model" }));
 
@@ -682,7 +686,10 @@ describe("Admin LlmPage", () => {
           call.url === "/admin/api/v1/llm/models/model_gemma" &&
           call.init.method === "PUT",
       );
-      expect(jsonBody(put!)).toMatchObject({ display_name: "Gemma admin" });
+      expect(jsonBody(put!)).toMatchObject({
+        display_name: "Gemma admin",
+        thinking_strategy: "gemma_system_token",
+      });
 
       fireEvent.click(modelEditTarget("Gemma 4 31B IT"));
       fireEvent.click(screen.getByRole("button", { name: "Delete model" }));
@@ -768,6 +775,8 @@ describe("Admin LlmPage", () => {
         api_model_id: "test/new-wire",
         input_cost_per_million: 0.25,
         output_cost_per_million: 0.75,
+        thinking_level_override: null,
+        thinking_strategy_override: null,
       });
 
       fireEvent.click(
@@ -787,8 +796,11 @@ describe("Admin LlmPage", () => {
       fireEvent.change(screen.getByLabelText(/Temperature override/), {
         target: { value: "0.7" },
       });
-      fireEvent.change(screen.getByLabelText(/^Thinking/), {
+      fireEvent.change(screen.getByLabelText(/Thinking level/), {
         target: { value: "high" },
+      });
+      fireEvent.change(screen.getByLabelText(/Thinking strategy/), {
+        target: { value: "openrouter_extra_body" },
       });
       fireEvent.change(screen.getByLabelText(/Price source override/), {
         target: { value: "openrouter" },
@@ -826,6 +838,7 @@ describe("Admin LlmPage", () => {
         supports_system_prompt: false,
         supports_temperature: false,
         thinking_level_override: "high",
+        thinking_strategy_override: "openrouter_extra_body",
         extra_api_params: { top_p: 0.9 },
         price_source_override: "openrouter",
         price_source_model_id_override: "openrouter/google-gemma",
