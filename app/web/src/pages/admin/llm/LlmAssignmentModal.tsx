@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import type { DragEvent, FormEvent } from "react";
+import type { DragEvent, FormEvent, KeyboardEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, GripVertical, Plus, Trash2 } from "lucide-react";
+import { GripVertical, Plus, Trash2 } from "lucide-react";
 import FormModal, { FormModalField } from "@/components/FormModal";
 import { Chip } from "@/components/common";
 import { ApiError, fetchJson } from "@/lib/api";
@@ -11,8 +11,9 @@ import type {
   LlmCapabilityEntry,
   LlmGraphPayload,
   LlmProviderModel,
+  LlmThinkingLevel,
 } from "@/types";
-import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
+import LlmUsageTotals from "./LlmUsageTotals";
 import type { LlmIndexes } from "./lib/llmIndexes";
 
 const DEFAULT_LLM_CAPABILITY = "default";
@@ -30,10 +31,20 @@ interface AssignmentPayload {
   priority: number;
   max_tokens: number | null;
   temperature: number | null;
+  thinking_level_override: LlmThinkingLevel | null;
   extra_api_params: Record<string, unknown>;
   required_capabilities: string[] | null;
   is_enabled: boolean;
 }
+
+type ThinkingOverrideValue = LlmThinkingLevel | "inherit";
+
+const THINKING_LEVEL_OPTIONS = [
+  "disabled",
+  "low",
+  "medium",
+  "high",
+] as const satisfies readonly LlmThinkingLevel[];
 
 function apiErrorCopy(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
@@ -76,9 +87,13 @@ function providerModelLabel(pm: LlmProviderModel, indexes: LlmIndexes): string {
   return `${model?.display_name ?? pm.api_model_id} via ${provider?.name ?? "provider"}`;
 }
 
-function thinkingLabel(level: LlmProviderModel["effective_thinking_level"]): string {
+function thinkingLabel(level: LlmThinkingLevel): string {
   if (level === "disabled") return "Thinking off";
   return `Thinking ${level}`;
+}
+
+function isThinkingOverride(value: string): value is ThinkingOverrideValue {
+  return value === "inherit" || (THINKING_LEVEL_OPTIONS as readonly string[]).includes(value);
 }
 
 function providerModelIsAvailable(pm: LlmProviderModel, indexes: LlmIndexes): boolean {
@@ -110,6 +125,7 @@ function assignmentCreatePayload(
     priority,
     max_tokens: null,
     temperature: null,
+    thinking_level_override: null,
     extra_api_params: {},
     required_capabilities: capability.required_capabilities,
     is_enabled: true,
@@ -203,6 +219,26 @@ export default function LlmAssignmentModal({
       setServerErr(apiErrorCopy(error, "Assignment reorder failed.")),
   });
 
+  const updateAssignmentThinking = useMutation({
+    mutationFn: ({
+      assignmentId,
+      thinkingOverride,
+    }: {
+      assignmentId: string;
+      thinkingOverride: ThinkingOverrideValue;
+    }) =>
+      fetchJson<LlmAssignment>(`/admin/api/v1/llm/assignments/${assignmentId}`, {
+        method: "PUT",
+        body: {
+          thinking_level_override:
+            thinkingOverride === "inherit" ? null : thinkingOverride,
+        },
+      }),
+    onSuccess: invalidate,
+    onError: (error: Error) =>
+      setServerErr(apiErrorCopy(error, "Assignment thinking save failed.")),
+  });
+
   const saveInheritance = useMutation({
     mutationFn: (inheritsFrom: string) => {
       if (!capabilityKey) throw new Error("Capability is missing.");
@@ -250,6 +286,7 @@ export default function LlmAssignmentModal({
     createAssignment.isPending ||
     deleteAssignment.isPending ||
     reorderAssignments.isPending ||
+    updateAssignmentThinking.isPending ||
     saveInheritance.isPending ||
     deleteInheritance.isPending;
 
@@ -265,15 +302,6 @@ export default function LlmAssignmentModal({
       return;
     }
     createAssignment.mutate(providerModelId);
-  }
-
-  function moveAssignment(index: number, direction: -1 | 1): void {
-    const nextIndex = index + direction;
-    if (nextIndex < 0 || nextIndex >= chain.length) return;
-    const next = [...chain];
-    const [moved] = next.splice(index, 1);
-    next.splice(nextIndex, 0, moved!);
-    reorderAssignments.mutate(next.map((assignment) => assignment.id));
   }
 
   function moveAssignmentTo(assignmentId: string, toIndex: number): void {
@@ -357,8 +385,12 @@ export default function LlmAssignmentModal({
                 setServerErr(null);
                 deleteAssignment.mutate(assignmentId);
               }}
-              onMove={moveAssignment}
               onMoveTo={moveAssignmentTo}
+              onThinkingChange={(assignmentId, thinkingOverride) => {
+                setClientErr(null);
+                setServerErr(null);
+                updateAssignmentThinking.mutate({ assignmentId, thinkingOverride });
+              }}
               onProviderModelDrag={setDraggedProviderModelId}
               onAssignmentDrag={setDraggedAssignmentId}
             />
@@ -506,6 +538,7 @@ function InheritedChainSummary({
           <li key={assignment.id} className="llm-assignment-chain-summary__item">
             <span className="llm-graph-chain__prio">{index === 0 ? "P" : index}</span>
             <ProviderModelSummary
+              variant="available"
               providerModel={pm}
               indexes={indexes}
               missing={missing}
@@ -584,8 +617,8 @@ function DirectChainPicker({
   draggedAssignmentId,
   onAdd,
   onDelete,
-  onMove,
   onMoveTo,
+  onThinkingChange,
   onProviderModelDrag,
   onAssignmentDrag,
 }: {
@@ -598,8 +631,11 @@ function DirectChainPicker({
   draggedAssignmentId: string | null;
   onAdd: (providerModelId: string) => void;
   onDelete: (assignmentId: string) => void;
-  onMove: (index: number, direction: -1 | 1) => void;
   onMoveTo: (assignmentId: string, toIndex: number) => void;
+  onThinkingChange: (
+    assignmentId: string,
+    thinkingOverride: ThinkingOverrideValue,
+  ) => void;
   onProviderModelDrag: (providerModelId: string | null) => void;
   onAssignmentDrag: (assignmentId: string | null) => void;
 }) {
@@ -644,6 +680,7 @@ function DirectChainPicker({
                   providerModel={pm}
                   indexes={indexes}
                   missing={missing}
+                  variant="available"
                   draggable={!incompatible && !pending}
                   disabled={incompatible || pending}
                   actionLabel="Add"
@@ -682,6 +719,7 @@ function DirectChainPicker({
                 capability.required_capabilities,
                 indexes,
               );
+              const label = providerModelLabelOrUnknown(pm, indexes);
               return (
                 <li
                   key={assignment.id}
@@ -695,44 +733,42 @@ function DirectChainPicker({
                     onAssignmentDrag(null);
                   }}
                 >
-                  <span className="llm-graph-chain__prio">
-                    {index === 0 ? "P" : index}
-                  </span>
                   <ProviderModelRow
                     providerModel={pm}
                     indexes={indexes}
                     missing={missing}
+                    variant="selected"
                     draggable={!pending}
                     disabled={pending}
                     actionLabel="Remove"
+                    ariaLabel={`${label}, selected chain position ${index + 1}`}
                     onDragStart={(event) => {
                       onAssignmentDrag(assignment.id);
                       event.dataTransfer.effectAllowed = "move";
                       event.dataTransfer.setData("text/plain", assignment.id);
                     }}
                     onDragEnd={() => onAssignmentDrag(null)}
+                    onKeyDown={(event) => {
+                      if (!event.altKey) return;
+                      if (event.key === "ArrowUp" && index > 0) {
+                        event.preventDefault();
+                        onMoveTo(assignment.id, index - 1);
+                      }
+                      if (event.key === "ArrowDown" && index < chain.length - 1) {
+                        event.preventDefault();
+                        onMoveTo(assignment.id, index + 1);
+                      }
+                    }}
                     onAction={() => onDelete(assignment.id)}
                   />
-                  <div className="llm-assignment-picker__row-actions">
-                    <button
-                      type="button"
-                      className="btn btn--ghost btn--sm"
-                      disabled={pending || index === 0}
-                      onClick={() => onMove(index, -1)}
-                      aria-label={`Move ${providerModelLabelOrUnknown(pm, indexes)} up`}
-                    >
-                      <ArrowUp size={16} aria-hidden="true" />
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn--ghost btn--sm"
-                      disabled={pending || index === chain.length - 1}
-                      onClick={() => onMove(index, 1)}
-                      aria-label={`Move ${providerModelLabelOrUnknown(pm, indexes)} down`}
-                    >
-                      <ArrowDown size={16} aria-hidden="true" />
-                    </button>
-                  </div>
+                  <AssignmentThinkingSelect
+                    assignment={assignment}
+                    label={label}
+                    disabled={pending}
+                    onChange={(thinkingOverride) =>
+                      onThinkingChange(assignment.id, thinkingOverride)
+                    }
+                  />
                 </li>
               );
             })}
@@ -761,39 +797,52 @@ function ProviderModelRow({
   providerModel,
   indexes,
   missing,
+  variant,
   draggable,
   disabled,
   actionLabel,
+  ariaLabel,
   onDragStart,
   onDragEnd,
+  onKeyDown,
   onAction,
 }: {
   providerModel: LlmProviderModel | undefined;
   indexes: LlmIndexes;
   missing: string[];
+  variant: "available" | "selected";
   draggable: boolean;
   disabled: boolean;
   actionLabel: "Add" | "Remove";
+  ariaLabel?: string;
   onDragStart: (event: DragEvent<HTMLElement>) => void;
   onDragEnd: () => void;
+  onKeyDown?: (event: KeyboardEvent<HTMLElement>) => void;
   onAction: () => void;
 }) {
+  const label = providerModelLabelOrUnknown(providerModel, indexes);
   return (
     <article
       className={[
         "llm-assignment-provider-model",
+        `llm-assignment-provider-model--${variant}`,
         missing.length ? "is-incompatible" : "",
       ]
         .filter(Boolean)
         .join(" ")}
+      tabIndex={variant === "selected" && draggable ? 0 : undefined}
+      aria-label={ariaLabel}
+      aria-keyshortcuts={variant === "selected" ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
       draggable={draggable}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
+      onKeyDown={onKeyDown}
     >
       <span className="llm-assignment-provider-model__handle" aria-hidden="true">
         <GripVertical size={15} />
       </span>
       <ProviderModelSummary
+        variant={variant}
         providerModel={providerModel}
         indexes={indexes}
         missing={missing}
@@ -803,23 +852,26 @@ function ProviderModelRow({
         className="btn btn--ghost btn--sm"
         disabled={disabled}
         onClick={onAction}
+        aria-label={`${actionLabel} ${label}`}
+        title={`${actionLabel} ${label}`}
       >
         {actionLabel === "Add" ? (
           <Plus size={16} aria-hidden="true" />
         ) : (
           <Trash2 size={16} aria-hidden="true" />
         )}
-        {actionLabel}
       </button>
     </article>
   );
 }
 
 function ProviderModelSummary({
+  variant,
   providerModel,
   indexes,
   missing,
 }: {
+  variant: "available" | "selected";
   providerModel: LlmProviderModel | undefined;
   indexes: LlmIndexes;
   missing: string[];
@@ -832,28 +884,55 @@ function ProviderModelSummary({
   return (
     <span className="llm-assignment-provider-model__main">
       <strong>{model?.display_name ?? providerModel.api_model_id}</strong>
-      <span className="llm-assignment-provider-model__meta">
-        {provider?.name ?? "Provider"} · {providerModel.api_model_id} ·{" "}
-        {thinkingLabel(providerModel.effective_thinking_level)} ·{" "}
-        {formatUsageSummary(providerModel.calls_30d, providerModel.spend_usd_30d)}
-      </span>
-      <span className="llm-assignment-provider-model__chips">
-        {(model?.capabilities ?? []).map((tag) => (
-          <Chip key={tag} tone="ghost" size="sm">
-            {tag}
-          </Chip>
-        ))}
-        {missing.length ? (
+      {variant === "available" ? (
+        <span className="llm-assignment-provider-model__meta">
+          {provider?.name ?? "Provider"} · {providerModel.api_model_id} ·{" "}
+          {thinkingLabel(providerModel.effective_thinking_level)}
+        </span>
+      ) : null}
+      {missing.length ? (
+        <span className="llm-assignment-provider-model__chips">
           <Chip tone="rust" size="sm">
             missing {missing.join(", ")}
           </Chip>
-        ) : (
-          <Chip tone="moss" size="sm">
-            compatible
-          </Chip>
-        )}
-      </span>
+        </span>
+      ) : null}
     </span>
+  );
+}
+
+function AssignmentThinkingSelect({
+  assignment,
+  label,
+  disabled,
+  onChange,
+}: {
+  assignment: LlmAssignment;
+  label: string;
+  disabled: boolean;
+  onChange: (thinkingOverride: ThinkingOverrideValue) => void;
+}) {
+  const value: ThinkingOverrideValue = assignment.thinking_level_override ?? "inherit";
+  return (
+    <FormModalField label={`Thinking override for ${label}`} requirement="optional">
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(event) => {
+          const next = event.target.value;
+          if (isThinkingOverride(next)) onChange(next);
+        }}
+      >
+        <option value="inherit">
+          Inherit ({thinkingLabel(assignment.effective_thinking_level)})
+        </option>
+        {THINKING_LEVEL_OPTIONS.map((level) => (
+          <option key={level} value={level}>
+            {thinkingLabel(level)}
+          </option>
+        ))}
+      </select>
+    </FormModalField>
   );
 }
 

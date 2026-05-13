@@ -1295,6 +1295,14 @@ LLM area.
   assignment thinking override and the effective thinking level used for
   routed calls; detailed period and direct/inherited usage breakdowns
   live on `/admin/llm/usage`.
+- **Direct assignment chain modal.** Selected rows show the model
+  display name, drag handle, icon-only remove action, missing-required-
+  capability pills when applicable, and a per-assignment thinking
+  override dropdown (`inherit`, `disabled`, `low`, `medium`, `high`).
+  Provider/model API ids, priority columns, matching capability chips,
+  call/cost summaries, and arrow-button reordering are intentionally
+  omitted from the selected-row view; drag-and-drop is the primary
+  reorder control.
 - **Hover and selection.**
   - Hover a provider card → every model offered by that provider and
     every assignment that resolves through it highlights; everything

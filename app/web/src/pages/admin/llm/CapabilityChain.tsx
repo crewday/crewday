@@ -172,6 +172,11 @@ export default function CapabilityChain(props: CapabilityChainProps) {
                   <span className="llm-graph-chain__pm-model mono">
                     {pm.api_model_id}
                   </span>
+                  {a.thinking_level_override ? (
+                    <span className="llm-graph-chain__pm-thinking">
+                      Thinking {a.thinking_level_override}
+                    </span>
+                  ) : null}
                 </button>
               ) : null}
             </div>

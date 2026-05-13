@@ -180,15 +180,19 @@ describe("LlmAssignmentModal", () => {
       within(dialog).queryByRole("textbox", { name: /Required capabilities/ }),
     ).not.toBeInTheDocument();
     expect(within(dialog).queryByLabelText(/Extra API params/)).not.toBeInTheDocument();
-    expect(within(dialog).getAllByText(/Thinking off/).length).toBeGreaterThan(0);
+    expect(within(dialog).queryByText("compatible")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("google/gemma-4-31b-it")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/11 calls/)).not.toBeInTheDocument();
 
     const textOnly = providerModelRow(dialog, "Text Only");
     expect(within(textOnly).getByText("missing function_calling")).toBeInTheDocument();
-    expect(within(textOnly).getByRole("button", { name: "Add" })).toBeDisabled();
+    expect(within(textOnly).getByRole("button", { name: /Add Text Only/ })).toBeDisabled();
 
-    fireEvent.click(within(providerModelRow(dialog, "Fast Chat")).getByRole("button", {
-      name: "Add",
-    }));
+    fireEvent.click(
+      within(providerModelRow(dialog, "Fast Chat")).getByRole("button", {
+        name: /Add Fast Chat/,
+      }),
+    );
 
     await waitFor(() => {
       expect(
@@ -210,6 +214,7 @@ describe("LlmAssignmentModal", () => {
       priority: 1,
       max_tokens: null,
       temperature: null,
+      thinking_level_override: null,
       extra_api_params: {},
       required_capabilities: ["chat", "function_calling"],
       is_enabled: true,
@@ -251,7 +256,7 @@ describe("LlmAssignmentModal", () => {
     });
   });
 
-  it("removes and reorders selected direct provider-models", async () => {
+  it("removes, keyboard-reorders, and updates thinking on selected rows", async () => {
     const twoRungGraph: LlmGraphPayload = {
       ...baseGraph,
       assignments: [
@@ -262,6 +267,8 @@ describe("LlmAssignmentModal", () => {
           id: "assign_chat_manager_fallback",
           provider_model_id: "pm_fast",
           priority: 1,
+          thinking_level_override: "high",
+          effective_thinking_level: "high",
         },
       ],
     };
@@ -269,11 +276,67 @@ describe("LlmAssignmentModal", () => {
     renderAssignment("chat.manager", twoRungGraph);
     const dialog = screen.getByRole("dialog", { name: "chat.manager" });
 
-    fireEvent.click(
-      within(dialog).getByRole("button", {
-        name: "Move Fast Chat via OpenRouter up",
-      }),
+    expect(within(dialog).queryByRole("button", { name: /Move .* up/ })).not.toBeInTheDocument();
+    expect(providerModelRow(dialog, "Fast Chat")).toHaveAttribute(
+      "aria-keyshortcuts",
+      "Alt+ArrowUp Alt+ArrowDown",
     );
+    expect(
+      within(dialog).getByLabelText(
+        /Thinking override for Fast Chat via OpenRouter/,
+      ),
+    ).toHaveValue("high");
+
+    fireEvent.change(within(dialog).getAllByLabelText(/Thinking override/)[0], {
+      target: { value: "medium" },
+    });
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/assignments/assign_chat_manager" &&
+            call.init.method === "PUT",
+        ),
+      ).toBe(true);
+    });
+    const thinkingPut = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/assignments/assign_chat_manager" &&
+        call.init.method === "PUT",
+    )!;
+    expect(bodyOf(thinkingPut)).toEqual({ thinking_level_override: "medium" });
+
+    fireEvent.change(
+      within(dialog).getByLabelText(
+        /Thinking override for Fast Chat via OpenRouter/,
+      ),
+      {
+        target: { value: "inherit" },
+      },
+    );
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url ===
+              "/admin/api/v1/llm/assignments/assign_chat_manager_fallback" &&
+            call.init.method === "PUT",
+        ),
+      ).toBe(true);
+    });
+    const inheritPut = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/assignments/assign_chat_manager_fallback" &&
+        call.init.method === "PUT",
+    )!;
+    expect(bodyOf(inheritPut)).toEqual({ thinking_level_override: null });
+
+    fireEvent.keyDown(providerModelRow(dialog, "Fast Chat"), {
+      key: "ArrowUp",
+      altKey: true,
+    });
 
     await waitFor(() => {
       expect(
@@ -299,9 +362,11 @@ describe("LlmAssignmentModal", () => {
       },
     ]);
 
-    fireEvent.click(within(providerModelRow(dialog, "Fast Chat")).getByRole("button", {
-      name: "Remove",
-    }));
+    fireEvent.click(
+      within(providerModelRow(dialog, "Fast Chat")).getByRole("button", {
+        name: /Remove Fast Chat/,
+      }),
+    );
 
     await waitFor(() => {
       expect(

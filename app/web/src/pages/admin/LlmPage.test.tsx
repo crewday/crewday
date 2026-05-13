@@ -1017,13 +1017,17 @@ describe("Admin LlmPage", () => {
       expect(
         within(dialog).queryByRole("textbox", { name: /Required capabilities/ }),
       ).not.toBeInTheDocument();
-      expect(within(providerModelRow(dialog, "Text Only")).getByRole("button", {
-        name: "Add",
-      })).toBeDisabled();
+      expect(
+        within(providerModelRow(dialog, "Text Only")).getByRole("button", {
+          name: /Add Text Only/,
+        }),
+      ).toBeDisabled();
 
-      fireEvent.click(within(providerModelRow(dialog, "Fast Chat")).getByRole("button", {
-        name: "Add",
-      }));
+      fireEvent.click(
+        within(providerModelRow(dialog, "Fast Chat")).getByRole("button", {
+          name: /Add Fast Chat/,
+        }),
+      );
 
       await waitFor(() => {
         expect(
@@ -1088,11 +1092,10 @@ describe("Admin LlmPage", () => {
 
       fireEvent.click(chatManagerAssignmentButton());
       const dialog = assignmentDialog("chat.manager");
-      fireEvent.click(
-        within(dialog).getByRole("button", {
-          name: "Move Fast Chat via OpenRouter up",
-        }),
-      );
+      fireEvent.keyDown(providerModelRow(dialog, "Fast Chat"), {
+        key: "ArrowUp",
+        altKey: true,
+      });
 
       await waitFor(() => {
         expect(
@@ -1120,7 +1123,7 @@ describe("Admin LlmPage", () => {
 
       fireEvent.click(
         within(providerModelRow(dialog, "Fast Chat")).getByRole("button", {
-          name: "Remove",
+          name: /Remove Fast Chat/,
         }),
       );
       await waitFor(() => {
@@ -1186,13 +1189,17 @@ describe("Admin LlmPage", () => {
       const dialog = assignmentDialog("default");
       expect(within(dialog).getByText("Selected chain")).toBeInTheDocument();
       expect(within(dialog).getByText("Gemma 4 31B IT")).toBeInTheDocument();
-      expect(within(providerModelRow(dialog, "Text Only")).getByRole("button", {
-        name: "Add",
-      })).toBeDisabled();
+      expect(
+        within(providerModelRow(dialog, "Text Only")).getByRole("button", {
+          name: /Add Text Only/,
+        }),
+      ).toBeDisabled();
 
-      fireEvent.click(within(providerModelRow(dialog, "Fast Chat")).getByRole("button", {
-        name: "Add",
-      }));
+      fireEvent.click(
+        within(providerModelRow(dialog, "Fast Chat")).getByRole("button", {
+          name: /Add Fast Chat/,
+        }),
+      );
 
       await waitFor(() => {
         expect(
@@ -1254,11 +1261,10 @@ describe("Admin LlmPage", () => {
       );
 
       const dialog = assignmentDialog("default");
-      fireEvent.click(
-        within(dialog).getByRole("button", {
-          name: "Move Fast Chat via OpenRouter up",
-        }),
-      );
+      fireEvent.keyDown(providerModelRow(dialog, "Fast Chat"), {
+        key: "ArrowUp",
+        altKey: true,
+      });
 
       await waitFor(() => {
         expect(
@@ -1302,7 +1308,7 @@ describe("Admin LlmPage", () => {
       const dialog = assignmentDialog("default");
       fireEvent.click(
         within(providerModelRow(dialog, "Gemma 4 31B IT")).getByRole("button", {
-          name: "Remove",
+          name: /Remove Gemma 4 31B IT/,
         }),
       );
 

@@ -127,6 +127,8 @@ export interface LlmAssignment {
   provider_model_id: string;
   max_tokens: number | null;
   temperature: number | null;
+  thinking_level_override: LlmThinkingLevel | null;
+  effective_thinking_level: LlmThinkingLevel;
   extra_api_params: Record<string, unknown>;
   required_capabilities: string[];
   is_enabled: boolean;
