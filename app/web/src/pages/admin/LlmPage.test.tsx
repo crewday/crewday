@@ -213,7 +213,7 @@ function capabilityEditTarget(name: string): HTMLElement {
 }
 
 function chatManagerAssignmentEditTarget(): HTMLElement {
-  return within(chatManagerAssignmentButton()).getByText("Gemma 4 31B IT");
+  return within(chatManagerAssignmentButton()).getByText("P");
 }
 
 async function findOpenRouterProvider(): Promise<HTMLElement> {
@@ -910,10 +910,18 @@ describe("Admin LlmPage", () => {
       const providerModelButton = within(rung).getByRole("button", {
         name: /Open provider-model google\/gemma-4-31b-it for chat\.manager assignment/,
       });
-      expect(providerModelButton).toHaveTextContent("Provider-model settings");
+      expect(providerModelButton).toHaveTextContent("Gemma 4 31B IT");
+      expect(providerModelButton).toHaveTextContent("Thinking disabled");
+      expect(providerModelButton.querySelector(".llm-graph-chain__pm-name")).toBeNull();
+      expect(providerModelButton.querySelectorAll(".llm-graph-chain__pm-thinking")).toHaveLength(
+        1,
+      );
+      expect(providerModelButton).not.toHaveTextContent("Provider-model settings");
+      expect(providerModelButton).not.toHaveTextContent(/via\s+OpenRouter/i);
       expect(providerModelButton).not.toHaveTextContent("OpenRouter");
       expect(providerModelButton).not.toHaveTextContent("google/gemma-4-31b-it");
-      expect(chatManagerAssignmentButton()).toHaveTextContent("Gemma 4 31B IT");
+      expect(chatManagerAssignmentButton()).not.toHaveTextContent("Gemma 4 31B IT");
+      expect(chatManagerAssignmentButton()).not.toHaveTextContent(/via\s+OpenRouter/i);
       expect(chatManagerAssignmentButton()).not.toHaveTextContent(
         "google/gemma-4-31b-it",
       );

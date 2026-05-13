@@ -104,18 +104,14 @@ export default function CapabilityChain(props: CapabilityChainProps) {
                   a.spend_usd_30d,
                 )}`}
               >
-                <span className="llm-graph-chain__prio">
+                <span className="llm-graph-chain__prio" data-llm-edit-target="true">
                   {a.priority === 0 ? "P" : a.priority}
                 </span>
-                <span className="llm-graph-chain__model" data-llm-edit-target="true">
-                  {model?.display_name ?? "(missing model)"}
-                </span>
-                <span
-                  className="llm-graph-chain__provider muted"
-                  data-llm-edit-target="true"
-                >
-                  via {provider?.name ?? "?"}
-                </span>
+                {pm ? null : (
+                  <span className="llm-graph-chain__model" data-llm-edit-target="true">
+                    {model?.display_name ?? "(missing model)"}
+                  </span>
+                )}
                 <span className="llm-graph-chain__usage">
                   <LlmUsageTotals
                     spendUsd={a.spend_usd_30d}
@@ -173,14 +169,14 @@ export default function CapabilityChain(props: CapabilityChainProps) {
                     pm.spend_usd_30d,
                   )}`}
                 >
-                  <span className="llm-graph-chain__pm-name">
-                    Provider-model settings
-                  </span>
-                  {a.thinking_level_override ? (
-                    <span className="llm-graph-chain__pm-thinking">
-                      Thinking {a.thinking_level_override}
+                  <span className="llm-graph-chain__pm-summary">
+                    <span className="llm-graph-chain__pm-model">
+                      {model?.display_name ?? pm.api_model_id}
                     </span>
-                  ) : null}
+                    <span className="llm-graph-chain__pm-thinking">
+                      Thinking {a.effective_thinking_level}
+                    </span>
+                  </span>
                   <LlmUsageTotals
                     spendUsd={pm.spend_usd_30d}
                     calls={pm.calls_30d}
