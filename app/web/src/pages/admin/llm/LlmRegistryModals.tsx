@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import FormModal, {
@@ -93,6 +93,28 @@ interface ModelPayload {
   price_source_model_id: string | null;
   is_active: boolean;
   notes: string | null;
+}
+
+interface OpenRouterProviderModelPreview {
+  provider_id: string;
+  provider_name: string;
+  existing_provider_model_id: string | null;
+  payload: ProviderModelPayload;
+}
+
+interface OpenRouterModelPreviewResponse {
+  openrouter_model_id: string;
+  existing_model_id: string | null;
+  model_payload: ModelPayload;
+  provider_model_previews: OpenRouterProviderModelPreview[];
+}
+
+interface OpenRouterPricingPreview {
+  providerName: string;
+  providerCount: number;
+  inputCostPerMillion: number;
+  outputCostPerMillion: number;
+  fixedCostPerCallUsd: number | null;
 }
 
 interface ProviderModelPayload {
@@ -239,6 +261,23 @@ function playgroundErrorCopy(error: unknown): string {
   return "Playground run failed.";
 }
 
+function openRouterMetadataErrorCopy(error: unknown): string {
+  const code = errorCode(error);
+  if (code === "invalid_openrouter_model_id") {
+    return "Enter an OpenRouter model id or URL.";
+  }
+  if (code === "openrouter_model_not_found") {
+    return "OpenRouter did not find that model.";
+  }
+  if (code === "openrouter_unavailable") {
+    return "OpenRouter metadata is temporarily unavailable.";
+  }
+  if (error instanceof ApiError) {
+    return error.detail ?? error.title ?? "OpenRouter metadata load failed.";
+  }
+  return error instanceof Error ? error.message : "OpenRouter metadata load failed.";
+}
+
 function describedBy(...ids: (string | undefined)[]): string | undefined {
   const present = ids.filter((id): id is string => id !== undefined);
   return present.length ? present.join(" ") : undefined;
@@ -259,6 +298,15 @@ function formatPlaygroundCost(value: string | null): string {
     minimumFractionDigits: numeric === 0 ? 2 : 6,
     maximumFractionDigits: numeric < 0.01 ? 6 : 2,
   }).format(numeric);
+}
+
+function formatCostPerMillion(value: number): string {
+  return `${new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: value === 0 ? 0 : 2,
+    maximumFractionDigits: value < 0.01 && value > 0 ? 6 : 2,
+  }).format(value)}/M`;
 }
 
 function providerOption(provider: LlmProvider): SearchableSelectOption {
@@ -582,6 +630,7 @@ function ModelForm({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
+  const openRouterInputId = useId();
   const [canonicalName, setCanonicalName] = useState(model?.canonical_name ?? "");
   const [displayName, setDisplayName] = useState(model?.display_name ?? "");
   const [vendor, setVendor] = useState(model?.vendor ?? "");
@@ -610,6 +659,11 @@ function ModelForm({
   );
   const [active, setActive] = useState(model?.is_active ?? true);
   const [notes, setNotes] = useState(model?.notes ?? "");
+  const [openRouterModel, setOpenRouterModel] = useState("");
+  const [openRouterErr, setOpenRouterErr] = useState<string | null>(null);
+  const [openRouterStatus, setOpenRouterStatus] = useState<string | null>(null);
+  const [openRouterPricing, setOpenRouterPricing] =
+    useState<OpenRouterPricingPreview | null>(null);
   const [clientErr, setClientErr] = useState<string | null>(null);
   const [serverErr, setServerErr] = useState<string | null>(null);
 
@@ -639,8 +693,46 @@ function ModelForm({
     },
     onError: (error: Error) => setServerErr(apiErrorCopy(error, "Model delete failed.")),
   });
+  const openRouterPreview = useMutation({
+    mutationFn: (modelIdOrUrl: string) =>
+      fetchJson<OpenRouterModelPreviewResponse>(
+        "/admin/api/v1/llm/models/openrouter-preview",
+        { method: "POST", body: { model_id_or_url: modelIdOrUrl } },
+      ),
+    onSuccess: (preview) => {
+      applyModelPayload(preview.model_payload);
+      setOpenRouterErr(null);
+      setClientErr(null);
+      setServerErr(null);
+      setOpenRouterStatus(
+        `Loaded OpenRouter metadata for ${preview.openrouter_model_id}.`,
+      );
+      const firstPreview = preview.provider_model_previews[0];
+      setOpenRouterPricing(
+        firstPreview
+          ? {
+              providerName: firstPreview.provider_name,
+              providerCount: preview.provider_model_previews.length,
+              inputCostPerMillion: firstPreview.payload.input_cost_per_million,
+              outputCostPerMillion: firstPreview.payload.output_cost_per_million,
+              fixedCostPerCallUsd: firstPreview.payload.fixed_cost_per_call_usd,
+            }
+          : null,
+      );
+    },
+    onError: (error: Error) => {
+      setOpenRouterErr(openRouterMetadataErrorCopy(error));
+      setOpenRouterStatus(null);
+      setOpenRouterPricing(null);
+    },
+  });
   const err = clientErr ?? serverErr;
   const errId = err ? "llm-model-error" : undefined;
+  const openRouterErrId = openRouterErr ? "llm-openrouter-error" : undefined;
+  const openRouterStatusId =
+    openRouterPreview.isPending || openRouterStatus
+      ? "llm-openrouter-status"
+      : undefined;
 
   function toggleCapability(tag: string) {
     setCapabilities((current) =>
@@ -648,6 +740,43 @@ function ModelForm({
         ? current.filter((value) => value !== tag)
         : [...current, tag],
     );
+  }
+
+  function applyModelPayload(payload: ModelPayload) {
+    setCanonicalName(payload.canonical_name);
+    setDisplayName(payload.display_name);
+    setVendor(payload.vendor);
+    setCapabilities(payload.capabilities);
+    setContextWindow(
+      payload.context_window === null || payload.context_window === undefined
+        ? ""
+        : String(payload.context_window),
+    );
+    setMaxOutput(
+      payload.max_output_tokens === null || payload.max_output_tokens === undefined
+        ? ""
+        : String(payload.max_output_tokens),
+    );
+    setThinkingLevel(payload.thinking_level);
+    setThinkingStrategy(payload.thinking_strategy);
+    setPriceSource(payload.price_source);
+    setPriceSourceModel(payload.price_source_model_id ?? "");
+    setActive(payload.is_active);
+    setNotes(payload.notes ?? "");
+  }
+
+  function loadOpenRouterMetadata() {
+    const modelIdOrUrl = openRouterModel.trim();
+    if (!modelIdOrUrl) {
+      setOpenRouterErr("Enter an OpenRouter model id or URL.");
+      setOpenRouterStatus(null);
+      setOpenRouterPricing(null);
+      return;
+    }
+    setOpenRouterErr(null);
+    setOpenRouterStatus(null);
+    setOpenRouterPricing(null);
+    openRouterPreview.mutate(modelIdOrUrl);
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -708,13 +837,77 @@ function ModelForm({
           <button
             type="submit"
             className="btn btn--moss"
-            disabled={save.isPending || remove.isPending}
+            disabled={save.isPending || remove.isPending || openRouterPreview.isPending}
           >
             {save.isPending ? "Saving…" : mode === "create" ? "Create model" : "Save model"}
           </button>
         </>
       }
     >
+        {mode === "create" ? (
+          <div className="field form-field form-field--optional form-modal__field llm-openrouter-loader">
+            <label htmlFor={openRouterInputId} className="llm-openrouter-loader__label">
+              <span className="form-field__label">
+                OpenRouter model{" "}
+                <span className="form-field__requirement form-field__requirement--optional">
+                  Optional
+                </span>
+              </span>
+            </label>
+            <div className="llm-openrouter-loader__control">
+              <input
+                id={openRouterInputId}
+                value={openRouterModel}
+                onChange={(e) => setOpenRouterModel(e.target.value)}
+                placeholder="google/gemma-4-31b-it"
+                aria-invalid={openRouterErr ? true : undefined}
+                aria-describedby={describedBy(openRouterErrId, openRouterStatusId)}
+              />
+              <button
+                type="button"
+                className="btn btn--ghost llm-openrouter-loader__button"
+                onClick={loadOpenRouterMetadata}
+                disabled={openRouterPreview.isPending || save.isPending}
+              >
+                {openRouterPreview.isPending ? "Loading…" : "Load metadata"}
+              </button>
+            </div>
+            {openRouterPreview.isPending || openRouterStatus ? (
+              <p
+                id="llm-openrouter-status"
+                className="llm-openrouter-loader__status"
+                role="status"
+              >
+                {openRouterPreview.isPending
+                  ? "Loading OpenRouter metadata..."
+                  : openRouterStatus}
+              </p>
+            ) : null}
+            {openRouterPricing ? (
+              <p className="llm-openrouter-loader__pricing">
+                Provider price preview: {openRouterPricing.providerName}{" "}
+                {formatCostPerMillion(openRouterPricing.inputCostPerMillion)} in,{" "}
+                {formatCostPerMillion(openRouterPricing.outputCostPerMillion)} out
+                {openRouterPricing.fixedCostPerCallUsd !== null
+                  ? `, ${new Intl.NumberFormat("en-US", {
+                      style: "currency",
+                      currency: "USD",
+                      maximumFractionDigits: 6,
+                    }).format(openRouterPricing.fixedCostPerCallUsd)} fixed`
+                  : ""}
+                {openRouterPricing.providerCount > 1
+                  ? ` across ${openRouterPricing.providerCount} OpenRouter providers`
+                  : ""}
+                .
+              </p>
+            ) : null}
+            {openRouterErr ? (
+              <p id="llm-openrouter-error" className="form-error" role="alert">
+                {openRouterErr}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         <FormModalField label="Canonical name" requirement="required">
           <input
             value={canonicalName}

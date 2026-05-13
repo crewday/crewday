@@ -639,6 +639,39 @@
 .llm-registry-form__delete {
   margin-right: auto;
 }
+.llm-openrouter-loader {
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+.llm-openrouter-loader__label {
+  display: block;
+}
+.llm-openrouter-loader__control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+.llm-openrouter-loader__button {
+  min-width: 132px;
+  white-space: nowrap;
+}
+.llm-openrouter-loader__status,
+.llm-openrouter-loader__pricing {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.llm-openrouter-loader__status {
+  color: var(--moss);
+}
+.llm-openrouter-loader__pricing {
+  color: var(--ink-3);
+}
 
 .llm-playground {
   display: grid;
@@ -1072,6 +1105,12 @@
 @media (max-width: 560px) {
   .llm-registry-form__delete {
     margin-right: 0;
+  }
+  .llm-openrouter-loader__control {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .llm-openrouter-loader__button {
+    width: 100%;
   }
   .llm-playground {
     padding: 12px;

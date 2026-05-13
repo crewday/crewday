@@ -664,6 +664,8 @@ describe("Admin LlmPage", () => {
       });
 
       fireEvent.click(modelEditTarget("Gemma 4 31B IT"));
+      const editDialog = screen.getByRole("dialog", { name: "Gemma 4 31B IT" });
+      expect(within(editDialog).queryByLabelText(/OpenRouter model/)).not.toBeInTheDocument();
       fireEvent.change(screen.getByLabelText(/Display name/), {
         target: { value: "Gemma admin" },
       });
@@ -707,6 +709,212 @@ describe("Admin LlmPage", () => {
           ),
         ).toHaveLength(2);
       });
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("loads OpenRouter metadata into the create model form without saving", async () => {
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/models/openrouter-preview": [
+        {
+          body: {
+            openrouter_model_id: "google/gemma-4-31b-it",
+            existing_model_id: null,
+            model_payload: {
+              canonical_name: "google/gemma-4-31b-it",
+              display_name: "Gemma 4 31B IT",
+              vendor: "Google",
+              capabilities: ["chat", "json_mode", "function_calling", "reasoning"],
+              context_window: 128000,
+              max_output_tokens: 8192,
+              thinking_level: "high",
+              thinking_strategy: "openrouter_extra_body",
+              price_source: "openrouter",
+              price_source_model_id: "google/gemma-4-31b-it",
+              is_active: true,
+              notes: null,
+            },
+            provider_model_previews: [
+              {
+                provider_id: "prov_openrouter",
+                provider_name: "OpenRouter",
+                existing_provider_model_id: null,
+                payload: {
+                  provider_id: "prov_openrouter",
+                  model_id: "",
+                  api_model_id: "google/gemma-4-31b-it",
+                  input_cost_per_million: 0.15,
+                  output_cost_per_million: 0.2,
+                  fixed_cost_per_call_usd: null,
+                  max_tokens_override: null,
+                  temperature_override: null,
+                  supports_system_prompt: true,
+                  supports_temperature: true,
+                  thinking_level_override: null,
+                  thinking_strategy_override: null,
+                  reasoning_effort: "",
+                  extra_api_params: {},
+                  price_source_override: "openrouter",
+                  price_source_model_id_override: "google/gemma-4-31b-it",
+                  is_enabled: true,
+                },
+              },
+            ],
+          },
+        },
+      ],
+      "/admin/api/v1/llm/models": [
+        {
+          body: {
+            ...graph.models[0],
+            id: "model_imported",
+            thinking_level: "high",
+            thinking_strategy: "openrouter_extra_body",
+          },
+        },
+      ],
+    });
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New model" }));
+      const dialog = screen.getByRole("dialog", { name: "Create model" });
+      fireEvent.change(within(dialog).getByLabelText(/OpenRouter model/), {
+        target: { value: "google/gemma-4-31b-it" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Load metadata" }));
+
+      expect(await within(dialog).findByRole("status")).toHaveTextContent(
+        "Loaded OpenRouter metadata for google/gemma-4-31b-it.",
+      );
+      expect(within(dialog).getByLabelText(/Canonical name/)).toHaveValue(
+        "google/gemma-4-31b-it",
+      );
+      expect(within(dialog).getByLabelText(/Display name/)).toHaveValue(
+        "Gemma 4 31B IT",
+      );
+      expect(within(dialog).getByLabelText(/Vendor/)).toHaveValue("Google");
+      expect(within(dialog).getByLabelText("reasoning")).toBeChecked();
+      expect(within(dialog).getByLabelText(/Context window/)).toHaveValue(128000);
+      expect(within(dialog).getByLabelText(/Max output tokens/)).toHaveValue(8192);
+      expect(within(dialog).getByLabelText(/Thinking level/)).toHaveValue("high");
+      expect(within(dialog).getByLabelText(/Thinking strategy/)).toHaveValue(
+        "openrouter_extra_body",
+      );
+      expect(
+        within(dialog).getByRole("combobox", { name: /^Price source\b/ }),
+      ).toHaveValue("openrouter");
+      expect(
+        within(dialog).getByRole("textbox", { name: /^Price source model id\b/ }),
+      ).toHaveValue("google/gemma-4-31b-it");
+      expect(within(dialog).getByText(/Provider price preview/)).toHaveTextContent(
+        "OpenRouter",
+      );
+
+      const preview = fetcher.calls.find(
+        (call) =>
+          call.url === "/admin/api/v1/llm/models/openrouter-preview" &&
+          call.init.method === "POST",
+      );
+      expect(jsonBody(preview!)).toEqual({
+        model_id_or_url: "google/gemma-4-31b-it",
+      });
+      expect(
+        fetcher.calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/models" && call.init.method === "POST",
+        ),
+      ).toBe(false);
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create model" }));
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url === "/admin/api/v1/llm/models" &&
+              call.init.method === "POST",
+          ),
+        ).toBe(true);
+      });
+      const post = fetcher.calls.find(
+        (call) =>
+          call.url === "/admin/api/v1/llm/models" && call.init.method === "POST",
+      );
+      expect(jsonBody(post!)).toMatchObject({
+        canonical_name: "google/gemma-4-31b-it",
+        display_name: "Gemma 4 31B IT",
+        vendor: "Google",
+        capabilities: ["chat", "json_mode", "function_calling", "reasoning"],
+        context_window: 128000,
+        max_output_tokens: 8192,
+        thinking_level: "high",
+        thinking_strategy: "openrouter_extra_body",
+        price_source: "openrouter",
+        price_source_model_id: "google/gemma-4-31b-it",
+      });
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("shows OpenRouter loader errors without clearing typed model fields", async () => {
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/models/openrouter-preview": [
+        { status: 404, body: { error: "openrouter_model_not_found" } },
+      ],
+    });
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New model" }));
+      const dialog = screen.getByRole("dialog", { name: "Create model" });
+      fireEvent.change(within(dialog).getByLabelText(/Canonical name/), {
+        target: { value: "manual/model" },
+      });
+      fireEvent.change(within(dialog).getByLabelText(/Display name/), {
+        target: { value: "Manual model" },
+      });
+      fireEvent.change(within(dialog).getByLabelText(/Vendor/), {
+        target: { value: "Manual" },
+      });
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Load metadata" }));
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+        "Enter an OpenRouter model id or URL.",
+      );
+      expect(
+        fetcher.calls.some(
+          (call) => call.url === "/admin/api/v1/llm/models/openrouter-preview",
+        ),
+      ).toBe(false);
+
+      fireEvent.change(within(dialog).getByLabelText(/OpenRouter model/), {
+        target: { value: "missing/model" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Load metadata" }));
+
+      await waitFor(() => {
+        expect(within(dialog).getByRole("alert")).toHaveTextContent(
+          "OpenRouter did not find that model.",
+        );
+      });
+      expect(within(dialog).getByLabelText(/Canonical name/)).toHaveValue(
+        "manual/model",
+      );
+      expect(within(dialog).getByLabelText(/Display name/)).toHaveValue(
+        "Manual model",
+      );
+      expect(within(dialog).getByLabelText(/Vendor/)).toHaveValue("Manual");
+      expect(
+        fetcher.calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/models" && call.init.method === "POST",
+        ),
+      ).toBe(false);
     } finally {
       fetcher.restore();
     }
