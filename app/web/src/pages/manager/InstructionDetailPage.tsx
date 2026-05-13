@@ -6,6 +6,7 @@ import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
+import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
@@ -348,7 +349,7 @@ export default function InstructionDetailPage() {
               </FormField>
             )}
             <FormField label="Markdown" requirement="required" className="instruction-edit-form__field sheet-form__field">
-              <textarea
+              <AutoGrowTextarea
                 value={draft.body_md}
                 onChange={(event) => setDraft({ ...draft, body_md: event.currentTarget.value })}
                 rows={10}

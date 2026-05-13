@@ -5,6 +5,7 @@ import { BriefcaseBusiness, Pencil, Plus, Trash2 } from "lucide-react";
 import { ApiError, fetchJson } from "@/lib/api";
 import { fetchAllList } from "@/lib/fetchAllList";
 import { qk } from "@/lib/queryKeys";
+import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
@@ -439,7 +440,7 @@ function WorkRoleCatalogManager() {
           />
 
           <FormField label="Description" requirement="optional" className="work-role-form__field sheet-form__field">
-            <textarea
+            <AutoGrowTextarea
               rows={4}
               value={form.description_md}
               aria-invalid={fieldErrors.description_md ? "true" : undefined}

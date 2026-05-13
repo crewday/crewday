@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Camera, Globe, GripVertical, Hash, Map as MapIcon, Sparkles, Timer } from "lucide-react";
 
+import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import { Chip, Loading } from "@/components/common";
 import DeskPage from "@/components/DeskPage";
 import FormField from "@/components/FormField";
@@ -359,7 +360,7 @@ function NewTemplateForm({
           />
         </FormField>
         <FormField label="Description" requirement="optional" className="template-create-form__field sheet-form__field">
-          <textarea
+          <AutoGrowTextarea
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             rows={4}
@@ -418,7 +419,7 @@ function NewTemplateForm({
         helpId={AGENT_GUIDANCE_HELP_ID}
         helpText="Agents use this when drafting or discussing tasks from this template."
       >
-        <textarea
+        <AutoGrowTextarea
           value={llmHints}
           onChange={(event) => setLlmHints(event.target.value)}
           rows={3}

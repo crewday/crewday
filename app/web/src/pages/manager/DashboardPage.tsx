@@ -12,6 +12,7 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import { useDecideMutation } from "@/lib/useDecideMutation";
+import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
@@ -284,7 +285,7 @@ export default function DashboardPage() {
           </FormField>
 
           <FormField label="Body" requirement="required" className="broadcast-message-form__field sheet-form__field">
-            <textarea
+            <AutoGrowTextarea
               required
               rows={6}
               maxLength={20000}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import DateTime from "@/components/DateTime";
 import FormModal, { FormModalField } from "@/components/FormModal";
 import { Chip } from "@/components/common";
@@ -232,7 +233,7 @@ function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
           {detailQ.isPending ? <p className="muted">Loading prompt body…</p> : null}
           {detailQ.isError ? <p className="form-error">Prompt body failed to load.</p> : null}
           <FormModalField label="Active template body" requirement="required">
-            <textarea
+            <AutoGrowTextarea
               value={template}
               onChange={(e) => setTemplate(e.target.value)}
               rows={14}
@@ -242,7 +243,7 @@ function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
             />
           </FormModalField>
           <FormModalField label="Notes" requirement="optional">
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+            <AutoGrowTextarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
           </FormModalField>
           <section className="llm-prompt-revisions" aria-label="Prompt revision history">
             <h4>Revision history</h4>

@@ -4,6 +4,7 @@ import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { PackageSearch, SearchX } from "lucide-react";
 import { ApiError, fetchJson, resolveApiPath } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import DeskPage from "@/components/DeskPage";
 import FileDropZone from "@/components/FileDropZone";
 import FormModal, { FormModalGrid } from "@/components/FormModal";
@@ -628,7 +629,7 @@ function NewAssetButton({
               />
               <label className="field asset-create__field">
                 <span>Guest instructions</span>
-                <textarea
+                <AutoGrowTextarea
                   value={guestInstructions}
                   onChange={(event) => setGuestInstructions(event.target.value)}
                 />
@@ -641,7 +642,7 @@ function NewAssetButton({
               </h4>
               <label className="field asset-create__field">
                 <span>Internal notes</span>
-                <textarea value={notes} onChange={(event) => setNotes(event.target.value)} />
+                <AutoGrowTextarea value={notes} onChange={(event) => setNotes(event.target.value)} />
               </label>
             </section>
 

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import { Checkbox, Chip, Loading } from "@/components/common";
@@ -302,7 +303,7 @@ export default function AdminSettingsPage() {
           </label>
           <label className="form-row">
             <span className="form-label">Throttle overrides</span>
-            <textarea
+            <AutoGrowTextarea
               className="input input--inline"
               rows={5}
               value={signupThrottleText}
@@ -385,7 +386,7 @@ export default function AdminSettingsPage() {
                       />
                     ) : row.kind === "json" ? (
                       <>
-                        <textarea
+                        <AutoGrowTextarea
                           className="input input--inline"
                           rows={5}
                           value={String(settingInputValue(row, drafts))}

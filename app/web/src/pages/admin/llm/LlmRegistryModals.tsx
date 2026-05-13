@@ -1,6 +1,7 @@
 import { useId, useMemo, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import FormModal, {
   FormModalField,
   FormModalGrid,
@@ -1034,7 +1035,7 @@ function ModelForm({
           />
         </FormModalField>
         <FormModalField label="Notes" requirement="optional">
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+          <AutoGrowTextarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
         </FormModalField>
         {err ? (
           <p id="llm-model-error" className="form-error" role="alert">
@@ -1485,7 +1486,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
           helpId={extraHelpId}
           helpText="JSON object merged into provider requests for this row."
         >
-          <textarea
+          <AutoGrowTextarea
             className="mono"
             value={extraApiParams}
             onChange={(e) => setExtraApiParams(e.target.value)}
@@ -1700,7 +1701,7 @@ function ProviderModelPlayground({
       ) : null}
 
       <FormModalField label="Prompt" requirement="required">
-        <textarea
+        <AutoGrowTextarea
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
           rows={4}
@@ -1716,7 +1717,7 @@ function ProviderModelPlayground({
         helpId={!supportsSystemPrompt ? "llm-playground-system-help" : undefined}
         helpText={!supportsSystemPrompt ? "Disabled for this provider-model." : undefined}
       >
-        <textarea
+        <AutoGrowTextarea
           value={systemPrompt}
           onChange={(event) => setSystemPrompt(event.target.value)}
           rows={3}
@@ -1767,7 +1768,7 @@ function ProviderModelPlayground({
 
       {supportsVision ? (
         <FormModalField label="Image URL or data URL" requirement="optional">
-          <textarea
+          <AutoGrowTextarea
             value={imageUrl}
             onChange={(event) => setImageUrl(event.target.value)}
             rows={2}

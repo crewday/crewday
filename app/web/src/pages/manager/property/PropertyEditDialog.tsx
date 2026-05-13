@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import CountrySelect from "@/components/CountrySelect";
 import FormField from "@/components/FormField";
 import FormModal, { FormModalGrid } from "@/components/FormModal";
@@ -323,7 +324,7 @@ export default function PropertyEditDialog(props: PropertyEditDialogProps) {
           </FormField>
         </FormModalGrid>
         <FormField label="Notes" requirement="optional" className="property-edit-dialog__field sheet-form__field">
-          <textarea
+          <AutoGrowTextarea
             value={draft.property_notes_md}
             onChange={(event) => setDraft({ ...draft, property_notes_md: event.currentTarget.value })}
             rows={5}

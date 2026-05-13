@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, Copy, MessageSquare } from "lucide-react";
+import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import { Chip, Loading, StatCard } from "@/components/common";
@@ -226,7 +227,7 @@ function TestInboundPanel({ provider }: { provider: AdminChatProvider | undefine
         </label>
         <label className="field chat-gateway-test__message">
           <span>Inbound message</span>
-          <textarea
+          <AutoGrowTextarea
             className="textarea"
             value={bodyMd}
             onChange={(e) => setBodyMd(e.target.value)}

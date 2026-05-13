@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
+import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
@@ -294,7 +295,7 @@ function CreateDialog(props: CreateDialogProps) {
           />
         </FormField>
         <FormField label="Events" requirement="required" className="webhook-subscription-form__field sheet-form__field">
-          <textarea
+          <AutoGrowTextarea
             value={events}
             onChange={(e) => onEvents(e.target.value)}
             placeholder="task.completed, approval.pending"

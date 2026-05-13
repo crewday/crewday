@@ -4,6 +4,7 @@ import { MapPinned } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
+import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { EmptyState, Loading } from "@/components/common";
 
@@ -310,7 +311,7 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
             </div>
             <label className="field">
               <span>Notes</span>
-              <textarea
+              <AutoGrowTextarea
                 value={draft.notes_md}
                 onChange={(event) => setDraft({ ...draft, notes_md: event.currentTarget.value })}
                 rows={3}
