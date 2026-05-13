@@ -10,7 +10,16 @@ from decimal import Decimal
 from typing import Annotated, Any, Literal, Self, cast
 
 from fastapi import APIRouter, Depends, Query, Request
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
+from pydantic import (
+    ValidationError as PydanticValidationError,
+)
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -26,6 +35,10 @@ from app.adapters.db.llm.models import (
     LlmUsage,
 )
 from app.adapters.llm.fake import FakeLLMClient
+from app.adapters.llm.openrouter import (
+    OpenRouterModelMetadata,
+    fetch_openrouter_model_metadata,
+)
 from app.adapters.llm.ports import (
     ChatMessage,
     LLMClient,
@@ -43,7 +56,13 @@ from app.domain.agent.compaction import (
     _default_compaction_prompt,
 )
 from app.domain.agent.runtime import _default_system_prompt
-from app.domain.errors import Conflict, NotFound, NotImplementedFeature, Validation
+from app.domain.errors import (
+    Conflict,
+    NotFound,
+    NotImplementedFeature,
+    UpstreamUnavailable,
+    Validation,
+)
 from app.domain.llm.router import (
     DEFAULT_LLM_CAPABILITY,
     DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID,
@@ -519,6 +538,26 @@ class ProviderModelPayload(BaseModel):
         if value == "":
             return None
         return value
+
+
+class OpenRouterModelPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model_id_or_url: str
+
+
+class OpenRouterProviderModelPreview(BaseModel):
+    provider_id: str
+    provider_name: str
+    existing_provider_model_id: str | None
+    payload: ProviderModelPayload
+
+
+class OpenRouterModelPreviewResponse(BaseModel):
+    openrouter_model_id: str
+    existing_model_id: str | None
+    model_payload: ModelPayload
+    provider_model_previews: list[OpenRouterProviderModelPreview]
 
 
 class AssignmentPayload(BaseModel):
@@ -1385,6 +1424,144 @@ def _validate_provider_model_payload(
         raise _conflict("provider_model_exists")
 
 
+def _openrouter_metadata_preview(
+    session: Session, payload: OpenRouterModelPreviewRequest
+) -> OpenRouterModelPreviewResponse:
+    try:
+        metadata = fetch_openrouter_model_metadata(payload.model_id_or_url)
+    except ValueError as exc:
+        raise _unprocessable("invalid_openrouter_model_id") from exc
+    except LlmProviderError as exc:
+        raise NotFound(extra={"error": "openrouter_model_not_found"}) from exc
+    except (LlmRateLimited, LlmTransportError) as exc:
+        raise UpstreamUnavailable(
+            "OpenRouter metadata is temporarily unavailable",
+            extra={"error": "openrouter_unavailable", "upstream": "openrouter"},
+        ) from exc
+
+    existing_model_id = session.scalar(
+        select(LlmModel.id)
+        .where(
+            or_(
+                LlmModel.canonical_name == metadata.model_id,
+                LlmModel.price_source_model_id == metadata.model_id,
+            )
+        )
+        .limit(1)
+    )
+    providers = list(
+        session.scalars(
+            select(LlmProvider)
+            .where(LlmProvider.provider_type == "openrouter")
+            .order_by(LlmProvider.name, LlmProvider.id)
+        ).all()
+    )
+    existing_provider_models = _existing_openrouter_provider_models(
+        session,
+        providers=providers,
+        metadata=metadata,
+        existing_model_id=existing_model_id,
+    )
+    try:
+        model_payload = _openrouter_model_payload(metadata)
+        provider_model_previews = [
+            OpenRouterProviderModelPreview(
+                provider_id=provider.id,
+                provider_name=provider.name,
+                existing_provider_model_id=existing_provider_models.get(provider.id),
+                payload=_openrouter_provider_model_payload(
+                    metadata,
+                    provider_id=provider.id,
+                    model_id=existing_model_id or "",
+                ),
+            )
+            for provider in providers
+        ]
+    except PydanticValidationError as exc:
+        raise UpstreamUnavailable(
+            "OpenRouter metadata is temporarily unavailable",
+            extra={"error": "openrouter_unavailable", "upstream": "openrouter"},
+        ) from exc
+
+    return OpenRouterModelPreviewResponse(
+        openrouter_model_id=metadata.model_id,
+        existing_model_id=existing_model_id,
+        model_payload=model_payload,
+        provider_model_previews=provider_model_previews,
+    )
+
+
+def _existing_openrouter_provider_models(
+    session: Session,
+    *,
+    providers: list[LlmProvider],
+    metadata: OpenRouterModelMetadata,
+    existing_model_id: str | None,
+) -> dict[str, str]:
+    if not providers:
+        return {}
+    provider_ids = [provider.id for provider in providers]
+    model_match = LlmProviderModel.api_model_id == metadata.model_id
+    if existing_model_id is not None:
+        model_match = or_(model_match, LlmProviderModel.model_id == existing_model_id)
+    rows = list(
+        session.scalars(
+            select(LlmProviderModel)
+            .where(LlmProviderModel.provider_id.in_(provider_ids), model_match)
+            .order_by(LlmProviderModel.provider_id, LlmProviderModel.id)
+        ).all()
+    )
+    result: dict[str, str] = {}
+    for row in rows:
+        result.setdefault(row.provider_id, row.id)
+    return result
+
+
+def _openrouter_model_payload(metadata: OpenRouterModelMetadata) -> ModelPayload:
+    return ModelPayload(
+        canonical_name=metadata.model_id,
+        display_name=metadata.display_name,
+        vendor=metadata.vendor,
+        capabilities=metadata.capabilities,
+        context_window=metadata.context_window,
+        max_output_tokens=metadata.max_output_tokens,
+        thinking_level=metadata.thinking_level,
+        thinking_strategy=metadata.thinking_strategy,
+        price_source="openrouter",
+        price_source_model_id=metadata.model_id,
+        is_active=True,
+        notes=None,
+    )
+
+
+def _openrouter_provider_model_payload(
+    metadata: OpenRouterModelMetadata, *, provider_id: str, model_id: str
+) -> ProviderModelPayload:
+    return ProviderModelPayload(
+        provider_id=provider_id,
+        model_id=model_id,
+        api_model_id=metadata.model_id,
+        input_cost_per_million=_money(metadata.input_cost_per_million),
+        output_cost_per_million=_money(metadata.output_cost_per_million),
+        fixed_cost_per_call_usd=(
+            _money(metadata.fixed_cost_per_call_usd)
+            if metadata.fixed_cost_per_call_usd is not None
+            else None
+        ),
+        max_tokens_override=None,
+        temperature_override=None,
+        supports_system_prompt=metadata.supports_system_prompt,
+        supports_temperature=metadata.supports_temperature,
+        thinking_level_override=None,
+        thinking_strategy_override=None,
+        reasoning_effort="",
+        extra_api_params={},
+        price_source_override="openrouter",
+        price_source_model_id_override=metadata.model_id,
+        is_enabled=True,
+    )
+
+
 def _validate_assignment_priority(
     session: Session,
     *,
@@ -1834,6 +2011,19 @@ def build_admin_llm_router() -> APIRouter:
             _publish_deployment_defaults_changed(ctx, request)
             session.refresh(row)
         return _model_response(row, Counter())
+
+    @router.post(
+        "/models/openrouter-preview",
+        response_model=OpenRouterModelPreviewResponse,
+        operation_id="admin.llm.models.openrouter_preview",
+    )
+    def openrouter_model_preview(
+        _ctx: _WriteCtx,
+        session: _Db,
+        payload: OpenRouterModelPreviewRequest,
+    ) -> OpenRouterModelPreviewResponse:
+        with tenant_agnostic():
+            return _openrouter_metadata_preview(session, payload)
 
     @router.get(
         "/models/{model_id}",

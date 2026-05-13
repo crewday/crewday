@@ -38,6 +38,8 @@ from app.adapters.llm.openrouter import (
     LlmRateLimited,
     LlmTransportError,
     OpenRouterClient,
+    fetch_openrouter_model_metadata,
+    normalize_openrouter_model_id,
 )
 from app.adapters.llm.ports import ChatMessage, LLMResponse, Tool
 from app.util.clock import FrozenClock
@@ -806,6 +808,165 @@ class TestConstruction:
         assert str(handler.requests[0].url) == (
             "https://openrouter.ai/api/v1/chat/completions"
         )
+
+
+class TestModelMetadataLookup:
+    def test_normalizes_id_and_openrouter_url(self) -> None:
+        assert (
+            normalize_openrouter_model_id("google/gemma-4-31b-it")
+            == "google/gemma-4-31b-it"
+        )
+        assert (
+            normalize_openrouter_model_id(
+                "https://openrouter.ai/models/google/gemma-4-31b-it"
+            )
+            == "google/gemma-4-31b-it"
+        )
+        assert (
+            normalize_openrouter_model_id("https://openrouter.ai/google/gemma-4-31b-it")
+            == "google/gemma-4-31b-it"
+        )
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "",
+            "gemma",
+            "bad/model id",
+            "too/many/parts",
+            "https://example.com/google/gemma",
+            "ftp://openrouter.ai/a/b",
+        ],
+    )
+    def test_rejects_malformed_model_ids(self, value: str) -> None:
+        with pytest.raises(ValueError):
+            normalize_openrouter_model_id(value)
+
+    def test_fetches_single_model_metadata(self) -> None:
+        handler = _RecordingHandler(
+            responses=[
+                httpx.Response(
+                    200,
+                    json={
+                        "data": [
+                            {
+                                "id": "openai/text-embedding-3-small",
+                                "name": "Embedding Model",
+                                "architecture": {
+                                    "input_modalities": ["text"],
+                                    "output_modalities": ["embedding"],
+                                },
+                                "pricing": {"prompt": "0.00000001"},
+                            },
+                            {
+                                "id": "google/gemma-4-31b-it",
+                                "name": "Gemma 4 31B Instruct",
+                                "context_length": 131072,
+                                "architecture": {
+                                    "modality": "text+image->text",
+                                    "input_modalities": ["text", "image", "audio"],
+                                    "output_modalities": ["text"],
+                                },
+                                "top_provider": {
+                                    "context_length": 131072,
+                                    "max_completion_tokens": 8192,
+                                },
+                                "supported_parameters": [
+                                    "temperature",
+                                    "tools",
+                                    "response_format",
+                                    "reasoning",
+                                    "stream",
+                                ],
+                                "pricing": {
+                                    "prompt": "0.00000015",
+                                    "completion": "0.00000045",
+                                    "request": "0.0012",
+                                },
+                            },
+                        ]
+                    },
+                )
+            ]
+        )
+        http = httpx.Client(transport=httpx.MockTransport(handler))
+
+        metadata = fetch_openrouter_model_metadata(
+            "https://openrouter.ai/models/google/gemma-4-31b-it", http=http
+        )
+
+        assert metadata.model_id == "google/gemma-4-31b-it"
+        assert metadata.display_name == "Gemma 4 31B Instruct"
+        assert metadata.vendor == "google"
+        assert metadata.capabilities == [
+            "chat",
+            "vision",
+            "audio_input",
+            "reasoning",
+            "function_calling",
+            "json_mode",
+            "streaming",
+        ]
+        assert metadata.context_window == 131072
+        assert metadata.max_output_tokens == 8192
+        assert str(metadata.input_cost_per_million) == "0.1500"
+        assert str(metadata.output_cost_per_million) == "0.4500"
+        assert str(metadata.fixed_cost_per_call_usd) == "0.0012"
+        assert metadata.supports_temperature is True
+        assert metadata.thinking_level == "disabled"
+        assert metadata.thinking_strategy == "openrouter_extra_body"
+        assert str(handler.requests[0].url) == "https://openrouter.ai/api/v1/models"
+        assert handler.requests[0].headers["X-Title"] == "crewday"
+        assert "authorization" not in handler.requests[0].headers
+
+    def test_metadata_lookup_maps_embeddings_when_exposed(self) -> None:
+        handler = _RecordingHandler(
+            responses=[
+                httpx.Response(
+                    200,
+                    json={
+                        "data": [
+                            {
+                                "id": "openai/text-embedding-3-small",
+                                "architecture": {
+                                    "input_modalities": ["text"],
+                                    "output_modalities": ["embeddings"],
+                                },
+                                "pricing": {"prompt": "0.00000002"},
+                            }
+                        ]
+                    },
+                )
+            ]
+        )
+        http = httpx.Client(transport=httpx.MockTransport(handler))
+
+        metadata = fetch_openrouter_model_metadata(
+            "openai/text-embedding-3-small", http=http
+        )
+
+        assert metadata.capabilities == ["embeddings"]
+        assert str(metadata.input_cost_per_million) == "0.0200"
+
+    def test_missing_model_raises_provider_error(self) -> None:
+        handler = _RecordingHandler(
+            responses=[httpx.Response(200, json={"data": [{"id": "other/model"}]})]
+        )
+        http = httpx.Client(transport=httpx.MockTransport(handler))
+
+        with pytest.raises(LlmProviderError, match="not found"):
+            fetch_openrouter_model_metadata("google/gemma-4-31b-it", http=http)
+
+    def test_transport_error_is_safe(self) -> None:
+        handler = _RecordingHandler(
+            raise_on={0: httpx.ConnectError("Authorization: Bearer sk-secret")}
+        )
+        http = httpx.Client(transport=httpx.MockTransport(handler))
+
+        with pytest.raises(LlmTransportError) as exc_info:
+            fetch_openrouter_model_metadata("google/gemma-4-31b-it", http=http)
+
+        assert "sk-secret" not in str(exc_info.value)
 
 
 class TestLatencyMeasurement:

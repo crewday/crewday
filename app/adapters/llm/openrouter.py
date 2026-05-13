@@ -59,8 +59,11 @@ import json
 import logging
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from types import MappingProxyType
 from typing import Final, Protocol, TypedDict, cast
+from urllib.parse import unquote, urlsplit
 
 import httpx
 from pydantic import SecretStr
@@ -99,7 +102,10 @@ __all__ = [
     "LlmTransportError",
     "OpenRouterClient",
     "OpenRouterConfigSource",
+    "OpenRouterModelMetadata",
     "StaticOpenRouterConfigSource",
+    "fetch_openrouter_model_metadata",
+    "normalize_openrouter_model_id",
     "openrouter_api_key_display_stub",
     "openrouter_envelope_id_from_pointer",
     "openrouter_envelope_pointer",
@@ -144,6 +150,33 @@ _DEFAULT_OCR_PROMPT: Final[str] = (
     "Preserve line breaks; do not summarise."
 )
 _DEFAULT_OCR_MIME: Final[str] = "image/jpeg"
+_PRICE_QUANTUM: Final[Decimal] = Decimal("0.0001")
+_PER_MILLION: Final[Decimal] = Decimal("1000000")
+_MODEL_ID_PARTS: Final[int] = 2
+_MODEL_ID_MAX_LENGTH: Final[int] = 240
+_MODEL_ID_VENDOR_MAX_LENGTH: Final[int] = 80
+_MODEL_ID_CHARS: Final[frozenset[str]] = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_:/"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class OpenRouterModelMetadata:
+    """Normalised subset of one OpenRouter catalogue row."""
+
+    model_id: str
+    display_name: str
+    vendor: str
+    capabilities: list[str]
+    context_window: int | None
+    max_output_tokens: int | None
+    input_cost_per_million: Decimal
+    output_cost_per_million: Decimal
+    fixed_cost_per_call_usd: Decimal | None
+    supports_system_prompt: bool
+    supports_temperature: bool
+    thinking_level: LlmThinkingLevel
+    thinking_strategy: LlmThinkingStrategy
 
 
 class OpenRouterConfigSource(Protocol):
@@ -152,6 +185,83 @@ class OpenRouterConfigSource(Protocol):
     def api_key(self) -> SecretStr | None:
         """Return the configured API key, or ``None`` when absent."""
         ...
+
+
+def normalize_openrouter_model_id(value: str) -> str:
+    """Return ``vendor/model`` from a raw OpenRouter id or model URL."""
+
+    raw = value.strip()
+    if not raw:
+        raise ValueError("openrouter model id is required")
+
+    parsed = urlsplit(raw)
+    if parsed.scheme or parsed.netloc:
+        if parsed.scheme not in {"http", "https"}:
+            raise ValueError("openrouter model URL must use http or https")
+        host = parsed.netloc.lower()
+        if host not in {"openrouter.ai", "www.openrouter.ai"}:
+            raise ValueError("openrouter model URL must use openrouter.ai")
+        parts = [
+            unquote(part)
+            for part in parsed.path.split("/")
+            if part and part not in {"models"}
+        ]
+        raw = "/".join(parts)
+
+    candidate = raw.strip().strip("/")
+    parts = candidate.split("/")
+    if (
+        len(candidate) > _MODEL_ID_MAX_LENGTH
+        or len(parts) != _MODEL_ID_PARTS
+        or any(not part.strip() for part in parts)
+        or len(parts[0]) > _MODEL_ID_VENDOR_MAX_LENGTH
+        or any(part in {".", ".."} for part in parts)
+        or any("?" in part or "#" in part for part in parts)
+        or any(char not in _MODEL_ID_CHARS for char in candidate)
+    ):
+        raise ValueError("openrouter model id must look like vendor/model")
+    return "/".join(parts)
+
+
+def fetch_openrouter_model_metadata(
+    model_id_or_url: str,
+    *,
+    base_url: str = _DEFAULT_BASE_URL,
+    http: httpx.Client | None = None,
+    timeout: float = 10.0,
+) -> OpenRouterModelMetadata:
+    """Fetch and normalise metadata for one OpenRouter model id."""
+
+    model_id = normalize_openrouter_model_id(model_id_or_url)
+    close_http = http is None
+    client = http or httpx.Client(timeout=timeout)
+    try:
+        try:
+            response = client.get(
+                f"{base_url.rstrip('/')}/models",
+                headers={
+                    "HTTP-Referer": _ATTRIBUTION_REFERER,
+                    "X-Title": _ATTRIBUTION_TITLE,
+                },
+            )
+        except httpx.TimeoutException as exc:
+            raise LlmTransportError("openrouter metadata request timed out") from exc
+        except httpx.HTTPError as exc:
+            raise LlmTransportError(
+                f"openrouter metadata request failed: {type(exc).__name__}"
+            ) from exc
+        if response.status_code >= 400:
+            raise LlmTransportError(
+                f"openrouter metadata request failed: {response.status_code}"
+            )
+        payload = _decode_models_payload(response)
+        for entry in payload:
+            if _string(entry.get("id")) == model_id:
+                return _openrouter_model_metadata(entry)
+    finally:
+        if close_http:
+            client.close()
+    raise LlmProviderError(f"openrouter model not found: {model_id}")
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +315,159 @@ class _ChatCompletion(TypedDict, total=False):
     model: str
     choices: list[_Choice]
     usage: _Usage
+
+
+def _decode_models_payload(response: httpx.Response) -> list[Mapping[str, object]]:
+    try:
+        payload = response.json()
+    except json.JSONDecodeError as exc:
+        raise LlmTransportError("openrouter metadata returned non-JSON body") from exc
+    root = _mapping(payload)
+    if root is None:
+        raise LlmTransportError("openrouter metadata returned non-object JSON body")
+    data = root.get("data")
+    if not isinstance(data, list):
+        raise LlmTransportError("openrouter metadata response contained no data")
+    entries: list[Mapping[str, object]] = []
+    for item in data:
+        entry = _mapping(item)
+        if entry is not None:
+            entries.append(entry)
+    return entries
+
+
+def _openrouter_model_metadata(
+    entry: Mapping[str, object],
+) -> OpenRouterModelMetadata:
+    model_id = _string(entry.get("id"))
+    if model_id is None:
+        raise LlmTransportError("openrouter metadata row lacked an id")
+    pricing = _mapping(entry.get("pricing")) or MappingProxyType({})
+    top_provider = _mapping(entry.get("top_provider")) or MappingProxyType({})
+    architecture = _mapping(entry.get("architecture")) or MappingProxyType({})
+    supported_parameters = _string_set(entry.get("supported_parameters"))
+    capabilities = _openrouter_capabilities(
+        architecture=architecture,
+        supported_parameters=supported_parameters,
+    )
+    has_reasoning = "reasoning" in capabilities
+    return OpenRouterModelMetadata(
+        model_id=model_id,
+        display_name=_string(entry.get("name"))
+        or _display_name_from_model_id(model_id),
+        vendor=model_id.split("/", 1)[0],
+        capabilities=capabilities,
+        context_window=_positive_int(
+            top_provider.get("context_length"), entry.get("context_length")
+        ),
+        max_output_tokens=_positive_int(top_provider.get("max_completion_tokens")),
+        input_cost_per_million=_per_million_price(pricing.get("prompt")),
+        output_cost_per_million=_per_million_price(pricing.get("completion")),
+        fixed_cost_per_call_usd=_fixed_price(pricing.get("request")),
+        supports_system_prompt=True,
+        supports_temperature="temperature" in supported_parameters,
+        thinking_level="disabled",
+        thinking_strategy="openrouter_extra_body" if has_reasoning else "none",
+    )
+
+
+def _openrouter_capabilities(
+    *,
+    architecture: Mapping[str, object],
+    supported_parameters: set[str],
+) -> list[str]:
+    input_modalities = _string_set(architecture.get("input_modalities"))
+    output_modalities = _string_set(architecture.get("output_modalities"))
+    modality = (_string(architecture.get("modality")) or "").lower()
+    tags: list[str] = []
+
+    if (
+        ("text" in input_modalities and "text" in output_modalities)
+        or "text->text" in modality
+        or "text+image->text" in modality
+    ):
+        tags.append("chat")
+    if "image" in input_modalities or "image" in modality:
+        tags.append("vision")
+    if "audio" in input_modalities or "audio" in modality:
+        tags.append("audio_input")
+    if (
+        "embedding" in output_modalities
+        or "embeddings" in output_modalities
+        or "embedding" in modality
+    ):
+        tags.append("embeddings")
+    if supported_parameters.intersection({"reasoning", "include_reasoning"}):
+        tags.append("reasoning")
+    if supported_parameters.intersection({"tools", "tool_choice", "functions"}):
+        tags.append("function_calling")
+    if supported_parameters.intersection({"response_format", "structured_outputs"}):
+        tags.append("json_mode")
+    if supported_parameters.intersection({"stream", "streaming"}):
+        tags.append("streaming")
+    return tags
+
+
+def _mapping(value: object) -> Mapping[str, object] | None:
+    if isinstance(value, Mapping):
+        return cast(Mapping[str, object], value)
+    return None
+
+
+def _string(value: object) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _string_set(value: object) -> set[str]:
+    if not isinstance(value, list):
+        return set()
+    return {
+        item.strip().lower() for item in value if isinstance(item, str) and item.strip()
+    }
+
+
+def _positive_int(*values: object) -> int | None:
+    for value in values:
+        if isinstance(value, int) and value > 0:
+            return value
+        if isinstance(value, str) and value.isdecimal():
+            parsed = int(value)
+            if parsed > 0:
+                return parsed
+    return None
+
+
+def _per_million_price(value: object) -> Decimal:
+    price = _decimal(value)
+    if price is None:
+        return Decimal("0.0000")
+    return (price * _PER_MILLION).quantize(_PRICE_QUANTUM)
+
+
+def _fixed_price(value: object) -> Decimal | None:
+    price = _decimal(value)
+    if price is None:
+        return None
+    return price.quantize(_PRICE_QUANTUM)
+
+
+def _decimal(value: object) -> Decimal | None:
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = Decimal(value)
+        except InvalidOperation:
+            return None
+        if parsed >= 0:
+            return parsed
+    if isinstance(value, int | float) and value >= 0:
+        return Decimal(str(value))
+    return None
+
+
+def _display_name_from_model_id(model_id: str) -> str:
+    return model_id.rsplit("/", 1)[-1].replace("-", " ").replace("_", " ").title()
 
 
 # ---------------------------------------------------------------------------

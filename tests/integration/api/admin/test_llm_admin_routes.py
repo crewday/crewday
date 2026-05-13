@@ -30,20 +30,26 @@ from app.adapters.db.llm.models import (
     LlmUsage,
 )
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
+from app.adapters.llm.openrouter import (
+    OpenRouterModelMetadata,
+    normalize_openrouter_model_id,
+)
 from app.adapters.llm.ports import (
     ChatMessage,
     LlmProviderError,
     LLMResponse,
+    LlmTransportError,
     LLMUsage,
 )
 from app.api.transport import admin_sse
+from app.auth import tokens as auth_tokens
 from app.auth.session import SESSION_COOKIE_NAME, issue
 from app.config import Settings
 from app.domain.llm.router import DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID
 from app.events.bus import EventBus
 from app.events.types import LlmAssignmentChanged
 from app.main import create_app
-from app.tenancy import tenant_agnostic
+from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.tenancy.orm_filter import install_tenant_filter
 from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user
@@ -217,6 +223,50 @@ def _seed_admin(
         )
         s.commit()
         return result.cookie_value
+
+
+def _seed_scoped_token(
+    session_factory: sessionmaker[Session],
+    *,
+    scopes: dict[str, object],
+) -> str:
+    with session_factory() as s:
+        user = bootstrap_user(
+            s, email=f"agent-{new_ulid()}@example.com", display_name="Agent"
+        )
+        workspace_id = new_ulid()
+        workspace_slug = f"token-{workspace_id[-6:].lower()}"
+        s.add(
+            Workspace(
+                id=workspace_id,
+                slug=workspace_slug,
+                name="Token Workspace",
+                plan="free",
+                quota_json={},
+                created_at=_PINNED,
+            )
+        )
+        s.flush()
+        result = auth_tokens.mint(
+            s,
+            WorkspaceContext(
+                workspace_id=workspace_id,
+                workspace_slug=workspace_slug,
+                actor_id=user.id,
+                actor_kind="user",
+                actor_grant_role="manager",
+                actor_was_owner_member=False,
+                audit_correlation_id=new_ulid(),
+            ),
+            user_id=user.id,
+            label="admin llm scoped token",
+            scopes=scopes,
+            expires_at=None,
+            kind="scoped",
+            now=_PINNED,
+        )
+        s.commit()
+        return result.token
 
 
 def _seed_llm_graph(session_factory: sessionmaker[Session]) -> SeededLlm:
@@ -490,6 +540,34 @@ def _wipe(session_factory: sessionmaker[Session]) -> None:
             for row in s.scalars(select(model)).all():
                 s.delete(row)
         s.commit()
+
+
+def _gemma_4_metadata(
+    model_id: str = "google/gemma-4-31b-it",
+) -> OpenRouterModelMetadata:
+    return OpenRouterModelMetadata(
+        model_id=model_id,
+        display_name="Gemma 4 31B Instruct",
+        vendor="google",
+        capabilities=[
+            "chat",
+            "vision",
+            "audio_input",
+            "reasoning",
+            "function_calling",
+            "json_mode",
+            "streaming",
+        ],
+        context_window=131072,
+        max_output_tokens=8192,
+        input_cost_per_million=Decimal("0.1500"),
+        output_cost_per_million=Decimal("0.4500"),
+        fixed_cost_per_call_usd=Decimal("0.0012"),
+        supports_system_prompt=True,
+        supports_temperature=True,
+        thinking_level="disabled",
+        thinking_strategy="openrouter_extra_body",
+    )
 
 
 class TestAdminLlmRoutes:
@@ -1321,6 +1399,257 @@ class TestAdminLlmRoutes:
             assert missing.status_code == 422, missing.text
             assert missing.json()["error"] == "assignment_missing_capability"
             assert missing.json()["missing_capabilities"] == ["vision", "json_mode"]
+        finally:
+            _wipe(session_factory)
+
+    def test_openrouter_model_preview_prefills_create_payload_and_detects_existing(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        try:
+            assert (
+                client.post(
+                    "/admin/api/v1/llm/models/openrouter-preview",
+                    json={"model_id_or_url": "google/gemma-4-31b-it"},
+                ).status_code
+                == 404
+            )
+            read_only_token = _seed_scoped_token(
+                session_factory,
+                scopes={"deployment.llm:read": True},
+            )
+            read_only = client.post(
+                "/admin/api/v1/llm/models/openrouter-preview",
+                json={"model_id_or_url": "google/gemma-4-31b-it"},
+                headers={"Authorization": f"Bearer {read_only_token}"},
+            )
+            assert read_only.status_code == 404, read_only.text
+
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            existing_model_id = new_ulid()
+            existing_provider_model_id = new_ulid()
+            with session_factory() as s, tenant_agnostic():
+                s.add(
+                    LlmModel(
+                        id=existing_model_id,
+                        canonical_name="gemma-4-31b-it",
+                        display_name="Existing Gemma 4",
+                        vendor="google",
+                        capabilities=["chat"],
+                        context_window=4096,
+                        max_output_tokens=None,
+                        thinking_level="disabled",
+                        thinking_strategy="none",
+                        is_active=True,
+                        price_source="openrouter",
+                        price_source_model_id="google/gemma-4-31b-it",
+                        notes=None,
+                        created_at=_PINNED,
+                        updated_at=_PINNED,
+                        updated_by_user_id=None,
+                    )
+                )
+                s.flush()
+                s.add(
+                    LlmProviderModel(
+                        id=existing_provider_model_id,
+                        provider_id=seeded.provider_id,
+                        model_id=existing_model_id,
+                        api_model_id="google/gemma-4-31b-it",
+                        input_cost_per_million=Decimal("1.0000"),
+                        output_cost_per_million=Decimal("2.0000"),
+                        fixed_cost_per_call_usd=None,
+                        max_tokens_override=None,
+                        temperature_override=None,
+                        supports_system_prompt=True,
+                        supports_temperature=True,
+                        thinking_level_override=None,
+                        thinking_strategy_override=None,
+                        reasoning_effort="",
+                        extra_api_params={},
+                        price_source_override="",
+                        price_source_model_id_override=None,
+                        price_last_synced_at=None,
+                        is_enabled=True,
+                        created_at=_PINNED,
+                        updated_at=_PINNED,
+                    )
+                )
+                s.commit()
+
+            seen: list[str] = []
+
+            def fake_lookup(model_id_or_url: str) -> OpenRouterModelMetadata:
+                seen.append(model_id_or_url)
+                return _gemma_4_metadata(
+                    model_id=normalize_openrouter_model_id(model_id_or_url)
+                )
+
+            monkeypatch.setattr(
+                "app.api.admin.llm.fetch_openrouter_model_metadata", fake_lookup
+            )
+
+            resp = client.post(
+                "/admin/api/v1/llm/models/openrouter-preview",
+                json={"model_id_or_url": "google/gemma-4-31b-it"},
+            )
+
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert seen == ["google/gemma-4-31b-it"]
+            assert body["openrouter_model_id"] == "google/gemma-4-31b-it"
+            assert body["existing_model_id"] == existing_model_id
+            assert body["model_payload"]["canonical_name"] == "google/gemma-4-31b-it"
+            assert body["model_payload"]["display_name"] == "Gemma 4 31B Instruct"
+            assert body["model_payload"]["vendor"] == "google"
+            assert body["model_payload"]["capabilities"] == [
+                "chat",
+                "vision",
+                "audio_input",
+                "reasoning",
+                "function_calling",
+                "json_mode",
+                "streaming",
+            ]
+            assert body["model_payload"]["context_window"] == 131072
+            assert body["model_payload"]["max_output_tokens"] == 8192
+            assert body["model_payload"]["thinking_level"] == "disabled"
+            assert body["model_payload"]["thinking_strategy"] == "openrouter_extra_body"
+            assert body["model_payload"]["price_source"] == "openrouter"
+            assert (
+                body["model_payload"]["price_source_model_id"]
+                == "google/gemma-4-31b-it"
+            )
+
+            provider_preview = body["provider_model_previews"][0]
+            assert provider_preview["provider_id"] == seeded.provider_id
+            assert provider_preview["provider_name"] == "OpenRouter"
+            assert (
+                provider_preview["existing_provider_model_id"]
+                == existing_provider_model_id
+            )
+            assert provider_preview["payload"]["model_id"] == existing_model_id
+            assert provider_preview["payload"]["api_model_id"] == (
+                "google/gemma-4-31b-it"
+            )
+            assert provider_preview["payload"]["input_cost_per_million"] == 0.15
+            assert provider_preview["payload"]["output_cost_per_million"] == 0.45
+            assert provider_preview["payload"]["fixed_cost_per_call_usd"] == 0.0012
+            assert provider_preview["payload"]["supports_system_prompt"] is True
+            assert provider_preview["payload"]["supports_temperature"] is True
+            assert provider_preview["payload"]["price_source_override"] == "openrouter"
+            assert provider_preview["payload"]["price_source_model_id_override"] == (
+                "google/gemma-4-31b-it"
+            )
+        finally:
+            _wipe(session_factory)
+
+    def test_openrouter_model_preview_accepts_url_and_maps_safe_errors(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            _seed_llm_graph(session_factory)
+            seen: list[str] = []
+
+            def fake_lookup(model_id_or_url: str) -> OpenRouterModelMetadata:
+                seen.append(model_id_or_url)
+                if model_id_or_url == "bad id":
+                    raise ValueError("bad id")
+                if model_id_or_url == "missing/model":
+                    raise LlmProviderError("not found")
+                if model_id_or_url == "transport/model":
+                    raise LlmTransportError(
+                        "Authorization: Bearer sk-openrouter-secret"
+                    )
+                if model_id_or_url == "oversized/model":
+                    return OpenRouterModelMetadata(
+                        model_id="oversized/model",
+                        display_name="x" * 241,
+                        vendor="oversized",
+                        capabilities=["chat"],
+                        context_window=None,
+                        max_output_tokens=None,
+                        input_cost_per_million=Decimal("0"),
+                        output_cost_per_million=Decimal("0"),
+                        fixed_cost_per_call_usd=None,
+                        supports_system_prompt=True,
+                        supports_temperature=True,
+                        thinking_level="disabled",
+                        thinking_strategy="none",
+                    )
+                return _gemma_4_metadata(
+                    model_id=normalize_openrouter_model_id(model_id_or_url)
+                )
+
+            monkeypatch.setattr(
+                "app.api.admin.llm.fetch_openrouter_model_metadata", fake_lookup
+            )
+
+            url_resp = client.post(
+                "/admin/api/v1/llm/models/openrouter-preview",
+                json={
+                    "model_id_or_url": (
+                        "https://openrouter.ai/models/google/gemma-4-31b-it"
+                    )
+                },
+            )
+            assert url_resp.status_code == 200, url_resp.text
+            assert url_resp.json()["openrouter_model_id"] == "google/gemma-4-31b-it"
+            assert seen[-1] == "https://openrouter.ai/models/google/gemma-4-31b-it"
+
+            invalid = client.post(
+                "/admin/api/v1/llm/models/openrouter-preview",
+                json={"model_id_or_url": "bad id"},
+            )
+            assert invalid.status_code == 422, invalid.text
+            assert invalid.json()["error"] == "invalid_openrouter_model_id"
+
+            empty = client.post(
+                "/admin/api/v1/llm/models/openrouter-preview",
+                json={"model_id_or_url": ""},
+            )
+            assert empty.status_code == 422, empty.text
+            assert empty.json()["error"] == "invalid_openrouter_model_id"
+
+            missing = client.post(
+                "/admin/api/v1/llm/models/openrouter-preview",
+                json={"model_id_or_url": "missing/model"},
+            )
+            assert missing.status_code == 404, missing.text
+            assert missing.json()["error"] == "openrouter_model_not_found"
+
+            transport = client.post(
+                "/admin/api/v1/llm/models/openrouter-preview",
+                json={"model_id_or_url": "transport/model"},
+            )
+            assert transport.status_code == 502, transport.text
+            body = transport.json()
+            assert body["error"] == "openrouter_unavailable"
+            assert body["upstream"] == "openrouter"
+            assert "sk-openrouter-secret" not in transport.text
+
+            oversized = client.post(
+                "/admin/api/v1/llm/models/openrouter-preview",
+                json={"model_id_or_url": "oversized/model"},
+            )
+            assert oversized.status_code == 502, oversized.text
+            assert oversized.json()["error"] == "openrouter_unavailable"
+            assert "x" * 241 not in oversized.text
         finally:
             _wipe(session_factory)
 
