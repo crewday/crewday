@@ -27,12 +27,12 @@ export default function FormField(props: FormFieldProps) {
       <span className="form-field__label">
         {label} <span className={requirementClasses}>{requirementLabel}</span>
       </span>
+      {children}
       {helpText ? (
         <span id={helpId} className="form-field__help">
           {helpText}
         </span>
       ) : null}
-      {children}
     </label>
   );
 }

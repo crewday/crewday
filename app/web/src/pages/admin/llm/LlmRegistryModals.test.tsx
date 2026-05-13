@@ -69,6 +69,18 @@ function playgroundSection(): HTMLElement {
   return screen.getByRole("region", { name: "Playground" });
 }
 
+function elementById(id: string): HTMLElement {
+  const element = document.getElementById(id);
+  if (!(element instanceof HTMLElement)) throw new Error(`Expected #${id}.`);
+  return element;
+}
+
+function expectControlBeforeHelp(control: HTMLElement, help: HTMLElement) {
+  expect(control.compareDocumentPosition(help) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+    Node.DOCUMENT_POSITION_FOLLOWING,
+  );
+}
+
 describe("LlmRegistryModals", () => {
   it("renders the edit-only provider-model playground with usable mode and vision controls", () => {
     installFetch();
@@ -526,6 +538,33 @@ describe("LlmRegistryModals", () => {
         call.init.method === "PUT",
     )!;
     expect(bodyOf(put)).toMatchObject({ thinking_level_override: "high" });
+  });
+
+  it("renders provider-model field help after the associated controls", () => {
+    installFetch();
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "create" });
+
+    const thinking = screen.getByLabelText(/Thinking level/);
+    const thinkingHelp = elementById("llm-provider-model-thinking-help");
+    const extraParams = screen.getByLabelText(/Extra API params/);
+    const extraParamsHelp = elementById("llm-provider-model-extra-help");
+
+    expect(thinking).toHaveAttribute(
+      "aria-describedby",
+      "llm-provider-model-thinking-help",
+    );
+    expect(thinkingHelp).toHaveTextContent(
+      "Inherited model default: disabled. Effective: disabled.",
+    );
+    expectControlBeforeHelp(thinking, thinkingHelp);
+    expect(extraParams).toHaveAttribute(
+      "aria-describedby",
+      "llm-provider-model-extra-help",
+    );
+    expect(extraParamsHelp).toHaveTextContent(
+      "JSON object merged into provider requests for this row.",
+    );
+    expectControlBeforeHelp(extraParams, extraParamsHelp);
   });
 
   it("ignores malformed provider-model thinking values before save", async () => {

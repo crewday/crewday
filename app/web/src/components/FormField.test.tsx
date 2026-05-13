@@ -33,6 +33,28 @@ describe("FormField", () => {
     expect(screen.getByLabelText(/^Notes\b/)).toBe(optionalTextarea);
   });
 
+  it("renders help text after the control while preserving described-by links", () => {
+    render(
+      <FormField
+        label="Threshold"
+        requirement="optional"
+        helpId="threshold-help"
+        helpText="Used to flag low stock."
+      >
+        <input aria-describedby="threshold-help" />
+      </FormField>,
+    );
+
+    const input = screen.getByLabelText(/^Threshold\b/);
+    const help = screen.getByText("Used to flag low stock.");
+
+    expect(input).toHaveAttribute("aria-describedby", "threshold-help");
+    expect(help).toHaveAttribute("id", "threshold-help");
+    expect(input.compareDocumentPosition(help) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
   it("keeps optional markers intentionally hidden but easy to re-show", () => {
     expect(formsCss).toMatch(
       /\.form-field__requirement--required\s*{\s*color: var\(--moss\);/m,
