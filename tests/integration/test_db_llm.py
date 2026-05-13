@@ -3506,6 +3506,7 @@ class TestRegistryShape:
             "context_window",
             "max_output_tokens",
             "thinking_level",
+            "thinking_strategy",
             "is_active",
             "price_source",
             "price_source_model_id",
@@ -3530,6 +3531,28 @@ class TestRegistryShape:
                 vendor="other",
                 capabilities=["chat"],
                 thinking_level="turbo",
+                thinking_strategy="none",
+                is_active=True,
+                price_source="",
+                created_at=_PINNED,
+                updated_at=_PINNED,
+            )
+        )
+
+        with pytest.raises(IntegrityError):
+            db_session.flush()
+        db_session.rollback()
+
+    def test_llm_model_thinking_strategy_constraint(self, db_session: Session) -> None:
+        db_session.add(
+            LlmModel(
+                id="01HWA0000000000000000THST",
+                canonical_name="thinking-strategy/invalid",
+                display_name="Invalid Thinking Strategy",
+                vendor="other",
+                capabilities=["chat"],
+                thinking_level="disabled",
+                thinking_strategy="turbo",
                 is_active=True,
                 price_source="",
                 created_at=_PINNED,
@@ -3556,6 +3579,7 @@ class TestRegistryShape:
             "supports_system_prompt",
             "supports_temperature",
             "thinking_level_override",
+            "thinking_strategy_override",
             "reasoning_effort",
             "extra_api_params",
             "price_source_override",
@@ -3576,6 +3600,20 @@ class TestRegistryShape:
             suffix="THPM",
         )
         pm.thinking_level_override = "turbo"
+
+        with pytest.raises(IntegrityError):
+            db_session.flush()
+        db_session.rollback()
+
+    def test_llm_provider_model_thinking_strategy_override_constraint(
+        self, db_session: Session
+    ) -> None:
+        pm = _seed_registry_trio(
+            db_session,
+            provider_model_id="01HWA0000000000000000TSPM",
+            suffix="TSPM",
+        )
+        pm.thinking_strategy_override = "turbo"
 
         with pytest.raises(IntegrityError):
             db_session.flush()
@@ -3753,6 +3791,168 @@ class TestProviderPriorityRemovalMigration:
                 c["name"]: c for c in inspect(engine).get_columns("llm_provider")
             }
             assert provider_cols["priority"]["nullable"] is False
+        finally:
+            engine.dispose()
+
+
+class TestThinkingStrategyMigration:
+    """cd-a9kho preserves existing OpenRouter thinking-level behavior."""
+
+    @contextmanager
+    def _override_database_url(self, url: str) -> Iterator[None]:
+        original = os.environ.get("CREWDAY_DATABASE_URL")
+        os.environ["CREWDAY_DATABASE_URL"] = url
+
+        from app.config import get_settings
+
+        get_settings.cache_clear()
+        try:
+            yield
+        finally:
+            if original is None:
+                os.environ.pop("CREWDAY_DATABASE_URL", None)
+            else:
+                os.environ["CREWDAY_DATABASE_URL"] = original
+            get_settings.cache_clear()
+
+    def test_upgrade_backfills_openrouter_strategy_for_existing_thinking_levels(
+        self, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
+        from alembic import command
+        from alembic.config import Config as AlembicConfig
+        from sqlalchemy import text
+
+        from app.adapters.db.session import make_engine
+
+        db_path = tmp_path_factory.mktemp("cd-a9kho-mig") / "mig.db"
+        url = f"sqlite:///{db_path}"
+        engine = make_engine(url)
+        try:
+            cfg = AlembicConfig(
+                str(Path(__file__).resolve().parents[2] / "alembic.ini")
+            )
+            cfg.set_main_option("sqlalchemy.url", url)
+            with self._override_database_url(url):
+                command.upgrade(cfg, "cdm67nwthink")
+
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO llm_provider "
+                        "(id, name, provider_type, timeout_s, "
+                        "requests_per_minute, is_enabled, created_at, updated_at) "
+                        "VALUES "
+                        "('01HWA000000000000000ORSTR', 'or-strategy', "
+                        "'openrouter', 60, 60, 1, "
+                        "'2026-05-13T10:00:00+00:00', "
+                        "'2026-05-13T10:00:00+00:00'), "
+                        "('01HWA000000000000000FKSTR', 'fake-strategy', "
+                        "'fake', 60, 60, 1, "
+                        "'2026-05-13T10:00:00+00:00', "
+                        "'2026-05-13T10:00:00+00:00')"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO llm_model "
+                        "(id, canonical_name, display_name, vendor, capabilities, "
+                        "thinking_level, is_active, price_source, "
+                        "created_at, updated_at) "
+                        "VALUES "
+                        "('01HWA000000000000000MDSTR', "
+                        "'strategy/model-default', 'Strategy Default', "
+                        "'other', '[\"chat\"]', 'medium', 1, '', "
+                        "'2026-05-13T10:00:00+00:00', "
+                        "'2026-05-13T10:00:00+00:00'), "
+                        "('01HWA000000000000000MDST2', "
+                        "'strategy/provider-override', 'Provider Override', "
+                        "'other', '[\"chat\"]', 'disabled', 1, '', "
+                        "'2026-05-13T10:00:00+00:00', "
+                        "'2026-05-13T10:00:00+00:00'), "
+                        "('01HWA000000000000000MDST3', "
+                        "'strategy/assignment-override', 'Assignment Override', "
+                        "'other', '[\"chat\"]', 'disabled', 1, '', "
+                        "'2026-05-13T10:00:00+00:00', "
+                        "'2026-05-13T10:00:00+00:00')"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO llm_provider_model "
+                        "(id, provider_id, model_id, api_model_id, "
+                        "input_cost_per_million, output_cost_per_million, "
+                        "supports_system_prompt, supports_temperature, "
+                        "thinking_level_override, extra_api_params, "
+                        "is_enabled, created_at, updated_at) "
+                        "VALUES "
+                        "('01HWA000000000000000PMINH', "
+                        "'01HWA000000000000000ORSTR', "
+                        "'01HWA000000000000000MDSTR', 'strategy/inherit', "
+                        "0, 0, 1, 1, NULL, '{}', 1, "
+                        "'2026-05-13T10:00:00+00:00', "
+                        "'2026-05-13T10:00:00+00:00'), "
+                        "('01HWA000000000000000PMFAK', "
+                        "'01HWA000000000000000FKSTR', "
+                        "'01HWA000000000000000MDSTR', 'strategy/fake', "
+                        "0, 0, 1, 1, NULL, '{}', 1, "
+                        "'2026-05-13T10:00:00+00:00', "
+                        "'2026-05-13T10:00:00+00:00'), "
+                        "('01HWA000000000000000PMOVR', "
+                        "'01HWA000000000000000ORSTR', "
+                        "'01HWA000000000000000MDST2', 'strategy/override', "
+                        "0, 0, 1, 1, 'low', '{}', 1, "
+                        "'2026-05-13T10:00:00+00:00', "
+                        "'2026-05-13T10:00:00+00:00'), "
+                        "('01HWA000000000000000PMASN', "
+                        "'01HWA000000000000000ORSTR', "
+                        "'01HWA000000000000000MDST3', 'strategy/assignment', "
+                        "0, 0, 1, 1, NULL, '{}', 1, "
+                        "'2026-05-13T10:00:00+00:00', "
+                        "'2026-05-13T10:00:00+00:00')"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO llm_assignment "
+                        "(id, workspace_id, capability, model_id, provider, "
+                        "priority, enabled, max_tokens, temperature, "
+                        "thinking_level_override, extra_api_params, "
+                        "required_capabilities, created_at) "
+                        "VALUES "
+                        "('01HWA000000000000000ASSTR', NULL, "
+                        "'chat.manager', '01HWA000000000000000PMASN', "
+                        "'OpenRouter', 0, 1, NULL, NULL, 'high', '{}', "
+                        "'[\"chat\"]', '2026-05-13T10:00:00+00:00')"
+                    )
+                )
+
+            with self._override_database_url(url):
+                command.upgrade(cfg, "cda9khothink")
+
+            with engine.begin() as conn:
+                rows = {
+                    row.id: row.strategy
+                    for row in conn.execute(
+                        text(
+                            "SELECT id, thinking_strategy_override AS strategy "
+                            "FROM llm_provider_model ORDER BY id"
+                        )
+                    )
+                }
+                model_strategy = conn.execute(
+                    text(
+                        "SELECT thinking_strategy FROM llm_model "
+                        "WHERE id = '01HWA000000000000000MDSTR'"
+                    )
+                ).scalar_one()
+
+            assert rows == {
+                "01HWA000000000000000PMASN": "openrouter_extra_body",
+                "01HWA000000000000000PMFAK": None,
+                "01HWA000000000000000PMINH": "openrouter_extra_body",
+                "01HWA000000000000000PMOVR": "openrouter_extra_body",
+            }
+            assert model_strategy == "none"
         finally:
             engine.dispose()
 

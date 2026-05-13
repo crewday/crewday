@@ -24,6 +24,8 @@ from app.adapters.db.llm import (
     BudgetLedger,
     LlmAssignment,
     LlmCapabilityInheritance,
+    LlmModel,
+    LlmProviderModel,
     LlmUsage,
 )
 from app.adapters.db.llm import models as llm_models
@@ -183,6 +185,38 @@ class TestLlmCapabilityInheritanceModel:
         )
         assert target.unique is True
         assert [c.name for c in target.columns] == ["capability"]
+
+
+class TestLlmModelRegistry:
+    def test_thinking_strategy_check_present(self) -> None:
+        checks = [
+            c
+            for c in LlmModel.__table_args__
+            if isinstance(c, CheckConstraint)
+            and c.name is not None
+            and str(c.name).endswith("thinking_strategy")
+        ]
+        assert len(checks) == 1
+        sql = str(checks[0].sqltext)
+        assert "thinking_strategy" in sql
+        assert "none" in sql
+        assert "openrouter_extra_body" in sql
+
+
+class TestLlmProviderModelRegistry:
+    def test_thinking_strategy_override_check_present(self) -> None:
+        checks = [
+            c
+            for c in LlmProviderModel.__table_args__
+            if isinstance(c, CheckConstraint)
+            and c.name is not None
+            and str(c.name).endswith("thinking_strategy_override")
+        ]
+        assert len(checks) == 1
+        sql = str(checks[0].sqltext)
+        assert "thinking_strategy_override" in sql
+        assert "none" in sql
+        assert "openrouter_extra_body" in sql
 
 
 class TestAgentTokenModel:

@@ -13179,6 +13179,16 @@
             "title": "Effective Thinking Level",
             "type": "string"
           },
+          "effective_thinking_strategy": {
+            "enum": [
+              "gemma_system_token",
+              "glm_extra_body",
+              "none",
+              "openrouter_extra_body"
+            ],
+            "title": "Effective Thinking Strategy",
+            "type": "string"
+          },
           "extra_api_params": {
             "additionalProperties": true,
             "title": "Extra Api Params",
@@ -13282,6 +13292,7 @@
           "capability",
           "description",
           "effective_thinking_level",
+          "effective_thinking_strategy",
           "extra_api_params",
           "id",
           "is_enabled",
@@ -13705,6 +13716,16 @@
             "title": "Thinking Level",
             "type": "string"
           },
+          "thinking_strategy": {
+            "enum": [
+              "gemma_system_token",
+              "glm_extra_body",
+              "none",
+              "openrouter_extra_body"
+            ],
+            "title": "Thinking Strategy",
+            "type": "string"
+          },
           "vendor": {
             "title": "Vendor",
             "type": "string"
@@ -13723,6 +13744,7 @@
           "price_source_model_id",
           "provider_model_count",
           "thinking_level",
+          "thinking_strategy",
           "vendor"
         ],
         "title": "LlmModelResponse",
@@ -14184,6 +14206,16 @@
             "title": "Effective Thinking Level",
             "type": "string"
           },
+          "effective_thinking_strategy": {
+            "enum": [
+              "gemma_system_token",
+              "glm_extra_body",
+              "none",
+              "openrouter_extra_body"
+            ],
+            "title": "Effective Thinking Strategy",
+            "type": "string"
+          },
           "extra_api_params": {
             "additionalProperties": true,
             "title": "Extra Api Params",
@@ -14316,11 +14348,29 @@
               }
             ],
             "title": "Thinking Level Override"
+          },
+          "thinking_strategy_override": {
+            "anyOf": [
+              {
+                "enum": [
+                  "gemma_system_token",
+                  "glm_extra_body",
+                  "none",
+                  "openrouter_extra_body"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thinking Strategy Override"
           }
         },
         "required": [
           "api_model_id",
           "effective_thinking_level",
+          "effective_thinking_strategy",
           "extra_api_params",
           "fixed_cost_per_call_usd",
           "id",
@@ -14337,7 +14387,8 @@
           "supports_system_prompt",
           "supports_temperature",
           "temperature_override",
-          "thinking_level_override"
+          "thinking_level_override",
+          "thinking_strategy_override"
         ],
         "title": "LlmProviderModelResponse",
         "type": "object"
@@ -15688,6 +15739,17 @@
               "medium"
             ],
             "title": "Thinking Level",
+            "type": "string"
+          },
+          "thinking_strategy": {
+            "default": "none",
+            "enum": [
+              "gemma_system_token",
+              "glm_extra_body",
+              "none",
+              "openrouter_extra_body"
+            ],
+            "title": "Thinking Strategy",
             "type": "string"
           },
           "vendor": {
@@ -18599,6 +18661,23 @@
               }
             ],
             "title": "Thinking Level Override"
+          },
+          "thinking_strategy_override": {
+            "anyOf": [
+              {
+                "enum": [
+                  "gemma_system_token",
+                  "glm_extra_body",
+                  "none",
+                  "openrouter_extra_body"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thinking Strategy Override"
           }
         },
         "required": [

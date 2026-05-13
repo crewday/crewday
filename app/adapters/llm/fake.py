@@ -38,6 +38,7 @@ from app.adapters.llm.ports import (
     LLMCapabilityMissing,
     LLMResponse,
     LlmThinkingLevel,
+    LlmThinkingStrategy,
     LLMUsage,
     Tool,
     ToolCall,
@@ -136,9 +137,10 @@ class FakeLLMClient:
         max_tokens: int = 1024,
         temperature: float = 0.0,
         thinking_level: LlmThinkingLevel = "disabled",
+        thinking_strategy: LlmThinkingStrategy = "none",
         consents: ConsentSet | None = None,
     ) -> LLMResponse:
-        del consents, thinking_level  # in-process fake never reaches upstream
+        del consents, thinking_level, thinking_strategy
         return LLMResponse(
             text=prompt,
             usage=LLMUsage(
@@ -158,11 +160,12 @@ class FakeLLMClient:
         max_tokens: int = 1024,
         temperature: float = 0.0,
         thinking_level: LlmThinkingLevel = "disabled",
+        thinking_strategy: LlmThinkingStrategy = "none",
         tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> LLMResponse:
         # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
-        del consents, thinking_level  # in-process fake never reaches upstream
+        del consents, thinking_level, thinking_strategy
         last = messages[-1]["content"] if messages else ""
         text = json.dumps(self._ocr_payload) if _OCR_PROMPT_MARKER in last else last
         return LLMResponse(
@@ -195,11 +198,12 @@ class FakeLLMClient:
         max_tokens: int = 1024,
         temperature: float = 0.0,
         thinking_level: LlmThinkingLevel = "disabled",
+        thinking_strategy: LlmThinkingStrategy = "none",
         tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> Iterator[str]:
         # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
-        del consents, thinking_level  # in-process fake never reaches upstream
+        del consents, thinking_level, thinking_strategy
         last = messages[-1]["content"] if messages else ""
         yield from last.split()
 

@@ -38,12 +38,19 @@ __all__ = [
     "LlmProviderError",
     "LlmRateLimited",
     "LlmThinkingLevel",
+    "LlmThinkingStrategy",
     "LlmTransportError",
     "Tool",
     "ToolCall",
 ]
 
 LlmThinkingLevel = Literal["disabled", "low", "medium", "high"]
+LlmThinkingStrategy = Literal[
+    "none",
+    "gemma_system_token",
+    "glm_extra_body",
+    "openrouter_extra_body",
+]
 
 
 class LLMCapabilityMissing(Exception):
@@ -173,6 +180,7 @@ class LLMClient(Protocol):
         max_tokens: int = 1024,
         temperature: float = 0.0,
         thinking_level: LlmThinkingLevel = "disabled",
+        thinking_strategy: LlmThinkingStrategy = "none",
         consents: ConsentSet | None = None,
     ) -> LLMResponse:
         """Single-shot text completion."""
@@ -186,6 +194,7 @@ class LLMClient(Protocol):
         max_tokens: int = 1024,
         temperature: float = 0.0,
         thinking_level: LlmThinkingLevel = "disabled",
+        thinking_strategy: LlmThinkingStrategy = "none",
         tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> LLMResponse:
@@ -222,6 +231,7 @@ class LLMClient(Protocol):
         max_tokens: int = 1024,
         temperature: float = 0.0,
         thinking_level: LlmThinkingLevel = "disabled",
+        thinking_strategy: LlmThinkingStrategy = "none",
         tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> Iterator[str]:

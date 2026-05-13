@@ -171,6 +171,12 @@ _LLM_THINKING_LEVEL_VALUES: tuple[str, ...] = (
     "medium",
     "high",
 )
+_LLM_THINKING_STRATEGY_VALUES: tuple[str, ...] = (
+    "none",
+    "gemma_system_token",
+    "glm_extra_body",
+    "openrouter_extra_body",
+)
 
 
 def _in_clause(values: tuple[str, ...]) -> str:
@@ -1432,6 +1438,12 @@ class LlmModel(Base):
         default="disabled",
         server_default="disabled",
     )
+    thinking_strategy: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="none",
+        server_default="none",
+    )
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -1462,6 +1474,10 @@ class LlmModel(Base):
         CheckConstraint(
             f"thinking_level IN ({_in_clause(_LLM_THINKING_LEVEL_VALUES)})",
             name="thinking_level",
+        ),
+        CheckConstraint(
+            f"thinking_strategy IN ({_in_clause(_LLM_THINKING_STRATEGY_VALUES)})",
+            name="thinking_strategy",
         ),
         UniqueConstraint("canonical_name", name="uq_llm_model_canonical_name"),
     )
@@ -1555,6 +1571,9 @@ class LlmProviderModel(Base):
     # vocabulary varies per reasoning provider.
     reasoning_effort: Mapped[str | None] = mapped_column(String, nullable=True)
     thinking_level_override: Mapped[str | None] = mapped_column(String, nullable=True)
+    thinking_strategy_override: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )
     # Catch-all for rare / new fields the adapter forwards to the
     # provider unchanged. Merged last over the model defaults.
     extra_api_params: Mapped[dict[str, Any]] = mapped_column(
@@ -1593,6 +1612,12 @@ class LlmProviderModel(Base):
             "thinking_level_override IS NULL "
             f"OR thinking_level_override IN ({_in_clause(_LLM_THINKING_LEVEL_VALUES)})",
             name="thinking_level_override",
+        ),
+        CheckConstraint(
+            "thinking_strategy_override IS NULL "
+            "OR thinking_strategy_override IN "
+            f"({_in_clause(_LLM_THINKING_STRATEGY_VALUES)})",
+            name="thinking_strategy_override",
         ),
         UniqueConstraint(
             "provider_id",

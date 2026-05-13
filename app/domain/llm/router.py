@@ -108,7 +108,7 @@ from app.adapters.db.llm.models import (
     LlmProvider,
     LlmProviderModel,
 )
-from app.adapters.llm.ports import LlmThinkingLevel
+from app.adapters.llm.ports import LlmThinkingLevel, LlmThinkingStrategy
 from app.config import get_settings
 from app.demo.guardrails import demo_free_model_pick, llm_capability_allowed_in_demo
 from app.events.bus import EventBus
@@ -198,6 +198,17 @@ def _thinking_level(value: str | None) -> LlmThinkingLevel:
     return "disabled"
 
 
+def _thinking_strategy(value: str | None) -> LlmThinkingStrategy:
+    if value in {
+        "none",
+        "gemma_system_token",
+        "glm_extra_body",
+        "openrouter_extra_body",
+    }:
+        return cast(LlmThinkingStrategy, value)
+    return "none"
+
+
 @dataclass(frozen=True, slots=True)
 class ModelPick:
     """One rung of a resolved fallback chain.
@@ -233,6 +244,7 @@ class ModelPick:
     # Frozen inside the dataclass; callers MUST NOT mutate.
     extra_api_params: Mapping[str, Any] = field(default_factory=dict)
     thinking_level: LlmThinkingLevel = "disabled"
+    thinking_strategy: LlmThinkingStrategy = "none"
     # Capability tags copied from the §11 catalogue on save
     # (``vision``, ``json_mode``, …). Adapter cross-checks the
     # target model before dispatch.
@@ -450,6 +462,9 @@ def _to_pick(
         if row.thinking_level_override is not None
         else (provider_model.thinking_level_override or model.thinking_level)
     )
+    thinking_strategy = _thinking_strategy(
+        provider_model.thinking_strategy_override or model.thinking_strategy
+    )
     return ModelPick(
         provider_model_id=provider_model.id,
         api_model_id=provider_model.api_model_id,
@@ -457,6 +472,7 @@ def _to_pick(
         temperature=row.temperature,
         extra_api_params=extra,
         thinking_level=thinking_level,
+        thinking_strategy=thinking_strategy,
         required_capabilities=required,
         assignment_id=row.id,
     )

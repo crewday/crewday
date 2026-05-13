@@ -315,6 +315,7 @@ class _StubAdapter:
         max_tokens: int = 1024,
         temperature: float = 0.0,
         thinking_level: str = "disabled",
+        thinking_strategy: str = "none",
         tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> LLMResponse:
@@ -325,6 +326,7 @@ class _StubAdapter:
                 "max_tokens": max_tokens,
                 "temperature": temperature,
                 "thinking_level": thinking_level,
+                "thinking_strategy": thinking_strategy,
                 "tools": list(tools) if tools else None,
                 "consents": consents,
             }
@@ -528,6 +530,43 @@ class TestHappyPath:
             reset_current(token)
 
         assert adapter.calls[0]["thinking_level"] == "high"
+
+    def test_thinking_strategy_reaches_adapter(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        ws = _seed_workspace(session)
+        ctx = _build_context(ws.id, slug=ws.slug)
+        assignment = _seed_assignment(
+            session,
+            workspace_id=ws.id,
+            capability=_CAPABILITY,
+            api_model_id="thinking-strategy/model",
+        )
+        provider_model = session.get(LlmProviderModel, assignment.model_id)
+        assert provider_model is not None
+        provider_model.thinking_strategy_override = "openrouter_extra_body"
+        _seed_ledger(session, workspace_id=ws.id, cap_cents=500)
+
+        adapter = _StubAdapter([_ok_response("hello world")])
+        client = LLMClient(adapter, pricing=_FREE_PRICING)
+
+        token = set_current(ctx)
+        try:
+            _run(
+                client.chat(
+                    session,
+                    ctx,
+                    capability=_CAPABILITY,
+                    messages=[{"role": "user", "content": "hi"}],
+                    attribution=_attribution(),
+                    consents=ConsentSet.none(),
+                    clock=clock,
+                )
+            )
+        finally:
+            reset_current(token)
+
+        assert adapter.calls[0]["thinking_strategy"] == "openrouter_extra_body"
 
 
 # ---------------------------------------------------------------------------

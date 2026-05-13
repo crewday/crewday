@@ -148,12 +148,29 @@ _MODEL_CAPABILITY_TAGS = frozenset(
     }
 )
 LlmThinkingLevel = Literal["disabled", "low", "medium", "high"]
+LlmThinkingStrategy = Literal[
+    "none",
+    "gemma_system_token",
+    "glm_extra_body",
+    "openrouter_extra_body",
+]
 
 
 def _thinking_level(value: str | None) -> LlmThinkingLevel:
     if value in {"disabled", "low", "medium", "high"}:
         return cast(LlmThinkingLevel, value)
     return "disabled"
+
+
+def _thinking_strategy(value: str | None) -> LlmThinkingStrategy:
+    if value in {
+        "none",
+        "gemma_system_token",
+        "glm_extra_body",
+        "openrouter_extra_body",
+    }:
+        return cast(LlmThinkingStrategy, value)
+    return "none"
 
 
 class LlmProviderResponse(BaseModel):
@@ -181,6 +198,7 @@ class LlmModelResponse(BaseModel):
     context_window: int | None
     max_output_tokens: int | None
     thinking_level: LlmThinkingLevel
+    thinking_strategy: LlmThinkingStrategy
     price_source: Literal["openrouter", "manual", ""]
     price_source_model_id: str | None
     is_active: bool
@@ -204,6 +222,8 @@ class LlmProviderModelResponse(BaseModel):
     supports_temperature: bool
     thinking_level_override: LlmThinkingLevel | None
     effective_thinking_level: LlmThinkingLevel
+    thinking_strategy_override: LlmThinkingStrategy | None
+    effective_thinking_strategy: LlmThinkingStrategy
     reasoning_effort: Literal["", "low", "medium", "high"]
     extra_api_params: dict[str, Any]
     price_source_override: Literal["", "none", "openrouter"]
@@ -242,6 +262,7 @@ class LlmAssignmentResponse(BaseModel):
     temperature: float | None
     thinking_level_override: LlmThinkingLevel | None
     effective_thinking_level: LlmThinkingLevel
+    effective_thinking_strategy: LlmThinkingStrategy
     extra_api_params: dict[str, Any]
     required_capabilities: list[str]
     is_enabled: bool
@@ -452,6 +473,7 @@ class ModelPayload(BaseModel):
     context_window: int | None = Field(default=None, ge=1)
     max_output_tokens: int | None = Field(default=None, ge=1)
     thinking_level: LlmThinkingLevel = "disabled"
+    thinking_strategy: LlmThinkingStrategy = "none"
     price_source: Literal["openrouter", "manual", ""] = ""
     price_source_model_id: str | None = Field(default=None, max_length=240)
     is_active: bool = True
@@ -484,11 +506,19 @@ class ProviderModelPayload(BaseModel):
     supports_system_prompt: bool = True
     supports_temperature: bool = True
     thinking_level_override: LlmThinkingLevel | None = None
+    thinking_strategy_override: LlmThinkingStrategy | None = None
     reasoning_effort: Literal["", "low", "medium", "high"] = ""
     extra_api_params: dict[str, Any] = Field(default_factory=dict)
     price_source_override: Literal["", "none", "openrouter"] = ""
     price_source_model_id_override: str | None = None
     is_enabled: bool = True
+
+    @field_validator("thinking_strategy_override", mode="before")
+    @classmethod
+    def _blank_strategy_override_inherits(cls, value: object) -> object:
+        if value == "":
+            return None
+        return value
 
 
 class AssignmentPayload(BaseModel):
@@ -634,6 +664,7 @@ def _model_response(
         context_window=model.context_window,
         max_output_tokens=model.max_output_tokens,
         thinking_level=_thinking_level(model.thinking_level),
+        thinking_strategy=_thinking_strategy(model.thinking_strategy),
         price_source=model.price_source,
         price_source_model_id=model.price_source_model_id,
         is_active=model.is_active,
@@ -655,6 +686,11 @@ def _provider_model_response(
         row.thinking_level_override
         if row.thinking_level_override is not None
         else (model.thinking_level if model is not None else None)
+    )
+    effective_thinking_strategy = _thinking_strategy(
+        row.thinking_strategy_override
+        if row.thinking_strategy_override
+        else (model.thinking_strategy if model is not None else None)
     )
     return LlmProviderModelResponse(
         id=row.id,
@@ -678,6 +714,12 @@ def _provider_model_response(
             else None
         ),
         effective_thinking_level=effective_thinking_level,
+        thinking_strategy_override=(
+            _thinking_strategy(row.thinking_strategy_override)
+            if row.thinking_strategy_override
+            else None
+        ),
+        effective_thinking_strategy=effective_thinking_strategy,
         reasoning_effort=row.reasoning_effort or "",
         extra_api_params=dict(row.extra_api_params or {}),
         price_source_override=row.price_source_override or "",
@@ -766,6 +808,11 @@ def _assignment_response(
             else (model.thinking_level if model is not None else None)
         )
     )
+    effective_thinking_strategy = _thinking_strategy(
+        provider_model.thinking_strategy_override
+        if provider_model is not None and provider_model.thinking_strategy_override
+        else (model.thinking_strategy if model is not None else None)
+    )
     return LlmAssignmentResponse(
         id=row.id,
         capability=row.capability,
@@ -780,6 +827,7 @@ def _assignment_response(
             else None
         ),
         effective_thinking_level=effective_thinking_level,
+        effective_thinking_strategy=effective_thinking_strategy,
         extra_api_params=dict(row.extra_api_params or {}),
         required_capabilities=list(row.required_capabilities or []),
         is_enabled=row.enabled,
@@ -1770,6 +1818,7 @@ def build_admin_llm_router() -> APIRouter:
             context_window=payload.context_window,
             max_output_tokens=payload.max_output_tokens,
             thinking_level=payload.thinking_level,
+            thinking_strategy=payload.thinking_strategy,
             price_source=payload.price_source,
             price_source_model_id=payload.price_source_model_id,
             is_active=payload.is_active,
@@ -1827,6 +1876,7 @@ def build_admin_llm_router() -> APIRouter:
             row.context_window = payload.context_window
             row.max_output_tokens = payload.max_output_tokens
             row.thinking_level = payload.thinking_level
+            row.thinking_strategy = payload.thinking_strategy
             row.price_source = payload.price_source
             row.price_source_model_id = payload.price_source_model_id
             row.is_active = payload.is_active
@@ -1923,6 +1973,7 @@ def build_admin_llm_router() -> APIRouter:
             supports_system_prompt=payload.supports_system_prompt,
             supports_temperature=payload.supports_temperature,
             thinking_level_override=payload.thinking_level_override,
+            thinking_strategy_override=payload.thinking_strategy_override,
             reasoning_effort=payload.reasoning_effort,
             extra_api_params=payload.extra_api_params,
             price_source_override=payload.price_source_override,
@@ -1995,6 +2046,9 @@ def build_admin_llm_router() -> APIRouter:
                         provider_model.thinking_level_override or model.thinking_level
                     )
                 ),
+                thinking_strategy=_thinking_strategy(
+                    provider_model.thinking_strategy_override or model.thinking_strategy
+                ),
                 consents=ConsentSet.none(),
             )
         except (LlmProviderError, LlmRateLimited, LlmTransportError) as exc:
@@ -2060,6 +2114,7 @@ def build_admin_llm_router() -> APIRouter:
             row.supports_system_prompt = payload.supports_system_prompt
             row.supports_temperature = payload.supports_temperature
             row.thinking_level_override = payload.thinking_level_override
+            row.thinking_strategy_override = payload.thinking_strategy_override
             row.reasoning_effort = payload.reasoning_effort
             row.extra_api_params = payload.extra_api_params
             row.price_source_override = payload.price_source_override

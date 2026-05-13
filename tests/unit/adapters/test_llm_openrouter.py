@@ -191,10 +191,43 @@ class TestCompleteHappyPath:
             model_id=_MODEL,
             prompt="hello",
             thinking_level="high",
+            thinking_strategy="openrouter_extra_body",
         )
 
         body = _json_body(handler.requests[0])
         assert body["reasoning"] == {"effort": "high"}
+
+    def test_thinking_level_without_openrouter_strategy_sends_no_reasoning(
+        self,
+    ) -> None:
+        handler = _RecordingHandler(
+            responses=[httpx.Response(200, json=_COMPLETE_FIXTURE)]
+        )
+        client = _make_client(handler)
+        client.complete(
+            model_id=_MODEL,
+            prompt="hello",
+            thinking_level="high",
+            thinking_strategy="none",
+        )
+
+        body = _json_body(handler.requests[0])
+        assert "reasoning" not in body
+
+    def test_disabled_openrouter_strategy_sends_no_reasoning(self) -> None:
+        handler = _RecordingHandler(
+            responses=[httpx.Response(200, json=_COMPLETE_FIXTURE)]
+        )
+        client = _make_client(handler)
+        client.complete(
+            model_id=_MODEL,
+            prompt="hello",
+            thinking_level="disabled",
+            thinking_strategy="openrouter_extra_body",
+        )
+
+        body = _json_body(handler.requests[0])
+        assert "reasoning" not in body
 
     def test_request_headers_include_auth_and_attribution(self) -> None:
         handler = _RecordingHandler(

@@ -403,6 +403,7 @@ class LLMClient:
                         else 0.0
                     ),
                     thinking_level=model_pick.thinking_level,
+                    thinking_strategy=model_pick.thinking_strategy,
                     tools=tools,
                     consents=effective_consents,
                 )
