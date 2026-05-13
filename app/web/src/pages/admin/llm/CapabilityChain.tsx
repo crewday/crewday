@@ -1,5 +1,6 @@
 import type { LlmAssignment } from "@/types";
 import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
+import { shouldOpenGraphEditor } from "./lib/clickTargets";
 import type { LlmIndexes } from "./lib/llmIndexes";
 import type { ElementRefSetter, Highlighted, Selection, SelectionSetter } from "./types";
 
@@ -96,7 +97,7 @@ export default function CapabilityChain(props: CapabilityChainProps) {
                 onClick={(e) => {
                   e.stopPropagation();
                   setSelection({ column: "assignment", id: a.id });
-                  onOpenAssignment(a.id);
+                  if (shouldOpenGraphEditor(e)) onOpenAssignment(a.id);
                 }}
                 aria-label={`${a.capability} assignment rung ${a.priority}, ${formatUsageSummary(
                   a.calls_30d,
@@ -106,14 +107,20 @@ export default function CapabilityChain(props: CapabilityChainProps) {
                 <span className="llm-graph-chain__prio">
                   {a.priority === 0 ? "P" : a.priority}
                 </span>
-                <span className="llm-graph-chain__model mono">
-                  {model?.canonical_name ?? "(missing model)"}
+                <span className="llm-graph-chain__model" data-llm-edit-target="true">
+                  {model?.display_name ?? "(missing model)"}
                 </span>
-                <span className="llm-graph-chain__provider muted">
+                <span
+                  className="llm-graph-chain__provider muted"
+                  data-llm-edit-target="true"
+                >
                   via {provider?.name ?? "?"}
                 </span>
                 <span className="llm-graph-chain__usage">
-                  <LlmUsageTotals spendUsd={a.spend_usd_30d} calls={a.calls_30d} />
+                  <LlmUsageTotals
+                    spendUsd={a.spend_usd_30d}
+                    calls={a.calls_30d}
+                  />
                 </span>
               </button>
               {pm ? (
@@ -167,16 +174,18 @@ export default function CapabilityChain(props: CapabilityChainProps) {
                   )}`}
                 >
                   <span className="llm-graph-chain__pm-name">
-                    {provider?.name ?? "Unknown provider"}
-                  </span>
-                  <span className="llm-graph-chain__pm-model mono">
-                    {pm.api_model_id}
+                    Provider-model settings
                   </span>
                   {a.thinking_level_override ? (
                     <span className="llm-graph-chain__pm-thinking">
                       Thinking {a.thinking_level_override}
                     </span>
                   ) : null}
+                  <LlmUsageTotals
+                    spendUsd={pm.spend_usd_30d}
+                    calls={pm.calls_30d}
+                    variant="muted"
+                  />
                 </button>
               ) : null}
             </div>

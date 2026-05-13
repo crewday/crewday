@@ -1,6 +1,7 @@
 import { Chip } from "@/components/common";
 import type { LlmProvider } from "@/types";
 import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
+import { shouldOpenGraphEditor } from "./lib/clickTargets";
 import type { ElementRefSetter, NodeClass, SelectionSetter } from "./types";
 
 interface ProviderColumnProps {
@@ -39,9 +40,9 @@ export default function ProviderColumn(props: ProviderColumnProps) {
           onMouseLeave={() => setHover(null)}
           onFocus={() => setHover({ column: "provider", id: p.id })}
           onBlur={() => setHover(null)}
-          onClick={() => {
+          onClick={(event) => {
             setSelection({ column: "provider", id: p.id });
-            onEditProvider(p.id);
+            if (shouldOpenGraphEditor(event)) onEditProvider(p.id);
           }}
           aria-label={`${p.name} provider, ${formatUsageSummary(
             p.calls_30d,
@@ -49,9 +50,11 @@ export default function ProviderColumn(props: ProviderColumnProps) {
           )}`}
         >
           <header className="llm-graph-node__head">
-            <span className="llm-graph-node__name">{p.name}</span>
+            <span className="llm-graph-node__name" data-llm-edit-target="true">
+              {p.name}
+            </span>
           </header>
-          <div className="llm-graph-node__meta">
+          <div className="llm-graph-node__meta" data-llm-edit-target="true">
             <span className="llm-graph-node__type">{p.provider_type}</span>
             <span className="llm-graph-node__endpoint mono">
               {p.endpoint || "(unset)"}

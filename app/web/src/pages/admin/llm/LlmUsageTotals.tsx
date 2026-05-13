@@ -3,6 +3,7 @@ import { formatMoney } from "@/lib/money";
 interface LlmUsageTotalsProps {
   spendUsd: number;
   calls: number;
+  variant?: "badge" | "muted";
 }
 
 export function formatUsageSummary(calls: number, spendUsd: number): string {
@@ -11,10 +12,18 @@ export function formatUsageSummary(calls: number, spendUsd: number): string {
 }
 
 export default function LlmUsageTotals(props: LlmUsageTotalsProps) {
-  const { spendUsd, calls } = props;
+  const { spendUsd, calls, variant = "badge" } = props;
   const summary = formatUsageSummary(calls, spendUsd);
   return (
-    <span className="llm-usage-total" aria-label={`Recent usage: ${summary}`}>
+    <span
+      className={[
+        "llm-usage-total",
+        variant === "muted" ? "llm-usage-total--muted" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      aria-label={`Recent usage: ${summary}`}
+    >
       <span className="llm-usage-total__money mono">
         {formatMoney(Math.round(spendUsd * 100), "USD")}
       </span>

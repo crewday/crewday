@@ -1,6 +1,7 @@
 import { Chip } from "@/components/common";
 import type { LlmModel } from "@/types";
 import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
+import { shouldOpenGraphEditor } from "./lib/clickTargets";
 import type { LlmIndexes } from "./lib/llmIndexes";
 import type { ElementRefSetter, NodeClass, SelectionSetter } from "./types";
 
@@ -61,9 +62,9 @@ export default function ModelColumn(props: ModelColumnProps) {
               onMouseLeave={() => setHover(null)}
               onFocus={() => setHover({ column: "model", id: m.id })}
               onBlur={() => setHover(null)}
-              onClick={() => {
+              onClick={(event) => {
                 setSelection({ column: "model", id: m.id });
-                onEditModel(m.id);
+                if (shouldOpenGraphEditor(event)) onEditModel(m.id);
               }}
               aria-label={`${m.display_name} model, ${formatUsageSummary(
                 m.calls_30d,
@@ -71,9 +72,13 @@ export default function ModelColumn(props: ModelColumnProps) {
               )}`}
             >
               <header className="llm-graph-node__head">
-                <span className="llm-graph-node__name">{m.display_name}</span>
+                <span className="llm-graph-node__name" data-llm-edit-target="true">
+                  {m.display_name}
+                </span>
               </header>
-              <div className="llm-graph-node__meta mono">{m.canonical_name}</div>
+              <div className="llm-graph-node__meta mono" data-llm-edit-target="true">
+                {m.canonical_name}
+              </div>
               <div className="llm-graph-node__tags">
                 {m.capabilities.map((tag) => (
                   <Chip key={tag} tone="ghost" size="sm">
@@ -134,6 +139,7 @@ export default function ModelColumn(props: ModelColumnProps) {
                       <LlmUsageTotals
                         spendUsd={pm.spend_usd_30d}
                         calls={pm.calls_30d}
+                        variant="muted"
                       />
                     </button>
                   );

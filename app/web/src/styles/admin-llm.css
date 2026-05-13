@@ -102,7 +102,7 @@
   color: var(--ink-2);
 }
 .llm-graph-node__button {
-  position: relative;
+  position: static;
   display: block;
   width: 100%;
   padding: 0;
@@ -259,13 +259,28 @@
 }
 .llm-graph-node > .llm-usage-total,
 .llm-graph-node__button > .llm-usage-total,
-.llm-provider-model-list .llm-usage-total,
-.llm-graph-chain__usage,
-.llm-graph-node__child .llm-usage-total {
+.llm-graph-chain__usage {
   position: absolute;
   top: 8px;
   right: 8px;
   z-index: 1;
+}
+.llm-provider-model-list .llm-usage-total--muted,
+.llm-graph-node__child .llm-usage-total--muted,
+.llm-graph-chain__provider-model > .llm-usage-total--muted {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+}
+.llm-usage-total--muted {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 11px;
+  text-align: right;
 }
 .llm-usage-total__money {
   color: var(--ink);
@@ -273,6 +288,10 @@
 .llm-usage-total__calls {
   color: var(--ink-2);
   white-space: nowrap;
+}
+.llm-usage-total--muted .llm-usage-total__money,
+.llm-usage-total--muted .llm-usage-total__calls {
+  color: var(--ink-3);
 }
 
 /* Assignment chain nested inside a capability node. */
@@ -366,12 +385,6 @@
 .llm-graph-chain__usage {
   display: block;
 }
-.llm-graph-chain__assignment .llm-graph-chain__usage {
-  position: static;
-  grid-column: 2;
-  justify-self: start;
-  margin-top: 1px;
-}
 .llm-graph-chain__provider-model {
   position: absolute;
   top: 5px;
@@ -381,7 +394,7 @@
   gap: 1px;
   width: clamp(116px, 36%, 158px);
   min-height: 32px;
-  padding: 5px 7px;
+  padding: 5px clamp(86px, 52%, 112px) 5px 7px;
   border: 1px solid var(--line);
   border-radius: 5px;
   background: var(--paper);
@@ -1008,6 +1021,7 @@
   }
   .llm-graph-chain__assignment {
     padding-right: 8px;
+    padding-top: 42px;
   }
   .llm-graph-chain__provider-model {
     position: static;

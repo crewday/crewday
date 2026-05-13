@@ -2,6 +2,7 @@ import { Chip } from "@/components/common";
 import type { LlmCapabilityEntry } from "@/types";
 import CapabilityChain from "./CapabilityChain";
 import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
+import { shouldOpenGraphEditor } from "./lib/clickTargets";
 import type { LlmIndexes } from "./lib/llmIndexes";
 import type {
   ElementRefSetter,
@@ -90,12 +91,18 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
               }}
               onFocus={() => setHover({ column: "capability", id: cap.key })}
               onBlur={() => setHover(null)}
-              onClick={() =>
-                onOpenCapability(cap.key)
-              }
+              onClick={(event) => {
+                setSelection({ column: "capability", id: cap.key });
+                if (shouldOpenGraphEditor(event)) onOpenCapability(cap.key);
+              }}
             >
               <header className="llm-graph-node__head">
-                <code className="llm-graph-node__name inline-code">{cap.key}</code>
+                <code
+                  className="llm-graph-node__name inline-code"
+                  data-llm-edit-target="true"
+                >
+                  {cap.key}
+                </code>
                 {isUnassigned ? (
                   <Chip tone="rust" size="sm">
                     unassigned
@@ -110,9 +117,11 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
                   </Chip>
                 ) : null}
               </header>
-              <div className="llm-graph-node__meta">{cap.description}</div>
+              <div className="llm-graph-node__meta" data-llm-edit-target="true">
+                {cap.description}
+              </div>
               {isInheriting ? (
-                <div className="llm-graph-node__inherits">
+                <div className="llm-graph-node__inherits" data-llm-edit-target="true">
                   {hasExplicitInheritance ? "explicitly inherits" : "defaults"} to{" "}
                   <code className="inline-code">{inheritsFrom}</code>
                 </div>
@@ -181,10 +190,11 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
                           : ""
                       }, ${formatUsageSummary(child.calls_30d, child.spend_usd_30d)}`}
                     >
-                      <code className="inline-code">{child.key}</code>
+                      <span>{child.key}</span>
                       <LlmUsageTotals
                         spendUsd={child.spend_usd_30d}
                         calls={child.calls_30d}
+                        variant="muted"
                       />
                     </button>
                   );

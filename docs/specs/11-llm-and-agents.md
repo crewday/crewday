@@ -1307,8 +1307,11 @@ LLM area.
   - Hover a provider card → every model offered by that provider and
     every assignment that resolves through it highlights; everything
     else dims. Same for hover on a model or an assignment.
-  - Click any card → inline edit drawer on the right. Escape or
-    clicking the backdrop closes it.
+  - Click a main card body → select and highlight that graph path
+    only. Click the card's visible text/edit target to open the
+    inline edit drawer on the right. Provider-model and inherited
+    capability subcards remain fully clickable edit targets. Escape or
+    clicking the backdrop closes the drawer.
 - **Validation feedback.**
   - Capabilities with no enabled assignment chain render a red
     "unassigned" pill at the top of their group only when no

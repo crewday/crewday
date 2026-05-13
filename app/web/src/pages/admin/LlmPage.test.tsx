@@ -198,6 +198,24 @@ function modelButton(name: string): HTMLElement {
   return screen.getByRole("button", { name: new RegExp(`${name} model`) });
 }
 
+function modelCard(name: string): HTMLElement {
+  const card = modelButton(name).closest("article");
+  if (!(card instanceof HTMLElement)) throw new Error(`${name} model card not found`);
+  return card;
+}
+
+function modelEditTarget(name: string): HTMLElement {
+  return within(modelButton(name)).getByText(name);
+}
+
+function capabilityEditTarget(name: string): HTMLElement {
+  return within(defaultCapabilityCard()).getByText(name);
+}
+
+function chatManagerAssignmentEditTarget(): HTMLElement {
+  return within(chatManagerAssignmentButton()).getByText("Gemma 4 31B IT");
+}
+
 async function findOpenRouterProvider(): Promise<HTMLElement> {
   return screen.findByRole("button", { name: /^OpenRouter provider,/ });
 }
@@ -241,7 +259,7 @@ describe("Admin LlmPage", () => {
           name: "OpenRouter provider, 12 calls, $1.25 spend",
         }),
       ).toBeInTheDocument();
-      expect(screen.getByText("Gemma 4 31B IT")).toBeInTheDocument();
+      expect(modelButton("Gemma 4 31B IT")).toBeInTheDocument();
       expect(screen.getAllByText("voice.transcribe").length).toBeGreaterThan(0);
       expect(screen.queryByText("Spend (30d)")).not.toBeInTheDocument();
       expect(screen.queryByText("Provider-model pricing")).not.toBeInTheDocument();
@@ -533,7 +551,7 @@ describe("Admin LlmPage", () => {
       });
       expect(jsonBody(post!)).not.toHaveProperty("priority");
 
-      fireEvent.click(await findOpenRouterProvider());
+      fireEvent.click(within(await findOpenRouterProvider()).getByText("OpenRouter"));
       expect(
         within(screen.getByRole("dialog", { name: "OpenRouter" })).queryByLabelText(
           /Priority/,
@@ -561,7 +579,7 @@ describe("Admin LlmPage", () => {
       expect(jsonBody(put!)).toMatchObject({ name: "OpenRouter EU" });
       expect(jsonBody(put!)).not.toHaveProperty("priority");
 
-      fireEvent.click(await findOpenRouterProvider());
+      fireEvent.click(within(await findOpenRouterProvider()).getByText("OpenRouter"));
       fireEvent.click(screen.getByRole("button", { name: "Delete provider" }));
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "attached to provider-model rows",
@@ -644,7 +662,7 @@ describe("Admin LlmPage", () => {
         capabilities: ["chat"],
       });
 
-      fireEvent.click(modelButton("Gemma 4 31B IT"));
+      fireEvent.click(modelEditTarget("Gemma 4 31B IT"));
       fireEvent.change(screen.getByLabelText(/Display name/), {
         target: { value: "Gemma admin" },
       });
@@ -666,7 +684,7 @@ describe("Admin LlmPage", () => {
       );
       expect(jsonBody(put!)).toMatchObject({ display_name: "Gemma admin" });
 
-      fireEvent.click(modelButton("Gemma 4 31B IT"));
+      fireEvent.click(modelEditTarget("Gemma 4 31B IT"));
       fireEvent.click(screen.getByRole("button", { name: "Delete model" }));
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "attached to provider-model rows",
@@ -892,6 +910,13 @@ describe("Admin LlmPage", () => {
       const providerModelButton = within(rung).getByRole("button", {
         name: /Open provider-model google\/gemma-4-31b-it for chat\.manager assignment/,
       });
+      expect(providerModelButton).toHaveTextContent("Provider-model settings");
+      expect(providerModelButton).not.toHaveTextContent("OpenRouter");
+      expect(providerModelButton).not.toHaveTextContent("google/gemma-4-31b-it");
+      expect(chatManagerAssignmentButton()).toHaveTextContent("Gemma 4 31B IT");
+      expect(chatManagerAssignmentButton()).not.toHaveTextContent(
+        "google/gemma-4-31b-it",
+      );
       fireEvent.click(providerModelButton);
 
       const providerModelDialog = await screen.findByRole("dialog", {
@@ -910,7 +935,7 @@ describe("Admin LlmPage", () => {
         expect(screen.queryByRole("dialog", { name: "google/gemma-4-31b-it" })).toBeNull();
       });
 
-      fireEvent.click(chatManagerAssignmentButton());
+      fireEvent.click(chatManagerAssignmentEditTarget());
       const assignment = assignmentDialog("chat.manager");
       expectSharedFormModal(assignment, { wide: true, section: true, footer: false });
       expect(within(assignment).getByText("Available provider-models")).toBeInTheDocument();
@@ -1008,7 +1033,7 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
       await findOpenRouterProvider();
 
-      fireEvent.click(chatManagerAssignmentButton());
+      fireEvent.click(chatManagerAssignmentEditTarget());
       const dialog = assignmentDialog("chat.manager");
       expectSharedFormModal(dialog, { wide: true, section: true, footer: false });
       expect(within(dialog).queryByLabelText(/Max tokens/)).not.toBeInTheDocument();
@@ -1090,7 +1115,7 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
       await findOpenRouterProvider();
 
-      fireEvent.click(chatManagerAssignmentButton());
+      fireEvent.click(chatManagerAssignmentEditTarget());
       const dialog = assignmentDialog("chat.manager");
       fireEvent.keyDown(providerModelRow(dialog, "Fast Chat"), {
         key: "ArrowUp",
@@ -1147,7 +1172,7 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
       await findOpenRouterProvider();
 
-      fireEvent.click(chatManagerAssignmentButton());
+      fireEvent.click(chatManagerAssignmentEditTarget());
       const dialog = assignmentDialog("chat.manager");
       expect(within(dialog).queryByText("New rung")).not.toBeInTheDocument();
       expect(within(dialog).queryByRole("button", { name: /Add rung/ })).toBeNull();
@@ -1180,11 +1205,7 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
       await findOpenRouterProvider();
 
-      fireEvent.click(
-        within(defaultCapabilityCard()).getByRole("button", {
-          name: /default capability/,
-        }),
-      );
+      fireEvent.click(capabilityEditTarget("default"));
 
       const dialog = assignmentDialog("default");
       expect(within(dialog).getByText("Selected chain")).toBeInTheDocument();
@@ -1254,11 +1275,7 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
       await findOpenRouterProvider();
 
-      fireEvent.click(
-        within(defaultCapabilityCard()).getByRole("button", {
-          name: /default capability/,
-        }),
-      );
+      fireEvent.click(capabilityEditTarget("default"));
 
       const dialog = assignmentDialog("default");
       fireEvent.keyDown(providerModelRow(dialog, "Fast Chat"), {
@@ -1299,11 +1316,7 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
       await findOpenRouterProvider();
 
-      fireEvent.click(
-        within(defaultCapabilityCard()).getByRole("button", {
-          name: /default capability/,
-        }),
-      );
+      fireEvent.click(capabilityEditTarget("default"));
 
       const dialog = assignmentDialog("default");
       fireEvent.click(
@@ -1381,7 +1394,7 @@ describe("Admin LlmPage", () => {
         screen.getByLabelText("Recent usage: 21 calls, $1.75 spend"),
       ).toHaveTextContent("$1.75");
       expect(
-        screen.getByLabelText("Recent usage: 19 calls, $1.50 spend"),
+        screen.getAllByLabelText("Recent usage: 19 calls, $1.50 spend")[0],
       ).toHaveTextContent("$1.50");
       expect(
         screen.getByLabelText("Recent usage: 41 calls, $3.25 spend"),
@@ -1399,6 +1412,14 @@ describe("Admin LlmPage", () => {
       expect(board.queryByText("direct 40 · inherited 12")).not.toBeInTheDocument();
       expect(board.queryByLabelText("pm 30d 19 calls")).not.toBeInTheDocument();
       expect(board.queryByLabelText("child 30d 5 calls")).not.toBeInTheDocument();
+      for (const usage of screen.getAllByLabelText(
+        "Recent usage: 19 calls, $1.50 spend",
+      )) {
+        expect(usage).toHaveClass("llm-usage-total--muted");
+      }
+      expect(screen.getByLabelText("Recent usage: 52 calls, $4.50 spend")).not.toHaveClass(
+        "llm-usage-total--muted",
+      );
     } finally {
       fetcher.restore();
     }
@@ -1446,8 +1467,7 @@ describe("Admin LlmPage", () => {
         "llm-usage-total",
       );
 
-      const model = screen.getByText("Gemma 4 31B IT").closest("article");
-      if (!(model instanceof HTMLElement)) throw new Error("model card not found");
+      const model = modelCard("Gemma 4 31B IT");
       expect(model).toHaveClass("is-disabled");
       expect(within(model).queryByText("Google")).not.toBeInTheDocument();
 
@@ -1460,6 +1480,10 @@ describe("Admin LlmPage", () => {
       expect(board.queryByText(/^1 rung$/)).not.toBeInTheDocument();
       expect(board.queryByText(/^\d+ rungs$/)).not.toBeInTheDocument();
       expect(board.getByText("unassigned")).toBeInTheDocument();
+      const inheritedChild = screen.getByRole("button", {
+        name: /Open assignment and inheritance settings for voice\.transcribe/,
+      });
+      expect(inheritedChild.querySelector(".inline-code")).not.toBeInTheDocument();
     } finally {
       fetcher.restore();
     }
@@ -1486,11 +1510,8 @@ describe("Admin LlmPage", () => {
       const gemmaProviderModel = screen.getByRole("button", {
         name: /OpenRouter provider model for Gemma 4 31B IT/,
       });
-      const gemmaCard = screen.getByText("Gemma 4 31B IT").closest("article");
-      const textOnlyCard = screen.getByText("Text Only").closest("article");
-      if (!(gemmaCard instanceof HTMLElement) || !(textOnlyCard instanceof HTMLElement)) {
-        throw new Error("model cards not found");
-      }
+      const gemmaCard = modelCard("Gemma 4 31B IT");
+      const textOnlyCard = modelCard("Text Only");
 
       fireEvent.mouseEnter(gemmaProviderModel);
 
@@ -1513,15 +1534,13 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
       await findOpenRouterProvider();
 
-      const gemmaCard = screen.getByText("Gemma 4 31B IT").closest("article");
-      const textOnlyCard = screen.getByText("Text Only").closest("article");
-      if (!(gemmaCard instanceof HTMLElement) || !(textOnlyCard instanceof HTMLElement)) {
-        throw new Error("model cards not found");
-      }
+      const gemmaCard = modelCard("Gemma 4 31B IT");
+      const textOnlyCard = modelCard("Text Only");
 
       fireEvent.click(chatManagerAssignmentButton());
 
       expect(chatManagerRung()).toHaveClass("is-active");
+      expect(screen.queryByRole("dialog", { name: "chat.manager" })).toBeNull();
       expect(gemmaCard).toHaveClass("is-linked");
       expect(textOnlyCard).toHaveClass("is-dim");
       await waitFor(() => {
@@ -1540,8 +1559,7 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
 
       await findOpenRouterProvider();
-      const textOnlyCard = screen.getByText("Text Only").closest("article");
-      if (!(textOnlyCard instanceof HTMLElement)) throw new Error("model card not found");
+      const textOnlyCard = modelCard("Text Only");
 
       fireEvent.click(chatManagerAssignmentButton());
 
@@ -1588,7 +1606,9 @@ describe("Admin LlmPage", () => {
       const provider = await findOpenRouterProvider();
       fireEvent.click(provider);
       expect(provider).toHaveClass("is-active");
+      expect(screen.queryByRole("dialog", { name: "OpenRouter" })).toBeNull();
 
+      fireEvent.click(within(provider).getByText("OpenRouter"));
       const providerDialog = screen.getByRole("dialog", { name: "OpenRouter" });
       fireEvent.click(within(providerDialog).getByRole("button", { name: "Close" }));
       await waitFor(() => {
@@ -1603,6 +1623,23 @@ describe("Admin LlmPage", () => {
       fireEvent.click(screen.getByRole("button", { name: "+ New provider" }));
       expect(provider).toHaveClass("is-active");
       expect(screen.getByRole("dialog", { name: "Create provider" })).toBeInTheDocument();
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("opens graph editors from keyboard-style card activation", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+
+      const provider = await findOpenRouterProvider();
+      provider.focus();
+      expect(provider).toHaveFocus();
+      fireEvent.click(provider, { detail: 0 });
+
+      expect(provider).toHaveClass("is-active");
+      expect(screen.getByRole("dialog", { name: "OpenRouter" })).toBeInTheDocument();
     } finally {
       fetcher.restore();
     }
@@ -1661,7 +1698,7 @@ describe("Admin LlmPage", () => {
         }
         if (
           el.classList.contains("llm-graph-chain__rung") &&
-          el.textContent?.includes("google/gemma-4-31b-it")
+          el.textContent?.includes("Gemma 4 31B IT")
         ) {
           return rect(710, 220, 160, 44);
         }
