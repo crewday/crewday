@@ -718,7 +718,7 @@
   display: inline-grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
-  width: min(100%, 320px);
+  width: 100%;
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -759,11 +759,34 @@
   color: var(--ink-2);
   font-size: 13px;
 }
+.llm-playground__defaults {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.llm-playground__default-chip {
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+.llm-playground__vision {
+  display: grid;
+  gap: 10px;
+}
 .llm-playground__actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+  justify-content: flex-end;
 }
 .llm-playground-result {
   display: grid;

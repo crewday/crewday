@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import time
 from collections import Counter
@@ -23,6 +24,8 @@ from pydantic import (
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from starlette.datastructures import FormData
+from starlette.datastructures import UploadFile as FormUploadFile
 
 from app.adapters.db.llm.models import (
     LlmAssignment,
@@ -166,6 +169,7 @@ _MODEL_CAPABILITY_TAGS = frozenset(
         "embeddings",
     }
 )
+_PLAYGROUND_IMAGE_UPLOAD_MAX_BYTES = 5 * 1024 * 1024
 LlmThinkingLevel = Literal["disabled", "low", "medium", "high"]
 LlmThinkingStrategy = Literal[
     "none",
@@ -442,6 +446,85 @@ class LlmProviderModelPlaygroundRequest(BaseModel):
         if self.mode == "direct" and self.assignment_id is not None:
             raise ValueError("assignment_id requires assignment mode")
         return self
+
+
+def _playground_form_text(form: FormData, name: str) -> str | None:
+    value = form.get(name)
+    if value is None:
+        return None
+    if isinstance(value, FormUploadFile):
+        raise _unprocessable("playground_field_invalid")
+    text = str(value).strip()
+    return text or None
+
+
+async def _playground_upload_data_url(upload: FormUploadFile) -> str:
+    content_type = (upload.content_type or "").split(";", 1)[0].strip().lower()
+    if not content_type.startswith("image/"):
+        await upload.close()
+        raise _unprocessable("playground_image_type_unsupported")
+
+    total = 0
+    pieces: list[bytes] = []
+    while True:
+        read_size = min(64 * 1024, _PLAYGROUND_IMAGE_UPLOAD_MAX_BYTES + 1 - total)
+        chunk = await upload.read(read_size)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > _PLAYGROUND_IMAGE_UPLOAD_MAX_BYTES:
+            await upload.close()
+            raise _unprocessable("playground_image_file_too_large")
+        pieces.append(chunk)
+    await upload.close()
+
+    payload = b"".join(pieces)
+    if not payload:
+        raise _unprocessable("playground_image_empty")
+    encoded = base64.b64encode(payload).decode("ascii")
+    return f"data:{content_type};base64,{encoded}"
+
+
+def _validate_playground_payload(raw: object) -> LlmProviderModelPlaygroundRequest:
+    if not isinstance(raw, dict):
+        raise _unprocessable("playground_payload_invalid")
+    try:
+        return LlmProviderModelPlaygroundRequest.model_validate(raw)
+    except PydanticValidationError as exc:
+        raise _unprocessable("playground_payload_invalid") from exc
+
+
+async def _playground_request_payload(
+    request: Request,
+) -> tuple[LlmProviderModelPlaygroundRequest, str | None]:
+    content_type = request.headers.get("content-type", "").lower()
+    if not content_type.startswith("multipart/form-data"):
+        try:
+            raw = await request.json()
+        except ValueError as exc:
+            raise _unprocessable("playground_payload_invalid") from exc
+        return _validate_playground_payload(raw), None
+
+    form = await request.form()
+    form_raw: dict[str, object] = {
+        "mode": _playground_form_text(form, "mode") or "direct",
+        "prompt": _playground_form_text(form, "prompt") or "",
+        "system_prompt": _playground_form_text(form, "system_prompt"),
+        "max_tokens": _playground_form_text(form, "max_tokens"),
+        "temperature": _playground_form_text(form, "temperature"),
+        "image_url": _playground_form_text(form, "image_url"),
+        "assignment_id": _playground_form_text(form, "assignment_id"),
+    }
+    payload = _validate_playground_payload(form_raw)
+    upload = form.get("image_file")
+    if upload is None:
+        return payload, None
+    if not isinstance(upload, FormUploadFile):
+        raise _unprocessable("playground_image_upload_invalid")
+    if payload.image_url is not None:
+        await upload.close()
+        raise _unprocessable("playground_image_multiple_sources")
+    return payload, await _playground_upload_data_url(upload)
 
 
 class LlmProviderModelPlaygroundResponse(BaseModel):
@@ -1721,17 +1804,28 @@ def _playground_messages(
     payload: LlmProviderModelPlaygroundRequest,
     provider_model: LlmProviderModel,
     model: LlmModel,
+    image_url: str | None = None,
 ) -> list[ChatMessage]:
     if payload.system_prompt is not None and not provider_model.supports_system_prompt:
         raise _unprocessable("system_prompt_not_supported")
-    if payload.image_url is not None:
-        if "vision" not in set(model.capabilities or []):
-            raise _unprocessable("image_requires_vision_model")
-        raise _unprocessable("image_playground_not_supported")
+    image_ref = image_url if image_url is not None else payload.image_url
+    if image_ref is not None and "vision" not in set(model.capabilities or []):
+        raise _unprocessable("image_requires_vision_model")
     messages: list[ChatMessage] = []
     if payload.system_prompt is not None:
         messages.append({"role": "system", "content": payload.system_prompt})
-    messages.append({"role": "user", "content": payload.prompt})
+    if image_ref is None:
+        messages.append({"role": "user", "content": payload.prompt})
+    else:
+        messages.append(
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": payload.prompt},
+                    {"type": "image_url", "image_url": {"url": image_ref}},
+                ],
+            }
+        )
     return messages
 
 
@@ -2198,14 +2292,62 @@ def build_admin_llm_router() -> APIRouter:
         "/provider-models/{provider_model_id}/playground",
         response_model=LlmProviderModelPlaygroundResponse,
         operation_id="admin.llm.provider_models.playground",
+        openapi_extra={
+            "requestBody": {
+                "content": {
+                    "application/json": {
+                        "schema": LlmProviderModelPlaygroundRequest.model_json_schema()
+                    },
+                    "multipart/form-data": {
+                        "schema": {
+                            "type": "object",
+                            "required": ["prompt"],
+                            "properties": {
+                                "mode": {
+                                    "type": "string",
+                                    "enum": ["direct", "assignment"],
+                                    "default": "direct",
+                                },
+                                "prompt": {"type": "string", "maxLength": 16000},
+                                "system_prompt": {
+                                    "type": "string",
+                                    "maxLength": 8000,
+                                    "nullable": True,
+                                },
+                                "max_tokens": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 32000,
+                                    "nullable": True,
+                                },
+                                "temperature": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 2,
+                                    "nullable": True,
+                                },
+                                "image_url": {
+                                    "type": "string",
+                                    "maxLength": 262144,
+                                    "nullable": True,
+                                },
+                                "assignment_id": {"type": "string", "nullable": True},
+                                "image_file": {"type": "string", "format": "binary"},
+                            },
+                        }
+                    },
+                },
+                "required": True,
+            }
+        },
     )
-    def provider_model_playground(
+    async def provider_model_playground(
         _ctx: _WriteCtx,
         request: Request,
         session: _Db,
         provider_model_id: str,
-        payload: LlmProviderModelPlaygroundRequest,
     ) -> LlmProviderModelPlaygroundResponse:
+        payload, image_url = await _playground_request_payload(request)
         with tenant_agnostic():
             provider_model, provider, model = _load_playground_target(
                 session, provider_model_id
@@ -2215,7 +2357,7 @@ def build_admin_llm_router() -> APIRouter:
                 payload=payload,
                 provider_model_id=provider_model_id,
             )
-            messages = _playground_messages(payload, provider_model, model)
+            messages = _playground_messages(payload, provider_model, model, image_url)
             max_tokens = _playground_max_tokens(
                 payload, provider_model, model, assignment
             )

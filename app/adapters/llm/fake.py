@@ -166,7 +166,8 @@ class FakeLLMClient:
     ) -> LLMResponse:
         # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         del consents, thinking_level, thinking_strategy
-        last = messages[-1]["content"] if messages else ""
+        last_content = messages[-1]["content"] if messages else ""
+        last = _message_text(last_content)
         text = json.dumps(self._ocr_payload) if _OCR_PROMPT_MARKER in last else last
         return LLMResponse(
             text=text,
@@ -205,7 +206,7 @@ class FakeLLMClient:
         # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         del consents, thinking_level, thinking_strategy
         last = messages[-1]["content"] if messages else ""
-        yield from last.split()
+        yield from _message_text(last).split()
 
 
 class EchoLLMClient(FakeLLMClient):
@@ -232,3 +233,17 @@ class EchoLLMClient(FakeLLMClient):
     ) -> str:
         del consents  # in-process fake never reaches an upstream provider
         raise LLMCapabilityMissing("ocr")
+
+
+def _message_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            text = block.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+    return "\n".join(parts)

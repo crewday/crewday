@@ -15,6 +15,7 @@ import type {
   LlmThinkingLevel,
 } from "@/types";
 import LlmUsageTotals from "./LlmUsageTotals";
+import LlmPlayground from "./LlmPlayground";
 import type { LlmIndexes } from "./lib/llmIndexes";
 
 const DEFAULT_LLM_CAPABILITY = "default";
@@ -304,6 +305,13 @@ export default function LlmAssignmentModal({
     updateAssignmentThinking.isPending ||
     saveInheritance.isPending ||
     deleteInheritance.isPending;
+  const playgroundAssignment = chain[0];
+  const playgroundProviderModel = playgroundAssignment
+    ? indexes.pmById.get(playgroundAssignment.provider_model_id)
+    : undefined;
+  const playgroundModel = playgroundProviderModel
+    ? indexes.modelsById.get(playgroundProviderModel.model_id)
+    : undefined;
 
   function addProviderModel(providerModelId: string): void {
     if (!capability) return;
@@ -429,6 +437,16 @@ export default function LlmAssignmentModal({
               onProviderModelDrag={setDraggedProviderModelId}
               onAssignmentDrag={setDraggedAssignmentId}
             />
+            {playgroundAssignment && playgroundProviderModel ? (
+              <LlmPlayground
+                providerModel={playgroundProviderModel}
+                model={playgroundModel}
+                mode="assignment"
+                assignment={playgroundAssignment}
+                titleId="llm-assignment-playground-title"
+                description="Run a stateless smoke test through this assignment. Assignment tuning applies automatically."
+              />
+            ) : null}
             <CreateInheritancePanel
               capability={capability}
               chainLength={chain.length}

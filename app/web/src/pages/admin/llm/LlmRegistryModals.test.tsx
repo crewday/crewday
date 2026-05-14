@@ -82,26 +82,29 @@ function expectControlBeforeHelp(control: HTMLElement, help: HTMLElement) {
 }
 
 describe("LlmRegistryModals", () => {
-  it("renders the edit-only provider-model playground with usable mode and vision controls", () => {
+  it("renders the edit-only provider-model playground as a direct-only smoke test", () => {
     installFetch();
     renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
 
     const playground = playgroundSection();
+    const systemPrompt = within(playground).getByLabelText("System prompt Optional");
+    const prompt = within(playground).getByLabelText("Prompt Required");
+    expect(systemPrompt.compareDocumentPosition(prompt)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
     expect(within(playground).getByLabelText("Prompt Required")).toBeInTheDocument();
     expect(
-      within(playground).getByRole("button", { name: "Direct call" }),
-    ).toHaveAttribute("aria-pressed", "true");
-    expect(
-      within(playground).getByRole("button", { name: "Via assignment" }),
-    ).toBeInTheDocument();
-    fireEvent.click(within(playground).getByRole("button", { name: "Via assignment" }));
-    const assignment = within(playground).getByLabelText("Assignment Required");
-    expect(assignment).toHaveValue("assign_default");
-    expect(assignment).toHaveTextContent("default priority 0");
-    expect(assignment).toHaveTextContent("chat.manager priority 0");
-    expect(
-      within(playground).queryByLabelText("Image URL or data URL Optional"),
+      within(playground).queryByRole("button", { name: "Via assignment" }),
     ).not.toBeInTheDocument();
+    expect(within(playground).queryByLabelText("Assignment Required")).not.toBeInTheDocument();
+    expect(within(playground).queryByLabelText("Temperature Optional")).not.toBeInTheDocument();
+    expect(within(playground).queryByLabelText("Max tokens Optional")).not.toBeInTheDocument();
+    expect(
+      within(playground).queryByLabelText("Image URL Optional"),
+    ).not.toBeInTheDocument();
+    const actionButtons = within(playground).getAllByRole("button").map((button) => button.textContent);
+    expect(actionButtons.at(-1)).toBe("Run playground");
+    expect(within(playground).queryByRole("button", { name: "Clear result" })).not.toBeInTheDocument();
 
     cleanup();
     renderRegistry(baseGraph, { kind: "providerModel", mode: "create" });
@@ -113,9 +116,7 @@ describe("LlmRegistryModals", () => {
     renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_text" });
 
     const playground = playgroundSection();
-    expect(
-      within(playground).queryByRole("button", { name: "Via assignment" }),
-    ).not.toBeInTheDocument();
+    expect(within(playground).queryByRole("button", { name: "Via assignment" })).not.toBeInTheDocument();
     expect(
       within(playground).getByRole("button", { name: "Run playground" }),
     ).toBeInTheDocument();
@@ -133,9 +134,9 @@ describe("LlmRegistryModals", () => {
     };
     renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
 
-    expect(
-      within(playgroundSection()).getByLabelText("Image URL or data URL Optional"),
-    ).toBeInTheDocument();
+    const playground = playgroundSection();
+    expect(within(playground).getByLabelText("Image URL Optional")).toBeInTheDocument();
+    expect(within(playground).getByLabelText("Upload playground image")).toBeInTheDocument();
   });
 
   it("runs a direct playground prompt without saving the provider-model", async () => {
@@ -169,12 +170,7 @@ describe("LlmRegistryModals", () => {
     fireEvent.change(within(playground).getByLabelText("Prompt Required"), {
       target: { value: "Say pong in one word." },
     });
-    fireEvent.change(within(playground).getByLabelText("Max tokens Optional"), {
-      target: { value: "16" },
-    });
-    fireEvent.keyDown(within(playground).getByLabelText("Max tokens Optional"), {
-      key: "Enter",
-    });
+    fireEvent.keyDown(within(playground).getByLabelText("Prompt Required"), { key: "Enter" });
     expect(
       calls.some(
         (call) =>
@@ -195,7 +191,8 @@ describe("LlmRegistryModals", () => {
     expect(bodyOf(post!)).toMatchObject({
       mode: "direct",
       prompt: "Say pong in one word.",
-      max_tokens: 16,
+      max_tokens: null,
+      temperature: null,
       assignment_id: null,
       image_url: null,
     });
@@ -208,18 +205,18 @@ describe("LlmRegistryModals", () => {
     ).toBe(false);
   });
 
-  it("runs an assignment playground prompt with the selected assignment id", async () => {
+  it("submits uploaded playground images as multipart form data", async () => {
     const calls = installFetch((url) =>
       url === "/admin/api/v1/llm/provider-models/pm_gemma/playground"
         ? {
             body: {
               status: "ok",
-              assistant_text: "assignment pong",
+              assistant_text: "vision pong",
               reasoning_text: null,
               model_used: "google/gemma-4-31b-it",
               provider_used: "OpenRouter",
               provider_model_id: "pm_gemma",
-              assignment_id: "assign_default",
+              assignment_id: null,
               latency_ms: 42,
               input_tokens: 6,
               output_tokens: 2,
@@ -233,24 +230,35 @@ describe("LlmRegistryModals", () => {
           }
         : { body: {} },
     );
-    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+    const testGraph: LlmGraphPayload = {
+      ...baseGraph,
+      models: baseGraph.models.map((model) =>
+        model.id === "model_gemma"
+          ? { ...model, capabilities: [...model.capabilities, "vision"] }
+          : model,
+      ),
+    };
+    renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
 
     const playground = playgroundSection();
-    fireEvent.click(within(playground).getByRole("button", { name: "Via assignment" }));
     fireEvent.change(within(playground).getByLabelText("Prompt Required"), {
-      target: { value: "Say pong through the assignment." },
+      target: { value: "Describe this image." },
+    });
+    const image = new File(["image-bytes"], "receipt.png", { type: "image/png" });
+    fireEvent.change(within(playground).getByLabelText("Upload playground image"), {
+      target: { files: [image] },
     });
     fireEvent.click(within(playground).getByRole("button", { name: "Run playground" }));
 
-    expect(await within(playground).findByText("assignment pong")).toBeInTheDocument();
+    expect(await within(playground).findByText("vision pong")).toBeInTheDocument();
     const post = calls.find(
       (call) => call.url === "/admin/api/v1/llm/provider-models/pm_gemma/playground",
     );
-    expect(bodyOf(post!)).toMatchObject({
-      mode: "assignment",
-      assignment_id: "assign_default",
-      prompt: "Say pong through the assignment.",
-    });
+    expect(post?.init.body).toBeInstanceOf(FormData);
+    const form = post!.init.body as FormData;
+    expect(form.get("mode")).toBe("direct");
+    expect(form.get("prompt")).toBe("Describe this image.");
+    expect((form.get("image_file") as File).name).toBe("receipt.png");
   });
 
   it("does not send unsupported system prompt or temperature playground fields", async () => {
@@ -298,8 +306,8 @@ describe("LlmRegistryModals", () => {
       within(playground).getByRole("textbox", { name: /^System prompt/ }),
     ).toBeDisabled();
     expect(
-      within(playground).getByRole("spinbutton", { name: /^Temperature/ }),
-    ).toBeDisabled();
+      within(playground).queryByRole("spinbutton", { name: /^Temperature/ }),
+    ).not.toBeInTheDocument();
     fireEvent.change(within(playground).getByLabelText("Prompt Required"), {
       target: { value: "Say pong." },
     });
@@ -426,20 +434,13 @@ describe("LlmRegistryModals", () => {
     fireEvent.change(within(playground).getByLabelText("System prompt Optional"), {
       target: { value: "Be terse." },
     });
-    fireEvent.change(within(playground).getByLabelText("Max tokens Optional"), {
-      target: { value: "12" },
-    });
     fireEvent.click(within(playground).getByRole("button", { name: "Run playground" }));
     expect(await within(playground).findByText("pong")).toBeInTheDocument();
-
-    fireEvent.click(within(playground).getByRole("button", { name: "Clear result" }));
-    expect(within(playground).queryByText("pong")).not.toBeInTheDocument();
-    expect(prompt).toHaveValue("Say pong.");
 
     fireEvent.click(within(playground).getByRole("button", { name: "Reset playground" }));
     expect(prompt).toHaveValue("");
     expect(within(playground).getByLabelText("System prompt Optional")).toHaveValue("");
-    expect(within(playground).getByLabelText("Max tokens Optional")).toHaveValue(null);
+    expect(within(playground).queryByText("pong")).not.toBeInTheDocument();
   });
 
   it("saves model thinking defaults from the fixed dropdown values", async () => {

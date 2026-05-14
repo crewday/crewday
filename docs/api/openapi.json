@@ -13940,92 +13940,6 @@
         "title": "LlmPromptTemplateResponse",
         "type": "object"
       },
-      "LlmProviderModelPlaygroundRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "assignment_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Assignment Id"
-          },
-          "image_url": {
-            "anyOf": [
-              {
-                "maxLength": 262144,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Image Url"
-          },
-          "max_tokens": {
-            "anyOf": [
-              {
-                "maximum": 32000.0,
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Tokens"
-          },
-          "mode": {
-            "default": "direct",
-            "enum": [
-              "assignment",
-              "direct"
-            ],
-            "title": "Mode",
-            "type": "string"
-          },
-          "prompt": {
-            "maxLength": 16000,
-            "minLength": 1,
-            "title": "Prompt",
-            "type": "string"
-          },
-          "system_prompt": {
-            "anyOf": [
-              {
-                "maxLength": 8000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "System Prompt"
-          },
-          "temperature": {
-            "anyOf": [
-              {
-                "maximum": 2.0,
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Temperature"
-          }
-        },
-        "required": [
-          "prompt"
-        ],
-        "title": "LlmProviderModelPlaygroundRequest",
-        "type": "object"
-      },
       "LlmProviderModelPlaygroundResponse": {
         "properties": {
           "assignment_id": {
@@ -52237,7 +52151,142 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/LlmProviderModelPlaygroundRequest"
+                "additionalProperties": false,
+                "properties": {
+                  "assignment_id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Assignment Id"
+                  },
+                  "image_url": {
+                    "anyOf": [
+                      {
+                        "maxLength": 262144,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Image Url"
+                  },
+                  "max_tokens": {
+                    "anyOf": [
+                      {
+                        "maximum": 32000,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Max Tokens"
+                  },
+                  "mode": {
+                    "default": "direct",
+                    "enum": [
+                      "assignment",
+                      "direct"
+                    ],
+                    "title": "Mode",
+                    "type": "string"
+                  },
+                  "prompt": {
+                    "maxLength": 16000,
+                    "minLength": 1,
+                    "title": "Prompt",
+                    "type": "string"
+                  },
+                  "system_prompt": {
+                    "anyOf": [
+                      {
+                        "maxLength": 8000,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "System Prompt"
+                  },
+                  "temperature": {
+                    "anyOf": [
+                      {
+                        "maximum": 2,
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Temperature"
+                  }
+                },
+                "required": [
+                  "prompt"
+                ],
+                "title": "LlmProviderModelPlaygroundRequest",
+                "type": "object"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "assignment_id": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "image_file": {
+                    "format": "binary",
+                    "type": "string"
+                  },
+                  "image_url": {
+                    "maxLength": 262144,
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "max_tokens": {
+                    "maximum": 32000,
+                    "minimum": 1,
+                    "nullable": true,
+                    "type": "integer"
+                  },
+                  "mode": {
+                    "default": "direct",
+                    "enum": [
+                      "assignment",
+                      "direct"
+                    ],
+                    "type": "string"
+                  },
+                  "prompt": {
+                    "maxLength": 16000,
+                    "type": "string"
+                  },
+                  "system_prompt": {
+                    "maxLength": 8000,
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "temperature": {
+                    "maximum": 2,
+                    "minimum": 0,
+                    "nullable": true,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "prompt"
+                ],
+                "type": "object"
               }
             }
           },

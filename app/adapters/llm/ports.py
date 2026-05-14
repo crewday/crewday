@@ -94,11 +94,28 @@ class LlmContentRefused(RuntimeError):
         self.correlation_id = correlation_id
 
 
+class ChatTextBlock(TypedDict):
+    type: Literal["text"]
+    text: str
+
+
+class ChatImageUrlRef(TypedDict):
+    url: str
+
+
+class ChatImageUrlBlock(TypedDict):
+    type: Literal["image_url"]
+    image_url: ChatImageUrlRef
+
+
+type ChatContent = str | list[ChatTextBlock | ChatImageUrlBlock]
+
+
 class ChatMessage(TypedDict):
     """A single role-tagged chat turn."""
 
     role: Literal["system", "user", "assistant"]
-    content: str
+    content: ChatContent
 
 
 class Tool(TypedDict):

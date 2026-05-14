@@ -11,15 +11,22 @@ interface FetchCall {
   init: RequestInit;
 }
 
-function installFetch(): FetchCall[] {
+function installFetch(
+  responseFor?: (url: string, init: RequestInit) => { status?: number; body: unknown },
+): FetchCall[] {
   const calls: FetchCall[] = [];
   const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    calls.push({ url: String(url), init: init ?? {} });
+    const resolved = String(url);
+    const requestInit = init ?? {};
+    calls.push({ url: resolved, init: requestInit });
+    const response = responseFor?.(resolved, requestInit) ?? { body: {} };
+    const status = response.status ?? 200;
+    const ok = status >= 200 && status < 300;
     return {
-      ok: true,
-      status: 200,
-      statusText: "OK",
-      text: async () => JSON.stringify({}),
+      ok,
+      status,
+      statusText: ok ? "OK" : "Error",
+      text: async () => JSON.stringify(response.body),
     } as Response;
   });
   (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
@@ -257,8 +264,16 @@ describe("LlmAssignmentModal", () => {
     ).not.toBeInTheDocument();
     expect(within(dialog).queryByLabelText(/Extra API params/)).not.toBeInTheDocument();
     expect(within(dialog).queryByText("compatible")).not.toBeInTheDocument();
-    expect(within(dialog).queryByText("google/gemma-4-31b-it")).not.toBeInTheDocument();
-    expect(within(dialog).queryByText("test/fast-chat")).not.toBeInTheDocument();
+    expect(
+      within(pickerColumn(dialog, "Available provider-models")).queryByText(
+        "google/gemma-4-31b-it",
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      within(pickerColumn(dialog, "Available provider-models")).queryByText(
+        "test/fast-chat",
+      ),
+    ).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/11 calls/)).not.toBeInTheDocument();
 
     const textOnly = providerModelRow(dialog, "Text Only");
@@ -301,6 +316,71 @@ describe("LlmAssignmentModal", () => {
       extra_api_params: {},
       required_capabilities: ["chat", "function_calling"],
       is_enabled: true,
+    });
+  });
+
+  it("runs playground prompts through the edited assignment defaults", async () => {
+    const assignmentGraph: LlmGraphPayload = {
+      ...baseGraph,
+      assignments: baseGraph.assignments.map((assignment) =>
+        assignment.id === "assign_chat_manager"
+          ? { ...assignment, max_tokens: 96, temperature: 0.3 }
+          : assignment,
+      ),
+    };
+    const calls = installFetch((url) =>
+      url === "/admin/api/v1/llm/provider-models/pm_gemma/playground"
+        ? {
+            body: {
+              status: "ok",
+              assistant_text: "assignment pong",
+              reasoning_text: null,
+              model_used: "google/gemma-4-31b-it",
+              provider_used: "OpenRouter",
+              provider_model_id: "pm_gemma",
+              assignment_id: "assign_chat_manager",
+              latency_ms: 42,
+              input_tokens: 6,
+              output_tokens: 2,
+              reasoning_tokens: null,
+              finish_reason: "stop",
+              stop_reason: "stop",
+              cost_usd: "0.000001",
+              cost_cents: 0,
+              error_message: null,
+            },
+          }
+        : { body: {} },
+    );
+    renderAssignment("chat.manager", assignmentGraph);
+    const dialog = screen.getByRole("dialog", { name: "chat.manager" });
+    const playground = within(dialog).getByRole("region", { name: "Playground" });
+
+    expect(within(playground).getByLabelText("Assignment tuning defaults")).toHaveTextContent(
+      "Max tokens 96",
+    );
+    expect(within(playground).getByLabelText("Assignment tuning defaults")).toHaveTextContent(
+      "Temperature 0.3",
+    );
+    expect(within(playground).queryByLabelText("Max tokens Optional")).not.toBeInTheDocument();
+    expect(within(playground).queryByLabelText("Temperature Optional")).not.toBeInTheDocument();
+
+    fireEvent.change(within(playground).getByLabelText("Prompt Required"), {
+      target: { value: "Say pong through the assignment." },
+    });
+    fireEvent.click(within(playground).getByRole("button", { name: "Run playground" }));
+
+    expect(await within(playground).findByText("assignment pong")).toBeInTheDocument();
+    const post = calls.find(
+      (call) => call.url === "/admin/api/v1/llm/provider-models/pm_gemma/playground",
+    );
+    expect(post?.init.method).toBe("POST");
+    expect(bodyOf(post!)).toMatchObject({
+      mode: "assignment",
+      assignment_id: "assign_chat_manager",
+      prompt: "Say pong through the assignment.",
+      max_tokens: null,
+      temperature: null,
     });
   });
 

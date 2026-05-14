@@ -103,6 +103,7 @@ class _FailingLLMClient:
 class _RecordingLLMClient:
     def __init__(self) -> None:
         self.calls = 0
+        self.messages: list[list[ChatMessage]] = []
 
     def chat(
         self,
@@ -116,9 +117,10 @@ class _RecordingLLMClient:
         tools: object = None,
         consents: object = None,
     ) -> LLMResponse:
-        del messages, max_tokens, temperature, thinking_level, thinking_strategy
+        del max_tokens, temperature, thinking_level, thinking_strategy
         del tools, consents
         self.calls += 1
+        self.messages.append(messages)
         return LLMResponse(
             text="ok",
             usage=LLMUsage(
@@ -697,6 +699,46 @@ class TestAdminLlmRoutes:
             assert too_many_tokens.status_code == 422, too_many_tokens.text
             assert too_many_tokens.json()["error"] == "max_tokens_exceeds_model_limit"
             assert llm.calls == 1
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_accepts_multipart_image_upload(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            llm = _RecordingLLMClient()
+            client.app.state.llm = llm
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                provider.api_key_envelope_ref = None
+                s.commit()
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                data={"prompt": "describe this image"},
+                files={"image_file": ("receipt.png", b"image-bytes", "image/png")},
+            )
+
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["status"] == "ok"
+            assert llm.calls == 1
+            sent = llm.messages[0]
+            assert sent[0]["role"] == "user"
+            content = sent[0]["content"]
+            assert isinstance(content, list)
+            assert content[0] == {"type": "text", "text": "describe this image"}
+            assert content[1]["type"] == "image_url"
+            assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
         finally:
             _wipe(session_factory)
 
