@@ -281,7 +281,7 @@
 }
 .llm-provider-model-list .llm-usage-total--muted,
 .llm-graph-node__child .llm-usage-total--muted,
-.llm-graph-chain__provider-model > .llm-usage-total--muted {
+.llm-graph-chain__assignment-model > .llm-usage-total--muted {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -333,6 +333,7 @@
   transition: opacity 120ms ease, border-color 120ms ease, background 120ms ease;
 }
 .llm-graph-chain__rung:hover,
+.llm-graph-chain__rung:focus-visible,
 .llm-graph-chain__rung:focus-within {
   border-color: var(--moss);
   border-style: solid;
@@ -357,6 +358,9 @@
 .llm-graph-chain__rung.is-error {
   border-color: var(--rust);
   background: var(--rust-soft);
+}
+.llm-graph-chain__rung.is-disabled:not(.is-active):not(.is-linked) {
+  opacity: 0.64;
 }
 .llm-graph-chain__assignment {
   position: relative;
@@ -394,44 +398,18 @@
 .llm-graph-chain__usage {
   display: block;
 }
-.llm-graph-chain__provider-model {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  left: 35px;
+.llm-graph-chain__assignment-model {
+  width: auto;
+  min-height: 32px;
+  margin: 0 5px 5px 35px;
   z-index: 2;
   display: grid;
   gap: 3px;
-  min-height: 32px;
   padding: 5px 7px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  background: var(--paper);
   color: var(--ink-2);
   cursor: pointer;
   font: inherit;
   text-align: left;
-  transition: opacity 120ms ease, border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
-}
-.llm-graph-chain__provider-model:hover,
-.llm-graph-chain__provider-model:focus-visible {
-  border-color: var(--moss);
-  color: var(--ink);
-  outline: 0;
-  box-shadow: 0 0 0 2px var(--moss-soft);
-}
-.llm-graph-chain__provider-model.is-linked {
-  border-color: var(--moss);
-  background: var(--moss-softer);
-}
-.llm-graph-chain__provider-model.is-active {
-  border-color: var(--moss);
-  background: var(--moss-soft);
-  box-shadow: 0 0 0 1px var(--moss) inset;
-}
-.llm-graph-chain__provider-model.is-dim { opacity: 0.45; }
-.llm-graph-chain__provider-model.is-disabled:not(.is-active):not(.is-linked) {
-  opacity: 0.64;
 }
 .llm-graph-chain__pm-summary,
 .llm-graph-chain__pm-model {
@@ -461,7 +439,7 @@
   font-size: 11.5px;
   line-height: 1;
 }
-.llm-graph-chain__provider-model > .llm-usage-total--muted {
+.llm-graph-chain__assignment-model > .llm-usage-total--muted {
   position: static;
   justify-self: start;
   text-align: left;
@@ -1109,8 +1087,7 @@
     padding-right: 8px;
     padding-top: 42px;
   }
-  .llm-graph-chain__provider-model {
-    position: static;
+  .llm-graph-chain__assignment-model {
     width: auto;
     margin: 0 5px 5px 35px;
   }

@@ -1131,6 +1131,27 @@ describe("Admin LlmPage", () => {
       const providerModelButton = within(rung).getByRole("button", {
         name: /Open provider-model google\/gemma-4-31b-it for chat\.manager assignment/,
       });
+      const errorProviderModelButton = within(defaultCapabilityCard()).getByRole("button", {
+        name: /Open provider-model google\/gemma-4-31b-it for default assignment/,
+      });
+      expect(errorProviderModelButton).toHaveClass(
+        "llm-graph-chain__rung",
+        "is-error",
+        "is-primary",
+      );
+      expect(errorProviderModelButton).not.toHaveClass("llm-graph-chain__provider-model");
+      expect(providerModelButton).toHaveClass(
+        "llm-graph-chain__rung",
+        "is-primary",
+      );
+      expect(providerModelButton).not.toHaveClass("llm-graph-chain__provider-model");
+      const modelColumnProviderModelButton = screen.getByRole("button", {
+        name: /OpenRouter provider model for Gemma 4 31B IT/,
+      });
+      expect(modelColumnProviderModelButton).toHaveClass("llm-graph-node");
+      expect(modelColumnProviderModelButton).not.toHaveClass(
+        "llm-graph-chain__assignment-model",
+      );
       expect(providerModelButton).toHaveTextContent("Gemma 4 31B IT");
       expect(providerModelButton).toHaveTextContent("Thinking disabled");
       expect(providerModelButton.querySelector(".llm-graph-chain__pm-name")).toBeNull();

@@ -123,7 +123,8 @@ export default function CapabilityChain(props: CapabilityChainProps) {
                 <button
                   type="button"
                   className={[
-                    "llm-graph-chain__provider-model",
+                    "llm-graph-chain__rung",
+                    "llm-graph-chain__assignment-model",
                     active?.column === "providerModel" && active.id === pm.id
                       ? "is-active"
                       : "",
@@ -134,6 +135,8 @@ export default function CapabilityChain(props: CapabilityChainProps) {
                     hasSelection && !mutedPath.providerModels.has(pm.id)
                       ? "is-dim"
                       : "",
+                    missing.length ? "is-error" : "",
+                    a.priority === 0 ? "is-primary" : "",
                     pm.is_enabled ? "" : "is-disabled",
                   ]
                     .filter(Boolean)
