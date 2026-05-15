@@ -69,6 +69,7 @@ _STREAM_FIXTURE_BYTES = _load_stream_fixture("openrouter_stream_smoke.txt")
 
 _API_KEY = SecretStr("sk-or-test-0123456789abcdef")
 _MODEL = "google/gemma-3-27b-it"
+_GEMMA4_MODEL = "google/gemma-4-31b-it"
 
 
 class _RecordingHandler:
@@ -265,6 +266,45 @@ class TestCompleteHappyPath:
         body = _json_body(handler.requests[0])
         assert "thinking" not in body
 
+    def test_gemma_system_token_strategy_adds_system_turn(self) -> None:
+        handler = _RecordingHandler(
+            responses=[httpx.Response(200, json=_COMPLETE_FIXTURE)]
+        )
+        client = _make_client(handler)
+        client.complete(
+            model_id=_GEMMA4_MODEL,
+            prompt="hello",
+            thinking_level="high",
+            thinking_strategy="gemma_system_token",
+        )
+
+        body = _json_body(handler.requests[0])
+        assert body["messages"] == [
+            {"role": "system", "content": "<|think|>"},
+            {"role": "user", "content": "hello"},
+        ]
+        assert "reasoning" not in body
+        assert "thinking" not in body
+
+    def test_disabled_gemma_system_token_strategy_leaves_messages_unchanged(
+        self,
+    ) -> None:
+        handler = _RecordingHandler(
+            responses=[httpx.Response(200, json=_COMPLETE_FIXTURE)]
+        )
+        client = _make_client(handler)
+        client.complete(
+            model_id=_GEMMA4_MODEL,
+            prompt="hello",
+            thinking_level="disabled",
+            thinking_strategy="gemma_system_token",
+        )
+
+        body = _json_body(handler.requests[0])
+        assert body["messages"] == [{"role": "user", "content": "hello"}]
+        assert "reasoning" not in body
+        assert "thinking" not in body
+
     def test_request_headers_include_auth_and_attribution(self) -> None:
         handler = _RecordingHandler(
             responses=[httpx.Response(200, json=_COMPLETE_FIXTURE)]
@@ -316,6 +356,58 @@ class TestChatHappyPath:
         assert body["messages"] == messages
         assert body["thinking"] == {"type": "enabled"}
         assert "reasoning" not in body
+
+    def test_gemma_system_token_strategy_preserves_multi_message_order(
+        self,
+    ) -> None:
+        handler = _RecordingHandler(responses=[httpx.Response(200, json=_CHAT_FIXTURE)])
+        client = _make_client(handler)
+        messages: list[ChatMessage] = [
+            {"role": "user", "content": "Plan a tight handover."},
+            {"role": "assistant", "content": "Which property?"},
+            {"role": "user", "content": "North wing."},
+        ]
+
+        client.chat(
+            model_id=_GEMMA4_MODEL,
+            messages=messages,
+            thinking_level="medium",
+            thinking_strategy="gemma_system_token",
+        )
+
+        body = _json_body(handler.requests[0])
+        assert body["messages"] == [
+            {"role": "system", "content": "<|think|>"},
+            *messages,
+        ]
+
+    def test_gemma_system_token_strategy_prepends_existing_system_message(
+        self,
+    ) -> None:
+        handler = _RecordingHandler(responses=[httpx.Response(200, json=_CHAT_FIXTURE)])
+        client = _make_client(handler)
+        messages: list[ChatMessage] = [
+            {"role": "system", "content": "You are a hospitality ops assistant."},
+            {"role": "user", "content": "Plan a tight handover."},
+            {"role": "assistant", "content": "Confirmed."},
+        ]
+
+        client.chat(
+            model_id=_GEMMA4_MODEL,
+            messages=messages,
+            thinking_level="low",
+            thinking_strategy="gemma_system_token",
+        )
+
+        body = _json_body(handler.requests[0])
+        assert body["messages"] == [
+            {
+                "role": "system",
+                "content": "<|think|>\nYou are a hospitality ops assistant.",
+            },
+            messages[1],
+            messages[2],
+        ]
 
 
 _SAMPLE_TOOL: Tool = {
@@ -525,6 +617,35 @@ class TestStreamHappyPath:
         body = _json_body(handler.requests[0])
         assert body["stream"] is True
         assert body["model"] == _MODEL
+
+    def test_stream_uses_gemma_system_token_strategy(self) -> None:
+        handler = _RecordingHandler(
+            responses=[
+                httpx.Response(
+                    200,
+                    headers={"content-type": "text/event-stream"},
+                    content=_STREAM_FIXTURE_BYTES,
+                )
+            ]
+        )
+        client = _make_client(handler)
+
+        chunks = list(
+            client.stream_chat(
+                model_id=_GEMMA4_MODEL,
+                messages=[{"role": "user", "content": "Say hi."}],
+                thinking_level="medium",
+                thinking_strategy="gemma_system_token",
+            )
+        )
+
+        assert chunks == ["Hello", ", ", "crew", ".day", "!"]
+        body = _json_body(handler.requests[0])
+        assert body["messages"] == [
+            {"role": "system", "content": "<|think|>"},
+            {"role": "user", "content": "Say hi."},
+        ]
+        assert body["stream"] is True
 
     def test_stream_skips_malformed_sse_frames(self) -> None:
         """Junk between ``data:`` lines is logged and skipped — the stream survives."""

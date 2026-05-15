@@ -827,8 +827,10 @@ llm_provider_model
   to adapters.
 - `thinking_strategy` records how a non-disabled thinking level is
   represented on the wire. Allowed values are `none` (send no explicit
-  thinking control), `gemma_system_token` (inject the model-specific
-  Gemma system token), `glm_extra_body` (send Z.AI GLM's
+  thinking control), `gemma_system_token` (for Gemma 4, prepend
+  `<|think|>` to the first system prompt, or add a leading system
+  prompt containing only that token when the call has no system prompt),
+  `glm_extra_body` (send Z.AI GLM's
   OpenAI-compatible extra-body `thinking: {type: enabled}` control),
   and `openrouter_extra_body` (send OpenRouter's extra-body reasoning
   control). `llm_model.thinking_strategy` is the

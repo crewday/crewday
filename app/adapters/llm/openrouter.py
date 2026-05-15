@@ -150,6 +150,7 @@ _DEFAULT_OCR_PROMPT: Final[str] = (
     "Preserve line breaks; do not summarise."
 )
 _DEFAULT_OCR_MIME: Final[str] = "image/jpeg"
+_GEMMA_THINKING_SYSTEM_TOKEN: Final[str] = "<|think|>"
 _PRICE_QUANTUM: Final[Decimal] = Decimal("0.0001")
 _PER_MILLION: Final[Decimal] = Decimal("1000000")
 _MODEL_ID_PARTS: Final[int] = 2
@@ -1056,7 +1057,11 @@ def _build_request_body(
     """
     body: dict[str, object] = {
         "model": model_id,
-        "messages": list(messages),
+        "messages": _messages_with_thinking_control(
+            messages,
+            thinking_level=thinking_level,
+            thinking_strategy=thinking_strategy,
+        ),
         "max_tokens": max_tokens,
         "temperature": temperature,
     }
@@ -1069,6 +1074,39 @@ def _build_request_body(
     if tools:
         body["tools"] = [_serialise_tool(t) for t in tools]
     return body
+
+
+def _messages_with_thinking_control(
+    messages: Sequence[_WireMessage],
+    *,
+    thinking_level: LlmThinkingLevel,
+    thinking_strategy: LlmThinkingStrategy,
+) -> list[_WireMessage]:
+    wire_messages: list[_WireMessage] = [
+        {"role": message["role"], "content": message["content"]} for message in messages
+    ]
+    if thinking_strategy != "gemma_system_token" or thinking_level == "disabled":
+        return wire_messages
+
+    system_token = _GEMMA_THINKING_SYSTEM_TOKEN
+    for index, message in enumerate(wire_messages):
+        if message["role"] != "system":
+            continue
+        content = message["content"]
+        if isinstance(content, str):
+            if content.startswith(system_token):
+                return wire_messages
+            updated: _WireMessage = {
+                "role": message["role"],
+                "content": f"{system_token}\n{content}" if content else system_token,
+            }
+            wire_messages[index] = updated
+            return wire_messages
+        wire_messages.insert(0, {"role": "system", "content": system_token})
+        return wire_messages
+
+    wire_messages.insert(0, {"role": "system", "content": system_token})
+    return wire_messages
 
 
 def _serialise_tool(tool: Tool) -> dict[str, object]:
