@@ -662,6 +662,9 @@ describe("Admin LlmPage", () => {
         { body: graph },
         { body: graph },
         { body: graph },
+        { body: graph },
+        { body: graph },
+        { body: graph },
       ],
       "/admin/api/v1/llm/providers": [
         {
@@ -676,6 +679,10 @@ describe("Admin LlmPage", () => {
         { body: { ...graph.providers[0], name: "OpenRouter EU" } },
         { status: 409, body: { error: "provider_in_use" } },
         { status: 204, body: null },
+      ],
+      "/admin/api/v1/llm/providers/prov_openrouter/key": [
+        { body: { ...graph.providers[0], api_key_status: "present" } },
+        { body: { ...graph.providers[0], api_key_ref: null, api_key_status: "missing" } },
       ],
     });
     try {
@@ -711,6 +718,7 @@ describe("Admin LlmPage", () => {
         provider_type: "fake",
       });
       expect(jsonBody(post!)).not.toHaveProperty("priority");
+      expect(jsonBody(post!)).not.toHaveProperty("api_key_envelope_ref");
 
       fireEvent.click(within(await findOpenRouterProvider()).getByText("OpenRouter"));
       expect(
@@ -739,8 +747,63 @@ describe("Admin LlmPage", () => {
       );
       expect(jsonBody(put!)).toMatchObject({ name: "OpenRouter EU" });
       expect(jsonBody(put!)).not.toHaveProperty("priority");
+      expect(jsonBody(put!)).not.toHaveProperty("api_key_envelope_ref");
 
       fireEvent.click(within(await findOpenRouterProvider()).getByText("OpenRouter"));
+      const keyDialog = screen.getByRole("dialog", { name: "OpenRouter" });
+      expect(within(keyDialog).queryByText("API key envelope ref")).not.toBeInTheDocument();
+      expect(within(keyDialog).queryByText("env:OPENROUTER_API_KEY")).not.toBeInTheDocument();
+      const keyInput = within(keyDialog).getByLabelText("API key");
+      expect(keyInput).toHaveValue("");
+      fireEvent.change(keyInput, { target: { value: "sk-page-rotate" } });
+      const graphCallsBeforeRotate = fetcher.calls.filter(
+        (call) => call.url === "/admin/api/v1/llm/graph",
+      ).length;
+      fireEvent.click(within(keyDialog).getByRole("button", { name: "Rotate key" }));
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url === "/admin/api/v1/llm/providers/prov_openrouter/key" &&
+              call.init.method === "PUT",
+          ),
+        ).toBe(true);
+      });
+      const keyPut = fetcher.calls.find(
+        (call) =>
+          call.url === "/admin/api/v1/llm/providers/prov_openrouter/key" &&
+          call.init.method === "PUT",
+      );
+      expect(jsonBody(keyPut!)).toEqual({ api_key: "sk-page-rotate" });
+      await waitFor(() => expect(keyInput).toHaveValue(""));
+      await waitFor(() => {
+        expect(
+          fetcher.calls.filter((call) => call.url === "/admin/api/v1/llm/graph")
+            .length,
+        ).toBeGreaterThan(graphCallsBeforeRotate);
+      });
+
+      const graphCallsBeforeClear = fetcher.calls.filter(
+        (call) => call.url === "/admin/api/v1/llm/graph",
+      ).length;
+      fireEvent.click(within(keyDialog).getByRole("button", { name: "Clear key" }));
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url === "/admin/api/v1/llm/providers/prov_openrouter/key" &&
+              call.init.method === "DELETE",
+          ),
+        ).toBe(true);
+      });
+      await waitFor(() => {
+        expect(
+          fetcher.calls.filter((call) => call.url === "/admin/api/v1/llm/graph")
+            .length,
+        ).toBeGreaterThan(graphCallsBeforeClear);
+      });
+
       fireEvent.click(screen.getByRole("button", { name: "Delete provider" }));
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "attached to provider-model rows",

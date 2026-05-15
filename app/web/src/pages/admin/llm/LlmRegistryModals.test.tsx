@@ -88,6 +88,224 @@ function expectControlBeforeHelp(control: HTMLElement, help: HTMLElement) {
 }
 
 describe("LlmRegistryModals", () => {
+  it("replaces the provider key ref field with missing-key set controls", async () => {
+    const calls = installFetch((url) =>
+      url === "/admin/api/v1/llm/providers/prov_openrouter/key"
+        ? {
+            body: {
+              ...baseGraph.providers[0],
+              api_key_ref: "internal-ref-after-set",
+              api_key_status: "present",
+            },
+          }
+        : { body: {} },
+    );
+    const testGraph: LlmGraphPayload = {
+      ...baseGraph,
+      providers: baseGraph.providers.map((provider) =>
+        provider.id === "prov_openrouter"
+          ? {
+              ...provider,
+              api_key_ref: "internal-ref-before-set",
+              api_key_status: "missing",
+            }
+          : provider,
+      ),
+    };
+    renderRegistry(testGraph, {
+      kind: "provider",
+      mode: "edit",
+      id: "prov_openrouter",
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "OpenRouter" });
+    expect(within(dialog).queryByText("API key envelope ref")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/internal-ref/)).not.toBeInTheDocument();
+    expect(within(dialog).getByText("Missing")).toBeInTheDocument();
+
+    const keyInput = within(dialog).getByLabelText("API key");
+    expect(keyInput).toHaveAttribute("type", "password");
+    expect(keyInput).toHaveValue("");
+    fireEvent.change(keyInput, { target: { value: "sk-set-value" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Set key" }));
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/providers/prov_openrouter/key" &&
+            call.init.method === "PUT",
+        ),
+      ).toBe(true);
+    });
+    const put = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/providers/prov_openrouter/key" &&
+        call.init.method === "PUT",
+    );
+    expect(bodyOf(put!)).toEqual({ api_key: "sk-set-value" });
+    await waitFor(() => expect(keyInput).toHaveValue(""));
+    expect(within(dialog).queryByText("sk-set-value")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/internal-ref-after-set/)).not.toBeInTheDocument();
+  });
+
+  it("rotates and clears present provider keys without rendering key values or refs", async () => {
+    const calls = installFetch((url, init) => {
+      if (
+        url === "/admin/api/v1/llm/providers/prov_openrouter/key" &&
+        init.method === "PUT"
+      ) {
+        return {
+          status: 422,
+          body: {
+            title: "Validation error",
+            detail:
+              "Rotate failed for sk-rotate-value at env:OPENROUTER_API_KEY.",
+            error: "provider_key_invalid",
+          },
+        };
+      }
+      if (
+        url === "/admin/api/v1/llm/providers/prov_openrouter/key" &&
+        init.method === "DELETE"
+      ) {
+        return {
+          body: {
+            ...baseGraph.providers[0],
+            api_key_ref: "internal-ref-after-clear",
+            api_key_status: "missing",
+          },
+        };
+      }
+      return { body: {} };
+    });
+    renderRegistry(baseGraph, {
+      kind: "provider",
+      mode: "edit",
+      id: "prov_openrouter",
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "OpenRouter" });
+    expect(within(dialog).getByText("Present")).toBeInTheDocument();
+    expect(within(dialog).queryByText("env:OPENROUTER_API_KEY")).not.toBeInTheDocument();
+    const keyInput = within(dialog).getByLabelText("API key");
+    expect(keyInput).toHaveValue("");
+
+    fireEvent.change(keyInput, { target: { value: " sk-rotate-value " } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Rotate key" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("[redacted]");
+    expect(within(dialog).queryByText(/sk-rotate-value/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/env:OPENROUTER_API_KEY/)).not.toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Clear key" }));
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/providers/prov_openrouter/key" &&
+            call.init.method === "DELETE",
+        ),
+      ).toBe(true);
+    });
+    expect(within(dialog).queryByText(/internal-ref-after-clear/)).not.toBeInTheDocument();
+  });
+
+  it("redacts key values and refs from ordinary provider save errors", async () => {
+    installFetch((url) =>
+      url === "/admin/api/v1/llm/providers/prov_openrouter"
+        ? {
+            status: 422,
+            body: {
+              title: "Validation error",
+              detail:
+                "Save failed for sk-save-value at env:OPENROUTER_API_KEY.",
+              error: "provider_invalid",
+            },
+          }
+        : { body: {} },
+    );
+    renderRegistry(baseGraph, {
+      kind: "provider",
+      mode: "edit",
+      id: "prov_openrouter",
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "OpenRouter" });
+    fireEvent.change(within(dialog).getByLabelText("API key"), {
+      target: { value: " sk-save-value " },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save provider" }));
+
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert).toHaveTextContent("[redacted]");
+    expect(alert).not.toHaveTextContent("sk-save-value");
+    expect(alert).not.toHaveTextContent("env:OPENROUTER_API_KEY");
+  });
+
+  it("keeps provider create and save payloads free of key envelope refs", async () => {
+    const calls = installFetch((url) =>
+      url === "/admin/api/v1/llm/providers/prov_openrouter"
+        ? { body: { ...baseGraph.providers[0], name: "OpenRouter EU" } }
+        : { body: baseGraph.providers[0] },
+    );
+
+    renderRegistry(baseGraph, { kind: "provider", mode: "create" });
+    const createDialog = screen.getByRole("dialog", { name: "Create provider" });
+    expect(within(createDialog).queryByText("API key envelope ref")).not.toBeInTheDocument();
+    expect(within(createDialog).queryByLabelText("API key")).not.toBeInTheDocument();
+    fireEvent.change(within(createDialog).getByLabelText("Name Required"), {
+      target: { value: "Fake provider" },
+    });
+    fireEvent.change(within(createDialog).getByLabelText("Type Required"), {
+      target: { value: "fake" },
+    });
+    fireEvent.click(within(createDialog).getByRole("button", { name: "Create provider" }));
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/providers" &&
+            call.init.method === "POST",
+        ),
+      ).toBe(true);
+    });
+    const post = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/providers" && call.init.method === "POST",
+    );
+    expect(bodyOf(post!)).not.toHaveProperty("api_key_envelope_ref");
+
+    cleanup();
+    renderRegistry(baseGraph, {
+      kind: "provider",
+      mode: "edit",
+      id: "prov_openrouter",
+    });
+    const editDialog = screen.getByRole("dialog", { name: "OpenRouter" });
+    fireEvent.change(within(editDialog).getByLabelText("Name Required"), {
+      target: { value: "OpenRouter EU" },
+    });
+    fireEvent.click(within(editDialog).getByRole("button", { name: "Save provider" }));
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/providers/prov_openrouter" &&
+            call.init.method === "PUT",
+        ),
+      ).toBe(true);
+    });
+    const put = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/providers/prov_openrouter" &&
+        call.init.method === "PUT",
+    );
+    expect(bodyOf(put!)).not.toHaveProperty("api_key_envelope_ref");
+  });
+
   it("renders the edit-only provider-model playground as a direct-only smoke test", () => {
     installFetch();
     renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });

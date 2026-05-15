@@ -76,7 +76,6 @@ interface ProviderPayload {
   name: string;
   provider_type: LlmProviderType;
   api_endpoint: string | null;
-  api_key_envelope_ref: string | null;
   default_model: string | null;
   timeout_s: number;
   requests_per_minute: number;
@@ -198,6 +197,16 @@ function apiErrorCopy(error: unknown, fallback: string): string {
     return error.detail ?? error.title ?? error.message ?? fallback;
   }
   return error instanceof Error ? error.message : fallback;
+}
+
+function redactedCopy(copy: string, values: (string | null | undefined)[]): string {
+  const uniqueValues = [
+    ...new Set(values.filter((value): value is string => Boolean(value))),
+  ];
+  return uniqueValues.reduce((current, value) => {
+    if (!value) return current;
+    return current.split(value).join("[redacted]");
+  }, copy);
 }
 
 function openRouterMetadataErrorCopy(error: unknown): string {
@@ -357,7 +366,7 @@ function ProviderForm(props: ProviderFormProps) {
     provider?.provider_type ?? "openrouter",
   );
   const [apiEndpoint, setApiEndpoint] = useState(provider?.endpoint ?? "");
-  const [apiKeyRef, setApiKeyRef] = useState(provider?.api_key_ref ?? "");
+  const [apiKey, setApiKey] = useState("");
   const [defaultModel, setDefaultModel] = useState(provider?.default_model ?? "");
   const [timeout, setTimeoutValue] = useState(String(provider?.timeout_s ?? 60));
   const [rpm, setRpm] = useState(String(provider?.requests_per_minute ?? 60));
@@ -375,6 +384,14 @@ function ProviderForm(props: ProviderFormProps) {
   const invalidate = async () => {
     await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
   };
+  function providerErrorCopy(error: Error, fallback: string): string {
+    return redactedCopy(apiErrorCopy(error, fallback), [
+      apiKey,
+      apiKey.trim(),
+      provider?.api_key_ref,
+    ]);
+  }
+
   const save = useMutation({
     mutationFn: (body: ProviderPayload) =>
       fetchJson<LlmProvider>(
@@ -387,7 +404,33 @@ function ProviderForm(props: ProviderFormProps) {
       await invalidate();
       onClose();
     },
-    onError: (error: Error) => setServerErr(apiErrorCopy(error, "Provider save failed.")),
+    onError: (error: Error) =>
+      setServerErr(providerErrorCopy(error, "Provider save failed.")),
+  });
+  const setKey = useMutation({
+    mutationFn: (key: string) =>
+      fetchJson<LlmProvider>(`/admin/api/v1/llm/providers/${provider?.id}/key`, {
+        method: "PUT",
+        body: { api_key: key },
+      }),
+    onSuccess: async () => {
+      setApiKey("");
+      await invalidate();
+    },
+    onError: (error: Error) =>
+      setServerErr(providerErrorCopy(error, "Provider key update failed.")),
+  });
+  const clearKey = useMutation({
+    mutationFn: () =>
+      fetchJson<LlmProvider>(`/admin/api/v1/llm/providers/${provider?.id}/key`, {
+        method: "DELETE",
+      }),
+    onSuccess: async () => {
+      setApiKey("");
+      await invalidate();
+    },
+    onError: (error: Error) =>
+      setServerErr(providerErrorCopy(error, "Provider key clear failed.")),
   });
   const remove = useMutation({
     mutationFn: () =>
@@ -399,7 +442,7 @@ function ProviderForm(props: ProviderFormProps) {
       onClose();
     },
     onError: (error: Error) =>
-      setServerErr(apiErrorCopy(error, "Provider delete failed.")),
+      setServerErr(providerErrorCopy(error, "Provider delete failed.")),
   });
 
   const err = clientErr ?? serverErr;
@@ -425,12 +468,25 @@ function ProviderForm(props: ProviderFormProps) {
       name: name.trim(),
       provider_type: providerType,
       api_endpoint: emptyToNull(apiEndpoint),
-      api_key_envelope_ref: emptyToNull(apiKeyRef),
       default_model: emptyToNull(defaultModel),
       timeout_s: timeoutValue,
       requests_per_minute: rpmValue,
       is_enabled: enabled,
     });
+  }
+
+  function submitKey() {
+    const key = apiKey.trim();
+    if (!key) return setClientErr("API key is required.");
+    setClientErr(null);
+    setServerErr(null);
+    setKey.mutate(key);
+  }
+
+  function keyStatusCopy(): string {
+    if (provider?.api_key_status === "present") return "Present";
+    if (provider?.api_key_status === "rotating") return "Rotating";
+    return "Missing";
   }
 
   return (
@@ -449,7 +505,12 @@ function ProviderForm(props: ProviderFormProps) {
               type="button"
               className="btn btn--rust llm-registry-form__delete"
               onClick={() => remove.mutate()}
-              disabled={remove.isPending || save.isPending}
+              disabled={
+                remove.isPending ||
+                save.isPending ||
+                setKey.isPending ||
+                clearKey.isPending
+              }
             >
               {remove.isPending ? "Deleting…" : "Delete provider"}
             </button>
@@ -460,7 +521,12 @@ function ProviderForm(props: ProviderFormProps) {
           <button
             type="submit"
             className="btn btn--moss"
-            disabled={save.isPending || remove.isPending}
+            disabled={
+              save.isPending ||
+              remove.isPending ||
+              setKey.isPending ||
+              clearKey.isPending
+            }
           >
             {save.isPending ? "Saving…" : mode === "create" ? "Create provider" : "Save provider"}
           </button>
@@ -506,9 +572,62 @@ function ProviderForm(props: ProviderFormProps) {
             aria-describedby={errId}
           />
         </FormModalField>
-        <FormModalField label="API key envelope ref" requirement="optional">
-          <input value={apiKeyRef} onChange={(e) => setApiKeyRef(e.target.value)} />
-        </FormModalField>
+        {mode === "edit" ? (
+          <div className="llm-provider-key">
+            <div className="llm-provider-key__head">
+              <span className="llm-provider-key__label">API key</span>
+              <span
+                className={`llm-provider-key__status llm-provider-key__status--${
+                  provider?.api_key_status ?? "missing"
+                }`}
+              >
+                {keyStatusCopy()}
+              </span>
+            </div>
+            <div className="llm-provider-key__control">
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder={
+                  provider?.api_key_status === "present"
+                    ? "Paste replacement key"
+                    : "Paste API key"
+                }
+                autoComplete="new-password"
+                aria-label="API key"
+                aria-invalid={clientErr === "API key is required."}
+                aria-describedby={errId}
+              />
+              <button
+                type="button"
+                className="btn btn--ghost llm-provider-key__button"
+                onClick={submitKey}
+                disabled={setKey.isPending || clearKey.isPending}
+              >
+                {setKey.isPending
+                  ? "Saving key…"
+                  : provider?.api_key_status === "present"
+                    ? "Rotate key"
+                    : "Set key"}
+              </button>
+              {provider?.api_key_status === "present" ? (
+                <button
+                  type="button"
+                  className="btn btn--rust llm-provider-key__button"
+                  onClick={() => {
+                    setClientErr(null);
+                    setServerErr(null);
+                    clearKey.mutate();
+                  }}
+                  disabled={setKey.isPending || clearKey.isPending}
+                >
+                  {clearKey.isPending ? "Clearing…" : "Clear key"}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
         <SearchableSelect
           label="Default provider-model"
           requirement="optional"

@@ -630,6 +630,53 @@
 .llm-registry-form__delete {
   margin-right: auto;
 }
+.llm-provider-key {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+.llm-provider-key__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.llm-provider-key__label {
+  color: var(--ink-3);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.llm-provider-key__status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+.llm-provider-key__status--present {
+  color: var(--moss-2);
+}
+.llm-provider-key__status--missing {
+  color: var(--rust);
+}
+.llm-provider-key__control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: stretch;
+}
+.llm-provider-key__button {
+  white-space: nowrap;
+}
 .llm-openrouter-loader {
   gap: 8px;
   padding: 10px 12px;
@@ -1250,10 +1297,12 @@
   .llm-registry-form__delete {
     margin-right: 0;
   }
+  .llm-provider-key__control,
   .llm-price-source-sync__control,
   .llm-openrouter-loader__control {
     grid-template-columns: minmax(0, 1fr);
   }
+  .llm-provider-key__button,
   .llm-price-source-sync__button,
   .llm-openrouter-loader__button {
     width: 100%;
