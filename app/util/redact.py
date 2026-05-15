@@ -82,7 +82,7 @@ Behaviour overview
    redacting the hashes would defeat the point.
 
 7. **Identifier pass-through** (all scopes): ULID-shaped strings
-   under ``id`` / ``*_id`` keys skip the free-text regex sweep.
+   under ``id`` / ``*_id`` / ``*_ids`` keys skip the free-text regex sweep.
    Audit rows and operator logs need stable row identifiers for
    forensic lookup; a ULID can contain phone-like digit runs by
    chance, but it is not itself PII. Sensitive-key rules still win
@@ -328,8 +328,9 @@ def _key_is_sensitive(key: object) -> bool:
     return _SENSITIVE_KEY_RE.search(normalised) is not None
 
 
-_IDENTIFIER_KEY_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|_)id$")
+_IDENTIFIER_KEY_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|_)ids?$")
 _ULID_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
+_IDENTIFIER_VALUE_UNHANDLED: Final[object] = object()
 
 
 def _key_is_identifier(key: object) -> bool:
@@ -341,6 +342,82 @@ def _key_is_identifier(key: object) -> bool:
 
 def _looks_like_ulid(value: str) -> bool:
     return _ULID_RE.fullmatch(value) is not None
+
+
+def _identifier_item_redacted(
+    value: object,
+    *,
+    scope: RedactScope,
+    consents: ConsentSet | None,
+    depth: int,
+    max_depth: int,
+) -> object:
+    if isinstance(value, str) and _looks_like_ulid(value):
+        return value
+    return _redact(
+        value,
+        scope=scope,
+        consents=consents,
+        depth=depth + 1,
+        max_depth=max_depth,
+    )
+
+
+def _identifier_value_redacted(
+    value: object,
+    *,
+    scope: RedactScope,
+    consents: ConsentSet | None,
+    depth: int,
+    max_depth: int,
+) -> object:
+    if isinstance(value, str) and _looks_like_ulid(value):
+        return value
+    if isinstance(value, list):
+        return [
+            _identifier_item_redacted(
+                item,
+                scope=scope,
+                consents=consents,
+                depth=depth,
+                max_depth=max_depth,
+            )
+            for item in value
+        ]
+    if isinstance(value, tuple):
+        return tuple(
+            _identifier_item_redacted(
+                item,
+                scope=scope,
+                consents=consents,
+                depth=depth,
+                max_depth=max_depth,
+            )
+            for item in value
+        )
+    if isinstance(value, frozenset):
+        return frozenset(
+            _identifier_item_redacted(
+                item,
+                scope=scope,
+                consents=consents,
+                depth=depth,
+                max_depth=max_depth,
+            )
+            for item in value
+        )
+    if isinstance(value, set):
+        return {
+            _identifier_item_redacted(
+                item,
+                scope=scope,
+                consents=consents,
+                depth=depth,
+                max_depth=max_depth,
+            )
+            for item in value
+        }
+    return _IDENTIFIER_VALUE_UNHANDLED
 
 
 # ---------------------------------------------------------------------------
@@ -780,9 +857,17 @@ def _redact_mapping(
             redacted[key] = _TAG_SENSITIVE_KEY
             continue
 
-        if _key_is_identifier(key) and isinstance(raw, str) and _looks_like_ulid(raw):
-            redacted[key] = raw
-            continue
+        if _key_is_identifier(key):
+            identifier_value = _identifier_value_redacted(
+                raw,
+                scope=scope,
+                consents=consents,
+                depth=depth,
+                max_depth=max_depth,
+            )
+            if identifier_value is not _IDENTIFIER_VALUE_UNHANDLED:
+                redacted[key] = identifier_value
+                continue
 
         # Consent pass-through (``scope="llm"`` only): the field name
         # is allowed, but the *contents* are still run through the

@@ -1672,7 +1672,9 @@ def test_agent_message_endpoint_surfaces_unassigned_capability_in_log(
     _seed_budget_ledger(db_session, workspace_id=workspace.id)
     with tenant_agnostic():
         db_session.execute(
-            delete(LlmAssignment).where(LlmAssignment.capability == "chat.manager")
+            delete(LlmAssignment).where(
+                LlmAssignment.capability.in_(("chat.manager", "default"))
+            )
         )
         db_session.flush()
     bus = EventBus()

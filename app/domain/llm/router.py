@@ -312,6 +312,7 @@ class _CacheEntry:
 # it across DB I/O — the pattern is "grab the bucket, release, use".
 _CACHE: dict[str, _CacheEntry] = {}
 _CACHE_LOCK = threading.Lock()
+_SESSION_CACHE_BYPASS_KEY: str = "llm_router_cache_bypass"
 
 # Tracks which buses have been wired up to our invalidation
 # handler. Tests that allocate a fresh :class:`EventBus` can call
@@ -443,6 +444,14 @@ def _statement_targets_cache_table(execute_state: ORMExecuteState) -> bool:
     return isinstance(table_name, str) and table_name in _CACHE_INVALIDATING_BULK_TABLES
 
 
+def _mark_session_cache_bypass(session: Session) -> None:
+    session.info[_SESSION_CACHE_BYPASS_KEY] = True
+
+
+def _session_bypasses_cache(session: Session) -> bool:
+    return bool(session.info.get(_SESSION_CACHE_BYPASS_KEY))
+
+
 @event.listens_for(Session, "do_orm_execute")
 def _invalidate_cache_before_bulk_routing_write(
     execute_state: ORMExecuteState,
@@ -451,6 +460,7 @@ def _invalidate_cache_before_bulk_routing_write(
         execute_state.is_delete or execute_state.is_update
     ) and _statement_targets_cache_table(execute_state):
         invalidate_cache()
+        _mark_session_cache_bypass(execute_state.session)
 
 
 def _subscribe_to_bus(event_bus: EventBus) -> None:
@@ -671,11 +681,13 @@ def _cached_or_resolve(
     """
     key = capability
     now = clock.now()
+    bypass_cache = _session_bypasses_cache(session)
 
-    with _CACHE_LOCK:
-        entry = _CACHE.get(key)
-        if entry is not None and entry.expires_at > now:
-            return list(entry.chain)
+    if not bypass_cache:
+        with _CACHE_LOCK:
+            entry = _CACHE.get(key)
+            if entry is not None and entry.expires_at > now:
+                return list(entry.chain)
 
     # Cache miss (or expired): resolve outside the lock — the DB
     # read can block, and other threads holding stale-but-valid
@@ -684,15 +696,16 @@ def _cached_or_resolve(
         session, workspace_id=ctx.workspace_id, capability=capability
     )
 
-    expires_at = now + timedelta(seconds=CACHE_TTL_SECONDS)
-    with _CACHE_LOCK:
-        # Last-writer-wins on race: two threads resolving the same
-        # key simultaneously both write the same answer, so the race
-        # is a small perf cost (double DB read) rather than a
-        # correctness hazard. Using ``setdefault`` would strand the
-        # later thread's fresher TTL; a plain assign keeps the
-        # window predictable.
-        _CACHE[key] = _CacheEntry(chain=tuple(fresh), expires_at=expires_at)
+    if not bypass_cache:
+        expires_at = now + timedelta(seconds=CACHE_TTL_SECONDS)
+        with _CACHE_LOCK:
+            # Last-writer-wins on race: two threads resolving the same
+            # key simultaneously both write the same answer, so the race
+            # is a small perf cost (double DB read) rather than a
+            # correctness hazard. Using ``setdefault`` would strand the
+            # later thread's fresher TTL; a plain assign keeps the
+            # window predictable.
+            _CACHE[key] = _CacheEntry(chain=tuple(fresh), expires_at=expires_at)
 
     return fresh
 

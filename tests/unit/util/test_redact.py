@@ -407,6 +407,19 @@ class TestKeyBasedRedaction:
         out = redact({"property_id": ulid}, scope="log")
         assert out == {"property_id": ulid}
 
+    def test_ulid_identifier_list_preserved(self) -> None:
+        ulid = "01KRPFJYCE0T3FV66965936DP3"
+        out = redact({"reinstated_user_work_role_ids": [ulid]}, scope="log")
+        assert out == {"reinstated_user_work_role_ids": [ulid]}
+
+    def test_identifier_list_with_pii_still_redacts(self) -> None:
+        ulid = "01KRPFJYCE0T3FV66965936DP3"
+        out = redact(
+            {"reinstated_user_work_role_ids": [ulid, "+14155550123"]},
+            scope="log",
+        )
+        assert out == {"reinstated_user_work_role_ids": [ulid, "<redacted:phone>"]}
+
     @pytest.mark.parametrize(
         "key",
         [

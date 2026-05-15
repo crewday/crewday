@@ -1226,6 +1226,40 @@ class TestCache:
         finally:
             reset_current(token)
 
+    def test_session_bulk_delete_bypasses_stale_cached_chain(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        """A writer session cannot use a stale cache entry after deleting a chain."""
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            row = seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="chat.manager",
+                priority=0,
+                model_id="01HWA00000000000000000DEL2",
+            )
+
+            first = resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+            assert first.assignment_id == row.id
+
+            db_session.execute(delete(LlmAssignment).where(LlmAssignment.id == row.id))
+            db_session.flush()
+            db_session.commit()
+
+            with router_module._CACHE_LOCK:
+                router_module._CACHE["chat.manager"] = router_module._CacheEntry(
+                    chain=(first,),
+                    expires_at=clock.now() + timedelta(seconds=CACHE_TTL_SECONDS),
+                )
+
+            with pytest.raises(CapabilityUnassignedError):
+                resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+        finally:
+            reset_current(token)
+
     def test_assignment_disable_invalidates_cached_chain(
         self, db_session: Session, clock: FrozenClock
     ) -> None:
