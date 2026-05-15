@@ -1251,33 +1251,65 @@ with preferences at render time:
 Pricing is DB-authoritative and syncs from OpenRouter on a schedule —
 the `app/config/llm_pricing.yml` file from earlier drafts is retired.
 
-- `llm_provider_model.input_cost_per_million` and `.output_cost_per_million`
-  are the only cost numbers the cost-tracker reads.
+- `llm_provider_model.input_cost_per_million`,
+  `.output_cost_per_million`, and `.fixed_cost_per_call_usd` are the
+  only cost numbers the cost-tracker reads.
 - A worker job `sync_llm_pricing` runs **weekly** (cron
-  `0 3 * * 1` UTC), probes every enabled provider whose type matches a
-  known price source (v1: OpenRouter only), and updates the
-  per-million prices on any `llm_provider_model` where
-  `get_effective_price_source()` resolves to that source and
-  `price_source_override != 'none'`. Successful rows bump
-  `price_last_synced_at`.
+  `0 3 * * 1` UTC), fetches from each configured price source (v1:
+  OpenRouter only), and updates syncable
+  `llm_provider_model` rows. A row is syncable exactly when its
+  effective price source is OpenRouter:
+  - `price_source_override = 'none'` means pinned/manual. The row
+    never syncs.
+  - `price_source_override = 'openrouter'` syncs from OpenRouter
+    regardless of the parent `llm_model.price_source`.
+  - `price_source_override = ''` inherits the parent model. It syncs
+    only when `llm_model.price_source = 'openrouter'`.
+  - Parent `llm_model.price_source = 'manual'` or `''` does not sync
+    unless the provider-model override is explicitly `openrouter`.
+  Successful rows update only
+  `llm_provider_model.input_cost_per_million`,
+  `llm_provider_model.output_cost_per_million`,
+  `llm_provider_model.fixed_cost_per_call_usd`, and
+  `price_last_synced_at`; no provider, model, support-flag,
+  thinking, or API-id fields change unless a separate model metadata
+  import save path explicitly saves those fields.
 - Admins pin a row by setting `price_source_override = 'none'` — the
   sync skips it, and the admin becomes the price authority for that
   combo. The UI surfaces pinned rows with a small "manual" badge.
-- `crewday admin llm sync-pricing` triggers a sync from the host
-  shell, with the same plumbing as the scheduled job. The
-  `/admin/llm/usage` page exposes the same action for deployment
-  admins and shows the latest per-row result. Both paths refresh the
-  admin graph/pricing data after a successful run. The CLI prints
+- OpenRouter lookup ids resolve in this order:
+  1. `llm_provider_model.price_source_model_id_override`, when
+     non-empty;
+  2. parent `llm_model.price_source_model_id`, when non-empty;
+  3. provider-model `api_model_id`, when the provider-model override
+     is explicitly `openrouter`;
+  4. parent `llm_model.canonical_name` otherwise.
+- `crewday deploy llm sync-pricing` triggers a sync over the
+  deployment-admin REST API, with the same plumbing as the scheduled
+  job. The `/admin/llm/usage`
+  page exposes the same action for deployment admins and shows the
+  latest per-row result. The provider-model edit drawer exposes a SYNC
+  affordance next to "Price source model override" only when the
+  current draft effective source is OpenRouter; it is hidden for
+  manual, pinned, and otherwise non-syncable states. Both paths refresh
+  the admin graph/pricing data after a successful run. The CLI prints
   per-row deltas and exits non-zero on any network error.
+- Provider-model create, and edits that change
+  `price_source_override` or `price_source_model_id_override`, run the
+  same price sync immediately when the saved row is syncable. This
+  automatic sync is best-effort for a single row: a lookup miss keeps
+  the admin-entered pricing, records a warning result, and does not
+  fail the create/edit; a network error surfaces as the route's normal
+  upstream error.
 - Missing prices (row present, price source returns nothing) log a
   `WARNING` per call and keep the existing value. Unknown model IDs
-  at call time fall back to `(0.0, 0.0)` and log a `WARNING` per
-  call, as before.
+  at call time fall back to zero input, output, and fixed per-call
+  pricing and log a `WARNING` per call, as before.
 
 The sync job does **not** mutate the model registry — new models
 announced by OpenRouter do not auto-appear, and there is no scheduled
 all-model catalogue auto-sync. Operators import one explicit model at a
-time via `/admin/llm/graph` or `crewday admin llm model create`. This
+time via `/admin/llm/graph` or `crewday deploy llm model create`. This
 keeps the model catalogue small and intentional while still letting the
 admin flow use OpenRouter metadata for a selected id.
 
@@ -1312,8 +1344,14 @@ so the graph page does not carry a duplicate overflow action.
   back to `canonical_name`. When the admin enters an id and clicks "Load
   metadata", the server fetches that exact id from OpenRouter's model
   catalogue and returns a prefilled, editable draft; it does not import
-  the whole catalogue or create/update rows until the admin saves.
-  Saving may create or update the curated `llm_model` row and the selected
+  the whole catalogue, create provider-model rows, or persist model
+  metadata until the admin saves. As a price-only side effect, a
+  successful metadata load immediately applies the § "Price sync" rules
+  to existing syncable `llm_provider_model` rows whose OpenRouter
+  lookup id resolves to the loaded id, and persists only their pricing
+  fields (`input_cost_per_million`, `output_cost_per_million`,
+  `fixed_cost_per_call_usd`) plus `price_last_synced_at`. Saving may
+  create or update the curated `llm_model` row and the selected
   OpenRouter `llm_provider_model` rows. Imported metadata maps into
   capability tags, `context_window`, `max_output_tokens`,
   `price_source = 'openrouter'`, `price_source_model_id`,
@@ -1326,10 +1364,14 @@ so the graph page does not carry a duplicate overflow action.
   save; unknown fields stay blank or at their explicit defaults rather
   than being guessed.
 - **Provider-model editing.** Provider-model edit drawers expose enabled
-  state, pricing, support flags, and a thinking-strategy override. The
-  nullable strategy control uses `inherit` for the model default;
-  thinking level is set at the model level or overridden per
-  assignment.
+  state, pricing, support flags, price-source override, price-source
+  model override, and a thinking-strategy override. The price-source
+  controls make `none` the pinned/manual state, `openrouter` an
+  explicit OpenRouter sync source, and blank the inherited state. The
+  SYNC affordance is shown next to the price-source model override only
+  when that draft state is syncable under § "Price sync". The nullable
+  strategy control uses `inherit` for the model default; thinking level
+  is set at the model level or overridden per assignment.
 - **Column 3 — Assignments.** Grouped by capability. Each group is a
   vertical stack of its priority chain, top-to-bottom = highest to
   lowest priority. Drag within a group reorders priority (hits
@@ -1868,13 +1910,6 @@ v1 members:
   (§03).
 - `crewday admin purge` — hard-delete per-person payload (§02,
   §15).
-- `crewday admin llm sync-pricing` — triggers the OpenRouter pricing
-  sync on demand (same plumbing as the weekly worker job in § "Price
-  sync"). Prints per-row deltas and exits non-zero on network error.
-  Replaces the earlier `budget reload-pricing` verb; the on-disk
-  `llm_pricing.yml` file is retired in favour of the DB
-  (`llm_provider_model.input_cost_per_million` etc).
-
 The agent-approval flow (§11) does not apply here because there is
 no request for the middleware to intercept. The operator audits
 these commands via shell history, the on-host `audit_log` rows each
@@ -2299,8 +2334,8 @@ Every shipping LLM call writes a `LlmUsage` / `llm_usage` row with
 the provider's reported token counts, a precise estimated USD cost
 (`cost_usd`, six decimal places), and a legacy integer-cent cost
 (`cost_cents`) computed from the serving `llm_provider_model` row's
-per-million prices (§ "Price sync" keeps them current). Successful
-low-token calls may therefore carry `cost_usd > 0` while
+per-million and fixed per-call prices (§ "Price sync" keeps them
+current). Successful low-token calls may therefore carry `cost_usd > 0` while
 `cost_cents = 0`. The background worker aggregates `cost_cents` into
 the rolling meter used by the **workspace usage budget** (§ "Workspace
 usage budget" below), preserving the existing cent-denominated cap
@@ -2435,15 +2470,18 @@ state changes.
 
 ### Pricing source
 
-Per-model USD cost per 1 M input and output tokens lives on
+Per-model USD cost per 1 M input/output tokens plus any fixed
+per-call price lives on
 `llm_provider_model` (§ "Provider / model / provider-model registry")
-and is kept current by the weekly `sync_llm_pricing` job (§ "Price
+and is kept current by the weekly `sync_llm_pricing` job, manual
+sync-pricing triggers, provider-model create/price-source edits, and
+the price-only side effect of OpenRouter model metadata load (§ "Price
 sync"). An admin who pins a row (`price_source_override = 'none'`)
 becomes the price authority for that combo. An unknown `api_model_id`
-at call time falls back to `(input, output) = (0.0, 0.0)` per-million
-**and** logs a `WARNING` every call. A free-tier model (`:free`
-suffix on OpenRouter) is priced at zero — the meter still records
-the call for telemetry but the cost contribution is zero.
+at call time falls back to zero input, output, and fixed per-call
+pricing **and** logs a `WARNING` every call. A free-tier model
+(`:free` suffix on OpenRouter) is priced at zero — the meter still
+records the call for telemetry but the cost contribution is zero.
 
 ### Visible surfaces
 

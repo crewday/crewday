@@ -722,21 +722,31 @@ fix the offender.
 - **LlmUsage.** Per-call LLM usage row (`llm_usage`) carrying tokens,
   cost, latency, outcome, capability, and correlation id. It is the
   source data used to refresh `BudgetLedger.spent_cents`.
-- **Pricing source.** DB-authoritative per-million-token prices on
-  `llm_provider_model.input_cost_per_million` / `.output_cost_per_million`.
-  Kept current by the weekly `sync_llm_pricing` worker job that pulls
-  from OpenRouter (extensible to other sources). Admin pins a row via
-  `price_source_override = 'none'`. Free-tier models (`:free` suffix
-  on OpenRouter) price at zero. Unknown `api_model_id` at call time
-  falls back to (0, 0) and logs a WARNING every call. See §11 "Price
-  sync"; the on-disk `llm_pricing.yml` from earlier drafts is
-  retired.
+- **Pricing source.** DB-authoritative prices on
+  `llm_provider_model.input_cost_per_million`,
+  `.output_cost_per_million`, and `.fixed_cost_per_call_usd`.
+  Kept current by the weekly `sync_llm_pricing` worker job, by the
+  manual `crewday deploy llm sync-pricing` command, by provider-model
+  create/price-source edits when syncable, and by the price side effect
+  of OpenRouter model metadata load. `price_source_override = 'none'`
+  pins a row and never syncs; `openrouter` syncs regardless of the
+  parent model; blank inherits the parent and syncs only when the
+  parent model's `price_source` is OpenRouter. Successful syncs update
+  only the provider-model input/output/fixed pricing fields and
+  `price_last_synced_at`. Free-tier models (`:free` suffix on
+  OpenRouter) price at zero. Unknown `api_model_id` at call time falls
+  back to zero input, output, and fixed per-call pricing and logs a
+  WARNING every call. See §11 "Price sync"; the on-disk
+  `llm_pricing.yml` from earlier drafts is retired.
 - **OpenRouter model import.** Admin-triggered metadata load from
   `/admin/llm/graph` model create/edit drawers, keyed by one explicit
   OpenRouter model id. It pre-fills editable `llm_model` and selected
-  OpenRouter `llm_provider_model` fields before save; it is separate
-  from the weekly price-only sync and is not a scheduled all-model
-  catalogue auto-import. See §11 "LLM graph admin".
+  OpenRouter `llm_provider_model` fields before save, but does not
+  create provider-model rows or persist model metadata until Save. It
+  can immediately persist price-only updates to existing syncable
+  provider-model rows whose OpenRouter pricing lookup id resolves to
+  the loaded id. It is not a scheduled all-model catalogue auto-import.
+  See §11 "LLM graph admin".
 - **LLM provider.** One `llm_provider` row per upstream service. Fields:
   `provider_type ∈ {openrouter, openai_compatible, fake}`, endpoint,
   envelope-stored API key, default model, rate limits. Deployment-
@@ -754,7 +764,8 @@ fix the offender.
   provider and model — where `api_model_id`, per-million pricing,
   per-combo overrides, nullable `thinking_strategy_override`, per-row
   enabled state, and the per-row price-source pin live. Empty strategy
-  overrides inherit from the canonical model. Same canonical model can
+  overrides inherit from the canonical model; blank price-source
+  overrides inherit the model's price source. Same canonical model can
   be priced, tuned, and disabled differently across providers.
   See §11.
 - **LLM assignment chain.** The priority-ordered list of

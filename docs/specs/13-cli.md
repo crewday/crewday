@@ -431,16 +431,21 @@ crewday deploy                          # HTTP-backed deployment-admin group
   llm model create --canonical <name> --display <n> \
                    --capabilities chat,vision,json_mode,... \
                    [--context-window <n>] [--max-output-tokens <n>] \
-                   [--price-source openrouter|none]
-  llm model edit <id> [--display] [--capabilities] [--price-source] [--price-source-model-id]
+                   [--price-source openrouter|manual]
+  llm model edit <id> [--display] [--capabilities] [--price-source openrouter|manual] [--clear-price-source] [--price-source-model-id]
+  llm model load-metadata --openrouter-model-id <s> [--model <id>]
+                     # returns an editable draft and may sync existing provider-model pricing; does not save model metadata
   llm model delete <id>
   # Provider × Model
   llm provider-model list [--provider <id>] [--model <id>]
   llm provider-model create --provider <id> --model <id> --api-model-id <s> \
-                            [--input-per-million <d>] [--output-per-million <d>] \
+                            [--input-per-million <d>] [--output-per-million <d>] [--fixed-per-call <d>] \
                             [--no-system-prompt] [--no-temperature] \
-                            [--price-source-override openrouter|none] [--disabled]
-  llm provider-model edit <id> [...] [--enable|--disable]
+                            [--price-source-override openrouter|none] \
+                            [--price-source-model-id-override <s>] [--disabled]
+  llm provider-model edit <id> [...] [--price-source-override openrouter|none|inherit] \
+                            [--price-source-model-id-override <s>|--clear-price-source-model-id-override] \
+                            [--enable|--disable]
   llm provider-model delete <id>
   # Assignments (priority-ordered chain per capability)
   llm assignment list [--capability]
@@ -466,7 +471,8 @@ crewday deploy                          # HTTP-backed deployment-admin group
   agent-docs revisions <slug>
   agent-docs reset-to-default <slug>
   # Pricing
-  llm sync-pricing [--dry-run]          # triggers the OpenRouter sync on demand
+  llm sync-pricing [--provider-model <id> ...] [--dry-run]
+                                           # triggers OpenRouter pricing sync on demand
   # Call feed
   llm calls list [--capability] [--provider-model] [--assignment] \
                  [--from] [--to] [--fallback-attempts-gt 0] [--follow]
@@ -564,12 +570,11 @@ intentionally separate groups with different security models.
 `rotate-root-key`, `backup`, `restore`, `purge`, `audit verify`,
 `audit export`, `allow-email-domain`, `signup set-ip-cap`,
 `signup allow-ip`, `webhook rotate`, `budget set-cap`,
-`llm sync-pricing`, `workspace create`, `workspace import`,
-`workspace trust`,
+`workspace create`, `workspace import`, `workspace trust`,
 `settings set`, `version`).
 The earlier `budget reload-pricing` verb is retired — pricing lives
-in the DB now (§11 "Price sync"), and the host-CLI sync helper is
-`crewday admin llm sync-pricing`.
+in the DB now (§11 "Price sync"), and the pricing sync command is the
+HTTP-backed `crewday deploy llm sync-pricing`.
 These verbs have no HTTP route and cannot be agent-invoked — the
 approval pipeline (§11) does not apply. They survive precisely
 because some operations must require shell access to the

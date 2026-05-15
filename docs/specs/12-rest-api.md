@@ -1189,16 +1189,17 @@ PUT    /admin/api/v1/llm/providers/{id}/key          # rotate API key; interacti
 # Models — provider-agnostic catalogue.
 GET    /admin/api/v1/llm/models                      # list; includes capabilities[]
 POST   /admin/api/v1/llm/models                      # create
+POST   /admin/api/v1/llm/models/openrouter/metadata  # load one OpenRouter id into an editable draft; price side effects below
 GET    /admin/api/v1/llm/models/{id}
 PUT    /admin/api/v1/llm/models/{id}
 DELETE /admin/api/v1/llm/models/{id}                 # refuses if any provider-model references it
 
 # Provider × model — pricing + per-combo overrides live here.
 GET    /admin/api/v1/llm/provider-models             # list; filters ?provider_id= / ?model_id=
-POST   /admin/api/v1/llm/provider-models             # create
+POST   /admin/api/v1/llm/provider-models             # create; auto-syncs pricing when syncable
 GET    /admin/api/v1/llm/provider-models/{id}
 POST   /admin/api/v1/llm/provider-models/{id}/playground  # smoke test; requires deployment.llm:write
-PUT    /admin/api/v1/llm/provider-models/{id}
+PUT    /admin/api/v1/llm/provider-models/{id}        # edit; price-source/source-id changes auto-sync when syncable
 DELETE /admin/api/v1/llm/provider-models/{id}        # refuses if any assignment references it; disable instead to drain
 
 # Assignments — priority-ordered chain per capability.
@@ -1223,7 +1224,55 @@ GET    /admin/api/v1/llm/prompts/{id}/revisions      # full history
 POST   /admin/api/v1/llm/prompts/{id}/reset-to-default   # writes a revision containing the current code default
 
 # Pricing sync — replaces pricing/reload from earlier drafts.
-POST   /admin/api/v1/llm/sync-pricing                # trigger the OpenRouter sync; streams per-row deltas
+POST   /admin/api/v1/llm/sync-pricing                # trigger OpenRouter pricing sync; all syncable rows or selected provider-model ids
+
+`POST /admin/api/v1/llm/models/openrouter/metadata` is the Model
+drawer "Load metadata" operation. Request body:
+
+```json
+{"openrouter_model_id": "google/gemma-4-31b-it", "model_id": "optional-existing-model-id"}
+```
+
+The response contains an editable `model_draft`, zero or more
+`provider_model_drafts`, and `pricing_sync_results` for existing
+syncable provider-model rows whose §11 OpenRouter pricing lookup id
+resolves to `openrouter_model_id` and whose pricing was updated as the
+§11 "Price sync" side effect. The route never creates provider-model
+rows and never persists model metadata; only successful pricing updates
+to those existing syncable provider-model rows are committed before
+Save.
+
+Provider-model create/edit payloads include
+`price_source_override` (`"" | "none" | "openrouter"`) and
+`price_source_model_id_override`. When a create is syncable, or an edit
+changes either price-source field and the saved row is syncable, the
+route runs the same single-row pricing sync before returning the saved
+row. The response embeds `pricing_sync_result` when a sync was
+attempted; absent means no sync was applicable.
+
+`POST /admin/api/v1/llm/sync-pricing` accepts an optional body:
+
+```json
+{"provider_model_ids": ["pm_01H..."], "dry_run": false}
+```
+
+Omitting `provider_model_ids` syncs every syncable row. Supplying ids
+syncs only those provider-model rows; selected rows that are visible
+but not syncable return `skipped_not_syncable` rather than causing a
+global sync. The selected-id form is the provider-model drawer SYNC
+operation and refuses ids that are not visible to the deployment admin.
+The response is newline-delimited JSON so the usage page and CLI can
+stream progress:
+
+```json
+{"provider_model_id":"pm_01H...","source":"openrouter","lookup_id":"google/gemma-4-31b-it","status":"updated","old_input_per_million":"0.35","new_input_per_million":"0.20","old_output_per_million":"1.05","new_output_per_million":"0.60","old_fixed_cost_per_call_usd":null,"new_fixed_cost_per_call_usd":"0.0012","price_last_synced_at":"2026-05-15T12:00:00Z"}
+```
+
+`status` is one of `updated`, `unchanged`, `skipped_not_syncable`,
+`missing_price`, or `error`. Successful `updated`/`unchanged` syncs
+mutate only provider-model input/output/fixed pricing fields and
+`price_last_synced_at`;
+`dry_run` reports the same deltas without writing.
 
 `POST /admin/api/v1/llm/provider-models/{id}/playground` is the
 stateless provider-model smoke-test endpoint used by `/admin/llm/graph`.
