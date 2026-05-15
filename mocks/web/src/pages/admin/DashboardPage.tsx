@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
+import { formatInteger } from "@/lib/numberFormat";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import { Chip, Loading, ProgressBar, StatCard } from "@/components/common";
@@ -63,7 +64,7 @@ export default function AdminDashboardPage() {
         />
         <StatCard
           label="Calls (30d)"
-          value={sum.deployment_call_count_30d.toLocaleString()}
+          value={formatInteger(sum.deployment_call_count_30d)}
           sub={"across " + sum.per_capability.length + " capabilities"}
         />
         <StatCard

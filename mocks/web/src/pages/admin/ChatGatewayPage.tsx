@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Copy, Check, MessageSquare } from "lucide-react";
 import { fetchJson } from "@/lib/api";
+import { formatPercent } from "@/lib/numberFormat";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
@@ -187,7 +188,12 @@ export default function AdminChatGatewayPage() {
         />
         <StatCard
           label="Delivery errors"
-          value={wa ? `${wa.delivery_error_rate_pct.toFixed(1)}%` : "—"}
+          value={formatPercent(wa?.delivery_error_rate_pct, {
+            input: "percent",
+            fallback: "—",
+            minimumFractionDigits: 1,
+            maximumFractionDigits: 1,
+          })}
           sub="24h, across all bindings"
         />
         <StatCard

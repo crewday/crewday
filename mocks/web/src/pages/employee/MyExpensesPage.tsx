@@ -102,6 +102,7 @@ export default function MyExpensesPage() {
     else setMerchant("");
 
     const cents = fillIf(result.total_amount_cents);
+    // Input normalization for <input type="number">; grouping separators would be invalid.
     if (cents !== null) setAmount((cents / 100).toFixed(2));
     else setAmount("");
 

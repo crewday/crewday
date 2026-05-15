@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
+import { formatInteger } from "@/lib/numberFormat";
 import DeskPage from "@/components/DeskPage";
 import { Chip, Loading, ProgressBar, StatCard } from "@/components/common";
 import type { AdminUsageSummary, AdminWorkspaceRow } from "@/types/api";
@@ -65,7 +66,7 @@ export default function AdminUsagePage() {
         />
         <StatCard
           label="Calls (30d)"
-          value={sum.deployment_call_count_30d.toLocaleString()}
+          value={formatInteger(sum.deployment_call_count_30d)}
         />
         <StatCard
           label="Top capability"
@@ -184,7 +185,7 @@ export default function AdminUsagePage() {
               .map((c) => (
                 <tr key={c.capability}>
                   <td><code className="inline-code">{c.capability}</code></td>
-                  <td className="mono">{c.calls_30d.toLocaleString()}</td>
+                  <td className="mono">{formatInteger(c.calls_30d)}</td>
                   <td className="mono">
                     {formatMoney(Math.round(c.spend_usd_30d * 100), "USD")}
                   </td>

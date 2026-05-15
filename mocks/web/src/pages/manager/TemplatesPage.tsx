@@ -7,6 +7,7 @@ import { Chip, Loading } from "@/components/common";
 import DeskPage from "@/components/DeskPage";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
+import { formatDecimal } from "@/lib/numberFormat";
 import { qk } from "@/lib/queryKeys";
 import type { ChecklistTemplateItem, TaskPriority, TaskTemplate } from "@/types/task";
 import type { WorkRole } from "@/types/employee";
@@ -17,8 +18,7 @@ import type { WorkRole } from "@/types/employee";
 // washer) and the renderer is the same on both sides — so the helper
 // stays decimal-aware now to spare a rewrite when storage widens.
 function fmtQty(n: number): string {
-  const s = n.toFixed(3);
-  return s.replace(/\.?0+$/, "");
+  return formatDecimal(n, { maximumFractionDigits: 3 });
 }
 
 const PRIORITY_TONE: Record<TaskPriority, "ghost" | "sand" | "rust"> = {

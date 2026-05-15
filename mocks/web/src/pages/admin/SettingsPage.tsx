@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
+import { formatInteger } from "@/lib/numberFormat";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
@@ -121,7 +122,9 @@ export default function AdminSettingsPage() {
           </div>
           <label className="form-row">
             <span className="form-label">Disposable domains</span>
-            <span className="mono">{s.disposable_domains_count.toLocaleString()} blocked</span>
+            <span className="mono">
+              {formatInteger(s.disposable_domains_count)} blocked
+            </span>
           </label>
           <label className="form-row">
             <span className="form-label">Per-IP /hour</span>

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
+import { formatDecimal } from "@/lib/numberFormat";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import { Chip, FilterChipGroup, Loading } from "@/components/common";
@@ -52,7 +53,10 @@ function fmtDate(iso: string | null): string {
 
 function fmtCents(cents: number | null, currency: string | null): string {
   if (cents == null) return "\u2014";
-  return (cents / 100).toFixed(2) + " " + (currency ?? "EUR");
+  return `${formatDecimal(cents / 100, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} ${currency ?? "EUR"}`;
 }
 
 export default function DocumentsPage() {

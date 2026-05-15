@@ -4,6 +4,7 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import { formatMoney } from "@/lib/money";
+import { formatContextWindow, formatDecimal } from "@/lib/numberFormat";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import { Chip, Loading, StatCard } from "@/components/common";
@@ -31,6 +32,13 @@ const CAPABILITY_TAG_LABEL: Record<string, string> = {
   json_mode: "json",
   streaming: "stream",
 };
+
+function formatUsdPerMillion(value: number): string {
+  return `$${formatDecimal(value, {
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  })}`;
+}
 
 const CALL_STATUS_TONE: Record<LLMCall["status"], "moss" | "rust" | "sand"> = {
   ok: "moss",
@@ -548,7 +556,7 @@ export default function AdminLlmPage() {
                 </span>
                 {m.context_window ? (
                   <span className="muted">
-                    {(m.context_window / 1000).toFixed(0)}k ctx
+                    {formatContextWindow(m.context_window)}
                   </span>
                 ) : null}
               </footer>
@@ -686,8 +694,8 @@ export default function AdminLlmPage() {
                     {model?.display_name ?? "?"}
                   </td>
                   <td className="mono">{pm.api_model_id}</td>
-                  <td className="mono">${pm.input_cost_per_million.toFixed(3)}</td>
-                  <td className="mono">${pm.output_cost_per_million.toFixed(3)}</td>
+                  <td className="mono">{formatUsdPerMillion(pm.input_cost_per_million)}</td>
+                  <td className="mono">{formatUsdPerMillion(pm.output_cost_per_million)}</td>
                   <td className="mono muted">
                     <DateTime value={pm.price_last_synced_at} showTime className="mono muted" empty="—" />
                   </td>
