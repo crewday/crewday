@@ -1181,10 +1181,11 @@ GET    /admin/api/v1/llm/graph                       # complete providers/models
 # Providers — the upstream services we call.
 GET    /admin/api/v1/llm/providers                   # list; shape per §11 llm_provider
 POST   /admin/api/v1/llm/providers                   # create
-GET    /admin/api/v1/llm/providers/{id}
-PUT    /admin/api/v1/llm/providers/{id}              # edit (no key rotation)
-DELETE /admin/api/v1/llm/providers/{id}              # refuses if any provider-model points at it; disable instead to drain
-PUT    /admin/api/v1/llm/providers/{id}/key          # rotate API key; interactive-session-only (§11)
+GET    /admin/api/v1/llm/providers/{provider_id}
+PUT    /admin/api/v1/llm/providers/{provider_id}     # edit (no key rotation)
+DELETE /admin/api/v1/llm/providers/{provider_id}     # refuses if any provider-model points at it; disable instead to drain
+PUT    /admin/api/v1/llm/providers/{provider_id}/key # set/rotate API key; interactive-session-only (§11)
+DELETE /admin/api/v1/llm/providers/{provider_id}/key # clear key pointer; keeps historical secret envelopes (§11)
 
 # Models — provider-agnostic catalogue.
 GET    /admin/api/v1/llm/models                      # list; includes capabilities[]

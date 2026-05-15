@@ -700,10 +700,13 @@ llm_provider
     it on.
 - A native Anthropic SDK adapter is **deferred** to a later version; v1
   reaches Claude models (if an operator wants them) through OpenRouter.
-- `api_key_envelope_ref` holds an opaque reference (e.g.
-  `envelope:llm:openrouter:default`) that the server resolves through
-  `secret_envelope` (§15). The raw key is never returned by the API,
-  never logged, and never appears in `llm_call.*` payloads.
+- `api_key_envelope_ref` is an internal, read-only pointer into
+  `secret_envelope` (§15). Operators never paste or edit this field
+  directly: provider create/update payloads omit it, and attempts to
+  submit it are rejected as unknown input. The admin API may return the
+  current opaque pointer as `api_key_ref` for status/debugging, but the
+  raw key is never returned, never logged, and never appears in
+  `llm_call.*` payloads.
 - Until the full `/admin/llm/graph` page is the only operator
   surface, the default OpenRouter adapter also accepts a transitional
   deployment setting named `openrouter.api_key_envelope_id`. Its value
@@ -712,10 +715,32 @@ llm_provider
   reads return only `display_stub`. At runtime the adapter resolves the
   DB setting first and falls back to `CREWDAY_OPENROUTER_API_KEY` only
   when the setting row is absent.
-- The deployment admin rotates keys with
-  `PUT /admin/api/v1/llm/providers/{id}/key`, which generates a new
-  envelope ciphertext and updates the ref atomically. This surface is
-  `interactive-session-only` (§ "Interactive-session-only endpoints").
+- The deployment admin sets or rotates keys with
+  `PUT /admin/api/v1/llm/providers/{provider_id}/key`, and clears them
+  with `DELETE /admin/api/v1/llm/providers/{provider_id}/key`. These
+  dedicated controls are `interactive-session-only` (§
+  "Interactive-session-only endpoints").
+  - `PUT` body: `{ "api_key": <non-blank secret string> }`. The server
+    encrypts the plaintext with purpose `llm_provider.api_key`, stores a
+    new `secret_envelope` row owned by `(llm_provider, provider_id)`,
+    and updates `api_key_envelope_ref` atomically.
+  - `DELETE` has no body. It clears `api_key_envelope_ref` on the
+    provider row, leaves historical `secret_envelope` rows in place for
+    retention/audit, and returns the provider with
+    `api_key_status = "missing"` and `api_key_ref = null`.
+  - Both routes return the normal provider shape:
+    `id`, `name`, `provider_type`, `endpoint`, `api_key_ref`,
+    `api_key_status`, `default_model`, `requests_per_minute`,
+    `timeout_s`, `is_enabled`, `provider_model_count`,
+    `spend_usd_30d`, and `calls_30d`.
+  - Key-route typed errors: bearer-token callers receive `403` with
+    `error = "session_only_endpoint"` and
+    `WWW-Authenticate: error="session_only_endpoint"`; missing provider
+    or invisible admin surface returns `404 not_found`; blank/malformed
+    `api_key` input is `422`; setting a key on `fake` providers returns
+    `422 provider_key_unsupported_provider_type`; missing root key
+    material returns `503 root_key_required`; database constraint races
+    return `409 provider_key_constraint_violation`.
 - `default_model` is an adapter setting for direct provider setup and
   legacy transitional config. Capability resolution never selects from
   this column; every `llm_assignment` still points at a concrete
@@ -1879,19 +1904,29 @@ delegated) and return `403 forbidden` with
 middleware does **not** write an `agent_action` row for these,
 because doing so would itself be the leak: the middleware persists
 `resolved_payload_json` and (on execution) `result_json`, and for
-these endpoints the response contains decrypted secret material that
-must never land in a persisted row.
+these endpoints the request or response contains secret material that
+must never land in a persisted row. Key-setting endpoints therefore
+reject bearer tokens even though their responses expose only status and
+read-only envelope references.
 
 v1 members of the list:
 
 - `POST /payslips/{id}/payout_manifest` — full decrypted account
   numbers for treasury use (§09).
+- `PUT /admin/api/v1/llm/providers/{provider_id}/key` — set or rotate
+  an LLM provider API key. Body is `{ "api_key": <non-blank secret
+  string> }`; response is `LlmProviderResponse` with
+  `api_key_status = "present"` and a read-only `api_key_ref`.
+- `DELETE /admin/api/v1/llm/providers/{provider_id}/key` — clear an
+  LLM provider API key pointer. The provider row returns
+  `api_key_status = "missing"` and `api_key_ref = null`; historical
+  `secret_envelope` rows are retained.
 
-These endpoints are **manager-session only**: they require a logged-
-in manager passkey session, not any bearer token. The idempotency
-cache (§12) explicitly does **not** persist their responses — a
-replay re-executes against the current secret store and re-audits,
-rather than serving a cached body.
+These endpoints are **session only**: they require a logged-in human
+passkey session that also satisfies the route's normal role/scope
+check, not any bearer token. The idempotency cache (§12) explicitly
+does **not** persist their responses — a replay re-executes against the
+current secret store and re-audits, rather than serving a cached body.
 
 ### Host-CLI-only administrative commands
 
