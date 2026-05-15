@@ -157,8 +157,8 @@ function callPath(call: FetchCall): string {
   return new URL(call.url, "http://crewday.test").pathname;
 }
 
-async function fireDrop(from: HTMLElement, to: HTMLElement): Promise<void> {
-  const dataTransfer = {
+function dataTransfer(): DataTransfer {
+  return {
     data: {} as Record<string, string>,
     effectAllowed: "move",
     dropEffect: "move",
@@ -168,18 +168,22 @@ async function fireDrop(from: HTMLElement, to: HTMLElement): Promise<void> {
     getData(format: string) {
       return this.data[format] ?? "";
     },
-  };
+  } as DataTransfer;
+}
+
+async function fireDrop(from: HTMLElement, to: HTMLElement): Promise<void> {
+  const transfer = dataTransfer();
   await act(async () => {
-    fireEvent.dragStart(from, { dataTransfer });
+    fireEvent.dragStart(from, { dataTransfer: transfer });
   });
   await act(async () => {
-    fireEvent.dragOver(to, { dataTransfer });
+    fireEvent.dragOver(to, { dataTransfer: transfer });
   });
   await act(async () => {
-    fireEvent.drop(to, { dataTransfer });
+    fireEvent.drop(to, { dataTransfer: transfer });
   });
   await act(async () => {
-    fireEvent.dragEnd(from, { dataTransfer });
+    fireEvent.dragEnd(from, { dataTransfer: transfer });
   });
 }
 
@@ -238,6 +242,42 @@ describe("<TemplatesPage> checklist reorder", () => {
         "third",
         "first",
       ]);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("shows and clears the checklist drop indicator", async () => {
+    const harness = installFetch();
+    const client = makeClient();
+    try {
+      render(<Harness client={client} />);
+      await screen.findByText("First step");
+
+      const items = screen.getAllByRole("listitem");
+      const transfer = dataTransfer();
+      vi.spyOn(items[1]!, "getBoundingClientRect").mockReturnValue({
+        x: 0,
+        y: 0,
+        width: 240,
+        height: 40,
+        top: 100,
+        right: 240,
+        bottom: 140,
+        left: 0,
+        toJSON: () => ({}),
+      });
+
+      fireEvent.dragStart(items[0]!, { dataTransfer: transfer });
+      fireEvent.dragOver(items[1]!, { dataTransfer: transfer, clientY: 130 });
+      expect(items[1]!).toHaveClass("tpl-card__step--drop-after");
+
+      fireEvent.drop(items[1]!, { dataTransfer: transfer, clientY: 130 });
+      expect(items[1]!).not.toHaveClass("tpl-card__step--drop-after");
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(500);

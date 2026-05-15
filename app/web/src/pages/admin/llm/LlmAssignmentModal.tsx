@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { GripVertical, Plus, Trash2 } from "lucide-react";
 import FormModal, { FormModalField } from "@/components/FormModal";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
+import { useReorderableList } from "@/components/useReorderableList";
 import { Chip } from "@/components/common";
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -179,14 +180,12 @@ export default function LlmAssignmentModal({
   const [draggedProviderModelId, setDraggedProviderModelId] = useState<string | null>(
     null,
   );
-  const [draggedAssignmentId, setDraggedAssignmentId] = useState<string | null>(null);
   const [clientErr, setClientErr] = useState<string | null>(null);
   const [serverErr, setServerErr] = useState<string | null>(null);
 
   useEffect(() => {
     setInheritParent(explicitParent ?? "");
     setDraggedProviderModelId(null);
-    setDraggedAssignmentId(null);
     setClientErr(null);
     setServerErr(null);
   }, [capabilityKey, explicitParent]);
@@ -421,7 +420,6 @@ export default function LlmAssignmentModal({
               indexes={indexes}
               pending={pending}
               draggedProviderModelId={draggedProviderModelId}
-              draggedAssignmentId={draggedAssignmentId}
               onAdd={addProviderModel}
               onDelete={(assignmentId) => {
                 setClientErr(null);
@@ -435,7 +433,6 @@ export default function LlmAssignmentModal({
                 updateAssignmentThinking.mutate({ assignmentId, thinkingOverride });
               }}
               onProviderModelDrag={setDraggedProviderModelId}
-              onAssignmentDrag={setDraggedAssignmentId}
             />
             {playgroundAssignment && playgroundProviderModel ? (
               <LlmPlayground
@@ -655,13 +652,11 @@ function DirectChainPicker({
   indexes,
   pending,
   draggedProviderModelId,
-  draggedAssignmentId,
   onAdd,
   onDelete,
   onMoveTo,
   onThinkingChange,
   onProviderModelDrag,
-  onAssignmentDrag,
 }: {
   capability: LlmCapabilityEntry;
   chain: LlmAssignment[];
@@ -669,7 +664,6 @@ function DirectChainPicker({
   indexes: LlmIndexes;
   pending: boolean;
   draggedProviderModelId: string | null;
-  draggedAssignmentId: string | null;
   onAdd: (providerModelId: string) => void;
   onDelete: (assignmentId: string) => void;
   onMoveTo: (assignmentId: string, toIndex: number) => void;
@@ -678,27 +672,46 @@ function DirectChainPicker({
     thinkingOverride: ThinkingOverrideValue,
   ) => void;
   onProviderModelDrag: (providerModelId: string | null) => void;
-  onAssignmentDrag: (assignmentId: string | null) => void;
 }) {
+  const reorder = useReorderableList({
+    items: chain,
+    getId: (assignment) => assignment.id,
+    onMove: onMoveTo,
+    disabled: pending,
+    defaultDropPosition: "before",
+  });
+  const selectedListProps = reorder.getListProps();
+
   function handleSelectedDrop(event: DragEvent<HTMLOListElement>): void {
-    event.preventDefault();
-    if (draggedProviderModelId) onAdd(draggedProviderModelId);
-    onProviderModelDrag(null);
+    if (draggedProviderModelId) {
+      event.preventDefault();
+      onAdd(draggedProviderModelId);
+      onProviderModelDrag(null);
+      return;
+    }
+    selectedListProps.onDrop(event);
+  }
+
+  function handleSelectedDragOver(event: DragEvent<HTMLOListElement>): void {
+    if (draggedProviderModelId) event.preventDefault();
   }
 
   function handleAvailableDrop(event: DragEvent<HTMLDivElement>): void {
     event.preventDefault();
-    if (draggedAssignmentId) onDelete(draggedAssignmentId);
-    onAssignmentDrag(null);
+    if (reorder.draggedId) onDelete(reorder.draggedId);
+    reorder.clearDragState();
+    onProviderModelDrag(null);
+  }
+
+  function handleAvailableDragOver(event: DragEvent<HTMLElement>): void {
+    if (reorder.draggedId) event.preventDefault();
   }
 
   return (
     <div className="llm-assignment-picker" aria-label="Direct provider-model chain">
       <section
         className="llm-assignment-picker__column"
-        onDragOver={(event) => {
-          if (draggedAssignmentId) event.preventDefault();
-        }}
+        onDragOver={handleAvailableDragOver}
         onDrop={handleAvailableDrop}
       >
         <div className="llm-assignment-dialog__section-head">
@@ -748,9 +761,8 @@ function DirectChainPicker({
         {chain.length ? (
           <ol
             className="llm-assignment-picker__list"
-            onDragOver={(event) => {
-              if (draggedProviderModelId) event.preventDefault();
-            }}
+            onDragOver={handleSelectedDragOver}
+            onDragLeave={selectedListProps.onDragLeave}
             onDrop={handleSelectedDrop}
           >
             {chain.map((assignment, index) => {
@@ -761,34 +773,39 @@ function DirectChainPicker({
                 indexes,
               );
               const label = providerModelLabelOrUnknown(pm, indexes);
+              const itemProps = reorder.getItemProps(index);
+              const isDragging = reorder.draggedId === assignment.id;
+              const dropPosition =
+                reorder.dropTarget?.id === assignment.id
+                  ? reorder.dropTarget.position
+                  : null;
               return (
                 <li
                   key={assignment.id}
-                  className="llm-assignment-picker__selected"
-                  onDragOver={(event) => {
-                    if (draggedAssignmentId) event.preventDefault();
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    if (draggedAssignmentId) onMoveTo(draggedAssignmentId, index);
-                    onAssignmentDrag(null);
-                  }}
+                  className={[
+                    "llm-assignment-picker__selected",
+                    isDragging ? "llm-assignment-picker__selected--dragging" : "",
+                    dropPosition
+                      ? `llm-assignment-picker__selected--drop-${dropPosition}`
+                      : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  onDragOver={itemProps.onDragOver}
+                  onDragLeave={itemProps.onDragLeave}
+                  onDrop={itemProps.onDrop}
                 >
                   <ProviderModelRow
                     providerModel={pm}
                     indexes={indexes}
                     missing={missing}
                     variant="selected"
-                    draggable={!pending}
+                    draggable={itemProps.draggable}
                     disabled={pending}
                     actionLabel="Remove"
                     ariaLabel={`${label}, selected chain position ${index + 1}`}
-                    onDragStart={(event) => {
-                      onAssignmentDrag(assignment.id);
-                      event.dataTransfer.effectAllowed = "move";
-                      event.dataTransfer.setData("text/plain", assignment.id);
-                    }}
-                    onDragEnd={() => onAssignmentDrag(null)}
+                    onDragStart={itemProps.onDragStart}
+                    onDragEnd={itemProps.onDragEnd}
                     onKeyDown={(event) => {
                       if (!event.altKey) return;
                       if (event.key === "ArrowUp" && index > 0) {

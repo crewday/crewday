@@ -1,10 +1,11 @@
-import type { DragEvent, ReactElement } from "react";
+import type { ReactElement } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Camera, Globe, GripVertical, Hash, Map as MapIcon, Sparkles, Timer } from "lucide-react";
 
 import { Chip, Loading } from "@/components/common";
 import DeskPage from "@/components/DeskPage";
+import { useReorderableList } from "@/components/useReorderableList";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 import { formatDecimal } from "@/lib/numberFormat";
@@ -230,8 +231,6 @@ function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement | nul
   const [items, setItems] = useState<ChecklistTemplateItem[]>(
     template.checklist_template_json,
   );
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [overIndex, setOverIndex] = useState<number | null>(null);
   const [announcement, setAnnouncement] = useState<string>("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<ChecklistTemplateItem[] | null>(null);
@@ -371,53 +370,36 @@ function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement | nul
     }
   }
 
-  function onDragStart(index: number) {
-    return (event: DragEvent<HTMLLIElement>) => {
-      setDragIndex(index);
-      event.dataTransfer.effectAllowed = "move";
-      // Firefox refuses to fire drag events without payload; the value
-      // is unused on our side but keeps the API contract honest.
-      event.dataTransfer.setData("text/plain", String(index));
-    };
+  function moveByKey(key: string, to: number): void {
+    const from = items.findIndex((item) => item.key === key);
+    if (from >= 0) move(from, to);
   }
 
-  function onDragOver(index: number) {
-    return (event: DragEvent<HTMLLIElement>) => {
-      if (dragIndex === null) return;
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-      if (overIndex !== index) setOverIndex(index);
-    };
-  }
-
-  function onDrop(index: number) {
-    return (event: DragEvent<HTMLLIElement>) => {
-      event.preventDefault();
-      if (dragIndex !== null && dragIndex !== index) {
-        move(dragIndex, index);
-      }
-      setDragIndex(null);
-      setOverIndex(null);
-    };
-  }
-
-  function onDragEnd(): void {
-    setDragIndex(null);
-    setOverIndex(null);
-  }
+  const reorderable = useReorderableList({
+    items,
+    getId: (item) => item.key,
+    onMove: moveByKey,
+  });
+  const listProps = reorderable.getListProps();
 
   if (items.length === 0) return null;
 
   return (
     <>
-      <ul className="tpl-card__checklist tpl-card__checklist--editable">
+      <ul
+        className="tpl-card__checklist tpl-card__checklist--editable"
+        onDragLeave={listProps.onDragLeave}
+        onDrop={listProps.onDrop}
+      >
       {items.map((c, idx) => {
-        const isDragging = dragIndex === idx;
-        const isOver = overIndex === idx && dragIndex !== null && dragIndex !== idx;
+        const itemProps = reorderable.getItemProps(idx);
+        const isDragging = reorderable.draggedId === c.key;
+        const dropPosition =
+          reorderable.dropTarget?.id === c.key ? reorderable.dropTarget.position : null;
         const className = [
           "tpl-card__step",
           isDragging ? "tpl-card__step--dragging" : "",
-          isOver ? "tpl-card__step--drop-target" : "",
+          dropPosition ? `tpl-card__step--drop-${dropPosition}` : "",
         ]
           .filter(Boolean)
           .join(" ");
@@ -425,11 +407,12 @@ function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement | nul
           <li
             key={c.key}
             className={className}
-            draggable
-            onDragStart={onDragStart(idx)}
-            onDragOver={onDragOver(idx)}
-            onDrop={onDrop(idx)}
-            onDragEnd={onDragEnd}
+            draggable={itemProps.draggable}
+            onDragStart={itemProps.onDragStart}
+            onDragOver={itemProps.onDragOver}
+            onDragLeave={itemProps.onDragLeave}
+            onDrop={itemProps.onDrop}
+            onDragEnd={itemProps.onDragEnd}
           >
             <span
               className="tpl-card__step-handle"

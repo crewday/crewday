@@ -1180,10 +1180,32 @@
 }
 .llm-assignment-picker__selected,
 .llm-assignment-chain-summary__item {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   align-items: stretch;
+}
+.llm-assignment-picker__selected--dragging {
+  opacity: 0.55;
+}
+.llm-assignment-picker__selected--drop-before::before,
+.llm-assignment-picker__selected--drop-after::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--moss);
+  box-shadow: 0 0 0 3px var(--moss-soft);
+  z-index: 1;
+}
+.llm-assignment-picker__selected--drop-before::before {
+  top: -5px;
+}
+.llm-assignment-picker__selected--drop-after::after {
+  bottom: -5px;
 }
 .llm-assignment-provider-model {
   position: relative;

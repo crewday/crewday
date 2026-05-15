@@ -572,7 +572,10 @@ describe("LlmAssignmentModal", () => {
     fireEvent.dragStart(providerModelRow(dialog, "Fast Chat"), {
       dataTransfer: dataTransfer(),
     });
+    fireEvent.dragOver(gemmaItem, { dataTransfer: dataTransfer(), clientY: 0 });
+    expect(gemmaItem).toHaveClass("llm-assignment-picker__selected--drop-before");
     fireEvent.drop(gemmaItem, { dataTransfer: dataTransfer() });
+    expect(gemmaItem).not.toHaveClass("llm-assignment-picker__selected--drop-before");
 
     await waitFor(() => {
       expect(
