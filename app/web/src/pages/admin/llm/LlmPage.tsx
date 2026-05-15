@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import DeskPage from "@/components/DeskPage";
 import { Loading } from "@/components/common";
+import SearchField from "@/components/SearchField";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import type { LlmGraphPayload } from "@/types";
@@ -14,6 +15,7 @@ import ModelColumn from "./ModelColumn";
 import ProviderColumn from "./ProviderColumn";
 import { buildHighlighted, emptyHighlighted } from "./lib/highlight";
 import { buildLlmGraphLayout } from "./lib/graphLayout";
+import { filterLlmGraphBySearch, selectionIsVisible } from "./lib/graphSearch";
 import { buildLlmIndexes } from "./lib/llmIndexes";
 import { useLlmGraphEdges } from "./useLlmGraphEdges";
 import type { Column, EdgeLayout, Selection } from "./types";
@@ -32,6 +34,8 @@ export default function AdminLlmPage() {
 
   const [selection, setSelection] = useState<Selection | null>(null);
   const [hover, setHover] = useState<Selection | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const [registryDialog, setRegistryDialog] = useState<RegistryDialogState | null>(
     null,
   );
@@ -39,13 +43,37 @@ export default function AdminLlmPage() {
     string | null
   >(null);
 
-  const graph = graphQ.data;
+  const sourceGraph = graphQ.data;
+  const sourceIndexes = useMemo(
+    () => (sourceGraph ? buildLlmIndexes(sourceGraph) : null),
+    [sourceGraph],
+  );
+  const searchResult = useMemo(
+    () =>
+      sourceGraph && sourceIndexes
+        ? filterLlmGraphBySearch(sourceGraph, sourceIndexes, searchQuery)
+        : null,
+    [sourceGraph, sourceIndexes, searchQuery],
+  );
+  const graph = searchResult?.graph ?? sourceGraph;
   const indexes = useMemo(() => (graph ? buildLlmIndexes(graph) : null), [graph]);
   const layout = useMemo(
     () => (graph && indexes ? buildLlmGraphLayout(graph, indexes) : null),
     [graph, indexes],
   );
-  const active = hover ?? selection;
+  const visibleSet = useMemo(() => {
+    if (!graph) return emptyHighlighted();
+    return {
+      providers: new Set(graph.providers.map((item) => item.id)),
+      models: new Set(graph.models.map((item) => item.id)),
+      providerModels: new Set(graph.provider_models.map((item) => item.id)),
+      assignments: new Set(graph.assignments.map((item) => item.id)),
+      capabilities: new Set(graph.capabilities.map((item) => item.key)),
+    };
+  }, [graph]);
+  const visibleHover = selectionIsVisible(hover, visibleSet) ? hover : null;
+  const visibleSelection = selectionIsVisible(selection, visibleSet) ? selection : null;
+  const active = visibleHover ?? visibleSelection;
 
   const highlighted = useMemo(() => {
     if (!graph || !indexes || !active) return emptyHighlighted();
@@ -56,7 +84,7 @@ export default function AdminLlmPage() {
     return buildHighlighted(graph, indexes, selection);
   }, [graph, indexes, selection]);
 
-  const hasSelection = selection !== null;
+  const hasSelection = visibleSelection !== null;
   const {
     graphRef,
     providerRefs,
@@ -67,6 +95,25 @@ export default function AdminLlmPage() {
     canvas,
     setRef,
   } = useLlmGraphEdges(graph, indexes, active);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "/" || event.defaultPrevented) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      searchRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const edgeIsOnPath = (e: EdgeLayout, source: Selection | null): boolean => {
     if (!source) return false;
@@ -105,12 +152,22 @@ export default function AdminLlmPage() {
     }[col];
     const isOn = set.has(id);
     const isActive = active?.column === col && active.id === id;
+    const isSearchMatch =
+      searchResult?.hasQuery &&
+      {
+        provider: searchResult.directMatches.providers,
+        model: searchResult.directMatches.models,
+        providerModel: searchResult.directMatches.providerModels,
+        assignment: searchResult.directMatches.assignments,
+        capability: searchResult.directMatches.capabilities,
+      }[col].has(id);
     const dim = hasSelection && !mutedSet.has(id);
     return [
       "llm-graph-node",
       `llm-graph-node--${col}`,
       isActive ? "is-active" : "",
       isOn && !isActive ? "is-linked" : "",
+      isSearchMatch ? "is-search-match" : "",
       dim ? "is-dim" : "",
     ]
       .filter(Boolean)
@@ -123,7 +180,7 @@ export default function AdminLlmPage() {
   };
 
   const openAssignmentDialog = (assignmentId: string) => {
-    const assignment = graph?.assignments.find((item) => item.id === assignmentId);
+    const assignment = sourceGraph?.assignments.find((item) => item.id === assignmentId);
     if (!assignment) return;
     setSelection({ column: "assignment", id: assignmentId });
     setAssignmentDialogCapability(assignment.capability);
@@ -162,7 +219,7 @@ export default function AdminLlmPage() {
       </DeskPage>
     );
   }
-  if (!graph || !indexes || !layout) {
+  if (!sourceGraph || !sourceIndexes || !graph || !indexes || !layout) {
     return (
       <DeskPage title={title} sub={sub}>
         Failed to load.
@@ -174,6 +231,16 @@ export default function AdminLlmPage() {
     <DeskPage title={title} sub={sub}>
       <div className="llm-graph-page">
         <LlmAlerts graph={graph} syncResult={undefined} />
+
+        <div className="llm-graph-toolbar">
+          <SearchField
+            ref={searchRef}
+            label="Search LLM graph"
+            placeholder="Providers, models, assignments, capabilities"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.currentTarget.value)}
+          />
+        </div>
 
         <div
           className="llm-graph"
@@ -188,7 +255,7 @@ export default function AdminLlmPage() {
           >
             {edges.map((e) => {
               const highlighted = edgeIsOnPath(e, active);
-              const dim = hasSelection && !edgeIsOnPath(e, selection);
+              const dim = hasSelection && !edgeIsOnPath(e, visibleSelection);
               const cls = [
                 "llm-graph__edge",
                 `llm-graph__edge--${e.kind}`,
@@ -232,7 +299,7 @@ export default function AdminLlmPage() {
             <div className="llm-graph__col-heading">
               <span className="llm-graph__col-title">Assignments</span>
               <span className="llm-graph__col-count">
-                {graph.totals.capability_count}
+                {graph.capabilities.length}
               </span>
             </div>
             <button
@@ -280,6 +347,7 @@ export default function AdminLlmPage() {
             hasSelection={hasSelection}
             highlighted={highlighted}
             mutedPath={mutedPath}
+            searchMatches={searchResult?.hasQuery ? searchResult.directMatches : null}
             setRungRef={setRef(rungRefs)}
             onOpenCapability={openCapabilityDialog}
             onOpenAssignment={openAssignmentDialog}
@@ -287,14 +355,19 @@ export default function AdminLlmPage() {
               setRegistryDialog({ kind: "providerModel", mode: "edit", id })
             }
           />
+          {searchResult?.hasQuery && !searchResult.hasMatches ? (
+            <div className="llm-graph__empty" role="status">
+              No providers, models, assignments, or capabilities match "{searchQuery}".
+            </div>
+          ) : null}
         </div>
 
         <LlmRegistryModals
           dialog={registryDialog}
-          providers={graph.providers}
-          models={graph.models}
-          providerModels={graph.provider_models}
-          indexes={indexes}
+          providers={sourceGraph.providers}
+          models={sourceGraph.models}
+          providerModels={sourceGraph.provider_models}
+          indexes={sourceIndexes}
           onOpenProviderModel={(providerModel) =>
             setRegistryDialog({
               kind: "providerModel",
@@ -311,8 +384,8 @@ export default function AdminLlmPage() {
         />
         <LlmAssignmentModal
           capabilityKey={assignmentDialogCapability}
-          graph={graph}
-          indexes={indexes}
+          graph={sourceGraph}
+          indexes={sourceIndexes}
           onClose={() => {
             setHover(null);
             setSelection(null);

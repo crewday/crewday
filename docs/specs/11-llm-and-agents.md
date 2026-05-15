@@ -1423,6 +1423,25 @@ so the graph page does not carry a duplicate overflow action.
     inline edit drawer on the right. Provider-model and inherited
     capability subcards remain fully clickable edit targets. Escape or
     clicking the backdrop closes the drawer.
+- **Connected search/filter.** The graph header includes a
+  deployment-local search box. Filtering is client-side only; it does
+  not change `/admin/api/v1/llm/graph`. A non-empty query searches the
+  text already represented by the graph: provider/model names,
+  canonical and API ids, provider type, endpoint host, capability keys
+  and descriptions, rendered chips/tags, thinking labels, inheritance
+  text, and rendered usage/call summaries. Matching a provider, model,
+  provider-model subcard, capability, inherited capability subcard, or
+  assignment keeps the full connected component visible and removes
+  unrelated graph nodes from the DOM so edges are recomputed only for
+  visible cards. Connectivity is treated as undirected:
+  provider ↔ provider-model ↔ model, provider-model ↔ assignment ↔
+  capability, plus represented capability inheritance parent/child
+  context. Column counts reflect the visible filtered providers,
+  models, and capabilities while search is active; clearing the query
+  restores the full graph and original counts. Direct matches receive
+  the `is-search-match` style, while context-only cards remain visible
+  without that class. A no-match query shows an explicit empty state and
+  no graph edges.
 - **Validation feedback.**
   - Capabilities with no enabled assignment chain render a red
     "unassigned" pill at the top of their group only when no

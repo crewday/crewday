@@ -139,6 +139,19 @@ function graphBoard(): HTMLElement {
   return board;
 }
 
+function graphSearch(): HTMLInputElement {
+  return screen.getByRole("searchbox", {
+    name: "Search LLM graph",
+  }) as HTMLInputElement;
+}
+
+function graphColumnCounts(): string[] {
+  return Array.from(
+    graphBoard().querySelectorAll<HTMLElement>(".llm-graph__col-count"),
+    (item) => item.textContent ?? "",
+  );
+}
+
 function expectGraphUnmuted(): void {
   expect(graphBoard().querySelector(".is-dim")).not.toBeInTheDocument();
 }
@@ -248,6 +261,7 @@ describe("Admin LlmPage", () => {
       render(<Harness />);
 
       expect(await findOpenRouterProvider()).toBeInTheDocument();
+      expect(graphSearch()).toHaveValue("");
       expect(screen.getByRole("heading", { name: "LLM graph" })).toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "Graph" })).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "Usage" })).not.toBeInTheDocument();
@@ -406,6 +420,167 @@ describe("Admin LlmPage", () => {
       expect(providerNames).toEqual(["Provider B", "Provider A", "Provider C"]);
       expect(modelNames).toEqual(["Gamma", "Beta", "Alpha"]);
       expect(capabilityNames).toEqual(["cap_b", "cap_a", "cap_c"]);
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("filters the graph to connected search matches and marks direct matches", async () => {
+    const connectedGraph = {
+      ...graph,
+      providers: [
+        ...graph.providers,
+        {
+          ...graph.providers[0],
+          id: "prov_backup",
+          name: "BackupAI",
+          endpoint: "https://backup.test/v1",
+          calls_30d: 4,
+          spend_usd_30d: 0.4,
+        },
+      ],
+      models: [
+        ...graph.models,
+        {
+          ...graph.models[0],
+          id: "model_backup",
+          canonical_name: "backup/chat",
+          display_name: "Backup Chat",
+          calls_30d: 4,
+          spend_usd_30d: 0.4,
+        },
+      ],
+      provider_models: [
+        ...graph.provider_models,
+        {
+          ...graph.provider_models[0],
+          id: "pm_backup",
+          provider_id: "prov_backup",
+          model_id: "model_backup",
+          api_model_id: "backup/chat",
+          calls_30d: 4,
+          spend_usd_30d: 0.4,
+        },
+      ],
+      capabilities: [
+        ...graph.capabilities,
+        {
+          ...graph.capabilities[0],
+          key: "chat.backup",
+          description: "Backup chat routing",
+          calls_30d: 4,
+          spend_usd_30d: 0.4,
+        },
+      ],
+      assignments: [
+        ...graph.assignments,
+        {
+          ...graph.assignments[0],
+          id: "assign_backup",
+          capability: "chat.backup",
+          description: "Backup chat routing",
+          provider_model_id: "pm_backup",
+          calls_30d: 4,
+          spend_usd_30d: 0.4,
+        },
+      ],
+      totals: {
+        ...graph.totals,
+        provider_count: 2,
+        model_count: 4,
+        capability_count: 4,
+      },
+    };
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/graph": [{ body: connectedGraph }],
+    });
+    try {
+      render(<Harness />);
+      await screen.findByRole("button", { name: /^BackupAI provider,/ });
+
+      fireEvent.change(graphSearch(), { target: { value: "backup.test" } });
+
+      const backupProvider = screen.getByRole("button", {
+        name: /^BackupAI provider,/,
+      });
+      expect(backupProvider).toHaveClass("is-search-match");
+      expect(screen.getByRole("button", { name: /Backup Chat model,/ })).toBeInTheDocument();
+      expect(screen.getByText("chat.backup")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^OpenRouter provider,/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /Gemma 4 31B IT model,/ })).toBeNull();
+      expect(graphColumnCounts()).toEqual(["1", "1", "1"]);
+
+      fireEvent.change(graphSearch(), { target: { value: "" } });
+
+      expect(await findOpenRouterProvider()).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^BackupAI provider,/ })).toBeInTheDocument();
+      expect(graphColumnCounts()).toEqual(["2", "4", "4"]);
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("focuses graph search with slash without hijacking input typing", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      fireEvent.keyDown(window, { key: "/" });
+
+      expect(graphSearch()).toHaveFocus();
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New provider" }));
+      const dialog = await screen.findByRole("dialog", { name: "Create provider" });
+      const nameInput = within(dialog).getByLabelText(/Name/);
+      nameInput.focus();
+
+      fireEvent.keyDown(nameInput, { key: "/" });
+
+      expect(nameInput).toHaveFocus();
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("keeps inherited capability context visible without marking it as a direct match", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      fireEvent.change(graphSearch(), { target: { value: "voice note" } });
+
+      const inheritedChild = screen.getByRole("button", {
+        name: /Open assignment and inheritance settings for voice\.transcribe/,
+      });
+      const parentCapability = defaultCapabilityCard();
+      expect(inheritedChild).toHaveClass("is-search-match");
+      expect(parentCapability).not.toHaveClass("is-search-match");
+      expect(parentCapability).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^OpenRouter provider,/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Gemma 4 31B IT model,/ })).toBeInTheDocument();
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("shows an explicit empty state and no graph edges when search has no matches", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      fireEvent.change(graphSearch(), { target: { value: "no such model" } });
+
+      expect(
+        screen.getByText(
+          'No providers, models, assignments, or capabilities match "no such model".',
+        ),
+      ).toHaveAttribute("role", "status");
+      expect(screen.queryByRole("button", { name: /^OpenRouter provider,/ })).toBeNull();
+      expect(document.querySelector(".llm-graph__edge")).not.toBeInTheDocument();
+      expect(graphColumnCounts()).toEqual(["0", "0", "0"]);
     } finally {
       fetcher.restore();
     }

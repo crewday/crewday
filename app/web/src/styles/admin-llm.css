@@ -20,6 +20,15 @@
 .llm-graph-alert--error { border-color: var(--rust); background: var(--rust-soft); }
 .llm-graph-alert--info { border-color: var(--sky, #9bb8d9); background: var(--sky-soft, #eaf2fb); }
 
+.llm-graph-toolbar {
+  display: flex;
+  justify-content: flex-start;
+  margin: 12px 0 6px;
+}
+.llm-graph-toolbar .search-field {
+  width: min(100%, 460px);
+}
+
 .llm-graph {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -88,6 +97,14 @@
   border-color: var(--moss);
   background: var(--moss-soft);
   box-shadow: 0 0 0 2px var(--moss) inset;
+}
+.llm-graph-node.is-search-match {
+  border-color: var(--sky);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sky) 22%, transparent);
+}
+.llm-graph-node.is-search-match.is-active,
+.llm-graph-node.is-search-match.is-linked {
+  border-color: var(--moss);
 }
 .llm-graph-node.is-dim { opacity: 0.35; }
 .llm-graph-node.is-disabled:not(.is-active):not(.is-linked) {
@@ -227,6 +244,14 @@
   background: var(--moss-soft);
   box-shadow: 0 0 0 1px var(--moss) inset;
 }
+.llm-graph-node__child.is-search-match {
+  border-color: var(--sky);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sky) 18%, transparent);
+}
+.llm-graph-node__child.is-search-match.is-active,
+.llm-graph-node__child.is-search-match.is-linked {
+  border-color: var(--moss);
+}
 .llm-graph-node__child.is-dim { opacity: 0.4; }
 .llm-graph-node__child.is-error {
   border-color: var(--rust);
@@ -356,6 +381,15 @@
   background: var(--moss-soft);
   box-shadow: 0 0 0 2px var(--moss) inset;
 }
+.llm-graph-chain__rung.is-search-match {
+  border-color: var(--sky);
+  border-style: solid;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sky) 18%, transparent);
+}
+.llm-graph-chain__rung.is-search-match.is-active,
+.llm-graph-chain__rung.is-search-match.is-linked {
+  border-color: var(--moss);
+}
 .llm-graph-chain__rung.is-dim { opacity: 0.4; }
 .llm-graph-chain__rung.is-error {
   border-color: var(--rust);
@@ -422,6 +456,15 @@
   background: transparent;
   box-shadow: none;
   outline: 0;
+}
+.llm-graph-chain__assignment-model.is-search-match {
+  color: var(--sky);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+.llm-graph-chain__assignment-model.is-search-match .llm-graph-chain__pm-model {
+  color: inherit;
 }
 .llm-graph-chain__pm-summary,
 .llm-graph-chain__pm-model {
@@ -1380,6 +1423,19 @@
 .llm-graph__col-header,
 .llm-graph__col {
   position: relative; z-index: 1;
+}
+
+.llm-graph__empty {
+  position: relative;
+  z-index: 1;
+  grid-column: 1 / -1;
+  padding: 22px 16px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink-2);
+  font-size: 13px;
+  text-align: center;
 }
 
 .llm-graph__edge {

@@ -12,6 +12,7 @@ interface CapabilityChainProps {
   hasSelection: boolean;
   highlighted: Highlighted;
   mutedPath: Highlighted;
+  searchMatches: Highlighted | null;
   setHover: SelectionSetter;
   setSelection: SelectionSetter;
   setRungRef: ElementRefSetter;
@@ -27,6 +28,7 @@ export default function CapabilityChain(props: CapabilityChainProps) {
     hasSelection,
     highlighted,
     mutedPath,
+    searchMatches,
     setHover,
     setSelection,
     setRungRef,
@@ -55,6 +57,7 @@ export default function CapabilityChain(props: CapabilityChainProps) {
           isActive ? "is-active" : "",
           isLinked && !isActive ? "is-linked" : "",
           hasSelection && !mutedPath.assignments.has(a.id) ? "is-dim" : "",
+          searchMatches?.assignments.has(a.id) ? "is-search-match" : "",
           missing.length ? "is-error" : "",
           a.priority === 0 ? "is-primary" : "",
         ]
@@ -98,6 +101,7 @@ export default function CapabilityChain(props: CapabilityChainProps) {
                     !(active?.column === "providerModel" && active.id === pm.id)
                       ? "is-linked"
                       : "",
+                    searchMatches?.providerModels.has(pm.id) ? "is-search-match" : "",
                     hasSelection && !mutedPath.providerModels.has(pm.id)
                       ? "is-dim"
                       : "",

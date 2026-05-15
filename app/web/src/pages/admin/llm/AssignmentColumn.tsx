@@ -22,6 +22,7 @@ interface AssignmentColumnProps {
   hasSelection: boolean;
   highlighted: Highlighted;
   mutedPath: Highlighted;
+  searchMatches: Highlighted | null;
   setRungRef: ElementRefSetter;
   onOpenCapability: (capability: string) => void;
   onOpenAssignment: (assignmentId: string) => void;
@@ -39,6 +40,7 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
     hasSelection,
     highlighted,
     mutedPath,
+    searchMatches,
     setRungRef,
     onOpenCapability,
     onOpenAssignment,
@@ -125,6 +127,7 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
               hasSelection={hasSelection}
               highlighted={highlighted}
               mutedPath={mutedPath}
+              searchMatches={searchMatches}
               setHover={setHover}
               setSelection={setSelection}
               setRungRef={setRungRef}
@@ -147,6 +150,9 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
                         "llm-graph-node__child",
                         childActive ? "is-active" : "",
                         childLinked && !childActive ? "is-linked" : "",
+                        searchMatches?.capabilities.has(child.key)
+                          ? "is-search-match"
+                          : "",
                         hasSelection && !mutedPath.capabilities.has(child.key)
                           ? "is-dim"
                           : "",

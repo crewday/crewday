@@ -8,6 +8,7 @@ import type {
   LlmProviderModel,
 } from "@/types";
 import { buildLlmGraphLayout } from "./graphLayout";
+import { filterLlmGraphBySearch } from "./graphSearch";
 import { buildLlmIndexes } from "./llmIndexes";
 
 function provider(id: string, name: string): LlmProvider {
@@ -282,6 +283,82 @@ describe("buildLlmGraphLayout", () => {
     expect(group?.capability.key).toBe("default");
     expect(group?.inheritedChildren.map((child) => child.key)).toEqual([
       "voice.transcribe",
+    ]);
+  });
+
+  it("filters search matches to their undirected connected component", () => {
+    const graph: LlmGraphPayload = {
+      providers: [provider("provider_a", "Provider A"), provider("provider_b", "Provider B")],
+      models: [model("model_alpha", "Alpha"), model("model_beta", "Beta")],
+      provider_models: [
+        providerModel("pm_alpha", "provider_a", "model_alpha"),
+        providerModel("pm_beta", "provider_b", "model_beta"),
+      ],
+      capabilities: [capability("cap_alpha"), capability("cap_beta")],
+      inheritance: [],
+      assignments: [
+        assignment("assign_alpha", "cap_alpha", 0, "pm_alpha"),
+        assignment("assign_beta", "cap_beta", 0, "pm_beta"),
+      ],
+      assignment_issues: [],
+      totals: {
+        spend_usd_30d: 0,
+        calls_30d: 0,
+        provider_count: 2,
+        model_count: 2,
+        capability_count: 2,
+        unassigned_capabilities: [],
+      },
+    };
+
+    const result = filterLlmGraphBySearch(graph, buildLlmIndexes(graph), "pm_beta");
+
+    expect(result.directMatches.providerModels).toEqual(new Set(["pm_beta"]));
+    expect(result.directMatches.assignments).toEqual(new Set());
+    expect(result.graph.providers.map((item) => item.id)).toEqual(["provider_b"]);
+    expect(result.graph.models.map((item) => item.id)).toEqual(["model_beta"]);
+    expect(result.graph.provider_models.map((item) => item.id)).toEqual(["pm_beta"]);
+    expect(result.graph.assignments.map((item) => item.id)).toEqual(["assign_beta"]);
+    expect(result.graph.capabilities.map((item) => item.key)).toEqual(["cap_beta"]);
+  });
+
+  it("keeps inherited parent and child capability context in search results", () => {
+    const graph: LlmGraphPayload = {
+      providers: [provider("provider_a", "Provider A")],
+      models: [model("model_alpha", "Alpha")],
+      provider_models: [providerModel("pm_alpha", "provider_a", "model_alpha")],
+      capabilities: [
+        capability("default"),
+        { ...capability("voice.transcribe"), description: "Turn a voice note into text" },
+      ],
+      inheritance: [
+        {
+          capability: "voice.transcribe",
+          inherits_from: "default",
+          source: "implicit_default",
+        },
+      ],
+      assignments: [assignment("default_primary", "default", 0, "pm_alpha")],
+      assignment_issues: [],
+      totals: {
+        spend_usd_30d: 0,
+        calls_30d: 0,
+        provider_count: 1,
+        model_count: 1,
+        capability_count: 2,
+        unassigned_capabilities: [],
+      },
+    };
+
+    const result = filterLlmGraphBySearch(graph, buildLlmIndexes(graph), "voice note");
+
+    expect(result.directMatches.capabilities).toEqual(new Set(["voice.transcribe"]));
+    expect(result.graph.capabilities.map((item) => item.key)).toEqual([
+      "default",
+      "voice.transcribe",
+    ]);
+    expect(result.graph.assignments.map((item) => item.id)).toEqual([
+      "default_primary",
     ]);
   });
 });

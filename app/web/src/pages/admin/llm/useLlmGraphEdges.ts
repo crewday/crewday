@@ -100,8 +100,13 @@ export function useLlmGraphEdges(
   );
 
   useLayoutEffect(() => {
+    setEdges([]);
     requestRecompute();
-  }, [active, graph, requestRecompute]);
+  }, [graph, requestRecompute]);
+
+  useLayoutEffect(() => {
+    requestRecompute();
+  }, [active, requestRecompute]);
 
   useEffect(() => {
     if (!graphRef.current) return;
