@@ -630,9 +630,6 @@
 .llm-registry-form__delete {
   margin-right: auto;
 }
-.llm-provider-model-costs {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
 .llm-openrouter-loader {
   gap: 8px;
   padding: 10px 12px;
@@ -665,6 +662,28 @@
 }
 .llm-openrouter-loader__pricing {
   color: var(--ink-3);
+}
+.llm-price-source-sync {
+  gap: 8px;
+}
+.llm-price-source-sync__label {
+  display: block;
+}
+.llm-price-source-sync__control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+.llm-price-source-sync__button {
+  min-width: 118px;
+  white-space: nowrap;
+}
+.llm-price-source-sync__status {
+  margin: 0;
+  color: var(--moss);
+  font-size: 12.5px;
+  line-height: 1.45;
 }
 .llm-model-provider-gaps {
   display: grid;
@@ -1231,12 +1250,11 @@
   .llm-registry-form__delete {
     margin-right: 0;
   }
-  .llm-provider-model-costs {
-    grid-template-columns: minmax(0, 1fr);
-  }
+  .llm-price-source-sync__control,
   .llm-openrouter-loader__control {
     grid-template-columns: minmax(0, 1fr);
   }
+  .llm-price-source-sync__button,
   .llm-openrouter-loader__button {
     width: 100%;
   }

@@ -968,6 +968,11 @@ describe("Admin LlmPage", () => {
       expect(within(dialog).getByText(/Provider price preview/)).toHaveTextContent(
         "OpenRouter",
       );
+      await waitFor(() => {
+        expect(
+          fetcher.calls.filter((call) => call.url === "/admin/api/v1/llm/graph"),
+        ).toHaveLength(2);
+      });
 
       const preview = fetcher.calls.find(
         (call) =>
@@ -2132,6 +2137,9 @@ describe("Admin LlmPage", () => {
       );
       expect(adminLlmCss).not.toMatch(
         /\.llm-graph-node__button:focus-visible\s*{[\s\S]*border-color:/m,
+      );
+      expect(adminLlmCss).not.toMatch(
+        /\.llm-provider-model-costs\s*{[\s\S]*repeat\(3,/m,
       );
     } finally {
       fetcher.restore();

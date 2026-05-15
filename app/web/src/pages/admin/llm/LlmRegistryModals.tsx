@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
@@ -135,6 +135,13 @@ interface ProviderModelPayload {
   price_source_override: LlmPriceSourceOverride;
   price_source_model_id_override: string | null;
   is_enabled: boolean;
+}
+
+interface LlmProviderModelSyncPricingResponse {
+  provider_model: LlmProviderModel;
+  pricing_sync_result: {
+    status: "updated" | "unchanged" | "skipped_not_syncable" | "error";
+  };
 }
 
 const CAPABILITY_TAGS = [
@@ -686,6 +693,7 @@ function ModelForm({
       ),
     onSuccess: (preview) => {
       applyModelPayload(preview.model_payload);
+      void invalidate();
       setOpenRouterErr(null);
       setClientErr(null);
       setServerErr(null);
@@ -1064,6 +1072,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   // code-health: ignore[ccn] Provider-model form keeps its pricing, override, capability, and JSON validation next to the save payload.
   const { mode, providerModel, providers, models, titleId, onClose } = props;
   const qc = useQueryClient();
+  const priceSourceModelOverrideId = useId();
   const [providerId, setProviderId] = useState(
     providerModel?.provider_id ?? providers[0]?.id ?? "",
   );
@@ -1110,6 +1119,13 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   const [enabled, setEnabled] = useState(providerModel?.is_enabled ?? true);
   const [clientErr, setClientErr] = useState<string | null>(null);
   const [serverErr, setServerErr] = useState<string | null>(null);
+  const [syncErr, setSyncErr] = useState<string | null>(null);
+  const pricingSyncState = useRef({
+    canSyncPricing: false,
+    priceSourceDraftChanged: false,
+    priceSourceOverride: "" as LlmPriceSourceOverride,
+    priceSourceModelOverride: null as string | null,
+  });
   const providerOptions = useMemo(() => providers.map(providerOption), [providers]);
   const modelOptions = useMemo(() => models.map(modelOption), [models]);
   const selectedModel = useMemo(
@@ -1133,10 +1149,88 @@ function ProviderModelForm(props: ProviderModelFormProps) {
     thinkingStrategyOverride === "inherit"
       ? inheritedThinkingStrategy
       : thinkingStrategyOverride;
+  const effectivePriceSource =
+    priceSourceOverride === "openrouter"
+      ? "openrouter"
+      : priceSourceOverride === ""
+        ? selectedModel?.price_source
+        : "manual";
+  const canSyncPricing =
+    mode === "edit" &&
+    providerModel !== undefined &&
+    modelId === providerModel.model_id &&
+    effectivePriceSource === "openrouter";
+  const priceSourceDraftChanged =
+    providerModel !== undefined &&
+    (priceSourceOverride !== providerModel.price_source_override ||
+      emptyToNull(priceSourceModelOverride) !==
+        providerModel.price_source_model_id_override);
+  pricingSyncState.current = {
+    canSyncPricing,
+    priceSourceDraftChanged,
+    priceSourceOverride,
+    priceSourceModelOverride: emptyToNull(priceSourceModelOverride),
+  };
 
   const invalidate = async () => {
     await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
   };
+  const syncPricing = useMutation({
+    mutationFn: (_expected: {
+      priceSourceOverride: LlmPriceSourceOverride;
+      priceSourceModelOverride: string | null;
+    }) => {
+      if (!providerModel) throw new Error("Provider-model is required.");
+      return fetchJson<LlmProviderModelSyncPricingResponse>(
+        `/admin/api/v1/llm/provider-models/${providerModel.id}/sync-pricing`,
+        { method: "POST" },
+      );
+    },
+    onSuccess: async (response, expected) => {
+      const current = pricingSyncState.current;
+      if (
+        !current.canSyncPricing ||
+        current.priceSourceDraftChanged ||
+        current.priceSourceOverride !== expected.priceSourceOverride ||
+        current.priceSourceModelOverride !== expected.priceSourceModelOverride
+      ) {
+        return;
+      }
+      applyProviderModelPricing(response.provider_model);
+      setSyncErr(null);
+      setClientErr(null);
+      setServerErr(null);
+      await invalidate();
+    },
+    onError: (error: Error) =>
+      setSyncErr(apiErrorCopy(error, "Provider-model pricing sync failed.")),
+  });
+  const syncDraftPricing = useMutation({
+    mutationFn: (body: ProviderModelPayload) => {
+      if (!providerModel) throw new Error("Provider-model is required.");
+      return fetchJson<LlmProviderModel>(
+        `/admin/api/v1/llm/provider-models/${providerModel.id}`,
+        { method: "PUT", body },
+      );
+    },
+    onSuccess: async (synced, body) => {
+      const current = pricingSyncState.current;
+      if (
+        !current.canSyncPricing ||
+        body.price_source_override !== current.priceSourceOverride ||
+        body.price_source_model_id_override !== current.priceSourceModelOverride
+      ) {
+        return;
+      }
+      applyProviderModelPricing(synced);
+      setSyncErr(null);
+      setClientErr(null);
+      setServerErr(null);
+      await invalidate();
+    },
+    onError: (error: Error) =>
+      setSyncErr(apiErrorCopy(error, "Provider-model pricing sync failed.")),
+  });
   const save = useMutation({
     mutationFn: (body: ProviderModelPayload) =>
       fetchJson<LlmProviderModel>(
@@ -1166,8 +1260,65 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   });
   const err = clientErr ?? serverErr;
   const errId = err ? "llm-provider-model-error" : undefined;
+  const syncErrId = syncErr ? "llm-provider-model-sync-error" : undefined;
   const extraHelpId = "llm-provider-model-extra-help";
   const thinkingStrategyHelpId = "llm-provider-model-thinking-strategy-help";
+  const syncPending = syncPricing.isPending || syncDraftPricing.isPending;
+  const syncStatusId = syncPending ? "llm-provider-model-sync-status" : undefined;
+  const priceSourceModelOverrideDescribedBy = describedBy(syncErrId, syncStatusId);
+
+  function applyProviderModelPricing(row: LlmProviderModel) {
+    setInputCost(String(row.input_cost_per_million));
+    setOutputCost(String(row.output_cost_per_million));
+    setFixedCost(
+      row.fixed_cost_per_call_usd == null ? "" : String(row.fixed_cost_per_call_usd),
+    );
+  }
+
+  function persistedPayloadWithPriceSourceDraft(): ProviderModelPayload | null {
+    if (!providerModel) return null;
+    return {
+      provider_id: providerModel.provider_id,
+      model_id: providerModel.model_id,
+      api_model_id: providerModel.api_model_id,
+      input_cost_per_million: providerModel.input_cost_per_million,
+      output_cost_per_million: providerModel.output_cost_per_million,
+      fixed_cost_per_call_usd: providerModel.fixed_cost_per_call_usd,
+      max_tokens_override: providerModel.max_tokens_override,
+      temperature_override: providerModel.temperature_override,
+      supports_system_prompt: providerModel.supports_system_prompt,
+      supports_temperature: providerModel.supports_temperature,
+      thinking_strategy_override: providerModel.thinking_strategy_override,
+      extra_api_params: providerModel.extra_api_params,
+      price_source_override: priceSourceOverride,
+      price_source_model_id_override: emptyToNull(priceSourceModelOverride),
+      is_enabled: providerModel.is_enabled,
+    };
+  }
+
+  function syncPriceSourceOverrideDraft() {
+    if (!canSyncPricing || !providerModel || syncPending) return;
+    if (!priceSourceDraftChanged) return;
+    const body = persistedPayloadWithPriceSourceDraft();
+    if (body) {
+      setSyncErr(null);
+      syncDraftPricing.mutate(body);
+    }
+  }
+
+  function syncCurrentPricing() {
+    if (!canSyncPricing || syncPending) return;
+    setSyncErr(null);
+    if (priceSourceDraftChanged) {
+      const body = persistedPayloadWithPriceSourceDraft();
+      if (body) syncDraftPricing.mutate(body);
+      return;
+    }
+    syncPricing.mutate({
+      priceSourceOverride,
+      priceSourceModelOverride: emptyToNull(priceSourceModelOverride),
+    });
+  }
 
   function submit(event: FormEvent<HTMLFormElement>) {
     // code-health: ignore[ccn] Provider-model submit intentionally keeps all field validation next to the payload it sends.
@@ -1246,7 +1397,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               type="button"
               className="btn btn--rust llm-registry-form__delete"
               onClick={() => remove.mutate()}
-              disabled={remove.isPending || save.isPending}
+              disabled={remove.isPending || save.isPending || syncPending}
             >
               {remove.isPending ? "Deleting…" : "Delete provider-model"}
             </button>
@@ -1257,7 +1408,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
           <button
             type="submit"
             className="btn btn--moss"
-            disabled={save.isPending || remove.isPending}
+            disabled={save.isPending || remove.isPending || syncPending}
           >
             {save.isPending
               ? "Saving…"
@@ -1398,21 +1549,72 @@ function ProviderModelForm(props: ProviderModelFormProps) {
           <FormModalField label="Price source override" requirement="optional">
             <select
               value={priceSourceOverride}
-              onChange={(e) =>
-                setPriceSourceOverride(e.target.value as LlmPriceSourceOverride)
-              }
+              onChange={(e) => {
+                setSyncErr(null);
+                setPriceSourceOverride(e.target.value as LlmPriceSourceOverride);
+              }}
             >
               <option value="">Use model default</option>
               <option value="openrouter">OpenRouter</option>
               <option value="none">Manual / pinned</option>
             </select>
           </FormModalField>
-          <FormModalField label="Price source model override" requirement="optional">
-            <input
-              value={priceSourceModelOverride}
-              onChange={(e) => setPriceSourceModelOverride(e.target.value)}
-            />
-          </FormModalField>
+          <div className="field form-field form-field--optional form-modal__field llm-price-source-sync">
+            <label
+              htmlFor={priceSourceModelOverrideId}
+              className="llm-price-source-sync__label"
+            >
+              <span className="form-field__label">
+                Price source model override{" "}
+                <span className="form-field__requirement form-field__requirement--optional">
+                  Optional
+                </span>
+              </span>
+            </label>
+            <div className="llm-price-source-sync__control">
+              <input
+                id={priceSourceModelOverrideId}
+                value={priceSourceModelOverride}
+                onChange={(e) => {
+                  setSyncErr(null);
+                  setPriceSourceModelOverride(e.target.value);
+                }}
+                onBlur={syncPriceSourceOverrideDraft}
+                aria-invalid={syncErr ? true : undefined}
+                aria-describedby={priceSourceModelOverrideDescribedBy}
+              />
+              {canSyncPricing ? (
+                <button
+                  type="button"
+                  className="btn btn--ghost llm-price-source-sync__button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={syncCurrentPricing}
+                  disabled={syncPending || save.isPending || remove.isPending}
+                  aria-label="Sync pricing"
+                >
+                  {syncPending ? "Syncing..." : "Sync pricing"}
+                </button>
+              ) : null}
+            </div>
+            {syncPending ? (
+              <p
+                id="llm-provider-model-sync-status"
+                className="llm-price-source-sync__status"
+                role="status"
+              >
+                Syncing pricing...
+              </p>
+            ) : null}
+            {syncErr ? (
+              <p
+                id="llm-provider-model-sync-error"
+                className="form-error llm-price-source-sync__error"
+                role="alert"
+              >
+                {syncErr}
+              </p>
+            ) : null}
+          </div>
         </FormModalGrid>
         <fieldset className="llm-registry-form__fieldset">
           <legend>Provider support overrides</legend>

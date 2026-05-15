@@ -613,6 +613,203 @@ describe("LlmRegistryModals", () => {
     expect(bodyOf(preview!)).toEqual({ model_id_or_url: "google/gemma-4-31b-it" });
   });
 
+  it("syncs persisted OpenRouter-effective provider-model pricing on demand", async () => {
+    const syncedProviderModel = {
+      ...baseGraph.provider_models[0]!,
+      input_cost_per_million: 0.5,
+      output_cost_per_million: 1.5,
+      fixed_cost_per_call_usd: 0.01,
+    };
+    const calls = installFetch((url) => {
+      if (url === "/admin/api/v1/llm/provider-models/pm_gemma/sync-pricing") {
+        return {
+          body: {
+            provider_model: syncedProviderModel,
+            pricing_sync_result: { status: "updated" },
+          },
+        };
+      }
+      return { body: {} };
+    });
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Sync pricing" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Input cost per 1M/)).toHaveValue(0.5);
+    });
+    expect(screen.getByLabelText(/Output cost per 1M/)).toHaveValue(1.5);
+    expect(screen.getByLabelText(/Fixed cost per call/)).toHaveValue(0.01);
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/admin/api/v1/llm/provider-models/pm_gemma/sync-pricing" &&
+          call.init.method === "POST",
+      ),
+    ).toBe(true);
+  });
+
+  it("hides provider-model pricing sync outside OpenRouter-effective states", () => {
+    installFetch();
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_text" });
+    expect(
+      screen.queryByRole("button", { name: "Sync pricing" }),
+    ).not.toBeInTheDocument();
+
+    cleanup();
+    const inheritedManualGraph: LlmGraphPayload = {
+      ...baseGraph,
+      provider_models: baseGraph.provider_models.map((pm) =>
+        pm.id === "pm_fast" ? { ...pm, price_source_override: "" } : pm,
+      ),
+    };
+    renderRegistry(inheritedManualGraph, {
+      kind: "providerModel",
+      mode: "edit",
+      id: "pm_fast",
+    });
+    expect(
+      screen.queryByRole("button", { name: "Sync pricing" }),
+    ).not.toBeInTheDocument();
+
+    cleanup();
+    const inheritedBlankGraph: LlmGraphPayload = {
+      ...inheritedManualGraph,
+      models: inheritedManualGraph.models.map((model) =>
+        model.id === "model_fast" ? { ...model, price_source: "" } : model,
+      ),
+    };
+    renderRegistry(inheritedBlankGraph, {
+      kind: "providerModel",
+      mode: "edit",
+      id: "pm_fast",
+    });
+    expect(
+      screen.queryByRole("button", { name: "Sync pricing" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("auto-syncs edited price source model overrides without saving the full draft", async () => {
+    const syncedProviderModel = {
+      ...baseGraph.provider_models[0]!,
+      input_cost_per_million: 0.25,
+      output_cost_per_million: 0.75,
+      fixed_cost_per_call_usd: 0.002,
+      price_source_model_id_override: "openrouter/google-gemma",
+    };
+    const calls = installFetch((url, init) => {
+      if (
+        url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+        init.method === "PUT"
+      ) {
+        return { body: syncedProviderModel };
+      }
+      return { body: {} };
+    });
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    const override = screen.getByLabelText(/Price source model override/);
+    fireEvent.change(override, { target: { value: "openrouter/google-gemma" } });
+    fireEvent.blur(override);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Input cost per 1M/)).toHaveValue(0.25);
+    });
+    expect(screen.getByLabelText(/Output cost per 1M/)).toHaveValue(0.75);
+    expect(screen.getByLabelText(/Fixed cost per call/)).toHaveValue(0.002);
+    const put = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+        call.init.method === "PUT",
+    )!;
+    expect(bodyOf(put)).toMatchObject({
+      price_source_override: "",
+      price_source_model_id_override: "openrouter/google-gemma",
+    });
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/admin/api/v1/llm/provider-models/pm_gemma/sync-pricing",
+      ),
+    ).toBe(false);
+  });
+
+  it("uses draft auto-sync instead of persisted sync when the override is dirty", async () => {
+    const syncedProviderModel = {
+      ...baseGraph.provider_models[0]!,
+      input_cost_per_million: 0.45,
+      output_cost_per_million: 0.9,
+      fixed_cost_per_call_usd: null,
+      price_source_model_id_override: "openrouter/dirty-gemma",
+    };
+    const calls = installFetch((url, init) => {
+      if (
+        url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+        init.method === "PUT"
+      ) {
+        return { body: syncedProviderModel };
+      }
+      return { body: {} };
+    });
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    fireEvent.change(screen.getByLabelText(/Price source model override/), {
+      target: { value: "openrouter/dirty-gemma" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sync pricing" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Input cost per 1M/)).toHaveValue(0.45);
+    });
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/admin/api/v1/llm/provider-models/pm_gemma/sync-pricing",
+      ),
+    ).toBe(false);
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+          call.init.method === "PUT",
+      ),
+    ).toBe(true);
+  });
+
+  it("shows provider-model pricing sync errors without clearing manual costs", async () => {
+    installFetch((url) => {
+      if (url === "/admin/api/v1/llm/provider-models/pm_gemma/sync-pricing") {
+        return {
+          status: 503,
+          body: { detail: "OpenRouter pricing is temporarily unavailable." },
+        };
+      }
+      return { body: {} };
+    });
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    fireEvent.change(screen.getByLabelText(/Input cost per 1M/), {
+      target: { value: "9.5" },
+    });
+    fireEvent.change(screen.getByLabelText(/Output cost per 1M/), {
+      target: { value: "10.5" },
+    });
+    fireEvent.change(screen.getByLabelText(/Fixed cost per call/), {
+      target: { value: "0.42" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sync pricing" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "OpenRouter pricing is temporarily unavailable.",
+    );
+    expect(screen.getByLabelText(/Input cost per 1M/)).toHaveValue(9.5);
+    expect(screen.getByLabelText(/Output cost per 1M/)).toHaveValue(10.5);
+    expect(screen.getByLabelText(/Fixed cost per call/)).toHaveValue(0.42);
+    expect(
+      screen.getByRole("button", { name: "Save provider-model" }),
+    ).toBeInTheDocument();
+  });
+
   it("omits provider-model thinking level and saves only strategy overrides", async () => {
     const calls = installFetch();
     const testGraph: LlmGraphPayload = {
@@ -873,6 +1070,8 @@ describe("LlmRegistryModals", () => {
       id: "pm_backup_gemma",
       provider_id: "prov_backup",
       model_id: "model_gemma",
+      input_cost_per_million: 0.33,
+      output_cost_per_million: 0.66,
     };
     const calls = installFetch((url, init) => {
       if (url === "/admin/api/v1/llm/provider-models" && init.method === "POST") {
@@ -903,7 +1102,11 @@ describe("LlmRegistryModals", () => {
 
     await waitFor(() =>
       expect(onOpenProviderModel).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "pm_backup_gemma" }),
+        expect.objectContaining({
+          id: "pm_backup_gemma",
+          input_cost_per_million: 0.33,
+          output_cost_per_million: 0.66,
+        }),
       ),
     );
     const post = calls.find((call) => call.url === "/admin/api/v1/llm/provider-models")!;
