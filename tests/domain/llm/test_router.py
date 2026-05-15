@@ -30,7 +30,8 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, delete, event, select
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from app.adapters.db.llm.models import (
@@ -1150,6 +1151,196 @@ class TestCache:
             second = resolve_primary(db_session, ctx, "chat.manager", clock=clock)
             # Still the cached value — invalidation was not signalled.
             assert second.provider_model_id == "01HWA00000000000000000HIT1"
+        finally:
+            reset_current(token)
+
+    def test_valid_cached_assignment_returns_without_db_read(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        """A valid in-window cache hit stays on the hot path."""
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="chat.manager",
+                priority=0,
+                model_id="01HWA00000000000000000HOT1",
+            )
+
+            first = resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+            assert first.provider_model_id == "01HWA00000000000000000HOT1"
+
+            bind = db_session.get_bind()
+            assert isinstance(bind, Engine | Connection)
+            statement_count = 0
+
+            def count_statement(
+                conn: object,
+                cursor: object,
+                statement: str,
+                parameters: object,
+                context: object,
+                executemany: bool,
+            ) -> None:
+                nonlocal statement_count
+                statement_count += 1
+
+            event.listen(bind, "before_cursor_execute", count_statement)
+            try:
+                second = resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+            finally:
+                event.remove(bind, "before_cursor_execute", count_statement)
+
+            assert second.provider_model_id == "01HWA00000000000000000HOT1"
+            assert statement_count == 0
+        finally:
+            reset_current(token)
+
+    def test_assignment_bulk_delete_invalidates_cached_chain(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        """A deleted assignment cannot remain usable through the cache."""
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            row = seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="chat.manager",
+                priority=0,
+                model_id="01HWA00000000000000000DEL1",
+            )
+
+            first = resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+            assert first.assignment_id == row.id
+
+            db_session.execute(delete(LlmAssignment).where(LlmAssignment.id == row.id))
+            db_session.flush()
+
+            with pytest.raises(CapabilityUnassignedError):
+                resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+        finally:
+            reset_current(token)
+
+    def test_assignment_disable_invalidates_cached_chain(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        """A disabled assignment cannot remain usable through the cache."""
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            row = seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="chat.manager",
+                priority=0,
+                model_id="01HWA00000000000000000DIS1",
+            )
+
+            first = resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+            assert first.assignment_id == row.id
+
+            row.enabled = False
+            db_session.flush()
+
+            with pytest.raises(CapabilityUnassignedError):
+                resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+        finally:
+            reset_current(token)
+
+    def test_provider_model_disable_invalidates_cached_chain(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        """A disabled provider-model row cannot remain usable through the cache."""
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            row = seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="chat.manager",
+                priority=0,
+                model_id="01HWA00000000000000000PDM1",
+            )
+
+            first = resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+            assert first.assignment_id == row.id
+
+            provider_model = db_session.get(LlmProviderModel, row.model_id)
+            assert provider_model is not None
+            provider_model.is_enabled = False
+            db_session.flush()
+
+            with pytest.raises(CapabilityUnassignedError):
+                resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+        finally:
+            reset_current(token)
+
+    def test_provider_disable_invalidates_cached_chain(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        """A disabled provider row cannot remain usable through the cache."""
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            row = seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="chat.manager",
+                priority=0,
+                model_id="01HWA00000000000000000PRV1",
+            )
+
+            first = resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+            assert first.assignment_id == row.id
+
+            provider_model = db_session.get(LlmProviderModel, row.model_id)
+            assert provider_model is not None
+            provider = db_session.get(LlmProvider, provider_model.provider_id)
+            assert provider is not None
+            provider.is_enabled = False
+            db_session.flush()
+
+            with pytest.raises(CapabilityUnassignedError):
+                resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+        finally:
+            reset_current(token)
+
+    def test_model_deactivate_invalidates_cached_chain(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        """An inactive model row cannot remain usable through the cache."""
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            row = seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="chat.manager",
+                priority=0,
+                model_id="01HWA00000000000000000MDX1",
+            )
+
+            first = resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+            assert first.assignment_id == row.id
+
+            provider_model = db_session.get(LlmProviderModel, row.model_id)
+            assert provider_model is not None
+            model = db_session.get(LlmModel, provider_model.model_id)
+            assert model is not None
+            model.is_active = False
+            db_session.flush()
+
+            with pytest.raises(CapabilityUnassignedError):
+                resolve_primary(db_session, ctx, "chat.manager", clock=clock)
         finally:
             reset_current(token)
 

@@ -68,6 +68,7 @@ from app.domain.agent.runtime import (
     run_turn,
 )
 from app.domain.llm.router import invalidate_cache as invalidate_llm_router_cache
+from app.domain.llm.router import resolve_primary
 from app.events.bus import EventBus
 from app.events.types import AgentMessageAppended, AgentTurnFinished, AgentTurnStarted
 from app.fixtures.llm import seed_default_registry
@@ -1666,13 +1667,14 @@ def test_agent_message_endpoint_surfaces_unassigned_capability_in_log(
         audit_correlation_id=new_ulid(),
     )
     set_current(ctx)
+    _seed_llm_assignment(db_session, workspace_id=workspace.id)
+    resolve_primary(db_session, ctx, "chat.manager", clock=FrozenClock(_PINNED))
     _seed_budget_ledger(db_session, workspace_id=workspace.id)
     with tenant_agnostic():
         db_session.execute(
             delete(LlmAssignment).where(LlmAssignment.capability == "chat.manager")
         )
         db_session.flush()
-    invalidate_llm_router_cache(workspace_id=workspace.id)
     bus = EventBus()
     events: list[object] = []
     bus.subscribe(AgentTurnStarted)(events.append)

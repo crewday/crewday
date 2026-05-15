@@ -98,8 +98,9 @@ from datetime import datetime, timedelta
 from types import MappingProxyType
 from typing import Any, cast
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import event, inspect, select
+from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Mapper, ORMExecuteState, Session
 
 from app.adapters.db.llm.models import (
     LlmAssignment,
@@ -347,6 +348,109 @@ def _on_llm_assignment_changed(event: LlmAssignmentChanged) -> None:
     invalidation scope without a richer payload would miss cases.
     """
     invalidate_cache()
+
+
+def _has_changed(target: object, attr_name: str) -> bool:
+    state = inspect(target)
+    if state is None:
+        return False
+    return bool(state.attrs[attr_name].history.has_changes())
+
+
+@event.listens_for(LlmAssignment, "after_update")
+def _invalidate_cache_after_assignment_enabled_change(
+    mapper: Mapper[LlmAssignment], connection: Connection, target: LlmAssignment
+) -> None:
+    if _has_changed(target, "enabled"):
+        invalidate_cache()
+
+
+@event.listens_for(LlmAssignment, "after_delete")
+def _invalidate_cache_after_assignment_delete(
+    mapper: Mapper[LlmAssignment], connection: Connection, target: LlmAssignment
+) -> None:
+    invalidate_cache()
+
+
+@event.listens_for(LlmProviderModel, "after_update")
+def _invalidate_cache_after_provider_model_enabled_change(
+    mapper: Mapper[LlmProviderModel], connection: Connection, target: LlmProviderModel
+) -> None:
+    if _has_changed(target, "is_enabled"):
+        invalidate_cache()
+
+
+@event.listens_for(LlmProviderModel, "after_delete")
+def _invalidate_cache_after_provider_model_delete(
+    mapper: Mapper[LlmProviderModel], connection: Connection, target: LlmProviderModel
+) -> None:
+    invalidate_cache()
+
+
+@event.listens_for(LlmProvider, "after_update")
+def _invalidate_cache_after_provider_enabled_change(
+    mapper: Mapper[LlmProvider], connection: Connection, target: LlmProvider
+) -> None:
+    if _has_changed(target, "is_enabled"):
+        invalidate_cache()
+
+
+@event.listens_for(LlmProvider, "after_delete")
+def _invalidate_cache_after_provider_delete(
+    mapper: Mapper[LlmProvider], connection: Connection, target: LlmProvider
+) -> None:
+    invalidate_cache()
+
+
+@event.listens_for(LlmModel, "after_update")
+def _invalidate_cache_after_model_active_change(
+    mapper: Mapper[LlmModel], connection: Connection, target: LlmModel
+) -> None:
+    if _has_changed(target, "is_active"):
+        invalidate_cache()
+
+
+@event.listens_for(LlmModel, "after_delete")
+def _invalidate_cache_after_model_delete(
+    mapper: Mapper[LlmModel], connection: Connection, target: LlmModel
+) -> None:
+    invalidate_cache()
+
+
+@event.listens_for(LlmCapabilityInheritance, "after_delete")
+def _invalidate_cache_after_inheritance_delete(
+    mapper: Mapper[LlmCapabilityInheritance],
+    connection: Connection,
+    target: LlmCapabilityInheritance,
+) -> None:
+    invalidate_cache()
+
+
+_CACHE_INVALIDATING_BULK_TABLES: frozenset[str] = frozenset(
+    {
+        LlmAssignment.__tablename__,
+        LlmCapabilityInheritance.__tablename__,
+        LlmProviderModel.__tablename__,
+        LlmProvider.__tablename__,
+        LlmModel.__tablename__,
+    }
+)
+
+
+def _statement_targets_cache_table(execute_state: ORMExecuteState) -> bool:
+    table = getattr(execute_state.statement, "table", None)
+    table_name = getattr(table, "name", None)
+    return isinstance(table_name, str) and table_name in _CACHE_INVALIDATING_BULK_TABLES
+
+
+@event.listens_for(Session, "do_orm_execute")
+def _invalidate_cache_before_bulk_routing_write(
+    execute_state: ORMExecuteState,
+) -> None:
+    if (
+        execute_state.is_delete or execute_state.is_update
+    ) and _statement_targets_cache_table(execute_state):
+        invalidate_cache()
 
 
 def _subscribe_to_bus(event_bus: EventBus) -> None:
