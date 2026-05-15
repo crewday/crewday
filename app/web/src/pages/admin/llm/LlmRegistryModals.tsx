@@ -86,7 +86,6 @@ interface ProviderPayload {
 interface ModelPayload {
   canonical_name: string;
   display_name: string;
-  vendor: string;
   capabilities: string[];
   context_window: number | null;
   max_output_tokens: number | null;
@@ -249,11 +248,10 @@ function modelOption(model: LlmModel): SearchableSelectOption {
   return {
     value: model.id,
     label: model.display_name,
-    secondaryText: [model.vendor, capabilities].filter(Boolean).join(" - "),
+    secondaryText: [model.canonical_name, capabilities].filter(Boolean).join(" - "),
     searchText: [
       model.display_name,
       model.canonical_name,
-      model.vendor,
       capabilities,
       model.id,
     ].join(" "),
@@ -568,7 +566,6 @@ function ModelForm({
   const openRouterInputId = useId();
   const [canonicalName, setCanonicalName] = useState(model?.canonical_name ?? "");
   const [displayName, setDisplayName] = useState(model?.display_name ?? "");
-  const [vendor, setVendor] = useState(model?.vendor ?? "");
   const [capabilities, setCapabilities] = useState<string[]>(model?.capabilities ?? []);
   const [contextWindow, setContextWindow] = useState(
     model?.context_window === null || model?.context_window === undefined
@@ -793,7 +790,6 @@ function ModelForm({
   function applyModelPayload(payload: ModelPayload) {
     setCanonicalName(payload.canonical_name);
     setDisplayName(payload.display_name);
-    setVendor(payload.vendor);
     setCapabilities(payload.capabilities);
     setContextWindow(
       payload.context_window === null || payload.context_window === undefined
@@ -833,7 +829,6 @@ function ModelForm({
     const outputValue = numberOrNull(maxOutput);
     if (!canonicalName.trim()) return setClientErr("Canonical name is required.");
     if (!displayName.trim()) return setClientErr("Display name is required.");
-    if (!vendor.trim()) return setClientErr("Vendor is required.");
     if (contextValue !== null && (!Number.isInteger(contextValue) || contextValue < 1)) {
       return setClientErr("Context window must be a positive whole number.");
     }
@@ -845,7 +840,6 @@ function ModelForm({
     save.mutate({
       canonical_name: canonicalName.trim(),
       display_name: displayName.trim(),
-      vendor: vendor.trim(),
       capabilities,
       context_window: contextValue,
       max_output_tokens: outputValue,
@@ -893,31 +887,22 @@ function ModelForm({
       }
     >
         {mode === "create" ? openRouterLoader : null}
-        <FormModalField label="Canonical name" requirement="required">
-          <input
-            value={canonicalName}
-            onChange={(e) => setCanonicalName(e.target.value)}
-            required
-            aria-invalid={clientErr === "Canonical name is required."}
-            aria-describedby={errId}
-          />
-        </FormModalField>
         <FormModalGrid>
+          <FormModalField label="Canonical name" requirement="required">
+            <input
+              value={canonicalName}
+              onChange={(e) => setCanonicalName(e.target.value)}
+              required
+              aria-invalid={clientErr === "Canonical name is required."}
+              aria-describedby={errId}
+            />
+          </FormModalField>
           <FormModalField label="Display name" requirement="required">
             <input
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               required
               aria-invalid={clientErr === "Display name is required."}
-              aria-describedby={errId}
-            />
-          </FormModalField>
-          <FormModalField label="Vendor" requirement="required">
-            <input
-              value={vendor}
-              onChange={(e) => setVendor(e.target.value)}
-              required
-              aria-invalid={clientErr === "Vendor is required."}
               aria-describedby={errId}
             />
           </FormModalField>

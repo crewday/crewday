@@ -13725,10 +13725,6 @@
             ],
             "title": "Thinking Strategy",
             "type": "string"
-          },
-          "vendor": {
-            "title": "Vendor",
-            "type": "string"
           }
         },
         "required": [
@@ -13744,8 +13740,7 @@
           "price_source_model_id",
           "provider_model_count",
           "thinking_level",
-          "thinking_strategy",
-          "vendor"
+          "thinking_strategy"
         ],
         "title": "LlmModelResponse",
         "type": "object"
@@ -15647,18 +15642,11 @@
             ],
             "title": "Thinking Strategy",
             "type": "string"
-          },
-          "vendor": {
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Vendor",
-            "type": "string"
           }
         },
         "required": [
           "canonical_name",
-          "display_name",
-          "vendor"
+          "display_name"
         ],
         "title": "ModelPayload",
         "type": "object"

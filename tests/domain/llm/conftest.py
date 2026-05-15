@@ -305,7 +305,6 @@ def seed_provider_model(
         id=new_ulid(),
         canonical_name=canonical,
         display_name=canonical,
-        vendor="other",
         capabilities=list(model_capabilities or ["chat"]),
         is_active=True,
         price_source="",

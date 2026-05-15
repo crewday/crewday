@@ -218,7 +218,6 @@ class LlmModelResponse(BaseModel):
     id: str
     canonical_name: str
     display_name: str
-    vendor: str
     capabilities: list[str]
     context_window: int | None
     max_output_tokens: int | None
@@ -575,7 +574,6 @@ class ModelPayload(BaseModel):
 
     canonical_name: str = Field(min_length=1, max_length=240)
     display_name: str = Field(min_length=1, max_length=240)
-    vendor: str = Field(min_length=1, max_length=80)
     capabilities: list[str] = Field(default_factory=list)
     context_window: int | None = Field(default=None, ge=1)
     max_output_tokens: int | None = Field(default=None, ge=1)
@@ -784,7 +782,6 @@ def _model_response(
         id=model.id,
         canonical_name=model.canonical_name,
         display_name=model.display_name,
-        vendor=model.vendor,
         capabilities=list(model.capabilities or []),
         context_window=model.context_window,
         max_output_tokens=model.max_output_tokens,
@@ -1592,7 +1589,6 @@ def _openrouter_model_payload(metadata: OpenRouterModelMetadata) -> ModelPayload
     return ModelPayload(
         canonical_name=metadata.model_id,
         display_name=metadata.display_name,
-        vendor=metadata.vendor,
         capabilities=metadata.capabilities,
         context_window=metadata.context_window,
         max_output_tokens=metadata.max_output_tokens,
@@ -2081,7 +2077,6 @@ def build_admin_llm_router() -> APIRouter:
             id=new_ulid(),
             canonical_name=payload.canonical_name,
             display_name=payload.display_name,
-            vendor=payload.vendor,
             capabilities=payload.capabilities,
             context_window=payload.context_window,
             max_output_tokens=payload.max_output_tokens,
@@ -2152,7 +2147,6 @@ def build_admin_llm_router() -> APIRouter:
             _validate_model_payload(session, payload, model_id=model_id)
             row.canonical_name = payload.canonical_name
             row.display_name = payload.display_name
-            row.vendor = payload.vendor
             row.capabilities = payload.capabilities
             row.context_window = payload.context_window
             row.max_output_tokens = payload.max_output_tokens

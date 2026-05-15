@@ -182,7 +182,6 @@ def _seed_provider_model(
         id=new_ulid(),
         canonical_name=f"canonical/{api_model_id}",
         display_name=api_model_id,
-        vendor="other",
         capabilities=["chat"],
         is_active=True,
         price_source="",

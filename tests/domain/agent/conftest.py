@@ -572,7 +572,6 @@ def seed_assignment(
         id=new_ulid(),
         canonical_name=api_model_id,
         display_name=api_model_id,
-        vendor="other",
         capabilities=["chat"],
         is_active=True,
         price_source="",

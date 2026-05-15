@@ -139,7 +139,6 @@ def _seed_registry_trio(
         id=f"01HWA0000000000000000MOD{suffix}"[:26],
         canonical_name=f"canonical/{suffix}",
         display_name=f"Canonical {suffix}",
-        vendor="other",
         capabilities=["chat"],
         is_active=True,
         price_source="",
@@ -2865,11 +2864,11 @@ class TestCdU84yMigrationRoundTrip:
                 conn.execute(
                     text(
                         "INSERT INTO llm_model "
-                        "(id, canonical_name, display_name, vendor, "
+                        "(id, canonical_name, display_name, "
                         "capabilities, is_active, price_source, "
                         "created_at, updated_at) VALUES "
                         "('01HWA00000000000000000MODH', 'canonical/h', "
-                        "'Canonical H', 'other', '[]', 1, '', "
+                        "'Canonical H', '[]', 1, '', "
                         "'2026-04-24T12:00:00+00:00', "
                         "'2026-04-24T12:00:00+00:00')"
                     )
@@ -2984,12 +2983,12 @@ class TestCdU84yMigrationRoundTrip:
                     conn.execute(
                         text(
                             "INSERT INTO llm_model "
-                            "(id, canonical_name, display_name, vendor, "
+                            "(id, canonical_name, display_name, "
                             "capabilities, is_active, price_source, "
                             "created_at, updated_at) VALUES "
                             f"('01HWA00000000000000000MOS{index}', "
                             f"'canonical/s{index}', "
-                            f"'Canonical S{index}', 'other', '[]', 1, '', "
+                            f"'Canonical S{index}', '[]', 1, '', "
                             "'2026-04-24T12:00:00+00:00', "
                             "'2026-04-24T12:00:00+00:00')"
                         )
@@ -3501,7 +3500,6 @@ class TestRegistryShape:
             "id",
             "canonical_name",
             "display_name",
-            "vendor",
             "capabilities",
             "context_window",
             "max_output_tokens",
@@ -3528,7 +3526,6 @@ class TestRegistryShape:
                 id="01HWA0000000000000000THNK",
                 canonical_name="thinking/invalid",
                 display_name="Invalid Thinking",
-                vendor="other",
                 capabilities=["chat"],
                 thinking_level="turbo",
                 thinking_strategy="none",
@@ -3549,7 +3546,6 @@ class TestRegistryShape:
                 id="01HWA0000000000000000THST",
                 canonical_name="thinking-strategy/invalid",
                 display_name="Invalid Thinking Strategy",
-                vendor="other",
                 capabilities=["chat"],
                 thinking_level="disabled",
                 thinking_strategy="turbo",

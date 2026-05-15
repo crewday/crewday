@@ -167,7 +167,6 @@ class OpenRouterModelMetadata:
 
     model_id: str
     display_name: str
-    vendor: str
     capabilities: list[str]
     context_window: int | None
     max_output_tokens: int | None
@@ -356,7 +355,6 @@ def _openrouter_model_metadata(
         model_id=model_id,
         display_name=_string(entry.get("name"))
         or _display_name_from_model_id(model_id),
-        vendor=model_id.split("/", 1)[0],
         capabilities=capabilities,
         context_window=_positive_int(
             top_provider.get("context_length"), entry.get("context_length")

@@ -242,7 +242,7 @@ afterEach(() => {
 });
 
 describe("Admin LlmPage", () => {
-  it("renders graph columns without usage panels and keeps the prompt drawer reachable", async () => {
+  it("renders graph columns without usage panels or duplicate prompt overflow", async () => {
     const fetcher = installPageFetch();
     try {
       render(<Harness />);
@@ -278,12 +278,12 @@ describe("Admin LlmPage", () => {
       expect(fetcher.calls.some((call) => call.url === "/admin/api/v1/llm/calls")).toBe(
         false,
       );
-
-      openOverflowItem("Prompts");
-      const drawer = await screen.findByText("Prompt library");
-      expect(drawer).toBeInTheDocument();
-      expect(screen.getByText("Manager chat")).toBeInTheDocument();
-      expect(screen.getByText("You are the manager assistant.")).toBeInTheDocument();
+      expect(
+        fetcher.calls.some((call) => call.url === "/admin/api/v1/llm/prompts"),
+      ).toBe(false);
+      expect(
+        screen.queryByRole("button", { name: "More actions" }),
+      ).not.toBeInTheDocument();
     } finally {
       fetcher.restore();
     }
@@ -597,8 +597,8 @@ describe("Admin LlmPage", () => {
       ],
     });
     try {
-      render(<Harness />);
-      await findOpenRouterProvider();
+      render(<Harness page="usage" />);
+      await screen.findByText("Provider-model pricing");
 
       openOverflowItem("Prompts");
       const drawer = await screen.findByText("Prompt library");
@@ -798,9 +798,6 @@ describe("Admin LlmPage", () => {
       fireEvent.change(screen.getByLabelText(/Display name/), {
         target: { value: "New model" },
       });
-      fireEvent.change(screen.getByLabelText(/Vendor/), {
-        target: { value: "test" },
-      });
       fireEvent.click(screen.getByLabelText("chat"));
       fireEvent.click(screen.getByRole("button", { name: "Create model" }));
 
@@ -887,7 +884,6 @@ describe("Admin LlmPage", () => {
             model_payload: {
               canonical_name: "google/gemma-4-31b-it",
               display_name: "Gemma 4 31B IT",
-              vendor: "Google",
               capabilities: ["chat", "json_mode", "function_calling", "reasoning"],
               context_window: 128000,
               max_output_tokens: 8192,
@@ -956,7 +952,6 @@ describe("Admin LlmPage", () => {
       expect(within(dialog).getByLabelText(/Display name/)).toHaveValue(
         "Gemma 4 31B IT",
       );
-      expect(within(dialog).getByLabelText(/Vendor/)).toHaveValue("Google");
       expect(within(dialog).getByLabelText("reasoning")).toBeChecked();
       expect(within(dialog).getByLabelText(/Context window/)).toHaveValue(128000);
       expect(within(dialog).getByLabelText(/Max output tokens/)).toHaveValue(8192);
@@ -1007,7 +1002,6 @@ describe("Admin LlmPage", () => {
       expect(jsonBody(post!)).toMatchObject({
         canonical_name: "google/gemma-4-31b-it",
         display_name: "Gemma 4 31B IT",
-        vendor: "Google",
         capabilities: ["chat", "json_mode", "function_calling", "reasoning"],
         context_window: 128000,
         max_output_tokens: 8192,
@@ -1039,9 +1033,6 @@ describe("Admin LlmPage", () => {
       fireEvent.change(within(dialog).getByLabelText(/Display name/), {
         target: { value: "Manual model" },
       });
-      fireEvent.change(within(dialog).getByLabelText(/Vendor/), {
-        target: { value: "Manual" },
-      });
 
       fireEvent.click(within(dialog).getByRole("button", { name: "Load metadata" }));
       expect(await within(dialog).findByRole("alert")).toHaveTextContent(
@@ -1069,7 +1060,6 @@ describe("Admin LlmPage", () => {
       expect(within(dialog).getByLabelText(/Display name/)).toHaveValue(
         "Manual model",
       );
-      expect(within(dialog).getByLabelText(/Vendor/)).toHaveValue("Manual");
       expect(
         fetcher.calls.some(
           (call) =>

@@ -1418,9 +1418,6 @@ class LlmModel(Base):
     # lives on :attr:`LlmProviderModel.api_model_id`.
     canonical_name: Mapped[str] = mapped_column(String, nullable=False)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
-    # Plain string — the §11 vendor list grows over time; CHECK-
-    # clamping it would force a migration on every new vendor.
-    vendor: Mapped[str] = mapped_column(String, nullable=False)
     # JSON list of capability tags. Empty list = no tags claimed —
     # the model is unusable for any crew.day capability that requires
     # a sub-capability.

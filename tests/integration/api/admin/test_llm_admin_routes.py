@@ -318,7 +318,6 @@ def _seed_llm_graph(session_factory: sessionmaker[Session]) -> SeededLlm:
                 id=model_id,
                 canonical_name="google/gemma-3-27b-it",
                 display_name="Gemma 3 27B",
-                vendor="google",
                 capabilities=["chat", "function_calling", "json_mode", "vision"],
                 context_window=128000,
                 max_output_tokens=8192,
@@ -554,7 +553,6 @@ def _gemma_4_metadata(
     return OpenRouterModelMetadata(
         model_id=model_id,
         display_name="Gemma 4 31B Instruct",
-        vendor="google",
         capabilities=[
             "chat",
             "vision",
@@ -796,7 +794,6 @@ class TestAdminLlmRoutes:
                         id=other_model_id,
                         canonical_name="test/other",
                         display_name="Other",
-                        vendor="test",
                         capabilities=["chat"],
                         context_window=None,
                         max_output_tokens=None,
@@ -1345,7 +1342,6 @@ class TestAdminLlmRoutes:
                 json={
                     "canonical_name": "text-only-test",
                     "display_name": "Text Only",
-                    "vendor": "test",
                     "capabilities": ["chat"],
                     "thinking_level": "low",
                     "thinking_strategy": "openrouter_extra_body",
@@ -1360,7 +1356,6 @@ class TestAdminLlmRoutes:
                 json={
                     "canonical_name": "default-thinking-strategy-test",
                     "display_name": "Default Thinking Strategy",
-                    "vendor": "test",
                     "capabilities": ["chat"],
                 },
             )
@@ -1374,7 +1369,6 @@ class TestAdminLlmRoutes:
                 json={
                     "canonical_name": "bad-thinking-test",
                     "display_name": "Bad Thinking",
-                    "vendor": "test",
                     "capabilities": ["chat"],
                     "thinking_level": "turbo",
                     "thinking_strategy": "none",
@@ -1387,7 +1381,6 @@ class TestAdminLlmRoutes:
                 json={
                     "canonical_name": "bad-thinking-strategy-test",
                     "display_name": "Bad Thinking Strategy",
-                    "vendor": "test",
                     "capabilities": ["chat"],
                     "thinking_strategy": "turbo",
                 },
@@ -1516,7 +1509,6 @@ class TestAdminLlmRoutes:
                         id=existing_model_id,
                         canonical_name="gemma-4-31b-it",
                         display_name="Existing Gemma 4",
-                        vendor="google",
                         capabilities=["chat"],
                         context_window=4096,
                         max_output_tokens=None,
@@ -1581,7 +1573,6 @@ class TestAdminLlmRoutes:
             assert body["existing_model_id"] == existing_model_id
             assert body["model_payload"]["canonical_name"] == "google/gemma-4-31b-it"
             assert body["model_payload"]["display_name"] == "Gemma 4 31B Instruct"
-            assert body["model_payload"]["vendor"] == "google"
             assert body["model_payload"]["capabilities"] == [
                 "chat",
                 "vision",
@@ -1653,7 +1644,6 @@ class TestAdminLlmRoutes:
                     return OpenRouterModelMetadata(
                         model_id="oversized/model",
                         display_name="x" * 241,
-                        vendor="oversized",
                         capabilities=["chat"],
                         context_window=None,
                         max_output_tokens=None,

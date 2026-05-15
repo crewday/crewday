@@ -574,7 +574,6 @@ describe("LlmRegistryModals", () => {
             model_payload: {
               canonical_name: "google/gemma-4-31b-it",
               display_name: "Gemma 4 31B IT",
-              vendor: "Google",
               capabilities: ["chat", "json_mode", "function_calling", "reasoning"],
               context_window: 128000,
               max_output_tokens: 8192,

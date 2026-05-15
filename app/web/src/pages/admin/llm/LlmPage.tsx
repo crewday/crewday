@@ -16,12 +16,11 @@ import { buildHighlighted, emptyHighlighted } from "./lib/highlight";
 import { buildLlmGraphLayout } from "./lib/graphLayout";
 import { buildLlmIndexes } from "./lib/llmIndexes";
 import { useLlmGraphEdges } from "./useLlmGraphEdges";
-import { useAdminLlmPromptDrawer } from "./useAdminLlmPromptDrawer";
 import type { Column, EdgeLayout, Selection } from "./types";
 import type { RegistryDialogState } from "./LlmRegistryModals";
 
 const sub =
-  "Deployment-wide LLM graph/config: providers, models, capability assignment chains, and the prompt library. Shared by every workspace.";
+  "Deployment-wide LLM graph/config: providers, models, and capability assignment chains. Shared by every workspace.";
 const title = "LLM graph";
 
 export default function AdminLlmPage() {
@@ -30,7 +29,6 @@ export default function AdminLlmPage() {
     queryKey: qk.adminLlmGraph(),
     queryFn: () => fetchJson<LlmGraphPayload>("/admin/api/v1/llm/graph"),
   });
-  const { promptsQ, promptOverflow, promptDrawer } = useAdminLlmPromptDrawer();
 
   const [selection, setSelection] = useState<Selection | null>(null);
   const [hover, setHover] = useState<Selection | null>(null);
@@ -157,25 +155,23 @@ export default function AdminLlmPage() {
     setSelection(null);
   };
 
-  const overflow = [promptOverflow];
-
-  if (graphQ.isPending || promptsQ.isPending) {
+  if (graphQ.isPending) {
     return (
-      <DeskPage title={title} sub={sub} overflow={overflow}>
+      <DeskPage title={title} sub={sub}>
         <Loading />
       </DeskPage>
     );
   }
-  if (!graph || !promptsQ.data || !indexes || !layout) {
+  if (!graph || !indexes || !layout) {
     return (
-      <DeskPage title={title} sub={sub} overflow={overflow}>
+      <DeskPage title={title} sub={sub}>
         Failed to load.
       </DeskPage>
     );
   }
 
   return (
-    <DeskPage title={title} sub={sub} overflow={overflow}>
+    <DeskPage title={title} sub={sub}>
       <div className="llm-graph-page">
         <LlmAlerts graph={graph} syncResult={undefined} />
 
@@ -293,7 +289,6 @@ export default function AdminLlmPage() {
           />
         </div>
 
-        {promptDrawer}
         <LlmRegistryModals
           dialog={registryDialog}
           providers={graph.providers}

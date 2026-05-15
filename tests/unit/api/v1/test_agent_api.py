@@ -225,7 +225,6 @@ def _seed_llm_assignment(
         id=new_ulid(),
         canonical_name=f"fake/{capability}",
         display_name=f"fake/{capability}",
-        vendor="other",
         capabilities=["chat"],
         is_active=True,
         price_source="",

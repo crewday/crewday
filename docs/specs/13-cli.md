@@ -426,9 +426,9 @@ crewday deploy                          # HTTP-backed deployment-admin group
   llm provider rotate-key <id>          # prompts for the new key on stdin; no plaintext in argv
   llm provider delete <id>              # refuses if a provider-model still points at it
   # Models
-  llm model list [--vendor] [--capability <tag>]
+  llm model list [--capability <tag>]
   llm model show <id>
-  llm model create --canonical <name> --display <n> --vendor <v> \
+  llm model create --canonical <name> --display <n> \
                    --capabilities chat,vision,json_mode,... \
                    [--context-window <n>] [--max-output-tokens <n>] \
                    [--price-source openrouter|none]

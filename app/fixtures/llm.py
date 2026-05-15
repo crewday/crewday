@@ -76,7 +76,6 @@ def seed_default_registry(
     provider_type: str = "fake",
     model_canonical_name: str = DEFAULT_MODEL_CANONICAL_NAME,
     model_display_name: str = "Default Chat Base",
-    model_vendor: str = "other",
     model_capabilities: list[str] | None = None,
 ) -> LlmProviderModel:
     """Insert (or return) the default LLM registry trio.
@@ -130,7 +129,6 @@ def seed_default_registry(
             id=new_ulid(c),
             canonical_name=model_canonical_name,
             display_name=model_display_name,
-            vendor=model_vendor,
             capabilities=list(model_capabilities or DEFAULT_MODEL_CAPABILITIES),
             thinking_level="disabled",
             is_active=True,
@@ -211,7 +209,6 @@ def seed_default_registry_for_settings(
             provider_type="openrouter",
             model_canonical_name=OPENROUTER_DEFAULT_MODEL_CANONICAL_NAME,
             model_display_name="Google Gemma 4 31B IT",
-            model_vendor="google",
             model_capabilities=["chat", "function_calling", "json_mode", "vision"],
         )
     return seed_default_registry(session, clock=clock)

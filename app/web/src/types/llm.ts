@@ -54,7 +54,6 @@ export interface LlmModel {
   id: string;
   canonical_name: string;
   display_name: string;
-  vendor: string;
   capabilities: string[];
   context_window: number | null;
   max_output_tokens: number | null;

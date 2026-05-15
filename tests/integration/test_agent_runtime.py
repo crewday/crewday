@@ -295,7 +295,6 @@ def _seed_llm_assignment(session: Session, *, workspace_id: str) -> None:
         id=new_ulid(),
         canonical_name=f"fake/integration-model-{registry_suffix}",
         display_name="fake/integration-model",
-        vendor="other",
         capabilities=["chat"],
         is_active=True,
         price_source="",

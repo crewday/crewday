@@ -33,7 +33,6 @@ function model(id: string, displayName: string): LlmModel {
     id,
     canonical_name: id,
     display_name: displayName,
-    vendor: "test",
     capabilities: ["chat"],
     context_window: null,
     max_output_tokens: null,

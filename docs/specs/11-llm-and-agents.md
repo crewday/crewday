@@ -735,7 +735,6 @@ llm_model
 ├── id                     ULID PK
 ├── canonical_name         text            -- unique; e.g. google/gemma-3-27b-it
 ├── display_name           text
-├── vendor                 text            -- google | anthropic | openai | meta | mistral | qwen | other
 ├── capabilities           jsonb           -- list[str]; see "Model capability tags" below
 ├── context_window         int?
 ├── max_output_tokens      int?
@@ -1292,15 +1291,15 @@ refs land on the graph intentionally.
 
 The `/admin/llm/usage` page carries the supporting operational panels:
 the top-level 30-day summary cards, provider-model pricing with manual
-sync, and the recent-call table. Both LLM pages expose the prompt
-library drawer so prompt template edits stay reachable from the admin
-LLM area.
+sync, and the recent-call table. Prompt/docs navigation stays reachable
+through the dedicated Prompts/docs sidebar link in the admin LLM area,
+so the graph page does not carry a duplicate overflow action.
 
 - **Column 1 — Providers.** One card per `llm_provider`; shows type,
   endpoint host, enabled state, API-key status (present / missing /
   rotating), and the provider's recent call/spend total.
-- **Column 2 — Models.** One card per `llm_model`; shows vendor and
-  capability tags as chips. Cards carry a small modality icon bar
+- **Column 2 — Models.** One card per `llm_model`; shows canonical name
+  and capability tags as chips. Cards carry a small modality icon bar
   (text / vision / audio / reasoning), thinking level as a chip after
   the capability tags, context window as the next chip, and the
   model's recent call/spend total. The model create/edit drawer exposes
@@ -1369,10 +1368,9 @@ LLM area.
   - Pricing rows flagged `price_source_override = 'none'` show a
     small "manual" chip; stale (`price_last_synced_at > 14 days` for
     an unpinned row) show a "stale" chip.
-- **Prompt library** lives as a secondary action in the page header —
-  "Prompts" opens a slide-over with one row per capability, its
-  version, and whether it's currently customised (different body than
-  `default_hash`). Editing a prompt opens the revision history.
+- **Prompt library** is not duplicated in the graph page header.
+  Operators reach prompts and agent docs from the dedicated
+  Prompts/docs sidebar link.
 - **Provider-model playground.** The provider-model edit drawer can
   call
   `POST /admin/api/v1/llm/provider-models/{id}/playground` to run a
