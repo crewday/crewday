@@ -934,7 +934,7 @@ function ProviderModelSummary({
       {variant === "available" ? (
         <span className="llm-assignment-provider-model__meta">
           {provider?.name ?? "Provider"} ·{" "}
-          {thinkingLabel(providerModel.effective_thinking_level)}
+          {thinkingLabel(model?.thinking_level ?? "disabled")}
         </span>
       ) : null}
       {missing.length ? (

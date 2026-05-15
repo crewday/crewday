@@ -17,7 +17,6 @@ import type {
   LlmProvider,
   LlmProviderModel,
   LlmProviderType,
-  LlmReasoningEffort,
   LlmThinkingLevel,
   LlmThinkingStrategy,
 } from "@/types";
@@ -132,9 +131,7 @@ interface ProviderModelPayload {
   temperature_override: number | null;
   supports_system_prompt: boolean;
   supports_temperature: boolean;
-  thinking_level_override: LlmThinkingLevel | null;
   thinking_strategy_override: LlmThinkingStrategy | null;
-  reasoning_effort: LlmReasoningEffort;
   extra_api_params: Record<string, unknown>;
   price_source_override: LlmPriceSourceOverride;
   price_source_model_id_override: string | null;
@@ -660,9 +657,7 @@ function ModelForm({
         temperature_override: null,
         supports_system_prompt: true,
         supports_temperature: true,
-        thinking_level_override: null,
         thinking_strategy_override: null,
-        reasoning_effort: "",
         extra_api_params: {},
         price_source_override: "",
         price_source_model_id_override: null,
@@ -1116,12 +1111,6 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   const [supportsTemperature, setSupportsTemperature] = useState(
     providerModel?.supports_temperature ?? true,
   );
-  const [reasoningEffort] = useState<LlmReasoningEffort>(
-    providerModel?.reasoning_effort ?? "",
-  );
-  const [thinkingOverride, setThinkingOverride] = useState<
-    LlmThinkingLevel | "inherit"
-  >(providerModel?.thinking_level_override ?? "inherit");
   const [thinkingStrategyOverride, setThinkingStrategyOverride] = useState<
     LlmThinkingStrategy | "inherit"
   >(providerModel?.thinking_strategy_override ?? "inherit");
@@ -1149,14 +1138,12 @@ function ProviderModelForm(props: ProviderModelFormProps) {
         : undefined,
     [models, providerModel],
   );
-  const inheritedThinkingLevel =
-    selectedModel?.thinking_level ?? providerModel?.effective_thinking_level ?? "disabled";
+  const inheritedThinkingLevel = selectedModel?.thinking_level ?? "disabled";
   const inheritedThinkingStrategy =
     selectedModel?.thinking_strategy ??
     providerModel?.effective_thinking_strategy ??
     "none";
-  const playgroundThinkingLevel =
-    thinkingOverride === "inherit" ? inheritedThinkingLevel : thinkingOverride;
+  const playgroundThinkingLevel = inheritedThinkingLevel;
   const playgroundThinkingStrategy =
     thinkingStrategyOverride === "inherit"
       ? inheritedThinkingStrategy
@@ -1195,7 +1182,6 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   const err = clientErr ?? serverErr;
   const errId = err ? "llm-provider-model-error" : undefined;
   const extraHelpId = "llm-provider-model-extra-help";
-  const thinkingHelpId = "llm-provider-model-thinking-help";
   const thinkingStrategyHelpId = "llm-provider-model-thinking-strategy-help";
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -1250,11 +1236,8 @@ function ProviderModelForm(props: ProviderModelFormProps) {
       temperature_override: temperatureValue,
       supports_system_prompt: supportsSystemPrompt,
       supports_temperature: supportsTemperature,
-      thinking_level_override:
-        thinkingOverride === "inherit" ? null : thinkingOverride,
       thinking_strategy_override:
         thinkingStrategyOverride === "inherit" ? null : thinkingStrategyOverride,
-      reasoning_effort: reasoningEffort,
       extra_api_params: parsedExtra,
       price_source_override: priceSourceOverride,
       price_source_model_id_override: emptyToNull(priceSourceModelOverride),
@@ -1364,6 +1347,8 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               aria-describedby={errId}
             />
           </FormModalField>
+        </FormModalGrid>
+        <FormModalGrid>
           <FormModalField label="Fixed cost per call" requirement="optional">
             <input
               type="number"
@@ -1375,8 +1360,6 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               aria-describedby={errId}
             />
           </FormModalField>
-        </FormModalGrid>
-        <FormModalGrid>
           <FormModalField
             label="Thinking strategy"
             requirement="optional"
@@ -1397,30 +1380,6 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               {THINKING_STRATEGY_OPTIONS.map((strategy) => (
                 <option key={strategy} value={strategy}>
                   {thinkingStrategyLabel(strategy)}
-                </option>
-              ))}
-            </select>
-          </FormModalField>
-          <FormModalField
-            label="Thinking level"
-            requirement="optional"
-            helpId={thinkingHelpId}
-            helpText={`Model default: ${thinkingLevelLabel(inheritedThinkingLevel)}.`}
-          >
-            <select
-              value={thinkingOverride}
-              aria-describedby={describedBy(thinkingHelpId, errId)}
-              onChange={(e) => {
-                const next = e.target.value;
-                if (next === "inherit" || isThinkingLevel(next)) {
-                  setThinkingOverride(next);
-                }
-              }}
-            >
-              <option value="inherit">Model default</option>
-              {THINKING_LEVEL_OPTIONS.map((level) => (
-                <option key={level} value={level}>
-                  {thinkingLevelLabel(level)}
                 </option>
               ))}
             </select>

@@ -798,9 +798,7 @@ llm_provider_model
 ├── temperature_override       float?
 ├── supports_system_prompt     bool            -- some reasoning models reject system prompts
 ├── supports_temperature       bool            -- o-series models forbid temperature
-├── thinking_level_override    text?           -- NULL = inherit model thinking_level; otherwise disabled | low | medium | high
 ├── thinking_strategy_override text?           -- NULL/empty = inherit model thinking_strategy; otherwise none | gemma_system_token | glm_extra_body | openrouter_extra_body
-├── reasoning_effort           text?           -- legacy compatibility; prefer thinking_level_override
 ├── extra_api_params           jsonb           -- catch-all for rare/new fields
 ├── price_source_override      text?           -- '' | 'none' | 'openrouter' — per-row override of the model's price_source
 ├── price_source_model_id_override text?
@@ -812,19 +810,20 @@ llm_provider_model
 
 - `api_model_id` decouples the canonical model name from what the wire
   expects (OpenRouter prefixes with a vendor, native SDKs don't).
+- `is_enabled = false` disables only this provider/model pairing. The
+  row stays in the registry and may remain referenced by assignments,
+  but runtime resolution skips it the same way it skips disabled
+  providers and inactive models.
 - `supports_temperature = false` makes the client strip the param
   before the call. `supports_system_prompt = false` folds the system
   prompt into the first user turn. These flags exist because they
   matter in practice on o-series / reasoning-first models.
 - Thinking is configured in two parts. `thinking_level` is the
   product-level intensity vocabulary (`disabled`, `low`, `medium`,
-  `high`). `llm_model.thinking_level` is the provider-agnostic
-  default, `llm_provider_model.thinking_level_override` can override
-  it for one provider/model combo, and
-  `llm_assignment.thinking_level_override` can override both for one
+  `high`). `llm_model.thinking_level` is the provider-agnostic default,
+  and `llm_assignment.thinking_level_override` can override it for one
   capability-chain rung. The resolver exposes the effective value
-  (`assignment override ?? provider-model override ?? model default`)
-  to adapters.
+  (`assignment override ?? model default`) to adapters.
 - `thinking_strategy` records how a non-disabled thinking level is
   represented on the wire. Allowed values are `none` (send no explicit
   thinking control), `gemma_system_token` (for Gemma 4, prepend
@@ -988,7 +987,7 @@ llm_assignment
 ├── provider_model_id           ULID FK llm_provider_model ON DELETE PROTECT
 ├── max_tokens                  int?            -- overrides provider_model + model defaults
 ├── temperature                 float?
-├── thinking_level_override     text?           -- NULL = inherit provider-model/model; otherwise disabled | low | medium | high
+├── thinking_level_override     text?           -- NULL = inherit model; otherwise disabled | low | medium | high
 ├── system_prompt_override      text?           -- rare one-off; prefer llm_prompt_template
 ├── extra_api_params            jsonb           -- merged last, wins over provider_model params
 ├── required_capabilities       jsonb           -- copied from the catalog; recomputed on save
@@ -1005,7 +1004,6 @@ column kept only for migration safety; active rows have `workspace_id
 IS NULL` and the resolver ignores legacy non-NULL rows.
 
 `thinking_level_override` is per-assignment. `NULL` inherits the
-provider-model effective thinking level, which itself may inherit the
 canonical model default. An explicit assignment value (`disabled`,
 `low`, `medium`, or `high`) wins for calls routed through that
 assignment, so the same provider-model can run with thinking disabled
@@ -1323,16 +1321,16 @@ LLM area.
   provider-model `api_model_id`, `price_source_override`,
   `price_source_model_id_override`, input/output pricing for the
   selected OpenRouter provider-model rows, `supports_system_prompt`,
-  `supports_temperature`, and thinking fields (`thinking_level`,
-  `thinking_strategy`, plus provider-model overrides) where the source
-  data makes them inferable. Any inferred value remains editable before
+  `supports_temperature`, model thinking fields (`thinking_level`,
+  `thinking_strategy`), and provider-model thinking strategy overrides
+  where the source data makes them inferable. Any inferred value remains editable before
   save; unknown fields stay blank or at their explicit defaults rather
   than being guessed.
-- **Provider-model editing.** Provider-model edit drawers expose pricing,
-  support flags, thinking-level override, thinking-strategy override,
-  and their effective inherited thinking values. Override controls use
-  `inherit` for the nullable/empty state and otherwise offer the same
-  values as the model-level fields.
+- **Provider-model editing.** Provider-model edit drawers expose enabled
+  state, pricing, support flags, and a thinking-strategy override. The
+  nullable strategy control uses `inherit` for the model default;
+  thinking level is set at the model level or overridden per
+  assignment.
 - **Column 3 — Assignments.** Grouped by capability. Each group is a
   vertical stack of its priority chain, top-to-bottom = highest to
   lowest priority. Drag within a group reorders priority (hits
@@ -1378,14 +1376,15 @@ LLM area.
 - **Provider-model playground.** The provider-model edit drawer can
   call
   `POST /admin/api/v1/llm/provider-models/{id}/playground` to run a
-  deployment-admin smoke test before the row is assigned to production
-  capabilities. The endpoint is gated by `deployment.llm:write` because
-  it performs an active upstream call. Direct mode calls the selected
-  provider-model row by its `api_model_id`; assignment mode requires a
-  deployment-level assignment that points at the same provider-model and
+  deployment-admin smoke test before an enabled row is assigned to
+  production capabilities. The endpoint is gated by
+  `deployment.llm:write` because it performs an active upstream call.
+  Direct mode calls the selected provider-model row by its
+  `api_model_id`; assignment mode requires a deployment-level
+  assignment that points at the same provider-model and
   applies that assignment's tuning defaults, including its
-  thinking-level override before falling back to the provider-model/model
-  effective thinking level and strategy. Direct mode may send explicit
+  thinking-level override before falling back to the model thinking
+  level and provider-model/model effective strategy. Direct mode may send explicit
   `thinking_level` / `thinking_strategy` values from the current edit
   drawer state; when present, those request values override persisted
   row defaults for the smoke test only. The response is stateless and

@@ -438,10 +438,9 @@ crewday deploy                          # HTTP-backed deployment-admin group
   llm provider-model list [--provider <id>] [--model <id>]
   llm provider-model create --provider <id> --model <id> --api-model-id <s> \
                             [--input-per-million <d>] [--output-per-million <d>] \
-                            [--reasoning-effort low|medium|high] \
                             [--no-system-prompt] [--no-temperature] \
-                            [--price-source-override openrouter|none]
-  llm provider-model edit <id> [...]
+                            [--price-source-override openrouter|none] [--disabled]
+  llm provider-model edit <id> [...] [--enable|--disable]
   llm provider-model delete <id>
   # Assignments (priority-ordered chain per capability)
   llm assignment list [--capability]

@@ -13,6 +13,7 @@ import LlmRegistryModals from "./LlmRegistryModals";
 import ModelColumn from "./ModelColumn";
 import ProviderColumn from "./ProviderColumn";
 import { buildHighlighted, emptyHighlighted } from "./lib/highlight";
+import { buildLlmGraphLayout } from "./lib/graphLayout";
 import { buildLlmIndexes } from "./lib/llmIndexes";
 import { useLlmGraphEdges } from "./useLlmGraphEdges";
 import { useAdminLlmPromptDrawer } from "./useAdminLlmPromptDrawer";
@@ -42,6 +43,10 @@ export default function AdminLlmPage() {
 
   const graph = graphQ.data;
   const indexes = useMemo(() => (graph ? buildLlmIndexes(graph) : null), [graph]);
+  const layout = useMemo(
+    () => (graph && indexes ? buildLlmGraphLayout(graph, indexes) : null),
+    [graph, indexes],
+  );
   const active = hover ?? selection;
 
   const highlighted = useMemo(() => {
@@ -161,7 +166,7 @@ export default function AdminLlmPage() {
       </DeskPage>
     );
   }
-  if (!graph || !promptsQ.data || !indexes) {
+  if (!graph || !promptsQ.data || !indexes || !layout) {
     return (
       <DeskPage title={title} sub={sub} overflow={overflow}>
         Failed to load.
@@ -246,7 +251,7 @@ export default function AdminLlmPage() {
           </div>
 
           <ProviderColumn
-            providers={graph.providers}
+            providers={layout.providers}
             setHover={setHover}
             setSelection={setSelection}
             onEditProvider={(id) =>
@@ -256,7 +261,7 @@ export default function AdminLlmPage() {
             setProviderRef={setRef(providerRefs)}
           />
           <ModelColumn
-            models={graph.models}
+            models={layout.models}
             setHover={setHover}
             setSelection={setSelection}
             nodeClass={nodeClass}
@@ -267,9 +272,10 @@ export default function AdminLlmPage() {
               setRegistryDialog({ kind: "providerModel", mode: "edit", id })
             }
             indexes={indexes}
+            providerModelsByModelId={layout.providerModelsByModelId}
           />
           <AssignmentColumn
-            capabilities={graph.capabilities}
+            assignmentGroups={layout.assignmentGroups}
             indexes={indexes}
             active={active}
             setHover={setHover}

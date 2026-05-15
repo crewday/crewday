@@ -3578,9 +3578,7 @@ class TestRegistryShape:
             "temperature_override",
             "supports_system_prompt",
             "supports_temperature",
-            "thinking_level_override",
             "thinking_strategy_override",
-            "reasoning_effort",
             "extra_api_params",
             "price_source_override",
             "price_source_model_id_override",
@@ -3590,20 +3588,6 @@ class TestRegistryShape:
             "updated_at",
         }
         assert set(cols) == expected
-
-    def test_llm_provider_model_thinking_override_constraint(
-        self, db_session: Session
-    ) -> None:
-        pm = _seed_registry_trio(
-            db_session,
-            provider_model_id="01HWA0000000000000000THPM",
-            suffix="THPM",
-        )
-        pm.thinking_level_override = "turbo"
-
-        with pytest.raises(IntegrityError):
-            db_session.flush()
-        db_session.rollback()
 
     def test_llm_provider_model_thinking_strategy_override_constraint(
         self, db_session: Session

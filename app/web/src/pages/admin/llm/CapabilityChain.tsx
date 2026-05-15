@@ -42,7 +42,7 @@ export default function CapabilityChain(props: CapabilityChainProps) {
         const model = pm ? indexes.modelsById.get(pm.model_id) : null;
         const provider = pm ? indexes.providersById.get(pm.provider_id) : null;
         const missing = indexes.issuesByAssignment.get(a.id) ?? [];
-        const inheritedThinkingLevel = pm?.effective_thinking_level;
+        const inheritedThinkingLevel = model?.thinking_level;
         const assignmentThinkingLevel =
           a.thinking_level_override &&
           a.thinking_level_override !== inheritedThinkingLevel

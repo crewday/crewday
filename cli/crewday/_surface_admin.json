@@ -1646,6 +1646,49 @@
     "x_cli": null
   },
   {
+    "body_schema_ref": "#/components/schemas/OpenRouterModelPreviewRequest",
+    "group": "llm",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/llm/models/openrouter-preview"
+    },
+    "idempotent": false,
+    "name": "openrouter-preview",
+    "operation_id": "admin.llm.models.openrouter_preview",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/OpenRouterModelPreviewResponse",
+    "summary": "Openrouter Model Preview",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/llm/provider-models/{provider_model_id}/playground"
+    },
+    "idempotent": false,
+    "name": "playground",
+    "operation_id": "admin.llm.provider_models.playground",
+    "path_params": [
+      {
+        "name": "provider_model_id",
+        "required": true,
+        "schema": {
+          "title": "Provider Model Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmProviderModelPlaygroundResponse",
+    "summary": "Provider Model Playground",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
     "body_schema_ref": null,
     "group": "llm",
     "http": {

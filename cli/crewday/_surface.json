@@ -147,6 +147,28 @@
     }
   },
   {
+    "body_schema_ref": "#/components/schemas/AgentRelayRequestBody",
+    "group": "agent",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/agent/manager/relay/request"
+    },
+    "idempotent": false,
+    "name": "relay-request",
+    "operation_id": "agent.relay.request",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AgentRelayRequestResponse",
+    "summary": "Ask a visible worker through their embedded agent",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "agent",
+      "mutates": true,
+      "summary": "Ask a visible worker through their agent",
+      "verb": "relay-request"
+    }
+  },
+  {
     "body_schema_ref": "#/components/schemas/AgentApprovalModeUpdate",
     "group": "agent",
     "http": {

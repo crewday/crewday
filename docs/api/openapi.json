@@ -14132,16 +14132,6 @@
             "title": "Calls 30D",
             "type": "integer"
           },
-          "effective_thinking_level": {
-            "enum": [
-              "disabled",
-              "high",
-              "low",
-              "medium"
-            ],
-            "title": "Effective Thinking Level",
-            "type": "string"
-          },
           "effective_thinking_strategy": {
             "enum": [
               "gemma_system_token",
@@ -14234,16 +14224,6 @@
             "title": "Provider Id",
             "type": "string"
           },
-          "reasoning_effort": {
-            "enum": [
-              "",
-              "high",
-              "low",
-              "medium"
-            ],
-            "title": "Reasoning Effort",
-            "type": "string"
-          },
           "spend_usd_30d": {
             "default": 0.0,
             "title": "Spend Usd 30D",
@@ -14268,23 +14248,6 @@
             ],
             "title": "Temperature Override"
           },
-          "thinking_level_override": {
-            "anyOf": [
-              {
-                "enum": [
-                  "disabled",
-                  "high",
-                  "low",
-                  "medium"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Thinking Level Override"
-          },
           "thinking_strategy_override": {
             "anyOf": [
               {
@@ -14305,7 +14268,6 @@
         },
         "required": [
           "api_model_id",
-          "effective_thinking_level",
           "effective_thinking_strategy",
           "extra_api_params",
           "fixed_cost_per_call_usd",
@@ -14319,11 +14281,9 @@
           "price_source_model_id_override",
           "price_source_override",
           "provider_id",
-          "reasoning_effort",
           "supports_system_prompt",
           "supports_temperature",
           "temperature_override",
-          "thinking_level_override",
           "thinking_strategy_override"
         ],
         "title": "LlmProviderModelResponse",
@@ -18632,17 +18592,6 @@
             "title": "Provider Id",
             "type": "string"
           },
-          "reasoning_effort": {
-            "default": "",
-            "enum": [
-              "",
-              "high",
-              "low",
-              "medium"
-            ],
-            "title": "Reasoning Effort",
-            "type": "string"
-          },
           "supports_system_prompt": {
             "default": true,
             "title": "Supports System Prompt",
@@ -18665,23 +18614,6 @@
               }
             ],
             "title": "Temperature Override"
-          },
-          "thinking_level_override": {
-            "anyOf": [
-              {
-                "enum": [
-                  "disabled",
-                  "high",
-                  "low",
-                  "medium"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Thinking Level Override"
           },
           "thinking_strategy_override": {
             "anyOf": [

@@ -359,9 +359,7 @@ describe("LlmRegistryModals", () => {
     fireEvent.change(screen.getByLabelText(/Thinking strategy/), {
       target: { value: "gemma_system_token" },
     });
-    fireEvent.change(screen.getByLabelText(/Thinking level/), {
-      target: { value: "high" },
-    });
+    expect(screen.queryByLabelText(/Thinking level/)).not.toBeInTheDocument();
 
     const playground = playgroundSection();
     fireEvent.change(within(playground).getByLabelText("Prompt Required"), {
@@ -374,7 +372,7 @@ describe("LlmRegistryModals", () => {
       (call) => call.url === "/admin/api/v1/llm/provider-models/pm_gemma/playground",
     );
     expect(bodyOf(post!)).toMatchObject({
-      thinking_level: "high",
+      thinking_level: "disabled",
       thinking_strategy: "gemma_system_token",
     });
     expect(
@@ -616,36 +614,28 @@ describe("LlmRegistryModals", () => {
     expect(bodyOf(preview!)).toEqual({ model_id_or_url: "google/gemma-4-31b-it" });
   });
 
-  it("shows inherited provider-model thinking and saves explicit overrides", async () => {
+  it("omits provider-model thinking level and saves only strategy overrides", async () => {
     const calls = installFetch();
     const testGraph: LlmGraphPayload = {
       ...baseGraph,
       models: baseGraph.models.map((model) =>
-        model.id === "model_gemma" ? { ...model, thinking_level: "medium" } : model,
-      ),
-      provider_models: baseGraph.provider_models.map((pm) =>
-        pm.id === "pm_gemma"
-          ? {
-              ...pm,
-              thinking_level_override: null,
-              effective_thinking_level: "medium",
-            }
-          : pm,
+        model.id === "model_gemma"
+          ? { ...model, thinking_strategy: "gemma_system_token" }
+          : model,
       ),
     };
     renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
 
-    const thinking = screen.getByLabelText(/Thinking level/);
-    expect(thinking).toHaveValue("inherit");
-    expect(within(thinking).getByRole("option", { name: "Model default" })).toBeInTheDocument();
-    expect(screen.getByText("Model default: medium.")).toBeInTheDocument();
-    expect(thinking).toHaveAttribute(
-      "aria-describedby",
-      "llm-provider-model-thinking-help",
-    );
+    expect(screen.queryByLabelText(/Thinking level/)).not.toBeInTheDocument();
+    const fixedCost = screen.getByLabelText(/Fixed cost per call/);
+    const strategy = screen.getByLabelText(/Thinking strategy/);
+    expect(
+      fixedCost.compareDocumentPosition(strategy) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(strategy).toHaveValue("inherit");
+    expect(screen.getByText("Model default: Gemma system token.")).toBeInTheDocument();
 
-    fireEvent.change(thinking, { target: { value: "high" } });
-    expect(screen.getByText("Model default: medium.")).toBeInTheDocument();
+    fireEvent.change(strategy, { target: { value: "openrouter_extra_body" } });
     fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
 
     await waitFor(() => {
@@ -662,7 +652,10 @@ describe("LlmRegistryModals", () => {
         call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
         call.init.method === "PUT",
     )!;
-    expect(bodyOf(put)).toMatchObject({ thinking_level_override: "high" });
+    expect(bodyOf(put)).not.toHaveProperty("thinking_level_override");
+    expect(bodyOf(put)).toMatchObject({
+      thinking_strategy_override: "openrouter_extra_body",
+    });
   });
 
   it("surfaces provider-model enabled state and can disable it", async () => {
@@ -693,21 +686,21 @@ describe("LlmRegistryModals", () => {
     expect(bodyOf(put)).toMatchObject({ is_enabled: false });
   });
 
-  it("renders provider-model field help after the associated controls", () => {
+  it("renders provider-model strategy help after the associated control", () => {
     installFetch();
     renderRegistry(baseGraph, { kind: "providerModel", mode: "create" });
 
-    const thinking = screen.getByLabelText(/Thinking level/);
-    const thinkingHelp = elementById("llm-provider-model-thinking-help");
+    const strategy = screen.getByLabelText(/Thinking strategy/);
+    const strategyHelp = elementById("llm-provider-model-thinking-strategy-help");
     const extraParams = screen.getByLabelText(/Extra API params/);
     const extraParamsHelp = elementById("llm-provider-model-extra-help");
 
-    expect(thinking).toHaveAttribute(
+    expect(strategy).toHaveAttribute(
       "aria-describedby",
-      "llm-provider-model-thinking-help",
+      "llm-provider-model-thinking-strategy-help",
     );
-    expect(thinkingHelp).toHaveTextContent("Model default: disabled.");
-    expectControlBeforeHelp(thinking, thinkingHelp);
+    expect(strategyHelp).toHaveTextContent("Model default: None / provider default.");
+    expectControlBeforeHelp(strategy, strategyHelp);
     expect(extraParams).toHaveAttribute(
       "aria-describedby",
       "llm-provider-model-extra-help",
@@ -718,87 +711,7 @@ describe("LlmRegistryModals", () => {
     expectControlBeforeHelp(extraParams, extraParamsHelp);
   });
 
-  it("ignores malformed provider-model thinking values before save", async () => {
-    const calls = installFetch();
-    const testGraph: LlmGraphPayload = {
-      ...baseGraph,
-      provider_models: baseGraph.provider_models.map((pm) =>
-        pm.id === "pm_gemma"
-          ? {
-              ...pm,
-              thinking_level_override: "high",
-              effective_thinking_level: "high",
-            }
-          : pm,
-      ),
-    };
-    renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
-
-    fireEvent.change(screen.getByLabelText(/Thinking level/), {
-      target: { value: "unsupported" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
-
-    await waitFor(() => {
-      expect(
-        calls.some(
-          (call) =>
-            call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
-            call.init.method === "PUT",
-        ),
-      ).toBe(true);
-    });
-    const put = calls.find(
-      (call) =>
-        call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
-        call.init.method === "PUT",
-    )!;
-    expect(bodyOf(put)).toMatchObject({ thinking_level_override: "high" });
-  });
-
-  it("clears provider-model thinking overrides back to the model default", async () => {
-    const calls = installFetch();
-    const testGraph: LlmGraphPayload = {
-      ...baseGraph,
-      models: baseGraph.models.map((model) =>
-        model.id === "model_gemma" ? { ...model, thinking_level: "medium" } : model,
-      ),
-      provider_models: baseGraph.provider_models.map((pm) =>
-        pm.id === "pm_gemma"
-          ? {
-              ...pm,
-              thinking_level_override: "high",
-              effective_thinking_level: "high",
-            }
-          : pm,
-      ),
-    };
-    renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
-
-    const thinking = screen.getByLabelText(/Thinking level/);
-    expect(thinking).toHaveValue("high");
-    fireEvent.change(thinking, { target: { value: "inherit" } });
-    expect(screen.getByText("Model default: medium.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
-
-    await waitFor(() => {
-      expect(
-        calls.some(
-          (call) =>
-            call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
-            call.init.method === "PUT",
-        ),
-      ).toBe(true);
-    });
-    const put = calls.find(
-      (call) =>
-        call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
-        call.init.method === "PUT",
-    )!;
-    expect(bodyOf(put)).toMatchObject({ thinking_level_override: null });
-  });
-
-  it("inherits and overrides provider-model thinking strategy separately from level", async () => {
+  it("inherits and overrides provider-model thinking strategy", async () => {
     const calls = installFetch();
     const testGraph: LlmGraphPayload = {
       ...baseGraph,
@@ -811,8 +724,6 @@ describe("LlmRegistryModals", () => {
         pm.id === "pm_gemma"
           ? {
               ...pm,
-              thinking_level_override: "high",
-              effective_thinking_level: "high",
               thinking_strategy_override: null,
               effective_thinking_strategy: "gemma_system_token",
             }
@@ -821,12 +732,8 @@ describe("LlmRegistryModals", () => {
     };
     renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
 
-    const level = screen.getByLabelText(/Thinking level/);
     const strategy = screen.getByLabelText(/Thinking strategy/);
-    expect(
-      strategy.compareDocumentPosition(level) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(level).toHaveValue("high");
+    expect(screen.queryByLabelText(/Thinking level/)).not.toBeInTheDocument();
     expect(strategy).toHaveValue("inherit");
     expect(within(strategy).getByRole("option", { name: "Model default" })).toBeInTheDocument();
     expect(
@@ -859,8 +766,8 @@ describe("LlmRegistryModals", () => {
         call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
         call.init.method === "PUT",
     )!;
+    expect(bodyOf(put)).not.toHaveProperty("thinking_level_override");
     expect(bodyOf(put)).toMatchObject({
-      thinking_level_override: "high",
       thinking_strategy_override: "openrouter_extra_body",
     });
   });

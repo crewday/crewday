@@ -752,10 +752,10 @@ fix the offender.
   fields to derive provider call parameters. See §11.
 - **LLM provider-model.** The `llm_provider_model` join between
   provider and model — where `api_model_id`, per-million pricing,
-  per-combo overrides, nullable `thinking_level_override`, nullable
-  `thinking_strategy_override`, and the per-row price-source pin live.
-  Empty thinking overrides inherit from the canonical model. Same
-  canonical model can be priced and tuned differently across providers.
+  per-combo overrides, nullable `thinking_strategy_override`, per-row
+  enabled state, and the per-row price-source pin live. Empty strategy
+  overrides inherit from the canonical model. Same canonical model can
+  be priced, tuned, and disabled differently across providers.
   See §11.
 - **LLM assignment chain.** The priority-ordered list of
   `llm_assignment` rows bound to a capability. `default` is the

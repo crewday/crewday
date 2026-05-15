@@ -158,7 +158,6 @@ def seed_default_registry(
             api_model_id=api_model_id,
             supports_system_prompt=True,
             supports_temperature=True,
-            thinking_level_override=None,
             is_enabled=True,
             created_at=now,
             updated_at=now,

@@ -1,8 +1,8 @@
 import { Chip } from "@/components/common";
-import type { LlmCapabilityEntry } from "@/types";
 import CapabilityChain from "./CapabilityChain";
 import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
 import { shouldOpenGraphEditor } from "./lib/clickTargets";
+import type { LlmAssignmentGroupLayout } from "./lib/graphLayout";
 import type { LlmIndexes } from "./lib/llmIndexes";
 import type {
   ElementRefSetter,
@@ -13,7 +13,7 @@ import type {
 } from "./types";
 
 interface AssignmentColumnProps {
-  capabilities: LlmCapabilityEntry[];
+  assignmentGroups: LlmAssignmentGroupLayout[];
   indexes: LlmIndexes;
   active: Selection | null;
   setHover: SelectionSetter;
@@ -30,7 +30,7 @@ interface AssignmentColumnProps {
 
 export default function AssignmentColumn(props: AssignmentColumnProps) {
   const {
-    capabilities,
+    assignmentGroups,
     indexes,
     active,
     setHover,
@@ -44,23 +44,13 @@ export default function AssignmentColumn(props: AssignmentColumnProps) {
     onOpenAssignment,
     onOpenProviderModel,
   } = props;
-  const roots = capabilities.filter((cap) => {
-    const hasChain = (indexes.assignmentsByCapability.get(cap.key) ?? []).length > 0;
-    return hasChain || !indexes.inheritanceByChild.has(cap.key);
-  });
-
   return (
     <div className="llm-graph__col llm-graph__col--assignments">
-      {roots.map((cap) => {
+      {assignmentGroups.map(({ capability: cap, chain, inheritedChildren }) => {
         // code-health: ignore[ccn nloc] Capability card mapping keeps graph state, inheritance badges, and modal click targets adjacent for this column.
-        const chain = indexes.assignmentsByCapability.get(cap.key) ?? [];
         const inheritsFrom = indexes.inheritanceByChild.get(cap.key);
         const hasExplicitInheritance = indexes.explicitInheritanceByChild.has(cap.key);
         const inheritedMissing = indexes.issuesByCapability.get(cap.key) ?? [];
-        const inheritedChildren = indexes.childrenByParent
-          .get(cap.key)
-          ?.map((key) => indexes.capabilitiesByKey.get(key))
-          .filter((child): child is LlmCapabilityEntry => Boolean(child)) ?? [];
         const isUnassigned = chain.length === 0 && !inheritsFrom;
         const isInheriting = chain.length === 0 && inheritsFrom;
         return (

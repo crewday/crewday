@@ -289,6 +289,128 @@ describe("Admin LlmPage", () => {
     }
   });
 
+  it("renders providers, models, and assignment groups in crossing-reduced order", async () => {
+    const graphForLayout = {
+      ...graph,
+      providers: [
+        { ...graph.providers[0], id: "provider_c", name: "Provider C" },
+        { ...graph.providers[0], id: "provider_a", name: "Provider A" },
+        { ...graph.providers[0], id: "provider_b", name: "Provider B" },
+      ],
+      models: [
+        {
+          ...graph.models[0],
+          id: "model_alpha",
+          display_name: "Alpha",
+          canonical_name: "alpha",
+        },
+        {
+          ...graph.models[1],
+          id: "model_beta",
+          display_name: "Beta",
+          canonical_name: "beta",
+        },
+        {
+          ...graph.models[2],
+          id: "model_gamma",
+          display_name: "Gamma",
+          canonical_name: "gamma",
+        },
+      ],
+      provider_models: [
+        {
+          ...graph.provider_models[0],
+          id: "pm_c_alpha",
+          provider_id: "provider_c",
+          model_id: "model_alpha",
+          api_model_id: "c/alpha",
+        },
+        {
+          ...graph.provider_models[1],
+          id: "pm_a_beta",
+          provider_id: "provider_a",
+          model_id: "model_beta",
+          api_model_id: "a/beta",
+        },
+        {
+          ...graph.provider_models[2],
+          id: "pm_b_gamma",
+          provider_id: "provider_b",
+          model_id: "model_gamma",
+          api_model_id: "b/gamma",
+        },
+      ],
+      capabilities: [
+        { ...graph.capabilities[0], key: "cap_b", description: "cap b" },
+        { ...graph.capabilities[1], key: "cap_a", description: "cap a" },
+        { ...graph.capabilities[2], key: "cap_c", description: "cap c" },
+      ],
+      inheritance: [],
+      assignments: [
+        {
+          ...graph.assignments[0],
+          id: "assign_b",
+          capability: "cap_b",
+          provider_model_id: "pm_b_gamma",
+          priority: 0,
+        },
+        {
+          ...graph.assignments[1],
+          id: "assign_a",
+          capability: "cap_a",
+          provider_model_id: "pm_a_beta",
+          priority: 0,
+        },
+        {
+          ...graph.assignments[0],
+          id: "assign_c",
+          capability: "cap_c",
+          provider_model_id: "pm_c_alpha",
+          priority: 0,
+        },
+      ],
+      assignment_issues: [],
+      totals: {
+        ...graph.totals,
+        provider_count: 3,
+        model_count: 3,
+        capability_count: 3,
+      },
+    };
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/graph": [{ body: graphForLayout }],
+    });
+    try {
+      render(<Harness />);
+      await screen.findByRole("button", { name: /^Provider B provider,/ });
+
+      const providerNames = Array.from(
+        graphBoard().querySelectorAll<HTMLElement>(
+          ".llm-graph__col--providers > .llm-graph-node .llm-graph-node__name",
+        ),
+        (item) => item.textContent,
+      );
+      const modelNames = Array.from(
+        graphBoard().querySelectorAll<HTMLElement>(
+          ".llm-graph__col--models > .llm-graph-node > .llm-graph-node__button .llm-graph-node__name",
+        ),
+        (item) => item.textContent,
+      );
+      const capabilityNames = Array.from(
+        graphBoard().querySelectorAll<HTMLElement>(
+          ".llm-graph__col--assignments > .llm-graph-node > .llm-graph-node__button .llm-graph-node__name",
+        ),
+        (item) => item.textContent,
+      );
+
+      expect(providerNames).toEqual(["Provider B", "Provider A", "Provider C"]);
+      expect(modelNames).toEqual(["Gamma", "Beta", "Alpha"]);
+      expect(capabilityNames).toEqual(["cap_b", "cap_a", "cap_c"]);
+    } finally {
+      fetcher.restore();
+    }
+  });
+
   it("uses compact million-scale context labels after thinking", async () => {
     const millionContextGraph = {
       ...graph,
@@ -792,9 +914,7 @@ describe("Admin LlmPage", () => {
                   temperature_override: null,
                   supports_system_prompt: true,
                   supports_temperature: true,
-                  thinking_level_override: null,
                   thinking_strategy_override: null,
-                  reasoning_effort: "",
                   extra_api_params: {},
                   price_source_override: "openrouter",
                   price_source_model_id_override: "google/gemma-4-31b-it",
@@ -1024,7 +1144,6 @@ describe("Admin LlmPage", () => {
         api_model_id: "test/new-wire",
         input_cost_per_million: 0.25,
         output_cost_per_million: 0.75,
-        thinking_level_override: null,
         thinking_strategy_override: null,
       });
 
@@ -1045,9 +1164,7 @@ describe("Admin LlmPage", () => {
       fireEvent.change(screen.getByLabelText(/Temperature override/), {
         target: { value: "0.7" },
       });
-      fireEvent.change(screen.getByLabelText(/Thinking level/), {
-        target: { value: "high" },
-      });
+      expect(screen.queryByLabelText(/Thinking level/)).not.toBeInTheDocument();
       fireEvent.change(screen.getByLabelText(/Thinking strategy/), {
         target: { value: "openrouter_extra_body" },
       });
@@ -1086,7 +1203,6 @@ describe("Admin LlmPage", () => {
         temperature_override: 0.7,
         supports_system_prompt: false,
         supports_temperature: false,
-        thinking_level_override: "high",
         thinking_strategy_override: "openrouter_extra_body",
         extra_api_params: { top_p: 0.9 },
         price_source_override: "openrouter",
@@ -1619,7 +1735,6 @@ describe("Admin LlmPage", () => {
         providerModel.id === "pm_gemma"
           ? {
               ...providerModel,
-              effective_thinking_level: "high",
               effective_thinking_strategy: "openrouter_extra_body",
             }
           : providerModel,

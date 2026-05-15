@@ -347,9 +347,7 @@ def _seed_llm_graph(session_factory: sessionmaker[Session]) -> SeededLlm:
                 temperature_override=None,
                 supports_system_prompt=True,
                 supports_temperature=True,
-                thinking_level_override="high",
                 thinking_strategy_override=None,
-                reasoning_effort="",
                 extra_api_params={},
                 price_source_override="",
                 price_source_model_id_override=None,
@@ -826,9 +824,7 @@ class TestAdminLlmRoutes:
                         temperature_override=None,
                         supports_system_prompt=True,
                         supports_temperature=True,
-                        thinking_level_override=None,
                         thinking_strategy_override=None,
-                        reasoning_effort="",
                         extra_api_params={},
                         price_source_override="",
                         price_source_model_id_override=None,
@@ -980,8 +976,8 @@ class TestAdminLlmRoutes:
             assert body["models"][0]["spend_usd_30d"] == 0.174606
             assert body["models"][0]["calls_30d"] == 3
             assert body["provider_models"][0]["id"] == seeded.provider_model_id
-            assert body["provider_models"][0]["thinking_level_override"] == "high"
-            assert body["provider_models"][0]["effective_thinking_level"] == "high"
+            assert "thinking_level_override" not in body["provider_models"][0]
+            assert "effective_thinking_level" not in body["provider_models"][0]
             assert body["provider_models"][0]["thinking_strategy_override"] is None
             assert (
                 body["provider_models"][0]["effective_thinking_strategy"]
@@ -991,7 +987,7 @@ class TestAdminLlmRoutes:
             assert body["provider_models"][0]["calls_30d"] == 3
             assert body["assignments"][0]["id"] == seeded.assignment_id
             assert body["assignments"][0]["thinking_level_override"] is None
-            assert body["assignments"][0]["effective_thinking_level"] == "high"
+            assert body["assignments"][0]["effective_thinking_level"] == "medium"
             assert (
                 body["assignments"][0]["effective_thinking_strategy"]
                 == "openrouter_extra_body"
@@ -1406,13 +1402,14 @@ class TestAdminLlmRoutes:
                     "provider_id": seeded.provider_id,
                     "model_id": model.json()["id"],
                     "api_model_id": "text-only-test",
-                    "thinking_level_override": "high",
                     "thinking_strategy_override": "glm_extra_body",
+                    "is_enabled": False,
                 },
             )
             assert provider_model.status_code == 200, provider_model.text
-            assert provider_model.json()["thinking_level_override"] == "high"
-            assert provider_model.json()["effective_thinking_level"] == "high"
+            assert provider_model.json()["is_enabled"] is False
+            assert "thinking_level_override" not in provider_model.json()
+            assert "effective_thinking_level" not in provider_model.json()
             assert (
                 provider_model.json()["thinking_strategy_override"] == "glm_extra_body"
             )
@@ -1427,18 +1424,20 @@ class TestAdminLlmRoutes:
                     "model_id": model.json()["id"],
                     "api_model_id": "text-only-test",
                     "thinking_strategy_override": "",
+                    "is_enabled": False,
                 },
             )
             assert inherited_provider_model.status_code == 200, (
                 inherited_provider_model.text
             )
+            assert inherited_provider_model.json()["is_enabled"] is False
             assert inherited_provider_model.json()["thinking_strategy_override"] is None
             assert (
                 inherited_provider_model.json()["effective_thinking_strategy"]
                 == "openrouter_extra_body"
             )
 
-            invalid_provider_model = client.post(
+            unsupported_level_field = client.post(
                 "/admin/api/v1/llm/provider-models",
                 json={
                     "provider_id": seeded.provider_id,
@@ -1447,8 +1446,8 @@ class TestAdminLlmRoutes:
                     "thinking_level_override": "turbo",
                 },
             )
-            assert invalid_provider_model.status_code == 422, (
-                invalid_provider_model.text
+            assert unsupported_level_field.status_code == 422, (
+                unsupported_level_field.text
             )
 
             invalid_provider_strategy = client.post(
@@ -1546,9 +1545,7 @@ class TestAdminLlmRoutes:
                         temperature_override=None,
                         supports_system_prompt=True,
                         supports_temperature=True,
-                        thinking_level_override=None,
                         thinking_strategy_override=None,
-                        reasoning_effort="",
                         extra_api_params={},
                         price_source_override="",
                         price_source_model_id_override=None,
@@ -1769,7 +1766,7 @@ class TestAdminLlmRoutes:
             )
             assert inherited.status_code == 200, inherited.text
             assert inherited.json()["thinking_level_override"] is None
-            assert inherited.json()["effective_thinking_level"] == "high"
+            assert inherited.json()["effective_thinking_level"] == "medium"
 
             invalid = client.put(
                 f"/admin/api/v1/llm/assignments/{seeded.assignment_id}",

@@ -245,11 +245,8 @@ class LlmProviderModelResponse(BaseModel):
     temperature_override: float | None
     supports_system_prompt: bool
     supports_temperature: bool
-    thinking_level_override: LlmThinkingLevel | None
-    effective_thinking_level: LlmThinkingLevel
     thinking_strategy_override: LlmThinkingStrategy | None
     effective_thinking_strategy: LlmThinkingStrategy
-    reasoning_effort: Literal["", "low", "medium", "high"]
     extra_api_params: dict[str, Any]
     price_source_override: Literal["", "none", "openrouter"]
     price_source_model_id_override: str | None
@@ -615,9 +612,7 @@ class ProviderModelPayload(BaseModel):
     temperature_override: float | None = Field(default=None, ge=0, le=2)
     supports_system_prompt: bool = True
     supports_temperature: bool = True
-    thinking_level_override: LlmThinkingLevel | None = None
     thinking_strategy_override: LlmThinkingStrategy | None = None
-    reasoning_effort: Literal["", "low", "medium", "high"] = ""
     extra_api_params: dict[str, Any] = Field(default_factory=dict)
     price_source_override: Literal["", "none", "openrouter"] = ""
     price_source_model_id_override: str | None = None
@@ -812,11 +807,6 @@ def _provider_model_response(
     usage: dict[str, tuple[int, Decimal]] | None = None,
 ) -> LlmProviderModelResponse:
     calls, spend = (usage or {}).get(row.id, (0, Decimal("0.000000")))
-    effective_thinking_level = _thinking_level(
-        row.thinking_level_override
-        if row.thinking_level_override is not None
-        else (model.thinking_level if model is not None else None)
-    )
     effective_thinking_strategy = _thinking_strategy(
         row.thinking_strategy_override
         if row.thinking_strategy_override
@@ -838,19 +828,12 @@ def _provider_model_response(
         temperature_override=row.temperature_override,
         supports_system_prompt=row.supports_system_prompt,
         supports_temperature=row.supports_temperature,
-        thinking_level_override=(
-            _thinking_level(row.thinking_level_override)
-            if row.thinking_level_override is not None
-            else None
-        ),
-        effective_thinking_level=effective_thinking_level,
         thinking_strategy_override=(
             _thinking_strategy(row.thinking_strategy_override)
             if row.thinking_strategy_override
             else None
         ),
         effective_thinking_strategy=effective_thinking_strategy,
-        reasoning_effort=row.reasoning_effort or "",
         extra_api_params=dict(row.extra_api_params or {}),
         price_source_override=row.price_source_override or "",
         price_source_model_id_override=row.price_source_model_id_override,
@@ -931,12 +914,7 @@ def _assignment_response(
     effective_thinking_level = _thinking_level(
         row.thinking_level_override
         if row.thinking_level_override is not None
-        else (
-            provider_model.thinking_level_override
-            if provider_model is not None
-            and provider_model.thinking_level_override is not None
-            else (model.thinking_level if model is not None else None)
-        )
+        else (model.thinking_level if model is not None else None)
     )
     effective_thinking_strategy = _thinking_strategy(
         provider_model.thinking_strategy_override
@@ -1645,9 +1623,7 @@ def _openrouter_provider_model_payload(
         temperature_override=None,
         supports_system_prompt=metadata.supports_system_prompt,
         supports_temperature=metadata.supports_temperature,
-        thinking_level_override=None,
         thinking_strategy_override=None,
-        reasoning_effort="",
         extra_api_params={},
         price_source_override="openrouter",
         price_source_model_id_override=metadata.model_id,
@@ -2277,9 +2253,7 @@ def build_admin_llm_router() -> APIRouter:
             temperature_override=payload.temperature_override,
             supports_system_prompt=payload.supports_system_prompt,
             supports_temperature=payload.supports_temperature,
-            thinking_level_override=payload.thinking_level_override,
             thinking_strategy_override=payload.thinking_strategy_override,
-            reasoning_effort=payload.reasoning_effort,
             extra_api_params=payload.extra_api_params,
             price_source_override=payload.price_source_override,
             price_source_model_id_override=payload.price_source_model_id_override,
@@ -2412,10 +2386,7 @@ def build_admin_llm_router() -> APIRouter:
                         assignment.thinking_level_override
                         if assignment is not None
                         and assignment.thinking_level_override is not None
-                        else (
-                            provider_model.thinking_level_override
-                            or model.thinking_level
-                        )
+                        else model.thinking_level
                     )
                 ),
                 thinking_strategy=(
@@ -2491,9 +2462,7 @@ def build_admin_llm_router() -> APIRouter:
             row.temperature_override = payload.temperature_override
             row.supports_system_prompt = payload.supports_system_prompt
             row.supports_temperature = payload.supports_temperature
-            row.thinking_level_override = payload.thinking_level_override
             row.thinking_strategy_override = payload.thinking_strategy_override
-            row.reasoning_effort = payload.reasoning_effort
             row.extra_api_params = payload.extra_api_params
             row.price_source_override = payload.price_source_override
             row.price_source_model_id_override = payload.price_source_model_id_override

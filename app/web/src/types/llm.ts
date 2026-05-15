@@ -27,7 +27,6 @@ export type LlmProviderType = "openrouter" | "openai_compatible" | "fake";
 export type LlmApiKeyStatus = "present" | "missing" | "rotating";
 export type LlmPriceSource = "openrouter" | "manual" | "";
 export type LlmPriceSourceOverride = "" | "none" | "openrouter";
-export type LlmReasoningEffort = "" | "low" | "medium" | "high";
 export type LlmThinkingLevel = "disabled" | "low" | "medium" | "high";
 export type LlmThinkingStrategy =
   | "none"
@@ -82,11 +81,8 @@ export interface LlmProviderModel {
   temperature_override: number | null;
   supports_system_prompt: boolean;
   supports_temperature: boolean;
-  thinking_level_override: LlmThinkingLevel | null;
-  effective_thinking_level: LlmThinkingLevel;
   thinking_strategy_override: LlmThinkingStrategy | null;
   effective_thinking_strategy: LlmThinkingStrategy;
-  reasoning_effort: LlmReasoningEffort;
   extra_api_params: Record<string, unknown>;
   price_source_override: LlmPriceSourceOverride;
   price_source_model_id_override: string | null;

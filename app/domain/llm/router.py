@@ -460,7 +460,7 @@ def _to_pick(
     thinking_level = _thinking_level(
         row.thinking_level_override
         if row.thinking_level_override is not None
-        else (provider_model.thinking_level_override or model.thinking_level)
+        else model.thinking_level
     )
     thinking_strategy = _thinking_strategy(
         provider_model.thinking_strategy_override or model.thinking_strategy

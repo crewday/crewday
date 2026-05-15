@@ -1,6 +1,6 @@
 import { Chip } from "@/components/common";
 import { formatContextWindow } from "@/lib/numberFormat";
-import type { LlmModel } from "@/types";
+import type { LlmModel, LlmProviderModel } from "@/types";
 import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
 import { shouldOpenGraphEditor } from "./lib/clickTargets";
 import type { LlmIndexes } from "./lib/llmIndexes";
@@ -27,6 +27,7 @@ interface ModelColumnProps {
   onEditModel: (modelId: string) => void;
   onEditProviderModel: (providerModelId: string) => void;
   indexes: LlmIndexes;
+  providerModelsByModelId: Map<string, LlmProviderModel[]>;
 }
 
 export default function ModelColumn(props: ModelColumnProps) {
@@ -40,12 +41,13 @@ export default function ModelColumn(props: ModelColumnProps) {
     onEditModel,
     onEditProviderModel,
     indexes,
+    providerModelsByModelId,
   } = props;
 
   return (
     <div className="llm-graph__col llm-graph__col--models">
       {models.map((m) => {
-        const providerModels = indexes.providerModelsByModelId.get(m.id) ?? [];
+        const providerModels = providerModelsByModelId.get(m.id) ?? [];
         return (
           <article
             key={m.id}

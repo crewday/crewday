@@ -1567,10 +1567,6 @@ class LlmProviderModel(Base):
         default=True,
         server_default=true(),
     )
-    # ``"" | "low" | "medium" | "high"`` — open enum because the
-    # vocabulary varies per reasoning provider.
-    reasoning_effort: Mapped[str | None] = mapped_column(String, nullable=True)
-    thinking_level_override: Mapped[str | None] = mapped_column(String, nullable=True)
     thinking_strategy_override: Mapped[str | None] = mapped_column(
         String, nullable=True
     )
@@ -1608,11 +1604,6 @@ class LlmProviderModel(Base):
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
-        CheckConstraint(
-            "thinking_level_override IS NULL "
-            f"OR thinking_level_override IN ({_in_clause(_LLM_THINKING_LEVEL_VALUES)})",
-            name="thinking_level_override",
-        ),
         CheckConstraint(
             "thinking_strategy_override IS NULL "
             "OR thinking_strategy_override IN "

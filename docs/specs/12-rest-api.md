@@ -1183,7 +1183,7 @@ GET    /admin/api/v1/llm/providers                   # list; shape per §11 llm_
 POST   /admin/api/v1/llm/providers                   # create
 GET    /admin/api/v1/llm/providers/{id}
 PUT    /admin/api/v1/llm/providers/{id}              # edit (no key rotation)
-DELETE /admin/api/v1/llm/providers/{id}              # refuses if any enabled provider-model points at it
+DELETE /admin/api/v1/llm/providers/{id}              # refuses if any provider-model points at it; disable instead to drain
 PUT    /admin/api/v1/llm/providers/{id}/key          # rotate API key; interactive-session-only (§11)
 
 # Models — provider-agnostic catalogue.
@@ -1199,7 +1199,7 @@ POST   /admin/api/v1/llm/provider-models             # create
 GET    /admin/api/v1/llm/provider-models/{id}
 POST   /admin/api/v1/llm/provider-models/{id}/playground  # smoke test; requires deployment.llm:write
 PUT    /admin/api/v1/llm/provider-models/{id}
-DELETE /admin/api/v1/llm/provider-models/{id}        # refuses if any enabled assignment references it
+DELETE /admin/api/v1/llm/provider-models/{id}        # refuses if any assignment references it; disable instead to drain
 
 # Assignments — priority-ordered chain per capability.
 GET    /admin/api/v1/llm/assignments                 # grouped by capability

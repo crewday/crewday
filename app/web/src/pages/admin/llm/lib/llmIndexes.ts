@@ -11,6 +11,7 @@ export interface LlmIndexes {
   modelsById: Map<string, LlmModel>;
   pmById: Map<string, LlmProviderModel>;
   providerModelsByModelId: Map<string, LlmProviderModel[]>;
+  providerModelsByProviderId: Map<string, LlmProviderModel[]>;
   capabilitiesByKey: Map<string, LlmGraphPayload["capabilities"][number]>;
   inheritanceByChild: Map<string, string>;
   explicitInheritanceByChild: Map<string, string>;
@@ -26,10 +27,14 @@ export function buildLlmIndexes(graph: LlmGraphPayload): LlmIndexes {
   const modelsById = new Map(graph.models.map((m) => [m.id, m]));
   const pmById = new Map(graph.provider_models.map((pm) => [pm.id, pm]));
   const providerModelsByModelId = new Map<string, LlmProviderModel[]>();
+  const providerModelsByProviderId = new Map<string, LlmProviderModel[]>();
   for (const pm of graph.provider_models) {
-    const list = providerModelsByModelId.get(pm.model_id) ?? [];
-    list.push(pm);
-    providerModelsByModelId.set(pm.model_id, list);
+    const modelList = providerModelsByModelId.get(pm.model_id) ?? [];
+    modelList.push(pm);
+    providerModelsByModelId.set(pm.model_id, modelList);
+    const providerList = providerModelsByProviderId.get(pm.provider_id) ?? [];
+    providerList.push(pm);
+    providerModelsByProviderId.set(pm.provider_id, providerList);
   }
   const capabilitiesByKey = new Map(graph.capabilities.map((c) => [c.key, c]));
   const inheritanceByChild = new Map(
@@ -79,6 +84,7 @@ export function buildLlmIndexes(graph: LlmGraphPayload): LlmIndexes {
     modelsById,
     pmById,
     providerModelsByModelId,
+    providerModelsByProviderId,
     capabilitiesByKey,
     inheritanceByChild,
     explicitInheritanceByChild,

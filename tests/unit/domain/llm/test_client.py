@@ -505,9 +505,7 @@ class TestHappyPath:
             capability=_CAPABILITY,
             api_model_id="thinking/model",
         )
-        provider_model = session.get(LlmProviderModel, assignment.model_id)
-        assert provider_model is not None
-        provider_model.thinking_level_override = "high"
+        assignment.thinking_level_override = "high"
         _seed_ledger(session, workspace_id=ws.id, cap_cents=500)
 
         adapter = _StubAdapter([_ok_response("hello world")])
