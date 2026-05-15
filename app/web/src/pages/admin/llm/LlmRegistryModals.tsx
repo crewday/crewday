@@ -37,7 +37,12 @@ export type RegistryDialogState =
   | { kind: "model"; mode: "create" }
   | { kind: "model"; mode: "edit"; id: string }
   | { kind: "providerModel"; mode: "create" }
-  | { kind: "providerModel"; mode: "edit"; id: string };
+  | {
+      kind: "providerModel";
+      mode: "edit";
+      id: string;
+      providerModel?: LlmProviderModel;
+    };
 
 interface RegistryModalsProps {
   dialog: RegistryDialogState | null;
@@ -46,6 +51,7 @@ interface RegistryModalsProps {
   providerModels: LlmProviderModel[];
   indexes: LlmIndexes;
   onClose: () => void;
+  onOpenProviderModel: (providerModel: LlmProviderModel) => void;
 }
 
 interface ProviderFormProps {
@@ -279,7 +285,15 @@ function providerModelOption(
 
 export default function LlmRegistryModals(props: RegistryModalsProps) {
   // code-health: ignore[ccn nloc] Lizard misattributes the registry form bodies to this modal dispatcher; each form is implemented below.
-  const { dialog, providers, models, providerModels, indexes, onClose } = props;
+  const {
+    dialog,
+    providers,
+    models,
+    providerModels,
+    indexes,
+    onClose,
+    onOpenProviderModel,
+  } = props;
 
   const titleId = dialog ? `llm-${dialog.kind}-${dialog.mode}-title` : undefined;
 
@@ -301,15 +315,20 @@ export default function LlmRegistryModals(props: RegistryModalsProps) {
         <ModelForm
           mode={dialog.mode}
           model={dialog.mode === "edit" ? indexes.modelsById.get(dialog.id) : undefined}
+          providers={providers}
+          providerModels={providerModels}
           titleId={titleId}
           onClose={onClose}
+          onOpenProviderModel={onOpenProviderModel}
         />
       ) : null}
       {dialog?.kind === "providerModel" ? (
         <ProviderModelForm
           mode={dialog.mode}
           providerModel={
-            dialog.mode === "edit" ? indexes.pmById.get(dialog.id) : undefined
+            dialog.mode === "edit"
+              ? indexes.pmById.get(dialog.id) ?? dialog.providerModel
+              : undefined
           }
           providers={providers}
           models={models}
@@ -528,13 +547,19 @@ function ProviderForm(props: ProviderFormProps) {
 function ModelForm({
   mode,
   model,
+  providers,
+  providerModels,
   titleId,
   onClose,
+  onOpenProviderModel,
 }: {
   mode: "create" | "edit";
   model?: LlmModel;
+  providers: LlmProvider[];
+  providerModels: LlmProviderModel[];
   titleId?: string;
   onClose: () => void;
+  onOpenProviderModel: (providerModel: LlmProviderModel) => void;
 }) {
   const qc = useQueryClient();
   const openRouterInputId = useId();
@@ -566,13 +591,28 @@ function ModelForm({
   );
   const [active, setActive] = useState(model?.is_active ?? true);
   const [notes, setNotes] = useState(model?.notes ?? "");
-  const [openRouterModel, setOpenRouterModel] = useState("");
+  const [openRouterModel, setOpenRouterModel] = useState(
+    mode === "edit" && model
+      ? (model.price_source_model_id ?? model.canonical_name)
+      : "",
+  );
   const [openRouterErr, setOpenRouterErr] = useState<string | null>(null);
   const [openRouterStatus, setOpenRouterStatus] = useState<string | null>(null);
   const [openRouterPricing, setOpenRouterPricing] =
     useState<OpenRouterPricingPreview | null>(null);
   const [clientErr, setClientErr] = useState<string | null>(null);
   const [serverErr, setServerErr] = useState<string | null>(null);
+  const [creatingProviderId, setCreatingProviderId] = useState<string | null>(null);
+
+  const missingProviders = useMemo(() => {
+    if (mode !== "edit" || !model) return [];
+    const providersWithModel = new Set(
+      providerModels
+        .filter((providerModel) => providerModel.model_id === model.id)
+        .map((providerModel) => providerModel.provider_id),
+    );
+    return providers.filter((provider) => !providersWithModel.has(provider.id));
+  }, [mode, model, providerModels, providers]);
 
   const invalidate = async () => {
     await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
@@ -599,6 +639,46 @@ function ModelForm({
       onClose();
     },
     onError: (error: Error) => setServerErr(apiErrorCopy(error, "Model delete failed.")),
+  });
+  const createProviderModel = useMutation({
+    mutationFn: (provider: LlmProvider) => {
+      if (!model) throw new Error("Model is required.");
+      const body: ProviderModelPayload = {
+        provider_id: provider.id,
+        model_id: model.id,
+        api_model_id: model.price_source_model_id ?? model.canonical_name,
+        input_cost_per_million: 0,
+        output_cost_per_million: 0,
+        fixed_cost_per_call_usd: null,
+        max_tokens_override: null,
+        temperature_override: null,
+        supports_system_prompt: true,
+        supports_temperature: true,
+        thinking_level_override: null,
+        thinking_strategy_override: null,
+        reasoning_effort: "",
+        extra_api_params: {},
+        price_source_override: "",
+        price_source_model_id_override: null,
+        is_enabled: provider.is_enabled,
+      };
+      return fetchJson<LlmProviderModel>("/admin/api/v1/llm/provider-models", {
+        method: "POST",
+        body,
+      });
+    },
+    onMutate: (provider) => {
+      setCreatingProviderId(provider.id);
+      setClientErr(null);
+      setServerErr(null);
+    },
+    onSuccess: async (providerModel) => {
+      await invalidate();
+      onOpenProviderModel(providerModel);
+    },
+    onError: (error: Error) =>
+      setServerErr(apiErrorCopy(error, "Provider-model create failed.")),
+    onSettled: () => setCreatingProviderId(null),
   });
   const openRouterPreview = useMutation({
     mutationFn: (modelIdOrUrl: string) =>
@@ -640,6 +720,70 @@ function ModelForm({
     openRouterPreview.isPending || openRouterStatus
       ? "llm-openrouter-status"
       : undefined;
+  const openRouterLoader = (
+    <div className="field form-field form-field--optional form-modal__field llm-openrouter-loader">
+      <label htmlFor={openRouterInputId} className="llm-openrouter-loader__label">
+        <span className="form-field__label">
+          OpenRouter model{" "}
+          <span className="form-field__requirement form-field__requirement--optional">
+            Optional
+          </span>
+        </span>
+      </label>
+      <div className="llm-openrouter-loader__control">
+        <input
+          id={openRouterInputId}
+          value={openRouterModel}
+          onChange={(e) => setOpenRouterModel(e.target.value)}
+          placeholder="google/gemma-4-31b-it"
+          aria-invalid={openRouterErr ? true : undefined}
+          aria-describedby={describedBy(openRouterErrId, openRouterStatusId)}
+        />
+        <button
+          type="button"
+          className="btn btn--ghost llm-openrouter-loader__button"
+          onClick={loadOpenRouterMetadata}
+          disabled={openRouterPreview.isPending || save.isPending}
+        >
+          {openRouterPreview.isPending ? "Loading…" : "Load metadata"}
+        </button>
+      </div>
+      {openRouterPreview.isPending || openRouterStatus ? (
+        <p
+          id="llm-openrouter-status"
+          className="llm-openrouter-loader__status"
+          role="status"
+        >
+          {openRouterPreview.isPending
+            ? "Loading OpenRouter metadata..."
+            : openRouterStatus}
+        </p>
+      ) : null}
+      {openRouterPricing ? (
+        <p className="llm-openrouter-loader__pricing">
+          Provider price preview: {openRouterPricing.providerName}{" "}
+          {formatCostPerMillion(openRouterPricing.inputCostPerMillion)} in,{" "}
+          {formatCostPerMillion(openRouterPricing.outputCostPerMillion)} out
+          {openRouterPricing.fixedCostPerCallUsd !== null
+            ? `, ${new Intl.NumberFormat("en-US", {
+                style: "currency",
+                currency: "USD",
+                maximumFractionDigits: 6,
+              }).format(openRouterPricing.fixedCostPerCallUsd)} fixed`
+            : ""}
+          {openRouterPricing.providerCount > 1
+            ? ` across ${openRouterPricing.providerCount} OpenRouter providers`
+            : ""}
+          .
+        </p>
+      ) : null}
+      {openRouterErr ? (
+        <p id="llm-openrouter-error" className="form-error" role="alert">
+          {openRouterErr}
+        </p>
+      ) : null}
+    </div>
+  );
 
   function toggleCapability(tag: string) {
     setCapabilities((current) =>
@@ -751,70 +895,7 @@ function ModelForm({
         </>
       }
     >
-        {mode === "create" ? (
-          <div className="field form-field form-field--optional form-modal__field llm-openrouter-loader">
-            <label htmlFor={openRouterInputId} className="llm-openrouter-loader__label">
-              <span className="form-field__label">
-                OpenRouter model{" "}
-                <span className="form-field__requirement form-field__requirement--optional">
-                  Optional
-                </span>
-              </span>
-            </label>
-            <div className="llm-openrouter-loader__control">
-              <input
-                id={openRouterInputId}
-                value={openRouterModel}
-                onChange={(e) => setOpenRouterModel(e.target.value)}
-                placeholder="google/gemma-4-31b-it"
-                aria-invalid={openRouterErr ? true : undefined}
-                aria-describedby={describedBy(openRouterErrId, openRouterStatusId)}
-              />
-              <button
-                type="button"
-                className="btn btn--ghost llm-openrouter-loader__button"
-                onClick={loadOpenRouterMetadata}
-                disabled={openRouterPreview.isPending || save.isPending}
-              >
-                {openRouterPreview.isPending ? "Loading…" : "Load metadata"}
-              </button>
-            </div>
-            {openRouterPreview.isPending || openRouterStatus ? (
-              <p
-                id="llm-openrouter-status"
-                className="llm-openrouter-loader__status"
-                role="status"
-              >
-                {openRouterPreview.isPending
-                  ? "Loading OpenRouter metadata..."
-                  : openRouterStatus}
-              </p>
-            ) : null}
-            {openRouterPricing ? (
-              <p className="llm-openrouter-loader__pricing">
-                Provider price preview: {openRouterPricing.providerName}{" "}
-                {formatCostPerMillion(openRouterPricing.inputCostPerMillion)} in,{" "}
-                {formatCostPerMillion(openRouterPricing.outputCostPerMillion)} out
-                {openRouterPricing.fixedCostPerCallUsd !== null
-                  ? `, ${new Intl.NumberFormat("en-US", {
-                      style: "currency",
-                      currency: "USD",
-                      maximumFractionDigits: 6,
-                    }).format(openRouterPricing.fixedCostPerCallUsd)} fixed`
-                  : ""}
-                {openRouterPricing.providerCount > 1
-                  ? ` across ${openRouterPricing.providerCount} OpenRouter providers`
-                  : ""}
-                .
-              </p>
-            ) : null}
-            {openRouterErr ? (
-              <p id="llm-openrouter-error" className="form-error" role="alert">
-                {openRouterErr}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
+        {mode === "create" ? openRouterLoader : null}
         <FormModalField label="Canonical name" requirement="required">
           <input
             value={canonicalName}
@@ -882,22 +963,6 @@ function ModelForm({
           </FormModalField>
         </FormModalGrid>
         <FormModalGrid>
-          <FormModalField label="Thinking level" requirement="required">
-            <select
-              value={thinkingLevel}
-              onChange={(e) => {
-                if (isThinkingLevel(e.target.value)) {
-                  setThinkingLevel(e.target.value);
-                }
-              }}
-            >
-              {THINKING_LEVEL_OPTIONS.map((level) => (
-                <option key={level} value={level}>
-                  {thinkingLevelLabel(level)}
-                </option>
-              ))}
-            </select>
-          </FormModalField>
           <FormModalField label="Thinking strategy" requirement="required">
             <select
               value={thinkingStrategy}
@@ -910,6 +975,22 @@ function ModelForm({
               {THINKING_STRATEGY_OPTIONS.map((strategy) => (
                 <option key={strategy} value={strategy}>
                   {thinkingStrategyLabel(strategy)}
+                </option>
+              ))}
+            </select>
+          </FormModalField>
+          <FormModalField label="Thinking level" requirement="required">
+            <select
+              value={thinkingLevel}
+              onChange={(e) => {
+                if (isThinkingLevel(e.target.value)) {
+                  setThinkingLevel(e.target.value);
+                }
+              }}
+            >
+              {THINKING_LEVEL_OPTIONS.map((level) => (
+                <option key={level} value={level}>
+                  {thinkingLevelLabel(level)}
                 </option>
               ))}
             </select>
@@ -943,6 +1024,51 @@ function ModelForm({
         <FormModalField label="Notes" requirement="optional">
           <AutoGrowTextarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
         </FormModalField>
+        {mode === "edit" && model && missingProviders.length ? (
+          <section
+            className="llm-model-provider-gaps"
+            aria-labelledby="llm-model-provider-gaps-title"
+          >
+            <header className="llm-model-provider-gaps__head">
+              <div>
+                <h3 id="llm-model-provider-gaps-title">Available providers</h3>
+              </div>
+              <span className="llm-model-provider-gaps__count">
+                {missingProviders.length}
+              </span>
+            </header>
+            <div className="llm-model-provider-gaps__list">
+              {missingProviders.map((provider) => {
+                const pending = creatingProviderId === provider.id;
+                return (
+                  <div key={provider.id} className="llm-model-provider-gaps__item">
+                    <span className="llm-model-provider-gaps__provider">
+                      <span className="llm-model-provider-gaps__name">{provider.name}</span>
+                      <span className="llm-model-provider-gaps__meta">
+                        {provider.provider_type.replace("_", " ")}
+                        {provider.is_enabled ? "" : " / disabled"}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      aria-label={`Create provider-model for ${provider.name}`}
+                      onClick={() => createProviderModel.mutate(provider)}
+                      disabled={
+                        save.isPending ||
+                        remove.isPending ||
+                        createProviderModel.isPending
+                      }
+                    >
+                      {pending ? "..." : "+"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+        {mode === "edit" ? openRouterLoader : null}
         {err ? (
           <p id="llm-model-error" className="form-error" role="alert">
             {err}
@@ -1023,16 +1149,10 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   );
   const inheritedThinkingLevel =
     selectedModel?.thinking_level ?? providerModel?.effective_thinking_level ?? "disabled";
-  const effectiveThinkingLevel =
-    thinkingOverride === "inherit" ? inheritedThinkingLevel : thinkingOverride;
   const inheritedThinkingStrategy =
     selectedModel?.thinking_strategy ??
     providerModel?.effective_thinking_strategy ??
     "none";
-  const effectiveThinkingStrategy =
-    thinkingStrategyOverride === "inherit"
-      ? inheritedThinkingStrategy
-      : thinkingStrategyOverride;
 
   const invalidate = async () => {
     await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
@@ -1067,8 +1187,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   const err = clientErr ?? serverErr;
   const errId = err ? "llm-provider-model-error" : undefined;
   const extraHelpId = "llm-provider-model-extra-help";
-  const thinkingHelpId =
-    thinkingOverride === "inherit" ? "llm-provider-model-thinking-help" : undefined;
+  const thinkingHelpId = "llm-provider-model-thinking-help";
   const thinkingStrategyHelpId = "llm-provider-model-thinking-strategy-help";
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -1206,7 +1325,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             aria-describedby={errId}
           />
         </FormModalField>
-        <FormModalGrid>
+        <FormModalGrid className="llm-provider-model-costs">
           <FormModalField label="Input cost per 1M" requirement="required">
             <input
               type="number"
@@ -1237,8 +1356,6 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               aria-describedby={errId}
             />
           </FormModalField>
-        </FormModalGrid>
-        <FormModalGrid>
           <FormModalField label="Fixed cost per call" requirement="optional">
             <input
               type="number"
@@ -1250,17 +1367,37 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               aria-describedby={errId}
             />
           </FormModalField>
+        </FormModalGrid>
+        <FormModalGrid>
+          <FormModalField
+            label="Thinking strategy"
+            requirement="optional"
+            helpId={thinkingStrategyHelpId}
+            helpText={`Model default: ${thinkingStrategyLabel(inheritedThinkingStrategy)}.`}
+          >
+            <select
+              value={thinkingStrategyOverride}
+              aria-describedby={describedBy(thinkingStrategyHelpId, errId)}
+              onChange={(e) => {
+                const next = e.target.value;
+                if (next === "inherit" || isThinkingStrategy(next)) {
+                  setThinkingStrategyOverride(next);
+                }
+              }}
+            >
+              <option value="inherit">Model default</option>
+              {THINKING_STRATEGY_OPTIONS.map((strategy) => (
+                <option key={strategy} value={strategy}>
+                  {thinkingStrategyLabel(strategy)}
+                </option>
+              ))}
+            </select>
+          </FormModalField>
           <FormModalField
             label="Thinking level"
             requirement="optional"
             helpId={thinkingHelpId}
-            helpText={
-              thinkingOverride === "inherit"
-                ? `Inherited model default: ${thinkingLevelLabel(
-                    inheritedThinkingLevel,
-                  )}. Effective: ${thinkingLevelLabel(effectiveThinkingLevel)}.`
-                : undefined
-            }
+            helpText={`Model default: ${thinkingLevelLabel(inheritedThinkingLevel)}.`}
           >
             <select
               value={thinkingOverride}
@@ -1281,38 +1418,6 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             </select>
           </FormModalField>
         </FormModalGrid>
-        <FormModalField
-          label="Thinking strategy"
-          requirement="optional"
-          helpId={thinkingStrategyHelpId}
-          helpText={
-            thinkingStrategyOverride === "inherit"
-              ? `Inherited model default: ${thinkingStrategyLabel(
-                  inheritedThinkingStrategy,
-                )}. Effective: ${thinkingStrategyLabel(effectiveThinkingStrategy)}.`
-              : `Model default: ${thinkingStrategyLabel(
-                  inheritedThinkingStrategy,
-                )}. Effective: ${thinkingStrategyLabel(effectiveThinkingStrategy)}.`
-          }
-        >
-          <select
-            value={thinkingStrategyOverride}
-            aria-describedby={describedBy(thinkingStrategyHelpId, errId)}
-            onChange={(e) => {
-              const next = e.target.value;
-              if (next === "inherit" || isThinkingStrategy(next)) {
-                setThinkingStrategyOverride(next);
-              }
-            }}
-          >
-            <option value="inherit">Model default</option>
-            {THINKING_STRATEGY_OPTIONS.map((strategy) => (
-              <option key={strategy} value={strategy}>
-                {thinkingStrategyLabel(strategy)}
-              </option>
-            ))}
-          </select>
-        </FormModalField>
         <FormModalGrid>
           <FormModalField label="Max tokens override" requirement="optional">
             <input

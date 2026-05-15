@@ -732,8 +732,8 @@ fix the offender.
   sync"; the on-disk `llm_pricing.yml` from earlier drafts is
   retired.
 - **OpenRouter model import.** Admin-triggered metadata load from
-  `/admin/llm/graph` Create model, keyed by one explicit OpenRouter
-  model id. It pre-fills editable `llm_model` and selected
+  `/admin/llm/graph` model create/edit drawers, keyed by one explicit
+  OpenRouter model id. It pre-fills editable `llm_model` and selected
   OpenRouter `llm_provider_model` fields before save; it is separate
   from the weekly price-only sync and is not a scheduled all-model
   catalogue auto-import. See §11 "LLM graph admin".

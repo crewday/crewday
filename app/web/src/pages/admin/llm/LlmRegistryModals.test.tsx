@@ -8,7 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { LlmGraphPayload, LlmProvider } from "@/types";
+import type { LlmGraphPayload, LlmProvider, LlmProviderModel } from "@/types";
 import { graph } from "@/pages/admin/LlmPage.testData";
 import LlmRegistryModals from "./LlmRegistryModals";
 import { buildLlmIndexes } from "./lib/llmIndexes";
@@ -43,6 +43,7 @@ function installFetch(
 function renderRegistry(
   testGraph: LlmGraphPayload,
   dialog: Parameters<typeof LlmRegistryModals>[0]["dialog"],
+  options: { onOpenProviderModel?: (providerModel: LlmProviderModel) => void } = {},
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
@@ -54,6 +55,7 @@ function renderRegistry(
         providerModels={testGraph.provider_models}
         indexes={buildLlmIndexes(testGraph)}
         onClose={vi.fn()}
+        onOpenProviderModel={options.onOpenProviderModel ?? vi.fn()}
       />
     </QueryClientProvider>,
   );
@@ -451,6 +453,12 @@ describe("LlmRegistryModals", () => {
     const strategy = screen.getByLabelText(/Thinking strategy/);
     expect(thinking).toHaveValue("disabled");
     expect(strategy).toHaveValue("none");
+    expect(
+      strategy.compareDocumentPosition(thinking) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.getByLabelText(/OpenRouter model/)).toHaveValue(
+      "google/gemma-4-31b-it",
+    );
     expect(screen.getByRole("option", { name: "disabled" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "low" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "medium" })).toBeInTheDocument();
@@ -490,6 +498,56 @@ describe("LlmRegistryModals", () => {
     });
   });
 
+  it("loads OpenRouter metadata from the edit model loader without saving first", async () => {
+    const calls = installFetch((url) => {
+      if (url === "/admin/api/v1/llm/models/openrouter-preview") {
+        return {
+          body: {
+            openrouter_model_id: "google/gemma-4-31b-it",
+            existing_model_id: "model_gemma",
+            model_payload: {
+              canonical_name: "google/gemma-4-31b-it",
+              display_name: "Gemma 4 31B IT",
+              vendor: "Google",
+              capabilities: ["chat", "json_mode", "function_calling", "reasoning"],
+              context_window: 128000,
+              max_output_tokens: 8192,
+              thinking_level: "high",
+              thinking_strategy: "openrouter_extra_body",
+              price_source: "openrouter",
+              price_source_model_id: "google/gemma-4-31b-it",
+              is_active: true,
+              notes: null,
+            },
+            provider_model_previews: [],
+          },
+        };
+      }
+      return { body: {} };
+    });
+    renderRegistry(baseGraph, { kind: "model", mode: "edit", id: "model_gemma" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Load metadata" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Loaded OpenRouter metadata for google/gemma-4-31b-it.",
+    );
+    expect(screen.getByLabelText(/Thinking strategy/)).toHaveValue(
+      "openrouter_extra_body",
+    );
+    expect(screen.getByLabelText(/Thinking level/)).toHaveValue("high");
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/admin/api/v1/llm/models/model_gemma" &&
+          call.init.method === "PUT",
+      ),
+    ).toBe(false);
+    const preview = calls.find(
+      (call) => call.url === "/admin/api/v1/llm/models/openrouter-preview",
+    );
+    expect(bodyOf(preview!)).toEqual({ model_id_or_url: "google/gemma-4-31b-it" });
+  });
+
   it("shows inherited provider-model thinking and saves explicit overrides", async () => {
     const calls = installFetch();
     const testGraph: LlmGraphPayload = {
@@ -512,16 +570,14 @@ describe("LlmRegistryModals", () => {
     const thinking = screen.getByLabelText(/Thinking level/);
     expect(thinking).toHaveValue("inherit");
     expect(within(thinking).getByRole("option", { name: "Model default" })).toBeInTheDocument();
-    expect(screen.getByText("Inherited model default: medium. Effective: medium.")).toBeInTheDocument();
+    expect(screen.getByText("Model default: medium.")).toBeInTheDocument();
     expect(thinking).toHaveAttribute(
       "aria-describedby",
       "llm-provider-model-thinking-help",
     );
 
     fireEvent.change(thinking, { target: { value: "high" } });
-    expect(
-      screen.queryByText("Inherited model default: medium. Effective: medium."),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText("Model default: medium.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
 
     await waitFor(() => {
@@ -554,9 +610,7 @@ describe("LlmRegistryModals", () => {
       "aria-describedby",
       "llm-provider-model-thinking-help",
     );
-    expect(thinkingHelp).toHaveTextContent(
-      "Inherited model default: disabled. Effective: disabled.",
-    );
+    expect(thinkingHelp).toHaveTextContent("Model default: disabled.");
     expectControlBeforeHelp(thinking, thinkingHelp);
     expect(extraParams).toHaveAttribute(
       "aria-describedby",
@@ -628,7 +682,7 @@ describe("LlmRegistryModals", () => {
     const thinking = screen.getByLabelText(/Thinking level/);
     expect(thinking).toHaveValue("high");
     fireEvent.change(thinking, { target: { value: "inherit" } });
-    expect(screen.getByText("Inherited model default: medium. Effective: medium.")).toBeInTheDocument();
+    expect(screen.getByText("Model default: medium.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
 
     await waitFor(() => {
@@ -673,6 +727,9 @@ describe("LlmRegistryModals", () => {
 
     const level = screen.getByLabelText(/Thinking level/);
     const strategy = screen.getByLabelText(/Thinking strategy/);
+    expect(
+      strategy.compareDocumentPosition(level) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(level).toHaveValue("high");
     expect(strategy).toHaveValue("inherit");
     expect(within(strategy).getByRole("option", { name: "Model default" })).toBeInTheDocument();
@@ -686,18 +743,10 @@ describe("LlmRegistryModals", () => {
       "aria-describedby",
       "llm-provider-model-thinking-strategy-help",
     );
-    expect(
-      screen.getByText(
-        "Inherited model default: Gemma system token. Effective: Gemma system token.",
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Model default: Gemma system token.")).toBeInTheDocument();
 
     fireEvent.change(strategy, { target: { value: "openrouter_extra_body" } });
-    expect(
-      screen.getByText(
-        "Model default: Gemma system token. Effective: OpenRouter reasoning body.",
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Model default: Gemma system token.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
 
     await waitFor(() => {
@@ -744,11 +793,7 @@ describe("LlmRegistryModals", () => {
     const strategy = screen.getByLabelText(/Thinking strategy/);
     expect(strategy).toHaveValue("glm_extra_body");
     fireEvent.change(strategy, { target: { value: "inherit" } });
-    expect(
-      screen.getByText(
-        "Inherited model default: Gemma system token. Effective: Gemma system token.",
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Model default: Gemma system token.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
 
     await waitFor(() => {
@@ -811,6 +856,62 @@ describe("LlmRegistryModals", () => {
       provider_id: "prov_backup",
       model_id: "model_fast",
       api_model_id: "backup/fast-chat",
+    });
+  });
+
+  it("creates a missing provider-model from the model editor and opens it for editing", async () => {
+    const backupProvider: LlmProvider = {
+      ...baseGraph.providers[0]!,
+      id: "prov_backup",
+      name: "Backup Gateway",
+      endpoint: "https://backup.test/v1",
+    };
+    const createdProviderModel = {
+      ...baseGraph.provider_models[0]!,
+      id: "pm_backup_gemma",
+      provider_id: "prov_backup",
+      model_id: "model_gemma",
+    };
+    const calls = installFetch((url, init) => {
+      if (url === "/admin/api/v1/llm/provider-models" && init.method === "POST") {
+        return { body: createdProviderModel };
+      }
+      return { body: {} };
+    });
+    const onOpenProviderModel = vi.fn();
+    const testGraph: LlmGraphPayload = {
+      ...baseGraph,
+      providers: [...baseGraph.providers, backupProvider],
+    };
+    renderRegistry(
+      testGraph,
+      { kind: "model", mode: "edit", id: "model_gemma" },
+      { onOpenProviderModel },
+    );
+
+    const gaps = screen.getByRole("region", { name: "Available providers" });
+    expect(within(gaps).getByText("Backup Gateway")).toBeInTheDocument();
+    expect(within(gaps).queryByText("OpenRouter")).not.toBeInTheDocument();
+
+    fireEvent.click(
+      within(gaps).getByRole("button", {
+        name: "Create provider-model for Backup Gateway",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(onOpenProviderModel).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "pm_backup_gemma" }),
+      ),
+    );
+    const post = calls.find((call) => call.url === "/admin/api/v1/llm/provider-models")!;
+    expect(bodyOf(post)).toMatchObject({
+      provider_id: "prov_backup",
+      model_id: "model_gemma",
+      api_model_id: "google/gemma-4-31b-it",
+      input_cost_per_million: 0,
+      output_cost_per_million: 0,
+      price_source_override: "",
     });
   });
 

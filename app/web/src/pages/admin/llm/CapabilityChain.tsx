@@ -2,6 +2,7 @@ import type { LlmAssignment } from "@/types";
 import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
 import { shouldOpenGraphEditor } from "./lib/clickTargets";
 import type { LlmIndexes } from "./lib/llmIndexes";
+import { thinkingLevelLabel } from "./lib/llmThinking";
 import type { ElementRefSetter, Highlighted, Selection, SelectionSetter } from "./types";
 
 interface CapabilityChainProps {
@@ -41,6 +42,12 @@ export default function CapabilityChain(props: CapabilityChainProps) {
         const model = pm ? indexes.modelsById.get(pm.model_id) : null;
         const provider = pm ? indexes.providersById.get(pm.provider_id) : null;
         const missing = indexes.issuesByAssignment.get(a.id) ?? [];
+        const inheritedThinkingLevel = pm?.effective_thinking_level;
+        const assignmentThinkingLevel =
+          a.thinking_level_override &&
+          a.thinking_level_override !== inheritedThinkingLevel
+            ? a.thinking_level_override
+            : null;
         const isActive = active?.column === "assignment" && active.id === a.id;
         const isLinked = highlighted.assignments.has(a.id);
         const rungClass = [
@@ -78,47 +85,6 @@ export default function CapabilityChain(props: CapabilityChainProps) {
                   : undefined
               }
             >
-              <button
-                type="button"
-                className="llm-graph-chain__assignment"
-                onMouseOver={(e) => {
-                  e.stopPropagation();
-                  setHover({ column: "assignment", id: a.id });
-                }}
-                onMouseEnter={(e) => {
-                  e.stopPropagation();
-                  setHover({ column: "assignment", id: a.id });
-                }}
-                onFocus={(e) => {
-                  e.stopPropagation();
-                  setHover({ column: "assignment", id: a.id });
-                }}
-                onBlur={() => setHover(null)}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSelection({ column: "assignment", id: a.id });
-                  if (shouldOpenGraphEditor(e)) onOpenAssignment(a.id);
-                }}
-                aria-label={`${a.capability} assignment rung ${a.priority}, ${formatUsageSummary(
-                  a.calls_30d,
-                  a.spend_usd_30d,
-                )}`}
-              >
-                <span className="llm-graph-chain__prio" data-llm-edit-target="true">
-                  {a.priority === 0 ? "P" : a.priority}
-                </span>
-                {pm ? null : (
-                  <span className="llm-graph-chain__model" data-llm-edit-target="true">
-                    {model?.display_name ?? "(missing model)"}
-                  </span>
-                )}
-                <span className="llm-graph-chain__usage">
-                  <LlmUsageTotals
-                    spendUsd={a.spend_usd_30d}
-                    calls={a.calls_30d}
-                  />
-                </span>
-              </button>
               {pm ? (
                 <button
                   type="button"
@@ -135,8 +101,6 @@ export default function CapabilityChain(props: CapabilityChainProps) {
                     hasSelection && !mutedPath.providerModels.has(pm.id)
                       ? "is-dim"
                       : "",
-                    missing.length ? "is-error" : "",
-                    a.priority === 0 ? "is-primary" : "",
                     pm.is_enabled ? "" : "is-disabled",
                   ]
                     .filter(Boolean)
@@ -176,9 +140,11 @@ export default function CapabilityChain(props: CapabilityChainProps) {
                     <span className="llm-graph-chain__pm-model">
                       {model?.display_name ?? pm.api_model_id}
                     </span>
-                    <span className="llm-graph-chain__pm-thinking">
-                      Thinking {a.effective_thinking_level}
-                    </span>
+                    {assignmentThinkingLevel ? (
+                      <span className="llm-graph-chain__pm-thinking">
+                        Thinking {thinkingLevelLabel(assignmentThinkingLevel)}
+                      </span>
+                    ) : null}
                   </span>
                   <LlmUsageTotals
                     spendUsd={pm.spend_usd_30d}
@@ -187,6 +153,44 @@ export default function CapabilityChain(props: CapabilityChainProps) {
                   />
                 </button>
               ) : null}
+              <button
+                type="button"
+                className="llm-graph-chain__assignment"
+                onMouseOver={(e) => {
+                  e.stopPropagation();
+                  setHover({ column: "assignment", id: a.id });
+                }}
+                onMouseEnter={(e) => {
+                  e.stopPropagation();
+                  setHover({ column: "assignment", id: a.id });
+                }}
+                onFocus={(e) => {
+                  e.stopPropagation();
+                  setHover({ column: "assignment", id: a.id });
+                }}
+                onBlur={() => setHover(null)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelection({ column: "assignment", id: a.id });
+                  if (shouldOpenGraphEditor(e)) onOpenAssignment(a.id);
+                }}
+                aria-label={`${a.capability} assignment rung ${a.priority}, ${formatUsageSummary(
+                  a.calls_30d,
+                  a.spend_usd_30d,
+                )}`}
+              >
+                {pm ? null : (
+                  <span className="llm-graph-chain__model" data-llm-edit-target="true">
+                    {model?.display_name ?? "(missing model)"}
+                  </span>
+                )}
+                <span className="llm-graph-chain__usage" data-llm-edit-target="true">
+                  <LlmUsageTotals
+                    spendUsd={a.spend_usd_30d}
+                    calls={a.calls_30d}
+                  />
+                </span>
+              </button>
             </div>
           </li>
         );

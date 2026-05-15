@@ -294,6 +294,14 @@ export default function AdminLlmPage() {
           models={graph.models}
           providerModels={graph.provider_models}
           indexes={indexes}
+          onOpenProviderModel={(providerModel) =>
+            setRegistryDialog({
+              kind: "providerModel",
+              mode: "edit",
+              id: providerModel.id,
+              providerModel,
+            })
+          }
           onClose={() => {
             setHover(null);
             setSelection(null);

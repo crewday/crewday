@@ -154,6 +154,9 @@
   margin-top: 8px;
   display: flex; flex-wrap: wrap; gap: 4px;
 }
+.llm-graph-node__thinking-chip {
+  background: var(--card);
+}
 .llm-graph-node__foot {
   display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
   gap: 8px; margin-top: 10px;
@@ -272,8 +275,7 @@
   white-space: nowrap;
 }
 .llm-graph-node > .llm-usage-total,
-.llm-graph-node__button > .llm-usage-total,
-.llm-graph-chain__usage {
+.llm-graph-node__button > .llm-usage-total {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -319,10 +321,13 @@
 }
 .llm-graph-chain__rung {
   position: relative;
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
   width: 100%;
   min-height: 42px;
-  padding: 0;
+  padding: 7px 8px;
   border: 1px dashed var(--line);
   border-radius: 6px;
   background: var(--card);
@@ -364,13 +369,13 @@
 }
 .llm-graph-chain__assignment {
   position: relative;
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
+  display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-end;
+  gap: 10px;
   width: 100%;
-  min-height: 42px;
-  padding: 7px clamp(144px, 42%, 182px) 7px 8px;
+  min-height: 28px;
+  padding: 0;
   border: 0;
   border-radius: 5px;
   background: transparent;
@@ -383,33 +388,43 @@
 .llm-graph-chain__assignment:focus-visible {
   outline: 0;
 }
-.llm-graph-chain__prio {
-  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 11px;
-  color: var(--ink-2);
-  text-align: center;
-  padding: 1px 4px; border-radius: 4px;
-  background: var(--paper); border: 1px solid var(--line);
-}
-.llm-graph-chain__rung.is-primary .llm-graph-chain__prio {
-  color: #fff; background: var(--moss); border-color: var(--moss);
+.llm-graph-chain__assignment:only-child {
+  grid-column: 1 / -1;
+  justify-content: space-between;
 }
 .llm-graph-chain__model { overflow-wrap: anywhere; }
 .llm-graph-chain__usage {
   display: block;
+  position: static;
+  flex: 0 0 auto;
 }
 .llm-graph-chain__assignment-model {
   width: auto;
-  min-height: 32px;
-  margin: 0 5px 5px 35px;
+  min-height: 0;
+  margin: 0;
   z-index: 2;
-  display: grid;
-  gap: 3px;
-  padding: 5px 7px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--ink-2);
   cursor: pointer;
   font: inherit;
   text-align: left;
+}
+.llm-graph-chain__assignment-model:hover,
+.llm-graph-chain__assignment-model:focus-visible,
+.llm-graph-chain__assignment-model:focus-within,
+.llm-graph-chain__assignment-model.is-active,
+.llm-graph-chain__assignment-model.is-linked {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: 0;
 }
 .llm-graph-chain__pm-summary,
 .llm-graph-chain__pm-model {
@@ -435,6 +450,7 @@
   padding: 2px 6px;
   border: 1px solid var(--line);
   border-radius: 999px;
+  background: var(--card);
   color: var(--ink-2);
   font-size: 11.5px;
   line-height: 1;
@@ -617,6 +633,9 @@
 .llm-registry-form__delete {
   margin-right: auto;
 }
+.llm-provider-model-costs {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
 .llm-openrouter-loader {
   gap: 8px;
   padding: 10px 12px;
@@ -649,6 +668,82 @@
 }
 .llm-openrouter-loader__pricing {
   color: var(--ink-3);
+}
+.llm-model-provider-gaps {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+.llm-model-provider-gaps__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.llm-model-provider-gaps__head h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+.llm-model-provider-gaps__head p {
+  margin: 2px 0 0;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+.llm-model-provider-gaps__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--moss-soft);
+  border-radius: 999px;
+  background: var(--moss-softer);
+  color: var(--moss);
+  font-size: 12px;
+  font-weight: 700;
+}
+.llm-model-provider-gaps__list {
+  display: grid;
+  gap: 6px;
+}
+.llm-model-provider-gaps__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 7px 8px 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--card);
+}
+.llm-model-provider-gaps__provider {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.llm-model-provider-gaps__name,
+.llm-model-provider-gaps__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.llm-model-provider-gaps__name {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+.llm-model-provider-gaps__meta {
+  color: var(--ink-3);
+  font-size: 11.5px;
+  text-transform: capitalize;
 }
 
 .llm-playground {
@@ -1052,10 +1147,6 @@
 .llm-assignment-provider-model__thinking {
   gap: 4px;
 }
-.llm-assignment-provider-model__thinking .form-field__label {
-  font-size: 10.5px;
-  letter-spacing: 0;
-}
 .llm-assignment-provider-model__thinking select {
   min-height: 36px;
   font-size: 12.5px;
@@ -1080,25 +1171,10 @@
   .llm-graph__col-header--assignments { order: 5; }
   .llm-graph__col--assignments { order: 6; }
   .llm-graph__edges { display: none; }
-  .llm-graph-chain__rung {
-    padding: 0;
-  }
-  .llm-graph-chain__assignment {
-    padding-right: 8px;
-    padding-top: 42px;
-  }
-  .llm-graph-chain__assignment-model {
-    width: auto;
-    margin: 0 5px 5px 35px;
-  }
   .llm-graph-node__child {
     grid-template-columns: minmax(0, 1fr);
     padding-right: 7px;
     padding-top: 34px;
-  }
-  .llm-graph-chain__usage {
-    grid-column: 2;
-    justify-self: start;
   }
   .llm-graph-node--provider,
   .llm-graph-node--model > .llm-graph-node__button,
@@ -1118,6 +1194,9 @@
 @media (max-width: 560px) {
   .llm-registry-form__delete {
     margin-right: 0;
+  }
+  .llm-provider-model-costs {
+    grid-template-columns: minmax(0, 1fr);
   }
   .llm-openrouter-loader__control {
     grid-template-columns: minmax(0, 1fr);

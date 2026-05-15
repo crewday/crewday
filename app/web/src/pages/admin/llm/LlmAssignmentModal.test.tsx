@@ -134,7 +134,6 @@ describe("LlmAssignmentModal", () => {
 
     expect(within(dialog).getByText(/inherits the chain owned by/)).toBeInTheDocument();
     expect(within(dialog).getByText("Gemma 4 31B IT")).toBeInTheDocument();
-    expect(dialog.querySelector(".llm-graph-chain__prio")).not.toBeInTheDocument();
     const parentPicker = within(dialog).getByRole("combobox", {
       name: /Change inheritance/,
     });
@@ -450,8 +449,8 @@ describe("LlmAssignmentModal", () => {
     );
     expect(fastChatThinking).toHaveValue("high");
     expect(
-      within(fastChat).getByText("Thinking", { selector: ".form-field__label" }),
-    ).toBeInTheDocument();
+      within(fastChat).queryByText("Thinking", { selector: ".form-field__label" }),
+    ).not.toBeInTheDocument();
     expect(
       within(fastChat).queryByText(/Thinking override for Fast Chat/),
     ).not.toBeInTheDocument();

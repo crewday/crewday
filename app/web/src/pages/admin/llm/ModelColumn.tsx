@@ -3,7 +3,7 @@ import type { LlmModel } from "@/types";
 import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
 import { shouldOpenGraphEditor } from "./lib/clickTargets";
 import type { LlmIndexes } from "./lib/llmIndexes";
-import { thinkingStrategyLabel } from "./lib/llmThinking";
+import { thinkingLevelLabel, thinkingStrategyLabel } from "./lib/llmThinking";
 import type { ElementRefSetter, NodeClass, SelectionSetter } from "./types";
 
 const CAPABILITY_TAG_LABEL: Record<string, string> = {
@@ -86,23 +86,17 @@ export default function ModelColumn(props: ModelColumnProps) {
                     {CAPABILITY_TAG_LABEL[tag] ?? tag}
                   </Chip>
                 ))}
+                <span className="chip chip--ghost chip--sm llm-graph-node__thinking-chip">
+                  Thinking {thinkingLevelLabel(m.thinking_level)}
+                </span>
               </div>
               {m.context_window ? (
                 <footer className="llm-graph-node__foot">
                   <span className="muted">
                     {(m.context_window / 1000).toFixed(0)}k ctx
                   </span>
-                  <span className="llm-graph-node__thinking">
-                    Thinking {m.thinking_level} /{" "}
-                    {thinkingStrategyLabel(m.thinking_strategy)}
-                  </span>
                 </footer>
-              ) : (
-                <div className="llm-graph-node__thinking">
-                  Thinking {m.thinking_level} /{" "}
-                  {thinkingStrategyLabel(m.thinking_strategy)}
-                </div>
-              )}
+              ) : null}
               <LlmUsageTotals spendUsd={m.spend_usd_30d} calls={m.calls_30d} />
             </button>
             {providerModels.length ? (

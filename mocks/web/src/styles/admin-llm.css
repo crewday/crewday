@@ -112,7 +112,7 @@
 }
 .llm-graph-chain__rung {
   display: grid;
-  grid-template-columns: 22px 1fr auto auto;
+  grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-4);
@@ -133,17 +133,6 @@
 .llm-graph-chain__rung.is-error {
   border-color: var(--rust);
   background: var(--rust-soft);
-}
-.llm-graph-chain__prio {
-  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 11px;
-  color: var(--ink-2);
-  text-align: center;
-  padding: var(--space-1) var(--space-2); border-radius: 4px;
-  background: var(--paper); border: 1px solid var(--line);
-}
-.llm-graph-chain__rung.is-primary .llm-graph-chain__prio {
-  color: #fff; background: var(--moss); border-color: var(--moss);
 }
 .llm-graph-chain__model { word-break: break-all; }
 .llm-graph-chain__provider { font-size: 11.5px; white-space: nowrap; }

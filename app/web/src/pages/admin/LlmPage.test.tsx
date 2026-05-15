@@ -213,7 +213,7 @@ function capabilityEditTarget(name: string): HTMLElement {
 }
 
 function chatManagerAssignmentEditTarget(): HTMLElement {
-  return within(chatManagerAssignmentButton()).getByText("P");
+  return within(chatManagerAssignmentButton()).getByLabelText(/Recent usage:/);
 }
 
 async function findOpenRouterProvider(): Promise<HTMLElement> {
@@ -665,7 +665,9 @@ describe("Admin LlmPage", () => {
 
       fireEvent.click(modelEditTarget("Gemma 4 31B IT"));
       const editDialog = screen.getByRole("dialog", { name: "Gemma 4 31B IT" });
-      expect(within(editDialog).queryByLabelText(/OpenRouter model/)).not.toBeInTheDocument();
+      expect(within(editDialog).getByLabelText(/OpenRouter model/)).toHaveValue(
+        "google/gemma-4-31b-it",
+      );
       fireEvent.change(screen.getByLabelText(/Display name/), {
         target: { value: "Gemma admin" },
       });
@@ -1136,15 +1138,20 @@ describe("Admin LlmPage", () => {
       });
       expect(errorProviderModelButton).toHaveClass(
         "llm-graph-chain__rung",
-        "is-error",
-        "is-primary",
+        "llm-graph-chain__assignment-model",
       );
+      expect(errorProviderModelButton).not.toHaveClass("is-error", "is-primary");
       expect(errorProviderModelButton).not.toHaveClass("llm-graph-chain__provider-model");
       expect(providerModelButton).toHaveClass(
         "llm-graph-chain__rung",
-        "is-primary",
+        "llm-graph-chain__assignment-model",
       );
+      expect(providerModelButton).not.toHaveClass("is-error", "is-primary");
       expect(providerModelButton).not.toHaveClass("llm-graph-chain__provider-model");
+      expect(
+        providerModelButton.compareDocumentPosition(chatManagerAssignmentButton()) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
       const modelColumnProviderModelButton = screen.getByRole("button", {
         name: /OpenRouter provider model for Gemma 4 31B IT/,
       });
@@ -1153,11 +1160,9 @@ describe("Admin LlmPage", () => {
         "llm-graph-chain__assignment-model",
       );
       expect(providerModelButton).toHaveTextContent("Gemma 4 31B IT");
-      expect(providerModelButton).toHaveTextContent("Thinking disabled");
+      expect(providerModelButton).not.toHaveTextContent("Thinking disabled");
       expect(providerModelButton.querySelector(".llm-graph-chain__pm-name")).toBeNull();
-      expect(providerModelButton.querySelectorAll(".llm-graph-chain__pm-thinking")).toHaveLength(
-        1,
-      );
+      expect(providerModelButton.querySelector(".llm-graph-chain__pm-thinking")).toBeNull();
       expect(providerModelButton).not.toHaveTextContent("Provider-model settings");
       expect(providerModelButton).not.toHaveTextContent(/via\s+OpenRouter/i);
       expect(providerModelButton).not.toHaveTextContent("OpenRouter");
@@ -1553,6 +1558,66 @@ describe("Admin LlmPage", () => {
           ids_in_priority_order: ["assign_default_fast", "assign_default"],
         },
       ]);
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("shows model thinking as a capability pill and assignment thinking only for explicit overrides", async () => {
+    const thinkingGraph = {
+      ...graph,
+      models: graph.models.map((model) =>
+        model.id === "model_gemma"
+          ? {
+              ...model,
+              capabilities: [...model.capabilities, "reasoning"],
+              thinking_level: "high",
+              thinking_strategy: "openrouter_extra_body",
+            }
+          : model,
+      ),
+      provider_models: graph.provider_models.map((providerModel) =>
+        providerModel.id === "pm_gemma"
+          ? {
+              ...providerModel,
+              effective_thinking_level: "high",
+              effective_thinking_strategy: "openrouter_extra_body",
+            }
+          : providerModel,
+      ),
+      assignments: graph.assignments.map((assignment) =>
+        assignment.id === "assign_chat_manager"
+          ? {
+              ...assignment,
+              thinking_level_override: "medium",
+              effective_thinking_level: "medium",
+              effective_thinking_strategy: "openrouter_extra_body",
+            }
+          : {
+              ...assignment,
+              effective_thinking_level: "high",
+              effective_thinking_strategy: "openrouter_extra_body",
+            },
+      ),
+    };
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/graph": [
+        { body: thinkingGraph },
+        { body: thinkingGraph },
+        { body: thinkingGraph },
+      ],
+    });
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      const model = modelButton("Gemma 4 31B IT");
+      expect(within(model).getByText("Thinking high")).toHaveClass(
+        "llm-graph-node__thinking-chip",
+      );
+      expect(model).not.toHaveTextContent("OpenRouter reasoning body");
+      expect(defaultCapabilityCard()).not.toHaveTextContent("Thinking high");
+      expect(chatManagerRung()).toHaveTextContent("Thinking medium");
     } finally {
       fetcher.restore();
     }

@@ -634,9 +634,6 @@ export default function AdminLlmPage() {
                             : undefined
                         }
                       >
-                        <span className="llm-graph-chain__prio">
-                          {a.priority === 0 ? "P" : a.priority}
-                        </span>
                         <span className="llm-graph-chain__model mono">
                           {model?.canonical_name ?? "(missing model)"}
                         </span>

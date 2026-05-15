@@ -962,7 +962,6 @@ function AssignmentThinkingSelect({
   const value: ThinkingOverrideValue = assignment.thinking_level_override ?? "inherit";
   return (
     <label className="field form-field form-field--optional llm-assignment-provider-model__thinking">
-      <span className="form-field__label">Thinking</span>
       <select
         aria-label={`Thinking override for ${label}`}
         value={value}

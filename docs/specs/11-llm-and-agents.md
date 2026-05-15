@@ -1301,16 +1301,19 @@ LLM area.
 - **Column 2 — Models.** One card per `llm_model`; shows vendor,
   capability tags as chips and context window. Cards carry a small
   modality icon bar (text / vision / audio / reasoning), thinking
-  level/strategy, and the model's recent call/spend total. The model
-  create/edit drawer exposes separate controls for thinking level and
-  thinking strategy.
-- **Create model / OpenRouter metadata load.** The Model column's
-  "Create model" drawer accepts manual fields or an optional
-  OpenRouter model id. When the admin enters an id and clicks "Load
+  level as a chip after the capability tags, and the model's recent
+  call/spend total. The model create/edit drawer exposes separate
+  controls for thinking strategy and thinking level, with strategy
+  first because it determines how non-disabled thinking is sent to the
+  provider.
+- **Model OpenRouter metadata load.** The Model column's create/edit
+  drawers accept manual fields or an optional OpenRouter model id. In
+  edit mode the field is prefilled from `price_source_model_id`, falling
+  back to `canonical_name`. When the admin enters an id and clicks "Load
   metadata", the server fetches that exact id from OpenRouter's model
   catalogue and returns a prefilled, editable draft; it does not import
-  the whole catalogue or create rows until the admin saves. Saving may
-  create or update the curated `llm_model` row and the selected
+  the whole catalogue or create/update rows until the admin saves.
+  Saving may create or update the curated `llm_model` row and the selected
   OpenRouter `llm_provider_model` rows. Imported metadata maps into
   capability tags, `context_window`, `max_output_tokens`,
   `price_source = 'openrouter'`, `price_source_model_id`,
