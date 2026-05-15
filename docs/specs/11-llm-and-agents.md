@@ -1328,7 +1328,7 @@ LLM area.
   data makes them inferable. Any inferred value remains editable before
   save; unknown fields stay blank or at their explicit defaults rather
   than being guessed.
-- **Provider-model editing.** Provider-model subcards expose pricing,
+- **Provider-model editing.** Provider-model edit drawers expose pricing,
   support flags, thinking-level override, thinking-strategy override,
   and their effective inherited thinking values. Override controls use
   `inherit` for the nullable/empty state and otherwise offer the same
@@ -1385,14 +1385,21 @@ LLM area.
   deployment-level assignment that points at the same provider-model and
   applies that assignment's tuning defaults, including its
   thinking-level override before falling back to the provider-model/model
-  effective thinking level and strategy. The response is stateless and
+  effective thinking level and strategy. Direct mode may send explicit
+  `thinking_level` / `thinking_strategy` values from the current edit
+  drawer state; when present, those request values override persisted
+  row defaults for the smoke test only. The response is stateless and
   includes status, assistant text on success, provider/model ids,
   latency, token counts, finish/stop reason, estimated cost from the
   provider-model pricing fields, and a secret-redacted provider error on
-  failure. Playground prompts and responses are not persisted to
-  `llm_usage` or prompt history. The request is rejected before the
-  upstream call when `max_tokens` exceeds the selected model's known
-  output-token limit.
+  failure. Playground errors include a request-scoped error id and a
+  machine error code so operators can correlate the UI with server logs.
+  Playground prompts and responses are not persisted to `llm_usage` or
+  prompt history. The request is rejected before the upstream call when
+  `max_tokens` exceeds the selected model's known output-token limit.
+  Direct runs without an explicit token count cap the default at the
+  playground safety limit (32,000 tokens), even when the provider
+  advertises a larger model maximum.
 - **Keyboard.** Global `/` focuses the filter input (filters every
   column at once). `N` on a focused column opens "Add" for that
   column. `Esc` closes the drawer. `j/k` navigates cards within a

@@ -19,7 +19,10 @@ interface FetchCall {
 }
 
 function installFetch(
-  responseFor?: (url: string, init: RequestInit) => { status?: number; body: unknown },
+  responseFor?: (
+    url: string,
+    init: RequestInit,
+  ) => { status?: number; body: unknown; headers?: HeadersInit },
 ): FetchCall[] {
   const calls: FetchCall[] = [];
   const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
@@ -33,6 +36,7 @@ function installFetch(
       ok,
       status,
       statusText: ok ? "OK" : "Error",
+      headers: new Headers(response.headers),
       text: async () => JSON.stringify(response.body),
     } as Response;
   });
@@ -325,6 +329,63 @@ describe("LlmRegistryModals", () => {
     });
   });
 
+  it("sends the currently selected provider-model thinking controls to playground", async () => {
+    const calls = installFetch((url) =>
+      url === "/admin/api/v1/llm/provider-models/pm_gemma/playground"
+        ? {
+            body: {
+              status: "ok",
+              assistant_text: "pong",
+              reasoning_text: null,
+              model_used: "google/gemma-4-31b-it",
+              provider_used: "OpenRouter",
+              provider_model_id: "pm_gemma",
+              assignment_id: null,
+              latency_ms: 42,
+              input_tokens: 6,
+              output_tokens: 1,
+              reasoning_tokens: null,
+              finish_reason: "stop",
+              stop_reason: "stop",
+              cost_usd: "0.000001",
+              cost_cents: 0,
+              error_message: null,
+            },
+          }
+        : { body: {} },
+    );
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    fireEvent.change(screen.getByLabelText(/Thinking strategy/), {
+      target: { value: "gemma_system_token" },
+    });
+    fireEvent.change(screen.getByLabelText(/Thinking level/), {
+      target: { value: "high" },
+    });
+
+    const playground = playgroundSection();
+    fireEvent.change(within(playground).getByLabelText("Prompt Required"), {
+      target: { value: "Say pong." },
+    });
+    fireEvent.click(within(playground).getByRole("button", { name: "Run playground" }));
+
+    expect(await within(playground).findByText("pong")).toBeInTheDocument();
+    const post = calls.find(
+      (call) => call.url === "/admin/api/v1/llm/provider-models/pm_gemma/playground",
+    );
+    expect(bodyOf(post!)).toMatchObject({
+      thinking_level: "high",
+      thinking_strategy: "gemma_system_token",
+    });
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+          call.init.method === "PUT",
+      ),
+    ).toBe(false);
+  });
+
   it("validates playground input and displays provider failures", async () => {
     const calls = installFetch((url) =>
       url === "/admin/api/v1/llm/provider-models/pm_gemma/playground"
@@ -345,6 +406,8 @@ describe("LlmRegistryModals", () => {
               stop_reason: null,
               cost_usd: null,
               cost_cents: null,
+              error_id: "req-provider-456",
+              error_code: "provider_rejected_request",
               error_message: "Provider rejected the request.",
             },
           }
@@ -370,18 +433,21 @@ describe("LlmRegistryModals", () => {
     expect(
       within(playground).getByText("Provider rejected the request."),
     ).toBeInTheDocument();
+    expect(within(playground).getByText("req-provider-456")).toBeInTheDocument();
+    expect(within(playground).getByText("provider_rejected_request")).toBeInTheDocument();
   });
 
   it("renders playground API failures without exposing raw server detail", async () => {
     installFetch((url) =>
       url === "/admin/api/v1/llm/provider-models/pm_gemma/playground"
         ? {
+          status: 422,
+          headers: { "X-Correlation-Id-Echo": "req-playground-123" },
+          body: {
+            type: "https://crewday.dev/errors/validation",
+            title: "Validation error",
             status: 422,
-            body: {
-              type: "https://crewday.dev/errors/validation",
-              title: "Validation error",
-              status: 422,
-              detail: "provider secret sk-live-should-not-render",
+            detail: "provider secret sk-live-should-not-render",
               error: "provider_api_key_missing",
             },
           }
@@ -398,6 +464,8 @@ describe("LlmRegistryModals", () => {
     expect(await within(playground).findByRole("alert")).toHaveTextContent(
       "The provider client is not configured for playground runs.",
     );
+    expect(within(playground).getByText("req-playground-123")).toBeInTheDocument();
+    expect(within(playground).getByText("provider_api_key_missing")).toBeInTheDocument();
     expect(
       within(playground).queryByText(/sk-live-should-not-render/),
     ).not.toBeInTheDocument();

@@ -1237,7 +1237,9 @@ The request body is:
   "max_tokens": 64,
   "temperature": 0.2,
   "image_url": null,
-  "assignment_id": null
+  "assignment_id": null,
+  "thinking_level": "high",
+  "thinking_strategy": "gemma_system_token"
 }
 ```
 
@@ -1251,6 +1253,10 @@ prompt/temperature combinations, and assignment/provider-model
 mismatches with 4xx validation envelopes before any upstream call.
 `max_tokens` must also fit the selected model's `max_output_tokens`
 when that limit is known.
+Direct-mode requests may include `thinking_level` and
+`thinking_strategy` from the current edit drawer state; when present,
+those values override the persisted model/provider-model defaults for
+that playground call only.
 
 Responses are typed and stateless: successful calls return
 `status: "ok"`, assistant text, provider/model/provider-model identifiers,

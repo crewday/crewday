@@ -1155,6 +1155,12 @@ function ProviderModelForm(props: ProviderModelFormProps) {
     selectedModel?.thinking_strategy ??
     providerModel?.effective_thinking_strategy ??
     "none";
+  const playgroundThinkingLevel =
+    thinkingOverride === "inherit" ? inheritedThinkingLevel : thinkingOverride;
+  const playgroundThinkingStrategy =
+    thinkingStrategyOverride === "inherit"
+      ? inheritedThinkingStrategy
+      : thinkingStrategyOverride;
 
   const invalidate = async () => {
     await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
@@ -1521,6 +1527,8 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             providerModel={providerModel}
             model={persistedModel}
             mode="direct"
+            thinkingLevel={playgroundThinkingLevel}
+            thinkingStrategy={playgroundThinkingStrategy}
             titleId="llm-provider-model-playground-title"
             description="Run a stateless smoke test against this provider-model."
           />

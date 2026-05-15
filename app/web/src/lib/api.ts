@@ -251,13 +251,20 @@ export class ApiError extends Error {
   readonly status: number;
   readonly body: unknown;
   readonly problem: ProblemDetail | null;
+  readonly requestId: string | null;
 
-  constructor(message: string, status: number, body: unknown) {
+  constructor(
+    message: string,
+    status: number,
+    body: unknown,
+    requestId: string | null = null,
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.body = body;
     this.problem = isProblemDetail(body) ? body : null;
+    this.requestId = requestId;
   }
 
   /** Short `type` key from the RFC 7807 body (e.g. `"validation"`). */
@@ -360,9 +367,18 @@ export async function fetchJson<T>(path: string, opts: FetchOpts = {}): Promise<
         console.error("onUnauthorized handler threw", err);
       }
     }
-    throw new ApiError(message, res.status, body);
+    throw new ApiError(message, res.status, body, responseRequestId(res.headers));
   }
   return body as T;
+}
+
+function responseRequestId(headers: Headers | undefined): string | null {
+  return (
+    headers?.get("X-Correlation-Id-Echo") ??
+    headers?.get("X-Request-Id") ??
+    headers?.get("X-Correlation-Id") ??
+    null
+  );
 }
 
 function shouldInvokeAuthRecovery(status: number, url: string, body: unknown): boolean {

@@ -52,6 +52,7 @@ from app.adapters.llm.ports import (
 from app.api.admin.deps import require_deployment_scope
 from app.api.deps import db_session
 from app.api.transport import admin_sse
+from app.api.transport.correlation_id import request_correlation_id
 from app.domain.agent.compaction import (
     COMPACT_CAPABILITY as _COMPACT_CAPABILITY,
 )
@@ -170,6 +171,7 @@ _MODEL_CAPABILITY_TAGS = frozenset(
     }
 )
 _PLAYGROUND_IMAGE_UPLOAD_MAX_BYTES = 5 * 1024 * 1024
+_PLAYGROUND_MAX_TOKENS_LIMIT = 32_000
 LlmThinkingLevel = Literal["disabled", "low", "medium", "high"]
 LlmThinkingStrategy = Literal[
     "none",
@@ -422,6 +424,8 @@ class LlmProviderModelPlaygroundRequest(BaseModel):
     temperature: float | None = Field(default=None, ge=0, le=2)
     image_url: str | None = Field(default=None, max_length=262_144)
     assignment_id: str | None = None
+    thinking_level: LlmThinkingLevel | None = None
+    thinking_strategy: LlmThinkingStrategy | None = None
 
     @field_validator("prompt")
     @classmethod
@@ -514,6 +518,8 @@ async def _playground_request_payload(
         "temperature": _playground_form_text(form, "temperature"),
         "image_url": _playground_form_text(form, "image_url"),
         "assignment_id": _playground_form_text(form, "assignment_id"),
+        "thinking_level": _playground_form_text(form, "thinking_level"),
+        "thinking_strategy": _playground_form_text(form, "thinking_strategy"),
     }
     payload = _validate_playground_payload(form_raw)
     upload = form.get("image_file")
@@ -543,6 +549,8 @@ class LlmProviderModelPlaygroundResponse(BaseModel):
     stop_reason: str | None = None
     cost_usd: Decimal | None = None
     cost_cents: int | None = None
+    error_id: str | None = None
+    error_code: str | None = None
     error_message: str | None = None
 
 
@@ -1333,8 +1341,10 @@ def _conflict(error: str) -> Conflict:
     return Conflict(extra={"error": error})
 
 
-def _unprocessable(error: str, **extra: object) -> Validation:
-    return Validation(extra={"error": error, **extra})
+def _unprocessable(
+    error: str, *, message: str | None = None, **extra: object
+) -> Validation:
+    return Validation(detail=message, extra={"error": error, **extra})
 
 
 def _commit_or_conflict(session: Session, error: str) -> None:
@@ -1835,27 +1845,38 @@ def _playground_max_tokens(
     model: LlmModel,
     assignment: LlmAssignment | None,
 ) -> int:
-    value = (
-        payload.max_tokens
-        if payload.max_tokens is not None
-        else (
-            assignment.max_tokens
-            if assignment is not None and assignment.max_tokens is not None
-            else (
-                provider_model.max_tokens_override
-                if provider_model.max_tokens_override is not None
-                else model.max_output_tokens
-            )
-        )
-    )
+    explicit = payload.max_tokens is not None
+    value = payload.max_tokens
+    if value is None and assignment is not None and assignment.max_tokens is not None:
+        value = assignment.max_tokens
+    if value is None and provider_model.max_tokens_override is not None:
+        value = provider_model.max_tokens_override
+    if value is None and model.max_output_tokens is not None:
+        value = min(model.max_output_tokens, _PLAYGROUND_MAX_TOKENS_LIMIT)
+
     max_tokens = value if value is not None else 1024
     if max_tokens < 1:
-        raise _unprocessable("max_tokens_invalid")
-    if max_tokens > 32_000:
-        raise _unprocessable("max_tokens_exceeds_playground_limit")
+        raise _unprocessable(
+            "max_tokens_invalid",
+            message="Max tokens must be at least 1.",
+        )
+    if max_tokens > _PLAYGROUND_MAX_TOKENS_LIMIT:
+        source = "the submitted value" if explicit else "the selected defaults"
+        raise _unprocessable(
+            "max_tokens_exceeds_playground_limit",
+            message=(
+                f"Max tokens from {source} is {max_tokens}, which exceeds the "
+                f"playground limit of {_PLAYGROUND_MAX_TOKENS_LIMIT}."
+            ),
+            max_tokens_limit=_PLAYGROUND_MAX_TOKENS_LIMIT,
+        )
     if model.max_output_tokens is not None and max_tokens > model.max_output_tokens:
         raise _unprocessable(
             "max_tokens_exceeds_model_limit",
+            message=(
+                f"Max tokens is {max_tokens}, which exceeds this model's known "
+                f"output-token limit of {model.max_output_tokens}."
+            ),
             max_tokens_limit=model.max_output_tokens,
         )
     return max_tokens
@@ -2332,6 +2353,21 @@ def build_admin_llm_router() -> APIRouter:
                                     "nullable": True,
                                 },
                                 "assignment_id": {"type": "string", "nullable": True},
+                                "thinking_level": {
+                                    "type": "string",
+                                    "enum": ["disabled", "low", "medium", "high"],
+                                    "nullable": True,
+                                },
+                                "thinking_strategy": {
+                                    "type": "string",
+                                    "enum": [
+                                        "none",
+                                        "gemma_system_token",
+                                        "glm_extra_body",
+                                        "openrouter_extra_body",
+                                    ],
+                                    "nullable": True,
+                                },
                                 "image_file": {"type": "string", "format": "binary"},
                             },
                         }
@@ -2370,16 +2406,24 @@ def build_admin_llm_router() -> APIRouter:
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
-                thinking_level=_thinking_level(
-                    assignment.thinking_level_override
-                    if assignment is not None
-                    and assignment.thinking_level_override is not None
-                    else (
-                        provider_model.thinking_level_override or model.thinking_level
+                thinking_level=(
+                    payload.thinking_level
+                    or _thinking_level(
+                        assignment.thinking_level_override
+                        if assignment is not None
+                        and assignment.thinking_level_override is not None
+                        else (
+                            provider_model.thinking_level_override
+                            or model.thinking_level
+                        )
                     )
                 ),
-                thinking_strategy=_thinking_strategy(
-                    provider_model.thinking_strategy_override or model.thinking_strategy
+                thinking_strategy=(
+                    payload.thinking_strategy
+                    or _thinking_strategy(
+                        provider_model.thinking_strategy_override
+                        or model.thinking_strategy
+                    )
                 ),
                 consents=ConsentSet.none(),
             )
@@ -2391,6 +2435,8 @@ def build_admin_llm_router() -> APIRouter:
                 provider_model_id=provider_model.id,
                 assignment_id=assignment.id if assignment is not None else None,
                 latency_ms=max(0, round((time.monotonic() - started) * 1000)),
+                error_id=request_correlation_id(request),
+                error_code="provider_rejected_request",
                 error_message=_safe_provider_error(exc),
             )
         cost_usd = _playground_cost_usd(

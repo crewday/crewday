@@ -13987,6 +13987,28 @@
             ],
             "title": "Cost Usd"
           },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Id"
+          },
           "error_message": {
             "anyOf": [
               {
@@ -52228,6 +52250,40 @@
                       }
                     ],
                     "title": "Temperature"
+                  },
+                  "thinking_level": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "disabled",
+                          "high",
+                          "low",
+                          "medium"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Thinking Level"
+                  },
+                  "thinking_strategy": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "gemma_system_token",
+                          "glm_extra_body",
+                          "none",
+                          "openrouter_extra_body"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Thinking Strategy"
                   }
                 },
                 "required": [
@@ -52281,6 +52337,26 @@
                     "minimum": 0,
                     "nullable": true,
                     "type": "number"
+                  },
+                  "thinking_level": {
+                    "enum": [
+                      "disabled",
+                      "high",
+                      "low",
+                      "medium"
+                    ],
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "thinking_strategy": {
+                    "enum": [
+                      "gemma_system_token",
+                      "glm_extra_body",
+                      "none",
+                      "openrouter_extra_body"
+                    ],
+                    "nullable": true,
+                    "type": "string"
                   }
                 },
                 "required": [

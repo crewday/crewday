@@ -11,6 +11,8 @@ import type {
   LlmProviderModel,
   LlmProviderModelPlaygroundMode,
   LlmProviderModelPlaygroundResponse,
+  LlmThinkingLevel,
+  LlmThinkingStrategy,
 } from "@/types";
 
 interface LlmPlaygroundProps {
@@ -18,8 +20,16 @@ interface LlmPlaygroundProps {
   model: LlmModel | undefined;
   mode: LlmProviderModelPlaygroundMode;
   assignment?: LlmAssignment;
+  thinkingLevel?: LlmThinkingLevel;
+  thinkingStrategy?: LlmThinkingStrategy;
   titleId: string;
   description: string;
+}
+
+interface PlaygroundErrorNotice {
+  message: string;
+  code: string;
+  errorId: string | null;
 }
 
 export default function LlmPlayground({
@@ -27,6 +37,8 @@ export default function LlmPlayground({
   model,
   mode,
   assignment,
+  thinkingLevel,
+  thinkingStrategy,
   titleId,
   description,
 }: LlmPlaygroundProps) {
@@ -34,7 +46,7 @@ export default function LlmPlayground({
   const [systemPrompt, setSystemPrompt] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const [clientErr, setClientErr] = useState<string | null>(null);
+  const [clientErr, setClientErr] = useState<PlaygroundErrorNotice | null>(null);
   const [result, setResult] =
     useState<LlmProviderModelPlaygroundResponse | null>(null);
 
@@ -62,17 +74,29 @@ export default function LlmPlayground({
   function runPlayground(): void {
     if (!prompt.trim()) {
       setResult(null);
-      setClientErr("Prompt is required.");
+      setClientErr({
+        message: "Prompt is required.",
+        code: "prompt_required",
+        errorId: null,
+      });
       return;
     }
     if (supportsVision && imageUrl.trim() && imageFile) {
       setResult(null);
-      setClientErr("Use either an image URL or an uploaded image, not both.");
+      setClientErr({
+        message: "Use either an image URL or an uploaded image, not both.",
+        code: "playground_image_multiple_sources",
+        errorId: null,
+      });
       return;
     }
     if (mode === "assignment" && !assignment) {
       setResult(null);
-      setClientErr("Assignment is required.");
+      setClientErr({
+        message: "Assignment is required.",
+        code: "assignment_required",
+        errorId: null,
+      });
       return;
     }
 
@@ -89,6 +113,8 @@ export default function LlmPlayground({
       temperature: null,
       image_url: supportsVision ? emptyToNull(imageUrl) : null,
       assignment_id: mode === "assignment" ? (assignment?.id ?? null) : null,
+      thinking_level: thinkingLevel ?? null,
+      thinking_strategy: thinkingStrategy ?? null,
     };
     if (!supportsVision || imageFile === null) return base;
 
@@ -161,7 +187,7 @@ export default function LlmPlayground({
           onChange={(event) => setPrompt(event.target.value)}
           rows={4}
           required
-          aria-invalid={clientErr === "Prompt is required."}
+          aria-invalid={clientErr?.code === "prompt_required"}
           aria-describedby={describedBy(errId, result ? resultId : undefined)}
         />
       </FormModalField>
@@ -196,9 +222,7 @@ export default function LlmPlayground({
       ) : null}
 
       {clientErr ? (
-        <p id={errId} className="form-error" role="alert">
-          {clientErr}
-        </p>
+        <PlaygroundErrorAlert id={errId} error={clientErr} />
       ) : null}
 
       {playground.isPending ? (
@@ -278,6 +302,12 @@ function PlaygroundResult({
   const diagnostics = [
     ["Provider", result.provider_used],
     ["Model", result.model_used],
+    ...(result.status === "error"
+      ? [
+          ["Error ID", result.error_id ?? null],
+          ["Error code", result.error_code ?? null],
+        ]
+      : []),
     ["Latency", formatNullable(result.latency_ms, " ms")],
     [
       "Tokens",
@@ -328,6 +358,37 @@ function PlaygroundResult({
   );
 }
 
+function PlaygroundErrorAlert({
+  id,
+  error,
+}: {
+  id: string | undefined;
+  error: PlaygroundErrorNotice;
+}) {
+  return (
+    <section
+      id={id}
+      className="llm-playground-error"
+      role="alert"
+      aria-live="assertive"
+    >
+      <strong>{error.message}</strong>
+      <dl className="llm-playground-error__meta">
+        {error.errorId ? (
+          <div>
+            <dt>Error ID</dt>
+            <dd className="mono">{error.errorId}</dd>
+          </div>
+        ) : null}
+        <div>
+          <dt>Code</dt>
+          <dd className="mono">{error.code}</dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
 function emptyToNull(value: string): string | null {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
@@ -338,39 +399,90 @@ function describedBy(...ids: (string | undefined)[]): string | undefined {
   return value || undefined;
 }
 
-function playgroundErrorCopy(error: unknown): string {
+function playgroundErrorCopy(error: unknown): PlaygroundErrorNotice {
   if (error instanceof ApiError) {
     const code =
       typeof error.problem?.error === "string" ? error.problem.error : undefined;
+    const detail = error.detail;
+    const errorId = error.requestId;
     if (code === "provider_api_key_missing" || code === "provider_client_unavailable") {
-      return "The provider client is not configured for playground runs.";
+      return {
+        message: "The provider client is not configured for playground runs.",
+        code,
+        errorId,
+      };
     }
-    if (code === "provider_disabled") return "The provider is disabled.";
-    if (code === "provider_model_disabled") return "The provider-model is disabled.";
-    if (code === "model_inactive") return "The model is inactive.";
-    if (code === "assignment_not_found") return "The assignment no longer exists.";
+    if (code === "provider_disabled") {
+      return { message: "The provider is disabled.", code, errorId };
+    }
+    if (code === "provider_model_disabled") {
+      return { message: "The provider-model is disabled.", code, errorId };
+    }
+    if (code === "model_inactive") {
+      return { message: "The model is inactive.", code, errorId };
+    }
+    if (code === "assignment_not_found") {
+      return { message: "The assignment no longer exists.", code, errorId };
+    }
     if (code === "assignment_provider_model_mismatch") {
-      return "That assignment no longer points at this provider-model.";
+      return {
+        message: "That assignment no longer points at this provider-model.",
+        code,
+        errorId,
+      };
     }
-    if (code === "assignment_disabled") return "The assignment is disabled.";
+    if (code === "assignment_disabled") {
+      return { message: "The assignment is disabled.", code, errorId };
+    }
     if (code === "system_prompt_not_supported") {
-      return "System prompts are disabled for this provider-model.";
+      return {
+        message: "System prompts are disabled for this provider-model.",
+        code,
+        errorId,
+      };
     }
     if (code === "temperature_not_supported") {
-      return "Temperature is disabled for this provider-model.";
+      return {
+        message: "Temperature is disabled for this provider-model.",
+        code,
+        errorId,
+      };
     }
     if (code === "max_tokens_exceeds_model_limit") {
-      return "Max tokens exceeds the selected model limit.";
+      return {
+        message: detail ?? "Max tokens exceeds the selected model limit.",
+        code,
+        errorId,
+      };
+    }
+    if (code === "max_tokens_exceeds_playground_limit") {
+      return {
+        message: detail ?? "Max tokens exceeds the playground limit.",
+        code,
+        errorId,
+      };
     }
     if (code === "image_requires_vision_model") {
-      return "Images require a vision-capable model.";
+      return { message: "Images require a vision-capable model.", code, errorId };
     }
     if (code === "playground_image_file_too_large") {
-      return "Image upload is too large for a playground run.";
+      return {
+        message: "Image upload is too large for a playground run.",
+        code,
+        errorId,
+      };
     }
-    return error.title ?? "Playground run failed.";
+    return {
+      message: detail ?? error.title ?? "Playground run failed.",
+      code: code ?? error.type ?? `http_${error.status}`,
+      errorId,
+    };
   }
-  return error instanceof Error ? error.message : "Playground run failed.";
+  return {
+    message: error instanceof Error ? error.message : "Playground run failed.",
+    code: "client_error",
+    errorId: null,
+  };
 }
 
 function formatNullable(value: number | string | null, suffix = ""): string {

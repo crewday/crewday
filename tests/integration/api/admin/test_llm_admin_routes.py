@@ -104,6 +104,9 @@ class _RecordingLLMClient:
     def __init__(self) -> None:
         self.calls = 0
         self.messages: list[list[ChatMessage]] = []
+        self.max_tokens: list[int] = []
+        self.thinking_levels: list[str] = []
+        self.thinking_strategies: list[str] = []
 
     def chat(
         self,
@@ -117,10 +120,13 @@ class _RecordingLLMClient:
         tools: object = None,
         consents: object = None,
     ) -> LLMResponse:
-        del max_tokens, temperature, thinking_level, thinking_strategy
+        del temperature
         del tools, consents
         self.calls += 1
         self.messages.append(messages)
+        self.max_tokens.append(max_tokens)
+        self.thinking_levels.append(thinking_level)
+        self.thinking_strategies.append(thinking_strategy)
         return LLMResponse(
             text="ok",
             usage=LLMUsage(
@@ -683,13 +689,21 @@ class TestAdminLlmRoutes:
             ok = client.post(
                 f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
                 "/playground",
-                json={"prompt": "hello", "max_tokens": 64},
+                json={
+                    "prompt": "hello",
+                    "max_tokens": 64,
+                    "thinking_level": "high",
+                    "thinking_strategy": "gemma_system_token",
+                },
             )
             assert ok.status_code == 200, ok.text
             assert ok.json()["status"] == "ok"
             assert ok.json()["cost_usd"] == "0.000300"
             assert ok.json()["cost_cents"] == 0
             assert llm.calls == 1
+            assert llm.max_tokens == [64]
+            assert llm.thinking_levels == ["high"]
+            assert llm.thinking_strategies == ["gemma_system_token"]
 
             too_many_tokens = client.post(
                 f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
@@ -698,7 +712,25 @@ class TestAdminLlmRoutes:
             )
             assert too_many_tokens.status_code == 422, too_many_tokens.text
             assert too_many_tokens.json()["error"] == "max_tokens_exceeds_model_limit"
+            assert (
+                "exceeds this model's known output-token limit"
+                in too_many_tokens.json()["detail"]
+            )
             assert llm.calls == 1
+
+            with session_factory() as s, tenant_agnostic():
+                model = s.get(LlmModel, seeded.model_id)
+                assert model is not None
+                model.max_output_tokens = 131_072
+                s.commit()
+
+            huge_model_default = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                json={"prompt": "hello"},
+            )
+            assert huge_model_default.status_code == 200, huge_model_default.text
+            assert llm.max_tokens[-1] == 32_000
         finally:
             _wipe(session_factory)
 
@@ -892,6 +924,8 @@ class TestAdminLlmRoutes:
             body = resp.json()
             assert body["status"] == "error"
             assert body["assistant_text"] is None
+            assert body["error_id"]
+            assert body["error_code"] == "provider_rejected_request"
             assert "sk-test-secret-token" not in body["error_message"]
             assert "<redacted:credential>" in body["error_message"]
         finally:

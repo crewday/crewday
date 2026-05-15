@@ -106,6 +106,8 @@ export interface LlmProviderModelPlaygroundRequest {
   temperature: number | null;
   image_url: string | null;
   assignment_id: string | null;
+  thinking_level: LlmThinkingLevel | null;
+  thinking_strategy: LlmThinkingStrategy | null;
 }
 
 export interface LlmProviderModelPlaygroundResponse {
@@ -124,6 +126,8 @@ export interface LlmProviderModelPlaygroundResponse {
   stop_reason: string | null;
   cost_usd: string | null;
   cost_cents: number | null;
+  error_id?: string | null;
+  error_code?: string | null;
   error_message: string | null;
 }
 
