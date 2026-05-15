@@ -43,6 +43,7 @@ from app.adapters.llm.fake import FakeLLMClient
 from app.adapters.llm.openrouter import (
     OpenRouterModelMetadata,
     fetch_openrouter_model_metadata,
+    normalize_openrouter_model_id,
 )
 from app.adapters.llm.ports import (
     ChatMessage,
@@ -410,11 +411,16 @@ class LlmGraphPayload(BaseModel):
 class LlmSyncPricingDelta(BaseModel):
     provider_model_id: str
     api_model_id: str
+    source: Literal["openrouter"] | None = None
+    lookup_id: str | None = None
     input_before: float
     input_after: float
     output_before: float
     output_after: float
-    status: Literal["updated", "unchanged", "pinned", "error"]
+    fixed_before: float | None = None
+    fixed_after: float | None = None
+    price_last_synced_at: str | None = None
+    status: Literal["updated", "unchanged", "skipped_not_syncable", "error"]
 
 
 class LlmSyncPricingResult(BaseModel):
@@ -423,6 +429,18 @@ class LlmSyncPricingResult(BaseModel):
     updated: int
     skipped: int
     errors: int
+
+
+class LlmSyncPricingPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider_model_ids: list[str] | None = None
+    dry_run: bool = False
+
+
+class LlmProviderModelSyncPricingResponse(BaseModel):
+    provider_model: LlmProviderModelResponse
+    pricing_sync_result: LlmSyncPricingDelta
 
 
 class LlmProviderModelPlaygroundRequest(BaseModel):
@@ -1365,6 +1383,13 @@ def _flush_or_conflict(session: Session, error: str) -> None:
         raise _conflict(error) from exc
 
 
+def _openrouter_unavailable() -> UpstreamUnavailable:
+    return UpstreamUnavailable(
+        "OpenRouter metadata is temporarily unavailable",
+        extra={"error": "openrouter_unavailable", "upstream": "openrouter"},
+    )
+
+
 def _publish_assignment_changed(
     ctx: DeploymentContext,
     request: Request,
@@ -1567,9 +1592,206 @@ def _validate_provider_model_payload(
         raise _conflict("provider_model_exists")
 
 
+def _provider_model_price_lookup(
+    row: LlmProviderModel, model: LlmModel
+) -> tuple[Literal["openrouter"], str] | None:
+    override = row.price_source_override or ""
+    if override == "none":
+        return None
+    if override != "openrouter" and model.price_source != "openrouter":
+        return None
+    lookup_id = (
+        row.price_source_model_id_override
+        or model.price_source_model_id
+        or (row.api_model_id if override == "openrouter" else model.canonical_name)
+    )
+    return "openrouter", lookup_id
+
+
+def _sync_pricing_error(exc: Exception) -> None:
+    if isinstance(exc, ValueError):
+        raise _unprocessable("invalid_openrouter_model_id") from exc
+    if isinstance(exc, LlmProviderError):
+        raise NotFound(extra={"error": "openrouter_model_not_found"}) from exc
+    if isinstance(exc, (LlmRateLimited, LlmTransportError)):
+        raise _openrouter_unavailable() from exc
+    raise exc
+
+
+def _fetch_openrouter_pricing(lookup_id: str) -> OpenRouterModelMetadata:
+    try:
+        return fetch_openrouter_model_metadata(lookup_id)
+    except (ValueError, LlmProviderError, LlmRateLimited, LlmTransportError) as exc:
+        _sync_pricing_error(exc)
+        raise AssertionError("unreachable") from exc
+
+
+def _apply_provider_model_pricing(
+    row: LlmProviderModel,
+    *,
+    source: Literal["openrouter"],
+    lookup_id: str,
+    metadata: OpenRouterModelMetadata,
+    now: datetime,
+    dry_run: bool = False,
+) -> LlmSyncPricingDelta:
+    input_before = _money(row.input_cost_per_million)
+    output_before = _money(row.output_cost_per_million)
+    fixed_before = (
+        _money(row.fixed_cost_per_call_usd)
+        if row.fixed_cost_per_call_usd is not None
+        else None
+    )
+    input_after = _money(metadata.input_cost_per_million)
+    output_after = _money(metadata.output_cost_per_million)
+    fixed_after = (
+        _money(metadata.fixed_cost_per_call_usd)
+        if metadata.fixed_cost_per_call_usd is not None
+        else None
+    )
+    changed = (
+        input_before != input_after
+        or output_before != output_after
+        or fixed_before != fixed_after
+    )
+    if not dry_run:
+        row.input_cost_per_million = metadata.input_cost_per_million
+        row.output_cost_per_million = metadata.output_cost_per_million
+        row.fixed_cost_per_call_usd = metadata.fixed_cost_per_call_usd
+        row.price_last_synced_at = now
+    return LlmSyncPricingDelta(
+        provider_model_id=row.id,
+        api_model_id=row.api_model_id,
+        source=source,
+        lookup_id=lookup_id,
+        input_before=input_before,
+        input_after=input_after,
+        output_before=output_before,
+        output_after=output_after,
+        fixed_before=fixed_before,
+        fixed_after=fixed_after,
+        price_last_synced_at=_iso(now),
+        status="updated" if changed else "unchanged",
+    )
+
+
+def _sync_provider_model_pricing(
+    row: LlmProviderModel,
+    model: LlmModel,
+    *,
+    now: datetime,
+    dry_run: bool = False,
+) -> LlmSyncPricingDelta:
+    lookup = _provider_model_price_lookup(row, model)
+    if lookup is None:
+        return LlmSyncPricingDelta(
+            provider_model_id=row.id,
+            api_model_id=row.api_model_id,
+            input_before=_money(row.input_cost_per_million),
+            input_after=_money(row.input_cost_per_million),
+            output_before=_money(row.output_cost_per_million),
+            output_after=_money(row.output_cost_per_million),
+            fixed_before=(
+                _money(row.fixed_cost_per_call_usd)
+                if row.fixed_cost_per_call_usd is not None
+                else None
+            ),
+            fixed_after=(
+                _money(row.fixed_cost_per_call_usd)
+                if row.fixed_cost_per_call_usd is not None
+                else None
+            ),
+            status="skipped_not_syncable",
+        )
+    source, lookup_id = lookup
+    metadata = _fetch_openrouter_pricing(lookup_id)
+    return _apply_provider_model_pricing(
+        row,
+        source=source,
+        lookup_id=lookup_id,
+        metadata=metadata,
+        now=now,
+        dry_run=dry_run,
+    )
+
+
+def _sync_pricing_error_delta(
+    row: LlmProviderModel,
+    model: LlmModel,
+) -> LlmSyncPricingDelta:
+    lookup = _provider_model_price_lookup(row, model)
+    return LlmSyncPricingDelta(
+        provider_model_id=row.id,
+        api_model_id=row.api_model_id,
+        source=lookup[0] if lookup is not None else None,
+        lookup_id=lookup[1] if lookup is not None else None,
+        input_before=_money(row.input_cost_per_million),
+        input_after=_money(row.input_cost_per_million),
+        output_before=_money(row.output_cost_per_million),
+        output_after=_money(row.output_cost_per_million),
+        fixed_before=(
+            _money(row.fixed_cost_per_call_usd)
+            if row.fixed_cost_per_call_usd is not None
+            else None
+        ),
+        fixed_after=(
+            _money(row.fixed_cost_per_call_usd)
+            if row.fixed_cost_per_call_usd is not None
+            else None
+        ),
+        status="error",
+    )
+
+
+def _sync_matching_provider_model_prices_from_metadata(
+    session: Session, metadata: OpenRouterModelMetadata
+) -> list[LlmSyncPricingDelta]:
+    rows = list(
+        session.scalars(
+            select(LlmProviderModel).order_by(
+                LlmProviderModel.api_model_id, LlmProviderModel.id
+            )
+        ).all()
+    )
+    if not rows:
+        return []
+    models_by_id = {
+        model.id: model
+        for model in session.scalars(
+            select(LlmModel).where(LlmModel.id.in_({row.model_id for row in rows}))
+        ).all()
+    }
+    now = _now()
+    deltas: list[LlmSyncPricingDelta] = []
+    for row in rows:
+        model = models_by_id.get(row.model_id)
+        if model is None:
+            continue
+        lookup = _provider_model_price_lookup(row, model)
+        if lookup is None:
+            continue
+        source, lookup_id = lookup
+        try:
+            normalized_lookup_id = normalize_openrouter_model_id(lookup_id)
+        except ValueError:
+            continue
+        if normalized_lookup_id != metadata.model_id:
+            continue
+        deltas.append(
+            _apply_provider_model_pricing(
+                row,
+                source=source,
+                lookup_id=lookup_id,
+                metadata=metadata,
+                now=now,
+            )
+        )
+    return deltas
+
+
 def _openrouter_metadata_preview(
     session: Session, payload: OpenRouterModelPreviewRequest
-) -> OpenRouterModelPreviewResponse:
+) -> tuple[OpenRouterModelPreviewResponse, bool]:
     try:
         metadata = fetch_openrouter_model_metadata(payload.model_id_or_url)
     except ValueError as exc:
@@ -1577,10 +1799,7 @@ def _openrouter_metadata_preview(
     except LlmProviderError as exc:
         raise NotFound(extra={"error": "openrouter_model_not_found"}) from exc
     except (LlmRateLimited, LlmTransportError) as exc:
-        raise UpstreamUnavailable(
-            "OpenRouter metadata is temporarily unavailable",
-            extra={"error": "openrouter_unavailable", "upstream": "openrouter"},
-        ) from exc
+        raise _openrouter_unavailable() from exc
 
     existing_model_id = session.scalar(
         select(LlmModel.id)
@@ -1625,12 +1844,20 @@ def _openrouter_metadata_preview(
             "OpenRouter metadata is temporarily unavailable",
             extra={"error": "openrouter_unavailable", "upstream": "openrouter"},
         ) from exc
+    pricing_changed = bool(
+        _sync_matching_provider_model_prices_from_metadata(session, metadata)
+    )
+    if pricing_changed:
+        _commit_or_conflict(session, "provider_model_constraint_violation")
 
-    return OpenRouterModelPreviewResponse(
-        openrouter_model_id=metadata.model_id,
-        existing_model_id=existing_model_id,
-        model_payload=model_payload,
-        provider_model_previews=provider_model_previews,
+    return (
+        OpenRouterModelPreviewResponse(
+            openrouter_model_id=metadata.model_id,
+            existing_model_id=existing_model_id,
+            model_payload=model_payload,
+            provider_model_previews=provider_model_previews,
+        ),
+        pricing_changed,
     )
 
 
@@ -2243,12 +2470,16 @@ def build_admin_llm_router() -> APIRouter:
         operation_id="admin.llm.models.openrouter_preview",
     )
     def openrouter_model_preview(
-        _ctx: _WriteCtx,
+        ctx: _WriteCtx,
+        request: Request,
         session: _Db,
         payload: OpenRouterModelPreviewRequest,
     ) -> OpenRouterModelPreviewResponse:
         with tenant_agnostic():
-            return _openrouter_metadata_preview(session, payload)
+            response, pricing_changed = _openrouter_metadata_preview(session, payload)
+            if pricing_changed:
+                _publish_deployment_defaults_changed(ctx, request)
+            return response
 
     @router.get(
         "/models/{model_id}",
@@ -2397,10 +2628,14 @@ def build_admin_llm_router() -> APIRouter:
         with tenant_agnostic():
             _validate_provider_model_payload(session, payload)
             session.add(row)
+            _flush_or_conflict(session, "provider_model_constraint_violation")
+            model = session.get(LlmModel, row.model_id)
+            if model is None:
+                raise _unprocessable("model_not_found")
+            _sync_provider_model_pricing(row, model, now=now)
             _commit_or_conflict(session, "provider_model_constraint_violation")
             _publish_deployment_defaults_changed(ctx, request)
             session.refresh(row)
-            model = session.get(LlmModel, row.model_id)
         return _provider_model_response(row, model)
 
     @router.get(
@@ -2415,6 +2650,32 @@ def build_admin_llm_router() -> APIRouter:
             row = _provider_model(session, provider_model_id)
             model = session.get(LlmModel, row.model_id)
         return _provider_model_response(row, model)
+
+    @router.post(
+        "/provider-models/{provider_model_id}/sync-pricing",
+        response_model=LlmProviderModelSyncPricingResponse,
+        operation_id="admin.llm.provider_models.sync_pricing",
+    )
+    def sync_provider_model_pricing(
+        ctx: _WriteCtx,
+        request: Request,
+        session: _Db,
+        provider_model_id: str,
+    ) -> LlmProviderModelSyncPricingResponse:
+        with tenant_agnostic():
+            row = _provider_model(session, provider_model_id)
+            model = session.get(LlmModel, row.model_id)
+            if model is None:
+                raise _unprocessable("model_not_found")
+            delta = _sync_provider_model_pricing(row, model, now=_now())
+            _commit_or_conflict(session, "provider_model_constraint_violation")
+            if delta.status == "updated":
+                _publish_deployment_defaults_changed(ctx, request)
+            session.refresh(row)
+        return LlmProviderModelSyncPricingResponse(
+            provider_model=_provider_model_response(row, model),
+            pricing_sync_result=delta,
+        )
 
     @router.post(
         "/provider-models/{provider_model_id}/playground",
@@ -2581,6 +2842,12 @@ def build_admin_llm_router() -> APIRouter:
             _validate_provider_model_payload(
                 session, payload, provider_model_id=provider_model_id
             )
+            old_model = session.get(LlmModel, row.model_id)
+            if old_model is None:
+                raise _unprocessable("model_not_found")
+            old_lookup = _provider_model_price_lookup(row, old_model)
+            old_price_source_override = row.price_source_override
+            old_price_source_model_id_override = row.price_source_model_id_override
             row.provider_id = payload.provider_id
             row.model_id = payload.model_id
             row.api_model_id = payload.api_model_id
@@ -2601,10 +2868,21 @@ def build_admin_llm_router() -> APIRouter:
             row.price_source_model_id_override = payload.price_source_model_id_override
             row.is_enabled = payload.is_enabled
             row.updated_at = _now()
+            model = session.get(LlmModel, row.model_id)
+            if model is None:
+                raise _unprocessable("model_not_found")
+            new_lookup = _provider_model_price_lookup(row, model)
+            should_sync_pricing = new_lookup is not None and (
+                payload.price_source_override != old_price_source_override
+                or payload.price_source_model_id_override
+                != old_price_source_model_id_override
+                or new_lookup != old_lookup
+            )
+            if should_sync_pricing:
+                _sync_provider_model_pricing(row, model, now=row.updated_at)
             _commit_or_conflict(session, "provider_model_constraint_violation")
             _publish_deployment_defaults_changed(ctx, request)
             session.refresh(row)
-            model = session.get(LlmModel, row.model_id)
         return _provider_model_response(row, model)
 
     @router.delete(
@@ -3254,34 +3532,85 @@ def build_admin_llm_router() -> APIRouter:
         response_model=LlmSyncPricingResult,
         operation_id="admin.llm.sync_pricing",
     )
-    def sync_pricing(_ctx: _WriteCtx, session: _Db) -> LlmSyncPricingResult:
+    def sync_pricing(
+        ctx: _WriteCtx,
+        request: Request,
+        session: _Db,
+        payload: LlmSyncPricingPayload | None = None,
+    ) -> LlmSyncPricingResult:
         started_at = _now()
+        payload = payload or LlmSyncPricingPayload()
         with tenant_agnostic():
-            rows = list(
-                session.scalars(
-                    select(LlmProviderModel).order_by(
-                        LlmProviderModel.api_model_id, LlmProviderModel.id
+            stmt = select(LlmProviderModel).order_by(
+                LlmProviderModel.api_model_id, LlmProviderModel.id
+            )
+            if payload.provider_model_ids is not None:
+                requested_ids = set(payload.provider_model_ids)
+                stmt = stmt.where(LlmProviderModel.id.in_(requested_ids))
+            rows = list(session.scalars(stmt).all())
+            if payload.provider_model_ids is not None and len(rows) != len(
+                set(payload.provider_model_ids)
+            ):
+                raise _not_found()
+            models_by_id = {
+                model.id: model
+                for model in session.scalars(
+                    select(LlmModel).where(
+                        LlmModel.id.in_({row.model_id for row in rows})
                     )
                 ).all()
-            )
-        deltas = [
-            LlmSyncPricingDelta(
-                provider_model_id=row.id,
-                api_model_id=row.api_model_id,
-                input_before=_money(row.input_cost_per_million),
-                input_after=_money(row.input_cost_per_million),
-                output_before=_money(row.output_cost_per_million),
-                output_after=_money(row.output_cost_per_million),
-                status="pinned" if row.price_source_override == "none" else "unchanged",
-            )
-            for row in rows
-        ]
+            }
+            deltas: list[LlmSyncPricingDelta] = []
+            for row in rows:
+                model = models_by_id.get(row.model_id)
+                if model is None:
+                    deltas.append(
+                        LlmSyncPricingDelta(
+                            provider_model_id=row.id,
+                            api_model_id=row.api_model_id,
+                            input_before=_money(row.input_cost_per_million),
+                            input_after=_money(row.input_cost_per_million),
+                            output_before=_money(row.output_cost_per_million),
+                            output_after=_money(row.output_cost_per_million),
+                            status="error",
+                        )
+                    )
+                    continue
+                try:
+                    deltas.append(
+                        _sync_provider_model_pricing(
+                            row,
+                            model,
+                            now=started_at,
+                            dry_run=payload.dry_run,
+                        )
+                    )
+                except (
+                    ValueError,
+                    LlmProviderError,
+                    LlmRateLimited,
+                    LlmTransportError,
+                    Validation,
+                    NotFound,
+                    UpstreamUnavailable,
+                ):
+                    deltas.append(_sync_pricing_error_delta(row, model))
+            if not payload.dry_run:
+                _commit_or_conflict(session, "provider_model_constraint_violation")
+            if not payload.dry_run and any(
+                delta.status == "updated" for delta in deltas
+            ):
+                _publish_deployment_defaults_changed(ctx, request)
         return LlmSyncPricingResult(
             started_at=_iso(started_at) or "",
             deltas=deltas,
-            updated=0,
-            skipped=len(deltas),
-            errors=0,
+            updated=sum(1 for delta in deltas if delta.status == "updated"),
+            skipped=sum(
+                1
+                for delta in deltas
+                if delta.status in {"unchanged", "skipped_not_syncable"}
+            ),
+            errors=sum(1 for delta in deltas if delta.status == "error"),
         )
 
     return router

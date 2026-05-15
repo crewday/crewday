@@ -1023,6 +1023,7 @@ class TestAdminLlmRoutes:
         client: TestClient,
         session_factory: sessionmaker[Session],
         pinned_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         try:
             client.cookies.set(
@@ -1175,12 +1176,18 @@ class TestAdminLlmRoutes:
             assert reset_body["revisions_count"] == 1
             assert reset_body["template"] != "You are the manager assistant."
 
+            monkeypatch.setattr(
+                "app.api.admin.llm.fetch_openrouter_model_metadata",
+                lambda model_id_or_url: _gemma_4_metadata(
+                    model_id=normalize_openrouter_model_id(model_id_or_url)
+                ),
+            )
             sync = client.post("/admin/api/v1/llm/sync-pricing")
             assert sync.status_code == 200, sync.text
             sync_body = sync.json()
-            assert sync_body["updated"] == 0
+            assert sync_body["updated"] == 1
             assert sync_body["errors"] == 0
-            assert sync_body["deltas"][0]["status"] == "unchanged"
+            assert sync_body["deltas"][0]["status"] == "updated"
         finally:
             _wipe(session_factory)
 
@@ -1971,6 +1978,527 @@ class TestAdminLlmRoutes:
             assert oversized.status_code == 502, oversized.text
             assert oversized.json()["error"] == "openrouter_unavailable"
             assert "x" * 241 not in oversized.text
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_create_update_and_single_sync_use_openrouter_prices(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            seen: list[str] = []
+
+            def fake_lookup(model_id_or_url: str) -> OpenRouterModelMetadata:
+                seen.append(model_id_or_url)
+                if model_id_or_url == "missing/model":
+                    raise LlmProviderError("not found")
+                if model_id_or_url == "transport/model":
+                    raise LlmTransportError("provider unavailable")
+                if model_id_or_url == "override/model":
+                    return _gemma_4_metadata(model_id="override/model")
+                if model_id_or_url == "single/model":
+                    metadata = _gemma_4_metadata(model_id="single/model")
+                    return OpenRouterModelMetadata(
+                        model_id=metadata.model_id,
+                        display_name=metadata.display_name,
+                        capabilities=metadata.capabilities,
+                        context_window=metadata.context_window,
+                        max_output_tokens=metadata.max_output_tokens,
+                        input_cost_per_million=Decimal("0.3300"),
+                        output_cost_per_million=Decimal("0.6600"),
+                        fixed_cost_per_call_usd=Decimal("0.0020"),
+                        supports_system_prompt=metadata.supports_system_prompt,
+                        supports_temperature=metadata.supports_temperature,
+                        thinking_level=metadata.thinking_level,
+                        thinking_strategy=metadata.thinking_strategy,
+                    )
+                return _gemma_4_metadata(
+                    model_id=normalize_openrouter_model_id(model_id_or_url)
+                )
+
+            monkeypatch.setattr(
+                "app.api.admin.llm.fetch_openrouter_model_metadata", fake_lookup
+            )
+
+            model = client.post(
+                "/admin/api/v1/llm/models",
+                json={
+                    "canonical_name": "google/gemma-4-31b-it",
+                    "display_name": "Gemma 4",
+                    "capabilities": ["chat"],
+                    "price_source": "openrouter",
+                },
+            )
+            assert model.status_code == 200, model.text
+
+            created = client.post(
+                "/admin/api/v1/llm/provider-models",
+                json={
+                    "provider_id": seeded.provider_id,
+                    "model_id": model.json()["id"],
+                    "api_model_id": "provider-wire-id",
+                    "input_cost_per_million": 9,
+                    "output_cost_per_million": 9,
+                    "fixed_cost_per_call_usd": 9,
+                },
+            )
+            assert created.status_code == 200, created.text
+            body = created.json()
+            assert seen == ["google/gemma-4-31b-it"]
+            assert body["input_cost_per_million"] == 0.15
+            assert body["output_cost_per_million"] == 0.45
+            assert body["fixed_cost_per_call_usd"] == 0.0012
+            assert body["price_last_synced_at"] is not None
+
+            updated = client.put(
+                f"/admin/api/v1/llm/provider-models/{body['id']}",
+                json={
+                    "provider_id": seeded.provider_id,
+                    "model_id": model.json()["id"],
+                    "api_model_id": "provider-wire-id",
+                    "price_source_model_id_override": "override/model",
+                },
+            )
+            assert updated.status_code == 200, updated.text
+            assert seen[-1] == "override/model"
+            assert updated.json()["input_cost_per_million"] == 0.15
+
+            single = client.post(
+                f"/admin/api/v1/llm/provider-models/{body['id']}/sync-pricing"
+            )
+            assert single.status_code == 200, single.text
+            assert seen[-1] == "override/model"
+            assert single.json()["pricing_sync_result"]["status"] == "unchanged"
+
+            seen_count = len(seen)
+            no_sync = client.put(
+                f"/admin/api/v1/llm/provider-models/{body['id']}",
+                json={
+                    "provider_id": seeded.provider_id,
+                    "model_id": model.json()["id"],
+                    "api_model_id": "provider-wire-id",
+                    "input_cost_per_million": 7.89,
+                    "output_cost_per_million": 8.9,
+                    "fixed_cost_per_call_usd": 0.03,
+                    "price_source_model_id_override": "override/model",
+                    "supports_temperature": False,
+                },
+            )
+            assert no_sync.status_code == 200, no_sync.text
+            assert len(seen) == seen_count
+            assert no_sync.json()["input_cost_per_million"] == 7.89
+            assert no_sync.json()["output_cost_per_million"] == 8.9
+            assert no_sync.json()["fixed_cost_per_call_usd"] == 0.03
+
+            switch_lookup = client.put(
+                f"/admin/api/v1/llm/provider-models/{body['id']}",
+                json={
+                    "provider_id": seeded.provider_id,
+                    "model_id": model.json()["id"],
+                    "api_model_id": "provider-wire-id",
+                    "price_source_model_id_override": "single/model",
+                },
+            )
+            assert switch_lookup.status_code == 200, switch_lookup.text
+            assert switch_lookup.json()["input_cost_per_million"] == 0.33
+            assert seen[-1] == "single/model"
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_manual_rows_do_not_call_openrouter(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+
+            def fail_lookup(model_id_or_url: str) -> OpenRouterModelMetadata:
+                raise AssertionError(f"unexpected OpenRouter lookup: {model_id_or_url}")
+
+            monkeypatch.setattr(
+                "app.api.admin.llm.fetch_openrouter_model_metadata", fail_lookup
+            )
+            model = client.post(
+                "/admin/api/v1/llm/models",
+                json={
+                    "canonical_name": "manual/model",
+                    "display_name": "Manual Model",
+                    "capabilities": ["chat"],
+                    "price_source": "manual",
+                },
+            )
+            assert model.status_code == 200, model.text
+
+            created = client.post(
+                "/admin/api/v1/llm/provider-models",
+                json={
+                    "provider_id": seeded.provider_id,
+                    "model_id": model.json()["id"],
+                    "api_model_id": "manual/model",
+                    "input_cost_per_million": 1.23,
+                    "output_cost_per_million": 4.56,
+                    "fixed_cost_per_call_usd": 0.01,
+                },
+            )
+            assert created.status_code == 200, created.text
+            assert created.json()["input_cost_per_million"] == 1.23
+            assert created.json()["output_cost_per_million"] == 4.56
+            assert created.json()["fixed_cost_per_call_usd"] == 0.01
+            assert created.json()["price_last_synced_at"] is None
+
+            pinned = client.put(
+                f"/admin/api/v1/llm/provider-models/{created.json()['id']}",
+                json={
+                    "provider_id": seeded.provider_id,
+                    "model_id": model.json()["id"],
+                    "api_model_id": "manual/model",
+                    "input_cost_per_million": 2.34,
+                    "output_cost_per_million": 5.67,
+                    "fixed_cost_per_call_usd": 0.02,
+                    "price_source_override": "none",
+                },
+            )
+            assert pinned.status_code == 200, pinned.text
+            assert pinned.json()["input_cost_per_million"] == 2.34
+            assert pinned.json()["output_cost_per_million"] == 5.67
+            assert pinned.json()["fixed_cost_per_call_usd"] == 0.02
+            assert pinned.json()["price_last_synced_at"] is None
+        finally:
+            _wipe(session_factory)
+
+    def test_syncable_provider_model_create_failure_does_not_save_row(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+
+            def missing_lookup(model_id_or_url: str) -> OpenRouterModelMetadata:
+                raise LlmProviderError("not found")
+
+            monkeypatch.setattr(
+                "app.api.admin.llm.fetch_openrouter_model_metadata", missing_lookup
+            )
+            model = client.post(
+                "/admin/api/v1/llm/models",
+                json={
+                    "canonical_name": "missing/model",
+                    "display_name": "Missing Model",
+                    "capabilities": ["chat"],
+                    "price_source": "openrouter",
+                },
+            )
+            assert model.status_code == 200, model.text
+
+            failed = client.post(
+                "/admin/api/v1/llm/provider-models",
+                json={
+                    "provider_id": seeded.provider_id,
+                    "model_id": model.json()["id"],
+                    "api_model_id": "missing/model",
+                },
+            )
+            assert failed.status_code == 404, failed.text
+            assert failed.json()["error"] == "openrouter_model_not_found"
+            with session_factory() as s, tenant_agnostic():
+                count = s.scalar(
+                    select(func.count(LlmProviderModel.id)).where(
+                        LlmProviderModel.model_id == model.json()["id"]
+                    )
+                )
+            assert count == 0
+        finally:
+            _wipe(session_factory)
+
+    def test_syncable_provider_model_update_failure_rolls_back_prices(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+
+            def lookup(model_id_or_url: str) -> OpenRouterModelMetadata:
+                if model_id_or_url == "missing/model":
+                    raise LlmProviderError("not found")
+                return _gemma_4_metadata(
+                    model_id=normalize_openrouter_model_id(model_id_or_url)
+                )
+
+            monkeypatch.setattr(
+                "app.api.admin.llm.fetch_openrouter_model_metadata", lookup
+            )
+            model = client.post(
+                "/admin/api/v1/llm/models",
+                json={
+                    "canonical_name": "google/gemma-4-31b-it",
+                    "display_name": "Gemma 4",
+                    "capabilities": ["chat"],
+                    "price_source": "openrouter",
+                },
+            )
+            assert model.status_code == 200, model.text
+            created = client.post(
+                "/admin/api/v1/llm/provider-models",
+                json={
+                    "provider_id": seeded.provider_id,
+                    "model_id": model.json()["id"],
+                    "api_model_id": "google/gemma-4-31b-it",
+                },
+            )
+            assert created.status_code == 200, created.text
+            provider_model_id = created.json()["id"]
+
+            failed = client.put(
+                f"/admin/api/v1/llm/provider-models/{provider_model_id}",
+                json={
+                    "provider_id": seeded.provider_id,
+                    "model_id": model.json()["id"],
+                    "api_model_id": "google/gemma-4-31b-it",
+                    "input_cost_per_million": 7,
+                    "output_cost_per_million": 8,
+                    "price_source_model_id_override": "missing/model",
+                },
+            )
+            assert failed.status_code == 404, failed.text
+            assert failed.json()["error"] == "openrouter_model_not_found"
+
+            persisted = client.get(
+                f"/admin/api/v1/llm/provider-models/{provider_model_id}"
+            )
+            assert persisted.status_code == 200, persisted.text
+            body = persisted.json()
+            assert body["price_source_model_id_override"] is None
+            assert body["input_cost_per_million"] == 0.15
+            assert body["output_cost_per_million"] == 0.45
+        finally:
+            _wipe(session_factory)
+
+    def test_openrouter_model_preview_updates_matching_syncable_prices_only(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            syncable_id = new_ulid()
+            pinned_id = new_ulid()
+            model_id = new_ulid()
+            pinned_model_id = new_ulid()
+            with session_factory() as s, tenant_agnostic():
+                for row_id, canonical_name in (
+                    (model_id, "google/gemma-4-31b-it"),
+                    (pinned_model_id, "google/gemma-4-31b-it-pinned"),
+                ):
+                    s.add(
+                        LlmModel(
+                            id=row_id,
+                            canonical_name=canonical_name,
+                            display_name="Existing Gemma 4",
+                            capabilities=["chat"],
+                            context_window=None,
+                            max_output_tokens=None,
+                            thinking_level="disabled",
+                            thinking_strategy="none",
+                            is_active=True,
+                            price_source="openrouter",
+                            price_source_model_id="google/gemma-4-31b-it",
+                            notes=None,
+                            created_at=_PINNED,
+                            updated_at=_PINNED,
+                            updated_by_user_id=None,
+                        )
+                    )
+                s.flush()
+                for row_id, row_model_id, override in (
+                    (syncable_id, model_id, ""),
+                    (pinned_id, pinned_model_id, "none"),
+                ):
+                    s.add(
+                        LlmProviderModel(
+                            id=row_id,
+                            provider_id=seeded.provider_id,
+                            model_id=row_model_id,
+                            api_model_id=f"google/gemma-4-31b-it-{row_id[-4:]}",
+                            input_cost_per_million=Decimal("9.0000"),
+                            output_cost_per_million=Decimal("9.0000"),
+                            fixed_cost_per_call_usd=None,
+                            max_tokens_override=None,
+                            temperature_override=None,
+                            supports_system_prompt=True,
+                            supports_temperature=True,
+                            thinking_strategy_override=None,
+                            extra_api_params={},
+                            price_source_override=override,
+                            price_source_model_id_override=None,
+                            price_last_synced_at=None,
+                            is_enabled=True,
+                            created_at=_PINNED,
+                            updated_at=_PINNED,
+                        )
+                    )
+                s.commit()
+
+            monkeypatch.setattr(
+                "app.api.admin.llm.fetch_openrouter_model_metadata",
+                lambda model_id_or_url: _gemma_4_metadata(
+                    model_id=normalize_openrouter_model_id(model_id_or_url)
+                ),
+            )
+            resp = client.post(
+                "/admin/api/v1/llm/models/openrouter-preview",
+                json={"model_id_or_url": "google/gemma-4-31b-it"},
+            )
+            assert resp.status_code == 200, resp.text
+            with session_factory() as s, tenant_agnostic():
+                syncable = s.get(LlmProviderModel, syncable_id)
+                pinned = s.get(LlmProviderModel, pinned_id)
+                model = s.get(LlmModel, model_id)
+                provider_model_count = s.scalar(
+                    select(func.count(LlmProviderModel.id)).where(
+                        LlmProviderModel.model_id.in_({model_id, pinned_model_id})
+                    )
+                )
+            assert syncable is not None
+            assert pinned is not None
+            assert model is not None
+            assert syncable.input_cost_per_million == Decimal("0.1500")
+            assert syncable.output_cost_per_million == Decimal("0.4500")
+            assert syncable.fixed_cost_per_call_usd == Decimal("0.0012")
+            assert syncable.price_last_synced_at is not None
+            assert pinned.input_cost_per_million == Decimal("9.0000")
+            assert pinned.price_last_synced_at is None
+            assert model.display_name == "Existing Gemma 4"
+            assert provider_model_count == 2
+        finally:
+            _wipe(session_factory)
+
+    def test_all_sync_pricing_reports_updated_skipped_and_error_deltas(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            error_model_id = new_ulid()
+            error_pm_id = new_ulid()
+            with session_factory() as s, tenant_agnostic():
+                s.add(
+                    LlmModel(
+                        id=error_model_id,
+                        canonical_name="error/model",
+                        display_name="Error Model",
+                        capabilities=["chat"],
+                        context_window=None,
+                        max_output_tokens=None,
+                        thinking_level="disabled",
+                        thinking_strategy="none",
+                        is_active=True,
+                        price_source="manual",
+                        price_source_model_id=None,
+                        notes=None,
+                        created_at=_PINNED,
+                        updated_at=_PINNED,
+                        updated_by_user_id=None,
+                    )
+                )
+                s.flush()
+                s.add(
+                    LlmProviderModel(
+                        id=error_pm_id,
+                        provider_id=seeded.provider_id,
+                        model_id=error_model_id,
+                        api_model_id="error/model",
+                        input_cost_per_million=Decimal("1.0000"),
+                        output_cost_per_million=Decimal("1.0000"),
+                        fixed_cost_per_call_usd=None,
+                        max_tokens_override=None,
+                        temperature_override=None,
+                        supports_system_prompt=True,
+                        supports_temperature=True,
+                        thinking_strategy_override=None,
+                        extra_api_params={},
+                        price_source_override="openrouter",
+                        price_source_model_id_override="transport/model",
+                        price_last_synced_at=None,
+                        is_enabled=True,
+                        created_at=_PINNED,
+                        updated_at=_PINNED,
+                    )
+                )
+                s.commit()
+
+            def fake_lookup(model_id_or_url: str) -> OpenRouterModelMetadata:
+                if model_id_or_url == "transport/model":
+                    raise LlmTransportError("temporary failure")
+                return _gemma_4_metadata(
+                    model_id=normalize_openrouter_model_id(model_id_or_url)
+                )
+
+            monkeypatch.setattr(
+                "app.api.admin.llm.fetch_openrouter_model_metadata", fake_lookup
+            )
+            resp = client.post("/admin/api/v1/llm/sync-pricing")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            statuses = {
+                delta["provider_model_id"]: delta["status"] for delta in body["deltas"]
+            }
+            assert body["updated"] == 1
+            assert body["skipped"] == 0
+            assert body["errors"] == 1
+            assert statuses[seeded.provider_model_id] == "updated"
+            assert statuses[error_pm_id] == "error"
+
+            selected = client.post(
+                "/admin/api/v1/llm/sync-pricing",
+                json={"provider_model_ids": [seeded.provider_model_id]},
+            )
+            assert selected.status_code == 200, selected.text
+            assert len(selected.json()["deltas"]) == 1
+            assert selected.json()["deltas"][0]["provider_model_id"] == (
+                seeded.provider_model_id
+            )
         finally:
             _wipe(session_factory)
 
