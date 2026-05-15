@@ -1072,7 +1072,7 @@ class TestModelMetadataLookup:
 
         assert metadata.model_id == "google/gemma-4-31b-it"
         assert metadata.display_name == "Gemma 4 31B Instruct"
-        assert metadata.vendor == "google"
+        assert not hasattr(metadata, "vendor")
         assert metadata.capabilities == [
             "chat",
             "vision",
