@@ -41,7 +41,7 @@ from app.adapters.llm.openrouter import (
     fetch_openrouter_model_metadata,
     normalize_openrouter_model_id,
 )
-from app.adapters.llm.ports import ChatMessage, LLMResponse, Tool
+from app.adapters.llm.ports import ChatMessage, LLMResponse, LlmThinkingLevel, Tool
 from app.util.clock import FrozenClock
 
 # ---------------------------------------------------------------------------
@@ -199,6 +199,25 @@ class TestCompleteHappyPath:
         body = _json_body(handler.requests[0])
         assert body["reasoning"] == {"effort": "high"}
 
+    @pytest.mark.parametrize("thinking_level", ["low", "medium", "high"])
+    def test_thinking_level_maps_to_glm_thinking_toggle(
+        self, thinking_level: LlmThinkingLevel
+    ) -> None:
+        handler = _RecordingHandler(
+            responses=[httpx.Response(200, json=_COMPLETE_FIXTURE)]
+        )
+        client = _make_client(handler)
+        client.complete(
+            model_id=_MODEL,
+            prompt="hello",
+            thinking_level=thinking_level,
+            thinking_strategy="glm_extra_body",
+        )
+
+        body = _json_body(handler.requests[0])
+        assert body["thinking"] == {"type": "enabled"}
+        assert "reasoning" not in body
+
     def test_thinking_level_without_openrouter_strategy_sends_no_reasoning(
         self,
     ) -> None:
@@ -231,6 +250,21 @@ class TestCompleteHappyPath:
         body = _json_body(handler.requests[0])
         assert "reasoning" not in body
 
+    def test_disabled_glm_strategy_sends_no_thinking_control(self) -> None:
+        handler = _RecordingHandler(
+            responses=[httpx.Response(200, json=_COMPLETE_FIXTURE)]
+        )
+        client = _make_client(handler)
+        client.complete(
+            model_id=_MODEL,
+            prompt="hello",
+            thinking_level="disabled",
+            thinking_strategy="glm_extra_body",
+        )
+
+        body = _json_body(handler.requests[0])
+        assert "thinking" not in body
+
     def test_request_headers_include_auth_and_attribution(self) -> None:
         handler = _RecordingHandler(
             responses=[httpx.Response(200, json=_COMPLETE_FIXTURE)]
@@ -262,6 +296,26 @@ class TestChatHappyPath:
         assert resp.text.startswith("Block the Tuesday morning slot")
         body = _json_body(handler.requests[0])
         assert body["messages"] == messages
+
+    def test_multi_turn_glm_strategy_sends_thinking_toggle(self) -> None:
+        handler = _RecordingHandler(responses=[httpx.Response(200, json=_CHAT_FIXTURE)])
+        client = _make_client(handler)
+        messages: list[ChatMessage] = [
+            {"role": "system", "content": "You are a hospitality ops assistant."},
+            {"role": "user", "content": "Plan a tight handover."},
+        ]
+
+        client.chat(
+            model_id="glm-4.6",
+            messages=messages,
+            thinking_level="medium",
+            thinking_strategy="glm_extra_body",
+        )
+
+        body = _json_body(handler.requests[0])
+        assert body["messages"] == messages
+        assert body["thinking"] == {"type": "enabled"}
+        assert "reasoning" not in body
 
 
 _SAMPLE_TOOL: Tool = {

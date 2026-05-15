@@ -1064,6 +1064,8 @@ def _build_request_body(
         body["stream"] = True
     if thinking_strategy == "openrouter_extra_body" and thinking_level != "disabled":
         body["reasoning"] = {"effort": thinking_level}
+    if thinking_strategy == "glm_extra_body" and thinking_level != "disabled":
+        body["thinking"] = {"type": "enabled"}
     if tools:
         body["tools"] = [_serialise_tool(t) for t in tools]
     return body
