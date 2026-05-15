@@ -7,6 +7,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { ApiError, fetchJson } from "@/lib/api";
+import { formatDecimal } from "@/lib/numberFormat";
 import { qk } from "@/lib/queryKeys";
 import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import DeskPage from "@/components/DeskPage";
@@ -188,8 +189,12 @@ const REASON_TONE: Record<
 function fmtQty(n: number): string {
   // code-health: ignore[ccn] Decimal quantity formatter is over-counted by lizard after TSX parser recovery.
   if (!Number.isFinite(n)) return String(n);
-  const s = n.toFixed(3);
-  return s.replace(/\.?0+$/, "");
+  return formatDecimal(n, { maximumFractionDigits: 3 });
+}
+
+function roundedStockDelta(observed: number, onHand: number): number {
+  // Arithmetic rounding for mutation payloads, not display formatting.
+  return Number((observed - onHand).toFixed(4));
 }
 
 function errorCopy(error: Error, fallback: string): string {
@@ -754,7 +759,7 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
 
   const observedNum = Number.parseFloat(observed);
   const delta = Number.isFinite(observedNum)
-    ? Number((observedNum - item.on_hand).toFixed(4))
+    ? roundedStockDelta(observedNum, item.on_hand)
     : null;
 
   const coverage = item.par > 0 ? Math.min(1, item.on_hand / item.par) : 0;
@@ -1274,7 +1279,7 @@ function StocktakeSheet({
           const l = lines[i.id] ?? initialStocktakeLine(i);
           const observedNum = Number.parseFloat(l.observed);
           const delta = Number.isFinite(observedNum)
-            ? Number((observedNum - i.on_hand).toFixed(4))
+            ? roundedStockDelta(observedNum, i.on_hand)
             : null;
           return (
             <li key={i.id} className="stocktake__row">

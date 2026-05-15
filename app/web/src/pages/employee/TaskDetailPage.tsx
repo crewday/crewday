@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { useAgentActivity } from "@/lib/agentTyping";
+import { formatDecimal } from "@/lib/numberFormat";
 import { qk } from "@/lib/queryKeys";
 import { Ban, Camera, Check, SkipForward } from "lucide-react";
 import { Chip, EmptyState, Loading } from "@/components/common";
@@ -92,8 +93,7 @@ interface ChecklistMutationContext {
 }
 
 function fmtQty(n: number): string {
-  const s = n.toFixed(3);
-  return s.replace(/\.?0+$/, "");
+  return formatDecimal(n, { maximumFractionDigits: 3 });
 }
 
 const STATUS_TONE: Record<RenderTaskStatus, "moss" | "sky" | "ghost" | "rust"> = {

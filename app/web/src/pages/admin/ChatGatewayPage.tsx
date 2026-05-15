@@ -6,6 +6,7 @@ import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import { Chip, Loading, StatCard } from "@/components/common";
 import { ApiError, fetchJson } from "@/lib/api";
+import { formatPercent } from "@/lib/numberFormat";
 import { qk } from "@/lib/queryKeys";
 import type {
   AdminChatOverrideRow,
@@ -329,7 +330,12 @@ export default function AdminChatGatewayPage() {
         />
         <StatCard
           label="Delivery errors"
-          value={wa ? `${wa.delivery_error_rate_pct.toFixed(1)}%` : "—"}
+          value={formatPercent(wa?.delivery_error_rate_pct, {
+            input: "percent",
+            fallback: "—",
+            minimumFractionDigits: 1,
+            maximumFractionDigits: 1,
+          })}
           sub="24h, across all bindings"
         />
         <StatCard

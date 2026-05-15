@@ -37,6 +37,7 @@ const EXPENSE_CATEGORIES: ExpenseCategory[] = [
 
 function amountInputValue(cents: number): string {
   // code-health: ignore[ccn nloc] One-line money input formatter is over-counted by lizard after TSX parser recovery.
+  // Input normalization for <input type="number">; grouping separators would be invalid.
   return (cents / 100).toFixed(2);
 }
 

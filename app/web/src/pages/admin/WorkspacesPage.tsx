@@ -42,6 +42,7 @@ function dollarsToCents(value: string): number | null {
 }
 
 function centsToDollars(value: number): string {
+  // Input normalization for <input type="number">; grouping separators would be invalid.
   return (value / 100).toFixed(2);
 }
 

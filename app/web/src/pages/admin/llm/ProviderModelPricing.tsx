@@ -1,5 +1,6 @@
 import DateTime from "@/components/DateTime";
 import { Chip } from "@/components/common";
+import { formatDecimal, formatInteger } from "@/lib/numberFormat";
 import type { LlmGraphPayload, LlmSyncPricingResult } from "@/types";
 import type { LlmIndexes } from "./lib/llmIndexes";
 
@@ -9,6 +10,13 @@ interface ProviderModelPricingProps {
   syncResult?: LlmSyncPricingResult;
   isSyncing: boolean;
   onSync: () => void;
+}
+
+function formatUsdPerMillion(value: number): string {
+  return `$${formatDecimal(value, {
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  })}`;
 }
 
 export default function ProviderModelPricing({
@@ -48,11 +56,14 @@ export default function ProviderModelPricing({
           Last synced{" "}
           <DateTime value={lastSynced ?? null} showTime className="mono" empty="—" />
         </span>
-        <span>{pinnedCount} manual-pinned row{pinnedCount === 1 ? "" : "s"}</span>
+        <span>
+          {formatInteger(pinnedCount)} manual-pinned row{pinnedCount === 1 ? "" : "s"}
+        </span>
         {syncResult ? (
           <span>
-            Last result: {syncResult.updated} updated, {syncResult.skipped} skipped,{" "}
-            {syncResult.errors} errors
+            Last result: {formatInteger(syncResult.updated)} updated,{" "}
+            {formatInteger(syncResult.skipped)} skipped,{" "}
+            {formatInteger(syncResult.errors)} errors
           </span>
         ) : null}
       </div>
@@ -61,9 +72,10 @@ export default function ProviderModelPricing({
           {syncResult.deltas.slice(0, 6).map((delta) => (
             <span key={`${delta.provider_model_id}-${delta.status}`} className="llm-pricing-delta">
               <code className="inline-code">{delta.api_model_id}</code>{" "}
-              {delta.status}: ${delta.input_before.toFixed(3)} -&gt; $
-              {delta.input_after.toFixed(3)} input, ${delta.output_before.toFixed(3)} -&gt; $
-              {delta.output_after.toFixed(3)} output
+              {delta.status}: {formatUsdPerMillion(delta.input_before)} -&gt;{" "}
+              {formatUsdPerMillion(delta.input_after)} input,{" "}
+              {formatUsdPerMillion(delta.output_before)} -&gt;{" "}
+              {formatUsdPerMillion(delta.output_after)} output
             </span>
           ))}
         </div>
@@ -94,8 +106,8 @@ export default function ProviderModelPricing({
                   {model?.display_name ?? "?"}
                 </td>
                 <td className="mono">{pm.api_model_id}</td>
-                <td className="mono">${pm.input_cost_per_million.toFixed(3)}</td>
-                <td className="mono">${pm.output_cost_per_million.toFixed(3)}</td>
+                <td className="mono">{formatUsdPerMillion(pm.input_cost_per_million)}</td>
+                <td className="mono">{formatUsdPerMillion(pm.output_cost_per_million)}</td>
                 <td>
                   <DateTime value={pm.price_last_synced_at} showTime className="mono muted" empty="—" />
                 </td>

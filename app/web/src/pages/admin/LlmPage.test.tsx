@@ -261,7 +261,7 @@ describe("Admin LlmPage", () => {
       ).toBeInTheDocument();
       const gemmaModel = modelButton("Gemma 4 31B IT");
       const thinkingChip = within(gemmaModel).getByText("Thinking disabled");
-      const contextChip = within(gemmaModel).getByText("128k ctx");
+      const contextChip = within(gemmaModel).getByText("128K ctx");
       expect(gemmaModel).toBeInTheDocument();
       expect(contextChip).toHaveClass("chip");
       expect(thinkingChip.compareDocumentPosition(contextChip)).toBe(
@@ -284,6 +284,38 @@ describe("Admin LlmPage", () => {
       expect(drawer).toBeInTheDocument();
       expect(screen.getByText("Manager chat")).toBeInTheDocument();
       expect(screen.getByText("You are the manager assistant.")).toBeInTheDocument();
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("uses compact million-scale context labels after thinking", async () => {
+    const millionContextGraph = {
+      ...graph,
+      models: graph.models.map((model) =>
+        model.id === "model_gemma"
+          ? { ...model, context_window: 1_048_576 }
+          : model,
+      ),
+    };
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/graph": [
+        { body: millionContextGraph },
+        { body: millionContextGraph },
+        { body: millionContextGraph },
+      ],
+    });
+    try {
+      render(<Harness />);
+
+      const gemmaModel = await screen.findByRole("button", {
+        name: /Gemma 4 31B IT model/,
+      });
+      const thinkingChip = within(gemmaModel).getByText("Thinking disabled");
+      const contextChip = within(gemmaModel).getByText("1M ctx");
+      expect(thinkingChip.compareDocumentPosition(contextChip)).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      );
     } finally {
       fetcher.restore();
     }

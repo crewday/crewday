@@ -96,6 +96,7 @@ export function deriveValues(scan: ExpenseScanResult | null): FieldValues {
     purchased_on:
       (purchasedIso !== null ? dateInputFromIso(purchasedIso) : null)
         ?? todayDateInput(),
+    // Input normalization for <input type="number">; grouping separators would be invalid.
     amount: cents !== null ? (cents / 100).toFixed(2) : "",
     currency: fillIf(scan.currency) ?? "EUR",
     category: fillIf(scan.category) ?? "other",

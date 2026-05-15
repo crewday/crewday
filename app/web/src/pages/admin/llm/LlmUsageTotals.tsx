@@ -1,4 +1,5 @@
 import { formatMoney } from "@/lib/money";
+import { formatInteger } from "@/lib/numberFormat";
 
 interface LlmUsageTotalsProps {
   spendUsd: number;
@@ -8,7 +9,7 @@ interface LlmUsageTotalsProps {
 
 export function formatUsageSummary(calls: number, spendUsd: number): string {
   const spend = formatMoney(Math.round(spendUsd * 100), "USD");
-  return `${calls.toLocaleString()} calls, ${spend} spend`;
+  return `${formatInteger(calls)} calls, ${spend} spend`;
 }
 
 export default function LlmUsageTotals(props: LlmUsageTotalsProps) {
@@ -27,7 +28,7 @@ export default function LlmUsageTotals(props: LlmUsageTotalsProps) {
       <span className="llm-usage-total__money mono">
         {formatMoney(Math.round(spendUsd * 100), "USD")}
       </span>
-      <span className="llm-usage-total__calls mono">{calls.toLocaleString()} calls</span>
+      <span className="llm-usage-total__calls mono">{formatInteger(calls)} calls</span>
     </span>
   );
 }

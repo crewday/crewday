@@ -1,5 +1,6 @@
 import DateTime from "@/components/DateTime";
 import { Chip } from "@/components/common";
+import { formatDecimal, formatInteger } from "@/lib/numberFormat";
 import type { LLMCall } from "@/types";
 
 const CALL_STATUS_TONE: Record<LLMCall["status"], "moss" | "rust" | "sand"> = {
@@ -14,12 +15,10 @@ interface RecentCallsProps {
 
 function formatUsdCost(value: string): string {
   const amount = Number(value);
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
+  return `$${formatDecimal(amount, {
     minimumFractionDigits: amount > 0 && amount < 0.01 ? 6 : 2,
     maximumFractionDigits: amount > 0 && amount < 0.01 ? 6 : 2,
-  }).format(amount);
+  })}`;
 }
 
 export default function RecentCalls({ calls }: RecentCallsProps) {
@@ -53,7 +52,7 @@ export default function RecentCalls({ calls }: RecentCallsProps) {
                 {c.input_tokens} / {c.output_tokens}
               </td>
               <td className="mono">{formatUsdCost(c.cost_usd)}</td>
-              <td className="mono">{c.latency_ms} ms</td>
+              <td className="mono">{formatInteger(c.latency_ms)} ms</td>
               <td className="mono">
                 {c.fallback_attempts && c.fallback_attempts > 0
                   ? `fallback #${c.fallback_attempts}`

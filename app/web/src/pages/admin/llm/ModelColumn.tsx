@@ -1,4 +1,5 @@
 import { Chip } from "@/components/common";
+import { formatContextWindow } from "@/lib/numberFormat";
 import type { LlmModel } from "@/types";
 import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
 import { shouldOpenGraphEditor } from "./lib/clickTargets";
@@ -91,7 +92,7 @@ export default function ModelColumn(props: ModelColumnProps) {
                 </span>
                 {m.context_window ? (
                   <span className="chip chip--ghost chip--sm">
-                    {(m.context_window / 1000).toFixed(0)}k ctx
+                    {formatContextWindow(m.context_window)}
                   </span>
                 ) : null}
               </div>

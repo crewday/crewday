@@ -8,6 +8,7 @@ import FormModal, {
 } from "@/components/FormModal";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { ApiError, fetchJson } from "@/lib/api";
+import { formatDecimal, formatInteger } from "@/lib/numberFormat";
 import { qk } from "@/lib/queryKeys";
 import type {
   LlmModel,
@@ -219,12 +220,17 @@ function describedBy(...ids: (string | undefined)[]): string | undefined {
 }
 
 function formatCostPerMillion(value: number): string {
-  return `${new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
+  return `$${formatDecimal(value, {
     minimumFractionDigits: value === 0 ? 0 : 2,
     maximumFractionDigits: value < 0.01 && value > 0 ? 6 : 2,
-  }).format(value)}/M`;
+  })}/M`;
+}
+
+function formatUsdAmount(value: number): string {
+  return `$${formatDecimal(value, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 6,
+  })}`;
 }
 
 function providerOption(provider: LlmProvider): SearchableSelectOption {
@@ -765,14 +771,10 @@ function ModelForm({
           {formatCostPerMillion(openRouterPricing.inputCostPerMillion)} in,{" "}
           {formatCostPerMillion(openRouterPricing.outputCostPerMillion)} out
           {openRouterPricing.fixedCostPerCallUsd !== null
-            ? `, ${new Intl.NumberFormat("en-US", {
-                style: "currency",
-                currency: "USD",
-                maximumFractionDigits: 6,
-              }).format(openRouterPricing.fixedCostPerCallUsd)} fixed`
+            ? `, ${formatUsdAmount(openRouterPricing.fixedCostPerCallUsd)} fixed`
             : ""}
           {openRouterPricing.providerCount > 1
-            ? ` across ${openRouterPricing.providerCount} OpenRouter providers`
+            ? ` across ${formatInteger(openRouterPricing.providerCount)} OpenRouter providers`
             : ""}
           .
         </p>

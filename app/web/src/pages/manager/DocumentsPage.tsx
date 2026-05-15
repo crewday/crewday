@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 import { Files } from "lucide-react";
 import { fetchJson } from "@/lib/api";
+import { formatDecimal, formatInteger } from "@/lib/numberFormat";
 import { qk } from "@/lib/queryKeys";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
@@ -70,11 +71,14 @@ function fmtDate(iso: string | null): string {
 
 function fmtCents(cents: number | null, currency: string | null): string {
   if (cents == null) return "\u2014";
-  return (cents / 100).toFixed(2) + " " + (currency ?? "EUR");
+  return `${formatDecimal(cents / 100, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} ${currency ?? "EUR"}`;
 }
 
 function fmtNumber(n: number | null | undefined): string {
-  return n == null ? "\u2014" : n.toLocaleString("en-GB");
+  return formatInteger(n, { locale: "en-GB", fallback: "\u2014" });
 }
 
 function fmtExtractor(extractor: DocumentExtraction["extractor"]): string {

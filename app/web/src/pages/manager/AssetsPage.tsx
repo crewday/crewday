@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { PackageSearch, SearchX } from "lucide-react";
 import { ApiError, fetchJson, resolveApiPath } from "@/lib/api";
+import { formatDecimal } from "@/lib/numberFormat";
 import { qk } from "@/lib/queryKeys";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import DeskPage from "@/components/DeskPage";
@@ -786,7 +787,10 @@ function defaultDocumentTitle(file: File): string {
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${formatDecimal(bytes / (1024 * 1024), {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })} MB`;
 }
 
 function buildAssetCreateBody(input: {

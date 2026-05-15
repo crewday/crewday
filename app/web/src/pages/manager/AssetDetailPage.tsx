@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
+import { formatDecimal } from "@/lib/numberFormat";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import PageTabs, { type PageTab } from "@/components/PageTabs";
@@ -64,7 +65,10 @@ function fmtDate(iso: string | null): string {
 
 function fmtCents(cents: number | null, currency: string | null): string {
   if (cents == null) return "\u2014";
-  return (cents / 100).toFixed(2) + " " + (currency ?? "EUR");
+  return `${formatDecimal(cents / 100, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} ${currency ?? "EUR"}`;
 }
 
 function dueTone(iso: string | null): "moss" | "sand" | "rust" | "ghost" {
