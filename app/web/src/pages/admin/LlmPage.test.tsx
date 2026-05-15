@@ -259,7 +259,14 @@ describe("Admin LlmPage", () => {
           name: "OpenRouter provider, 12 calls, $1.25 spend",
         }),
       ).toBeInTheDocument();
-      expect(modelButton("Gemma 4 31B IT")).toBeInTheDocument();
+      const gemmaModel = modelButton("Gemma 4 31B IT");
+      const thinkingChip = within(gemmaModel).getByText("Thinking disabled");
+      const contextChip = within(gemmaModel).getByText("128k ctx");
+      expect(gemmaModel).toBeInTheDocument();
+      expect(contextChip).toHaveClass("chip");
+      expect(thinkingChip.compareDocumentPosition(contextChip)).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      );
       expect(screen.getAllByText("voice.transcribe").length).toBeGreaterThan(0);
       expect(screen.queryByText("Spend (30d)")).not.toBeInTheDocument();
       expect(screen.queryByText("Provider-model pricing")).not.toBeInTheDocument();

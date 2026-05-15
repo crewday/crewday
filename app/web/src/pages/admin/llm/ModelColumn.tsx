@@ -89,14 +89,12 @@ export default function ModelColumn(props: ModelColumnProps) {
                 <span className="chip chip--ghost chip--sm llm-graph-node__thinking-chip">
                   Thinking {thinkingLevelLabel(m.thinking_level)}
                 </span>
-              </div>
-              {m.context_window ? (
-                <footer className="llm-graph-node__foot">
-                  <span className="muted">
+                {m.context_window ? (
+                  <span className="chip chip--ghost chip--sm">
                     {(m.context_window / 1000).toFixed(0)}k ctx
                   </span>
-                </footer>
-              ) : null}
+                ) : null}
+              </div>
               <LlmUsageTotals spendUsd={m.spend_usd_30d} calls={m.calls_30d} />
             </button>
             {providerModels.length ? (

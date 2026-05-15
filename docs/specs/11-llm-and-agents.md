@@ -1301,14 +1301,14 @@ LLM area.
 - **Column 1 — Providers.** One card per `llm_provider`; shows type,
   endpoint host, enabled state, API-key status (present / missing /
   rotating), and the provider's recent call/spend total.
-- **Column 2 — Models.** One card per `llm_model`; shows vendor,
-  capability tags as chips and context window. Cards carry a small
-  modality icon bar (text / vision / audio / reasoning), thinking
-  level as a chip after the capability tags, and the model's recent
-  call/spend total. The model create/edit drawer exposes separate
-  controls for thinking strategy and thinking level, with strategy
-  first because it determines how non-disabled thinking is sent to the
-  provider.
+- **Column 2 — Models.** One card per `llm_model`; shows vendor and
+  capability tags as chips. Cards carry a small modality icon bar
+  (text / vision / audio / reasoning), thinking level as a chip after
+  the capability tags, context window as the next chip, and the
+  model's recent call/spend total. The model create/edit drawer exposes
+  separate controls for thinking strategy and thinking level, with
+  strategy first because it determines how non-disabled thinking is sent
+  to the provider.
 - **Model OpenRouter metadata load.** The Model column's create/edit
   drawers accept manual fields or an optional OpenRouter model id. In
   edit mode the field is prefilled from `price_source_model_id`, falling

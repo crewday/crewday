@@ -597,6 +597,34 @@ describe("LlmRegistryModals", () => {
     expect(bodyOf(put)).toMatchObject({ thinking_level_override: "high" });
   });
 
+  it("surfaces provider-model enabled state and can disable it", async () => {
+    const calls = installFetch();
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    const enabled = screen.getByLabelText("Enabled");
+    expect(enabled).toBeChecked();
+
+    fireEvent.click(enabled);
+    expect(enabled).not.toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+            call.init.method === "PUT",
+        ),
+      ).toBe(true);
+    });
+    const put = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+        call.init.method === "PUT",
+    )!;
+    expect(bodyOf(put)).toMatchObject({ is_enabled: false });
+  });
+
   it("renders provider-model field help after the associated controls", () => {
     installFetch();
     renderRegistry(baseGraph, { kind: "providerModel", mode: "create" });
