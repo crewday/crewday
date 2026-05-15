@@ -39,9 +39,10 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from typing import Annotated
 
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import Engine
@@ -62,7 +63,10 @@ from app.adapters.db.base import Base
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import Workspace
 from app.api.admin import admin_router
-from app.api.admin.deps import DEPLOYMENT_SCOPE_CONFLICT_ERROR
+from app.api.admin.deps import (
+    DEPLOYMENT_SCOPE_CONFLICT_ERROR,
+    require_deployment_session_scope,
+)
 from app.api.deps import db_session as db_session_dep
 from app.api.errors import add_exception_handlers
 from app.auth import tokens as auth_tokens
@@ -70,6 +74,7 @@ from app.auth.session import SESSION_COOKIE_NAME, issue
 from app.config import Settings
 from app.tenancy import (
     DEPLOYMENT_SCOPE_CATALOG,
+    DeploymentContext,
     WorkspaceContext,
     tenant_agnostic,
 )
@@ -132,6 +137,16 @@ def client(
 
     app = FastAPI()
     app.include_router(admin_router, prefix="/admin/api/v1")
+
+    @app.get("/admin/api/v1/_session-only")
+    def session_only_probe(
+        ctx: Annotated[
+            DeploymentContext,
+            Depends(require_deployment_session_scope("deployment.llm:write")),
+        ],
+    ) -> dict[str, str | None]:
+        return {"actor_kind": ctx.actor_kind, "user_id": ctx.user_id}
+
     add_exception_handlers(app)
 
     def _session() -> Iterator[Session]:
@@ -548,6 +563,124 @@ class TestTokenPrincipal:
         )
         assert resp.status_code == 404, resp.text
         assert resp.json().get("error") == "not_found"
+
+
+# ---------------------------------------------------------------------------
+# Interactive-session-only deployment endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestDeploymentSessionOnlyScope:
+    """The stricter dep refuses bearer principals after normal auth."""
+
+    def test_admin_session_with_scope_admits(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        with session_factory() as s:
+            user_id = _seed_user(s, tag="session-only-admin")
+            _grant_deployment_admin(s, user_id=user_id)
+            s.commit()
+
+        client.cookies.set(
+            SESSION_COOKIE_NAME,
+            _issue_session(session_factory, user_id=user_id, settings=settings),
+        )
+
+        resp = client.get("/admin/api/v1/_session-only")
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"actor_kind": "user", "user_id": user_id}
+
+    def test_scoped_token_with_required_scope_is_session_only_403(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+    ) -> None:
+        with session_factory() as s:
+            user_id = _seed_user(s, tag="session-only-scoped")
+            workspace_id = _seed_workspace(s, slug="session-only-scoped-ws")
+            s.commit()
+
+        token = _mint_scoped_token(
+            session_factory,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            workspace_slug="session-only-scoped-ws",
+            scopes={"deployment.llm:write": True},
+        )
+
+        resp = client.get(
+            "/admin/api/v1/_session-only",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert resp.headers["www-authenticate"] == 'error="session_only_endpoint"'
+        assert resp.json()["error"] == "session_only_endpoint"
+
+    def test_session_with_bearer_header_is_session_only_403(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        with session_factory() as s:
+            user_id = _seed_user(s, tag="session-only-bearer")
+            _grant_deployment_admin(s, user_id=user_id)
+            s.commit()
+
+        client.cookies.set(
+            SESSION_COOKIE_NAME,
+            _issue_session(session_factory, user_id=user_id, settings=settings),
+        )
+
+        resp = client.get(
+            "/admin/api/v1/_session-only",
+            headers={"Authorization": "Bearer caller-supplied-token"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert resp.headers["www-authenticate"] == 'error="session_only_endpoint"'
+        assert resp.json()["error"] == "session_only_endpoint"
+
+    def test_delegated_token_for_admin_is_session_only_403(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+    ) -> None:
+        with session_factory() as s:
+            admin_id = _seed_user(s, tag="session-only-deleg")
+            _grant_deployment_admin(s, user_id=admin_id)
+            workspace_id = _seed_workspace(s, slug="session-only-deleg-ws")
+            with tenant_agnostic():
+                s.add(
+                    RoleGrant(
+                        id=new_ulid(),
+                        workspace_id=workspace_id,
+                        user_id=admin_id,
+                        grant_role="manager",
+                        scope_kind="workspace",
+                        created_at=_PINNED,
+                    )
+                )
+                s.flush()
+            s.commit()
+
+        token = _mint_delegated_token(
+            session_factory,
+            minter_user_id=admin_id,
+            delegate_for_user_id=admin_id,
+            workspace_id=workspace_id,
+            workspace_slug="session-only-deleg-ws",
+        )
+
+        resp = client.get(
+            "/admin/api/v1/_session-only",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert resp.headers["www-authenticate"] == 'error="session_only_endpoint"'
+        assert resp.json()["error"] == "session_only_endpoint"
 
 
 # ---------------------------------------------------------------------------

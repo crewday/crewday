@@ -44,7 +44,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Annotated, Final
 
-from fastapi import Cookie, Depends, Request
+from fastapi import Cookie, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import db_session
@@ -63,6 +63,7 @@ __all__ = [
     "DEPLOYMENT_SCOPE_CONFLICT_ERROR",
     "current_deployment_admin_principal",
     "require_deployment_scope",
+    "require_deployment_session_scope",
 ]
 
 
@@ -401,6 +402,48 @@ def require_deployment_scope(
     def _check(
         ctx: Annotated[DeploymentContext, Depends(current_deployment_admin_principal)],
     ) -> DeploymentContext:
+        if scope_name not in ctx.deployment_scopes:
+            raise _not_found()
+        return ctx
+
+    return _check
+
+
+def _reject_bearer_for_session_only(request: Request) -> None:
+    auth_header = request.headers.get("authorization")
+    if auth_header is None or not auth_header.lower().startswith(_BEARER_PREFIX):
+        return
+    token_value = auth_header[len(_BEARER_PREFIX) :].strip()
+    if not token_value:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={"error": "session_only_endpoint"},
+        headers={"WWW-Authenticate": 'error="session_only_endpoint"'},
+    )
+
+
+def require_deployment_session_scope(
+    scope_name: str,
+) -> Callable[..., DeploymentContext]:
+    """Return a dep that requires both ``scope_name`` and a passkey session.
+
+    Interactive-session-only admin endpoints reject every bearer-token
+    principal even when the token otherwise holds the requested deployment
+    scope. The error shape is pinned by §11/§12 so delegated tools can stop
+    immediately instead of trying an approval flow.
+    """
+
+    def _check(
+        _no_bearer: Annotated[None, Depends(_reject_bearer_for_session_only)],
+        ctx: Annotated[DeploymentContext, Depends(current_deployment_admin_principal)],
+    ) -> DeploymentContext:
+        if ctx.actor_kind != "user":  # pragma: no cover - bearer precheck owns this
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"error": "session_only_endpoint"},
+                headers={"WWW-Authenticate": 'error="session_only_endpoint"'},
+            )
         if scope_name not in ctx.deployment_scopes:
             raise _not_found()
         return ctx

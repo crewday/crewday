@@ -15,6 +15,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SecretStr,
     field_validator,
     model_validator,
 )
@@ -37,6 +38,7 @@ from app.adapters.db.llm.models import (
     LlmProviderModel,
     LlmUsage,
 )
+from app.adapters.db.secrets.repositories import SqlAlchemySecretEnvelopeRepository
 from app.adapters.llm.fake import FakeLLMClient
 from app.adapters.llm.openrouter import (
     OpenRouterModelMetadata,
@@ -49,10 +51,16 @@ from app.adapters.llm.ports import (
     LlmRateLimited,
     LlmTransportError,
 )
-from app.api.admin.deps import require_deployment_scope
+from app.adapters.storage.envelope import Aes256GcmEnvelope
+from app.adapters.storage.ports import EnvelopeOwner
+from app.api.admin.deps import (
+    require_deployment_scope,
+    require_deployment_session_scope,
+)
 from app.api.deps import db_session
 from app.api.transport import admin_sse
 from app.api.transport.correlation_id import request_correlation_id
+from app.config import Settings
 from app.domain.agent.compaction import (
     COMPACT_CAPABILITY as _COMPACT_CAPABILITY,
 )
@@ -64,6 +72,7 @@ from app.domain.errors import (
     Conflict,
     NotFound,
     NotImplementedFeature,
+    ServiceUnavailable,
     UpstreamUnavailable,
     Validation,
 )
@@ -87,8 +96,14 @@ _ReadCtx = Annotated[
 _WriteCtx = Annotated[
     DeploymentContext, Depends(require_deployment_scope("deployment.llm:write"))
 ]
+_SessionWriteCtx = Annotated[
+    DeploymentContext,
+    Depends(require_deployment_session_scope("deployment.llm:write")),
+]
 
 _OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1"
+_LLM_PROVIDER_API_KEY_PURPOSE = "llm_provider.api_key"
+_ROW_BACKED_ENVELOPE_VERSION = 0x02
 _CAPABILITIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     (
         DEFAULT_LLM_CAPABILITY,
@@ -550,13 +565,25 @@ class LlmProviderModelPlaygroundResponse(BaseModel):
     error_message: str | None = None
 
 
+class LlmProviderKeyPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    api_key: SecretStr = Field(min_length=1, max_length=8192)
+
+    @field_validator("api_key")
+    @classmethod
+    def _validate_api_key(cls, value: SecretStr) -> SecretStr:
+        if not value.get_secret_value().strip():
+            raise ValueError("api_key must not be blank")
+        return value
+
+
 class ProviderPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=160)
     provider_type: Literal["openrouter", "openai_compatible", "fake"]
     api_endpoint: str | None = Field(default=None, max_length=2048)
-    api_key_envelope_ref: str | None = Field(default=None, max_length=512)
     default_model: str | None = None
     timeout_s: int = Field(default=60, ge=1, le=600)
     requests_per_minute: int = Field(default=60, ge=1, le=100_000)
@@ -1455,6 +1482,54 @@ def _validate_provider_payload(
         raise _unprocessable("default_model_provider_mismatch")
 
 
+def _settings_from_request(request: Request) -> Settings:
+    settings = getattr(request.app.state, "settings", None)
+    if isinstance(settings, Settings):
+        return settings
+    raise RuntimeError("app.state.settings is not configured")
+
+
+def _envelope_id_from_pointer(pointer: bytes) -> str:
+    if len(pointer) < 2 or pointer[0] != _ROW_BACKED_ENVELOPE_VERSION:
+        raise RuntimeError("LLM provider key encryption did not return a row pointer")
+    try:
+        envelope_id = pointer[1:].decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RuntimeError("LLM provider key envelope pointer is not UTF-8") from exc
+    if not envelope_id.strip():
+        raise RuntimeError("LLM provider key envelope pointer id is blank")
+    return envelope_id
+
+
+def _encrypt_provider_api_key(
+    session: Session,
+    *,
+    provider: LlmProvider,
+    api_key: SecretStr,
+    settings: Settings,
+) -> str:
+    if provider.provider_type == "fake":
+        raise _unprocessable("provider_key_unsupported_provider_type")
+    if settings.root_key is None:
+        raise ServiceUnavailable(
+            "CREWDAY_ROOT_KEY is required to store LLM provider API keys",
+            extra={
+                "error": "root_key_required",
+                "upstream": "secret_envelope",
+            },
+        )
+    envelope = Aes256GcmEnvelope(
+        settings.root_key,
+        repository=SqlAlchemySecretEnvelopeRepository(session),
+    )
+    pointer = envelope.encrypt(
+        api_key.get_secret_value().encode("utf-8"),
+        purpose=_LLM_PROVIDER_API_KEY_PURPOSE,
+        owner=EnvelopeOwner(kind="llm_provider", id=provider.id),
+    )
+    return _envelope_id_from_pointer(pointer)
+
+
 def _validate_model_payload(
     session: Session,
     payload: ModelPayload,
@@ -1952,7 +2027,7 @@ def build_admin_llm_router() -> APIRouter:
             name=payload.name,
             provider_type=payload.provider_type,
             api_endpoint=payload.api_endpoint,
-            api_key_envelope_ref=payload.api_key_envelope_ref,
+            api_key_envelope_ref=None,
             default_model=payload.default_model,
             timeout_s=payload.timeout_s,
             requests_per_minute=payload.requests_per_minute,
@@ -2008,7 +2083,6 @@ def build_admin_llm_router() -> APIRouter:
             row.name = payload.name
             row.provider_type = payload.provider_type
             row.api_endpoint = payload.api_endpoint
-            row.api_key_envelope_ref = payload.api_key_envelope_ref
             row.default_model = payload.default_model
             row.timeout_s = payload.timeout_s
             row.requests_per_minute = payload.requests_per_minute
@@ -2016,6 +2090,71 @@ def build_admin_llm_router() -> APIRouter:
             row.updated_at = _now()
             row.updated_by_user_id = ctx.user_id
             _commit_or_conflict(session, "provider_constraint_violation")
+            _publish_deployment_defaults_changed(ctx, request)
+            session.refresh(row)
+            count = session.scalar(
+                select(func.count(LlmProviderModel.id)).where(
+                    LlmProviderModel.provider_id == provider_id
+                )
+            )
+        return _provider_response(row, Counter({provider_id: int(count or 0)}))
+
+    @router.put(
+        "/providers/{provider_id}/key",
+        response_model=LlmProviderResponse,
+        operation_id="admin.llm.providers.key.set",
+        openapi_extra={"x-interactive-only": True},
+    )
+    def set_provider_key(
+        ctx: _SessionWriteCtx,
+        request: Request,
+        session: _Db,
+        provider_id: str,
+        payload: LlmProviderKeyPayload,
+    ) -> LlmProviderResponse:
+        settings = _settings_from_request(request)
+        with tenant_agnostic():
+            row = session.get(LlmProvider, provider_id)
+            if row is None:
+                raise _not_found()
+            row.api_key_envelope_ref = _encrypt_provider_api_key(
+                session,
+                provider=row,
+                api_key=payload.api_key,
+                settings=settings,
+            )
+            row.updated_at = _now()
+            row.updated_by_user_id = ctx.user_id
+            _commit_or_conflict(session, "provider_key_constraint_violation")
+            _publish_deployment_defaults_changed(ctx, request)
+            session.refresh(row)
+            count = session.scalar(
+                select(func.count(LlmProviderModel.id)).where(
+                    LlmProviderModel.provider_id == provider_id
+                )
+            )
+        return _provider_response(row, Counter({provider_id: int(count or 0)}))
+
+    @router.delete(
+        "/providers/{provider_id}/key",
+        response_model=LlmProviderResponse,
+        operation_id="admin.llm.providers.key.clear",
+        openapi_extra={"x-interactive-only": True},
+    )
+    def clear_provider_key(
+        ctx: _SessionWriteCtx,
+        request: Request,
+        session: _Db,
+        provider_id: str,
+    ) -> LlmProviderResponse:
+        with tenant_agnostic():
+            row = session.get(LlmProvider, provider_id)
+            if row is None:
+                raise _not_found()
+            row.api_key_envelope_ref = None
+            row.updated_at = _now()
+            row.updated_by_user_id = ctx.user_id
+            _commit_or_conflict(session, "provider_key_constraint_violation")
             _publish_deployment_defaults_changed(ctx, request)
             session.refresh(row)
             count = session.scalar(

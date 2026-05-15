@@ -29,6 +29,8 @@ from app.adapters.db.llm.models import (
     LlmProviderModel,
     LlmUsage,
 )
+from app.adapters.db.secrets.models import SecretEnvelope
+from app.adapters.db.secrets.repositories import SqlAlchemySecretEnvelopeRepository
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.adapters.llm.openrouter import (
     OpenRouterModelMetadata,
@@ -41,6 +43,8 @@ from app.adapters.llm.ports import (
     LlmTransportError,
     LLMUsage,
 )
+from app.adapters.storage.envelope import Aes256GcmEnvelope
+from app.adapters.storage.ports import EnvelopeOwner
 from app.api.transport import admin_sse
 from app.auth import tokens as auth_tokens
 from app.auth.session import SESSION_COOKIE_NAME, issue
@@ -272,6 +276,85 @@ def _seed_scoped_token(
             expires_at=None,
             kind="scoped",
             now=_PINNED,
+        )
+        s.commit()
+        return result.token
+
+
+def _seed_delegated_token(
+    session_factory: sessionmaker[Session],
+    *,
+    settings: Settings,
+) -> str:
+    with session_factory() as s:
+        user = bootstrap_user(
+            s,
+            email=f"delegated-admin-{new_ulid()}@example.com",
+            display_name="Delegated Admin",
+        )
+        workspace_id = new_ulid()
+        workspace_slug = f"delegated-{workspace_id[-6:].lower()}"
+        with tenant_agnostic():
+            s.add(
+                Workspace(
+                    id=workspace_id,
+                    slug=workspace_slug,
+                    name="Delegated Admin Workspace",
+                    plan="free",
+                    quota_json={},
+                    created_at=_PINNED,
+                )
+            )
+            s.flush()
+            s.add(
+                RoleGrant(
+                    id=new_ulid(),
+                    workspace_id=None,
+                    user_id=user.id,
+                    grant_role="manager",
+                    scope_kind="deployment",
+                    created_at=_PINNED,
+                )
+            )
+            s.add(
+                RoleGrant(
+                    id=new_ulid(),
+                    workspace_id=workspace_id,
+                    user_id=user.id,
+                    grant_role="manager",
+                    scope_kind="workspace",
+                    created_at=_PINNED,
+                )
+            )
+            s.flush()
+        ctx = WorkspaceContext(
+            workspace_id=workspace_id,
+            workspace_slug=workspace_slug,
+            actor_id=user.id,
+            actor_kind="user",
+            actor_grant_role="manager",
+            actor_was_owner_member=False,
+            audit_correlation_id=new_ulid(),
+        )
+        result = auth_tokens.mint(
+            s,
+            ctx,
+            user_id=user.id,
+            label="admin llm delegated token",
+            scopes={},
+            expires_at=None,
+            kind="delegated",
+            delegate_for_user_id=user.id,
+            now=_PINNED,
+        )
+        issue(
+            s,
+            user_id=user.id,
+            has_owner_grant=False,
+            ua=_TEST_UA,
+            ip="127.0.0.1",
+            accept_language=_TEST_ACCEPT_LANGUAGE,
+            settings=settings,
         )
         s.commit()
         return result.token
@@ -534,6 +617,7 @@ def _wipe(session_factory: sessionmaker[Session]) -> None:
             LlmProviderModel,
             LlmModel,
             LlmProvider,
+            SecretEnvelope,
             ApiToken,
             SessionRow,
             UserWorkspace,
@@ -545,6 +629,16 @@ def _wipe(session_factory: sessionmaker[Session]) -> None:
             for row in s.scalars(select(model)).all():
                 s.delete(row)
         s.commit()
+
+
+def _assert_not_exposed(response_text: str, sensitive: str) -> None:
+    if sensitive in response_text:
+        raise AssertionError("response exposed sensitive test input")
+
+
+def _assert_secret_text_equal(actual: str, expected: str) -> None:
+    if actual != expected:
+        raise AssertionError("decrypted secret did not match the test input")
 
 
 def _gemma_4_metadata(
@@ -1467,6 +1561,170 @@ class TestAdminLlmRoutes:
             assert missing.status_code == 422, missing.text
             assert missing.json()["error"] == "assignment_missing_capability"
             assert missing.json()["missing_capabilities"] == ["vision", "json_mode"]
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_key_rotation_uses_session_only_secret_envelope(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        plaintext = f"test-provider-key-{new_ulid()}"
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+
+            caller_supplied_ref = client.post(
+                "/admin/api/v1/llm/providers",
+                json={
+                    "name": "Caller Ref",
+                    "provider_type": "openrouter",
+                    "api_key_envelope_ref": "operator-typed-secret-ref",
+                },
+            )
+            assert caller_supplied_ref.status_code == 422, caller_supplied_ref.text
+
+            set_key = client.put(
+                f"/admin/api/v1/llm/providers/{seeded.provider_id}/key",
+                json={"api_key": plaintext},
+            )
+            assert set_key.status_code == 200, set_key.text
+            body = set_key.json()
+            assert body["api_key_status"] == "present"
+            _assert_not_exposed(set_key.text, plaintext)
+
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                envelope_ref = provider.api_key_envelope_ref
+                assert envelope_ref
+                assert provider.updated_by_user_id is not None
+                envelope_row = s.get(SecretEnvelope, envelope_ref)
+                assert envelope_row is not None
+                assert envelope_row.owner_entity_kind == "llm_provider"
+                assert envelope_row.owner_entity_id == seeded.provider_id
+                assert envelope_row.purpose == "llm_provider.api_key"
+                assert envelope_row.ciphertext != plaintext.encode("utf-8")
+                assert envelope_ref == body["api_key_ref"]
+                assert pinned_settings.root_key is not None
+                decrypted = Aes256GcmEnvelope(
+                    pinned_settings.root_key,
+                    repository=SqlAlchemySecretEnvelopeRepository(s),
+                ).decrypt(
+                    b"\x02" + envelope_ref.encode("utf-8"),
+                    purpose="llm_provider.api_key",
+                    expected_owner=EnvelopeOwner(
+                        kind="llm_provider", id=seeded.provider_id
+                    ),
+                )
+                _assert_secret_text_equal(decrypted.decode("utf-8"), plaintext)
+
+            update_without_key = client.put(
+                f"/admin/api/v1/llm/providers/{seeded.provider_id}",
+                json={
+                    "name": "OpenRouter Renamed",
+                    "provider_type": "openrouter",
+                    "requests_per_minute": 120,
+                    "timeout_s": 60,
+                    "is_enabled": True,
+                },
+            )
+            assert update_without_key.status_code == 200, update_without_key.text
+            assert update_without_key.json()["api_key_ref"] == envelope_ref
+
+            update_with_ref = client.put(
+                f"/admin/api/v1/llm/providers/{seeded.provider_id}",
+                json={
+                    "name": "OpenRouter Renamed",
+                    "provider_type": "openrouter",
+                    "api_key_envelope_ref": "operator-typed-secret-ref",
+                },
+            )
+            assert update_with_ref.status_code == 422, update_with_ref.text
+
+            clear = client.delete(
+                f"/admin/api/v1/llm/providers/{seeded.provider_id}/key"
+            )
+            assert clear.status_code == 200, clear.text
+            assert clear.json()["api_key_status"] == "missing"
+            assert clear.json()["api_key_ref"] is None
+            _assert_not_exposed(clear.text, plaintext)
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                assert provider.api_key_envelope_ref is None
+                assert provider.updated_by_user_id is not None
+                assert s.get(SecretEnvelope, envelope_ref) is not None
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_key_rotation_rejects_tokens_and_missing_root_key(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            scoped_secret = f"test-scoped-token-key-{new_ulid()}"
+            scoped_token = _seed_scoped_token(
+                session_factory,
+                scopes={"deployment.llm:write": True},
+            )
+            scoped = client.put(
+                f"/admin/api/v1/llm/providers/{seeded.provider_id}/key",
+                json={"api_key": scoped_secret},
+                headers={"Authorization": f"Bearer {scoped_token}"},
+            )
+            assert scoped.status_code == 403, scoped.text
+            assert scoped.headers["www-authenticate"] == (
+                'error="session_only_endpoint"'
+            )
+            assert scoped.json()["error"] == "session_only_endpoint"
+            _assert_not_exposed(scoped.text, scoped_secret)
+
+            delegated_token = _seed_delegated_token(
+                session_factory, settings=pinned_settings
+            )
+            delegated = client.delete(
+                f"/admin/api/v1/llm/providers/{seeded.provider_id}/key",
+                headers={"Authorization": f"Bearer {delegated_token}"},
+            )
+            assert delegated.status_code == 403, delegated.text
+            assert delegated.headers["www-authenticate"] == (
+                'error="session_only_endpoint"'
+            )
+            assert delegated.json()["error"] == "session_only_endpoint"
+
+            original_settings = client.app.state.settings
+            client.app.state.settings = pinned_settings.model_copy(
+                update={"root_key": None}
+            )
+            missing_root_secret = f"test-missing-root-key-{new_ulid()}"
+            try:
+                missing_root = client.put(
+                    f"/admin/api/v1/llm/providers/{seeded.provider_id}/key",
+                    json={"api_key": missing_root_secret},
+                )
+            finally:
+                client.app.state.settings = original_settings
+            assert missing_root.status_code == 503, missing_root.text
+            assert missing_root.json()["error"] == "root_key_required"
+            _assert_not_exposed(missing_root.text, missing_root_secret)
+
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                assert provider.api_key_envelope_ref == "envelope:llm:openrouter:test"
+                assert s.scalar(select(func.count(SecretEnvelope.id))) == 0
         finally:
             _wipe(session_factory)
 
