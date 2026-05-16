@@ -552,6 +552,7 @@ class TestMigrationShape:
             "provider_model_id",
             "tokens_in",
             "tokens_out",
+            "audio_seconds",
             "cost_cents",
             "cost_usd",
             "latency_ms",
@@ -575,9 +576,11 @@ class TestMigrationShape:
             "created_at",
         }
         assert set(cols) == expected
-        # cd-wjpl: five of the six new columns are nullable; only
-        # ``fallback_attempts`` carries a server default.
+        # Duration and agent-trail telemetry are optional; only
+        # ``fallback_attempts`` carries a server default among the
+        # telemetry additions.
         nullable = {
+            "audio_seconds",
             "assignment_id",
             "finish_reason",
             "actor_user_id",
@@ -588,6 +591,7 @@ class TestMigrationShape:
             assert cols[col]["nullable"] is True, f"{col} must be NULLABLE"
         for notnull in expected - nullable:
             assert cols[notnull]["nullable"] is False, f"{notnull} must be NOT NULL"
+        assert str(cols["audio_seconds"]["type"]) == "NUMERIC(12, 3)"
 
     def test_llm_usage_fks(self, engine: Engine) -> None:
         """Only the workspace FK exists — ``provider_model_id`` is a
