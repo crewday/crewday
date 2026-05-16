@@ -23,7 +23,7 @@ from typing import Annotated, Any, Final
 from fastapi import APIRouter, Depends, Request, Response
 from starlette.responses import StreamingResponse
 
-from app.api.admin.deps import current_deployment_admin_principal
+from app.api.admin.deps import current_deployment_admin_principal_once
 from app.api.transport.correlation_id import request_correlation_id
 from app.api.transport.sse import (
     HEARTBEAT_INTERVAL_S,
@@ -52,7 +52,9 @@ _log = logging.getLogger(__name__)
 _RECONNECT_MS: Final[int] = 3000
 _DEPLOYMENT_ADMIN_WORKSPACE_ID: Final[str] = "__deployment_admin__"
 
-_AdminCtx = Annotated[DeploymentContext, Depends(current_deployment_admin_principal)]
+_AdminCtx = Annotated[
+    DeploymentContext, Depends(current_deployment_admin_principal_once)
+]
 
 
 @dataclass(frozen=True)

@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
+import time
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
@@ -58,6 +60,7 @@ from app.worker.scheduler import (
     USER_WORKSPACE_REFRESH_JOB_ID,
     WEB_PUSH_DISPATCH_JOB_ID,
     WEBHOOK_DISPATCH_JOB_ID,
+    WORKER_MAX_CONCURRENT_TICKS,
     WORKSPACE_PURGE_INTERVAL_SECONDS,
     WORKSPACE_PURGE_JOB_ID,
     create_scheduler,
@@ -1064,6 +1067,45 @@ class TestWrapJob:
 
         body.assert_called_once_with()
         assert seen_calls == [("test_job", clock.now())]
+
+    def test_concurrent_different_jobs_share_global_tick_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Aligned job ids must not consume the whole DB pool at once."""
+        clock = FrozenClock(datetime(2026, 4, 24, 12, 0, tzinfo=UTC))
+        monkeypatch.setattr(scheduler_mod, "WORKER_MAX_CONCURRENT_TICKS", 2)
+        monkeypatch.setattr(
+            scheduler_mod,
+            "_write_heartbeat",
+            lambda _job_id, _clock: None,
+        )
+        monkeypatch.setattr(scheduler_mod, "_is_dead", lambda _job_id: False)
+
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        def body() -> None:
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                time.sleep(0.05)
+            finally:
+                with lock:
+                    active -= 1
+
+        async def _run() -> None:
+            wrapped = [
+                wrap_job(body, job_id=f"aligned_{index}", clock=clock)
+                for index in range(WORKER_MAX_CONCURRENT_TICKS + 2)
+            ]
+            await asyncio.gather(*(job() for job in wrapped))
+
+        asyncio.run(_run())
+
+        assert max_active == 2
 
     def test_body_exception_is_swallowed_and_logged(
         self,

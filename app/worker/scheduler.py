@@ -52,12 +52,15 @@ See ``docs/specs/01-architecture.md`` §"Worker" and
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import inspect
 import logging
+import threading
+import weakref
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final
 
 from apscheduler.jobstores.base import JobLookupError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -147,6 +150,7 @@ __all__ = [
     "WEBHOOK_DISPATCH_JOB_ID",
     "WEB_PUSH_DISPATCH_INTERVAL_SECONDS",
     "WEB_PUSH_DISPATCH_JOB_ID",
+    "WORKER_MAX_CONCURRENT_TICKS",
     "create_scheduler",
     "register_jobs",
     "start",
@@ -155,6 +159,16 @@ __all__ = [
 ]
 
 _log = logging.getLogger(__name__)
+
+# Bound total scheduler tick concurrency below the default SQLAlchemy pool
+# capacity. ``max_instances=1`` protects each job id only; different jobs can
+# still align on the same second and otherwise fan out enough DB sessions to
+# starve HTTP readiness and user traffic.
+WORKER_MAX_CONCURRENT_TICKS: Final[int] = 4
+_tick_gates: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+    weakref.WeakKeyDictionary()
+)
+_tick_gates_lock = threading.Lock()
 
 
 # Stable job id for the always-on heartbeat tick. Matches the string
@@ -521,6 +535,16 @@ def _clock_for(scheduler: AsyncIOScheduler) -> Clock:
     return SystemClock()
 
 
+def _worker_tick_gate() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    with _tick_gates_lock:
+        gate = _tick_gates.get(loop)
+        if gate is None:
+            gate = asyncio.Semaphore(WORKER_MAX_CONCURRENT_TICKS)
+            _tick_gates[loop] = gate
+        return gate
+
+
 def wrap_job(
     func: JobBody,
     *,
@@ -563,6 +587,10 @@ def wrap_job(
     job_label = sanitize_label(job_id)
 
     async def _runner() -> None:
+        async with _worker_tick_gate():
+            await _run_tick()
+
+    async def _run_tick() -> None:
         request_id_token = set_request_id(new_request_id())
         start = _time.perf_counter()
         _log.info(

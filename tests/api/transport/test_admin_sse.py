@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.api.admin import deps as admin_deps
 from app.api.transport import admin_sse
 from app.api.transport.admin_sse import AdminSSEFanOut, _stream_admin_events
 from app.api.transport.correlation_id import CORRELATION_ID_STATE_ATTR
@@ -315,6 +316,31 @@ class TestAdminSSEFanOut:
 
 
 class TestAdminEventsRoute:
+    @staticmethod
+    def _patch_admin_stream_uow(
+        monkeypatch: pytest.MonkeyPatch,
+        session_factory: sessionmaker[Session],
+        *,
+        lifecycle: list[str] | None = None,
+    ) -> None:
+        class TrackingUow:
+            def __init__(self) -> None:
+                self.session: Session | None = None
+
+            def __enter__(self) -> Session:
+                if lifecycle is not None:
+                    lifecycle.append("enter")
+                self.session = session_factory()
+                return self.session
+
+            def __exit__(self, *_exc: object) -> None:
+                if lifecycle is not None:
+                    lifecycle.append("exit")
+                assert self.session is not None
+                self.session.close()
+
+        monkeypatch.setattr(admin_deps, "make_uow", TrackingUow)
+
     def test_non_admin_gets_invisible_404(
         self,
         client: TestClient,
@@ -343,6 +369,7 @@ class TestAdminEventsRoute:
             yield b"retry: 3000\n\n"
 
         monkeypatch.setattr(admin_sse, "_stream_admin_events", _finite_stream)
+        self._patch_admin_stream_uow(monkeypatch, session_factory)
         _user_id, cookie = seed_admin(session_factory, settings=settings)
         client.cookies.set(SESSION_COOKIE_NAME, cookie)
 
@@ -351,3 +378,28 @@ class TestAdminEventsRoute:
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/event-stream")
         assert resp.content == b"retry: 3000\n\n"
+
+    def test_admin_stream_auth_closes_db_before_streaming(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        lifecycle: list[str] = []
+
+        async def _finite_stream(**kwargs: object) -> AsyncIterator[bytes]:
+            del kwargs
+            assert lifecycle == ["enter", "exit"]
+            yield b"retry: 3000\n\n"
+
+        self._patch_admin_stream_uow(monkeypatch, session_factory, lifecycle=lifecycle)
+        monkeypatch.setattr(admin_sse, "_stream_admin_events", _finite_stream)
+        _user_id, cookie = seed_admin(session_factory, settings=settings)
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+        resp = client.get("/admin/events")
+
+        assert resp.status_code == 200
+        assert resp.content == b"retry: 3000\n\n"
+        assert lifecycle == ["enter", "exit"]

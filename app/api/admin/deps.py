@@ -47,6 +47,7 @@ from typing import Annotated, Final
 from fastapi import Cookie, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.adapters.db.session import make_uow
 from app.api.deps import db_session
 from app.auth import session as auth_session
 from app.auth import tokens as auth_tokens
@@ -62,6 +63,7 @@ from app.tenancy import (
 __all__ = [
     "DEPLOYMENT_SCOPE_CONFLICT_ERROR",
     "current_deployment_admin_principal",
+    "current_deployment_admin_principal_once",
     "require_deployment_scope",
     "require_deployment_session_scope",
 ]
@@ -309,17 +311,12 @@ def _resolve_token_principal(
 # ---------------------------------------------------------------------------
 
 
-def current_deployment_admin_principal(
+def _resolve_deployment_admin_principal(
     request: Request,
-    session: _Db,
-    session_cookie_primary: Annotated[
-        str | None,
-        Cookie(alias=auth_session.SESSION_COOKIE_NAME),
-    ] = None,
-    session_cookie_dev: Annotated[
-        str | None,
-        Cookie(alias=DEV_SESSION_COOKIE_NAME),
-    ] = None,
+    session: Session,
+    *,
+    session_cookie_primary: str | None,
+    session_cookie_dev: str | None,
 ) -> DeploymentContext:
     """Resolve the caller to a :class:`DeploymentContext` or 404.
 
@@ -370,6 +367,54 @@ def current_deployment_admin_principal(
             return ctx
 
     raise _not_found()
+
+
+def current_deployment_admin_principal(
+    request: Request,
+    session: _Db,
+    session_cookie_primary: Annotated[
+        str | None,
+        Cookie(alias=auth_session.SESSION_COOKIE_NAME),
+    ] = None,
+    session_cookie_dev: Annotated[
+        str | None,
+        Cookie(alias=DEV_SESSION_COOKIE_NAME),
+    ] = None,
+) -> DeploymentContext:
+    """Resolve the caller to a :class:`DeploymentContext` or 404."""
+    return _resolve_deployment_admin_principal(
+        request,
+        session,
+        session_cookie_primary=session_cookie_primary,
+        session_cookie_dev=session_cookie_dev,
+    )
+
+
+def current_deployment_admin_principal_once(
+    request: Request,
+    session_cookie_primary: Annotated[
+        str | None,
+        Cookie(alias=auth_session.SESSION_COOKIE_NAME),
+    ] = None,
+    session_cookie_dev: Annotated[
+        str | None,
+        Cookie(alias=DEV_SESSION_COOKIE_NAME),
+    ] = None,
+) -> DeploymentContext:
+    """Resolve admin auth without holding a DB session past dependency setup.
+
+    Long-lived streaming routes must not depend on :func:`db_session` directly:
+    FastAPI keeps yield-dependency cleanup tied to the response lifetime, so an
+    SSE connection would pin a pool connection until the browser disconnects.
+    """
+    with make_uow() as session:
+        assert isinstance(session, Session)
+        return _resolve_deployment_admin_principal(
+            request,
+            session,
+            session_cookie_primary=session_cookie_primary,
+            session_cookie_dev=session_cookie_dev,
+        )
 
 
 def require_deployment_scope(
