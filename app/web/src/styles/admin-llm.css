@@ -392,8 +392,7 @@
   z-index: 1;
 }
 .llm-provider-model-list .llm-usage-total--muted,
-.llm-graph-node__child .llm-usage-total--muted,
-.llm-graph-chain__assignment-model > .llm-usage-total--muted {
+.llm-graph-node__child .llm-usage-total--muted {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -552,7 +551,8 @@
   color: inherit;
 }
 .llm-graph-chain__pm-summary,
-.llm-graph-chain__pm-model {
+.llm-graph-chain__pm-model,
+.llm-graph-chain__pm-provider {
   min-width: 0;
 }
 .llm-graph-chain__pm-summary {
@@ -561,12 +561,22 @@
   gap: 5px;
 }
 .llm-graph-chain__pm-model {
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--ink);
   font-size: 11.5px;
   font-weight: 600;
+  line-height: 1.15;
+}
+.llm-graph-chain__pm-provider {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-3);
+  font-size: 11.5px;
   line-height: 1.15;
 }
 .llm-graph-chain__pm-thinking {
@@ -580,12 +590,6 @@
   font-size: 11.5px;
   line-height: 1;
 }
-.llm-graph-chain__assignment-model > .llm-usage-total--muted {
-  position: static;
-  justify-self: start;
-  text-align: left;
-}
-
 /* Prompt-library slide-over. */
 .llm-prompt-drawer-backdrop {
   position: fixed; inset: 0;

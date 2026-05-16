@@ -292,6 +292,18 @@ describe("Admin LlmPage", () => {
       expect(thinkingChip.compareDocumentPosition(contextChip)).toBe(
         Node.DOCUMENT_POSITION_FOLLOWING,
       );
+      const assignmentProviderModel = within(chatManagerRung()).getByRole("button", {
+        name: /^Open provider-model google\/gemma-4-31b-it/,
+      });
+      expect(
+        within(assignmentProviderModel).getByText("OpenRouter"),
+      ).toHaveClass("llm-graph-chain__pm-provider");
+      expect(
+        within(assignmentProviderModel).queryByLabelText(/Recent usage:/),
+      ).not.toBeInTheDocument();
+      expect(
+        within(chatManagerAssignmentButton()).getByLabelText(/Recent usage:/),
+      ).toBeInTheDocument();
       expect(screen.getAllByText("voice.transcribe").length).toBeGreaterThan(0);
       expect(screen.queryByText("Spend (30d)")).not.toBeInTheDocument();
       expect(screen.queryByText("Provider-model pricing")).not.toBeInTheDocument();
@@ -1574,7 +1586,9 @@ describe("Admin LlmPage", () => {
       expect(providerModelButton.querySelector(".llm-graph-chain__pm-thinking")).toBeNull();
       expect(providerModelButton).not.toHaveTextContent("Provider-model settings");
       expect(providerModelButton).not.toHaveTextContent(/via\s+OpenRouter/i);
-      expect(providerModelButton).not.toHaveTextContent("OpenRouter");
+      expect(within(providerModelButton).getByText("OpenRouter")).toHaveClass(
+        "llm-graph-chain__pm-provider",
+      );
       expect(providerModelButton).not.toHaveTextContent("google/gemma-4-31b-it");
       expect(chatManagerAssignmentButton()).not.toHaveTextContent("Gemma 4 31B IT");
       expect(chatManagerAssignmentButton()).not.toHaveTextContent(/via\s+OpenRouter/i);

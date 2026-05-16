@@ -143,17 +143,15 @@ export default function CapabilityChain(props: CapabilityChainProps) {
                     <span className="llm-graph-chain__pm-model">
                       {model?.display_name ?? pm.api_model_id}
                     </span>
+                    <span className="llm-graph-chain__pm-provider">
+                      {provider?.name ?? "Unknown provider"}
+                    </span>
                     {assignmentThinkingLevel ? (
                       <span className="llm-graph-chain__pm-thinking">
                         Thinking {thinkingLevelLabel(assignmentThinkingLevel)}
                       </span>
                     ) : null}
                   </span>
-                  <LlmUsageTotals
-                    spendUsd={pm.spend_usd_30d}
-                    calls={pm.calls_30d}
-                    variant="muted"
-                  />
                 </button>
               ) : null}
               <button
