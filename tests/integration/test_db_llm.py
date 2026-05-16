@@ -29,7 +29,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Engine, inspect, select
+from sqlalchemy import Engine, Numeric, inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -3576,6 +3576,7 @@ class TestRegistryShape:
             "input_cost_per_million",
             "output_cost_per_million",
             "fixed_cost_per_call_usd",
+            "audio_cost_per_hour_usd",
             "max_tokens_override",
             "supports_system_prompt",
             "supports_temperature",
@@ -3589,6 +3590,11 @@ class TestRegistryShape:
             "updated_at",
         }
         assert set(cols) == expected
+        audio_cost_type = cols["audio_cost_per_hour_usd"]["type"]
+        assert isinstance(audio_cost_type, Numeric)
+        assert audio_cost_type.precision == 10
+        assert audio_cost_type.scale == 4
+        assert cols["audio_cost_per_hour_usd"]["nullable"] is True
 
     def test_llm_provider_model_thinking_strategy_override_constraint(
         self, db_session: Session
