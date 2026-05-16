@@ -1441,7 +1441,7 @@ describe("Admin LlmPage", () => {
       });
       fireEvent.click(screen.getByLabelText("System prompt"));
       fireEvent.click(screen.getByLabelText("Temperature"));
-      fireEvent.click(screen.getByLabelText("Enabled"));
+      fireEvent.click(screen.getByLabelText(/Active/));
       fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
 
       await waitFor(() => {
@@ -1584,7 +1584,7 @@ describe("Admin LlmPage", () => {
       fireEvent.click(providerModelButton);
 
       const providerModelDialog = await screen.findByRole("dialog", {
-        name: "google/gemma-4-31b-it",
+        name: "OpenRouter / Gemma 4 31B IT",
       });
       expectSharedFormModal(providerModelDialog);
       expect(
@@ -1596,7 +1596,7 @@ describe("Admin LlmPage", () => {
 
       fireEvent.click(within(providerModelDialog).getByRole("button", { name: "Close" }));
       await waitFor(() => {
-        expect(screen.queryByRole("dialog", { name: "google/gemma-4-31b-it" })).toBeNull();
+        expect(screen.queryByRole("dialog", { name: "OpenRouter / Gemma 4 31B IT" })).toBeNull();
       });
 
       fireEvent.click(chatManagerAssignmentEditTarget());
@@ -1606,7 +1606,7 @@ describe("Admin LlmPage", () => {
       expect(within(assignment).getByText("Selected chain")).toBeInTheDocument();
       expect(chatManagerRung()).toHaveClass("is-active");
       expect(providerModelButton).not.toHaveClass("is-active");
-      expect(screen.queryByRole("dialog", { name: "google/gemma-4-31b-it" })).toBeNull();
+      expect(screen.queryByRole("dialog", { name: "OpenRouter / Gemma 4 31B IT" })).toBeNull();
     } finally {
       fetcher.restore();
     }

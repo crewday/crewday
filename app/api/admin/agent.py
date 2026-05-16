@@ -47,6 +47,7 @@ __all__ = [
     "AdminAgentDecisionResponse",
     "AdminAgentMessage",
     "AdminAgentMessageRequest",
+    "AdminAgentTextReply",
     "build_admin_agent_router",
 ]
 
@@ -92,6 +93,13 @@ class AdminAgentActionProposal:
     idempotency_key: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class AdminAgentTextReply:
+    """Plain-text deployment-admin chat reply produced by the agent."""
+
+    body: str
+
+
 class AdminAgentActionProducer(Protocol):
     """Configured runtime seam for live admin-agent action production."""
 
@@ -102,8 +110,8 @@ class AdminAgentActionProducer(Protocol):
         page_context: str,
         ctx: DeploymentContext,
         session: Session,
-    ) -> AdminAgentActionProposal | None:
-        """Resolve ``message`` into one gated deployment action proposal."""
+    ) -> AdminAgentActionProposal | AdminAgentTextReply | None:
+        """Resolve ``message`` into an admin reply or gated action proposal."""
         ...
 
 
@@ -242,7 +250,7 @@ def build_admin_agent_router() -> APIRouter:
                 raise
             return fallback
         try:
-            proposal = _validated_action_proposal(
+            result = _validated_producer_result(
                 producer.produce_action(
                     message=body.body,
                     page_context=page,
@@ -291,9 +299,25 @@ def build_admin_agent_router() -> APIRouter:
             created_at=created_at,
         )
         payload = _message_payload(row)
+        if isinstance(result, AdminAgentTextReply):
+            _record_admin_text_reply(
+                request,
+                ctx=ctx,
+                session=session,
+                page_context=page,
+                user_message=row,
+                reply=result,
+            )
+            _publish_admin_turn_finished(
+                request,
+                ctx,
+                row.created_at,
+                outcome="replied",
+            )
+            return payload
         try:
             action = _produce_admin_action(
-                proposal,
+                result,
                 request,
                 ctx=ctx,
                 session=session,
@@ -600,6 +624,17 @@ def _validated_action_proposal(
     return proposal
 
 
+def _validated_producer_result(
+    result: AdminAgentActionProposal | AdminAgentTextReply | None,
+) -> AdminAgentActionProposal | AdminAgentTextReply:
+    if isinstance(result, AdminAgentTextReply):
+        body = result.body.strip()
+        if not body:
+            raise _admin_agent_unavailable("admin_agent_no_action_proposal")
+        return replace(result, body=body)
+    return _validated_action_proposal(result)
+
+
 def _validated_settings_update_proposal(
     proposal: AdminAgentActionProposal,
 ) -> AdminAgentActionProposal:
@@ -791,6 +826,47 @@ def _record_admin_fallback_turn(
         error=error,
     )
     return _message_payload(row)
+
+
+def _record_admin_text_reply(
+    request: Request,
+    *,
+    ctx: DeploymentContext,
+    session: Session,
+    page_context: str,
+    user_message: AdminAgentMessageRow,
+    reply: AdminAgentTextReply,
+) -> AdminAgentMessageRow:
+    row = AdminAgentMessageRow(
+        id=new_ulid(),
+        admin_user_id=ctx.user_id,
+        kind="agent",
+        body_md=reply.body,
+        page_context=page_context,
+        author_label="agent",
+        created_at=_now_utc(),
+    )
+    # justification: deployment-admin transcript rows are not workspace-scoped.
+    with tenant_agnostic():
+        session.add(row)
+        session.flush()
+    audit_admin(
+        session,
+        ctx=ctx,
+        request=request,
+        entity_kind="admin_agent_message",
+        entity_id=row.id,
+        action="admin_agent.message.replied",
+        diff={
+            "capability": _ADMIN_AGENT_CAPABILITY,
+            "inline_channel": _ADMIN_AGENT_CHANNEL,
+            "page": page_context,
+            "principal": ctx.principal,
+            "user_message_id": user_message.id,
+        },
+    )
+    _publish_admin_message(request, ctx, _message_payload(row))
+    return row
 
 
 def _record_admin_runtime_fallback(
@@ -1069,7 +1145,7 @@ def _publish_admin_turn_finished(
     ctx: DeploymentContext,
     started_at: datetime,
     *,
-    outcome: Literal["action", "error"],
+    outcome: Literal["action", "error", "replied"],
     error: str | None = None,
 ) -> None:
     finished_at = _now_utc()

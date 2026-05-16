@@ -1003,6 +1003,52 @@ describe("LlmRegistryModals", () => {
     ).toBe(true);
   });
 
+  it("uses the provider-model sync button state without a separate status indicator", async () => {
+    const syncedProviderModel = {
+      ...baseGraph.provider_models[0]!,
+      input_cost_per_million: 0.5,
+      output_cost_per_million: 1.5,
+      fixed_cost_per_call_usd: 0.01,
+      audio_cost_per_hour_usd: 0.04,
+    };
+    let resolveSync: (response: Response) => void = () => undefined;
+    const spy = vi.fn((url: string | URL | Request) => {
+      if (String(url) === "/admin/api/v1/llm/provider-models/pm_gemma/sync-pricing") {
+        return new Promise<Response>((resolve) => {
+          resolveSync = resolve;
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        headers: new Headers(),
+        text: async () => JSON.stringify({}),
+      } as Response);
+    });
+    (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Sync pricing" }));
+
+    expect(await screen.findByRole("button", { name: "Syncing..." })).toBeDisabled();
+    expect(screen.queryByText("Syncing pricing...")).not.toBeInTheDocument();
+    resolveSync({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: new Headers(),
+      text: async () =>
+        JSON.stringify({
+          provider_model: syncedProviderModel,
+          pricing_sync_result: { status: "updated" },
+        }),
+    } as Response);
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Input cost per 1M/)).toHaveValue(0.5);
+    });
+  });
+
   it("hides provider-model pricing sync outside OpenRouter-effective states", () => {
     installFetch();
     renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_text" });
@@ -1217,11 +1263,21 @@ describe("LlmRegistryModals", () => {
     };
     renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
 
-    expect(screen.queryByLabelText(/Thinking level/)).not.toBeInTheDocument();
-    const fixedCost = screen.getByLabelText(/Fixed cost per call/);
-    const strategy = screen.getByLabelText(/Thinking strategy/);
     expect(
-      fixedCost.compareDocumentPosition(strategy) & Node.DOCUMENT_POSITION_FOLLOWING,
+      screen.getByRole("dialog", { name: "OpenRouter / Gemma 4 31B IT" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /^Provider/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /^Model/ })).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/API model id/)).toHaveValue("google/gemma-4-31b-it");
+    expect(screen.queryByLabelText(/Thinking level/)).not.toBeInTheDocument();
+    const maxTokens = screen.getByLabelText(/Max tokens override/);
+    const strategy = screen.getByLabelText(/Thinking strategy/);
+    const inputCost = screen.getByLabelText(/Input cost per 1M/);
+    expect(
+      maxTokens.compareDocumentPosition(strategy) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      strategy.compareDocumentPosition(inputCost) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(strategy).toHaveValue("inherit");
     expect(screen.getByText("Model default: Gemma system token.")).toBeInTheDocument();
@@ -1249,11 +1305,11 @@ describe("LlmRegistryModals", () => {
     });
   });
 
-  it("surfaces provider-model enabled state and can disable it", async () => {
+  it("surfaces provider-model active state and can disable it", async () => {
     const calls = installFetch();
     renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
 
-    const enabled = screen.getByLabelText(/Enabled/);
+    const enabled = screen.getByLabelText(/Active/);
     expect(enabled).toBeChecked();
     expect(enabled).not.toHaveClass("llm-registry-form__check-input");
     expect(enabled.closest("label")).toHaveClass("form-field--optional");

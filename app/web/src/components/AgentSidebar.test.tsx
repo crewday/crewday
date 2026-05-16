@@ -452,6 +452,66 @@ describe("AgentSidebar", () => {
     }
   });
 
+  it("keeps the optimistic admin message while rendering an agent text reply", async () => {
+    const sentAt = "2026-05-06T12:00:00Z";
+    const replyAt = "2026-05-06T12:00:01Z";
+    let messages: Array<{ at: string; kind: "user" | "agent"; body: string }> = [];
+    const env = installFetchRouteHandlers([
+      {
+        path: "/admin/api/v1/agent/log",
+        respond: () => ({ body: messages }),
+      },
+      {
+        path: "/admin/api/v1/agent/actions",
+        respond: { body: [] },
+      },
+      {
+        path: "/admin/api/v1/agent/message",
+        method: "POST",
+        respond: () => {
+          const userMessage = {
+            at: sentAt,
+            kind: "user" as const,
+            body: "ello whats up",
+          };
+          messages = [
+            userMessage,
+            {
+              at: replyAt,
+              kind: "agent" as const,
+              body: "Hello. What admin task should we look at?",
+            },
+          ];
+          return {
+            status: 201,
+            body: userMessage,
+          };
+        },
+      },
+    ]);
+
+    try {
+      renderWithProviders(
+        <MemoryRouter initialEntries={["/admin/dashboard"]}>
+          <AgentSidebar role="admin" />
+        </MemoryRouter>,
+        { queryClient: makeTestQueryClient() },
+      );
+
+      const input = screen.getByLabelText("Message agent");
+      fireEvent.change(input, { target: { value: "ello whats up" } });
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+      expect(await screen.findByText("ello whats up")).toBeInTheDocument();
+      expect(
+        await screen.findByText("Hello. What admin task should we look at?"),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Agent is typing")).not.toBeInTheDocument();
+    } finally {
+      env.restore();
+    }
+  });
+
   it("rolls back the optimistic user message when send fails", async () => {
     let rejectSend: (value: Response) => void = () => {};
     const failedSend = new Promise<Response>((resolve) => {

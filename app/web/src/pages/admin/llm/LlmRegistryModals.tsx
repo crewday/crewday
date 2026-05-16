@@ -1379,6 +1379,10 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   });
   const providerOptions = useMemo(() => providers.map(providerOption), [providers]);
   const modelOptions = useMemo(() => models.map(modelOption), [models]);
+  const selectedProvider = useMemo(
+    () => providers.find((item) => item.id === providerId),
+    [providerId, providers],
+  );
   const selectedModel = useMemo(
     () => models.find((item) => item.id === modelId),
     [modelId, models],
@@ -1515,8 +1519,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   const extraHelpId = "llm-provider-model-extra-help";
   const thinkingStrategyHelpId = "llm-provider-model-thinking-strategy-help";
   const syncPending = syncPricing.isPending || syncDraftPricing.isPending;
-  const syncStatusId = syncPending ? "llm-provider-model-sync-status" : undefined;
-  const priceSourceModelOverrideDescribedBy = describedBy(syncErrId, syncStatusId);
+  const priceSourceModelOverrideDescribedBy = describedBy(syncErrId);
 
   function applyProviderModelPricing(row: LlmProviderModel) {
     setInputCost(
@@ -1623,7 +1626,11 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   return (
     <FormModal
       open
-      title={mode === "create" ? "Create provider-model" : providerModel?.api_model_id}
+      title={
+        mode === "create"
+          ? "Create provider-model"
+          : `${selectedProvider?.name ?? "Unknown provider"} / ${selectedModel?.display_name ?? providerModel?.api_model_id ?? "Unknown model"}`
+      }
       titleId={titleId}
       eyebrow={mode === "create" ? "New provider-model" : "Edit provider-model"}
       onClose={onClose}
@@ -1658,30 +1665,32 @@ function ProviderModelForm(props: ProviderModelFormProps) {
         </>
       }
     >
-        <FormModalGrid>
-          <SearchableSelect
-            label="Provider"
-            requirement="required"
-            className="form-modal__field"
-            value={providerId}
-            options={providerOptions}
-            onChange={setProviderId}
-            required
-            aria-invalid={clientErr === "Provider is required."}
-            aria-describedby={errId}
-          />
-          <SearchableSelect
-            label="Model"
-            requirement="required"
-            className="form-modal__field"
-            value={modelId}
-            options={modelOptions}
-            onChange={setModelId}
-            required
-            aria-invalid={clientErr === "Model is required."}
-            aria-describedby={errId}
-          />
-        </FormModalGrid>
+        {mode === "create" ? (
+          <FormModalGrid>
+            <SearchableSelect
+              label="Provider"
+              requirement="required"
+              className="form-modal__field"
+              value={providerId}
+              options={providerOptions}
+              onChange={setProviderId}
+              required
+              aria-invalid={clientErr === "Provider is required."}
+              aria-describedby={errId}
+            />
+            <SearchableSelect
+              label="Model"
+              requirement="required"
+              className="form-modal__field"
+              value={modelId}
+              options={modelOptions}
+              onChange={setModelId}
+              required
+              aria-invalid={clientErr === "Model is required."}
+              aria-describedby={errId}
+            />
+          </FormModalGrid>
+        ) : null}
         <FormModalField label="API model id" requirement="required">
           <input
             value={apiModelId}
@@ -1691,6 +1700,44 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             aria-describedby={errId}
           />
         </FormModalField>
+        <FormModalGrid className="llm-provider-model-costs">
+          <FormModalField label="Max tokens override" requirement="optional">
+            <input
+              type="number"
+              min="1"
+              value={maxTokens}
+              onChange={(e) => setMaxTokens(e.target.value)}
+              aria-invalid={
+                clientErr === "Max tokens override must be a positive whole number."
+              }
+              aria-describedby={errId}
+            />
+          </FormModalField>
+          <FormModalField
+            label="Thinking strategy"
+            requirement="optional"
+            helpId={thinkingStrategyHelpId}
+            helpText={`Model default: ${thinkingStrategyLabel(inheritedThinkingStrategy)}.`}
+          >
+            <select
+              value={thinkingStrategyOverride}
+              aria-describedby={describedBy(thinkingStrategyHelpId, errId)}
+              onChange={(e) => {
+                const next = e.target.value;
+                if (next === "inherit" || isThinkingStrategy(next)) {
+                  setThinkingStrategyOverride(next);
+                }
+              }}
+            >
+              <option value="inherit">Model default</option>
+              {THINKING_STRATEGY_OPTIONS.map((strategy) => (
+                <option key={strategy} value={strategy}>
+                  {thinkingStrategyLabel(strategy)}
+                </option>
+              ))}
+            </select>
+          </FormModalField>
+        </FormModalGrid>
         <FormModalGrid className="llm-provider-model-costs">
           <FormModalField label="Input cost per 1M" requirement="optional">
             <input
@@ -1740,42 +1787,6 @@ function ProviderModelForm(props: ProviderModelFormProps) {
           </FormModalField>
         </FormModalGrid>
         <FormModalGrid>
-          <FormModalField
-            label="Thinking strategy"
-            requirement="optional"
-            helpId={thinkingStrategyHelpId}
-            helpText={`Model default: ${thinkingStrategyLabel(inheritedThinkingStrategy)}.`}
-          >
-            <select
-              value={thinkingStrategyOverride}
-              aria-describedby={describedBy(thinkingStrategyHelpId, errId)}
-              onChange={(e) => {
-                const next = e.target.value;
-                if (next === "inherit" || isThinkingStrategy(next)) {
-                  setThinkingStrategyOverride(next);
-                }
-              }}
-            >
-              <option value="inherit">Model default</option>
-              {THINKING_STRATEGY_OPTIONS.map((strategy) => (
-                <option key={strategy} value={strategy}>
-                  {thinkingStrategyLabel(strategy)}
-                </option>
-              ))}
-            </select>
-          </FormModalField>
-        </FormModalGrid>
-        <FormModalField label="Max tokens override" requirement="optional">
-          <input
-            type="number"
-            min="1"
-            value={maxTokens}
-            onChange={(e) => setMaxTokens(e.target.value)}
-            aria-invalid={clientErr === "Max tokens override must be a positive whole number."}
-            aria-describedby={errId}
-          />
-        </FormModalField>
-        <FormModalGrid>
           <FormModalField label="Price source override" requirement="optional">
             <select
               value={priceSourceOverride}
@@ -1819,21 +1830,11 @@ function ProviderModelForm(props: ProviderModelFormProps) {
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={syncCurrentPricing}
                   disabled={syncPending || save.isPending || remove.isPending}
-                  aria-label="Sync pricing"
                 >
                   {syncPending ? "Syncing..." : "Sync pricing"}
                 </button>
               ) : null}
             </div>
-            {syncPending ? (
-              <p
-                id="llm-provider-model-sync-status"
-                className="llm-price-source-sync__status"
-                role="status"
-              >
-                Syncing pricing...
-              </p>
-            ) : null}
             {syncErr ? (
               <p
                 id="llm-provider-model-sync-error"
@@ -1845,10 +1846,9 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             ) : null}
           </div>
         </FormModalGrid>
-        <FormModalField label="Enabled" requirement="optional">
+        <FormModalField label="Active" requirement="optional">
           <input
             type="checkbox"
-            aria-label="Enabled"
             checked={enabled}
             onChange={(e) => setEnabled(e.target.checked)}
           />

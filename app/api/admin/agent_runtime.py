@@ -31,7 +31,11 @@ from app.api.admin._workspace_state import (
     set_verification_state,
     verification_state_of,
 )
-from app.api.admin.agent import AdminAgentActionProducer, AdminAgentActionProposal
+from app.api.admin.agent import (
+    AdminAgentActionProducer,
+    AdminAgentActionProposal,
+    AdminAgentTextReply,
+)
 from app.api.admin.settings import (
     preview_deployment_setting_for_agent,
     write_deployment_setting,
@@ -107,7 +111,7 @@ class AdminAgentRuntimeActionProducer(AdminAgentActionProducer):
         page_context: str,
         ctx: DeploymentContext,
         session: Session,
-    ) -> AdminAgentActionProposal | None:
+    ) -> AdminAgentActionProposal | AdminAgentTextReply | None:
         if not self._tools:
             raise _unavailable("dispatcher_not_configured")
         model_id = _resolve_admin_model_id(session)
@@ -135,8 +139,13 @@ class AdminAgentRuntimeActionProducer(AdminAgentActionProducer):
                 },
             )
             raise _unavailable("admin_agent_model_unavailable") from exc
+        if len(response.tool_calls) > 1:
+            return None
         resolved_call = _resolve_tool_call(response)
         if resolved_call is None:
+            reply = _text_reply(response.text)
+            if reply is not None:
+                return reply
             return None
         proposal = _resolve_supported_proposal(resolved_call, session=session)
         if proposal is None:
@@ -310,8 +319,6 @@ def _resolve_admin_model_id(session: Session) -> str | None:
 
 
 def _resolve_tool_call(response: LLMResponse) -> ToolCall | None:
-    if len(response.tool_calls) > 1:
-        return None
     if response.tool_calls:
         first = response.tool_calls[0]
         return ToolCall(
@@ -320,6 +327,13 @@ def _resolve_tool_call(response: LLMResponse) -> ToolCall | None:
             input=dict(first.arguments),
         )
     return _parse_text_tool_call(response.text)
+
+
+def _text_reply(text: str) -> AdminAgentTextReply | None:
+    body = text.strip()
+    if not body:
+        return None
+    return AdminAgentTextReply(body=body)
 
 
 def _parse_text_tool_call(text: str) -> ToolCall | None:

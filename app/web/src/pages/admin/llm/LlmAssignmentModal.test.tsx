@@ -93,6 +93,20 @@ function pickerColumn(dialog: HTMLElement, heading: string): HTMLElement {
   return column;
 }
 
+function availableProviderModelLabels(dialog: HTMLElement): string[] {
+  return [
+    ...pickerColumn(dialog, "Available provider-models").querySelectorAll(
+      ".llm-assignment-provider-model",
+    ),
+  ].map((row) => {
+    const model = row.querySelector("strong")?.textContent?.trim() ?? "";
+    const meta =
+      row.querySelector(".llm-assignment-provider-model__meta")?.textContent ?? "";
+    const provider = meta.split("·")[0]?.trim() ?? "";
+    return `${model} via ${provider}`;
+  });
+}
+
 function dataTransfer(): DataTransfer {
   return {
     effectAllowed: "all",
@@ -522,6 +536,76 @@ describe("LlmAssignmentModal", () => {
       required_capabilities: ["chat", "function_calling"],
       is_enabled: true,
     });
+  });
+
+  it("sorts available provider-models by compatibility, model, and provider", () => {
+    installFetch();
+    const sortedAvailableGraph: LlmGraphPayload = {
+      ...baseGraph,
+      providers: [
+        ...baseGraph.providers,
+        {
+          id: "prov_zeta",
+          name: "Zeta Gateway",
+          provider_type: "openai_compatible",
+          endpoint: "https://zeta.example.test/v1",
+          api_key_ref: "env:ZETA_API_KEY",
+          api_key_status: "present",
+          default_model: null,
+          requests_per_minute: 60,
+          timeout_s: 60,
+          is_enabled: true,
+          provider_model_count: 1,
+          spend_usd_30d: 0,
+          calls_30d: 0,
+        },
+        {
+          id: "prov_alpha",
+          name: "Alpha Gateway",
+          provider_type: "openai_compatible",
+          endpoint: "https://alpha.example.test/v1",
+          api_key_ref: "env:ALPHA_API_KEY",
+          api_key_status: "present",
+          default_model: null,
+          requests_per_minute: 60,
+          timeout_s: 60,
+          is_enabled: true,
+          provider_model_count: 1,
+          spend_usd_30d: 0,
+          calls_30d: 0,
+        },
+      ],
+      provider_models: [
+        baseGraph.provider_models[1]!,
+        {
+          ...baseGraph.provider_models[2]!,
+          id: "pm_fast_zeta",
+          provider_id: "prov_zeta",
+          api_model_id: "zeta/fast-chat",
+        },
+        baseGraph.provider_models[2]!,
+        {
+          ...baseGraph.provider_models[2]!,
+          id: "pm_fast_alpha",
+          provider_id: "prov_alpha",
+          api_model_id: "alpha/fast-chat",
+        },
+        baseGraph.provider_models[0]!,
+      ],
+    };
+
+    renderAssignment("chat.manager", sortedAvailableGraph);
+    const dialog = screen.getByRole("dialog", { name: "chat.manager" });
+
+    expect(availableProviderModelLabels(dialog)).toEqual([
+      "Fast Chat via Alpha Gateway",
+      "Fast Chat via OpenRouter",
+      "Fast Chat via Zeta Gateway",
+      "Text Only via OpenRouter",
+    ]);
+    expect(providerModelRow(dialog, "Text Only")).toHaveTextContent(
+      "missing function_calling",
+    );
   });
 
   it("shows local BGE as feedback.embed compatible and uses embedding smoke", async () => {

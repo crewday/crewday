@@ -105,6 +105,8 @@ class FakeLLMClient:
 
     A pre-canned ``tool_calls`` tuple may be supplied at construction;
     when set, every :meth:`chat` invocation attaches the same tuple.
+    A custom ``chat_text`` overrides the non-OCR chat echo for callers
+    that need a stable assistant message.
     A custom ``ocr_payload`` overrides the canned high-confidence
     autofill output for tests that exercise edge shapes (low
     confidence, alternate currency, …).
@@ -114,10 +116,12 @@ class FakeLLMClient:
         self,
         *,
         tool_calls: tuple[ToolCall, ...] = (),
+        chat_text: str | None = None,
         ocr_payload: dict[str, object] | None = None,
         ocr_text: str = _DEFAULT_OCR_TEXT,
     ) -> None:
         self._tool_calls = tool_calls
+        self._chat_text = chat_text
         # Deep-copy so a caller that reaches into ``self._ocr_payload``
         # (or its nested ``confidence`` map) doesn't mutate the
         # module-level default and contaminate every subsequent
@@ -168,7 +172,12 @@ class FakeLLMClient:
         del consents, thinking_level, thinking_strategy
         last_content = messages[-1]["content"] if messages else ""
         last = _message_text(last_content)
-        text = json.dumps(self._ocr_payload) if _OCR_PROMPT_MARKER in last else last
+        if _OCR_PROMPT_MARKER in last:
+            text = json.dumps(self._ocr_payload)
+        elif self._chat_text is not None:
+            text = self._chat_text
+        else:
+            text = last
         return LLMResponse(
             text=text,
             usage=LLMUsage(

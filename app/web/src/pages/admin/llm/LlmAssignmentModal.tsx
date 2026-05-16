@@ -52,6 +52,10 @@ const THINKING_LEVEL_OPTIONS = [
   "medium",
   "high",
 ] as const satisfies readonly LlmThinkingLevel[];
+const PROVIDER_MODEL_SORT_COLLATOR = new Intl.Collator("en", {
+  numeric: true,
+  sensitivity: "base",
+});
 
 function apiErrorCopy(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
@@ -147,6 +151,39 @@ function providerModelIsAvailable(pm: LlmProviderModel, indexes: LlmIndexes): bo
   const provider = indexes.providersById.get(pm.provider_id);
   const model = indexes.modelsById.get(pm.model_id);
   return pm.is_enabled && provider?.is_enabled === true && model?.is_active === true;
+}
+
+function compareProviderModelText(left: string, right: string): number {
+  return (
+    PROVIDER_MODEL_SORT_COLLATOR.compare(left, right) ||
+    left.localeCompare(right, "en")
+  );
+}
+
+function compareAvailableProviderModels(
+  left: LlmProviderModel,
+  right: LlmProviderModel,
+  requiredCapabilities: string[],
+  indexes: LlmIndexes,
+): number {
+  const leftIncompatible = compatibleMissing(left, requiredCapabilities, indexes).length > 0;
+  const rightIncompatible = compatibleMissing(right, requiredCapabilities, indexes).length > 0;
+  if (leftIncompatible !== rightIncompatible) return leftIncompatible ? 1 : -1;
+
+  const leftModel = indexes.modelsById.get(left.model_id);
+  const rightModel = indexes.modelsById.get(right.model_id);
+  const leftProvider = indexes.providersById.get(left.provider_id);
+  const rightProvider = indexes.providersById.get(right.provider_id);
+
+  return (
+    compareProviderModelText(
+      leftModel?.display_name ?? left.api_model_id,
+      rightModel?.display_name ?? right.api_model_id,
+    ) ||
+    compareProviderModelText(leftProvider?.name ?? "", rightProvider?.name ?? "") ||
+    compareProviderModelText(left.api_model_id, right.api_model_id) ||
+    compareProviderModelText(left.id, right.id)
+  );
 }
 
 function assignmentCreatePayload(
@@ -334,8 +371,18 @@ export default function LlmAssignmentModal({
   const selectedProviderModelIds = new Set(
     chain.map((assignment) => assignment.provider_model_id),
   );
-  const availableProviderModels = graph.provider_models.filter(
-    (pm) => providerModelIsAvailable(pm, indexes) && !selectedProviderModelIds.has(pm.id),
+  const availableProviderModels = [
+    ...graph.provider_models.filter(
+      (pm) =>
+        providerModelIsAvailable(pm, indexes) && !selectedProviderModelIds.has(pm.id),
+    ),
+  ].sort((left, right) =>
+    compareAvailableProviderModels(
+      left,
+      right,
+      capability?.required_capabilities ?? [],
+      indexes,
+    ),
   );
   const eligibleParentOptions = useMemo(
     () => sortedParentOptions(graph, capabilityKey, indexes),

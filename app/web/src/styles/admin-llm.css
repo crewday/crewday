@@ -886,12 +886,6 @@
   min-width: 118px;
   white-space: nowrap;
 }
-.llm-price-source-sync__status {
-  margin: 0;
-  color: var(--moss);
-  font-size: 12.5px;
-  line-height: 1.45;
-}
 .llm-model-providers {
   display: grid;
   gap: 10px;

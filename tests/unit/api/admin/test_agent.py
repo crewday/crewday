@@ -17,7 +17,7 @@ from app.adapters.db.ops.models import AdminAgentAction, AdminAgentChatMessage
 from app.adapters.llm.fake import FakeLLMClient
 from app.adapters.llm.openrouter import OPENROUTER_API_KEY_SETTING
 from app.adapters.llm.ports import ToolCall as LlmToolCall
-from app.api.admin.agent import AdminAgentActionProposal
+from app.api.admin.agent import AdminAgentActionProposal, AdminAgentTextReply
 from app.api.admin.agent_runtime import (
     AdminAgentRuntimeActionProducer,
     DeploymentAdminToolDispatcher,
@@ -85,10 +85,14 @@ class _FakeDispatcher:
 class _FakeActionProducer:
     def __init__(
         self,
-        proposal: AdminAgentActionProposal | None | object = _DEFAULT_PROPOSAL,
+        proposal: AdminAgentActionProposal
+        | AdminAgentTextReply
+        | None
+        | object = _DEFAULT_PROPOSAL,
     ) -> None:
         self.calls: list[tuple[str, str, str]] = []
         if proposal is _DEFAULT_PROPOSAL:
+            self.proposal: AdminAgentActionProposal | AdminAgentTextReply | None
             self.proposal = AdminAgentActionProposal(
                 tool_call=ToolCall(
                     id="call_deployment_settings_edit",
@@ -111,15 +115,11 @@ class _FakeActionProducer:
         page_context: str,
         ctx: object,
         session: Session,
-    ) -> AdminAgentActionProposal | None:
+    ) -> AdminAgentActionProposal | AdminAgentTextReply | None:
         _ = session
         user_id = ctx.user_id
         assert isinstance(user_id, str)
         self.calls.append((message, page_context, user_id))
-        assert self.proposal is None or isinstance(
-            self.proposal,
-            AdminAgentActionProposal,
-        )
         return self.proposal
 
 
@@ -199,6 +199,29 @@ def _assert_admin_runtime_fallback_write(
         in messages[1].body_md
     )
     assert "Error ID:" in messages[1].body_md
+    assert actions == []
+    assert approvals == []
+
+
+def _assert_admin_text_reply_write(
+    session_factory: sessionmaker[Session],
+    *,
+    user_body: str,
+    agent_body: str,
+) -> None:
+    with session_factory() as session, tenant_agnostic():
+        messages = session.scalars(
+            select(AdminAgentChatMessage).order_by(
+                AdminAgentChatMessage.created_at.asc(),
+                AdminAgentChatMessage.id.asc(),
+            )
+        ).all()
+        actions = session.scalars(select(AdminAgentAction)).all()
+        approvals = session.scalars(select(ApprovalRequest)).all()
+    assert len(messages) == 2
+    assert (messages[0].kind, messages[0].body_md) == ("user", user_body)
+    assert (messages[1].kind, messages[1].body_md) == ("agent", agent_body)
+    assert "Error ID:" not in messages[1].body_md
     assert actions == []
     assert approvals == []
 
@@ -437,6 +460,61 @@ class TestAdminAgent:
         assert finished_payload["outcome"] == "error"
         assert finished_payload["error"] == "admin_agent_runtime_unwired"
 
+    def test_message_with_text_reply_records_user_and_agent_reply(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        user_id = install_admin_cookie(client, session_factory, settings)
+        client.app.state.admin_agent_action_producer = _FakeActionProducer(
+            AdminAgentTextReply("Hey. I can help with deployment admin tasks.")
+        )
+        published: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            admin_sse,
+            "publish_admin_event",
+            lambda **kwargs: published.append(kwargs),
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            headers={"X-Agent-Page": "route=/admin/dashboard"},
+            json={"body": "ello whats up"},
+        )
+
+        assert resp.status_code == 201
+        assert resp.json()["kind"] == "user"
+        assert resp.json()["body"] == "ello whats up"
+        _assert_admin_text_reply_write(
+            session_factory,
+            user_body="ello whats up",
+            agent_body="Hey. I can help with deployment admin tasks.",
+        )
+        assert [event["kind"] for event in published] == [
+            "agent.turn.started",
+            "admin.audit.appended",
+            "agent.message.appended",
+            "admin.audit.appended",
+            "agent.message.appended",
+            "agent.turn.finished",
+        ]
+        assert published[0]["user_scope"] == user_id
+        assert published[2]["user_scope"] == user_id
+        assert published[4]["user_scope"] == user_id
+        assert published[5]["user_scope"] == user_id
+        reply_payload = published[4]["payload"]
+        assert isinstance(reply_payload, dict)
+        reply_message = reply_payload["message"]
+        assert isinstance(reply_message, dict)
+        assert reply_message["kind"] == "agent"
+        assert reply_message["body"] == "Hey. I can help with deployment admin tasks."
+        finished_payload = published[5]["payload"]
+        assert isinstance(finished_payload, dict)
+        assert finished_payload["outcome"] == "replied"
+        assert "error" not in finished_payload
+
     def test_message_without_action_proposal_records_user_and_fallback(
         self,
         client: TestClient,
@@ -561,6 +639,32 @@ class TestAdminAgent:
         _assert_admin_runtime_fallback_write(
             session_factory,
             user_body="raise that workspace cap",
+        )
+
+    def test_runtime_producer_plain_text_records_agent_reply(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        _seed_admin_model_default(session_factory)
+        client.app.state.admin_agent_action_producer = AdminAgentRuntimeActionProducer(
+            llm=FakeLLMClient(chat_text="Hello. What admin task should we look at?")
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            json={"body": "ello whats up"},
+        )
+
+        assert resp.status_code == 201
+        assert resp.json()["kind"] == "user"
+        assert resp.json()["body"] == "ello whats up"
+        _assert_admin_text_reply_write(
+            session_factory,
+            user_body="ello whats up",
+            agent_body="Hello. What admin task should we look at?",
         )
 
     def test_runtime_producer_supported_tool_creates_pending_admin_action(
