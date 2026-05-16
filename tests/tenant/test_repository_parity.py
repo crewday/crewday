@@ -588,12 +588,11 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.places.property_work_role_assignments.get_property_work_role_assignment",
         "app.domain.places.property_work_role_assignments.list_property_work_role_assignments",
         "app.domain.places.property_work_role_assignments.update_property_work_role_assignment",
-        # llm context (cd-irng, cd-ybrt, cd-pd0e): router + budget +
-        # usage recorder all scope their reads through
-        # ``workspace_id = ctx.workspace_id`` (inheritance chain walk
-        # in :mod:`app.domain.llm.router` and the budget aggregate
-        # table queries in :mod:`app.domain.llm.budget`). Writes
-        # land on rows loaded through the same filter — e.g.
+        # llm context (cd-irng, cd-ybrt, cd-pd0e): router assignment
+        # and inheritance rows are deployment-level by spec; ctx-bound
+        # tenant seams are the budget + usage-recorder paths, which
+        # scope their reads through ``workspace_id = ctx.workspace_id``.
+        # Writes land on rows loaded through the same filter — e.g.
         # ``budget_ledger`` updates target a row keyed on
         # ``(workspace_id, window_start)`` resolved by SELECT.
         "app.domain.llm.budget.check_budget",
@@ -620,8 +619,12 @@ COVERED_METHODS: frozenset[str] = frozenset(
         # through ``_load_claim`` / ``_load_attachment`` which scope
         # the SELECT by ``ctx.workspace_id``; the persist path
         # mutates fields on the loaded row and writes a new
-        # :class:`LlmUsage` row keyed on ``ctx.workspace_id``. The
-        # ORM-filter seam covers the whole surface.
+        # :class:`LlmUsage` row keyed on ``ctx.workspace_id``.
+        # ``resolve_autofill_model_pick`` only resolves the
+        # deployment-level capability chain; its ctx-sensitive
+        # tenant effects are the surrounding claim, attachment,
+        # consent, and usage seams.
+        "app.domain.expenses.autofill.resolve_autofill_model_pick",
         "app.domain.expenses.autofill.run_extraction",
         # cd-5l5f: expense claim approval / submission flows load the
         # claim through a ``workspace_id``-scoped SELECT; transitions
@@ -757,7 +760,15 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.agent.preferences.resolve_preferences",
         "app.domain.agent.preferences.save_preference",
         "app.domain.agent.preferences.save_workspace_upstream_pii_consent",
+        # cd-s2g73: voice note transcription runs through the
+        # ctx-bound routed LLM client. Router assignment resolution is
+        # deployment-level; the tenant seams are consent lookup,
+        # budget checks, usage rows, and the subsequent voice-chat
+        # delegation to ``run_staff_chat_turn`` for approval and
+        # conversation writes under ``ctx.workspace_id``.
+        "app.domain.agent.staff_chat.run_staff_chat_voice_turn",
         "app.domain.agent.staff_chat.run_staff_chat_turn",
+        "app.domain.agent.staff_chat.transcribe_voice_note",
         "app.domain.assets.actions.delete_action",
         "app.domain.assets.actions.list_actions",
         "app.domain.assets.actions.next_due",
