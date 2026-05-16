@@ -14,9 +14,12 @@ fresh UoW per row, and runs the v1 extraction pipeline:
    - ``text/*`` (sniffed) -> ``passthrough`` rung. Empty body -> ``empty``.
      Non-empty body -> ``succeeded`` (with one ``pages_json`` entry
      covering the whole text).
-   - Anything else (PDF, DOCX, images) -> ``unsupported`` for v1.
-     The §21 rung table has slots for ``pdf`` / ``docx`` / ``ocr``
-     extractors; cd-mo9e only ships the passthrough rung.
+   - Supported image MIME types -> ``documents.ocr`` vision fallback
+     when assigned; empty OCR output -> ``empty``.
+   - Anything else (PDF, DOCX, unknown binary) -> ``unsupported`` for v1.
+     The §21 rung table has slots for ``pdf`` / ``docx`` extractors;
+     cd-mo9e only shipped the passthrough rung, and cd-goiqp adds the
+     image OCR fallback.
    - Storage / IO errors -> ``record_extraction_failure``; the row
      re-arms back to ``pending`` until ``MAX_EXTRACTION_ATTEMPTS``.
 
@@ -33,8 +36,10 @@ See ``docs/specs/02-domain-model.md`` §"file_extraction",
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Final
 
 from sqlalchemy import select
@@ -43,9 +48,10 @@ from sqlalchemy.orm import Session
 from app.adapters.db.assets.models import AssetDocument
 from app.adapters.db.session import make_uow
 from app.adapters.db.workspace.models import Workspace
+from app.adapters.llm.ports import LlmContentRefused, LlmProviderError
 from app.adapters.storage.mime import FiletypeMimeSniffer
 from app.adapters.storage.ports import BlobNotFound, MimeSniffer, Storage
-from app.api.factory import _build_storage
+from app.api.factory import _build_llm, _build_storage
 from app.config import get_settings
 from app.domain.assets.extraction import (
     list_pending_extractions,
@@ -55,6 +61,11 @@ from app.domain.assets.extraction import (
     record_extraction_unsupported,
     start_extraction,
 )
+from app.domain.llm.budget import BudgetExceeded
+from app.domain.llm.client import LLMChainExhausted
+from app.domain.llm.client import LLMClient as RoutedLLMClient
+from app.domain.llm.router import CapabilityUnassignedError
+from app.domain.llm.usage_recorder import AgentAttribution
 from app.tenancy import reset_current, set_current, tenant_agnostic
 from app.tenancy.context import WorkspaceContext
 from app.util.clock import Clock, SystemClock
@@ -91,6 +102,21 @@ _SYSTEM_ACTOR_ZERO_ULID: Final[str] = "00000000000000000000000000"
 # bloat the row and the SSE payload; 240 chars matches the §02 audit
 # diff-string cap so a failure surface fits in a chip + tooltip.
 _LAST_ERROR_MAX_CHARS: Final[int] = 240
+_DOCUMENTS_OCR_CAPABILITY: Final[str] = "documents.ocr"
+_DOCUMENTS_OCR_EXTRACTOR: Final[str] = "ocr"
+_DOCUMENTS_OCR_AGENT_LABEL: Final[str] = "asset-document-extraction"
+_DOCUMENTS_OCR_MAX_OUTPUT_TOKENS: Final[int] = 2048
+_DOCUMENTS_OCR_PROJECTED_PROMPT_TOKENS: Final[int] = 2048
+_DOCUMENTS_OCR_PROJECTED_COMPLETION_TOKENS: Final[int] = 2048
+_DOCUMENTS_OCR_PROMPT: Final[str] = (
+    "Extract only the visible text from this document image, verbatim. Preserve "
+    "line breaks and reading order. If there are multiple pages, keep page order. "
+    "Do not summarize, classify, approve, infer fields, produce JSON, or take any "
+    "workflow action. Return plain text only."
+)
+_SUPPORTED_IMAGE_MIMES: Final[frozenset[str]] = frozenset(
+    {"image/jpeg", "image/png", "image/heic", "image/webp"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +144,7 @@ def extract_pending_documents(  # code-health: ignore[nloc] Worker sweep owns sc
     clock: Clock | None = None,
     storage: Storage | None = None,
     mime_sniffer: MimeSniffer | None = None,
+    llm_client: RoutedLLMClient | None = None,
 ) -> ExtractDocumentReport:
     """Run one extraction sweep across the deployment.
 
@@ -153,6 +180,9 @@ def extract_pending_documents(  # code-health: ignore[nloc] Worker sweep owns sc
     resolved_sniffer = (
         mime_sniffer if mime_sniffer is not None else FiletypeMimeSniffer()
     )
+    resolved_llm_client = (
+        llm_client if llm_client is not None else _resolve_routed_llm_client()
+    )
 
     # First read — gather pending ids in one short UoW. We process
     # each row in its own UoW below so a long sweep never pins one
@@ -180,6 +210,7 @@ def extract_pending_documents(  # code-health: ignore[nloc] Worker sweep owns sc
                 clock=resolved_clock,
                 storage=resolved_storage,
                 sniffer=resolved_sniffer,
+                llm_client=resolved_llm_client,
             )
         except Exception:
             # Per-row failure: log and continue. The tick must not
@@ -235,6 +266,7 @@ def _extract_one(  # code-health: ignore[nloc] Extraction state-machine policy. 
     clock: Clock,
     storage: Storage,
     sniffer: MimeSniffer,
+    llm_client: RoutedLLMClient | None,
 ) -> str:
     """Process one pending row inside its own UoW. Returns the terminal name."""
     with make_uow() as session:
@@ -276,6 +308,7 @@ def _extract_one(  # code-health: ignore[nloc] Extraction state-machine policy. 
                 asset_id=asset_id,
                 payload=payload,
                 mime=mime,
+                llm_client=llm_client,
                 clock=clock,
             )
         except _ExtractionError as exc:
@@ -329,14 +362,22 @@ def _run_pipeline(  # code-health: ignore[params] Extraction adapter boundary.  
     asset_id: str | None,
     payload: bytes,
     mime: str | None,
+    llm_client: RoutedLLMClient | None,
     clock: Clock,
 ) -> str:
     """Pick a rung and persist the terminal. Returns the terminal name."""
     if mime is None or not _is_text_mime(mime):
-        # v1 only ships the passthrough rung. PDF / DOCX / OCR rungs
-        # are §21 follow-ups; until they land, anything not text/* is
-        # ``unsupported`` (terminal) so the manager can decide whether
-        # to re-upload as text or wait for the rung.
+        if mime in _SUPPORTED_IMAGE_MIMES:
+            return _run_llm_vision_ocr(
+                session,
+                ctx,
+                document_id=document_id,
+                asset_id=asset_id,
+                payload=payload,
+                mime=mime,
+                llm_client=llm_client,
+                clock=clock,
+            )
         record_extraction_unsupported(
             session,
             ctx,
@@ -381,6 +422,129 @@ def _run_pipeline(  # code-health: ignore[params] Extraction adapter boundary.  
     return "succeeded"
 
 
+def _run_llm_vision_ocr(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    document_id: str,
+    asset_id: str | None,
+    payload: bytes,
+    mime: str,
+    llm_client: RoutedLLMClient | None,
+    clock: Clock,
+) -> str:
+    if llm_client is None:
+        record_extraction_unsupported(
+            session,
+            ctx,
+            document_id,
+            asset_id=asset_id,
+            clock=clock,
+        )
+        return "unsupported"
+
+    try:
+        ocr_ctx = replace(ctx, audit_correlation_id=document_id)
+        result = asyncio.run(
+            llm_client.chat(
+                session,
+                ocr_ctx,
+                capability=_DOCUMENTS_OCR_CAPABILITY,
+                user_content=_DOCUMENTS_OCR_PROMPT,
+                images=[{"url": _image_data_url(payload, mime)}],
+                attribution=AgentAttribution(
+                    actor_user_id=None,
+                    token_id=None,
+                    agent_label=_DOCUMENTS_OCR_AGENT_LABEL,
+                ),
+                max_output_tokens=_DOCUMENTS_OCR_MAX_OUTPUT_TOKENS,
+                projected_prompt_tokens=_DOCUMENTS_OCR_PROJECTED_PROMPT_TOKENS,
+                projected_completion_tokens=_DOCUMENTS_OCR_PROJECTED_COMPLETION_TOKENS,
+                clock=clock,
+            )
+        )
+    except CapabilityUnassignedError:
+        record_extraction_unsupported(
+            session,
+            ctx,
+            document_id,
+            asset_id=asset_id,
+            clock=clock,
+        )
+        return "unsupported"
+    except BudgetExceeded:
+        record_extraction_failure(
+            session,
+            ctx,
+            document_id,
+            error="budget_exceeded",
+            asset_id=asset_id,
+            clock=clock,
+        )
+        return "failed"
+    except LlmContentRefused:
+        record_extraction_failure(
+            session,
+            ctx,
+            document_id,
+            error="provider_refused",
+            asset_id=asset_id,
+            clock=clock,
+        )
+        return "failed"
+    except LLMChainExhausted as exc:
+        record_extraction_failure(
+            session,
+            ctx,
+            document_id,
+            error=_llm_failure_error(exc.last_error),
+            asset_id=asset_id,
+            clock=clock,
+        )
+        return "failed"
+    except LlmProviderError:
+        record_extraction_failure(
+            session,
+            ctx,
+            document_id,
+            error="provider_error",
+            asset_id=asset_id,
+            clock=clock,
+        )
+        return "failed"
+
+    body = result.text
+    scrubbed = scrub_string(body)
+    has_secret = scrubbed != body
+    if not scrubbed.strip():
+        record_extraction_empty(
+            session,
+            ctx,
+            document_id,
+            extractor=_DOCUMENTS_OCR_EXTRACTOR,
+            asset_id=asset_id,
+            clock=clock,
+        )
+        return "empty"
+
+    pages_json: list[dict[str, int]] = [
+        {"page": 1, "char_start": 0, "char_end": len(scrubbed)},
+    ]
+    record_extraction_success(
+        session,
+        ctx,
+        document_id,
+        extractor=_DOCUMENTS_OCR_EXTRACTOR,
+        body_text=scrubbed,
+        pages_json=pages_json,
+        token_count=len(scrubbed.split()),
+        has_secret_marker=has_secret,
+        asset_id=asset_id,
+        clock=clock,
+    )
+    return "succeeded"
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -402,6 +566,13 @@ class _ExtractionError(Exception):
 
 def _resolve_storage() -> Storage | None:
     return _build_storage(get_settings())
+
+
+def _resolve_routed_llm_client() -> RoutedLLMClient | None:
+    adapter = _build_llm(get_settings())
+    if adapter is None:
+        return None
+    return RoutedLLMClient(adapter)
 
 
 def _build_context(
@@ -500,6 +671,14 @@ def _sniff_mime(
         return "text/csv"
     if lower.endswith((".html", ".htm")):
         return "text/html"
+    if lower.endswith((".jpg", ".jpeg")):
+        return "image/jpeg"
+    if lower.endswith(".png"):
+        return "image/png"
+    if lower.endswith((".heic", ".heif")):
+        return "image/heic"
+    if lower.endswith(".webp"):
+        return "image/webp"
     return None
 
 
@@ -530,3 +709,19 @@ def _truncate_error(message: str) -> str:
     if len(message) <= _LAST_ERROR_MAX_CHARS:
         return message
     return message[: _LAST_ERROR_MAX_CHARS - 3] + "..."
+
+
+def _image_data_url(payload: bytes, mime: str) -> str:
+    encoded = base64.b64encode(payload).decode("ascii")
+    return f"data:{mime};base64,{encoded}"
+
+
+def _llm_failure_error(exc: BaseException) -> str:
+    name = type(exc).__name__
+    if name == "LlmRateLimited":
+        return "rate_limited"
+    if name == "LlmTransportError":
+        return "transport_error"
+    if name == "LlmContentRefused":
+        return "provider_refused"
+    return _truncate_error(f"llm_chain_exhausted: {name}")

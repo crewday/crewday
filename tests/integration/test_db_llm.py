@@ -898,7 +898,7 @@ class TestLlmAssignmentCrud:
         ctx_token = set_current(_ctx_for(workspace, user.id))
         try:
             extra = {"top_p": 0.95, "tool_choice": "auto"}
-            req_caps = ["vision", "json_mode"]
+            req_caps = ["vision"]
             row = LlmAssignment(
                 id="01HWA00000000000000000MATU",
                 workspace_id=workspace.id,
