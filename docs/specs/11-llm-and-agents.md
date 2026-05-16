@@ -821,9 +821,10 @@ llm_provider_model
 ├── api_model_id               text            -- what the provider expects on the wire
 │                                              -- e.g. 'anthropic/claude-3-5-sonnet' on OpenRouter,
 │                                              -- 'claude-3-5-sonnet-20241022' on a native adapter
-├── input_cost_per_million     numeric(10,4)
-├── output_cost_per_million    numeric(10,4)
-├── fixed_cost_per_call_usd    numeric(10,4)?  -- reserved for future providers that bill per-call
+├── input_cost_per_million     numeric(10,4)?  -- USD per 1M input tokens; unset = 0
+├── output_cost_per_million    numeric(10,4)?  -- USD per 1M output tokens; unset = 0
+├── fixed_cost_per_call_usd    numeric(10,4)?  -- USD per call; unset = 0
+├── audio_cost_per_hour_usd    numeric(10,4)?  -- USD per hour of audio duration; unset = 0
 ├── max_tokens_override        int?
 ├── supports_system_prompt     bool            -- some reasoning models reject system prompts
 ├── supports_temperature       bool            -- o-series models forbid temperature
@@ -1293,8 +1294,12 @@ Pricing is DB-authoritative and syncs from OpenRouter on a schedule —
 the `app/config/llm_pricing.yml` file from earlier drafts is retired.
 
 - `llm_provider_model.input_cost_per_million`,
-  `.output_cost_per_million`, and `.fixed_cost_per_call_usd` are the
-  only cost numbers the cost-tracker reads.
+  `.output_cost_per_million`, `.fixed_cost_per_call_usd`, and
+  `.audio_cost_per_hour_usd` are the provider-model cost numbers.
+  Token costs are USD per 1M input/output tokens, fixed cost is USD
+  per call, and audio duration cost is USD per hour of submitted
+  audio. All pricing fields are optional at the admin API boundary;
+  omitted or NULL values are evaluated as zero.
 - A worker job `sync_llm_pricing` runs **weekly** (cron
   `0 3 * * 1` UTC), fetches from each configured price source (v1:
   OpenRouter only), and updates syncable
@@ -1311,7 +1316,8 @@ the `app/config/llm_pricing.yml` file from earlier drafts is retired.
   Successful rows update only
   `llm_provider_model.input_cost_per_million`,
   `llm_provider_model.output_cost_per_million`,
-  `llm_provider_model.fixed_cost_per_call_usd`, and
+  `llm_provider_model.fixed_cost_per_call_usd`,
+  `llm_provider_model.audio_cost_per_hour_usd`, and
   `price_last_synced_at`; no provider, model, support-flag,
   thinking, or API-id fields change unless a separate model metadata
   import save path explicitly saves those fields.
@@ -1344,8 +1350,8 @@ the `app/config/llm_pricing.yml` file from earlier drafts is retired.
   upstream error.
 - Missing prices (row present, price source returns nothing) log a
   `WARNING` per call and keep the existing value. Unknown model IDs
-  at call time fall back to zero input, output, and fixed per-call
-  pricing and log a `WARNING` per call, as before.
+  at call time fall back to zero input, output, fixed per-call, and
+  audio-duration pricing and log a `WARNING` per call, as before.
 
 The sync job does **not** mutate the model registry — new models
 announced by OpenRouter do not auto-appear, and there is no scheduled
@@ -1391,14 +1397,15 @@ so the graph page does not carry a duplicate overflow action.
   to existing syncable `llm_provider_model` rows whose OpenRouter
   lookup id resolves to the loaded id, and persists only their pricing
   fields (`input_cost_per_million`, `output_cost_per_million`,
-  `fixed_cost_per_call_usd`) plus `price_last_synced_at`. Saving may
+  `fixed_cost_per_call_usd`, `audio_cost_per_hour_usd`) plus
+  `price_last_synced_at`. Saving may
   create or update the curated `llm_model` row and the selected
   OpenRouter `llm_provider_model` rows. Imported metadata maps into
   capability tags, `context_window`, `max_output_tokens`,
   `price_source = 'openrouter'`, `price_source_model_id`,
   provider-model `api_model_id`, `price_source_override`,
-  `price_source_model_id_override`, input/output pricing for the
-  selected OpenRouter provider-model rows, `supports_system_prompt`,
+  `price_source_model_id_override`, input/output/fixed/audio pricing
+  for the selected OpenRouter provider-model rows, `supports_system_prompt`,
   `supports_temperature`, model thinking fields (`thinking_level`,
   `thinking_strategy`), and provider-model thinking strategy overrides
   where the source data makes them inferable. Any inferred value remains editable before
@@ -2410,8 +2417,8 @@ Every shipping LLM call writes a `LlmUsage` / `llm_usage` row with
 the provider's reported token counts, a precise estimated USD cost
 (`cost_usd`, six decimal places), and a legacy integer-cent cost
 (`cost_cents`) computed from the serving `llm_provider_model` row's
-per-million and fixed per-call prices (§ "Price sync" keeps them
-current). Successful low-token calls may therefore carry `cost_usd > 0` while
+per-million, fixed per-call, and duration prices (§ "Price sync"
+keeps them current). Successful low-token calls may therefore carry `cost_usd > 0` while
 `cost_cents = 0`. The background worker aggregates `cost_cents` into
 the rolling meter used by the **workspace usage budget** (§ "Workspace
 usage budget" below), preserving the existing cent-denominated cap
@@ -2546,16 +2553,16 @@ state changes.
 
 ### Pricing source
 
-Per-model USD cost per 1 M input/output tokens plus any fixed
-per-call price lives on
+Per-model USD cost per 1 M input/output tokens, any fixed per-call
+price, and any per-hour audio-duration price live on
 `llm_provider_model` (§ "Provider / model / provider-model registry")
 and is kept current by the weekly `sync_llm_pricing` job, manual
 sync-pricing triggers, provider-model create/price-source edits, and
 the price-only side effect of OpenRouter model metadata load (§ "Price
 sync"). An admin who pins a row (`price_source_override = 'none'`)
 becomes the price authority for that combo. An unknown `api_model_id`
-at call time falls back to zero input, output, and fixed per-call
-pricing **and** logs a `WARNING` every call. A free-tier model
+at call time falls back to zero input, output, fixed per-call, and
+audio-duration pricing **and** logs a `WARNING` every call. A free-tier model
 (`:free` suffix on OpenRouter) is priced at zero — the meter still
 records the call for telemetry but the cost contribution is zero.
 

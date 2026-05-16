@@ -1568,6 +1568,10 @@ class TestAdminLlmRoutes:
             )
             assert provider_model.status_code == 200, provider_model.text
             assert provider_model.json()["is_enabled"] is False
+            assert provider_model.json()["input_cost_per_million"] == 0
+            assert provider_model.json()["output_cost_per_million"] == 0
+            assert provider_model.json()["fixed_cost_per_call_usd"] == 0
+            assert provider_model.json()["audio_cost_per_hour_usd"] == 0
             assert "thinking_level_override" not in provider_model.json()
             assert "effective_thinking_level" not in provider_model.json()
             assert (
@@ -1596,6 +1600,15 @@ class TestAdminLlmRoutes:
                 inherited_provider_model.json()["effective_thinking_strategy"]
                 == "openrouter_extra_body"
             )
+            with session_factory() as s, tenant_agnostic():
+                persisted_provider_model = s.get(
+                    LlmProviderModel, provider_model.json()["id"]
+                )
+                assert persisted_provider_model is not None
+                assert persisted_provider_model.input_cost_per_million == Decimal("0")
+                assert persisted_provider_model.output_cost_per_million == Decimal("0")
+                assert persisted_provider_model.fixed_cost_per_call_usd == Decimal("0")
+                assert persisted_provider_model.audio_cost_per_hour_usd == Decimal("0")
 
             unsupported_level_field = client.post(
                 "/admin/api/v1/llm/provider-models",
@@ -2138,6 +2151,7 @@ class TestAdminLlmRoutes:
             assert provider_preview["payload"]["input_cost_per_million"] == 0.15
             assert provider_preview["payload"]["output_cost_per_million"] == 0.45
             assert provider_preview["payload"]["fixed_cost_per_call_usd"] == 0.0012
+            assert provider_preview["payload"]["audio_cost_per_hour_usd"] == 0
             assert provider_preview["payload"]["supports_system_prompt"] is True
             assert provider_preview["payload"]["supports_temperature"] is True
             assert provider_preview["payload"]["price_source_override"] == "openrouter"
@@ -2282,6 +2296,7 @@ class TestAdminLlmRoutes:
                         input_cost_per_million=Decimal("0.3300"),
                         output_cost_per_million=Decimal("0.6600"),
                         fixed_cost_per_call_usd=Decimal("0.0020"),
+                        audio_cost_per_hour_usd=Decimal("0.0400"),
                         supports_system_prompt=metadata.supports_system_prompt,
                         supports_temperature=metadata.supports_temperature,
                         thinking_level=metadata.thinking_level,
@@ -2364,6 +2379,7 @@ class TestAdminLlmRoutes:
             assert no_sync.json()["input_cost_per_million"] == 7.89
             assert no_sync.json()["output_cost_per_million"] == 8.9
             assert no_sync.json()["fixed_cost_per_call_usd"] == 0.03
+            assert no_sync.json()["audio_cost_per_hour_usd"] == 0
 
             switch_lookup = client.put(
                 f"/admin/api/v1/llm/provider-models/{body['id']}",
@@ -2376,6 +2392,7 @@ class TestAdminLlmRoutes:
             )
             assert switch_lookup.status_code == 200, switch_lookup.text
             assert switch_lookup.json()["input_cost_per_million"] == 0.33
+            assert switch_lookup.json()["audio_cost_per_hour_usd"] == 0.04
             assert seen[-1] == "single/model"
         finally:
             _wipe(session_factory)
@@ -2665,6 +2682,7 @@ class TestAdminLlmRoutes:
             assert syncable.input_cost_per_million == Decimal("0.1500")
             assert syncable.output_cost_per_million == Decimal("0.4500")
             assert syncable.fixed_cost_per_call_usd == Decimal("0.0012")
+            assert syncable.audio_cost_per_hour_usd == Decimal("0.0000")
             assert syncable.price_last_synced_at is not None
             assert pinned.input_cost_per_million == Decimal("9.0000")
             assert pinned.price_last_synced_at is None

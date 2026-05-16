@@ -1502,8 +1502,9 @@ class LlmProviderModel(Base):
 
     Pricing columns are :class:`Numeric(10, 4)` so the ledger can
     carry values like ``0.0003`` (sub-cent rates per million tokens)
-    without floating-point hazard. Kept in dollars-per-million for
-    parity with the OpenRouter catalogue and §11; the per-call
+    without floating-point hazard. Token prices are kept in
+    dollars-per-million for parity with the OpenRouter catalogue and
+    §11; per-call and per-hour prices are stored as USD. The per-call
     :attr:`~app.adapters.db.llm.models.LlmUsage.cost_cents` is
     computed at write time and stored in cents.
 
@@ -1547,6 +1548,9 @@ class LlmProviderModel(Base):
     # Reserved for future per-call billed providers. NULL = unknown /
     # not applicable.
     fixed_cost_per_call_usd: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 4), nullable=True
+    )
+    audio_cost_per_hour_usd: Mapped[Decimal | None] = mapped_column(
         Numeric(10, 4), nullable=True
     )
     max_tokens_override: Mapped[int | None] = mapped_column(Integer, nullable=True)

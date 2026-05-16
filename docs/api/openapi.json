@@ -14274,6 +14274,17 @@
             "title": "Api Model Id",
             "type": "string"
           },
+          "audio_cost_per_hour_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Cost Per Hour Usd"
+          },
           "calls_30d": {
             "default": 0,
             "title": "Calls 30D",
@@ -14310,8 +14321,15 @@
             "type": "string"
           },
           "input_cost_per_million": {
-            "title": "Input Cost Per Million",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Cost Per Million"
           },
           "is_enabled": {
             "title": "Is Enabled",
@@ -14333,8 +14351,15 @@
             "type": "string"
           },
           "output_cost_per_million": {
-            "title": "Output Cost Per Million",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Cost Per Million"
           },
           "price_last_synced_at": {
             "anyOf": [
@@ -14406,13 +14431,10 @@
           "api_model_id",
           "effective_thinking_strategy",
           "extra_api_params",
-          "fixed_cost_per_call_usd",
           "id",
-          "input_cost_per_million",
           "is_enabled",
           "max_tokens_override",
           "model_id",
-          "output_cost_per_million",
           "price_last_synced_at",
           "price_source_model_id_override",
           "price_source_override",
@@ -14543,6 +14565,28 @@
           "api_model_id": {
             "title": "Api Model Id",
             "type": "string"
+          },
+          "audio_after": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio After"
+          },
+          "audio_before": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Before"
           },
           "fixed_after": {
             "anyOf": [
@@ -18769,6 +18813,18 @@
             "title": "Api Model Id",
             "type": "string"
           },
+          "audio_cost_per_hour_usd": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Cost Per Hour Usd"
+          },
           "extra_api_params": {
             "additionalProperties": true,
             "title": "Extra Api Params",
@@ -18787,10 +18843,16 @@
             "title": "Fixed Cost Per Call Usd"
           },
           "input_cost_per_million": {
-            "default": 0,
-            "minimum": 0.0,
-            "title": "Input Cost Per Million",
-            "type": "number"
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Cost Per Million"
           },
           "is_enabled": {
             "default": true,
@@ -18814,10 +18876,16 @@
             "type": "string"
           },
           "output_cost_per_million": {
-            "default": 0,
-            "minimum": 0.0,
-            "title": "Output Cost Per Million",
-            "type": "number"
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Cost Per Million"
           },
           "price_source_model_id_override": {
             "anyOf": [

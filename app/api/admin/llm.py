@@ -261,9 +261,10 @@ class LlmProviderModelResponse(BaseModel):
     provider_id: str
     model_id: str
     api_model_id: str
-    input_cost_per_million: float
-    output_cost_per_million: float
-    fixed_cost_per_call_usd: float | None
+    input_cost_per_million: float | None = None
+    output_cost_per_million: float | None = None
+    fixed_cost_per_call_usd: float | None = None
+    audio_cost_per_hour_usd: float | None = None
     max_tokens_override: int | None
     supports_system_prompt: bool
     supports_temperature: bool
@@ -426,6 +427,8 @@ class LlmSyncPricingDelta(BaseModel):
     output_after: float
     fixed_before: float | None = None
     fixed_after: float | None = None
+    audio_before: float | None = None
+    audio_after: float | None = None
     price_last_synced_at: str | None = None
     status: Literal["updated", "unchanged", "skipped_not_syncable", "error"]
 
@@ -684,9 +687,10 @@ class ProviderModelPayload(BaseModel):
     provider_id: str
     model_id: str
     api_model_id: str = Field(min_length=1, max_length=240)
-    input_cost_per_million: float = Field(default=0, ge=0)
-    output_cost_per_million: float = Field(default=0, ge=0)
+    input_cost_per_million: float | None = Field(default=None, ge=0)
+    output_cost_per_million: float | None = Field(default=None, ge=0)
     fixed_cost_per_call_usd: float | None = Field(default=None, ge=0)
+    audio_cost_per_hour_usd: float | None = Field(default=None, ge=0)
     max_tokens_override: int | None = Field(default=None, ge=1)
     supports_system_prompt: bool = True
     supports_temperature: bool = True
@@ -797,6 +801,12 @@ def _money(value: Decimal | int | float | None) -> float:
     return float(value)
 
 
+def _money_decimal(value: float | None) -> Decimal:
+    if value is None:
+        return Decimal("0")
+    return Decimal(str(value))
+
+
 def _spend_usd(value: Decimal) -> float:
     return round(float(value), 6)
 
@@ -899,11 +909,8 @@ def _provider_model_response(
         api_model_id=row.api_model_id,
         input_cost_per_million=_money(row.input_cost_per_million),
         output_cost_per_million=_money(row.output_cost_per_million),
-        fixed_cost_per_call_usd=(
-            _money(row.fixed_cost_per_call_usd)
-            if row.fixed_cost_per_call_usd is not None
-            else None
-        ),
+        fixed_cost_per_call_usd=_money(row.fixed_cost_per_call_usd),
+        audio_cost_per_hour_usd=_money(row.audio_cost_per_hour_usd),
         max_tokens_override=row.max_tokens_override,
         supports_system_prompt=row.supports_system_prompt,
         supports_temperature=row.supports_temperature,
@@ -1695,27 +1702,23 @@ def _apply_provider_model_pricing(
 ) -> LlmSyncPricingDelta:
     input_before = _money(row.input_cost_per_million)
     output_before = _money(row.output_cost_per_million)
-    fixed_before = (
-        _money(row.fixed_cost_per_call_usd)
-        if row.fixed_cost_per_call_usd is not None
-        else None
-    )
+    fixed_before = _money(row.fixed_cost_per_call_usd)
+    audio_before = _money(row.audio_cost_per_hour_usd)
     input_after = _money(metadata.input_cost_per_million)
     output_after = _money(metadata.output_cost_per_million)
-    fixed_after = (
-        _money(metadata.fixed_cost_per_call_usd)
-        if metadata.fixed_cost_per_call_usd is not None
-        else None
-    )
+    fixed_after = _money(metadata.fixed_cost_per_call_usd)
+    audio_after = _money(metadata.audio_cost_per_hour_usd)
     changed = (
         input_before != input_after
         or output_before != output_after
         or fixed_before != fixed_after
+        or audio_before != audio_after
     )
     if not dry_run:
         row.input_cost_per_million = metadata.input_cost_per_million
         row.output_cost_per_million = metadata.output_cost_per_million
-        row.fixed_cost_per_call_usd = metadata.fixed_cost_per_call_usd
+        row.fixed_cost_per_call_usd = metadata.fixed_cost_per_call_usd or Decimal("0")
+        row.audio_cost_per_hour_usd = metadata.audio_cost_per_hour_usd
         row.price_last_synced_at = now
     return LlmSyncPricingDelta(
         provider_model_id=row.id,
@@ -1728,6 +1731,8 @@ def _apply_provider_model_pricing(
         output_after=output_after,
         fixed_before=fixed_before,
         fixed_after=fixed_after,
+        audio_before=audio_before,
+        audio_after=audio_after,
         price_last_synced_at=_iso(now),
         status="updated" if changed else "unchanged",
     )
@@ -1749,16 +1754,10 @@ def _sync_provider_model_pricing(
             input_after=_money(row.input_cost_per_million),
             output_before=_money(row.output_cost_per_million),
             output_after=_money(row.output_cost_per_million),
-            fixed_before=(
-                _money(row.fixed_cost_per_call_usd)
-                if row.fixed_cost_per_call_usd is not None
-                else None
-            ),
-            fixed_after=(
-                _money(row.fixed_cost_per_call_usd)
-                if row.fixed_cost_per_call_usd is not None
-                else None
-            ),
+            fixed_before=_money(row.fixed_cost_per_call_usd),
+            fixed_after=_money(row.fixed_cost_per_call_usd),
+            audio_before=_money(row.audio_cost_per_hour_usd),
+            audio_after=_money(row.audio_cost_per_hour_usd),
             status="skipped_not_syncable",
         )
     source, lookup_id = lookup
@@ -1787,16 +1786,10 @@ def _sync_pricing_error_delta(
         input_after=_money(row.input_cost_per_million),
         output_before=_money(row.output_cost_per_million),
         output_after=_money(row.output_cost_per_million),
-        fixed_before=(
-            _money(row.fixed_cost_per_call_usd)
-            if row.fixed_cost_per_call_usd is not None
-            else None
-        ),
-        fixed_after=(
-            _money(row.fixed_cost_per_call_usd)
-            if row.fixed_cost_per_call_usd is not None
-            else None
-        ),
+        fixed_before=_money(row.fixed_cost_per_call_usd),
+        fixed_after=_money(row.fixed_cost_per_call_usd),
+        audio_before=_money(row.audio_cost_per_hour_usd),
+        audio_after=_money(row.audio_cost_per_hour_usd),
         status="error",
     )
 
@@ -1972,11 +1965,8 @@ def _openrouter_provider_model_payload(
         api_model_id=metadata.model_id,
         input_cost_per_million=_money(metadata.input_cost_per_million),
         output_cost_per_million=_money(metadata.output_cost_per_million),
-        fixed_cost_per_call_usd=(
-            _money(metadata.fixed_cost_per_call_usd)
-            if metadata.fixed_cost_per_call_usd is not None
-            else None
-        ),
+        fixed_cost_per_call_usd=_money(metadata.fixed_cost_per_call_usd),
+        audio_cost_per_hour_usd=_money(metadata.audio_cost_per_hour_usd),
         max_tokens_override=None,
         supports_system_prompt=metadata.supports_system_prompt,
         supports_temperature=metadata.supports_temperature,
@@ -2691,13 +2681,10 @@ def build_admin_llm_router() -> APIRouter:
             provider_id=payload.provider_id,
             model_id=payload.model_id,
             api_model_id=payload.api_model_id,
-            input_cost_per_million=Decimal(str(payload.input_cost_per_million)),
-            output_cost_per_million=Decimal(str(payload.output_cost_per_million)),
-            fixed_cost_per_call_usd=(
-                Decimal(str(payload.fixed_cost_per_call_usd))
-                if payload.fixed_cost_per_call_usd is not None
-                else None
-            ),
+            input_cost_per_million=_money_decimal(payload.input_cost_per_million),
+            output_cost_per_million=_money_decimal(payload.output_cost_per_million),
+            fixed_cost_per_call_usd=_money_decimal(payload.fixed_cost_per_call_usd),
+            audio_cost_per_hour_usd=_money_decimal(payload.audio_cost_per_hour_usd),
             max_tokens_override=payload.max_tokens_override,
             supports_system_prompt=payload.supports_system_prompt,
             supports_temperature=payload.supports_temperature,
@@ -2980,12 +2967,15 @@ def build_admin_llm_router() -> APIRouter:
             row.provider_id = payload.provider_id
             row.model_id = payload.model_id
             row.api_model_id = payload.api_model_id
-            row.input_cost_per_million = Decimal(str(payload.input_cost_per_million))
-            row.output_cost_per_million = Decimal(str(payload.output_cost_per_million))
-            row.fixed_cost_per_call_usd = (
-                Decimal(str(payload.fixed_cost_per_call_usd))
-                if payload.fixed_cost_per_call_usd is not None
-                else None
+            row.input_cost_per_million = _money_decimal(payload.input_cost_per_million)
+            row.output_cost_per_million = _money_decimal(
+                payload.output_cost_per_million
+            )
+            row.fixed_cost_per_call_usd = _money_decimal(
+                payload.fixed_cost_per_call_usd
+            )
+            row.audio_cost_per_hour_usd = _money_decimal(
+                payload.audio_cost_per_hour_usd
             )
             row.max_tokens_override = payload.max_tokens_override
             row.supports_system_prompt = payload.supports_system_prompt
@@ -3707,6 +3697,10 @@ def build_admin_llm_router() -> APIRouter:
                             input_after=_money(row.input_cost_per_million),
                             output_before=_money(row.output_cost_per_million),
                             output_after=_money(row.output_cost_per_million),
+                            fixed_before=_money(row.fixed_cost_per_call_usd),
+                            fixed_after=_money(row.fixed_cost_per_call_usd),
+                            audio_before=_money(row.audio_cost_per_hour_usd),
+                            audio_after=_money(row.audio_cost_per_hour_usd),
                             status="error",
                         )
                     )

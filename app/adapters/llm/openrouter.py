@@ -177,6 +177,7 @@ class OpenRouterModelMetadata:
     supports_temperature: bool
     thinking_level: LlmThinkingLevel
     thinking_strategy: LlmThinkingStrategy
+    audio_cost_per_hour_usd: Decimal = Decimal("0.0000")
 
 
 class OpenRouterConfigSource(Protocol):
@@ -376,6 +377,11 @@ def _openrouter_model_metadata(
     architecture = _mapping(entry.get("architecture")) or MappingProxyType({})
     endpoint = _first_endpoint(entry.get("endpoints"))
     pricing = _openrouter_pricing(entry=entry, architecture=architecture)
+    is_duration_priced_audio = _is_duration_priced_audio(
+        architecture=architecture,
+        endpoint=endpoint,
+        entry=entry,
+    )
     top_provider = (
         _mapping(entry.get("top_provider")) or endpoint or MappingProxyType({})
     )
@@ -396,9 +402,16 @@ def _openrouter_model_metadata(
             top_provider.get("context_length"), entry.get("context_length")
         ),
         max_output_tokens=_positive_int(top_provider.get("max_completion_tokens")),
-        input_cost_per_million=_per_million_price(pricing.get("prompt")),
+        input_cost_per_million=_per_million_price(
+            None if is_duration_priced_audio else pricing.get("prompt")
+        ),
         output_cost_per_million=_per_million_price(pricing.get("completion")),
         fixed_cost_per_call_usd=_fixed_price(pricing.get("request")),
+        audio_cost_per_hour_usd=(
+            _hour_price(pricing.get("prompt"))
+            if is_duration_priced_audio
+            else Decimal("0.0000")
+        ),
         supports_system_prompt=True,
         supports_temperature="temperature" in supported_parameters,
         thinking_level="disabled",
@@ -415,12 +428,24 @@ def _openrouter_pricing(
     endpoint = _first_endpoint(entry.get("endpoints"))
     if endpoint is None:
         return MappingProxyType({})
-    pricing = _mapping(endpoint.get("pricing")) or MappingProxyType({})
-    modality = (_string(architecture.get("modality")) or "").lower()
-    context_length = _positive_int(endpoint.get("context_length"))
-    if modality == "audio->transcription" and context_length is None:
-        return MappingProxyType({})
-    return pricing
+    return _mapping(endpoint.get("pricing")) or MappingProxyType({})
+
+
+def _is_duration_priced_audio(
+    *,
+    architecture: Mapping[str, object],
+    endpoint: Mapping[str, object] | None,
+    entry: Mapping[str, object],
+) -> bool:
+    if (_string(architecture.get("modality")) or "").lower() != (
+        "audio->transcription"
+    ):
+        return False
+    context_length = _positive_int(
+        endpoint.get("context_length") if endpoint is not None else None,
+        entry.get("context_length"),
+    )
+    return context_length is None
 
 
 def _first_endpoint(value: object) -> Mapping[str, object] | None:
@@ -512,6 +537,13 @@ def _fixed_price(value: object) -> Decimal | None:
     price = _decimal(value)
     if price is None:
         return None
+    return price.quantize(_PRICE_QUANTUM)
+
+
+def _hour_price(value: object) -> Decimal:
+    price = _decimal(value)
+    if price is None:
+        return Decimal("0.0000")
     return price.quantize(_PRICE_QUANTUM)
 
 

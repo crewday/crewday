@@ -1087,6 +1087,7 @@ class TestModelMetadataLookup:
         assert str(metadata.input_cost_per_million) == "0.1500"
         assert str(metadata.output_cost_per_million) == "0.4500"
         assert str(metadata.fixed_cost_per_call_usd) == "0.0012"
+        assert str(metadata.audio_cost_per_hour_usd) == "0.0000"
         assert metadata.supports_temperature is True
         assert metadata.thinking_level == "disabled"
         assert metadata.thinking_strategy == "openrouter_extra_body"
@@ -1173,7 +1174,7 @@ class TestModelMetadataLookup:
             == "https://openrouter.ai/api/v1/models/openai/gpt-4o-mini-transcribe/endpoints"
         )
 
-    def test_metadata_lookup_does_not_map_per_hour_whisper_as_tokens(self) -> None:
+    def test_metadata_lookup_maps_per_hour_whisper_as_audio_duration(self) -> None:
         handler = _RecordingHandler(
             responses=[
                 httpx.Response(200, json={"data": []}),
@@ -1208,6 +1209,7 @@ class TestModelMetadataLookup:
         assert metadata.capabilities == ["audio_input"]
         assert str(metadata.input_cost_per_million) == "0.0000"
         assert str(metadata.output_cost_per_million) == "0.0000"
+        assert str(metadata.audio_cost_per_hour_usd) == "0.0400"
 
     def test_missing_model_raises_provider_error(self) -> None:
         handler = _RecordingHandler(
