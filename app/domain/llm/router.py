@@ -555,16 +555,16 @@ def _to_pick(
     adapter.
 
     cd-4btd surfaces :attr:`LlmProviderModel.api_model_id` directly
-    on the pick. Per-call tuning (``max_tokens``, ``temperature``,
-    ``extra_api_params``) still comes from the assignment — the
-    operator's deployment assignment beats the deployment default.
+    on the pick. Per-call tuning comes from the assignment, with a
+    NULL assignment temperature inheriting the model-level default.
+    The operator's deployment assignment beats the deployment
+    default.
     Promoting provider_model overrides to the pick is a
     follow-up once the spec pins the merge order; the
-    :attr:`LlmProviderModel.max_tokens_override` /
-    ``temperature_override`` / ``supports_*`` flags are the obvious
-    candidates but every one has a "did the operator mean to
-    override?" question that the v1 surface answers via the
-    /admin/llm graph editor, not the resolver.
+    :attr:`LlmProviderModel.max_tokens_override` / ``supports_*``
+    flags are the obvious candidates but every one has a "did the
+    operator mean to override?" question that the v1 surface answers
+    via the /admin/llm graph editor, not the resolver.
     """
     extra_copy: dict[str, Any] = (
         dict(row.extra_api_params) if row.extra_api_params else {}
@@ -583,7 +583,9 @@ def _to_pick(
         provider_model_id=provider_model.id,
         api_model_id=provider_model.api_model_id,
         max_tokens=row.max_tokens,
-        temperature=row.temperature,
+        temperature=row.temperature
+        if row.temperature is not None
+        else model.temperature,
         extra_api_params=extra,
         thinking_level=thinking_level,
         thinking_strategy=thinking_strategy,

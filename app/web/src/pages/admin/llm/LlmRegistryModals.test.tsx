@@ -518,7 +518,6 @@ describe("LlmRegistryModals", () => {
               ...pm,
               supports_system_prompt: false,
               supports_temperature: false,
-              temperature_override: 0.7,
             }
           : pm,
       ),
@@ -796,6 +795,7 @@ describe("LlmRegistryModals", () => {
               context_window: 128000,
               max_output_tokens: 8192,
               embedding_dimensions: null,
+          temperature: null,
               thinking_level: "high",
               thinking_strategy: "openrouter_extra_body",
               price_source: "openrouter",

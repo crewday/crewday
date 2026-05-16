@@ -13722,6 +13722,17 @@
             "title": "Spend Usd 30D",
             "type": "number"
           },
+          "temperature": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature"
+          },
           "thinking_level": {
             "enum": [
               "disabled",
@@ -13756,6 +13767,7 @@
           "price_source",
           "price_source_model_id",
           "provider_model_count",
+          "temperature",
           "thinking_level",
           "thinking_strategy"
         ],
@@ -14372,17 +14384,6 @@
             "title": "Supports Temperature",
             "type": "boolean"
           },
-          "temperature_override": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Temperature Override"
-          },
           "thinking_strategy_override": {
             "anyOf": [
               {
@@ -14418,7 +14419,6 @@
           "provider_id",
           "supports_system_prompt",
           "supports_temperature",
-          "temperature_override",
           "thinking_strategy_override"
         ],
         "title": "LlmProviderModelResponse",
@@ -15871,6 +15871,19 @@
               }
             ],
             "title": "Price Source Model Id"
+          },
+          "temperature": {
+            "anyOf": [
+              {
+                "maximum": 2.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature"
           },
           "thinking_level": {
             "default": "disabled",
@@ -18840,19 +18853,6 @@
             "default": true,
             "title": "Supports Temperature",
             "type": "boolean"
-          },
-          "temperature_override": {
-            "anyOf": [
-              {
-                "maximum": 2.0,
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Temperature Override"
           },
           "thinking_strategy_override": {
             "anyOf": [

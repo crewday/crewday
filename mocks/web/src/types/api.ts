@@ -619,6 +619,7 @@ export interface LlmModel {
   capabilities: string[];
   context_window: number | null;
   max_output_tokens: number | null;
+  temperature: number | null;
   thinking_level: LlmThinkingLevel;
   price_source: LlmPriceSource;
   price_source_model_id: string | null;
@@ -635,7 +636,6 @@ export interface LlmProviderModel {
   input_cost_per_million: number;
   output_cost_per_million: number;
   max_tokens_override: number | null;
-  temperature_override: number | null;
   supports_system_prompt: boolean;
   supports_temperature: boolean;
   thinking_level_override: LlmThinkingLevel | null;

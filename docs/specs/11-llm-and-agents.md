@@ -768,6 +768,7 @@ llm_model
 ├── context_window         int?
 ├── max_output_tokens      int?
 ├── embedding_dimensions   int?            -- required when dimensions are known for embedding models
+├── temperature            float?          -- model-level default; assignments may override per capability
 ├── thinking_level         text            -- disabled | low | medium | high; default disabled
 ├── thinking_strategy      text            -- none | gemma_system_token | glm_extra_body | openrouter_extra_body; default none
 ├── is_active              bool
@@ -824,7 +825,6 @@ llm_provider_model
 ├── output_cost_per_million    numeric(10,4)
 ├── fixed_cost_per_call_usd    numeric(10,4)?  -- reserved for future providers that bill per-call
 ├── max_tokens_override        int?
-├── temperature_override       float?
 ├── supports_system_prompt     bool            -- some reasoning models reject system prompts
 ├── supports_temperature       bool            -- o-series models forbid temperature
 ├── thinking_strategy_override text?           -- NULL/empty = inherit model thinking_strategy; otherwise none | gemma_system_token | glm_extra_body | openrouter_extra_body
@@ -1146,7 +1146,7 @@ At first boot the deployment is seeded with:
 | capability              | default `provider_model`                                                    | rationale |
 |-------------------------|-----------------------------------------------------------------------------|-----------|
 | `default`               | OpenRouter × `google/gemma-4-31b-it` (priority 0)                           | Matches the user's Gemma pick; inherited by capabilities without their own chain. |
-| `feedback.embed`        | Local FastEmbed × `BAAI/bge-small-en-v1.5` (priority 0)                     | Local CPU embeddings work without an external provider key; the model has `embeddings` and `embedding_dimensions=384`. |
+| `feedback.embed`        | Local × `BAAI/bge-small-en-v1.5` (priority 0)                               | Local CPU embeddings work without an external provider key; the model has `embeddings` and `embedding_dimensions=384`. |
 | capabilities without direct chains | inherit `default` unless a deployment inheritance edge says otherwise | Keeps ordinary LLM features auto-configured while preserving direct override precedence. |
 | `voice.transcribe`      | inherits `default`, but is **invalid until an audio model is assigned**      | The inherited Gemma chat model lacks `audio_input`, so routing fails closed and `/admin/llm/graph` shows the mismatch. |
 | `documents.ocr`         | inherits `default` only when the model has the required `vision` tag         | Local extractors handle the common cases; the LLM fallback remains visibly governed by model capability tags. See §21 "Document text extraction". |

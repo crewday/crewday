@@ -267,6 +267,7 @@ def seed_provider_model(
     provider_name: str | None = None,
     provider_type: str = "fake",
     model_capabilities: list[str] | None = None,
+    model_temperature: float | None = None,
 ) -> LlmProviderModel:
     """Insert a :class:`LlmProviderModel` plus its :class:`LlmProvider` /
     :class:`LlmModel` ancestors.
@@ -306,6 +307,7 @@ def seed_provider_model(
         canonical_name=canonical,
         display_name=canonical,
         capabilities=list(model_capabilities or ["chat"]),
+        temperature=model_temperature,
         is_active=True,
         price_source="",
         created_at=_PINNED,

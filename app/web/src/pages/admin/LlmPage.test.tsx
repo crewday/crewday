@@ -1067,6 +1067,9 @@ describe("Admin LlmPage", () => {
       fireEvent.change(screen.getByLabelText(/Display name/), {
         target: { value: "Gemma admin" },
       });
+      fireEvent.change(screen.getByLabelText(/^Temperature/), {
+        target: { value: "0.7" },
+      });
       fireEvent.change(screen.getByLabelText(/Thinking strategy/), {
         target: { value: "gemma_system_token" },
       });
@@ -1088,6 +1091,7 @@ describe("Admin LlmPage", () => {
       );
       expect(jsonBody(put!)).toMatchObject({
         display_name: "Gemma admin",
+        temperature: 0.7,
         thinking_strategy: "gemma_system_token",
       });
 
@@ -1126,6 +1130,7 @@ describe("Admin LlmPage", () => {
               context_window: 128000,
               max_output_tokens: 8192,
               embedding_dimensions: null,
+          temperature: null,
               thinking_level: "high",
               thinking_strategy: "openrouter_extra_body",
               price_source: "openrouter",
@@ -1146,7 +1151,6 @@ describe("Admin LlmPage", () => {
                   output_cost_per_million: 0.2,
                   fixed_cost_per_call_usd: null,
                   max_tokens_override: null,
-                  temperature_override: null,
                   supports_system_prompt: true,
                   supports_temperature: true,
                   thinking_strategy_override: null,
@@ -1250,6 +1254,7 @@ describe("Admin LlmPage", () => {
         context_window: 128000,
         max_output_tokens: 8192,
         embedding_dimensions: null,
+          temperature: null,
         thinking_level: "high",
         thinking_strategy: "openrouter_extra_body",
         price_source: "openrouter",
@@ -1396,9 +1401,6 @@ describe("Admin LlmPage", () => {
       fireEvent.change(screen.getByLabelText(/Max tokens override/), {
         target: { value: "1024" },
       });
-      fireEvent.change(screen.getByLabelText(/Temperature override/), {
-        target: { value: "0.7" },
-      });
       expect(screen.queryByLabelText(/Thinking level/)).not.toBeInTheDocument();
       fireEvent.change(screen.getByLabelText(/Thinking strategy/), {
         target: { value: "openrouter_extra_body" },
@@ -1435,7 +1437,6 @@ describe("Admin LlmPage", () => {
         api_model_id: "google/gemma-admin",
         fixed_cost_per_call_usd: 0.05,
         max_tokens_override: 1024,
-        temperature_override: 0.7,
         supports_system_prompt: false,
         supports_temperature: false,
         thinking_strategy_override: "openrouter_extra_body",
@@ -1493,14 +1494,6 @@ describe("Admin LlmPage", () => {
       fireEvent.change(screen.getByLabelText(/Fixed cost per call/), {
         target: { value: "" },
       });
-      fireEvent.change(screen.getByLabelText(/Temperature override/), {
-        target: { value: "3" },
-      });
-      fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
-      expect(await screen.findByRole("alert")).toHaveTextContent(
-        "Temperature override must be between 0 and 2.",
-      );
-
       expect(
         fetcher.calls.some(
           (call) =>

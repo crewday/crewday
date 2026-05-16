@@ -531,7 +531,7 @@ describe("LlmAssignmentModal", () => {
         ...baseGraph.providers,
         {
           id: "prov_local",
-          name: "Local FastEmbed",
+          name: "Local",
           provider_type: "local_embedding",
           endpoint: "",
           api_key_ref: null,
@@ -555,6 +555,7 @@ describe("LlmAssignmentModal", () => {
           context_window: null,
           max_output_tokens: null,
           embedding_dimensions: 384,
+          temperature: null,
           thinking_level: "disabled",
           thinking_strategy: "none",
           price_source: "manual",
@@ -577,7 +578,6 @@ describe("LlmAssignmentModal", () => {
           output_cost_per_million: 0,
           fixed_cost_per_call_usd: 0,
           max_tokens_override: null,
-          temperature_override: null,
           supports_system_prompt: false,
           supports_temperature: false,
           thinking_strategy_override: null,
@@ -637,10 +637,11 @@ describe("LlmAssignmentModal", () => {
             body: {
               status: "ok",
               model_used: "BAAI/bge-small-en-v1.5",
-              provider_used: "Local FastEmbed",
+              provider_used: "Local",
               provider_model_id: "pm_bge",
               latency_ms: 12,
               embedding_dimensions: 384,
+          temperature: null,
               vector_norm: 1,
             },
           }

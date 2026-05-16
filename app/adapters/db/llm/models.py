@@ -1388,7 +1388,8 @@ class LlmModel(Base):
 
     A model row carries the provider-agnostic facts about a model:
     the canonical name, capability tags, context window, output
-    cap. The same canonical model (``google/gemma-3-27b-it``,
+    cap, and default temperature. The same canonical model
+    (``google/gemma-3-27b-it``,
     ``anthropic/claude-3-5-sonnet``, …) may be served by multiple
     providers — the per-provider tweaks live on
     :class:`LlmProviderModel`.
@@ -1431,6 +1432,7 @@ class LlmModel(Base):
     context_window: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     embedding_dimensions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
     thinking_level: Mapped[str] = mapped_column(
         String,
         nullable=False,
@@ -1548,7 +1550,6 @@ class LlmProviderModel(Base):
         Numeric(10, 4), nullable=True
     )
     max_tokens_override: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    temperature_override: Mapped[float | None] = mapped_column(Float, nullable=True)
     # ``False`` = adapter folds the system prompt into the first user
     # turn. Default ``True`` keeps the existing call shape for the
     # 95 % of models that do support a system prompt.

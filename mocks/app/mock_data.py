@@ -758,6 +758,7 @@ class LlmModel:
     capabilities: list[str]                    # chat, vision, audio_input, reasoning, function_calling, json_mode, streaming
     context_window: int | None
     max_output_tokens: int | None
+    temperature: float | None
     thinking_level: Literal["disabled", "low", "medium", "high"]
     price_source: Literal["openrouter", "manual", ""]
     price_source_model_id: str | None
@@ -774,7 +775,6 @@ class LlmProviderModel:
     input_cost_per_million: float
     output_cost_per_million: float
     max_tokens_override: int | None
-    temperature_override: float | None
     supports_system_prompt: bool
     supports_temperature: bool
     thinking_level_override: Literal["disabled", "low", "medium", "high"] | None
@@ -2656,6 +2656,7 @@ LLM_MODELS: list[LlmModel] = [
         capabilities=["chat", "vision", "json_mode", "function_calling", "streaming"],
         context_window=128_000,
         max_output_tokens=8192,
+        temperature=None,
         thinking_level="disabled",
         price_source="openrouter",
         price_source_model_id=None,
@@ -2669,6 +2670,7 @@ LLM_MODELS: list[LlmModel] = [
         capabilities=["chat", "vision", "json_mode", "streaming"],
         context_window=128_000,
         max_output_tokens=4096,
+        temperature=None,
         thinking_level="disabled",
         price_source="openrouter",
         price_source_model_id=None,
@@ -2683,6 +2685,7 @@ LLM_MODELS: list[LlmModel] = [
         capabilities=["chat", "vision", "json_mode", "function_calling", "streaming"],
         context_window=200_000,
         max_output_tokens=8192,
+        temperature=0.3,
         thinking_level="disabled",
         price_source="openrouter",
         price_source_model_id=None,
@@ -2696,6 +2699,7 @@ LLM_MODELS: list[LlmModel] = [
         capabilities=["chat", "json_mode", "function_calling", "streaming"],
         context_window=131_072,
         max_output_tokens=8192,
+        temperature=None,
         thinking_level="disabled",
         price_source="openrouter",
         price_source_model_id=None,
@@ -2709,6 +2713,7 @@ LLM_MODELS: list[LlmModel] = [
         capabilities=["chat", "vision", "json_mode", "function_calling", "streaming"],
         context_window=128_000,
         max_output_tokens=16_384,
+        temperature=None,
         thinking_level="disabled",
         price_source="openrouter",
         price_source_model_id=None,
@@ -2723,6 +2728,7 @@ LLM_MODELS: list[LlmModel] = [
         capabilities=["audio_input"],
         context_window=None,
         max_output_tokens=None,
+        temperature=None,
         thinking_level="disabled",
         price_source="",
         price_source_model_id=None,
@@ -2741,7 +2747,6 @@ LLM_PROVIDER_MODELS: list[LlmProviderModel] = [
         input_cost_per_million=0.10,
         output_cost_per_million=0.30,
         max_tokens_override=None,
-        temperature_override=None,
         supports_system_prompt=True,
         supports_temperature=True,
         thinking_level_override=None,
@@ -2759,7 +2764,6 @@ LLM_PROVIDER_MODELS: list[LlmProviderModel] = [
         input_cost_per_million=0.0,
         output_cost_per_million=0.0,
         max_tokens_override=None,
-        temperature_override=None,
         supports_system_prompt=True,
         supports_temperature=True,
         thinking_level_override=None,
@@ -2777,7 +2781,6 @@ LLM_PROVIDER_MODELS: list[LlmProviderModel] = [
         input_cost_per_million=0.80,
         output_cost_per_million=4.00,
         max_tokens_override=None,
-        temperature_override=0.3,
         supports_system_prompt=True,
         supports_temperature=True,
         thinking_level_override=None,
@@ -2795,7 +2798,6 @@ LLM_PROVIDER_MODELS: list[LlmProviderModel] = [
         input_cost_per_million=0.12,
         output_cost_per_million=0.35,
         max_tokens_override=None,
-        temperature_override=None,
         supports_system_prompt=True,
         supports_temperature=True,
         thinking_level_override=None,
@@ -2813,7 +2815,6 @@ LLM_PROVIDER_MODELS: list[LlmProviderModel] = [
         input_cost_per_million=0.15,
         output_cost_per_million=0.60,
         max_tokens_override=None,
-        temperature_override=None,
         supports_system_prompt=True,
         supports_temperature=True,
         thinking_level_override=None,

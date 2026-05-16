@@ -90,6 +90,7 @@ interface ModelPayload {
   context_window: number | null;
   max_output_tokens: number | null;
   embedding_dimensions: number | null;
+  temperature: number | null;
   thinking_level: LlmThinkingLevel;
   thinking_strategy: LlmThinkingStrategy;
   price_source: LlmPriceSource;
@@ -128,7 +129,6 @@ interface ProviderModelPayload {
   output_cost_per_million: number;
   fixed_cost_per_call_usd: number | null;
   max_tokens_override: number | null;
-  temperature_override: number | null;
   supports_system_prompt: boolean;
   supports_temperature: boolean;
   thinking_strategy_override: LlmThinkingStrategy | null;
@@ -730,6 +730,11 @@ function ModelForm({
       ? ""
       : String(model.embedding_dimensions),
   );
+  const [temperature, setTemperature] = useState(
+    model?.temperature === null || model?.temperature === undefined
+      ? ""
+      : String(model.temperature),
+  );
   const [priceSource, setPriceSource] = useState<LlmPriceSource>(
     model?.price_source ?? "",
   );
@@ -804,7 +809,6 @@ function ModelForm({
         output_cost_per_million: 0,
         fixed_cost_per_call_usd: null,
         max_tokens_override: null,
-        temperature_override: null,
         supports_system_prompt: true,
         supports_temperature: true,
         thinking_strategy_override: null,
@@ -960,6 +964,11 @@ function ModelForm({
         ? ""
         : String(payload.embedding_dimensions),
     );
+    setTemperature(
+      payload.temperature === null || payload.temperature === undefined
+        ? ""
+        : String(payload.temperature),
+    );
     setThinkingLevel(payload.thinking_level);
     setThinkingStrategy(payload.thinking_strategy);
     setPriceSource(payload.price_source);
@@ -987,6 +996,7 @@ function ModelForm({
     const contextValue = numberOrNull(contextWindow);
     const outputValue = numberOrNull(maxOutput);
     const embeddingDimensionsValue = numberOrNull(embeddingDimensions);
+    const temperatureValue = numberOrNull(temperature);
     if (!canonicalName.trim()) return setClientErr("Canonical name is required.");
     if (!displayName.trim()) return setClientErr("Display name is required.");
     if (contextValue !== null && (!Number.isInteger(contextValue) || contextValue < 1)) {
@@ -1001,6 +1011,12 @@ function ModelForm({
     ) {
       return setClientErr("Embedding dimensions must be a positive whole number.");
     }
+    if (
+      temperatureValue !== null &&
+      (!Number.isFinite(temperatureValue) || temperatureValue < 0 || temperatureValue > 2)
+    ) {
+      return setClientErr("Temperature must be between 0 and 2.");
+    }
     setClientErr(null);
     setServerErr(null);
     save.mutate({
@@ -1010,6 +1026,7 @@ function ModelForm({
       context_window: contextValue,
       max_output_tokens: outputValue,
       embedding_dimensions: embeddingDimensionsValue,
+      temperature: temperatureValue,
       thinking_level: thinkingLevel,
       thinking_strategy: thinkingStrategy,
       price_source: priceSource,
@@ -1111,18 +1128,32 @@ function ModelForm({
             />
           </FormModalField>
         </FormModalGrid>
-        <FormModalField label="Embedding dimensions" requirement="optional">
-          <input
-            type="number"
-            min="1"
-            value={embeddingDimensions}
-            onChange={(e) => setEmbeddingDimensions(e.target.value)}
-            aria-invalid={
-              clientErr === "Embedding dimensions must be a positive whole number."
-            }
-            aria-describedby={errId}
-          />
-        </FormModalField>
+        <FormModalGrid>
+          <FormModalField label="Embedding dimensions" requirement="optional">
+            <input
+              type="number"
+              min="1"
+              value={embeddingDimensions}
+              onChange={(e) => setEmbeddingDimensions(e.target.value)}
+              aria-invalid={
+                clientErr === "Embedding dimensions must be a positive whole number."
+              }
+              aria-describedby={errId}
+            />
+          </FormModalField>
+          <FormModalField label="Temperature" requirement="optional">
+            <input
+              type="number"
+              min="0"
+              max="2"
+              step="0.1"
+              value={temperature}
+              onChange={(e) => setTemperature(e.target.value)}
+              aria-invalid={clientErr === "Temperature must be between 0 and 2."}
+              aria-describedby={errId}
+            />
+          </FormModalField>
+        </FormModalGrid>
         <FormModalGrid>
           <FormModalField label="Thinking strategy" requirement="required">
             <select
@@ -1264,11 +1295,6 @@ function ProviderModelForm(props: ProviderModelFormProps) {
     providerModel?.max_tokens_override == null
       ? ""
       : String(providerModel.max_tokens_override),
-  );
-  const [temperature, setTemperature] = useState(
-    providerModel?.temperature_override == null
-      ? ""
-      : String(providerModel.temperature_override),
   );
   const [supportsSystemPrompt, setSupportsSystemPrompt] = useState(
     providerModel?.supports_system_prompt ?? true,
@@ -1456,7 +1482,6 @@ function ProviderModelForm(props: ProviderModelFormProps) {
       output_cost_per_million: providerModel.output_cost_per_million,
       fixed_cost_per_call_usd: providerModel.fixed_cost_per_call_usd,
       max_tokens_override: providerModel.max_tokens_override,
-      temperature_override: providerModel.temperature_override,
       supports_system_prompt: providerModel.supports_system_prompt,
       supports_temperature: providerModel.supports_temperature,
       thinking_strategy_override: providerModel.thinking_strategy_override,
@@ -1508,15 +1533,8 @@ function ProviderModelForm(props: ProviderModelFormProps) {
     const fixedParsed = optionalNonNegativeNumber(fixedCost, "Fixed cost");
     if (!fixedParsed.ok) return setClientErr(fixedParsed.error);
     const maxTokensValue = numberOrNull(maxTokens);
-    const temperatureValue = numberOrNull(temperature);
     if (maxTokensValue !== null && (!Number.isInteger(maxTokensValue) || maxTokensValue < 1)) {
       return setClientErr("Max tokens override must be a positive whole number.");
-    }
-    if (
-      temperatureValue !== null &&
-      (!Number.isFinite(temperatureValue) || temperatureValue < 0 || temperatureValue > 2)
-    ) {
-      return setClientErr("Temperature override must be between 0 and 2.");
     }
 
     let parsedExtra: Record<string, unknown>;
@@ -1540,7 +1558,6 @@ function ProviderModelForm(props: ProviderModelFormProps) {
       output_cost_per_million: outputParsed.value,
       fixed_cost_per_call_usd: fixedParsed.value,
       max_tokens_override: maxTokensValue,
-      temperature_override: temperatureValue,
       supports_system_prompt: supportsSystemPrompt,
       supports_temperature: supportsTemperature,
       thinking_strategy_override:
@@ -1692,30 +1709,16 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             </select>
           </FormModalField>
         </FormModalGrid>
-        <FormModalGrid>
-          <FormModalField label="Max tokens override" requirement="optional">
-            <input
-              type="number"
-              min="1"
-              value={maxTokens}
-              onChange={(e) => setMaxTokens(e.target.value)}
-              aria-invalid={clientErr === "Max tokens override must be a positive whole number."}
-              aria-describedby={errId}
-            />
-          </FormModalField>
-          <FormModalField label="Temperature override" requirement="optional">
-            <input
-              type="number"
-              min="0"
-              max="2"
-              step="0.1"
-              value={temperature}
-              onChange={(e) => setTemperature(e.target.value)}
-              aria-invalid={clientErr === "Temperature override must be between 0 and 2."}
-              aria-describedby={errId}
-            />
-          </FormModalField>
-        </FormModalGrid>
+        <FormModalField label="Max tokens override" requirement="optional">
+          <input
+            type="number"
+            min="1"
+            value={maxTokens}
+            onChange={(e) => setMaxTokens(e.target.value)}
+            aria-invalid={clientErr === "Max tokens override must be a positive whole number."}
+            aria-describedby={errId}
+          />
+        </FormModalField>
         <FormModalGrid>
           <FormModalField label="Price source override" requirement="optional">
             <select

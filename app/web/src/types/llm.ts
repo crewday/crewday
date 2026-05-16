@@ -62,6 +62,7 @@ export interface LlmModel {
   context_window: number | null;
   max_output_tokens: number | null;
   embedding_dimensions: number | null;
+  temperature: number | null;
   thinking_level: LlmThinkingLevel;
   thinking_strategy: LlmThinkingStrategy;
   price_source: LlmPriceSource;
@@ -82,7 +83,6 @@ export interface LlmProviderModel {
   output_cost_per_million: number;
   fixed_cost_per_call_usd: number | null;
   max_tokens_override: number | null;
-  temperature_override: number | null;
   supports_system_prompt: boolean;
   supports_temperature: boolean;
   thinking_strategy_override: LlmThinkingStrategy | null;

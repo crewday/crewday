@@ -301,6 +301,35 @@ class TestHappyPath:
         finally:
             reset_current(token)
 
+    def test_assignment_inherits_model_temperature(
+        self, db_session: Session, clock: FrozenClock
+    ) -> None:
+        ws = seed_workspace(db_session)
+        ctx = build_context(ws.id)
+        token = set_current(ctx)
+        try:
+            provider_model = seed_provider_model(
+                db_session,
+                provider_model_id="01HWA0000000000000000TEMP",
+                model_capabilities=["chat", "function_calling"],
+                model_temperature=0.4,
+            )
+            seed_assignment(
+                db_session,
+                workspace_id=ws.id,
+                capability="chat.manager",
+                model_id=provider_model.id,
+                priority=1,
+                temperature=None,
+                required_capabilities=["chat", "function_calling"],
+            )
+
+            pick = resolve_primary(db_session, ctx, "chat.manager", clock=clock)
+
+            assert pick.temperature == pytest.approx(0.4)
+        finally:
+            reset_current(token)
+
     def test_thinking_level_uses_model_default(
         self, db_session: Session, clock: FrozenClock
     ) -> None:

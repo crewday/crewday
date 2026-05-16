@@ -69,7 +69,7 @@ DEFAULT_MODEL_CAPABILITIES: tuple[str, ...] = (
 )
 OPENROUTER_DEFAULT_PROVIDER_NAME: str = "openrouter-default"
 OPENROUTER_DEFAULT_MODEL_CANONICAL_NAME: str = "google/gemma-4-31b-it"
-LOCAL_EMBEDDING_PROVIDER_NAME: str = "Local FastEmbed"
+LOCAL_EMBEDDING_PROVIDER_NAME: str = "Local"
 LOCAL_BGE_MODEL_CANONICAL_NAME: str = "BAAI/bge-small-en-v1.5"
 LOCAL_BGE_MODEL_DISPLAY_NAME: str = "BGE Small EN v1.5"
 LOCAL_BGE_EMBEDDING_DIMENSIONS: int = 384
@@ -117,6 +117,7 @@ def seed_local_embedding_registry(
             display_name=LOCAL_BGE_MODEL_DISPLAY_NAME,
             capabilities=["embeddings"],
             embedding_dimensions=LOCAL_BGE_EMBEDDING_DIMENSIONS,
+            temperature=None,
             thinking_level="disabled",
             thinking_strategy="none",
             is_active=True,

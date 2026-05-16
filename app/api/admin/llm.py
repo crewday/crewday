@@ -244,6 +244,7 @@ class LlmModelResponse(BaseModel):
     context_window: int | None
     max_output_tokens: int | None
     embedding_dimensions: int | None
+    temperature: float | None
     thinking_level: LlmThinkingLevel
     thinking_strategy: LlmThinkingStrategy
     price_source: Literal["openrouter", "manual", ""]
@@ -264,7 +265,6 @@ class LlmProviderModelResponse(BaseModel):
     output_cost_per_million: float
     fixed_cost_per_call_usd: float | None
     max_tokens_override: int | None
-    temperature_override: float | None
     supports_system_prompt: bool
     supports_temperature: bool
     thinking_strategy_override: LlmThinkingStrategy | None
@@ -657,6 +657,7 @@ class ModelPayload(BaseModel):
     context_window: int | None = Field(default=None, ge=1)
     max_output_tokens: int | None = Field(default=None, ge=1)
     embedding_dimensions: int | None = Field(default=None, ge=1)
+    temperature: float | None = Field(default=None, ge=0, le=2)
     thinking_level: LlmThinkingLevel = "disabled"
     thinking_strategy: LlmThinkingStrategy = "none"
     price_source: Literal["openrouter", "manual", ""] = ""
@@ -687,7 +688,6 @@ class ProviderModelPayload(BaseModel):
     output_cost_per_million: float = Field(default=0, ge=0)
     fixed_cost_per_call_usd: float | None = Field(default=None, ge=0)
     max_tokens_override: int | None = Field(default=None, ge=1)
-    temperature_override: float | None = Field(default=None, ge=0, le=2)
     supports_system_prompt: bool = True
     supports_temperature: bool = True
     thinking_strategy_override: LlmThinkingStrategy | None = None
@@ -867,6 +867,7 @@ def _model_response(
         context_window=model.context_window,
         max_output_tokens=model.max_output_tokens,
         embedding_dimensions=model.embedding_dimensions,
+        temperature=model.temperature,
         thinking_level=_thinking_level(model.thinking_level),
         thinking_strategy=_thinking_strategy(model.thinking_strategy),
         price_source=model.price_source,
@@ -904,7 +905,6 @@ def _provider_model_response(
             else None
         ),
         max_tokens_override=row.max_tokens_override,
-        temperature_override=row.temperature_override,
         supports_system_prompt=row.supports_system_prompt,
         supports_temperature=row.supports_temperature,
         thinking_strategy_override=(
@@ -1953,6 +1953,7 @@ def _openrouter_model_payload(metadata: OpenRouterModelMetadata) -> ModelPayload
         context_window=metadata.context_window,
         max_output_tokens=metadata.max_output_tokens,
         embedding_dimensions=None,
+        temperature=None,
         thinking_level=metadata.thinking_level,
         thinking_strategy=metadata.thinking_strategy,
         price_source="openrouter",
@@ -1977,7 +1978,6 @@ def _openrouter_provider_model_payload(
             else None
         ),
         max_tokens_override=None,
-        temperature_override=None,
         supports_system_prompt=metadata.supports_system_prompt,
         supports_temperature=metadata.supports_temperature,
         thinking_strategy_override=None,
@@ -2220,6 +2220,7 @@ def _playground_max_tokens(
 def _playground_temperature(
     payload: LlmProviderModelPlaygroundRequest,
     provider_model: LlmProviderModel,
+    model: LlmModel,
     assignment: LlmAssignment | None,
 ) -> float:
     if not provider_model.supports_temperature:
@@ -2232,7 +2233,7 @@ def _playground_temperature(
         else (
             assignment.temperature
             if assignment is not None and assignment.temperature is not None
-            else provider_model.temperature_override
+            else model.temperature
         )
     )
     return value if value is not None else 0.0
@@ -2527,6 +2528,7 @@ def build_admin_llm_router() -> APIRouter:
             context_window=payload.context_window,
             max_output_tokens=payload.max_output_tokens,
             embedding_dimensions=payload.embedding_dimensions,
+            temperature=payload.temperature,
             thinking_level=payload.thinking_level,
             thinking_strategy=payload.thinking_strategy,
             price_source=payload.price_source,
@@ -2602,6 +2604,7 @@ def build_admin_llm_router() -> APIRouter:
             row.context_window = payload.context_window
             row.max_output_tokens = payload.max_output_tokens
             row.embedding_dimensions = payload.embedding_dimensions
+            row.temperature = payload.temperature
             row.thinking_level = payload.thinking_level
             row.thinking_strategy = payload.thinking_strategy
             row.price_source = payload.price_source
@@ -2696,7 +2699,6 @@ def build_admin_llm_router() -> APIRouter:
                 else None
             ),
             max_tokens_override=payload.max_tokens_override,
-            temperature_override=payload.temperature_override,
             supports_system_prompt=payload.supports_system_prompt,
             supports_temperature=payload.supports_temperature,
             thinking_strategy_override=payload.thinking_strategy_override,
@@ -2890,7 +2892,9 @@ def build_admin_llm_router() -> APIRouter:
             max_tokens = _playground_max_tokens(
                 payload, provider_model, model, assignment
             )
-            temperature = _playground_temperature(payload, provider_model, assignment)
+            temperature = _playground_temperature(
+                payload, provider_model, model, assignment
+            )
         llm = _playground_llm(request, provider)
         started = time.monotonic()
         try:
@@ -2984,7 +2988,6 @@ def build_admin_llm_router() -> APIRouter:
                 else None
             )
             row.max_tokens_override = payload.max_tokens_override
-            row.temperature_override = payload.temperature_override
             row.supports_system_prompt = payload.supports_system_prompt
             row.supports_temperature = payload.supports_temperature
             row.thinking_strategy_override = payload.thinking_strategy_override

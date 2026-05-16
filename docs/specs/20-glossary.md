@@ -747,16 +747,18 @@ fix the offender.
   provider-model rows whose OpenRouter pricing lookup id resolves to
   the loaded id. It is not a scheduled all-model catalogue auto-import.
   See §11 "LLM graph admin".
-- **LLM provider.** One `llm_provider` row per upstream service. Fields:
-  `provider_type ∈ {openrouter, openai_compatible, fake}`, endpoint,
-  envelope-stored API key, default model, rate limits. Deployment-
+- **LLM provider.** One `llm_provider` row per upstream service or local
+  runtime. Fields:
+  `provider_type ∈ {openrouter, openai_compatible, fake, local_embedding}`,
+  endpoint, envelope-stored API key, default model, rate limits. Deployment-
   scope; edited from `/admin/llm` or `crewday deploy llm provider …`.
   See §11 "Provider / model / provider-model registry".
 - **LLM model.** One `llm_model` row per provider-agnostic model
   (e.g. `google/gemma-3-27b-it`). Carries the `capabilities` array
   (chat, vision, audio_input, reasoning, function_calling, json_mode,
-  streaming), product-level `thinking_level`, and model-level
-  `thinking_strategy` (`none`, `gemma_system_token`,
+  streaming), model-level `temperature`, product-level
+  `thinking_level`, and model-level `thinking_strategy` (`none`,
+  `gemma_system_token`,
   `glm_extra_body`, `openrouter_extra_body`). Assignment-time
   validation checks the capability tags; routing uses the thinking
   fields to derive provider call parameters. See §11.

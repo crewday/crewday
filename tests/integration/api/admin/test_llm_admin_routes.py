@@ -432,7 +432,6 @@ def _seed_llm_graph(session_factory: sessionmaker[Session]) -> SeededLlm:
                 output_cost_per_million=Decimal("0.2000"),
                 fixed_cost_per_call_usd=None,
                 max_tokens_override=None,
-                temperature_override=None,
                 supports_system_prompt=True,
                 supports_temperature=True,
                 thinking_strategy_override=None,
@@ -918,7 +917,6 @@ class TestAdminLlmRoutes:
                         output_cost_per_million=Decimal("0"),
                         fixed_cost_per_call_usd=None,
                         max_tokens_override=None,
-                        temperature_override=None,
                         supports_system_prompt=True,
                         supports_temperature=True,
                         thinking_strategy_override=None,
@@ -1063,26 +1061,33 @@ class TestAdminLlmRoutes:
             graph = client.get("/admin/api/v1/llm/graph")
             assert graph.status_code == 200, graph.text
             body = graph.json()
-            assert body["providers"][0]["id"] == seeded.provider_id
-            assert body["providers"][0]["api_key_status"] == "present"
-            assert "priority" not in body["providers"][0]
-            assert body["providers"][0]["spend_usd_30d"] == 0.174606
-            assert body["providers"][0]["calls_30d"] == 3
-            assert body["models"][0]["id"] == seeded.model_id
-            assert body["models"][0]["thinking_level"] == "medium"
-            assert body["models"][0]["thinking_strategy"] == "openrouter_extra_body"
-            assert body["models"][0]["spend_usd_30d"] == 0.174606
-            assert body["models"][0]["calls_30d"] == 3
-            assert body["provider_models"][0]["id"] == seeded.provider_model_id
-            assert "thinking_level_override" not in body["provider_models"][0]
-            assert "effective_thinking_level" not in body["provider_models"][0]
-            assert body["provider_models"][0]["thinking_strategy_override"] is None
-            assert (
-                body["provider_models"][0]["effective_thinking_strategy"]
-                == "openrouter_extra_body"
+            provider = next(
+                item for item in body["providers"] if item["id"] == seeded.provider_id
             )
-            assert body["provider_models"][0]["spend_usd_30d"] == 0.174606
-            assert body["provider_models"][0]["calls_30d"] == 3
+            assert provider["api_key_status"] == "present"
+            assert "priority" not in provider
+            assert provider["spend_usd_30d"] == 0.174606
+            assert provider["calls_30d"] == 3
+            model = next(
+                item for item in body["models"] if item["id"] == seeded.model_id
+            )
+            assert model["thinking_level"] == "medium"
+            assert model["thinking_strategy"] == "openrouter_extra_body"
+            assert model["spend_usd_30d"] == 0.174606
+            assert model["calls_30d"] == 3
+            provider_model = next(
+                item
+                for item in body["provider_models"]
+                if item["id"] == seeded.provider_model_id
+            )
+            assert "thinking_level_override" not in provider_model
+            assert "effective_thinking_level" not in provider_model
+            assert provider_model["thinking_strategy_override"] is None
+            assert (
+                provider_model["effective_thinking_strategy"] == "openrouter_extra_body"
+            )
+            assert provider_model["spend_usd_30d"] == 0.174606
+            assert provider_model["calls_30d"] == 3
             assert body["assignments"][0]["id"] == seeded.assignment_id
             assert body["assignments"][0]["thinking_level_override"] is None
             assert body["assignments"][0]["effective_thinking_level"] == "medium"
@@ -1193,7 +1198,12 @@ class TestAdminLlmRoutes:
             sync_body = sync.json()
             assert sync_body["updated"] == 1
             assert sync_body["errors"] == 0
-            assert sync_body["deltas"][0]["status"] == "updated"
+            updated_delta = next(
+                delta
+                for delta in sync_body["deltas"]
+                if delta["provider_model_id"] == seeded.provider_model_id
+            )
+            assert updated_delta["status"] == "updated"
         finally:
             _wipe(session_factory)
 
@@ -1698,7 +1708,7 @@ class TestAdminLlmRoutes:
             provider = client.post(
                 "/admin/api/v1/llm/providers",
                 json={
-                    "name": "Local FastEmbed",
+                    "name": "Local test",
                     "provider_type": "local_embedding",
                 },
             )
@@ -1706,8 +1716,8 @@ class TestAdminLlmRoutes:
             embedding_model = client.post(
                 "/admin/api/v1/llm/models",
                 json={
-                    "canonical_name": LOCAL_BGE_MODEL_CANONICAL_NAME,
-                    "display_name": "BGE Small EN v1.5",
+                    "canonical_name": "test/local-embedding",
+                    "display_name": "Test Local Embedding",
                     "capabilities": ["embeddings"],
                     "embedding_dimensions": 384,
                     "price_source": "manual",
@@ -1746,7 +1756,7 @@ class TestAdminLlmRoutes:
                 json={
                     "capability": FEEDBACK_EMBED_CAPABILITY,
                     "provider_model_id": seeded.provider_model_id,
-                    "priority": 0,
+                    "priority": 1,
                 },
             )
             assert chat_assignment_rejected.status_code == 422, (
@@ -1765,7 +1775,7 @@ class TestAdminLlmRoutes:
                 json={
                     "capability": FEEDBACK_EMBED_CAPABILITY,
                     "provider_model_id": local_provider_model.json()["id"],
-                    "priority": 0,
+                    "priority": 1,
                 },
             )
             assert assignment.status_code == 200, assignment.text
@@ -2057,7 +2067,6 @@ class TestAdminLlmRoutes:
                         output_cost_per_million=Decimal("2.0000"),
                         fixed_cost_per_call_usd=None,
                         max_tokens_override=None,
-                        temperature_override=None,
                         supports_system_prompt=True,
                         supports_temperature=True,
                         thinking_strategy_override=None,
@@ -2616,7 +2625,6 @@ class TestAdminLlmRoutes:
                             output_cost_per_million=Decimal("9.0000"),
                             fixed_cost_per_call_usd=None,
                             max_tokens_override=None,
-                            temperature_override=None,
                             supports_system_prompt=True,
                             supports_temperature=True,
                             thinking_strategy_override=None,
@@ -2711,7 +2719,6 @@ class TestAdminLlmRoutes:
                         output_cost_per_million=Decimal("1.0000"),
                         fixed_cost_per_call_usd=None,
                         max_tokens_override=None,
-                        temperature_override=None,
                         supports_system_prompt=True,
                         supports_temperature=True,
                         thinking_strategy_override=None,
@@ -2743,7 +2750,9 @@ class TestAdminLlmRoutes:
                 delta["provider_model_id"]: delta["status"] for delta in body["deltas"]
             }
             assert body["updated"] == 1
-            assert body["skipped"] == 0
+            assert body["skipped"] == sum(
+                1 for status in statuses.values() if status == "skipped_not_syncable"
+            )
             assert body["errors"] == 1
             assert statuses[seeded.provider_model_id] == "updated"
             assert statuses[error_pm_id] == "error"
