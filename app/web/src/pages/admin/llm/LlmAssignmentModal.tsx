@@ -18,6 +18,7 @@ import type {
 } from "@/types";
 import LlmUsageTotals from "./LlmUsageTotals";
 import LlmPlayground from "./LlmPlayground";
+import LlmEmbeddingSmoke from "./LlmEmbeddingSmoke";
 import type { LlmIndexes } from "./lib/llmIndexes";
 
 const DEFAULT_LLM_CAPABILITY = "default";
@@ -359,6 +360,10 @@ export default function LlmAssignmentModal({
   const playgroundModel = playgroundProviderModel
     ? indexes.modelsById.get(playgroundProviderModel.model_id)
     : undefined;
+  const playgroundSupportsChat = Boolean(playgroundModel?.capabilities.includes("chat"));
+  const playgroundSupportsEmbeddings = Boolean(
+    playgroundModel?.capabilities.includes("embeddings"),
+  );
 
   function addProviderModel(providerModelId: string): void {
     if (!capability) return;
@@ -500,7 +505,7 @@ export default function LlmAssignmentModal({
                 onParentChange={setInheritParent}
                 onSubmit={submitInheritance}
               />
-              {playgroundAssignment && playgroundProviderModel ? (
+              {playgroundAssignment && playgroundProviderModel && playgroundSupportsChat ? (
                 <LlmPlayground
                   providerModel={playgroundProviderModel}
                   model={playgroundModel}
@@ -508,6 +513,17 @@ export default function LlmAssignmentModal({
                   assignment={playgroundAssignment}
                   titleId="llm-assignment-playground-title"
                   description="Run a stateless smoke test through this assignment. Assignment tuning applies automatically."
+                />
+              ) : null}
+              {playgroundAssignment &&
+              playgroundProviderModel &&
+              !playgroundSupportsChat &&
+              playgroundSupportsEmbeddings ? (
+                <LlmEmbeddingSmoke
+                  providerModel={playgroundProviderModel}
+                  model={playgroundModel}
+                  titleId="llm-assignment-embedding-smoke-title"
+                  description="Run a stateless smoke test through this embedding assignment."
                 />
               ) : null}
             </>

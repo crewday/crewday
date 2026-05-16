@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import math
 import time
 from collections import Counter
 from datetime import UTC, datetime, timedelta
@@ -40,6 +41,10 @@ from app.adapters.db.llm.models import (
 )
 from app.adapters.db.secrets.repositories import SqlAlchemySecretEnvelopeRepository
 from app.adapters.llm.fake import FakeLLMClient
+from app.adapters.llm.fastembed import (
+    FastEmbedEmbeddingClient,
+    FastEmbedEmbeddingError,
+)
 from app.adapters.llm.openrouter import (
     OpenRouterModelMetadata,
     fetch_openrouter_model_metadata,
@@ -195,6 +200,7 @@ LlmThinkingStrategy = Literal[
     "glm_extra_body",
     "openrouter_extra_body",
 ]
+LlmProviderType = Literal["openrouter", "openai_compatible", "fake", "local_embedding"]
 
 
 def _thinking_level(value: str | None) -> LlmThinkingLevel:
@@ -217,7 +223,7 @@ def _thinking_strategy(value: str | None) -> LlmThinkingStrategy:
 class LlmProviderResponse(BaseModel):
     id: str
     name: str
-    provider_type: Literal["openrouter", "openai_compatible", "fake"]
+    provider_type: LlmProviderType
     endpoint: str
     api_key_ref: str | None
     api_key_status: Literal["present", "missing", "rotating"]
@@ -237,6 +243,7 @@ class LlmModelResponse(BaseModel):
     capabilities: list[str]
     context_window: int | None
     max_output_tokens: int | None
+    embedding_dimensions: int | None
     thinking_level: LlmThinkingLevel
     thinking_strategy: LlmThinkingStrategy
     price_source: Literal["openrouter", "manual", ""]
@@ -583,6 +590,33 @@ class LlmProviderModelPlaygroundResponse(BaseModel):
     error_message: str | None = None
 
 
+class LlmProviderModelEmbeddingSmokeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(default="crew.day local embedding smoke test", max_length=16_000)
+
+    @field_validator("text")
+    @classmethod
+    def _strip_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("text must not be blank")
+        return stripped
+
+
+class LlmProviderModelEmbeddingSmokeResponse(BaseModel):
+    status: Literal["ok", "error"]
+    model_used: str
+    provider_used: str
+    provider_model_id: str
+    latency_ms: int
+    embedding_dimensions: int | None = None
+    vector_norm: float | None = None
+    error_id: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+
 class LlmProviderKeyPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -600,7 +634,7 @@ class ProviderPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=160)
-    provider_type: Literal["openrouter", "openai_compatible", "fake"]
+    provider_type: LlmProviderType
     api_endpoint: str | None = Field(default=None, max_length=2048)
     default_model: str | None = None
     timeout_s: int = Field(default=60, ge=1, le=600)
@@ -622,6 +656,7 @@ class ModelPayload(BaseModel):
     capabilities: list[str] = Field(default_factory=list)
     context_window: int | None = Field(default=None, ge=1)
     max_output_tokens: int | None = Field(default=None, ge=1)
+    embedding_dimensions: int | None = Field(default=None, ge=1)
     thinking_level: LlmThinkingLevel = "disabled"
     thinking_strategy: LlmThinkingStrategy = "none"
     price_source: Literal["openrouter", "manual", ""] = ""
@@ -831,6 +866,7 @@ def _model_response(
         capabilities=list(model.capabilities or []),
         context_window=model.context_window,
         max_output_tokens=model.max_output_tokens,
+        embedding_dimensions=model.embedding_dimensions,
         thinking_level=_thinking_level(model.thinking_level),
         thinking_strategy=_thinking_strategy(model.thinking_strategy),
         price_source=model.price_source,
@@ -1549,7 +1585,7 @@ def _encrypt_provider_api_key(
     api_key: SecretStr,
     settings: Settings,
 ) -> str:
-    if provider.provider_type == "fake":
+    if provider.provider_type in {"fake", "local_embedding"}:
         raise _unprocessable("provider_key_unsupported_provider_type")
     if settings.root_key is None:
         raise ServiceUnavailable(
@@ -1592,10 +1628,16 @@ def _validate_provider_model_payload(
     *,
     provider_model_id: str | None = None,
 ) -> None:
-    if not _provider_exists(session, payload.provider_id):
+    provider = session.get(LlmProvider, payload.provider_id)
+    if provider is None:
         raise _unprocessable("provider_not_found")
-    if not _model_exists(session, payload.model_id):
+    model = session.get(LlmModel, payload.model_id)
+    if model is None:
         raise _unprocessable("model_not_found")
+    if provider.provider_type == "local_embedding" and "embeddings" not in set(
+        model.capabilities or []
+    ):
+        raise _unprocessable("local_embedding_model_requires_embeddings")
     duplicate = session.scalar(
         select(LlmProviderModel.id)
         .where(
@@ -1910,6 +1952,7 @@ def _openrouter_model_payload(metadata: OpenRouterModelMetadata) -> ModelPayload
         capabilities=metadata.capabilities,
         context_window=metadata.context_window,
         max_output_tokens=metadata.max_output_tokens,
+        embedding_dimensions=None,
         thinking_level=metadata.thinking_level,
         thinking_strategy=metadata.thinking_strategy,
         price_source="openrouter",
@@ -2106,6 +2149,8 @@ def _playground_messages(
     model: LlmModel,
     image_url: str | None = None,
 ) -> list[ChatMessage]:
+    if "chat" not in set(model.capabilities or []):
+        raise _unprocessable("playground_requires_chat_model")
     if payload.system_prompt is not None and not provider_model.supports_system_prompt:
         raise _unprocessable("system_prompt_not_supported")
     image_ref = image_url if image_url is not None else payload.image_url
@@ -2224,6 +2269,25 @@ def _playground_cost_usd(
     if provider_model.fixed_cost_per_call_usd is not None:
         cost += provider_model.fixed_cost_per_call_usd
     return cost.quantize(Decimal("0.000001"))
+
+
+def _embedding_smoke_dimensions(model: LlmModel) -> int:
+    if "embeddings" not in set(model.capabilities or []):
+        raise _unprocessable("embedding_smoke_requires_embedding_model")
+    if model.embedding_dimensions is None:
+        raise _unprocessable("embedding_dimensions_unknown")
+    return model.embedding_dimensions
+
+
+def _embedding_smoke_client(
+    provider: LlmProvider, model: LlmModel
+) -> FastEmbedEmbeddingClient:
+    if provider.provider_type != "local_embedding":
+        raise _unprocessable("embedding_smoke_provider_type_not_supported")
+    return FastEmbedEmbeddingClient(
+        model_name=model.canonical_name,
+        dimensions=_embedding_smoke_dimensions(model),
+    )
 
 
 def _safe_provider_error(exc: BaseException) -> str:
@@ -2462,6 +2526,7 @@ def build_admin_llm_router() -> APIRouter:
             capabilities=payload.capabilities,
             context_window=payload.context_window,
             max_output_tokens=payload.max_output_tokens,
+            embedding_dimensions=payload.embedding_dimensions,
             thinking_level=payload.thinking_level,
             thinking_strategy=payload.thinking_strategy,
             price_source=payload.price_source,
@@ -2536,6 +2601,7 @@ def build_admin_llm_router() -> APIRouter:
             row.capabilities = payload.capabilities
             row.context_window = payload.context_window
             row.max_output_tokens = payload.max_output_tokens
+            row.embedding_dimensions = payload.embedding_dimensions
             row.thinking_level = payload.thinking_level
             row.thinking_strategy = payload.thinking_strategy
             row.price_source = payload.price_source
@@ -2691,6 +2757,49 @@ def build_admin_llm_router() -> APIRouter:
         return LlmProviderModelSyncPricingResponse(
             provider_model=_provider_model_response(row, model),
             pricing_sync_result=delta,
+        )
+
+    @router.post(
+        "/provider-models/{provider_model_id}/embedding-smoke",
+        response_model=LlmProviderModelEmbeddingSmokeResponse,
+        operation_id="admin.llm.provider_models.embedding_smoke",
+    )
+    def provider_model_embedding_smoke(
+        _ctx: _WriteCtx,
+        request: Request,
+        session: _Db,
+        provider_model_id: str,
+        payload: LlmProviderModelEmbeddingSmokeRequest,
+    ) -> LlmProviderModelEmbeddingSmokeResponse:
+        with tenant_agnostic():
+            provider_model, provider, model = _load_playground_target(
+                session, provider_model_id
+            )
+            client = _embedding_smoke_client(provider, model)
+            dimensions = _embedding_smoke_dimensions(model)
+        started = time.monotonic()
+        try:
+            vector = client.embed([payload.text])[0]
+        except FastEmbedEmbeddingError as exc:
+            return LlmProviderModelEmbeddingSmokeResponse(
+                status="error",
+                model_used=provider_model.api_model_id,
+                provider_used=provider.name,
+                provider_model_id=provider_model.id,
+                latency_ms=max(0, round((time.monotonic() - started) * 1000)),
+                embedding_dimensions=dimensions,
+                error_id=request_correlation_id(request),
+                error_code="embedding_smoke_failed",
+                error_message=scrub_string(str(exc)),
+            )
+        return LlmProviderModelEmbeddingSmokeResponse(
+            status="ok",
+            model_used=provider_model.api_model_id,
+            provider_used=provider.name,
+            provider_model_id=provider_model.id,
+            latency_ms=max(0, round((time.monotonic() - started) * 1000)),
+            embedding_dimensions=len(vector),
+            vector_norm=round(math.sqrt(sum(value * value for value in vector)), 6),
         )
 
     @router.post(

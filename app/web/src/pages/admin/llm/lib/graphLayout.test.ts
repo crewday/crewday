@@ -37,6 +37,7 @@ function model(id: string, displayName: string): LlmModel {
     capabilities: ["chat"],
     context_window: null,
     max_output_tokens: null,
+    embedding_dimensions: null,
     thinking_level: "disabled",
     thinking_strategy: "none",
     price_source: "manual",

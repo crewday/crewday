@@ -23,7 +23,11 @@ export interface LLMCall {
 
 // §11 — provider / model / provider-model graph shapes.
 
-export type LlmProviderType = "openrouter" | "openai_compatible" | "fake";
+export type LlmProviderType =
+  | "openrouter"
+  | "openai_compatible"
+  | "fake"
+  | "local_embedding";
 export type LlmApiKeyStatus = "present" | "missing" | "rotating";
 export type LlmPriceSource = "openrouter" | "manual" | "";
 export type LlmPriceSourceOverride = "" | "none" | "openrouter";
@@ -57,6 +61,7 @@ export interface LlmModel {
   capabilities: string[];
   context_window: number | null;
   max_output_tokens: number | null;
+  embedding_dimensions: number | null;
   thinking_level: LlmThinkingLevel;
   thinking_strategy: LlmThinkingStrategy;
   price_source: LlmPriceSource;
@@ -124,6 +129,23 @@ export interface LlmProviderModelPlaygroundResponse {
   error_id?: string | null;
   error_code?: string | null;
   error_message: string | null;
+}
+
+export interface LlmProviderModelEmbeddingSmokeRequest {
+  text: string;
+}
+
+export interface LlmProviderModelEmbeddingSmokeResponse {
+  status: "ok" | "error";
+  model_used: string;
+  provider_used: string;
+  provider_model_id: string;
+  latency_ms: number;
+  embedding_dimensions: number | null;
+  vector_norm: number | null;
+  error_id?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
 }
 
 export interface LlmAssignment {

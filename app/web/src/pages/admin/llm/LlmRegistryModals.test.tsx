@@ -795,6 +795,7 @@ describe("LlmRegistryModals", () => {
               capabilities: ["chat", "json_mode", "function_calling", "reasoning"],
               context_window: 128000,
               max_output_tokens: 8192,
+              embedding_dimensions: null,
               thinking_level: "high",
               thinking_strategy: "openrouter_extra_body",
               price_source: "openrouter",

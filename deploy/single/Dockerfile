@@ -18,7 +18,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CREWDAY_DATA_DIR=/data \
     CREWDAY_BIND_HOST=0.0.0.0 \
     CREWDAY_BIND_PORT=8000 \
-    CREWDAY_ALLOW_PUBLIC_BIND=1
+    CREWDAY_ALLOW_PUBLIC_BIND=1 \
+    FASTEMBED_CACHE_PATH=/app/.cache/fastembed
 
 RUN groupadd --system --gid 10001 crewday \
     && useradd --system --uid 10001 --gid crewday --home-dir /app --shell /usr/sbin/nologin crewday
@@ -34,6 +35,7 @@ COPY --from=web-build /web/dist ./app/web/dist
 
 RUN python -m pip install --upgrade pip \
     && python -m pip install . \
+    && python -m app.adapters.llm.fastembed \
     && chmod 0755 /usr/local/bin/crewday-server \
     && mkdir -p /data \
     && chown -R crewday:crewday /app /data \

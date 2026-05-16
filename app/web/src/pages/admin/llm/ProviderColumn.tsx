@@ -13,6 +13,13 @@ interface ProviderColumnProps {
   setProviderRef: ElementRefSetter;
 }
 
+function providerTypeLabel(provider: LlmProvider): string {
+  if (provider.provider_type === "openrouter") return "OpenRouter provider";
+  if (provider.provider_type === "openai_compatible") return "OpenAI compatible";
+  if (provider.provider_type === "local_embedding") return "Local embedding";
+  return "Fake";
+}
+
 export default function ProviderColumn(props: ProviderColumnProps) {
   const {
     providers,
@@ -55,13 +62,17 @@ export default function ProviderColumn(props: ProviderColumnProps) {
             </span>
           </header>
           <div className="llm-graph-node__meta" data-llm-edit-target="true">
-            <span className="llm-graph-node__type">{p.provider_type}</span>
+            <span className="llm-graph-node__type">{providerTypeLabel(p)}</span>
             <span className="llm-graph-node__endpoint mono">
               {p.endpoint || "(unset)"}
             </span>
           </div>
           <footer className="llm-graph-node__foot">
-            {p.api_key_status === "missing" ? (
+            {p.provider_type === "local_embedding" ? (
+              <Chip tone="sky" size="sm">
+                local
+              </Chip>
+            ) : p.api_key_status === "missing" ? (
               <Chip tone="rust" size="sm">
                 no key
               </Chip>

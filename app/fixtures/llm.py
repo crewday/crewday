@@ -42,10 +42,16 @@ __all__ = [
     "DEFAULT_MODEL_CANONICAL_NAME",
     "DEFAULT_MODEL_CAPABILITIES",
     "DEFAULT_PROVIDER_NAME",
+    "FEEDBACK_EMBED_CAPABILITY",
+    "LOCAL_BGE_EMBEDDING_DIMENSIONS",
+    "LOCAL_BGE_MODEL_CANONICAL_NAME",
+    "LOCAL_BGE_MODEL_DISPLAY_NAME",
+    "LOCAL_EMBEDDING_PROVIDER_NAME",
     "OPENROUTER_DEFAULT_MODEL_CANONICAL_NAME",
     "OPENROUTER_DEFAULT_PROVIDER_NAME",
     "seed_default_registry",
     "seed_default_registry_for_settings",
+    "seed_local_embedding_registry",
 ]
 
 
@@ -63,8 +69,115 @@ DEFAULT_MODEL_CAPABILITIES: tuple[str, ...] = (
 )
 OPENROUTER_DEFAULT_PROVIDER_NAME: str = "openrouter-default"
 OPENROUTER_DEFAULT_MODEL_CANONICAL_NAME: str = "google/gemma-4-31b-it"
+LOCAL_EMBEDDING_PROVIDER_NAME: str = "Local FastEmbed"
+LOCAL_BGE_MODEL_CANONICAL_NAME: str = "BAAI/bge-small-en-v1.5"
+LOCAL_BGE_MODEL_DISPLAY_NAME: str = "BGE Small EN v1.5"
+LOCAL_BGE_EMBEDDING_DIMENSIONS: int = 384
+FEEDBACK_EMBED_CAPABILITY: str = "feedback.embed"
 _DEFAULT_CAPABILITY: str = "default"
 _DEFAULT_REQUIRED_CAPABILITIES: list[str] = ["chat", "function_calling"]
+_FEEDBACK_EMBED_REQUIRED_CAPABILITIES: list[str] = ["embeddings"]
+
+
+def seed_local_embedding_registry(
+    session: Session,
+    *,
+    clock: Clock | None = None,
+) -> LlmProviderModel:
+    """Insert (or return) the local BGE embedding provider-model trio."""
+    c = clock if clock is not None else SystemClock()
+    now: datetime = c.now()
+
+    provider = session.execute(
+        select(LlmProvider).where(LlmProvider.name == LOCAL_EMBEDDING_PROVIDER_NAME)
+    ).scalar_one_or_none()
+    if provider is None:
+        provider = LlmProvider(
+            id=new_ulid(c),
+            name=LOCAL_EMBEDDING_PROVIDER_NAME,
+            provider_type="local_embedding",
+            timeout_s=60,
+            requests_per_minute=60,
+            is_enabled=True,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(provider)
+        session.flush()
+
+    model = session.execute(
+        select(LlmModel).where(
+            LlmModel.canonical_name == LOCAL_BGE_MODEL_CANONICAL_NAME
+        )
+    ).scalar_one_or_none()
+    if model is None:
+        model = LlmModel(
+            id=new_ulid(c),
+            canonical_name=LOCAL_BGE_MODEL_CANONICAL_NAME,
+            display_name=LOCAL_BGE_MODEL_DISPLAY_NAME,
+            capabilities=["embeddings"],
+            embedding_dimensions=LOCAL_BGE_EMBEDDING_DIMENSIONS,
+            thinking_level="disabled",
+            thinking_strategy="none",
+            is_active=True,
+            price_source="manual",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(model)
+        session.flush()
+
+    provider_model = session.execute(
+        select(LlmProviderModel).where(
+            LlmProviderModel.provider_id == provider.id,
+            LlmProviderModel.model_id == model.id,
+        )
+    ).scalar_one_or_none()
+    if provider_model is None:
+        provider_model = LlmProviderModel(
+            id=new_ulid(c),
+            provider_id=provider.id,
+            model_id=model.id,
+            api_model_id=LOCAL_BGE_MODEL_CANONICAL_NAME,
+            input_cost_per_million=0,
+            output_cost_per_million=0,
+            fixed_cost_per_call_usd=0,
+            supports_system_prompt=False,
+            supports_temperature=False,
+            is_enabled=True,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(provider_model)
+        session.flush()
+
+    assignment = session.execute(
+        select(LlmAssignment)
+        .where(
+            LlmAssignment.workspace_id.is_(None),
+            LlmAssignment.capability == FEEDBACK_EMBED_CAPABILITY,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    if assignment is None:
+        session.add(
+            LlmAssignment(
+                id=new_ulid(c),
+                workspace_id=None,
+                capability=FEEDBACK_EMBED_CAPABILITY,
+                model_id=provider_model.id,
+                provider=provider.name,
+                priority=0,
+                enabled=True,
+                max_tokens=None,
+                temperature=None,
+                extra_api_params={},
+                required_capabilities=_FEEDBACK_EMBED_REQUIRED_CAPABILITIES,
+                created_at=now,
+            )
+        )
+        session.flush()
+    return provider_model
 
 
 def seed_default_registry(
@@ -103,6 +216,7 @@ def seed_default_registry(
     # code-health: ignore[nloc,params] Idempotent fixture seeding keeps trio together.
     c = clock if clock is not None else SystemClock()
     now: datetime = c.now()
+    seed_local_embedding_registry(session, clock=c)
 
     provider = session.execute(
         select(LlmProvider).where(LlmProvider.name == provider_name)

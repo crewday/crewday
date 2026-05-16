@@ -52,6 +52,12 @@ from app.config import Settings
 from app.domain.llm.router import DEPLOYMENT_DEFAULT_CACHE_WORKSPACE_ID
 from app.events.bus import EventBus
 from app.events.types import LlmAssignmentChanged
+from app.fixtures.llm import (
+    FEEDBACK_EMBED_CAPABILITY,
+    LOCAL_BGE_MODEL_CANONICAL_NAME,
+    LOCAL_EMBEDDING_PROVIDER_NAME,
+    seed_default_registry,
+)
 from app.main import create_app
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.tenancy.orm_filter import install_tenant_filter
@@ -1618,6 +1624,208 @@ class TestAdminLlmRoutes:
             assert missing.status_code == 422, missing.text
             assert missing.json()["error"] == "assignment_missing_capability"
             assert missing.json()["missing_capabilities"] == ["vision", "json_mode"]
+        finally:
+            _wipe(session_factory)
+
+    def test_graph_includes_seeded_local_feedback_embed_assignment(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            with session_factory() as s, tenant_agnostic():
+                seed_default_registry(s)
+                s.commit()
+
+            response = client.get("/admin/api/v1/llm/graph")
+            assert response.status_code == 200, response.text
+            body = response.json()
+            provider = next(
+                item
+                for item in body["providers"]
+                if item["name"] == LOCAL_EMBEDDING_PROVIDER_NAME
+            )
+            model = next(
+                item
+                for item in body["models"]
+                if item["canonical_name"] == LOCAL_BGE_MODEL_CANONICAL_NAME
+            )
+            provider_model = next(
+                item
+                for item in body["provider_models"]
+                if item["provider_id"] == provider["id"]
+                and item["model_id"] == model["id"]
+            )
+            assignment = next(
+                item
+                for item in body["assignments"]
+                if item["capability"] == FEEDBACK_EMBED_CAPABILITY
+            )
+            assert provider["provider_type"] == "local_embedding"
+            assert provider["api_key_status"] == "missing"
+            assert model["display_name"] == "BGE Small EN v1.5"
+            assert model["capabilities"] == ["embeddings"]
+            assert model["embedding_dimensions"] == 384
+            assert provider_model["api_model_id"] == LOCAL_BGE_MODEL_CANONICAL_NAME
+            assert assignment["provider_model_id"] == provider_model["id"]
+            assert assignment["required_capabilities"] == ["embeddings"]
+            assert not [
+                issue
+                for issue in body["assignment_issues"]
+                if issue["capability"] == FEEDBACK_EMBED_CAPABILITY
+            ]
+        finally:
+            _wipe(session_factory)
+
+    def test_local_embedding_provider_model_can_be_assigned_to_feedback_embed(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+
+            provider = client.post(
+                "/admin/api/v1/llm/providers",
+                json={
+                    "name": "Local FastEmbed",
+                    "provider_type": "local_embedding",
+                },
+            )
+            assert provider.status_code == 200, provider.text
+            embedding_model = client.post(
+                "/admin/api/v1/llm/models",
+                json={
+                    "canonical_name": LOCAL_BGE_MODEL_CANONICAL_NAME,
+                    "display_name": "BGE Small EN v1.5",
+                    "capabilities": ["embeddings"],
+                    "embedding_dimensions": 384,
+                    "price_source": "manual",
+                },
+            )
+            assert embedding_model.status_code == 200, embedding_model.text
+            local_provider_model = client.post(
+                "/admin/api/v1/llm/provider-models",
+                json={
+                    "provider_id": provider.json()["id"],
+                    "model_id": embedding_model.json()["id"],
+                    "api_model_id": LOCAL_BGE_MODEL_CANONICAL_NAME,
+                    "supports_system_prompt": False,
+                    "supports_temperature": False,
+                    "price_source_override": "none",
+                },
+            )
+            assert local_provider_model.status_code == 200, local_provider_model.text
+
+            chat_model_rejected = client.post(
+                "/admin/api/v1/llm/provider-models",
+                json={
+                    "provider_id": provider.json()["id"],
+                    "model_id": seeded.model_id,
+                    "api_model_id": "chat-only-under-local",
+                },
+            )
+            assert chat_model_rejected.status_code == 422, chat_model_rejected.text
+            assert (
+                chat_model_rejected.json()["error"]
+                == "local_embedding_model_requires_embeddings"
+            )
+
+            chat_assignment_rejected = client.post(
+                "/admin/api/v1/llm/assignments",
+                json={
+                    "capability": FEEDBACK_EMBED_CAPABILITY,
+                    "provider_model_id": seeded.provider_model_id,
+                    "priority": 0,
+                },
+            )
+            assert chat_assignment_rejected.status_code == 422, (
+                chat_assignment_rejected.text
+            )
+            assert (
+                chat_assignment_rejected.json()["error"]
+                == "assignment_missing_capability"
+            )
+            assert chat_assignment_rejected.json()["missing_capabilities"] == [
+                "embeddings"
+            ]
+
+            assignment = client.post(
+                "/admin/api/v1/llm/assignments",
+                json={
+                    "capability": FEEDBACK_EMBED_CAPABILITY,
+                    "provider_model_id": local_provider_model.json()["id"],
+                    "priority": 0,
+                },
+            )
+            assert assignment.status_code == 200, assignment.text
+            assert assignment.json()["capability"] == FEEDBACK_EMBED_CAPABILITY
+            assert (
+                assignment.json()["provider_model_id"]
+                == local_provider_model.json()["id"]
+            )
+            assert assignment.json()["required_capabilities"] == ["embeddings"]
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_embedding_smoke_runs_local_client(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        class _FakeEmbeddingClient:
+            def __init__(self, *, model_name: str, dimensions: int) -> None:
+                self.model_name = model_name
+                self.dimensions = dimensions
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                assert texts == ["hello embeddings"]
+                assert self.model_name == LOCAL_BGE_MODEL_CANONICAL_NAME
+                return [[1.0] + [0.0] * (self.dimensions - 1)]
+
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            with session_factory() as s, tenant_agnostic():
+                provider_model = seed_default_registry(s)
+                local_provider_model_id = s.scalar(
+                    select(LlmProviderModel.id)
+                    .join(LlmProvider, LlmProvider.id == LlmProviderModel.provider_id)
+                    .where(LlmProvider.name == LOCAL_EMBEDDING_PROVIDER_NAME)
+                )
+                assert provider_model is not None
+                assert local_provider_model_id is not None
+                s.commit()
+
+            monkeypatch.setattr(
+                "app.api.admin.llm.FastEmbedEmbeddingClient", _FakeEmbeddingClient
+            )
+            response = client.post(
+                f"/admin/api/v1/llm/provider-models/{local_provider_model_id}"
+                "/embedding-smoke",
+                json={"text": "hello embeddings"},
+            )
+            assert response.status_code == 200, response.text
+            body = response.json()
+            assert body["status"] == "ok"
+            assert body["model_used"] == LOCAL_BGE_MODEL_CANONICAL_NAME
+            assert body["provider_model_id"] == local_provider_model_id
+            assert body["embedding_dimensions"] == 384
+            assert body["vector_norm"] == 1
         finally:
             _wipe(session_factory)
 

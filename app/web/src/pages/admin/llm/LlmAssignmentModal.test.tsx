@@ -524,6 +524,153 @@ describe("LlmAssignmentModal", () => {
     });
   });
 
+  it("shows local BGE as feedback.embed compatible and uses embedding smoke", async () => {
+    const feedbackGraph: LlmGraphPayload = {
+      ...baseGraph,
+      providers: [
+        ...baseGraph.providers,
+        {
+          id: "prov_local",
+          name: "Local FastEmbed",
+          provider_type: "local_embedding",
+          endpoint: "",
+          api_key_ref: null,
+          api_key_status: "missing",
+          default_model: null,
+          requests_per_minute: 60,
+          timeout_s: 60,
+          is_enabled: true,
+          provider_model_count: 1,
+          spend_usd_30d: 0,
+          calls_30d: 0,
+        },
+      ],
+      models: [
+        ...baseGraph.models,
+        {
+          id: "model_bge",
+          canonical_name: "BAAI/bge-small-en-v1.5",
+          display_name: "BGE Small EN v1.5",
+          capabilities: ["embeddings"],
+          context_window: null,
+          max_output_tokens: null,
+          embedding_dimensions: 384,
+          thinking_level: "disabled",
+          thinking_strategy: "none",
+          price_source: "manual",
+          price_source_model_id: null,
+          is_active: true,
+          notes: null,
+          provider_model_count: 1,
+          spend_usd_30d: 0,
+          calls_30d: 0,
+        },
+      ],
+      provider_models: [
+        ...baseGraph.provider_models,
+        {
+          id: "pm_bge",
+          provider_id: "prov_local",
+          model_id: "model_bge",
+          api_model_id: "BAAI/bge-small-en-v1.5",
+          input_cost_per_million: 0,
+          output_cost_per_million: 0,
+          fixed_cost_per_call_usd: 0,
+          max_tokens_override: null,
+          temperature_override: null,
+          supports_system_prompt: false,
+          supports_temperature: false,
+          thinking_strategy_override: null,
+          effective_thinking_strategy: "none",
+          extra_api_params: {},
+          price_source_override: "none",
+          price_source_model_id_override: null,
+          price_last_synced_at: null,
+          is_enabled: true,
+          spend_usd_30d: 0,
+          calls_30d: 0,
+        },
+      ],
+      capabilities: [
+        ...baseGraph.capabilities,
+        {
+          key: "feedback.embed",
+          description: "Compute dense embeddings for texts",
+          required_capabilities: ["embeddings"],
+          spend_usd_30d: 0,
+          calls_30d: 0,
+          direct_spend_usd_30d: 0,
+          direct_calls_30d: 0,
+          inherited_spend_usd_30d: 0,
+          inherited_calls_30d: 0,
+        },
+      ],
+      assignments: [
+        ...baseGraph.assignments,
+        {
+          id: "assign_feedback_embed",
+          capability: "feedback.embed",
+          description: "Compute dense embeddings for texts",
+          priority: 0,
+          provider_model_id: "pm_bge",
+          max_tokens: null,
+          temperature: null,
+          thinking_level_override: null,
+          effective_thinking_level: "disabled",
+          effective_thinking_strategy: "none",
+          extra_api_params: {},
+          required_capabilities: ["embeddings"],
+          is_enabled: true,
+          last_used_at: null,
+          spend_usd_30d: 0,
+          calls_30d: 0,
+          direct_spend_usd_30d: 0,
+          direct_calls_30d: 0,
+          inherited_spend_usd_30d: 0,
+          inherited_calls_30d: 0,
+        },
+      ],
+    };
+    const calls = installFetch((url) =>
+      url === "/admin/api/v1/llm/provider-models/pm_bge/embedding-smoke"
+        ? {
+            body: {
+              status: "ok",
+              model_used: "BAAI/bge-small-en-v1.5",
+              provider_used: "Local FastEmbed",
+              provider_model_id: "pm_bge",
+              latency_ms: 12,
+              embedding_dimensions: 384,
+              vector_norm: 1,
+            },
+          }
+        : { body: {} },
+    );
+
+    renderAssignment("feedback.embed", feedbackGraph);
+    const dialog = screen.getByRole("dialog", { name: "feedback.embed" });
+
+    expect(within(dialog).queryByRole("region", { name: "Playground" })).not.toBeInTheDocument();
+    const smoke = within(dialog).getByRole("region", { name: "Embedding smoke" });
+    expect(within(smoke).getByText("BAAI/bge-small-en-v1.5")).toBeInTheDocument();
+    const textOnly = providerModelRow(dialog, "Text Only");
+    expect(within(textOnly).getByText("missing embeddings")).toBeInTheDocument();
+    expect(within(textOnly).getByRole("button", { name: /Add Text Only/ })).toBeDisabled();
+
+    fireEvent.change(within(smoke).getByLabelText("Text Required"), {
+      target: { value: "feedback text" },
+    });
+    fireEvent.click(within(smoke).getByRole("button", { name: "Run embedding smoke" }));
+
+    expect(await within(smoke).findByText("Embedding ready")).toBeInTheDocument();
+    const post = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/provider-models/pm_bge/embedding-smoke",
+    );
+    expect(post?.init.method).toBe("POST");
+    expect(bodyOf(post!)).toEqual({ text: "feedback text" });
+  });
+
   it("runs playground prompts through the edited assignment defaults", async () => {
     const assignmentGraph: LlmGraphPayload = {
       ...baseGraph,

@@ -3503,6 +3503,7 @@ class TestRegistryShape:
             "capabilities",
             "context_window",
             "max_output_tokens",
+            "embedding_dimensions",
             "thinking_level",
             "thinking_strategy",
             "is_active",

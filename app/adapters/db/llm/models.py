@@ -1285,6 +1285,7 @@ _LLM_PROVIDER_TYPE_VALUES: tuple[str, ...] = (
     "openrouter",
     "openai_compatible",
     "fake",
+    "local_embedding",
 )
 
 
@@ -1337,7 +1338,7 @@ class LlmProvider(Base):
     # Display name; uniqueness is enforced at the DB level so the
     # admin UI never shows two providers with the same label.
     name: Mapped[str] = mapped_column(String, nullable=False)
-    # ``openrouter | openai_compatible | fake``. CHECK clamps the
+    # ``openrouter | openai_compatible | fake | local_embedding``. CHECK clamps the
     # set; widening is additive.
     provider_type: Mapped[str] = mapped_column(String, nullable=False)
     # Optional override for the provider type's default URL. Required
@@ -1429,6 +1430,7 @@ class LlmModel(Base):
     )
     context_window: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    embedding_dimensions: Mapped[int | None] = mapped_column(Integer, nullable=True)
     thinking_level: Mapped[str] = mapped_column(
         String,
         nullable=False,

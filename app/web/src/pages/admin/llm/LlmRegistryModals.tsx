@@ -21,6 +21,7 @@ import type {
   LlmThinkingStrategy,
 } from "@/types";
 import LlmPlayground from "./LlmPlayground";
+import LlmEmbeddingSmoke from "./LlmEmbeddingSmoke";
 import type { LlmIndexes } from "./lib/llmIndexes";
 import {
   THINKING_LEVEL_OPTIONS,
@@ -88,6 +89,7 @@ interface ModelPayload {
   capabilities: string[];
   context_window: number | null;
   max_output_tokens: number | null;
+  embedding_dimensions: number | null;
   thinking_level: LlmThinkingLevel;
   thinking_strategy: LlmThinkingStrategy;
   price_source: LlmPriceSource;
@@ -245,11 +247,18 @@ function formatUsdAmount(value: number): string {
   })}`;
 }
 
+function providerTypeLabel(providerType: LlmProviderType): string {
+  if (providerType === "openrouter") return "OpenRouter provider";
+  if (providerType === "openai_compatible") return "OpenAI compatible";
+  if (providerType === "local_embedding") return "Local embedding";
+  return "Fake";
+}
+
 function providerOption(provider: LlmProvider): SearchableSelectOption {
   return {
     value: provider.id,
     label: provider.name,
-    secondaryText: provider.provider_type,
+    secondaryText: providerTypeLabel(provider.provider_type),
     searchText: [
       provider.name,
       provider.provider_type,
@@ -257,6 +266,18 @@ function providerOption(provider: LlmProvider): SearchableSelectOption {
       provider.id,
     ].join(" "),
   };
+}
+
+function providerAllowsApiKey(providerType: LlmProviderType): boolean {
+  return providerType !== "fake" && providerType !== "local_embedding";
+}
+
+function modelSupportsChat(model: LlmModel | undefined): boolean {
+  return Boolean(model?.capabilities.includes("chat"));
+}
+
+function modelSupportsEmbeddings(model: LlmModel | undefined): boolean {
+  return Boolean(model?.capabilities.includes("embeddings"));
 }
 
 function modelOption(model: LlmModel): SearchableSelectOption {
@@ -551,6 +572,7 @@ function ProviderForm(props: ProviderFormProps) {
             >
               <option value="openrouter">OpenRouter</option>
               <option value="openai_compatible">OpenAI compatible</option>
+              <option value="local_embedding">Local embedding</option>
               <option value="fake">Fake</option>
             </select>
           </FormModalField>
@@ -572,7 +594,7 @@ function ProviderForm(props: ProviderFormProps) {
             aria-describedby={errId}
           />
         </FormModalField>
-        {mode === "edit" ? (
+        {mode === "edit" && provider && providerAllowsApiKey(provider.provider_type) ? (
           <div className="llm-provider-key">
             <div className="llm-provider-key__head">
               <span className="llm-provider-key__label">API key</span>
@@ -702,6 +724,11 @@ function ModelForm({
     model?.max_output_tokens === null || model?.max_output_tokens === undefined
       ? ""
       : String(model.max_output_tokens),
+  );
+  const [embeddingDimensions, setEmbeddingDimensions] = useState(
+    model?.embedding_dimensions === null || model?.embedding_dimensions === undefined
+      ? ""
+      : String(model.embedding_dimensions),
   );
   const [priceSource, setPriceSource] = useState<LlmPriceSource>(
     model?.price_source ?? "",
@@ -928,6 +955,11 @@ function ModelForm({
         ? ""
         : String(payload.max_output_tokens),
     );
+    setEmbeddingDimensions(
+      payload.embedding_dimensions === null || payload.embedding_dimensions === undefined
+        ? ""
+        : String(payload.embedding_dimensions),
+    );
     setThinkingLevel(payload.thinking_level);
     setThinkingStrategy(payload.thinking_strategy);
     setPriceSource(payload.price_source);
@@ -954,6 +986,7 @@ function ModelForm({
     event.preventDefault();
     const contextValue = numberOrNull(contextWindow);
     const outputValue = numberOrNull(maxOutput);
+    const embeddingDimensionsValue = numberOrNull(embeddingDimensions);
     if (!canonicalName.trim()) return setClientErr("Canonical name is required.");
     if (!displayName.trim()) return setClientErr("Display name is required.");
     if (contextValue !== null && (!Number.isInteger(contextValue) || contextValue < 1)) {
@@ -961,6 +994,12 @@ function ModelForm({
     }
     if (outputValue !== null && (!Number.isInteger(outputValue) || outputValue < 1)) {
       return setClientErr("Max output tokens must be a positive whole number.");
+    }
+    if (
+      embeddingDimensionsValue !== null &&
+      (!Number.isInteger(embeddingDimensionsValue) || embeddingDimensionsValue < 1)
+    ) {
+      return setClientErr("Embedding dimensions must be a positive whole number.");
     }
     setClientErr(null);
     setServerErr(null);
@@ -970,6 +1009,7 @@ function ModelForm({
       capabilities,
       context_window: contextValue,
       max_output_tokens: outputValue,
+      embedding_dimensions: embeddingDimensionsValue,
       thinking_level: thinkingLevel,
       thinking_strategy: thinkingStrategy,
       price_source: priceSource,
@@ -1071,6 +1111,18 @@ function ModelForm({
             />
           </FormModalField>
         </FormModalGrid>
+        <FormModalField label="Embedding dimensions" requirement="optional">
+          <input
+            type="number"
+            min="1"
+            value={embeddingDimensions}
+            onChange={(e) => setEmbeddingDimensions(e.target.value)}
+            aria-invalid={
+              clientErr === "Embedding dimensions must be a positive whole number."
+            }
+            aria-describedby={errId}
+          />
+        </FormModalField>
         <FormModalGrid>
           <FormModalField label="Thinking strategy" requirement="required">
             <select
@@ -1154,7 +1206,7 @@ function ModelForm({
                     <span className="llm-model-provider-gaps__provider">
                       <span className="llm-model-provider-gaps__name">{provider.name}</span>
                       <span className="llm-model-provider-gaps__meta">
-                        {provider.provider_type.replace("_", " ")}
+                        {providerTypeLabel(provider.provider_type)}
                         {provider.is_enabled ? "" : " / disabled"}
                       </span>
                     </span>
@@ -1787,7 +1839,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             {err}
           </p>
         ) : null}
-        {mode === "edit" && providerModel ? (
+        {mode === "edit" && providerModel && modelSupportsChat(persistedModel) ? (
           <LlmPlayground
             providerModel={providerModel}
             model={persistedModel}
@@ -1796,6 +1848,17 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             thinkingStrategy={playgroundThinkingStrategy}
             titleId="llm-provider-model-playground-title"
             description="Run a stateless smoke test against this provider-model."
+          />
+        ) : null}
+        {mode === "edit" &&
+        providerModel &&
+        !modelSupportsChat(persistedModel) &&
+        modelSupportsEmbeddings(persistedModel) ? (
+          <LlmEmbeddingSmoke
+            providerModel={providerModel}
+            model={persistedModel}
+            titleId="llm-provider-model-embedding-smoke-title"
+            description="Run a stateless smoke test against this embedding provider-model."
           />
         ) : null}
     </FormModal>

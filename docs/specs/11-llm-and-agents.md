@@ -675,7 +675,7 @@ equivalents (§13).
 llm_provider
 ├── id                     ULID PK
 ├── name                   text            -- display name; unique
-├── provider_type          text            -- openrouter | openai_compatible | fake
+├── provider_type          text            -- openrouter | openai_compatible | fake | local_embedding
 ├── api_endpoint           text?           -- overrides the type's default URL
 ├── api_key_envelope_ref   text?           -- pointer into secret_envelope (§15); never the ciphertext
 ├── default_model          text?           -- adapter default model id; not routing/fallback order
@@ -698,6 +698,9 @@ llm_provider
     (`docker-compose.dev.yml`, repeated in
     `mocks/docker-compose.e2e.yml`) is the only deployment that flips
     it on.
+  - `local_embedding` — in-process CPU embedding runtime backed by
+    FastEmbed. It has no API key, no endpoint requirement, and is only
+    valid for provider-model rows whose model carries `embeddings`.
 - A native Anthropic SDK adapter is **deferred** to a later version; v1
   reaches Claude models (if an operator wants them) through OpenRouter.
 - `api_key_envelope_ref` is an internal, read-only pointer into
@@ -737,7 +740,8 @@ llm_provider
     `error = "session_only_endpoint"` and
     `WWW-Authenticate: error="session_only_endpoint"`; missing provider
     or invisible admin surface returns `404 not_found`; blank/malformed
-    `api_key` input is `422`; setting a key on `fake` providers returns
+    `api_key` input is `422`; setting a key on `fake` or
+    `local_embedding` providers returns
     `422 provider_key_unsupported_provider_type`; missing root key
     material returns `503 root_key_required`; database constraint races
     return `409 provider_key_constraint_violation`.
@@ -763,6 +767,7 @@ llm_model
 ├── capabilities           jsonb           -- list[str]; see "Model capability tags" below
 ├── context_window         int?
 ├── max_output_tokens      int?
+├── embedding_dimensions   int?            -- required when dimensions are known for embedding models
 ├── thinking_level         text            -- disabled | low | medium | high; default disabled
 ├── thinking_strategy      text            -- none | gemma_system_token | glm_extra_body | openrouter_extra_body; default none
 ├── is_active              bool
@@ -1126,12 +1131,13 @@ writes a deployment inheritance row that points somewhere else.
 
 Inherited chains are validated against the **child** capability's
 `required_capabilities`, not only against the parent assignment's own
-tags. This is visible in `/admin/llm/graph`: `voice.transcribe` and
-`feedback.embed` can inherit the `default` chain structurally, but the
-Gemma chat model is marked incompatible because it lacks
-`audio_input` / `embeddings`; calls fail closed until an operator adds
-a compatible direct assignment or changes the inheritance target to a
-compatible chain.
+tags. This is visible in `/admin/llm/graph`: `voice.transcribe` can
+inherit the `default` chain structurally, but the Gemma chat model is
+marked incompatible because it lacks `audio_input`; calls fail closed
+until an operator adds a compatible direct assignment or changes the
+inheritance target to a compatible chain. The same invariant applies
+if an operator removes the seeded direct `feedback.embed` embedding
+assignment and lets it fall back to an incompatible chat-only chain.
 
 ### Capability defaults (seeds)
 
@@ -1140,9 +1146,9 @@ At first boot the deployment is seeded with:
 | capability              | default `provider_model`                                                    | rationale |
 |-------------------------|-----------------------------------------------------------------------------|-----------|
 | `default`               | OpenRouter × `google/gemma-4-31b-it` (priority 0)                           | Matches the user's Gemma pick; inherited by capabilities without their own chain. |
+| `feedback.embed`        | Local FastEmbed × `BAAI/bge-small-en-v1.5` (priority 0)                     | Local CPU embeddings work without an external provider key; the model has `embeddings` and `embedding_dimensions=384`. |
 | capabilities without direct chains | inherit `default` unless a deployment inheritance edge says otherwise | Keeps ordinary LLM features auto-configured while preserving direct override precedence. |
 | `voice.transcribe`      | inherits `default`, but is **invalid until an audio model is assigned**      | The inherited Gemma chat model lacks `audio_input`, so routing fails closed and `/admin/llm/graph` shows the mismatch. |
-| `feedback.embed`        | inherits `default`, but is **invalid until an embedding model is assigned**  | The inherited Gemma chat model lacks `embeddings`; unsupported model use is never silent. |
 | `documents.ocr`         | inherits `default` only when the model has the required `vision` tag         | Local extractors handle the common cases; the LLM fallback remains visibly governed by model capability tags. See §21 "Document text extraction". |
 
 The capability catalogue itself (the closed enum of keys —
