@@ -554,11 +554,10 @@ def _build_llm(settings: Settings) -> LLMClient | None:
       is resolved per request, so an admin key rotation takes effect
       without rebuilding the app.
 
-    The OCR-autofill capability layers an additional gate on
-    :attr:`Settings.llm_ocr_model` — both a usable LLM client and a
-    model id must be present for ``POST /expenses/scan`` to run. That
-    keeps the fake provider keyless while still letting production
-    disable the capability by clearing either side.
+    ``POST /expenses/scan`` still uses :attr:`Settings.llm_ocr_model` as
+    its legacy preview gate. Receipt autofill attached to claims resolves
+    the ``expenses.autofill`` capability assignment first and only falls
+    back to that setting for old local fixtures.
     """
     if settings.llm_provider == "fake":
         _log.info(

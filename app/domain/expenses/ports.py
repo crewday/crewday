@@ -656,6 +656,9 @@ class ExpensesRepository(Protocol):
         correlation_id: str,
         actor_user_id: str,
         created_at: datetime,
+        assignment_id: str | None = None,
+        fallback_attempts: int = 0,
+        finish_reason: str | None = None,
     ) -> None:
         """Insert one ``llm_usage`` row in the same UoW.
 

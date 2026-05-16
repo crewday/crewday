@@ -474,6 +474,9 @@ class _FakeRepo:
         correlation_id: str,
         actor_user_id: str,
         created_at: datetime,
+        assignment_id: str | None = None,
+        fallback_attempts: int = 0,
+        finish_reason: str | None = None,
     ) -> None:
         self.llm_usage_rows.append(
             {
@@ -489,6 +492,9 @@ class _FakeRepo:
                 "correlation_id": correlation_id,
                 "actor_user_id": actor_user_id,
                 "created_at": created_at,
+                "assignment_id": assignment_id,
+                "fallback_attempts": fallback_attempts,
+                "finish_reason": finish_reason,
             }
         )
 

@@ -180,9 +180,11 @@ from app.domain.expenses.autofill import (
     ExtractionTimeout,
     ReceiptExtraction,
     extract_from_bytes,
+    resolve_autofill_model_pick,
 )
 from app.domain.expenses.ports import ExpensesRepository
 from app.domain.llm.consent import load_consent_set
+from app.domain.llm.router import ModelPick
 from app.domain.messaging.notifications import NotificationService
 from app.tenancy import WorkspaceContext
 from app.util.clock import SystemClock
@@ -1042,23 +1044,24 @@ def _build_attach_runner(
 ) -> Callable[..., None] | None:
     """Return an extraction runner closure, or ``None`` to skip autofill.
 
-    Both knobs must be set for the runner to fire:
+    A usable LLM client must be present for the runner to fire:
 
     * ``llm`` — a usable :class:`LLMClient` (the factory wires the
       fake provider directly in dev / e2e, or OpenRouter when a key
       source is available).
-    * ``settings.llm_ocr_model`` — the deployment-level capability
-      gate. ``None`` disables autofill.
 
-    When either is missing the helper returns ``None`` — the
+    When it is missing the helper returns ``None`` — the
     :func:`~app.domain.expenses.claims.attach_receipt` seam treats
     that as the "no autofill" path and skips the runner entirely.
+    Model selection is now owned by the ``expenses.autofill`` capability
+    assignment; ``settings.llm_ocr_model`` remains only as the domain
+    layer's temporary compatibility fallback for older local fixtures.
 
     The closure captures ``llm`` / ``settings`` / ``storage`` from
     the request scope so the domain layer never has to reach back
     through ``app.state`` for adapter handles.
     """
-    if llm is None or settings.llm_ocr_model is None:
+    if llm is None:
         return None
 
     from app.worker.tasks.receipt_ocr import run_receipt_ocr
@@ -1423,26 +1426,31 @@ async def scan_expense_receipt_route(
     ``extraction_runner`` re-run the same extraction inside the
     attach transaction.
 
-    Disabled at the deployment level when ``settings.llm_ocr_model``
-    is unset — the response is 503 ``scan_not_configured`` so a
-    caller can distinguish "no model assigned" from "transient
-    provider error".
+    Disabled at the deployment level when neither the
+    ``expenses.autofill`` assignment nor the legacy
+    ``settings.llm_ocr_model`` fallback is present — the response is
+    503 ``scan_not_configured`` so a caller can distinguish "no model
+    assigned" from "transient provider error".
 
     The hint fields (``hint_currency``, ``hint_vendor``) are reserved
     for the v1 endpoint surface; the current pipeline does not yet
     feed them into the prompt. Wiring is tracked alongside cd-e626's
     prompt-tuning work — surfacing them here keeps the contract
     stable for the SPA. **Crucially the prompt body still carries
-    only the OCR text** — these hints are never forwarded to the
-    LLM, so an attacker who supplies a doctored ``hint_vendor``
-    cannot inject prompt content the model sees today.
+    only the fixed extraction instruction plus the receipt image** —
+    these hints are never forwarded to the LLM, so an attacker who
+    supplies a doctored ``hint_vendor`` cannot inject prompt content
+    the model sees today.
 
     Every successful or failed LLM call lands one usage row
     (capability ``expenses.autofill``) so the workspace usage budget
     envelope stays honest even when callers exercise the preview
     surface.
     """
-    if settings.llm_ocr_model is None:
+    repo, _checker = make_seam_pair(session, ctx)
+    model_pick = resolve_autofill_model_pick(repo, ctx, clock=SystemClock())
+
+    if model_pick is None and settings.llm_ocr_model is None:
         # Drain the upload so the multipart parser doesn't leak
         # tempfiles on the disabled-feature path.
         await image.close()
@@ -1456,6 +1464,10 @@ async def scan_expense_receipt_route(
                 "(settings.llm_ocr_model is unset)"
             ),
         )
+    fallback_model_id = (
+        model_pick.api_model_id if model_pick is not None else settings.llm_ocr_model
+    )
+    assert fallback_model_id is not None
 
     # v1 single-image: the second image slot is reserved for the
     # multi-page batch follow-up (a tip-receipt + a meal-receipt
@@ -1494,14 +1506,13 @@ async def scan_expense_receipt_route(
             message="image upload is empty",
         )
 
-    repo, _checker = make_seam_pair(session, ctx)
-
     try:
         metrics = extract_from_bytes(
             image_bytes,
             llm=llm,
             settings=settings,
             consents=load_consent_set(session, ctx.workspace_id),
+            model_pick=model_pick,
         )
     except ExtractionParseError as exc:
         # Chat call may have landed before the parse failed — record
@@ -1511,8 +1522,9 @@ async def scan_expense_receipt_route(
             repo,
             ctx,
             burnt=exc.burnt_metrics,
-            fallback_model_id=settings.llm_ocr_model,
+            fallback_model_id=fallback_model_id,
             status="error",
+            model_pick=model_pick,
         )
         raise _http(422, "extraction_parse_error", message=str(exc)) from exc
     except ExtractionTimeout as exc:
@@ -1520,8 +1532,9 @@ async def scan_expense_receipt_route(
             repo,
             ctx,
             burnt=None,
-            fallback_model_id=settings.llm_ocr_model,
+            fallback_model_id=fallback_model_id,
             status="timeout",
+            model_pick=model_pick,
         )
         raise _http(504, "extraction_timeout", message=str(exc)) from exc
     except ExtractionRateLimited as exc:
@@ -1529,8 +1542,9 @@ async def scan_expense_receipt_route(
             repo,
             ctx,
             burnt=None,
-            fallback_model_id=settings.llm_ocr_model,
+            fallback_model_id=fallback_model_id,
             status="error",
+            model_pick=model_pick,
         )
         # ``Retry-After: 60`` mirrors the §11 fallback-chain hint
         # (60 s window for the next attempt). The exact value is the
@@ -1548,8 +1562,9 @@ async def scan_expense_receipt_route(
             repo,
             ctx,
             burnt=None,
-            fallback_model_id=settings.llm_ocr_model,
+            fallback_model_id=fallback_model_id,
             status="error",
+            model_pick=model_pick,
         )
         raise _http(503, "extraction_provider_error", message=str(exc)) from exc
 
@@ -1562,8 +1577,9 @@ async def scan_expense_receipt_route(
             repo,
             ctx,
             burnt=metrics,
-            fallback_model_id=settings.llm_ocr_model,
+            fallback_model_id=fallback_model_id,
             status="error",
+            model_pick=model_pick,
         )
         raise _http(
             500,
@@ -1575,8 +1591,9 @@ async def scan_expense_receipt_route(
         repo,
         ctx,
         burnt=metrics,
-        fallback_model_id=settings.llm_ocr_model,
+        fallback_model_id=fallback_model_id,
         status="ok",
+        model_pick=model_pick,
     )
     return ExpenseScanResultPayload.from_extraction(extraction)
 
@@ -1588,6 +1605,7 @@ def _record_preview_usage(
     burnt: ExtractionMetrics | None,
     fallback_model_id: str,
     status: Literal["ok", "error", "timeout"],
+    model_pick: ModelPick | None = None,
 ) -> None:
     """Insert one LLM usage row for a preview-endpoint call.
 
@@ -1616,4 +1634,13 @@ def _record_preview_usage(
         correlation_id=new_ulid(),
         actor_user_id=ctx.actor_id,
         created_at=SystemClock().now(),
+        assignment_id=(
+            burnt.assignment_id
+            if burnt is not None
+            else model_pick.assignment_id
+            if model_pick is not None
+            else None
+        ),
+        fallback_attempts=(burnt.fallback_attempts if burnt is not None else 0),
+        finish_reason=burnt.finish_reason if burnt is not None else None,
     )

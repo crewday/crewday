@@ -10,6 +10,7 @@ through the existing port, records usage through
 
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -20,9 +21,15 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy.orm import Session
 
-from app.adapters.llm.ports import LLMClient, LLMResponse
+from app.adapters.llm.ports import (
+    ChatContent,
+    ChatMessage,
+    LLMClient,
+    LLMResponse,
+)
 from app.domain.llm.budget import (
     PricingTable,
+    UsageStatus,
     check_budget,
     default_pricing_table,
     estimate_cost_cents,
@@ -51,13 +58,14 @@ _PROJECTED_COMPLETION_TOKENS: Final[int] = 512
 _LOW_CONFIDENCE_WITHOUT_VENDOR: Final[int] = 40
 
 _PROMPT: Final[str] = (
-    "Return only JSON for this receipt OCR text. Shape: "
+    "Return only JSON for this receipt image. Shape: "
     '{"vendor": string|null, "amount_cents": integer, '
     '"currency_iso4217": string|null, "occurred_on": "YYYY-MM-DD"|null, '
     '"category": string|null, "confidence_pct": integer 0..100, '
     '"is_receipt": boolean}. If this is not a receipt, set '
     '"is_receipt": false. Do not invent missing vendor names.'
 )
+_DEFAULT_RECEIPT_MIME: Final[str] = "image/jpeg"
 
 _THREE_DECIMAL_CURRENCIES: Final[frozenset[str]] = frozenset(
     {"BHD", "JOD", "KWD", "OMR", "TND"}
@@ -157,14 +165,9 @@ def extract(ctx: ReceiptOcrContext, image_bytes: bytes) -> ReceiptDraft:
         _check_budget(ctx, model_pick=model_pick, pricing=pricing, clock=clock)
 
         started = clock.now()
-        ocr_text = ctx.llm.ocr(
-            model_id=model_pick.api_model_id,
-            image_bytes=image_bytes,
-            consents=consents,
-        )
         response = ctx.llm.chat(
             model_id=model_pick.api_model_id,
-            messages=[{"role": "user", "content": f"{_PROMPT}\n\n{ocr_text}"}],
+            messages=_receipt_messages(image_bytes),
             max_tokens=model_pick.max_tokens or _PROJECTED_COMPLETION_TOKENS,
             temperature=(
                 model_pick.temperature if model_pick.temperature is not None else 0.0
@@ -172,6 +175,41 @@ def extract(ctx: ReceiptOcrContext, image_bytes: bytes) -> ReceiptDraft:
             consents=consents,  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
         )
         latency_ms = max(0, int((clock.now() - started).total_seconds() * 1000))
+
+        try:
+            draft = _parse_response(response.text, ctx=ctx)
+        except _ReceiptNonReceiptError:
+            _record_usage(
+                ctx,
+                model_pick=model_pick,
+                response=response,
+                correlation_id=correlation_id,
+                latency_ms=latency_ms,
+                pricing=pricing,
+                clock=clock,
+                attribution=attribution,
+                fallback_attempts=attempt,
+                attempt=attempt,
+                status="ok",
+            )
+            raise
+        except ReceiptParseError as exc:
+            _record_usage(
+                ctx,
+                model_pick=model_pick,
+                response=response,
+                correlation_id=correlation_id,
+                latency_ms=latency_ms,
+                pricing=pricing,
+                clock=clock,
+                attribution=attribution,
+                fallback_attempts=attempt,
+                attempt=attempt,
+                status="error",
+            )
+            last_parse_error = exc
+            continue
+
         _record_usage(
             ctx,
             model_pick=model_pick,
@@ -183,18 +221,41 @@ def extract(ctx: ReceiptOcrContext, image_bytes: bytes) -> ReceiptDraft:
             attribution=attribution,
             fallback_attempts=attempt,
             attempt=attempt,
+            status="ok",
         )
-
-        try:
-            return _parse_response(response.text, ctx=ctx)
-        except _ReceiptNonReceiptError:
-            raise
-        except ReceiptParseError as exc:
-            last_parse_error = exc
+        return draft
 
     if last_parse_error is not None:
         raise last_parse_error
     raise ReceiptParseError("LLM output was not a usable receipt draft")
+
+
+def _receipt_messages(image_bytes: bytes) -> list[ChatMessage]:
+    content: ChatContent = [
+        {"type": "text", "text": _PROMPT},
+        {
+            "type": "image_url",
+            "image_url": {"url": _image_data_url(image_bytes)},
+        },
+    ]
+    return [{"role": "user", "content": content}]
+
+
+def _image_data_url(image_bytes: bytes) -> str:
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    return f"data:{_image_mime_type(image_bytes)};base64,{encoded}"
+
+
+def _image_mime_type(image_bytes: bytes) -> str:
+    if image_bytes.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if image_bytes.startswith(b"%PDF-"):
+        return "application/pdf"
+    if image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
+        return "image/webp"
+    return _DEFAULT_RECEIPT_MIME
 
 
 def _check_budget(
@@ -232,22 +293,27 @@ def _record_usage(
     attribution: AgentAttribution,
     fallback_attempts: int,
     attempt: int,
+    status: UsageStatus,
 ) -> None:
     # code-health: ignore[params] Port params are adapter API contract.
-    cost_cents = estimate_cost_cents(
-        prompt_tokens=response.usage.prompt_tokens,
-        max_output_tokens=response.usage.completion_tokens,
-        api_model_id=model_pick.api_model_id,
-        pricing=pricing,
-        workspace_id=ctx.workspace_ctx.workspace_id,  # code-health: ignore[duplicate] Usage pricing is recorded at each LLM boundary.  # noqa: E501
-    )
-    cost_usd = estimate_cost_usd(
-        prompt_tokens=response.usage.prompt_tokens,
-        max_output_tokens=response.usage.completion_tokens,
-        api_model_id=model_pick.api_model_id,
-        pricing=pricing,
-        workspace_id=ctx.workspace_ctx.workspace_id,
-    )
+    if status == "ok":
+        cost_cents = estimate_cost_cents(
+            prompt_tokens=response.usage.prompt_tokens,
+            max_output_tokens=response.usage.completion_tokens,
+            api_model_id=model_pick.api_model_id,
+            pricing=pricing,
+            workspace_id=ctx.workspace_ctx.workspace_id,  # code-health: ignore[duplicate] Usage pricing is recorded at each LLM boundary.  # noqa: E501
+        )
+        cost_usd = estimate_cost_usd(
+            prompt_tokens=response.usage.prompt_tokens,
+            max_output_tokens=response.usage.completion_tokens,
+            api_model_id=model_pick.api_model_id,
+            pricing=pricing,
+            workspace_id=ctx.workspace_ctx.workspace_id,
+        )
+    else:
+        cost_cents = 0
+        cost_usd = Decimal("0")
     record(
         ctx.session,
         ctx.workspace_ctx,
@@ -259,7 +325,7 @@ def _record_usage(
         completion_tokens=response.usage.completion_tokens,
         cost_cents=cost_cents,
         latency_ms=latency_ms,
-        status="ok",
+        status=status,
         finish_reason=response.finish_reason,
         attribution=attribution,
         cost_usd=cost_usd,

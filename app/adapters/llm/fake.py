@@ -52,8 +52,8 @@ __all__ = [
 
 
 # Sentinel that flags an OCR-to-JSON prompt. Kept as a plain substring
-# match against the user message because the domain layer concatenates
-# the prompt with the OCR text: ``f"{_OCR_TO_JSON_PROMPT}\n\n{ocr_text}"``.
+# match against the user message because the domain layer sends the prompt
+# as the text block in a multimodal receipt-image chat message.
 # Mirroring the literal here avoids a back-import from domain into the
 # adapter (the dependency direction is adapter→ports, not adapter→domain).
 #

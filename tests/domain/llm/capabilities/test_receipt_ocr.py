@@ -46,6 +46,7 @@ class StubLLM:
         self.payload = payload
         self.payloads_by_model = payloads_by_model or {}
         self.calls: list[tuple[str, str]] = []
+        self.chat_messages: list[list[ChatMessage]] = []
 
     def complete(
         self,
@@ -78,6 +79,7 @@ class StubLLM:
         consents: ConsentSet | None = None,
     ) -> LLMResponse:
         self.calls.append(("chat", model_id))
+        self.chat_messages.append(list(messages))
         payload = self.payloads_by_model.get(model_id, self.payload)
         text = payload if isinstance(payload, str) else json.dumps(payload)
         return LLMResponse(
@@ -97,6 +99,23 @@ class StubLLM:
         consents: ConsentSet | None = None,
     ) -> Iterator[str]:
         raise NotImplementedError
+
+
+def _assert_multimodal_receipt_chat(messages: Sequence[ChatMessage]) -> None:
+    assert len(messages) == 1
+    content = messages[0]["content"]
+    assert isinstance(content, list)
+    assert any(
+        isinstance(block, dict) and block.get("type") == "text" for block in content
+    )
+    image_blocks = [
+        block
+        for block in content
+        if isinstance(block, dict) and block.get("type") == "image_url"
+    ]
+    assert len(image_blocks) == 1
+    image_ref = image_blocks[0]["image_url"]
+    assert image_ref["url"].startswith("data:")
 
 
 def _seed_ledger(
@@ -197,10 +216,8 @@ def test_canonical_receipt_parses_and_records_usage(
     assert draft.occurred_on.isoformat() == "2026-04-15"
     assert draft.category == "food"
     assert draft.confidence_pct == 92
-    assert llm.calls == [
-        ("ocr", "fake/receipt-model"),
-        ("chat", "fake/receipt-model"),
-    ]
+    assert llm.calls == [("chat", "fake/receipt-model")]
+    _assert_multimodal_receipt_chat(llm.chat_messages[0])
     rows = _usage_rows(db_session, ctx=workspace_ctx)
     assert len(rows) == 1
     assert rows[0].capability == AUTOFILL_CAPABILITY
@@ -348,17 +365,17 @@ def test_parse_failure_falls_through_assignment_chain(
 
     assert draft.vendor == "Monoprix"
     assert llm.calls == [
-        ("ocr", "fake/bad-receipt-model"),
         ("chat", "fake/bad-receipt-model"),
-        ("ocr", "fake/good-receipt-model"),
         ("chat", "fake/good-receipt-model"),
     ]
     rows = _usage_rows(db_session, ctx=workspace_ctx)
     assert len(rows) == 2
     assert rows[0].provider_model_id == "fake/bad-receipt-model"
+    assert rows[0].status == "error"
     assert rows[0].attempt == 0
     assert rows[0].fallback_attempts == 0
     assert rows[1].provider_model_id == "fake/good-receipt-model"
+    assert rows[1].status == "ok"
     assert rows[1].attempt == 1
     assert rows[1].fallback_attempts == 1
 
@@ -419,10 +436,7 @@ def test_non_receipt_classification_does_not_fall_through(
     finally:
         reset_current(token)
 
-    assert llm.calls == [
-        ("ocr", "fake/bad-receipt-model"),
-        ("chat", "fake/bad-receipt-model"),
-    ]
+    assert llm.calls == [("chat", "fake/bad-receipt-model")]
     rows = _usage_rows(db_session, ctx=workspace_ctx)
     assert len(rows) == 1
     assert rows[0].provider_model_id == "fake/bad-receipt-model"

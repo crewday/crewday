@@ -48,6 +48,12 @@ from app.adapters.db.expenses.repositories import (
     SqlAlchemyExpensesRepository,
 )
 from app.adapters.db.identity.models import User, canonicalise_email
+from app.adapters.db.llm.models import (
+    LlmAssignment,
+    LlmModel,
+    LlmProvider,
+    LlmProviderModel,
+)
 from app.adapters.db.llm.models import LlmUsage as LlmUsageRow
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import WorkEngagement, Workspace
@@ -78,6 +84,7 @@ from app.domain.expenses.autofill import (
     run_extraction,
 )
 from app.domain.expenses.claims import ExpenseClaimCreate
+from app.domain.llm.router import invalidate_cache
 from app.tenancy.context import ActorGrantRole, WorkspaceContext
 from app.util.clock import FrozenClock
 from app.util.redact import ConsentSet
@@ -216,6 +223,15 @@ def clock() -> FrozenClock:
     return FrozenClock(_PINNED)
 
 
+@pytest.fixture(autouse=True)
+def _reset_llm_router_cache() -> Iterator[None]:
+    invalidate_cache()
+    try:
+        yield
+    finally:
+        invalidate_cache()
+
+
 @pytest.fixture
 def settings() -> Settings:
     """Minimal :class:`Settings` with the OCR model wired."""
@@ -261,6 +277,7 @@ class StubLLMClient:
         self._ocr_error = ocr_error
         self._chat_error = chat_error
         self.calls: list[tuple[str, str]] = []  # (method, model_id)
+        self.chat_messages: list[list[ChatMessage]] = []
 
     def complete(  # pragma: no cover - unused
         self,
@@ -283,6 +300,7 @@ class StubLLMClient:
         consents: ConsentSet | None = None,
     ) -> LLMResponse:
         self.calls.append(("chat", model_id))
+        self.chat_messages.append(list(messages))
         if self._chat_error is not None:
             raise self._chat_error
         if isinstance(self._chat_payload, str):
@@ -324,6 +342,23 @@ class StubLLMClient:
         consents: ConsentSet | None = None,
     ) -> Iterator[str]:
         raise LLMCapabilityMissing("stream_chat")
+
+
+def _assert_multimodal_receipt_chat(messages: Sequence[ChatMessage]) -> None:
+    assert len(messages) == 1
+    content = messages[0]["content"]
+    assert isinstance(content, list)
+    assert any(
+        isinstance(block, dict) and block.get("type") == "text" for block in content
+    )
+    image_blocks = [
+        block
+        for block in content
+        if isinstance(block, dict) and block.get("type") == "image_url"
+    ]
+    assert len(image_blocks) == 1
+    image_ref = image_blocks[0]["image_url"]
+    assert image_ref["url"].startswith("data:")
 
 
 # Adapter-style errors — copy the class names so the autofill module's
@@ -414,6 +449,74 @@ def _bootstrap_engagement(s: Session, *, workspace_id: str, user_id: str) -> str
     )
     s.flush()
     return eng_id
+
+
+def _seed_autofill_assignment(
+    s: Session, *, api_model_id: str = "test/capability-vision"
+) -> str:
+    invalidate_cache()
+    provider_id = new_ulid()
+    model_id = new_ulid()
+    provider_model_id = new_ulid()
+    assignment_id = new_ulid()
+    s.add(
+        LlmProvider(
+            id=provider_id,
+            name=f"test-provider-{provider_id[-6:]}",
+            provider_type="fake",
+            timeout_s=60,
+            requests_per_minute=60,
+            is_enabled=True,
+            created_at=_PINNED,
+            updated_at=_PINNED,
+        )
+    )
+    s.add(
+        LlmModel(
+            id=model_id,
+            canonical_name=f"test-model-{model_id[-6:]}",
+            display_name="Test vision model",
+            capabilities=["vision", "json_mode"],
+            is_active=True,
+            price_source="",
+            created_at=_PINNED,
+            updated_at=_PINNED,
+        )
+    )
+    s.flush()
+    s.add(
+        LlmProviderModel(
+            id=provider_model_id,
+            provider_id=provider_id,
+            model_id=model_id,
+            api_model_id=api_model_id,
+            supports_system_prompt=True,
+            supports_temperature=True,
+            is_enabled=True,
+            created_at=_PINNED,
+            updated_at=_PINNED,
+        )
+    )
+    s.flush()
+    s.add(
+        LlmAssignment(
+            id=assignment_id,
+            workspace_id=None,
+            capability=AUTOFILL_CAPABILITY,
+            model_id=provider_model_id,
+            provider="fake",
+            priority=0,
+            enabled=True,
+            max_tokens=512,
+            temperature=0.0,
+            extra_api_params={},
+            required_capabilities=["vision", "json_mode"],
+            created_at=_PINNED,
+        )
+    )
+    s.flush()
+    invalidate_cache()
+    return assignment_id
 
 
 def _ctx(
@@ -778,6 +881,8 @@ class TestRunExtractionHappyPath:
         assert claim.category == "food"
         assert claim.llm_autofill_json is not None
         assert claim.autofill_confidence_overall == Decimal("0.95")
+        assert llm.calls == [("chat", _OCR_MODEL)]
+        _assert_multimodal_receipt_chat(llm.chat_messages[0])
 
     def test_payload_persisted_even_below_threshold(
         self,
@@ -964,6 +1069,8 @@ class TestRunExtractionFailures:
                 settings=settings,
             )
 
+        assert llm.calls == [("chat", _OCR_MODEL)]
+
         # Claim untouched: no autofill payload, original vendor.
         claim = session.scalars(
             select(ExpenseClaim).where(ExpenseClaim.id == claim_id)
@@ -1136,6 +1243,121 @@ class TestRunExtractionFailures:
 
 
 class TestLlmUsagePersisted:
+    def test_capability_assignment_routes_one_multimodal_call(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, str, FrozenClock],
+        storage: InMemoryStorage,
+        settings: Settings,
+    ) -> None:
+        ctx, _user_id, eng_id, clock = worker_env
+        assignment_id = _seed_autofill_assignment(session)
+        view = create_claim(
+            session, ctx, body=_create_body(work_engagement_id=eng_id), clock=clock
+        )
+        att_id, _h = _attach_with_blob(
+            session, ctx, storage=storage, claim_id=view.id, clock=clock
+        )
+        llm = StubLLMClient(chat_payload=_high_confidence_payload())
+
+        run_extraction(
+            _make_repo(session),
+            ctx,
+            claim_id=view.id,
+            attachment_id=att_id,
+            llm=llm,
+            storage=storage,
+            clock=clock,
+            settings=settings,
+        )
+
+        assert llm.calls == [("chat", "test/capability-vision")]
+        _assert_multimodal_receipt_chat(llm.chat_messages[0])
+        rows = _llm_usage_rows(session, workspace_id=ctx.workspace_id)
+        assert len(rows) == 1
+        assert rows[0].provider_model_id == "test/capability-vision"
+        assert rows[0].assignment_id == assignment_id
+        assert rows[0].fallback_attempts == 0
+        assert rows[0].finish_reason == "stop"
+
+    def test_assigned_provider_failure_usage_row_uses_capability_model(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, str, FrozenClock],
+        storage: InMemoryStorage,
+        settings: Settings,
+    ) -> None:
+        ctx, _user_id, eng_id, clock = worker_env
+        assignment_id = _seed_autofill_assignment(
+            session, api_model_id="test/capability-vision"
+        )
+        view = create_claim(
+            session, ctx, body=_create_body(work_engagement_id=eng_id), clock=clock
+        )
+        att_id, _h = _attach_with_blob(
+            session, ctx, storage=storage, claim_id=view.id, clock=clock
+        )
+        llm = StubLLMClient(chat_error=LlmProviderError("400 Bad Request"))
+
+        with pytest.raises(ExtractionProviderError):
+            run_extraction(
+                _make_repo(session),
+                ctx,
+                claim_id=view.id,
+                attachment_id=att_id,
+                llm=llm,
+                storage=storage,
+                clock=clock,
+                settings=settings,
+            )
+
+        assert llm.calls == [("chat", "test/capability-vision")]
+        rows = _llm_usage_rows(session, workspace_id=ctx.workspace_id)
+        assert len(rows) == 1
+        assert rows[0].status == "error"
+        assert rows[0].provider_model_id == "test/capability-vision"
+        assert rows[0].assignment_id == assignment_id
+        assert rows[0].fallback_attempts == 0
+
+    def test_assigned_timeout_usage_row_keeps_assignment_metadata(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, str, FrozenClock],
+        storage: InMemoryStorage,
+        settings: Settings,
+    ) -> None:
+        ctx, _user_id, eng_id, clock = worker_env
+        assignment_id = _seed_autofill_assignment(
+            session, api_model_id="test/capability-vision"
+        )
+        view = create_claim(
+            session, ctx, body=_create_body(work_engagement_id=eng_id), clock=clock
+        )
+        att_id, _h = _attach_with_blob(
+            session, ctx, storage=storage, claim_id=view.id, clock=clock
+        )
+        llm = StubLLMClient(chat_error=TimeoutError("read timeout"))
+
+        with pytest.raises(ExtractionTimeout):
+            run_extraction(
+                _make_repo(session),
+                ctx,
+                claim_id=view.id,
+                attachment_id=att_id,
+                llm=llm,
+                storage=storage,
+                clock=clock,
+                settings=settings,
+            )
+
+        assert llm.calls == [("chat", "test/capability-vision")]
+        rows = _llm_usage_rows(session, workspace_id=ctx.workspace_id)
+        assert len(rows) == 1
+        assert rows[0].status == "timeout"
+        assert rows[0].provider_model_id == "test/capability-vision"
+        assert rows[0].assignment_id == assignment_id
+        assert rows[0].fallback_attempts == 0
+
     def test_usage_row_carries_capability_and_workspace(
         self,
         session: Session,

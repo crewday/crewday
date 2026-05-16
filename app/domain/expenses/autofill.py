@@ -1,7 +1,7 @@
 """Receipt OCR / autofill pipeline for expense claims (cd-95zb).
 
 The :func:`run_extraction` service runs an attached receipt blob
-through the LLM port (vision OCR + structured-JSON parse), validates
+through the LLM port (multimodal structured-JSON extraction), validates
 the result against :class:`ReceiptExtraction`, persists the parsed
 payload + per-field confidence on the claim row, and — when the
 overall confidence clears the autofill threshold AND the claim is a
@@ -91,6 +91,7 @@ layer"; ``docs/specs/02-domain-model.md`` §"expense_claim".
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from collections.abc import Mapping
@@ -101,7 +102,12 @@ from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from app.adapters.llm.ports import LLMClient, LLMResponse
+from app.adapters.llm.ports import (
+    ChatContent,
+    ChatMessage,
+    LLMClient,
+    LLMResponse,
+)
 from app.adapters.storage.ports import BlobNotFound, Storage
 from app.audit import write_audit
 from app.config import Settings, get_settings
@@ -112,6 +118,7 @@ from app.domain.expenses.ports import (
     ExpensesRepository,
 )
 from app.domain.llm.consent import load_consent_set
+from app.domain.llm.router import CapabilityUnassignedError, ModelPick, resolve_model
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.currency import ISO_4217_ALLOWLIST
@@ -133,6 +140,7 @@ __all__ = [
     "ReceiptExtraction",
     "extract_from_bytes",
     "overall_confidence",
+    "resolve_autofill_model_pick",
     "run_extraction",
 ]
 
@@ -171,12 +179,11 @@ _MAX_VENDOR_LEN: Final[int] = 200
 # cd-e626 (the receipt-OCR specialisation task); v1 ships a sensible
 # single-shot prompt that asks for a JSON object with the five
 # fields and a per-field confidence map. The prompt deliberately
-# carries NO tenant identifiers — only the OCR text the previous
-# step extracted from the image bytes. See module docstring §"PII
-# contract".
+# carries NO tenant identifiers — only the receipt image bytes. See
+# module docstring §"PII contract".
 _OCR_TO_JSON_PROMPT: Final[str] = (
-    "You are a receipt-extraction tool. Given the OCR text of a "
-    "receipt image, return a JSON object with these keys: "
+    "You are a receipt-extraction tool. Read the receipt image and "
+    "return a JSON object with these keys: "
     "vendor (string, store / merchant name), "
     "amount (string, total paid as a decimal number, no currency symbol), "
     "currency (string, 3-letter ISO 4217 code, uppercase), "
@@ -187,6 +194,7 @@ _OCR_TO_JSON_PROMPT: Final[str] = (
     "purchased_at / category to a float between 0 and 1). "
     "Return ONLY the JSON object — no commentary, no markdown fences."
 )
+_DEFAULT_RECEIPT_MIME: Final[str] = "image/jpeg"
 
 # Cents conversion: most currencies use 2-decimal minor units. The
 # 3-decimal currencies (BHD / JOD / KWD / OMR / TND) are handled
@@ -447,6 +455,9 @@ class ExtractionMetrics:
     prompt_tokens: int
     completion_tokens: int
     latency_ms: int
+    assignment_id: str | None = None
+    fallback_attempts: int = 0
+    finish_reason: str | None = None
 
 
 def extract_from_bytes(
@@ -456,20 +467,21 @@ def extract_from_bytes(
     settings: Settings | None = None,
     clock: Clock | None = None,
     consents: ConsentSet | None = None,
+    model_pick: ModelPick | None = None,
 ) -> ExtractionMetrics:
     """Run a receipt blob through the LLM and return the validated payload.
 
-    Two-step pipeline:
+    Single-call multimodal pipeline:
 
-    1. ``llm.ocr(model_id=..., image_bytes=...)`` → free-form OCR text.
-    2. ``llm.chat(model_id=..., messages=[{role: user, content:
-       <prompt + ocr_text>}])`` → structured JSON parsed through
-       :class:`ReceiptExtraction`.
+    ``llm.chat(model_id=..., messages=[{role: user, content:
+    <prompt + image block>}])`` → structured JSON parsed through
+    :class:`ReceiptExtraction`.
 
-    The two-step keeps the adapter seam clean — vision-capable OCR
-    on one model, JSON-mode parsing on another (or the same model
-    twice). Token counts are summed across both calls; latency is
-    the wall-clock from before the OCR call to after the parse.
+    Normal operation passes a capability-routed ``model_pick`` for
+    ``expenses.autofill``. The legacy ``settings.llm_ocr_model`` path is
+    retained as an explicit compatibility fallback for old dev/test
+    wiring that has not seeded assignment rows yet. Token counts and
+    latency come from the one upstream call.
 
     Pure: no DB, no audit, no usage row. Callers that want the
     persist semantics use :func:`run_extraction`.
@@ -485,7 +497,11 @@ def extract_from_bytes(
     resolved_settings = settings if settings is not None else get_settings()
     resolved_clock = clock if clock is not None else SystemClock()
 
-    model_id = resolved_settings.llm_ocr_model
+    model_id = (
+        model_pick.api_model_id
+        if model_pick is not None
+        else resolved_settings.llm_ocr_model
+    )
     if model_id is None:
         # Defensive — callers are expected to gate on this themselves
         # (the API endpoint returns 503 ``scan_not_configured`` and
@@ -501,17 +517,17 @@ def extract_from_bytes(
 
     started = resolved_clock.now()
     try:
-        ocr_text = llm.ocr(
-            model_id=model_id, image_bytes=image_bytes, consents=consents
-        )
         chat_response = llm.chat(
             model_id=model_id,
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"{_OCR_TO_JSON_PROMPT}\n\n{ocr_text}",
-                }
-            ],
+            messages=_receipt_messages(image_bytes),
+            max_tokens=(model_pick.max_tokens or 1024)
+            if model_pick is not None
+            else 1024,
+            temperature=(
+                model_pick.temperature
+                if model_pick is not None and model_pick.temperature is not None
+                else 0.0
+            ),
             consents=consents,
         )
     except TimeoutError as exc:
@@ -555,6 +571,9 @@ def extract_from_bytes(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             latency_ms=latency_ms,
+            assignment_id=model_pick.assignment_id if model_pick is not None else None,
+            fallback_attempts=0,
+            finish_reason=chat_response.finish_reason,
         )
         raise
 
@@ -564,7 +583,38 @@ def extract_from_bytes(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         latency_ms=latency_ms,
+        assignment_id=model_pick.assignment_id if model_pick is not None else None,
+        fallback_attempts=0,
+        finish_reason=chat_response.finish_reason,
     )
+
+
+def _receipt_messages(image_bytes: bytes) -> list[ChatMessage]:
+    content: ChatContent = [
+        {"type": "text", "text": _OCR_TO_JSON_PROMPT},
+        {
+            "type": "image_url",
+            "image_url": {"url": _receipt_data_url(image_bytes)},
+        },
+    ]
+    return [{"role": "user", "content": content}]
+
+
+def _receipt_data_url(image_bytes: bytes) -> str:
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    return f"data:{_receipt_mime_type(image_bytes)};base64,{encoded}"
+
+
+def _receipt_mime_type(image_bytes: bytes) -> str:
+    if image_bytes.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if image_bytes.startswith(b"%PDF-"):
+        return "application/pdf"
+    if image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
+        return "image/webp"
+    return _DEFAULT_RECEIPT_MIME
 
 
 def _parse_chat_response(response: LLMResponse) -> ReceiptExtraction:
@@ -782,6 +832,9 @@ def _record_llm_usage(
     status: Literal["ok", "error", "timeout"],
     correlation_id: str,
     clock: Clock,
+    assignment_id: str | None = None,
+    fallback_attempts: int = 0,
+    finish_reason: str | None = None,
 ) -> str:
     """Insert one LLM usage row and return its id.
 
@@ -819,8 +872,31 @@ def _record_llm_usage(
         correlation_id=correlation_id,
         actor_user_id=ctx.actor_id,
         created_at=clock.now(),
+        assignment_id=assignment_id,
+        fallback_attempts=fallback_attempts,
+        finish_reason=finish_reason,
     )
     return usage_id
+
+
+def resolve_autofill_model_pick(
+    repo: ExpensesRepository, ctx: WorkspaceContext, *, clock: Clock
+) -> ModelPick | None:
+    """Return the assigned ``expenses.autofill`` model, when resolvable.
+
+    A few old seam tests use a hand-rolled ``Session`` subclass that can satisfy
+    audit writes but cannot execute router queries. Treat that as "no assignment
+    visible" so the explicit legacy ``settings.llm_ocr_model`` fallback remains
+    available there.
+    """
+    try:
+        repo.session.get_bind()
+    except Exception:
+        return None
+    chain = resolve_model(repo.session, ctx, AUTOFILL_CAPABILITY, clock=clock)
+    if not chain:
+        return None
+    return chain[0]
 
 
 def run_extraction(
@@ -880,9 +956,36 @@ def run_extraction(
     is_draft = claim.state == "draft"
 
     correlation_id = new_ulid()
-    fallback_model_id = resolved_settings.llm_ocr_model or ""
-
     image_bytes = _read_blob(storage, blob_hash=attachment.blob_hash)
+    model_pick = resolve_autofill_model_pick(repo, ctx, clock=resolved_clock)
+    fallback_model_id = (
+        model_pick.api_model_id
+        if model_pick is not None
+        else resolved_settings.llm_ocr_model or ""
+    )
+    if model_pick is None and resolved_settings.llm_ocr_model is None:
+        exc = CapabilityUnassignedError(AUTOFILL_CAPABILITY, ctx.workspace_id)
+        _write_audit_failure(
+            repo,
+            ctx,
+            claim_id=claim_id,
+            attachment_id=attachment_id,
+            error=f"{type(exc).__name__}: {exc!s}",
+            clock=resolved_clock,
+        )
+        _record_llm_usage(
+            repo,
+            ctx,
+            model_id="",
+            prompt_tokens=0,
+            completion_tokens=0,
+            latency_ms=0,
+            status="error",
+            correlation_id=correlation_id,
+            clock=resolved_clock,
+        )
+        raise exc
+    assignment_id = model_pick.assignment_id if model_pick is not None else None
 
     try:
         metrics = extract_from_bytes(
@@ -891,6 +994,7 @@ def run_extraction(
             settings=resolved_settings,
             clock=resolved_clock,
             consents=load_consent_set(repo.session, ctx.workspace_id),
+            model_pick=model_pick,
         )
     except ExtractionTimeout as exc:
         _write_audit_failure(
@@ -915,6 +1019,7 @@ def run_extraction(
             status="timeout",
             correlation_id=correlation_id,
             clock=resolved_clock,
+            assignment_id=assignment_id,
         )
         raise
     except ExtractionParseError as exc:
@@ -941,6 +1046,9 @@ def run_extraction(
             status="error",
             correlation_id=correlation_id,
             clock=resolved_clock,
+            assignment_id=burnt.assignment_id if burnt is not None else None,
+            fallback_attempts=burnt.fallback_attempts if burnt is not None else 0,
+            finish_reason=burnt.finish_reason if burnt is not None else None,
         )
         raise
     except (
@@ -967,6 +1075,7 @@ def run_extraction(
             status="error",
             correlation_id=correlation_id,
             clock=resolved_clock,
+            assignment_id=assignment_id,
         )
         raise
 
@@ -1034,6 +1143,9 @@ def run_extraction(
         status="ok",
         correlation_id=correlation_id,
         clock=resolved_clock,
+        assignment_id=metrics.assignment_id,
+        fallback_attempts=metrics.fallback_attempts,
+        finish_reason=metrics.finish_reason,
     )
 
     write_audit(

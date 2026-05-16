@@ -322,6 +322,9 @@ class _FakeRepo:
         correlation_id: str,
         actor_user_id: str,
         created_at: datetime,
+        assignment_id: str | None = None,
+        fallback_attempts: int = 0,
+        finish_reason: str | None = None,
     ) -> None:
         self.llm_usage_rows.append(
             {
@@ -337,6 +340,9 @@ class _FakeRepo:
                 "correlation_id": correlation_id,
                 "actor_user_id": actor_user_id,
                 "created_at": created_at,
+                "assignment_id": assignment_id,
+                "fallback_attempts": fallback_attempts,
+                "finish_reason": finish_reason,
             }
         )
 
@@ -490,13 +496,14 @@ def _payload(*, score: float = 0.95) -> dict[str, Any]:
 def test_run_extraction_reads_and_writes_through_repo_seam() -> None:
     repo = _FakeRepo(claim=_claim(), attachment=_attachment())
     clock = FrozenClock(_PINNED)
+    llm = _StubLLMClient()
 
     result = run_extraction(
         repo,
         _ctx(),
         claim_id=_CLAIM_ID,
         attachment_id=_ATTACHMENT_ID,
-        llm=_StubLLMClient(),
+        llm=llm,
         storage=_storage(),
         clock=clock,
         settings=_settings(),
@@ -528,6 +535,7 @@ def test_run_extraction_reads_and_writes_through_repo_seam() -> None:
     assert repo.llm_usage_rows[0]["tokens_in"] == 42
     assert repo.llm_usage_rows[0]["tokens_out"] == 17
     assert repo.llm_usage_rows[0]["status"] == "ok"
+    assert llm.calls == [("chat", _OCR_MODEL)]
 
 
 def test_followup_run_persists_payload_without_scalar_overwrite() -> None:

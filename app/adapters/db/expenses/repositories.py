@@ -787,6 +787,9 @@ class SqlAlchemyExpensesRepository(ExpensesRepository):
         correlation_id: str,
         actor_user_id: str,
         created_at: datetime,
+        assignment_id: str | None = None,
+        fallback_attempts: int = 0,
+        finish_reason: str | None = None,
     ) -> None:
         # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
         row = LlmUsageRow(
@@ -801,9 +804,9 @@ class SqlAlchemyExpensesRepository(ExpensesRepository):
             status=status,
             correlation_id=correlation_id,
             attempt=0,
-            assignment_id=None,
-            fallback_attempts=0,
-            finish_reason=None,
+            assignment_id=assignment_id,
+            fallback_attempts=fallback_attempts,
+            finish_reason=finish_reason,
             actor_user_id=actor_user_id,
             token_id=None,
             agent_label=None,
