@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   __resetApiProvidersForTests,
+  fetchApiDownload,
   fetchJson,
   registerAuthTokenGetter,
   registerOnUnauthorized,
   registerWorkspaceSlugGetter,
   resolveApiPath,
+  toDisplayError,
 } from "@/lib/api";
 
 // A tiny spy-fetch we install in place of the global. `fetchJson` only
@@ -19,6 +21,7 @@ interface FakeResponse {
   ok?: boolean;
   body: unknown;
   contentType?: string;
+  headers?: Record<string, string>;
 }
 
 function installFetch(responses: FakeResponse[]): {
@@ -44,6 +47,7 @@ function installFetch(responses: FakeResponse[]): {
       ok,
       status,
       statusText: next.statusText ?? (ok ? "OK" : "Error"),
+      headers: new Headers(next.headers),
       text: async () => text,
     } as unknown as Response;
   });
@@ -353,6 +357,62 @@ describe("fetchJson headers", () => {
 });
 
 describe("fetchJson error mapping", () => {
+  it("exposes backend error ids, user messages, and machine codes", async () => {
+    const problem = {
+      type: "https://crewday.dev/errors/conflict",
+      title: "Conflict",
+      status: 409,
+      error_id: "err_01HX",
+      user_message: "That task has already been completed.",
+      detail: "Task state transition is not allowed.",
+      error: "task_already_completed",
+      instance: "/w/acme/api/v1/tasks/task_1/complete",
+    };
+    const { restore } = installFetch([
+      {
+        status: 409,
+        body: problem,
+        statusText: "Conflict",
+        headers: { "X-Request-Id": "req_01HX" },
+      },
+    ]);
+    try {
+      await expect(fetchJson("/api/v1/tasks/task_1/complete", { method: "POST" })).rejects.toSatisfy(
+        (err: unknown) => {
+          expect(err).toBeInstanceOf(ApiError);
+          const e = err as ApiError;
+          expect(e.errorId).toBe("err_01HX");
+          expect(e.userMessage).toBe("That task has already been completed.");
+          expect(e.machineCode).toBe("task_already_completed");
+          expect(e.instance).toBe("/w/acme/api/v1/tasks/task_1/complete");
+          expect(e.requestId).toBe("req_01HX");
+
+          const display = toDisplayError(e, "Could not complete task.");
+          expect(display).toMatchObject({
+            id: "err_01HX",
+            message: "That task has already been completed.",
+            status: 409,
+            type: "conflict",
+            title: "Conflict",
+            machineCode: "task_already_completed",
+            instance: "/w/acme/api/v1/tasks/task_1/complete",
+            requestId: "req_01HX",
+            raw: problem,
+          });
+          expect(display.details).toContainEqual({
+            label: "Machine code",
+            message: "task_already_completed",
+            path: null,
+            type: null,
+          });
+          return true;
+        },
+      );
+    } finally {
+      restore();
+    }
+  });
+
   it("throws ApiError with parsed RFC 7807 fields on a validation 422", async () => {
     const problem = {
       type: "https://crewday.dev/errors/validation",
@@ -373,6 +433,12 @@ describe("fetchJson error mapping", () => {
         expect(e.type).toBe("validation");
         expect(e.fieldErrors).toHaveLength(1);
         expect(e.fieldErrors[0]!.msg).toBe("field required");
+        expect(toDisplayError(e).details).toContainEqual({
+          label: "Field error",
+          message: "field required",
+          path: "body.title",
+          type: "value_error.missing",
+        });
         return true;
       });
     } finally {
@@ -415,6 +481,11 @@ describe("fetchJson error mapping", () => {
         // Plain-text body is surfaced as the message.
         expect(e.message).toBe("Bad Gateway");
         expect(e.problem).toBeNull();
+        expect(toDisplayError(e)).toMatchObject({
+          message: "Bad Gateway",
+          status: 502,
+          raw: "Bad Gateway",
+        });
         return true;
       });
     } finally {
@@ -450,6 +521,68 @@ describe("fetchJson error mapping", () => {
     } finally {
       restore();
     }
+  });
+
+  it("fetchApiDownload also throws ApiError on non-2xx responses", async () => {
+    const problem = {
+      type: "https://crewday.dev/errors/forbidden",
+      title: "Forbidden",
+      status: 403,
+      error_id: "err_download",
+      user_message: "You cannot export this file.",
+      error: "export_forbidden",
+    };
+    const { restore } = installFetch([
+      {
+        status: 403,
+        body: problem,
+        headers: { "X-Correlation-Id-Echo": "corr_download" },
+      },
+    ]);
+    try {
+      await expect(fetchApiDownload("/api/v1/me/export")).rejects.toSatisfy((err: unknown) => {
+        expect(err).toBeInstanceOf(ApiError);
+        const e = err as ApiError;
+        expect(e.status).toBe(403);
+        expect(e.errorId).toBe("err_download");
+        expect(e.userMessage).toBe("You cannot export this file.");
+        expect(e.machineCode).toBe("export_forbidden");
+        expect(e.requestId).toBe("corr_download");
+        return true;
+      });
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe("toDisplayError", () => {
+  it("normalizes generic thrown errors without exposing their message as user copy", () => {
+    const err = new Error("database password leaked in stack");
+
+    expect(toDisplayError(err, "Please try again.")).toMatchObject({
+      id: null,
+      message: "Please try again.",
+      status: null,
+      type: null,
+      title: "Error",
+      machineCode: null,
+      instance: null,
+      fieldErrors: [],
+      requestId: null,
+      raw: { name: "Error", message: "database password leaked in stack" },
+    });
+  });
+
+  it("does not stringify arbitrary thrown objects that may be circular", () => {
+    const circular: { self?: unknown } = {};
+    circular.self = circular;
+
+    expect(toDisplayError(circular, "Could not save.")).toMatchObject({
+      message: "Could not save.",
+      raw: null,
+      details: [],
+    });
   });
 });
 

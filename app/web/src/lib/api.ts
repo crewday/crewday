@@ -188,7 +188,7 @@ export async function fetchApiDownload(path: string, opts: FetchOpts = {}): Prom
         console.error("onUnauthorized handler threw", err);
       }
     }
-    throw new ApiError(message, res.status, body);
+    throw new ApiError(message, res.status, body, responseRequestId(res.headers));
   }
 
   return {
@@ -230,12 +230,21 @@ export interface ProblemDetail {
   status?: number;
   detail?: string;
   instance?: string;
-  errors?: ReadonlyArray<{ loc?: readonly (string | number)[]; msg?: string; type?: string }>;
+  error_id?: string;
+  user_message?: string;
+  error?: string;
+  errors?: ReadonlyArray<ProblemFieldError>;
   // Approval pipeline extension — see spec §11.
   approval_request_id?: string;
   expires_at?: string;
   // Any other extension fields the server attached.
   [key: string]: unknown;
+}
+
+export interface ProblemFieldError {
+  loc?: readonly (string | number)[];
+  msg?: string;
+  type?: string;
 }
 
 /**
@@ -282,14 +291,50 @@ export class ApiError extends Error {
     return this.problem?.detail ?? null;
   }
 
+  /** RFC 7807 `instance` (request path or occurrence URI). */
+  get instance(): string | null {
+    return this.problem?.instance ?? null;
+  }
+
+  /** Backend support/operator lookup id for this failure. */
+  get errorId(): string | null {
+    return nonEmptyString(this.problem?.error_id);
+  }
+
+  /** Backend-provided safe user-facing message. */
+  get userMessage(): string | null {
+    return nonEmptyString(this.problem?.user_message);
+  }
+
+  /** Stable machine-readable backend error code. */
+  get machineCode(): string | null {
+    return nonEmptyString(this.problem?.error);
+  }
+
   /** RFC 7807 `errors[]` extension (field-level validation). */
-  get fieldErrors(): ReadonlyArray<{ loc?: readonly (string | number)[]; msg?: string; type?: string }> {
-    return this.problem?.errors ?? [];
+  get fieldErrors(): ReadonlyArray<ProblemFieldError> {
+    return normalizedProblemFieldErrors(this.problem);
   }
 }
 
 function isProblemDetail(body: unknown): body is ProblemDetail {
   return typeof body === "object" && body !== null && !Array.isArray(body);
+}
+
+function normalizedProblemFieldErrors(problem: ProblemDetail | null): ReadonlyArray<ProblemFieldError> {
+  if (!Array.isArray(problem?.errors)) return [];
+  return problem.errors.flatMap((item) => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) return [];
+    const rawLoc: unknown = item.loc;
+    const loc = Array.isArray(rawLoc)
+      ? rawLoc.filter((part: unknown): part is string | number => typeof part === "string" || typeof part === "number")
+      : undefined;
+    return [{
+      loc,
+      msg: nonEmptyString(item.msg) ?? undefined,
+      type: nonEmptyString(item.type) ?? undefined,
+    }];
+  });
 }
 
 // --- Request options ---------------------------------------------------------
@@ -426,9 +471,17 @@ function decodeHeaderFilename(value: string): string {
 
 function pickMessage(body: unknown, statusText: string, status: number): string {
   if (isProblemDetail(body)) {
+    if (typeof body.user_message === "string" && body.user_message) return body.user_message;
     if (typeof body.detail === "string" && body.detail) return body.detail;
     if (typeof body.title === "string" && body.title) return body.title;
   }
   if (typeof body === "string" && body) return body;
   return statusText || `HTTP ${status}`;
 }
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+export type { DisplayError, DisplayErrorDetail } from "@/lib/displayError";
+export { toDisplayError } from "@/lib/displayError";
