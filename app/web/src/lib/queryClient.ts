@@ -14,14 +14,19 @@
 // - Mutations default `retry: 0` so an optimistic rollback is fired
 //   exactly once on failure.
 
-import { QueryClient } from "@tanstack/react-query";
-import { ApiError } from "@/lib/api";
+import { MutationCache, QueryCache, QueryClient, type Mutation, type Query } from "@tanstack/react-query";
+import { ApiError, toDisplayError, type DisplayError } from "@/lib/api";
+import { publishGlobalErrorToast, type ErrorToastEvent } from "@/lib/errorToastBus";
 
 const QUERY_STALE_MS = 30_000;
 const QUERY_GC_MS = 5 * 60_000;
 const QUERY_RETRY_MAX = 2;
 const RETRY_DELAY_BASE_MS = 500;
 const RETRY_DELAY_MAX_MS = 30_000;
+
+interface QueryClientFactoryOptions {
+  onErrorToast?: (event: ErrorToastEvent) => void;
+}
 
 function statusOf(error: unknown): number | null {
   if (error instanceof ApiError) return error.status;
@@ -46,8 +51,23 @@ function retryDelay(attemptIndex: number): number {
   return Math.min(delay, RETRY_DELAY_MAX_MS);
 }
 
-export function makeQueryClient(): QueryClient {
+export function makeQueryClient(options: QueryClientFactoryOptions = {}): QueryClient {
+  const onErrorToast = options.onErrorToast ?? publishGlobalErrorToast;
   return new QueryClient({
+    queryCache: new QueryCache({
+      onError: (error, query) => {
+        const displayError = displayErrorForToast(error);
+        if (!displayError || !shouldToastQueryError(error, displayError, query)) return;
+        onErrorToast({ error: displayError, source: "query" });
+      },
+    }),
+    mutationCache: new MutationCache({
+      onError: (error, _variables, _context, mutation) => {
+        const displayError = displayErrorForToast(error);
+        if (!displayError || !shouldToastMutationError(error, displayError, mutation)) return;
+        onErrorToast({ error: displayError, source: "mutation" });
+      },
+    }),
     defaultOptions: {
       queries: {
         staleTime: QUERY_STALE_MS,
@@ -59,4 +79,49 @@ export function makeQueryClient(): QueryClient {
       mutations: { retry: 0 },
     },
   });
+}
+
+function displayErrorForToast(error: unknown): DisplayError | null {
+  if (isAbortError(error)) return null;
+  return toDisplayError(error);
+}
+
+function shouldToastQueryError(
+  error: unknown,
+  displayError: DisplayError,
+  query: Query<unknown, unknown, unknown, readonly unknown[]>,
+): boolean {
+  if (suppressesGlobalErrorToast(query.meta)) return false;
+  if (!hasBackgroundData(query)) return false;
+  return shouldToastDisplayError(error, displayError);
+}
+
+function shouldToastMutationError(
+  error: unknown,
+  displayError: DisplayError,
+  mutation: Mutation<unknown, unknown, unknown, unknown>,
+): boolean {
+  if (suppressesGlobalErrorToast(mutation.meta)) return false;
+  if (typeof mutation.options.onError === "function") return false;
+  return shouldToastDisplayError(error, displayError);
+}
+
+function shouldToastDisplayError(error: unknown, displayError: DisplayError): boolean {
+  if (statusOf(error) === 401) return false;
+  if (displayError.fieldErrors.length > 0) return false;
+  return true;
+}
+
+function hasBackgroundData(query: Query<unknown, unknown, unknown, readonly unknown[]>): boolean {
+  return query.state.data !== undefined;
+}
+
+function suppressesGlobalErrorToast(meta: unknown): boolean {
+  if (typeof meta !== "object" || meta === null) return false;
+  const record = meta as Record<string, unknown>;
+  return record.suppressErrorToast === true || record.errorToast === false;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
 }

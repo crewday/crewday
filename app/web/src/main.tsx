@@ -12,6 +12,7 @@ import { NavHistoryProvider } from "@/context/NavHistoryContext";
 import { AuthProvider } from "@/auth";
 import { I18nProvider } from "@/i18n";
 import { startOfflineQueueReplay } from "@/lib/offlineQueue";
+import { ErrorToastProvider } from "@/components/ErrorToast";
 
 import "@/styles/fonts.css";
 import "@/styles/tokens.css";
@@ -43,23 +44,25 @@ const queryClient = makeQueryClient();
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <I18nProvider>
-        <BrowserRouter>
-          <AuthProvider>
-            <NavHistoryProvider>
-              <ThemeProvider>
-                <RoleProvider>
-                  <WorkspaceProvider>
-                    <SseProvider>
-                      <App />
-                    </SseProvider>
-                  </WorkspaceProvider>
-                </RoleProvider>
-              </ThemeProvider>
-            </NavHistoryProvider>
-          </AuthProvider>
-        </BrowserRouter>
-      </I18nProvider>
+      <ErrorToastProvider>
+        <I18nProvider>
+          <BrowserRouter>
+            <AuthProvider>
+              <NavHistoryProvider>
+                <ThemeProvider>
+                  <RoleProvider>
+                    <WorkspaceProvider>
+                      <SseProvider>
+                        <App />
+                      </SseProvider>
+                    </WorkspaceProvider>
+                  </RoleProvider>
+                </ThemeProvider>
+              </NavHistoryProvider>
+            </AuthProvider>
+          </BrowserRouter>
+        </I18nProvider>
+      </ErrorToastProvider>
     </QueryClientProvider>
   </React.StrictMode>,
 );

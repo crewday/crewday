@@ -101,4 +101,130 @@ describe("makeQueryClient defaults", () => {
     const qc = makeQueryClient();
     expect(qc.getDefaultOptions().mutations?.retry).toBe(0);
   });
+
+  it("toasts background query failures that already have data", async () => {
+    const events: unknown[] = [];
+    const qc = makeQueryClient({ onErrorToast: (event) => events.push(event) });
+    qc.setQueryData(["background"], { ok: true });
+
+    await expect(qc.fetchQuery({
+      queryKey: ["background"],
+      queryFn: async () => {
+        throw new ApiError("Down", 503, {
+          detail: "Server is down.",
+          error_id: "err_bg",
+          status: 503,
+          title: "Service unavailable",
+        });
+      },
+      retry: false,
+      staleTime: 0,
+    })).rejects.toThrow("Down");
+
+    expect(events).toMatchObject([{
+      source: "query",
+      error: {
+        id: "err_bg",
+        message: "Server is down.",
+        status: 503,
+      },
+    }]);
+  });
+
+  it("does not toast initial query failures without cached data", async () => {
+    const events: unknown[] = [];
+    const qc = makeQueryClient({ onErrorToast: (event) => events.push(event) });
+
+    await expect(qc.fetchQuery({
+      queryKey: ["initial"],
+      queryFn: async () => {
+        throw new ApiError("Down", 503, { detail: "Server is down." });
+      },
+      retry: false,
+    })).rejects.toThrow("Down");
+
+    expect(events).toEqual([]);
+  });
+
+  it("does not toast auth recovery or field validation failures", async () => {
+    const events: unknown[] = [];
+    const qc = makeQueryClient({ onErrorToast: (event) => events.push(event) });
+    qc.setQueryData(["auth"], { ok: true });
+    qc.setQueryData(["validation"], { ok: true });
+
+    await expect(qc.fetchQuery({
+      queryKey: ["auth"],
+      queryFn: async () => {
+        throw new ApiError("Unauthorized", 401, { detail: "Sign in again." });
+      },
+      retry: false,
+      staleTime: 0,
+    })).rejects.toThrow("Unauthorized");
+    await expect(qc.fetchQuery({
+      queryKey: ["validation"],
+      queryFn: async () => {
+        throw new ApiError("Invalid", 422, {
+          errors: [{ loc: ["body", "name"], msg: "Name is required", type: "missing" }],
+        });
+      },
+      retry: false,
+      staleTime: 0,
+    })).rejects.toThrow("Invalid");
+
+    expect(events).toEqual([]);
+  });
+
+  it("toasts mutation failures only when the call site has no inline error handler", async () => {
+    const events: unknown[] = [];
+    const qc = makeQueryClient({ onErrorToast: (event) => events.push(event) });
+
+    const globalMutation = qc.getMutationCache().build(qc, {
+      mutationFn: async () => {
+        throw new ApiError("Save failed", 500, { detail: "Could not save." });
+      },
+    });
+    await expect(globalMutation.execute(undefined)).rejects.toThrow("Save failed");
+
+    const inlineMutation = qc.getMutationCache().build(qc, {
+      mutationFn: async () => {
+        throw new ApiError("Inline failed", 500, { detail: "Inline message." });
+      },
+      onError: () => undefined,
+    });
+    await expect(inlineMutation.execute(undefined)).rejects.toThrow("Inline failed");
+
+    expect(events).toMatchObject([{
+      source: "mutation",
+      error: {
+        message: "Could not save.",
+        status: 500,
+      },
+    }]);
+  });
+
+  it("honors per-query and per-mutation toast suppression metadata", async () => {
+    const events: unknown[] = [];
+    const qc = makeQueryClient({ onErrorToast: (event) => events.push(event) });
+    qc.setQueryData(["quiet"], { ok: true });
+
+    await expect(qc.fetchQuery({
+      queryKey: ["quiet"],
+      queryFn: async () => {
+        throw new ApiError("Quiet", 500, { detail: "Do not toast." });
+      },
+      meta: { errorToast: false },
+      retry: false,
+      staleTime: 0,
+    })).rejects.toThrow("Quiet");
+
+    const mutation = qc.getMutationCache().build(qc, {
+      mutationFn: async () => {
+        throw new ApiError("Quiet mutation", 500, { detail: "Do not toast." });
+      },
+      meta: { suppressErrorToast: true },
+    });
+    await expect(mutation.execute(undefined)).rejects.toThrow("Quiet mutation");
+
+    expect(events).toEqual([]);
+  });
 });

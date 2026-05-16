@@ -36,6 +36,7 @@
 @import "./scheduler-drawer.css";
 @import "./inventory.css";
 @import "./auth-gate.css";
+@import "./error-toast.css";
 
 .panel--inset {
   background: var(--paper-2);
