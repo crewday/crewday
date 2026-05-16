@@ -33,13 +33,22 @@ COPY migrations ./migrations
 COPY deploy/single/entrypoint.sh /usr/local/bin/crewday-server
 COPY --from=web-build /web/dist ./app/web/dist
 
-RUN python -m pip install --upgrade pip \
+# ``ffmpeg`` supports server-side media normalization. ``build-essential``
+# is only for source wheels without CPython 3.14 binaries, and is removed
+# before the layer is committed.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        ffmpeg \
+    && python -m pip install --upgrade pip \
     && python -m pip install . \
     && python -m app.adapters.llm.fastembed \
     && chmod 0755 /usr/local/bin/crewday-server \
     && mkdir -p /data \
     && chown -R crewday:crewday /app /data \
-    && find /usr/local/bin /usr/local/lib -perm /6000 -type f -exec chmod a-s {} +
+    && find /usr/local/bin /usr/local/lib -perm /6000 -type f -exec chmod a-s {} + \
+    && apt-get purge -y --auto-remove build-essential \
+    && rm -rf /root/.cache /var/lib/apt/lists/*
 
 USER crewday:crewday
 

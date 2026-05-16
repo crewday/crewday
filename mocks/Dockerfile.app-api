@@ -32,17 +32,6 @@ FROM python:3.14-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# ``curl`` is used by the healthcheck below; Pango/fontconfig/DejaVu
-# are the runtime pieces WeasyPrint needs to produce PDFs.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      curl \
-      fontconfig \
-      fonts-dejavu-core \
-      libpango-1.0-0 \
-      libpangoft2-1.0-0 \
- && rm -rf /var/lib/apt/lists/*
-
 # Non-root user pinned at the image level per docs/specs/16.
 # uid/gid 10001 matches the mocks image + the production recipe so a
 # bind-mounted ``/data`` volume lands with the right ownership under
@@ -62,10 +51,25 @@ WORKDIR /app
 # ``rm -f /app/pyproject.toml`` at the end clears the build artefact
 # so the runtime sees only the bind-mounted file at the same path.
 COPY pyproject.toml ./pyproject.toml
-RUN python -c "import tomllib; data = tomllib.load(open('pyproject.toml', 'rb')); print('\n'.join(data['project']['dependencies']))" > /tmp/runtime-deps.txt \
+# ``curl`` is used by the healthcheck below; ``ffmpeg`` supports
+# server-side media normalization; Pango/fontconfig/DejaVu are the
+# runtime pieces WeasyPrint needs to produce PDFs. ``build-essential``
+# is only for source wheels without CPython 3.14 binaries, and is
+# removed before the layer is committed.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      build-essential \
+      curl \
+      ffmpeg \
+      fontconfig \
+      fonts-dejavu-core \
+      libpango-1.0-0 \
+      libpangoft2-1.0-0 \
+ && python -c "import tomllib; data = tomllib.load(open('pyproject.toml', 'rb')); print('\n'.join(data['project']['dependencies']))" > /tmp/runtime-deps.txt \
  && pip install --no-cache-dir -r /tmp/runtime-deps.txt \
  && pip install --no-cache-dir aiosqlite \
- && rm -f /tmp/runtime-deps.txt /app/pyproject.toml
+ && apt-get purge -y --auto-remove build-essential \
+ && rm -rf /tmp/runtime-deps.txt /app/pyproject.toml /root/.cache /var/lib/apt/lists/*
 
 # The data dir is a named compose volume by default, so the mount
 # point itself needs to exist (Docker creates it) but the volume's
