@@ -1,21 +1,11 @@
-import { Chip } from "@/components/common";
 import { formatContextWindow } from "@/lib/numberFormat";
 import type { LlmModel, LlmProviderModel } from "@/types";
+import CapabilityTagChip from "./CapabilityTagChip";
 import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
 import { shouldOpenGraphEditor } from "./lib/clickTargets";
 import type { LlmIndexes } from "./lib/llmIndexes";
 import { thinkingLevelLabel } from "./lib/llmThinking";
 import type { ElementRefSetter, NodeClass, SelectionSetter } from "./types";
-
-const CAPABILITY_TAG_LABEL: Record<string, string> = {
-  chat: "chat",
-  vision: "vision",
-  audio_input: "audio",
-  reasoning: "reasoning",
-  function_calling: "tools",
-  json_mode: "json",
-  streaming: "stream",
-};
 
 interface ModelColumnProps {
   models: LlmModel[];
@@ -85,9 +75,7 @@ export default function ModelColumn(props: ModelColumnProps) {
               </div>
               <div className="llm-graph-node__tags">
                 {m.capabilities.map((tag) => (
-                  <Chip key={tag} tone="ghost" size="sm">
-                    {CAPABILITY_TAG_LABEL[tag] ?? tag}
-                  </Chip>
+                  <CapabilityTagChip key={tag} tag={tag} />
                 ))}
                 <span className="chip chip--ghost chip--sm llm-graph-node__thinking-chip">
                   Thinking {thinkingLevelLabel(m.thinking_level)}

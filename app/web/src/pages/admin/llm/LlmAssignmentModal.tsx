@@ -16,6 +16,7 @@ import type {
   LlmProviderModel,
   LlmThinkingLevel,
 } from "@/types";
+import CapabilityTagChip from "./CapabilityTagChip";
 import LlmUsageTotals from "./LlmUsageTotals";
 import LlmPlayground from "./LlmPlayground";
 import LlmEmbeddingSmoke from "./LlmEmbeddingSmoke";
@@ -569,9 +570,7 @@ function CapabilityHeader({ capability }: { capability: LlmCapabilityEntry }) {
         <p>{capability.description}</p>
         <div className="llm-assignment-dialog__chips" aria-label="Required capabilities">
           {capability.required_capabilities.map((tag) => (
-            <Chip key={tag} tone="sky" size="sm">
-              {tag}
-            </Chip>
+            <CapabilityTagChip key={tag} tag={tag} />
           ))}
         </div>
       </div>

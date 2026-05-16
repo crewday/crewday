@@ -64,6 +64,7 @@ function providerModel(
     input_cost_per_million: 0,
     output_cost_per_million: 0,
     fixed_cost_per_call_usd: null,
+    audio_cost_per_hour_usd: null,
     max_tokens_override: null,
     supports_system_prompt: true,
     supports_temperature: true,

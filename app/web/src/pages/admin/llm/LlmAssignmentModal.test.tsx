@@ -577,6 +577,7 @@ describe("LlmAssignmentModal", () => {
           input_cost_per_million: 0,
           output_cost_per_million: 0,
           fixed_cost_per_call_usd: 0,
+          audio_cost_per_hour_usd: null,
           max_tokens_override: null,
           supports_system_prompt: false,
           supports_temperature: false,

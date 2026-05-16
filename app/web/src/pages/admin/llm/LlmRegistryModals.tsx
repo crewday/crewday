@@ -31,6 +31,7 @@ import {
   thinkingLevelLabel,
   thinkingStrategyLabel,
 } from "./lib/llmThinking";
+import RegistryCheckPill from "./RegistryCheckPill";
 
 export type RegistryDialogState =
   | { kind: "provider"; mode: "create" }
@@ -116,18 +117,20 @@ interface OpenRouterModelPreviewResponse {
 interface OpenRouterPricingPreview {
   providerName: string;
   providerCount: number;
-  inputCostPerMillion: number;
-  outputCostPerMillion: number;
+  inputCostPerMillion: number | null;
+  outputCostPerMillion: number | null;
   fixedCostPerCallUsd: number | null;
+  audioCostPerHourUsd: number | null;
 }
 
 interface ProviderModelPayload {
   provider_id: string;
   model_id: string;
   api_model_id: string;
-  input_cost_per_million: number;
-  output_cost_per_million: number;
+  input_cost_per_million: number | null;
+  output_cost_per_million: number | null;
   fixed_cost_per_call_usd: number | null;
+  audio_cost_per_hour_usd: number | null;
   max_tokens_override: number | null;
   supports_system_prompt: boolean;
   supports_temperature: boolean;
@@ -238,6 +241,10 @@ function formatCostPerMillion(value: number): string {
     minimumFractionDigits: value === 0 ? 0 : 2,
     maximumFractionDigits: value < 0.01 && value > 0 ? 6 : 2,
   })}/M`;
+}
+
+function formatOptionalCostPerMillion(value: number | null): string {
+  return formatCostPerMillion(value ?? 0);
 }
 
 function formatUsdAmount(value: number): string {
@@ -762,14 +769,22 @@ function ModelForm({
   const [serverErr, setServerErr] = useState<string | null>(null);
   const [creatingProviderId, setCreatingProviderId] = useState<string | null>(null);
 
-  const missingProviders = useMemo(() => {
+  const modelProviderRows = useMemo(() => {
     if (mode !== "edit" || !model) return [];
-    const providersWithModel = new Set(
+    const providerModelByProviderId = new Map(
       providerModels
         .filter((providerModel) => providerModel.model_id === model.id)
-        .map((providerModel) => providerModel.provider_id),
+        .map((providerModel) => [providerModel.provider_id, providerModel] as const),
     );
-    return providers.filter((provider) => !providersWithModel.has(provider.id));
+    return providers
+      .map((provider) => ({
+        provider,
+        providerModel: providerModelByProviderId.get(provider.id) ?? null,
+      }))
+      .sort((left, right) => {
+        const byName = left.provider.name.localeCompare(right.provider.name);
+        return byName || left.provider.id.localeCompare(right.provider.id);
+      });
   }, [mode, model, providerModels, providers]);
 
   const invalidate = async () => {
@@ -805,9 +820,10 @@ function ModelForm({
         provider_id: provider.id,
         model_id: model.id,
         api_model_id: model.price_source_model_id ?? model.canonical_name,
-        input_cost_per_million: 0,
-        output_cost_per_million: 0,
+        input_cost_per_million: null,
+        output_cost_per_million: null,
         fixed_cost_per_call_usd: null,
+        audio_cost_per_hour_usd: null,
         max_tokens_override: null,
         supports_system_prompt: true,
         supports_temperature: true,
@@ -859,6 +875,7 @@ function ModelForm({
               inputCostPerMillion: firstPreview.payload.input_cost_per_million,
               outputCostPerMillion: firstPreview.payload.output_cost_per_million,
               fixedCostPerCallUsd: firstPreview.payload.fixed_cost_per_call_usd,
+              audioCostPerHourUsd: firstPreview.payload.audio_cost_per_hour_usd,
             }
           : null,
       );
@@ -917,14 +934,30 @@ function ModelForm({
       ) : null}
       {openRouterPricing ? (
         <p className="llm-openrouter-loader__pricing">
-          Provider price preview: {openRouterPricing.providerName}{" "}
-          {formatCostPerMillion(openRouterPricing.inputCostPerMillion)} in,{" "}
-          {formatCostPerMillion(openRouterPricing.outputCostPerMillion)} out
-          {openRouterPricing.fixedCostPerCallUsd !== null
-            ? `, ${formatUsdAmount(openRouterPricing.fixedCostPerCallUsd)} fixed`
-            : ""}
+          <span className="llm-openrouter-loader__pricing-main">
+            Provider price preview: {openRouterPricing.providerName}{" "}
+            {openRouterPricing.audioCostPerHourUsd !== null &&
+            openRouterPricing.audioCostPerHourUsd > 0
+              ? `${formatUsdAmount(openRouterPricing.audioCostPerHourUsd)}/audio hour`
+              : `${formatOptionalCostPerMillion(openRouterPricing.inputCostPerMillion)} in, ${formatOptionalCostPerMillion(openRouterPricing.outputCostPerMillion)} out`}
+          </span>
+          {openRouterPricing.audioCostPerHourUsd !== null &&
+          openRouterPricing.audioCostPerHourUsd > 0 &&
+          ((openRouterPricing.inputCostPerMillion ?? 0) > 0 ||
+            (openRouterPricing.outputCostPerMillion ?? 0) > 0) ? (
+            <span className="llm-openrouter-loader__pricing-detail">
+              Token pricing:{" "}
+              {formatOptionalCostPerMillion(openRouterPricing.inputCostPerMillion)} in,{" "}
+              {formatOptionalCostPerMillion(openRouterPricing.outputCostPerMillion)} out
+            </span>
+          ) : null}
+          {openRouterPricing.fixedCostPerCallUsd !== null ? (
+            <span className="llm-openrouter-loader__pricing-detail">
+              Fixed cost: {formatUsdAmount(openRouterPricing.fixedCostPerCallUsd)}
+            </span>
+          ) : null}
           {openRouterPricing.providerCount > 1
-            ? ` across ${formatInteger(openRouterPricing.providerCount)} OpenRouter providers`
+            ? ` Across ${formatInteger(openRouterPricing.providerCount)} OpenRouter providers`
             : ""}
           .
         </p>
@@ -1095,14 +1128,13 @@ function ModelForm({
           <legend>Capabilities</legend>
           <div className="llm-registry-form__checks">
             {CAPABILITY_TAGS.map((tag) => (
-              <label key={tag} className="llm-registry-form__check">
-                <input
-                  type="checkbox"
-                  checked={capabilities.includes(tag)}
-                  onChange={() => toggleCapability(tag)}
-                />
-                <span>{tag}</span>
-              </label>
+              <RegistryCheckPill
+                key={tag}
+                checked={capabilities.includes(tag)}
+                onChange={() => toggleCapability(tag)}
+              >
+                {tag}
+              </RegistryCheckPill>
             ))}
           </div>
         </fieldset>
@@ -1155,7 +1187,7 @@ function ModelForm({
           </FormModalField>
         </FormModalGrid>
         <FormModalGrid>
-          <FormModalField label="Thinking strategy" requirement="required">
+          <FormModalField label="Thinking strategy" requirement="optional">
             <select
               value={thinkingStrategy}
               onChange={(e) => {
@@ -1171,7 +1203,7 @@ function ModelForm({
               ))}
             </select>
           </FormModalField>
-          <FormModalField label="Thinking level" requirement="required">
+          <FormModalField label="Thinking level" requirement="optional">
             <select
               value={thinkingLevel}
               onChange={(e) => {
@@ -1206,7 +1238,7 @@ function ModelForm({
             />
           </FormModalField>
         </FormModalGrid>
-        <FormModalField label="Active" requirement="required">
+        <FormModalField label="Active" requirement="optional">
           <input
             type="checkbox"
             checked={active}
@@ -1216,44 +1248,57 @@ function ModelForm({
         <FormModalField label="Notes" requirement="optional">
           <AutoGrowTextarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
         </FormModalField>
-        {mode === "edit" && model && missingProviders.length ? (
+        {mode === "edit" && model ? (
           <section
-            className="llm-model-provider-gaps"
-            aria-labelledby="llm-model-provider-gaps-title"
+            className="llm-model-providers"
+            aria-labelledby="llm-model-providers-title"
           >
-            <header className="llm-model-provider-gaps__head">
+            <header className="llm-model-providers__head">
               <div>
-                <h3 id="llm-model-provider-gaps-title">Available providers</h3>
+                <h3 id="llm-model-providers-title">Providers</h3>
               </div>
-              <span className="llm-model-provider-gaps__count">
-                {missingProviders.length}
-              </span>
             </header>
-            <div className="llm-model-provider-gaps__list">
-              {missingProviders.map((provider) => {
+            <div className="llm-model-providers__list">
+              {modelProviderRows.map(({ provider, providerModel }) => {
                 const pending = creatingProviderId === provider.id;
-                return (
-                  <div key={provider.id} className="llm-model-provider-gaps__item">
-                    <span className="llm-model-provider-gaps__provider">
-                      <span className="llm-model-provider-gaps__name">{provider.name}</span>
-                      <span className="llm-model-provider-gaps__meta">
-                        {providerTypeLabel(provider.provider_type)}
-                        {provider.is_enabled ? "" : " / disabled"}
-                      </span>
+                const providerCopy = (
+                  <span className="llm-model-providers__provider">
+                    <span className="llm-model-providers__name">{provider.name}</span>
+                    <span className="llm-model-providers__meta">
+                      {providerTypeLabel(provider.provider_type)}
+                      {provider.is_enabled ? "" : " / disabled"}
                     </span>
-                    <button
-                      type="button"
-                      className="btn btn--ghost btn--sm"
-                      aria-label={`Create provider-model for ${provider.name}`}
-                      onClick={() => createProviderModel.mutate(provider)}
-                      disabled={
-                        save.isPending ||
-                        remove.isPending ||
-                        createProviderModel.isPending
-                      }
-                    >
-                      {pending ? "..." : "+"}
-                    </button>
+                  </span>
+                );
+                return (
+                  <div key={provider.id} className="llm-model-providers__item">
+                    {providerModel ? (
+                      <button
+                        type="button"
+                        className="llm-model-providers__button"
+                        aria-label={`Edit provider-model for ${provider.name}`}
+                        onClick={() => onOpenProviderModel(providerModel)}
+                      >
+                        {providerCopy}
+                      </button>
+                    ) : (
+                      <>
+                        {providerCopy}
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          aria-label={`Create provider-model for ${provider.name}`}
+                          onClick={() => createProviderModel.mutate(provider)}
+                          disabled={
+                            save.isPending ||
+                            remove.isPending ||
+                            createProviderModel.isPending
+                          }
+                        >
+                          {pending ? "..." : "+"}
+                        </button>
+                      </>
+                    )}
                   </div>
                 );
               })}
@@ -1281,15 +1326,24 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   const [modelId, setModelId] = useState(providerModel?.model_id ?? models[0]?.id ?? "");
   const [apiModelId, setApiModelId] = useState(providerModel?.api_model_id ?? "");
   const [inputCost, setInputCost] = useState(
-    String(providerModel?.input_cost_per_million ?? 0),
+    providerModel?.input_cost_per_million == null
+      ? ""
+      : String(providerModel.input_cost_per_million),
   );
   const [outputCost, setOutputCost] = useState(
-    String(providerModel?.output_cost_per_million ?? 0),
+    providerModel?.output_cost_per_million == null
+      ? ""
+      : String(providerModel.output_cost_per_million),
   );
   const [fixedCost, setFixedCost] = useState(
     providerModel?.fixed_cost_per_call_usd == null
       ? ""
       : String(providerModel.fixed_cost_per_call_usd),
+  );
+  const [audioCost, setAudioCost] = useState(
+    providerModel?.audio_cost_per_hour_usd == null
+      ? ""
+      : String(providerModel.audio_cost_per_hour_usd),
   );
   const [maxTokens, setMaxTokens] = useState(
     providerModel?.max_tokens_override == null
@@ -1465,10 +1519,17 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   const priceSourceModelOverrideDescribedBy = describedBy(syncErrId, syncStatusId);
 
   function applyProviderModelPricing(row: LlmProviderModel) {
-    setInputCost(String(row.input_cost_per_million));
-    setOutputCost(String(row.output_cost_per_million));
+    setInputCost(
+      row.input_cost_per_million == null ? "" : String(row.input_cost_per_million),
+    );
+    setOutputCost(
+      row.output_cost_per_million == null ? "" : String(row.output_cost_per_million),
+    );
     setFixedCost(
       row.fixed_cost_per_call_usd == null ? "" : String(row.fixed_cost_per_call_usd),
+    );
+    setAudioCost(
+      row.audio_cost_per_hour_usd == null ? "" : String(row.audio_cost_per_hour_usd),
     );
   }
 
@@ -1481,6 +1542,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
       input_cost_per_million: providerModel.input_cost_per_million,
       output_cost_per_million: providerModel.output_cost_per_million,
       fixed_cost_per_call_usd: providerModel.fixed_cost_per_call_usd,
+      audio_cost_per_hour_usd: providerModel.audio_cost_per_hour_usd,
       max_tokens_override: providerModel.max_tokens_override,
       supports_system_prompt: providerModel.supports_system_prompt,
       supports_temperature: providerModel.supports_temperature,
@@ -1490,16 +1552,6 @@ function ProviderModelForm(props: ProviderModelFormProps) {
       price_source_model_id_override: emptyToNull(priceSourceModelOverride),
       is_enabled: providerModel.is_enabled,
     };
-  }
-
-  function syncPriceSourceOverrideDraft() {
-    if (!canSyncPricing || !providerModel || syncPending) return;
-    if (!priceSourceDraftChanged) return;
-    const body = persistedPayloadWithPriceSourceDraft();
-    if (body) {
-      setSyncErr(null);
-      syncDraftPricing.mutate(body);
-    }
   }
 
   function syncCurrentPricing() {
@@ -1522,16 +1574,14 @@ function ProviderModelForm(props: ProviderModelFormProps) {
     if (!providerId) return setClientErr("Provider is required.");
     if (!modelId) return setClientErr("Model is required.");
     if (!apiModelId.trim()) return setClientErr("API model id is required.");
-    if (inputCost.trim() === "") return setClientErr("Input cost is required.");
-    if (outputCost.trim() === "") return setClientErr("Output cost is required.");
     const inputParsed = optionalNonNegativeNumber(inputCost, "Input cost");
     if (!inputParsed.ok) return setClientErr(inputParsed.error);
-    if (inputParsed.value === null) return setClientErr("Input cost is required.");
     const outputParsed = optionalNonNegativeNumber(outputCost, "Output cost");
     if (!outputParsed.ok) return setClientErr(outputParsed.error);
-    if (outputParsed.value === null) return setClientErr("Output cost is required.");
     const fixedParsed = optionalNonNegativeNumber(fixedCost, "Fixed cost");
     if (!fixedParsed.ok) return setClientErr(fixedParsed.error);
+    const audioParsed = optionalNonNegativeNumber(audioCost, "Audio cost");
+    if (!audioParsed.ok) return setClientErr(audioParsed.error);
     const maxTokensValue = numberOrNull(maxTokens);
     if (maxTokensValue !== null && (!Number.isInteger(maxTokensValue) || maxTokensValue < 1)) {
       return setClientErr("Max tokens override must be a positive whole number.");
@@ -1557,6 +1607,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
       input_cost_per_million: inputParsed.value,
       output_cost_per_million: outputParsed.value,
       fixed_cost_per_call_usd: fixedParsed.value,
+      audio_cost_per_hour_usd: audioParsed.value,
       max_tokens_override: maxTokensValue,
       supports_system_prompt: supportsSystemPrompt,
       supports_temperature: supportsTemperature,
@@ -1641,38 +1692,30 @@ function ProviderModelForm(props: ProviderModelFormProps) {
           />
         </FormModalField>
         <FormModalGrid className="llm-provider-model-costs">
-          <FormModalField label="Input cost per 1M" requirement="required">
+          <FormModalField label="Input cost per 1M" requirement="optional">
             <input
               type="number"
               min="0"
               step="0.0001"
               value={inputCost}
               onChange={(e) => setInputCost(e.target.value)}
-              required
-              aria-invalid={
-                clientErr === "Input cost is required." ||
-                clientErr === "Input cost must be zero or more."
-              }
+              aria-invalid={clientErr === "Input cost must be zero or more."}
               aria-describedby={errId}
             />
           </FormModalField>
-          <FormModalField label="Output cost per 1M" requirement="required">
+          <FormModalField label="Output cost per 1M" requirement="optional">
             <input
               type="number"
               min="0"
               step="0.0001"
               value={outputCost}
               onChange={(e) => setOutputCost(e.target.value)}
-              required
-              aria-invalid={
-                clientErr === "Output cost is required." ||
-                clientErr === "Output cost must be zero or more."
-              }
+              aria-invalid={clientErr === "Output cost must be zero or more."}
               aria-describedby={errId}
             />
           </FormModalField>
         </FormModalGrid>
-        <FormModalGrid>
+        <FormModalGrid className="llm-provider-model-costs">
           <FormModalField label="Fixed cost per call" requirement="optional">
             <input
               type="number"
@@ -1684,6 +1727,19 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               aria-describedby={errId}
             />
           </FormModalField>
+          <FormModalField label="Audio cost per hour" requirement="optional">
+            <input
+              type="number"
+              min="0"
+              step="0.0001"
+              value={audioCost}
+              onChange={(e) => setAudioCost(e.target.value)}
+              aria-invalid={clientErr === "Audio cost must be zero or more."}
+              aria-describedby={errId}
+            />
+          </FormModalField>
+        </FormModalGrid>
+        <FormModalGrid>
           <FormModalField
             label="Thinking strategy"
             requirement="optional"
@@ -1753,7 +1809,6 @@ function ProviderModelForm(props: ProviderModelFormProps) {
                   setSyncErr(null);
                   setPriceSourceModelOverride(e.target.value);
                 }}
-                onBlur={syncPriceSourceOverrideDraft}
                 aria-invalid={syncErr ? true : undefined}
                 aria-describedby={priceSourceModelOverrideDescribedBy}
               />
@@ -1790,33 +1845,29 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             ) : null}
           </div>
         </FormModalGrid>
+        <FormModalField label="Enabled" requirement="optional">
+          <input
+            type="checkbox"
+            aria-label="Enabled"
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+          />
+        </FormModalField>
         <fieldset className="llm-registry-form__fieldset">
           <legend>Provider support overrides</legend>
           <div className="llm-registry-form__checks">
-            <label className="llm-registry-form__check">
-              <input
-                type="checkbox"
-                checked={supportsSystemPrompt}
-                onChange={(e) => setSupportsSystemPrompt(e.target.checked)}
-              />
-              <span>System prompt</span>
-            </label>
-            <label className="llm-registry-form__check">
-              <input
-                type="checkbox"
-                checked={supportsTemperature}
-                onChange={(e) => setSupportsTemperature(e.target.checked)}
-              />
-              <span>Temperature</span>
-            </label>
-            <label className="llm-registry-form__check">
-              <input
-                type="checkbox"
-                checked={enabled}
-                onChange={(e) => setEnabled(e.target.checked)}
-              />
-              <span>Enabled</span>
-            </label>
+            <RegistryCheckPill
+              checked={supportsSystemPrompt}
+              onChange={setSupportsSystemPrompt}
+            >
+              System prompt
+            </RegistryCheckPill>
+            <RegistryCheckPill
+              checked={supportsTemperature}
+              onChange={setSupportsTemperature}
+            >
+              Temperature
+            </RegistryCheckPill>
           </div>
         </fieldset>
         <FormModalField

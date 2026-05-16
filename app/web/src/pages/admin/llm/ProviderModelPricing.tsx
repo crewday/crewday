@@ -12,11 +12,22 @@ interface ProviderModelPricingProps {
   onSync: () => void;
 }
 
-function formatUsdPerMillion(value: number): string {
-  return `$${formatDecimal(value, {
+function formatUsdPerMillion(value: number | null): string {
+  return `$${formatDecimal(value ?? 0, {
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
   })}`;
+}
+
+function formatUsdAmount(value: number | null): string {
+  return `$${formatDecimal(value ?? 0, {
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 6,
+  })}`;
+}
+
+function hasOptionalPricingValue(before: number | null, after: number | null): boolean {
+  return before !== null || after !== null;
 }
 
 export default function ProviderModelPricing({
@@ -76,6 +87,12 @@ export default function ProviderModelPricing({
               {formatUsdPerMillion(delta.input_after)} input,{" "}
               {formatUsdPerMillion(delta.output_before)} -&gt;{" "}
               {formatUsdPerMillion(delta.output_after)} output
+              {hasOptionalPricingValue(delta.fixed_before, delta.fixed_after)
+                ? `, ${formatUsdAmount(delta.fixed_before)} -> ${formatUsdAmount(delta.fixed_after)} fixed`
+                : ""}
+              {hasOptionalPricingValue(delta.audio_before, delta.audio_after)
+                ? `, ${formatUsdAmount(delta.audio_before)} -> ${formatUsdAmount(delta.audio_after)} audio/hr`
+                : ""}
             </span>
           ))}
         </div>
@@ -87,6 +104,8 @@ export default function ProviderModelPricing({
             <th>API model id</th>
             <th>Input / 1M</th>
             <th>Output / 1M</th>
+            <th>Fixed</th>
+            <th>Audio / hr</th>
             <th>Last synced</th>
             <th>Source</th>
           </tr>
@@ -97,7 +116,9 @@ export default function ProviderModelPricing({
             const model = indexes.modelsById.get(pm.model_id);
             const pinned = pm.price_source_override === "none";
             const free =
-              pm.input_cost_per_million === 0 && pm.output_cost_per_million === 0;
+              (pm.input_cost_per_million ?? 0) === 0 &&
+              (pm.output_cost_per_million ?? 0) === 0 &&
+              (pm.audio_cost_per_hour_usd ?? 0) === 0;
             return (
               <tr key={pm.id}>
                 <td>
@@ -108,6 +129,8 @@ export default function ProviderModelPricing({
                 <td className="mono">{pm.api_model_id}</td>
                 <td className="mono">{formatUsdPerMillion(pm.input_cost_per_million)}</td>
                 <td className="mono">{formatUsdPerMillion(pm.output_cost_per_million)}</td>
+                <td className="mono">{formatUsdAmount(pm.fixed_cost_per_call_usd)}</td>
+                <td className="mono">{formatUsdAmount(pm.audio_cost_per_hour_usd)}</td>
                 <td>
                   <DateTime value={pm.price_last_synced_at} showTime className="mono muted" empty="—" />
                 </td>

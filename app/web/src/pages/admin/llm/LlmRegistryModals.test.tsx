@@ -734,8 +734,15 @@ describe("LlmRegistryModals", () => {
 
     const thinking = screen.getByLabelText(/Thinking level/);
     const strategy = screen.getByLabelText(/Thinking strategy/);
+    const active = screen.getByLabelText(/Active/);
     expect(thinking).toHaveValue("disabled");
     expect(strategy).toHaveValue("none");
+    expect(thinking.closest("label")).toHaveClass("form-field--optional");
+    expect(strategy.closest("label")).toHaveClass("form-field--optional");
+    expect(active.closest("label")).toHaveClass("form-field--optional");
+    expect(thinking.closest("label")).not.toHaveClass("form-field--required");
+    expect(strategy.closest("label")).not.toHaveClass("form-field--required");
+    expect(active.closest("label")).not.toHaveClass("form-field--required");
     expect(
       strategy.compareDocumentPosition(thinking) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -832,12 +839,139 @@ describe("LlmRegistryModals", () => {
     expect(bodyOf(preview!)).toEqual({ model_id_or_url: "google/gemma-4-31b-it" });
   });
 
+  it("shows hourly audio OpenRouter pricing before token pricing for hourly transcription", async () => {
+    installFetch((url) => {
+      if (url === "/admin/api/v1/llm/models/openrouter-preview") {
+        return {
+          body: {
+            openrouter_model_id: "openai/whisper-large-v3-turbo",
+            existing_model_id: null,
+            model_payload: {
+              canonical_name: "openai/whisper-large-v3-turbo",
+              display_name: "Whisper Large v3 Turbo",
+              capabilities: ["audio_input"],
+              context_window: null,
+              max_output_tokens: null,
+              embedding_dimensions: null,
+              temperature: null,
+              thinking_level: "disabled",
+              thinking_strategy: "none",
+              price_source: "openrouter",
+              price_source_model_id: "openai/whisper-large-v3-turbo",
+              is_active: true,
+              notes: null,
+            },
+            provider_model_previews: [
+              {
+                provider_id: "prov_openrouter",
+                provider_name: "OpenRouter",
+                existing_provider_model_id: null,
+                payload: {
+                  provider_id: "prov_openrouter",
+                  model_id: "",
+                  api_model_id: "openai/whisper-large-v3-turbo",
+                  input_cost_per_million: 0,
+                  output_cost_per_million: 0,
+                  fixed_cost_per_call_usd: null,
+                  audio_cost_per_hour_usd: 0.04,
+                  max_tokens_override: null,
+                  supports_system_prompt: false,
+                  supports_temperature: false,
+                  thinking_strategy_override: null,
+                  extra_api_params: {},
+                  price_source_override: "openrouter",
+                  price_source_model_id_override: "openai/whisper-large-v3-turbo",
+                  is_enabled: true,
+                },
+              },
+            ],
+          },
+        };
+      }
+      return { body: {} };
+    });
+    renderRegistry(baseGraph, { kind: "model", mode: "create" });
+
+    fireEvent.change(screen.getByLabelText(/OpenRouter model/), {
+      target: { value: "openai/whisper-large-v3-turbo" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Load metadata" }));
+
+    const pricing = await screen.findByText(/Provider price preview/);
+    expect(pricing).toHaveTextContent("OpenRouter $0.04/audio hour");
+    expect(pricing).not.toHaveTextContent("$0/M");
+  });
+
+  it("keeps token OpenRouter pricing prominent for token-priced transcription", async () => {
+    installFetch((url) => {
+      if (url === "/admin/api/v1/llm/models/openrouter-preview") {
+        return {
+          body: {
+            openrouter_model_id: "openai/gpt-4o-mini-transcribe",
+            existing_model_id: null,
+            model_payload: {
+              canonical_name: "openai/gpt-4o-mini-transcribe",
+              display_name: "GPT-4o mini transcribe",
+              capabilities: ["audio_input"],
+              context_window: 16000,
+              max_output_tokens: null,
+              embedding_dimensions: null,
+              temperature: null,
+              thinking_level: "disabled",
+              thinking_strategy: "none",
+              price_source: "openrouter",
+              price_source_model_id: "openai/gpt-4o-mini-transcribe",
+              is_active: true,
+              notes: null,
+            },
+            provider_model_previews: [
+              {
+                provider_id: "prov_openrouter",
+                provider_name: "OpenRouter",
+                existing_provider_model_id: null,
+                payload: {
+                  provider_id: "prov_openrouter",
+                  model_id: "",
+                  api_model_id: "openai/gpt-4o-mini-transcribe",
+                  input_cost_per_million: 1.25,
+                  output_cost_per_million: 5,
+                  fixed_cost_per_call_usd: null,
+                  audio_cost_per_hour_usd: null,
+                  max_tokens_override: null,
+                  supports_system_prompt: false,
+                  supports_temperature: true,
+                  thinking_strategy_override: null,
+                  extra_api_params: {},
+                  price_source_override: "openrouter",
+                  price_source_model_id_override: "openai/gpt-4o-mini-transcribe",
+                  is_enabled: true,
+                },
+              },
+            ],
+          },
+        };
+      }
+      return { body: {} };
+    });
+    renderRegistry(baseGraph, { kind: "model", mode: "create" });
+
+    fireEvent.change(screen.getByLabelText(/OpenRouter model/), {
+      target: { value: "openai/gpt-4o-mini-transcribe" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Load metadata" }));
+
+    const pricing = await screen.findByText(/Provider price preview/);
+    expect(pricing).toHaveTextContent("OpenRouter $1.25/M in, $5.00/M out");
+    expect(pricing).not.toHaveTextContent("audio hour");
+  });
+
   it("syncs persisted OpenRouter-effective provider-model pricing on demand", async () => {
     const syncedProviderModel = {
       ...baseGraph.provider_models[0]!,
       input_cost_per_million: 0.5,
       output_cost_per_million: 1.5,
       fixed_cost_per_call_usd: 0.01,
+      audio_cost_per_hour_usd: 0.04,
     };
     const calls = installFetch((url) => {
       if (url === "/admin/api/v1/llm/provider-models/pm_gemma/sync-pricing") {
@@ -859,6 +993,7 @@ describe("LlmRegistryModals", () => {
     });
     expect(screen.getByLabelText(/Output cost per 1M/)).toHaveValue(1.5);
     expect(screen.getByLabelText(/Fixed cost per call/)).toHaveValue(0.01);
+    expect(screen.getByLabelText(/Audio cost per hour/)).toHaveValue(0.04);
     expect(
       calls.some(
         (call) =>
@@ -908,20 +1043,13 @@ describe("LlmRegistryModals", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("auto-syncs edited price source model overrides without saving the full draft", async () => {
-    const syncedProviderModel = {
-      ...baseGraph.provider_models[0]!,
-      input_cost_per_million: 0.25,
-      output_cost_per_million: 0.75,
-      fixed_cost_per_call_usd: 0.002,
-      price_source_model_id_override: "openrouter/google-gemma",
-    };
+  it("does not persist edited price source model overrides until sync or save", async () => {
     const calls = installFetch((url, init) => {
       if (
         url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
         init.method === "PUT"
       ) {
-        return { body: syncedProviderModel };
+        throw new Error("Unexpected provider-model save.");
       }
       return { body: {} };
     });
@@ -931,24 +1059,14 @@ describe("LlmRegistryModals", () => {
     fireEvent.change(override, { target: { value: "openrouter/google-gemma" } });
     fireEvent.blur(override);
 
-    await waitFor(() => {
-      expect(screen.getByLabelText(/Input cost per 1M/)).toHaveValue(0.25);
-    });
-    expect(screen.getByLabelText(/Output cost per 1M/)).toHaveValue(0.75);
-    expect(screen.getByLabelText(/Fixed cost per call/)).toHaveValue(0.002);
-    const put = calls.find(
-      (call) =>
-        call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
-        call.init.method === "PUT",
-    )!;
-    expect(bodyOf(put)).toMatchObject({
-      price_source_override: "",
-      price_source_model_id_override: "openrouter/google-gemma",
-    });
+    expect(screen.getByLabelText(/Input cost per 1M/)).toHaveValue(0.15);
+    expect(screen.getByLabelText(/Output cost per 1M/)).toHaveValue(0.2);
+    expect(screen.getByLabelText(/Audio cost per hour/)).toHaveValue(null);
     expect(
       calls.some(
         (call) =>
-          call.url === "/admin/api/v1/llm/provider-models/pm_gemma/sync-pricing",
+          call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+          call.init.method === "PUT",
       ),
     ).toBe(false);
   });
@@ -959,6 +1077,7 @@ describe("LlmRegistryModals", () => {
       input_cost_per_million: 0.45,
       output_cost_per_million: 0.9,
       fixed_cost_per_call_usd: null,
+      audio_cost_per_hour_usd: 0.08,
       price_source_model_id_override: "openrouter/dirty-gemma",
     };
     const calls = installFetch((url, init) => {
@@ -980,6 +1099,7 @@ describe("LlmRegistryModals", () => {
     await waitFor(() => {
       expect(screen.getByLabelText(/Input cost per 1M/)).toHaveValue(0.45);
     });
+    expect(screen.getByLabelText(/Audio cost per hour/)).toHaveValue(0.08);
     expect(
       calls.some(
         (call) =>
@@ -1027,6 +1147,62 @@ describe("LlmRegistryModals", () => {
     expect(
       screen.getByRole("button", { name: "Save provider-model" }),
     ).toBeInTheDocument();
+  });
+
+  it("saves provider-model rows with blank optional pricing fields", async () => {
+    const calls = installFetch();
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "create" });
+
+    expect(screen.getByLabelText(/Audio cost per hour/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Input cost per 1M/).closest("label")).toHaveClass(
+      "form-field--optional",
+    );
+    expect(screen.getByLabelText(/Output cost per 1M/).closest("label")).toHaveClass(
+      "form-field--optional",
+    );
+
+    fireEvent.change(screen.getByLabelText(/API model id/), {
+      target: { value: "test/blank-pricing" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create provider-model" }));
+
+    await waitFor(() => {
+      expect(calls.some((call) => call.url === "/admin/api/v1/llm/provider-models")).toBe(
+        true,
+      );
+    });
+    const post = calls.find((call) => call.url === "/admin/api/v1/llm/provider-models")!;
+    expect(bodyOf(post)).toMatchObject({
+      input_cost_per_million: null,
+      output_cost_per_million: null,
+      fixed_cost_per_call_usd: null,
+      audio_cost_per_hour_usd: null,
+    });
+  });
+
+  it("keeps malformed provider-model pricing field-level invalid", async () => {
+    const calls = installFetch();
+    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    fireEvent.change(screen.getByLabelText(/Audio cost per hour/), {
+      target: { value: "-1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Audio cost must be zero or more.",
+    );
+    expect(screen.getByLabelText(/Audio cost per hour/)).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+          call.init.method === "PUT",
+      ),
+    ).toBe(false);
   });
 
   it("omits provider-model thinking level and saves only strategy overrides", async () => {
@@ -1077,11 +1253,15 @@ describe("LlmRegistryModals", () => {
     const calls = installFetch();
     renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
 
-    const enabled = screen.getByLabelText("Enabled");
+    const enabled = screen.getByLabelText(/Enabled/);
     expect(enabled).toBeChecked();
+    expect(enabled).not.toHaveClass("llm-registry-form__check-input");
+    expect(enabled.closest("label")).toHaveClass("form-field--optional");
+    expect(enabled.closest("label")).not.toHaveClass("llm-registry-form__check");
 
     fireEvent.click(enabled);
     expect(enabled).not.toBeChecked();
+    expect(enabled.closest("label")).not.toHaveClass("llm-registry-form__check--unchecked");
     fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
 
     await waitFor(() => {
@@ -1277,7 +1457,7 @@ describe("LlmRegistryModals", () => {
     });
   });
 
-  it("creates a missing provider-model from the model editor and opens it for editing", async () => {
+  it("lists model providers alphabetically and opens or creates provider-models", async () => {
     const backupProvider: LlmProvider = {
       ...baseGraph.providers[0]!,
       id: "prov_backup",
@@ -1309,12 +1489,25 @@ describe("LlmRegistryModals", () => {
       { onOpenProviderModel },
     );
 
-    const gaps = screen.getByRole("region", { name: "Available providers" });
-    expect(within(gaps).getByText("Backup Gateway")).toBeInTheDocument();
-    expect(within(gaps).queryByText("OpenRouter")).not.toBeInTheDocument();
+    const providers = screen.getByRole("region", { name: "Providers" });
+    expect(
+      Array.from(providers.querySelectorAll(".llm-model-providers__name")).map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(["Backup Gateway", "OpenRouter"]);
 
     fireEvent.click(
-      within(gaps).getByRole("button", {
+      within(providers).getByRole("button", {
+        name: "Edit provider-model for OpenRouter",
+      }),
+    );
+
+    expect(onOpenProviderModel).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "pm_gemma" }),
+    );
+
+    fireEvent.click(
+      within(providers).getByRole("button", {
         name: "Create provider-model for Backup Gateway",
       }),
     );
@@ -1333,8 +1526,9 @@ describe("LlmRegistryModals", () => {
       provider_id: "prov_backup",
       model_id: "model_gemma",
       api_model_id: "google/gemma-4-31b-it",
-      input_cost_per_million: 0,
-      output_cost_per_million: 0,
+      input_cost_per_million: null,
+      output_cost_per_million: null,
+      audio_cost_per_hour_usd: null,
       price_source_override: "",
     });
   });

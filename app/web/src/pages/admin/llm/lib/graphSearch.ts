@@ -1,5 +1,6 @@
 import { formatContextWindow } from "@/lib/numberFormat";
 import type { LlmGraphPayload } from "@/types";
+import { capabilityTagLabel } from "../CapabilityTagChip";
 import { formatUsageSummary } from "../LlmUsageTotals";
 import { thinkingLevelLabel } from "./llmThinking";
 import type { LlmIndexes } from "./llmIndexes";
@@ -11,16 +12,6 @@ export interface LlmGraphSearchResult {
   hasQuery: boolean;
   hasMatches: boolean;
 }
-
-const CAPABILITY_TAG_LABEL: Record<string, string> = {
-  chat: "chat",
-  vision: "vision",
-  audio_input: "audio",
-  reasoning: "reasoning",
-  function_calling: "tools",
-  json_mode: "json",
-  streaming: "stream",
-};
 
 export function filterLlmGraphBySearch(
   graph: LlmGraphPayload,
@@ -111,7 +102,7 @@ function markDirectMatches(
         model.display_name,
         model.canonical_name,
         ...model.capabilities,
-        ...model.capabilities.map((tag) => CAPABILITY_TAG_LABEL[tag] ?? tag),
+        ...model.capabilities.map(capabilityTagLabel),
         "Thinking " + thinkingLevelLabel(model.thinking_level),
         model.context_window ? formatContextWindow(model.context_window) : "",
         formatUsageSummary(model.calls_30d, model.spend_usd_30d),

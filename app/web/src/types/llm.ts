@@ -79,9 +79,10 @@ export interface LlmProviderModel {
   provider_id: string;
   model_id: string;
   api_model_id: string;
-  input_cost_per_million: number;
-  output_cost_per_million: number;
+  input_cost_per_million: number | null;
+  output_cost_per_million: number | null;
   fixed_cost_per_call_usd: number | null;
+  audio_cost_per_hour_usd: number | null;
   max_tokens_override: number | null;
   supports_system_prompt: boolean;
   supports_temperature: boolean;
@@ -246,11 +247,18 @@ export interface LlmSyncPricingResult {
   deltas: {
     provider_model_id: string;
     api_model_id: string;
+    source: "openrouter" | null;
+    lookup_id: string | null;
     input_before: number;
     input_after: number;
     output_before: number;
     output_after: number;
-    status: "updated" | "unchanged" | "pinned" | "error";
+    fixed_before: number | null;
+    fixed_after: number | null;
+    audio_before: number | null;
+    audio_after: number | null;
+    price_last_synced_at: string | null;
+    status: "updated" | "unchanged" | "skipped_not_syncable" | "error";
   }[];
   updated: number;
   skipped: number;

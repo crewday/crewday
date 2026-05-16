@@ -1411,6 +1411,12 @@ so the graph page does not carry a duplicate overflow action.
   where the source data makes them inferable. Any inferred value remains editable before
   save; unknown fields stay blank or at their explicit defaults rather
   than being guessed.
+- **Model provider joins.** In edit mode the model drawer includes a
+  "Providers" pane listing every provider alphabetically. Providers that
+  already have a provider-model row for the model open that provider-model
+  editor when clicked, replacing the model drawer. Providers without a
+  row show a plus affordance that creates the provider-model row and then
+  opens it for editing.
 - **Provider-model editing.** Provider-model edit drawers expose enabled
   state, pricing, support flags, price-source override, price-source
   model override, and a thinking-strategy override. The price-source

@@ -276,7 +276,18 @@ describe("Admin LlmPage", () => {
       const gemmaModel = modelButton("Gemma 4 31B IT");
       const thinkingChip = within(gemmaModel).getByText("Thinking disabled");
       const contextChip = within(gemmaModel).getByText("128K ctx");
+      const capabilityTags = Array.from(
+        gemmaModel.querySelectorAll<HTMLElement>(".llm-capability-tag"),
+      );
       expect(gemmaModel).toBeInTheDocument();
+      expect(capabilityTags.map((tag) => tag.dataset.capabilityTag)).toEqual([
+        "chat",
+        "json_mode",
+        "function_calling",
+      ]);
+      expect(new Set(capabilityTags.map((tag) => tag.dataset.capabilityTag)).size).toBe(
+        capabilityTags.length,
+      );
       expect(contextChip).toHaveClass("chip");
       expect(thinkingChip.compareDocumentPosition(contextChip)).toBe(
         Node.DOCUMENT_POSITION_FOLLOWING,
@@ -650,10 +661,17 @@ describe("Admin LlmPage", () => {
               {
                 provider_model_id: "pm_gemma",
                 api_model_id: "google/gemma-4-31b-it",
+                source: "openrouter",
+                lookup_id: "google/gemma-4-31b-it",
                 input_before: 0.15,
                 input_after: 0.12,
                 output_before: 0.2,
                 output_after: 0.18,
+                fixed_before: null,
+                fixed_after: 0.002,
+                audio_before: null,
+                audio_after: 0.04,
+                price_last_synced_at: "2026-04-30T12:01:00Z",
                 status: "updated",
               },
             ],
@@ -678,6 +696,9 @@ describe("Admin LlmPage", () => {
       expect(
         within(pricingPanel).getByLabelText("Pricing sync deltas"),
       ).toHaveTextContent("google/gemma-4-31b-it");
+      expect(
+        within(pricingPanel).getByLabelText("Pricing sync deltas"),
+      ).toHaveTextContent("$0.000 -> $0.040 audio/hr");
       expect(fetcher.calls.some((call) => call.url === "/admin/api/v1/llm/sync-pricing")).toBe(true);
       await waitFor(() => {
         expect(
@@ -1150,6 +1171,7 @@ describe("Admin LlmPage", () => {
                   input_cost_per_million: 0.15,
                   output_cost_per_million: 0.2,
                   fixed_cost_per_call_usd: null,
+                  audio_cost_per_hour_usd: null,
                   max_tokens_override: null,
                   supports_system_prompt: true,
                   supports_temperature: true,
@@ -1209,7 +1231,7 @@ describe("Admin LlmPage", () => {
         within(dialog).getByRole("textbox", { name: /^Price source model id\b/ }),
       ).toHaveValue("google/gemma-4-31b-it");
       expect(within(dialog).getByText(/Provider price preview/)).toHaveTextContent(
-        "OpenRouter",
+        "OpenRouter $0.15/M in, $0.20/M out",
       );
       await waitFor(() => {
         expect(
@@ -1398,6 +1420,9 @@ describe("Admin LlmPage", () => {
       fireEvent.change(screen.getByLabelText(/Fixed cost per call/), {
         target: { value: "0.05" },
       });
+      fireEvent.change(screen.getByLabelText(/Audio cost per hour/), {
+        target: { value: "0.04" },
+      });
       fireEvent.change(screen.getByLabelText(/Max tokens override/), {
         target: { value: "1024" },
       });
@@ -1436,6 +1461,7 @@ describe("Admin LlmPage", () => {
       expect(jsonBody(put!)).toMatchObject({
         api_model_id: "google/gemma-admin",
         fixed_cost_per_call_usd: 0.05,
+        audio_cost_per_hour_usd: 0.04,
         max_tokens_override: 1024,
         supports_system_prompt: false,
         supports_temperature: false,
