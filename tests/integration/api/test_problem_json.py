@@ -223,8 +223,8 @@ class TestDictDetailSpreadsIntoEnvelope:
     ) -> None:
         """Regression guard: ``detail`` must NOT be ``"{'error': ...}"``."""
         body = composed_client.get("/api/_probe/http/dict_detail").json()
-        # Either ``detail`` is absent (dict had no ``message`` key) or
-        # it's a real string — never the Python-repr of a dict.
+        # ``detail`` may be the default user message when the dict had
+        # no ``message`` key, but never the Python-repr of a dict.
         detail = body.get("detail")
         if detail is not None:
             assert not detail.startswith("{"), (
@@ -232,13 +232,15 @@ class TestDictDetailSpreadsIntoEnvelope:
                 "dict-shaped details must spread into envelope fields"
             )
 
-    def test_dict_detail_without_message_omits_detail_field(
+    def test_dict_detail_without_message_defaults_detail_to_user_message(
         self, composed_client: TestClient
     ) -> None:
         body = composed_client.get("/api/_probe/http/dict_detail").json()
         # The dict had no ``"message"`` key — the envelope's ``detail``
-        # field must be absent rather than render as a repr string.
-        assert "detail" not in body
+        # field defaults to safe copy derived from the machine code,
+        # never a repr string or a generic HTTP title.
+        assert body["detail"] == "Token not found"
+        assert body["user_message"] == "Token not found"
 
     def test_dict_detail_message_becomes_envelope_detail(
         self, composed_client: TestClient
@@ -272,6 +274,7 @@ class TestDictDetailSpreadsIntoEnvelope:
         # Reserved keys keep the handler-computed values.
         assert body["type"] == _type_uri("not_found")
         assert body["status"] == 404
+        assert body["user_message"] == "Token not found"
         # Non-reserved keys pass through.
         assert body["error"] == "token_not_found"
         assert body["harmless"] == "ok"
@@ -300,19 +303,20 @@ class TestStringDetailPreserved:
 
 
 class TestNoneDetailPreserved:
-    """FastAPI's default ``detail`` (``HTTPStatus.phrase``) is suppressed."""
+    """FastAPI's default ``detail`` uses the canonical user message."""
 
-    def test_default_detail_equals_title_is_suppressed(
+    def test_default_detail_equals_user_message(
         self, composed_client: TestClient
     ) -> None:
         resp = composed_client.get("/api/_probe/http/none_detail")
         assert resp.status_code == 404
         body = resp.json()
-        # Envelope still shaped correctly — just no redundant ``detail``
-        # duplicating ``title``.
+        # Envelope stays shaped correctly and carries the canonical
+        # user-facing message in both compatibility fields.
         assert body["type"] == _type_uri("not_found")
         assert body["title"] == "Not found"
-        assert "detail" not in body
+        assert body["detail"] == "Not found"
+        assert body["user_message"] == "Not found"
 
 
 class TestOtherTypeDetailFallsBackToStr:

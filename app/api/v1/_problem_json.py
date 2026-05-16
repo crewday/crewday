@@ -44,9 +44,11 @@ _PROBLEM_JSON_SCHEMA: Final[dict[str, Any]] = {
         "status": {"type": "integer"},
         "detail": {"type": "string"},
         "instance": {"type": "string"},
+        "error_id": {"type": "string", "minLength": 1},
+        "user_message": {"type": "string", "minLength": 1},
         "errors": {"type": "array", "items": {"type": "object"}},
     },
-    "required": ["type", "title", "status", "instance"],
+    "required": ["error_id", "instance", "status", "title", "type", "user_message"],
     "additionalProperties": True,
 }
 

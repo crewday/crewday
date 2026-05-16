@@ -25,6 +25,8 @@ See ``docs/specs/12-rest-api.md`` §"Errors" and
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -76,6 +78,13 @@ def _client(app: FastAPI) -> TestClient:
 
 def _type_uri(short: str) -> str:
     return f"{CANONICAL_TYPE_BASE}{short}"
+
+
+def _assert_problem_ids(body: dict[str, object]) -> None:
+    assert isinstance(body["error_id"], str)
+    assert body["error_id"]
+    assert isinstance(body["user_message"], str)
+    assert body["user_message"]
 
 
 # ---------------------------------------------------------------------------
@@ -146,14 +155,27 @@ class TestDomainErrorMapping:
         assert body["title"] == expected_title
         assert body["status"] == expected_status
         assert body["detail"] == "boom detail"
+        assert body["user_message"] == "boom detail"
         assert body["instance"] == "/boom"
+        _assert_problem_ids(body)
         assert resp.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
 
-    def test_detail_defaults_to_none(self) -> None:
-        """Omitting ``detail`` omits the key entirely."""
+    def test_detail_defaults_to_user_message(self) -> None:
+        """Omitting ``detail`` fills it from the canonical user message."""
         client = _client(_app_raising(NotFound()))
         body = client.get("/boom").json()
-        assert "detail" not in body
+        assert body["detail"] == "Not found"
+        assert body["user_message"] == "Not found"
+        _assert_problem_ids(body)
+
+    def test_machine_code_seeds_user_message_when_detail_missing(self) -> None:
+        client = _client(
+            _app_raising(Conflict(extra={"error": "assignment_priority_exists"}))
+        )
+        body = client.get("/boom").json()
+        assert body["detail"] == "Assignment priority exists"
+        assert body["user_message"] == "Assignment priority exists"
+        assert body["error"] == "assignment_priority_exists"
 
     def test_errors_array_flows_through(self) -> None:
         """Service-raised ``errors`` propagate into ``errors[]``."""
@@ -202,6 +224,9 @@ class TestUnknownDomainErrorFallsBackToInternal:
         assert body["type"] == _type_uri("internal")
         assert body["title"] == "Internal server error"
         assert body["status"] == 500
+        assert body["detail"] == "Internal server error"
+        assert body["user_message"] == "Internal server error"
+        _assert_problem_ids(body)
 
 
 class TestApprovalRequired:
@@ -312,7 +337,9 @@ class TestValidationErrorPaths:
         assert body["type"] == _type_uri("validation")
         assert body["status"] == 422
         assert body["title"] == "Validation error"
+        assert body["user_message"] == "Request validation failed"
         assert body["instance"] == "/v"
+        _assert_problem_ids(body)
         assert resp.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
         assert isinstance(body["errors"], list)
         assert body["errors"], "errors[] must be non-empty"
@@ -338,6 +365,8 @@ class TestValidationErrorPaths:
         body = resp.json()
         assert body["type"] == _type_uri("validation")
         assert body["instance"] == "/boom"
+        assert body["user_message"] == "Request validation failed"
+        _assert_problem_ids(body)
         assert body["errors"]
         assert "count" in body["errors"][0]["loc"]
 
@@ -387,6 +416,7 @@ class TestHTTPExceptionEnvelope:
         body = resp.json()
         assert body["type"] == _type_uri(expected_type)
         assert body["instance"] == "/boom"
+        _assert_problem_ids(body)
         assert resp.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
 
     def test_unknown_status_falls_back_to_http_prefix(self) -> None:
@@ -401,6 +431,7 @@ class TestHTTPExceptionEnvelope:
         )
         body = client.get("/boom").json()
         assert body["detail"] == "missing row"
+        assert body["user_message"] == "missing row"
 
     def test_dict_detail_message_is_preserved_as_extension(self) -> None:
         client = _client(
@@ -413,17 +444,33 @@ class TestHTTPExceptionEnvelope:
         )
         body = client.get("/boom").json()
         assert body["detail"] == "bad range"
+        assert body["user_message"] == "bad range"
         assert body["error"] == "invalid_window"
         assert body["message"] == "bad range"
 
-    def test_default_detail_equals_title_is_suppressed(self) -> None:
+    def test_dict_detail_error_code_seeds_user_message(self) -> None:
+        client = _client(
+            _app_raising(
+                HTTPException(
+                    status_code=404,
+                    detail={"error": "token_not_found"},
+                )
+            )
+        )
+        body = client.get("/boom").json()
+        assert body["detail"] == "Token not found"
+        assert body["user_message"] == "Token not found"
+        assert body["error"] == "token_not_found"
+
+    def test_default_detail_equals_user_message(self) -> None:
         """FastAPI defaults ``detail = HTTPStatus.phrase`` — avoid the
-        duplicate ``detail == title`` in the envelope body.
+        default phrase and use the canonical title-backed user message.
         """
         client = _client(_app_raising(HTTPException(status_code=404)))
         body = client.get("/boom").json()
         assert body["title"] == "Not found"
-        assert "detail" not in body
+        assert body["detail"] == "Not found"
+        assert body["user_message"] == "Not found"
 
     def test_caller_headers_preserved(self) -> None:
         """``HTTPException(headers=...)`` stays on the response."""
@@ -466,12 +513,14 @@ class TestEnvelopeHeaders:
         resp = client.get("/boom", headers={"X-Correlation-Id": "01HXCORRELATION"})
         assert resp.headers["X-Correlation-Id"] == "01HXCORRELATION"
         assert resp.headers["X-Request-Id"] == "01HXCORRELATION"
+        assert resp.json()["error_id"] == "01HXCORRELATION"
 
     def test_correlation_id_echoed_from_x_request_id(self) -> None:
         client = _client(_app_raising(NotFound()))
         resp = client.get("/boom", headers={"X-Request-Id": "01HXREQID"})
         assert resp.headers["X-Request-Id"] == "01HXREQID"
         assert resp.headers["X-Correlation-Id"] == "01HXREQID"
+        assert resp.json()["error_id"] == "01HXREQID"
 
     def test_x_correlation_id_wins_over_x_request_id(self) -> None:
         """Spec-named header takes precedence when both are present."""
@@ -485,13 +534,17 @@ class TestEnvelopeHeaders:
         )
         assert resp.headers["X-Correlation-Id"] == "spec-name"
         assert resp.headers["X-Request-Id"] == "spec-name"
+        assert resp.json()["error_id"] == "spec-name"
 
-    def test_no_correlation_header_when_request_has_none(self) -> None:
+    def test_no_correlation_header_when_request_has_none_still_gets_error_id(
+        self,
+    ) -> None:
         client = _client(_app_raising(NotFound()))
         resp = client.get("/boom")
         lower = {k.lower() for k in resp.headers}
         assert "x-correlation-id" not in lower
         assert "x-request-id" not in lower
+        _assert_problem_ids(resp.json())
 
     def test_crlf_in_correlation_id_is_stripped(self) -> None:
         """CRLF / NUL bytes in an inbound correlation header are stripped.
@@ -509,6 +562,40 @@ class TestEnvelopeHeaders:
         assert "\r" not in echoed
         assert "\n" not in echoed
         assert "X-Evil" not in resp.headers
+        assert resp.json()["error_id"] == "abcX-Evil: injected"
+
+
+class TestUnexpectedExceptionEnvelope:
+    """Unhandled exceptions are still rendered as safe 500 problem+json."""
+
+    def test_unexpected_exception_returns_internal_problem(self) -> None:
+        client = _client(_app_raising(RuntimeError("database password leaked")))
+        resp = client.get("/boom")
+        assert resp.status_code == 500
+        assert resp.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+        body = resp.json()
+        assert body["type"] == _type_uri("internal")
+        assert body["title"] == "Internal server error"
+        assert body["detail"] == "Internal server error"
+        assert body["user_message"] == "Internal server error"
+        assert "database password leaked" not in str(body)
+        _assert_problem_ids(body)
+
+    def test_unexpected_exception_log_carries_error_id(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.ERROR, logger="app.api.errors")
+        client = _client(_app_raising(RuntimeError("database password leaked")))
+        body = client.get("/boom").json()
+
+        records = [
+            record
+            for record in caplog.records
+            if getattr(record, "event", None) == "problem_json.unexpected_exception"
+        ]
+        assert records
+        assert records[0].error_id == body["error_id"]
+        assert records[0].path == "/boom"
 
 
 class TestExtraFieldBehaviour:
@@ -519,11 +606,19 @@ class TestExtraFieldBehaviour:
             _app_raising(
                 NotFound(
                     "missing",
-                    extra={"type": "attacker", "status": 200, "harmless": "ok"},
+                    extra={
+                        "type": "attacker",
+                        "status": 200,
+                        "error_id": "wrong",
+                        "user_message": "wrong",
+                        "harmless": "ok",
+                    },
                 )
             )
         )
         body = client.get("/boom").json()
         assert body["type"] == _type_uri("not_found")
         assert body["status"] == 404
+        assert body["user_message"] == "missing"
+        assert body["error_id"] != "wrong"
         assert body["harmless"] == "ok"

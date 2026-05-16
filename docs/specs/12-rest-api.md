@@ -243,6 +243,8 @@ Problem Details (RFC 7807):
   "type": "https://crewday.dev/errors/validation",
   "title": "Validation error",
   "status": 422,
+  "error_id": "01J0M7T9F6F2X2Y7Q3S4R5T6V7",
+  "user_message": "property_id must be provided",
   "detail": "property_id must be provided",
   "instance": "/api/v1/tasks",
   "errors": [
@@ -251,11 +253,36 @@ Problem Details (RFC 7807):
 }
 ```
 
-Every error response sets `Content-Type: application/problem+json`. Any
-inbound `X-Correlation-Id` or `X-Request-Id` header is echoed on the
-response (both names are always echoed so either side of a proxy chain
-sees it). `RateLimited` responses additionally carry a `Retry-After`
-header when `retry_after_seconds` is present in the envelope `extra`.
+Every error response sets `Content-Type: application/problem+json`.
+Every problem body carries mandatory non-empty string fields:
+
+- `error_id` — the operator/support lookup id for this failure. If
+  the caller supplies `X-Correlation-Id`, `error_id` is the canonical
+  resolved correlation id and matches the echoed correlation headers.
+  If the caller supplies only `X-Request-Id`, `error_id` may use that
+  canonical per-hop request id and match the echoed `X-Request-Id`.
+  If neither header is supplied, the server uses the request-scoped
+  correlation id when one has already been minted, otherwise it
+  generates an opaque id for the problem response. The server logs
+  `error_id` with the response status, path, problem type, and machine
+  error code.
+- `user_message` — the canonical safe user-facing message. For
+  backwards compatibility, `detail` remains present and defaults to
+  the same value as `user_message` unless a handler deliberately
+  supplies another compatible detail string. When a handler supplies
+  only a controlled machine `error` code, the server derives safe
+  display copy from that code instead of falling back to a generic HTTP
+  title. Clients should prefer `user_message` for display and keep
+  accepting `detail` from older servers.
+
+Inbound `X-Correlation-Id` is echoed as the problem body's `error_id`,
+as `X-Correlation-Id`, and, on full app requests, as
+`X-Correlation-Id-Echo`. `X-Request-Id` remains the per-hop log id; when
+a caller supplies only `X-Request-Id`, the problem body `error_id` and
+the visible `X-Request-Id` use that canonical per-hop id while
+`X-Correlation-Id-Echo` may carry a separately minted audit correlation
+id. `RateLimited` responses additionally carry a `Retry-After` header
+when `retry_after_seconds` is present in the envelope `extra`.
 
 `errors[]` items carry exactly `loc`, `msg`, and `type` — pydantic's
 `input`/`ctx`/`url` fields are stripped to avoid echoing PII (§15).

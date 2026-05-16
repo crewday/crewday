@@ -31,7 +31,10 @@ domain.
 ``DomainError`` carries three optional payload slots that flow
 straight into the problem+json body:
 
-* ``detail``: human-facing one-liner, placed under ``detail``.
+* ``detail``: human-facing one-liner, placed under ``detail`` and,
+  by default, under the envelope's canonical ``user_message``.
+  When omitted, the HTTP seam fills both compatibility fields from
+  the error title.
 * ``errors``: field-level error list (RFC 7807 extension), placed
   under ``errors``. Each entry should match
   ``{"loc": [...], "msg": str, "type": str}``.

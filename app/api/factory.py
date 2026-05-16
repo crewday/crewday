@@ -1303,6 +1303,7 @@ def _build_custom_openapi(app: FastAPI) -> dict[str, Any]:
     schema["tags"] = merged_tags
     _declare_workspace_slug_path_parameters(schema)
     _declare_rate_limit_responses(schema)
+    _declare_problem_json_required_fields(schema)
     _sort_set_arrays(schema)
     return schema
 
@@ -1403,12 +1404,21 @@ def _rate_limit_response() -> dict[str, Any]:
                         "status": {"type": "integer", "const": 429},
                         "detail": {"type": "string"},
                         "instance": {"type": "string"},
+                        "error_id": {"type": "string", "minLength": 1},
+                        "user_message": {"type": "string", "minLength": 1},
                         "retry_after_seconds": {
                             "type": "integer",
                             "minimum": 1,
                         },
                     },
-                    "required": ["type", "title", "status", "instance"],
+                    "required": [
+                        "error_id",
+                        "instance",
+                        "status",
+                        "title",
+                        "type",
+                        "user_message",
+                    ],
                     "additionalProperties": True,
                 }
             }
@@ -1449,6 +1459,55 @@ def _declare_rate_limit_responses(schema: dict[str, Any]) -> None:
             responses = operation.get("responses")
             if isinstance(responses, dict):
                 responses.setdefault("429", _rate_limit_response())
+
+
+def _declare_problem_json_required_fields(schema: dict[str, Any]) -> None:
+    """Stamp the mandatory problem+json extension fields on every schema.
+
+    Most problem response shapes come from shared router-level helpers,
+    but a few routes carry local response declarations for specific
+    404/409 branches. Updating the generated schema here keeps those
+    local declarations aligned with the runtime envelope without
+    forcing every route to duplicate the common fields.
+    """
+    paths = schema.get("paths")
+    if not isinstance(paths, dict):
+        return
+
+    for path_item in paths.values():
+        if not isinstance(path_item, dict):
+            continue
+        for operation in path_item.values():
+            if not isinstance(operation, dict):
+                continue
+            responses = operation.get("responses")
+            if not isinstance(responses, dict):
+                continue
+            for response in responses.values():
+                if not isinstance(response, dict):
+                    continue
+                content = response.get("content")
+                if not isinstance(content, dict):
+                    continue
+                media = content.get("application/problem+json")
+                if not isinstance(media, dict):
+                    continue
+                problem_schema = media.get("schema")
+                if not isinstance(problem_schema, dict):
+                    continue
+                properties = problem_schema.setdefault("properties", {})
+                if not isinstance(properties, dict):
+                    continue
+                properties.setdefault("error_id", {"type": "string", "minLength": 1})
+                properties.setdefault(
+                    "user_message", {"type": "string", "minLength": 1}
+                )
+                required = problem_schema.setdefault("required", [])
+                if not isinstance(required, list):
+                    continue
+                for field in ("error_id", "user_message"):
+                    if field not in required:
+                        required.append(field)
 
 
 def _install_custom_openapi(app: FastAPI) -> None:

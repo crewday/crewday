@@ -49,6 +49,7 @@ from pydantic import ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
 
+from app.api.transport.correlation_id import CORRELATION_ID_ECHO_HEADER
 from app.domain.errors import (
     CANONICAL_TYPE_BASE,
     ApprovalRequired,
@@ -71,6 +72,8 @@ from app.domain.errors import (
     Validation,
 )
 from app.domain.identity.permission_groups import WouldOrphanOwnersGroup
+from app.util.logging import get_request_id
+from app.util.ulid import new_ulid
 
 __all__ = [
     "CONTENT_TYPE_PROBLEM_JSON",
@@ -93,6 +96,9 @@ CONTENT_TYPE_PROBLEM_JSON: Final[str] = "application/problem+json"
 # Either can arrive on a request; both are echoed so a caller that
 # set ``X-Correlation-Id`` doesn't have to know the internal spelling.
 CORRELATION_HEADERS: Final[tuple[str, ...]] = ("X-Correlation-Id", "X-Request-Id")
+
+_CORRELATION_ID_STATE_ATTR: Final[str] = "correlation_id"
+_ERROR_ID_STATE_ATTR: Final[str] = "problem_error_id"
 
 
 # DomainError subclass → HTTP status. Spec §12 "Errors" pins each of
@@ -220,8 +226,98 @@ def _correlation_id(request: Request) -> str | None:
     for header in CORRELATION_HEADERS:
         value = request.headers.get(header)
         if value:
+            if header == "X-Correlation-Id":
+                state_value = getattr(request.state, _CORRELATION_ID_STATE_ATTR, None)
+                if isinstance(state_value, str) and state_value.strip():
+                    return state_value
+            if header == "X-Request-Id":
+                request_id = get_request_id()
+                if request_id is not None:
+                    return request_id
             return _sanitize_header_value(value)
     return None
+
+
+def _error_id(request: Request) -> str:
+    existing = getattr(request.state, _ERROR_ID_STATE_ATTR, None)
+    if isinstance(existing, str) and existing.strip():
+        return existing
+
+    inbound_correlation = request.headers.get("X-Correlation-Id")
+    if inbound_correlation:
+        state_value = getattr(request.state, _CORRELATION_ID_STATE_ATTR, None)
+        if isinstance(state_value, str) and state_value.strip():
+            error_id = state_value
+        else:
+            error_id = _sanitize_header_value(inbound_correlation)
+    elif request.headers.get("X-Request-Id"):
+        request_id = get_request_id()
+        if request_id is not None:
+            error_id = request_id
+        else:
+            error_id = _sanitize_header_value(request.headers["X-Request-Id"])
+    else:
+        state_value = getattr(request.state, _CORRELATION_ID_STATE_ATTR, None)
+        request_id = get_request_id()
+        if isinstance(state_value, str) and state_value.strip():
+            error_id = state_value
+        elif request_id is not None:
+            error_id = request_id
+        else:
+            error_id = new_ulid()
+
+    if not error_id.strip():
+        error_id = new_ulid()
+    setattr(request.state, _ERROR_ID_STATE_ATTR, error_id)
+    return error_id
+
+
+def _machine_code(type_name: str, extra: dict[str, object] | None) -> str:
+    if extra is not None:
+        raw = extra.get("error")
+        if isinstance(raw, str) and raw.strip():
+            return raw
+    return type_name
+
+
+def _user_message_from_machine_code(extra: dict[str, object] | None) -> str | None:
+    """Return conservative display copy from a controlled machine code."""
+    if extra is None:
+        return None
+    raw = extra.get("error")
+    if not isinstance(raw, str):
+        return None
+    code = raw.strip()
+    if (
+        not code
+        or len(code) > 80
+        or not all(char.islower() or char.isdigit() or char == "_" for char in code)
+    ):
+        return None
+    message = code.replace("_", " ").strip()
+    return message[:1].upper() + message[1:] if message else None
+
+
+def _log_problem_response(
+    *,
+    error_id: str,
+    request: Request,
+    status: int,
+    type_name: str,
+    extra: dict[str, object] | None,
+) -> None:
+    log = _log.error if status >= 500 else _log.info
+    log(
+        "problem_json response",
+        extra={
+            "event": "problem_json.response",
+            "error_id": error_id,
+            "status": status,
+            "path": request.url.path,
+            "type": type_name,
+            "machine_code": _machine_code(type_name, extra),
+        },
+    )
 
 
 def problem_response(
@@ -231,6 +327,7 @@ def problem_response(
     type_name: str,
     title: str,
     detail: str | None = None,
+    user_message: str | None = None,
     errors: tuple[dict[str, object], ...] | None = None,
     extra: dict[str, object] | None = None,
     extra_headers: dict[str, str] | None = None,
@@ -246,23 +343,41 @@ def problem_response(
     §12 "Errors" (``{"loc": [...], "msg": str, "type": str}``).
     ``extra`` flows into the body *after* the standard keys so a
     buggy caller cannot accidentally stomp ``type`` / ``title`` /
-    ``status`` / ``instance`` / ``detail`` / ``errors``.
+    ``status`` / ``instance`` / ``detail`` / ``errors`` /
+    ``error_id`` / ``user_message``.
     """
+    safe_user_message = (
+        user_message or detail or _user_message_from_machine_code(extra) or title
+    )
+    if not safe_user_message.strip():
+        safe_user_message = title or "Error"
+    rendered_detail = detail if detail is not None else safe_user_message
+    error_id = _error_id(request)
     body: dict[str, object] = {
         "type": _type_uri(type_name),
         "title": title,
         "status": status,
+        "detail": rendered_detail,
         "instance": str(request.url.path),
+        "error_id": error_id,
+        "user_message": safe_user_message,
     }
-    if detail is not None:
-        body["detail"] = detail
     if errors:
         body["errors"] = list(errors)
     if extra:
         # Reserved keys cannot be overridden via ``extra``. Silent
         # skip rather than raise because ``extra`` is free-form by
         # contract; the extra-key tests pin this behaviour.
-        reserved = {"type", "title", "status", "instance", "detail", "errors"}
+        reserved = {
+            "type",
+            "title",
+            "status",
+            "instance",
+            "detail",
+            "errors",
+            "error_id",
+            "user_message",
+        }
         for key, value in extra.items():
             if key in reserved:
                 continue
@@ -277,9 +392,19 @@ def problem_response(
         # ``X-Correlation-Id`` echo matches the spec §12 name.
         for header in CORRELATION_HEADERS:
             headers[header] = correlation
+    state_correlation = getattr(request.state, _CORRELATION_ID_STATE_ATTR, None)
+    if isinstance(state_correlation, str) and state_correlation.strip():
+        headers[CORRELATION_ID_ECHO_HEADER] = state_correlation
     if extra_headers:
         headers.update(extra_headers)
 
+    _log_problem_response(
+        error_id=error_id,
+        request=request,
+        status=status,
+        type_name=type_name,
+        extra=extra,
+    )
     return JSONResponse(status_code=status, content=body, headers=headers)
 
 
@@ -363,10 +488,12 @@ def _handle_domain_error(request: Request, exc: DomainError) -> JSONResponse:
     """
     status = _resolve_domain_status(exc)
     if status is None:
+        error_id = _error_id(request)
         _log.error(
             "unmapped domain error",
             extra={
                 "event": "problem_json.unmapped_domain_error",
+                "error_id": error_id,
                 "exception_type": type(exc).__name__,
             },
         )
@@ -454,7 +581,8 @@ def _handle_http_exception(
 
     ``exc.detail`` shapes (spec §12 "Errors"):
 
-    * ``None`` → ``detail`` field omitted from the envelope.
+    * ``None`` → ``detail`` defaults to the canonical
+      ``user_message``.
     * ``str`` → rendered as the ``detail`` field (but suppressed when
       it duplicates ``title``; see below).
     * ``dict`` → spread into the envelope's extension fields (so
@@ -469,7 +597,8 @@ def _handle_http_exception(
 
     FastAPI defaults ``detail`` to :class:`HTTPStatus.phrase`
     (e.g. ``"Not Found"``) when omitted; the case-insensitive compare
-    below suppresses that redundant duplication of ``title``.
+    below ignores that default phrase so ``problem_response`` can fill
+    ``detail`` and ``user_message`` from the canonical title.
     """
     status = exc.status_code
     type_name = _HTTP_STATUS_TYPE_MAP.get(status, f"http_{status}")
@@ -522,6 +651,27 @@ def _handle_http_exception(
     )
 
 
+def _handle_unexpected_exception(request: Request, exc: Exception) -> JSONResponse:
+    """Render an unhandled exception as a safe 500 problem+json response."""
+    error_id = _error_id(request)
+    _log.exception(
+        "unexpected exception",
+        extra={
+            "event": "problem_json.unexpected_exception",
+            "error_id": error_id,
+            "path": request.url.path,
+            "exception_type": type(exc).__name__,
+        },
+    )
+    return problem_response(
+        request,
+        status=500,
+        type_name="internal",
+        title="Internal server error",
+        detail=None,
+    )
+
+
 def add_exception_handlers(app: FastAPI) -> None:
     """Register the three problem+json handlers on ``app``.
 
@@ -561,7 +711,11 @@ def add_exception_handlers(app: FastAPI) -> None:
         assert isinstance(exc, StarletteHTTPException)
         return _handle_http_exception(request, exc)
 
+    async def on_unexpected_exception(request: Request, exc: Exception) -> JSONResponse:
+        return _handle_unexpected_exception(request, exc)
+
     app.add_exception_handler(DomainError, on_domain_error)
     app.add_exception_handler(RequestValidationError, on_request_validation_error)
     app.add_exception_handler(ValidationError, on_pydantic_validation_error)
     app.add_exception_handler(StarletteHTTPException, on_http_exception)
+    app.add_exception_handler(Exception, on_unexpected_exception)

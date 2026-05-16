@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import Response
 
 from app.adapters.db.identity.models import User
 from app.adapters.db.llm.models import ApprovalRequest
@@ -21,6 +21,7 @@ from app.adapters.db.messaging.repositories import SqlAlchemyEmailDeliveryReposi
 from app.adapters.db.session import make_uow
 from app.adapters.llm.ports import Tool
 from app.adapters.mail.null import NullMailer
+from app.api.errors import problem_response
 from app.api.messaging.broadcasts import SqlAlchemyBroadcastGateway
 from app.domain.agent.notifications import (
     approval_notification_view_from_row,
@@ -99,14 +100,14 @@ class AgentApprovalMiddleware(BaseHTTPMiddleware):
 
         action = await _approval_action_for(request, ctx=ctx, target=target)
         if action is None:
-            return _invalid_approval_input_response()
+            return _invalid_approval_input_response(request)
 
         approval_id, expires_at = _write_pending_approval(
             ctx,
             actor=actor,
             action=action,
         )
-        return _approval_required_response(approval_id, expires_at)
+        return _approval_required_response(request, approval_id, expires_at)
 
 
 def _should_consider(request: Request) -> bool:
@@ -233,30 +234,32 @@ def _write_pending_approval(
     return approval_id, expires_at
 
 
-def _approval_required_response(approval_id: str, expires_at: datetime) -> Response:
-    return JSONResponse(
-        status_code=409,
-        media_type="application/problem+json",
-        content={
-            "type": "https://crewday.dev/errors/approval_required",
-            "title": "Approval required",
-            "detail": "This delegated-token action is pending human approval.",
+def _approval_required_response(
+    request: Request, approval_id: str, expires_at: datetime
+) -> Response:
+    return problem_response(
+        request,
+        status=409,
+        type_name="approval_required",
+        title="Approval required",
+        detail="This delegated-token action is pending human approval.",
+        extra={
+            "error": "approval_required",
             "approval_id": approval_id,
-            "status": "pending",
+            "approval_request_id": approval_id,
+            "approval_status": "pending",
             "expires_at": expires_at.isoformat(),
         },
     )
 
 
-def _invalid_approval_input_response() -> Response:
-    return JSONResponse(
-        status_code=422,
-        media_type="application/problem+json",
-        content={
-            "type": "https://crewday.dev/errors/validation",
-            "title": "Validation error",
-            "detail": "reason_md is required before this action can be queued.",
-        },
+def _invalid_approval_input_response(request: Request) -> Response:
+    return problem_response(
+        request,
+        status=422,
+        type_name="validation",
+        title="Validation error",
+        detail="reason_md is required before this action can be queued.",
     )
 
 

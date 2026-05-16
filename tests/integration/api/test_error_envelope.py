@@ -174,6 +174,10 @@ def _build_probe_router() -> APIRouter:
     def probe_internal() -> None:
         raise _UnregisteredError("surprise")
 
+    @r.get("/api/_probe/unexpected", include_in_schema=False)
+    def probe_unexpected() -> None:
+        raise RuntimeError("database password leaked")
+
     return r
 
 
@@ -221,6 +225,13 @@ def _type_uri(short: str) -> str:
     return f"{CANONICAL_TYPE_BASE}{short}"
 
 
+def _assert_problem_ids(body: dict[str, object]) -> None:
+    assert isinstance(body["error_id"], str)
+    assert body["error_id"]
+    assert isinstance(body["user_message"], str)
+    assert body["user_message"]
+
+
 # ---------------------------------------------------------------------------
 # Snapshot per canonical type
 # ---------------------------------------------------------------------------
@@ -238,7 +249,9 @@ class TestCanonicalTypeSnapshots:
         assert body["title"] == "Validation error"
         assert body["status"] == 422
         assert body["detail"] == "property_id must be provided"
+        assert body["user_message"] == "property_id must be provided"
         assert body["instance"] == "/api/_probe/validation"
+        _assert_problem_ids(body)
         assert body["errors"] == [
             {
                 "loc": ["body", "property_id"],
@@ -251,13 +264,13 @@ class TestCanonicalTypeSnapshots:
         resp = composed_client.get("/api/_probe/not_found")
         assert resp.status_code == 404
         body = resp.json()
-        assert body == {
-            "type": _type_uri("not_found"),
-            "title": "Not found",
-            "status": 404,
-            "detail": "task not found",
-            "instance": "/api/_probe/not_found",
-        }
+        assert body["type"] == _type_uri("not_found")
+        assert body["title"] == "Not found"
+        assert body["status"] == 404
+        assert body["detail"] == "task not found"
+        assert body["user_message"] == "task not found"
+        assert body["instance"] == "/api/_probe/not_found"
+        _assert_problem_ids(body)
 
     def test_conflict(self, composed_client: TestClient) -> None:
         resp = composed_client.get("/api/_probe/conflict")
@@ -267,6 +280,7 @@ class TestCanonicalTypeSnapshots:
         assert body["title"] == "Conflict"
         assert body["status"] == 409
         assert body["detail"] == "etag mismatch"
+        assert body["user_message"] == "etag mismatch"
         assert body["instance"] == "/api/_probe/conflict"
 
     def test_unauthorized(self, composed_client: TestClient) -> None:
@@ -276,6 +290,7 @@ class TestCanonicalTypeSnapshots:
         assert body["type"] == _type_uri("unauthorized")
         assert body["title"] == "Unauthorized"
         assert body["detail"] == "bearer token missing"
+        assert body["user_message"] == "bearer token missing"
         assert body["instance"] == "/api/_probe/unauthorized"
 
     def test_forbidden(self, composed_client: TestClient) -> None:
@@ -285,6 +300,7 @@ class TestCanonicalTypeSnapshots:
         assert body["type"] == _type_uri("forbidden")
         assert body["title"] == "Forbidden"
         assert body["detail"] == "insufficient permissions"
+        assert body["user_message"] == "insufficient permissions"
 
     def test_rate_limited(self, composed_client: TestClient) -> None:
         resp = composed_client.get("/api/_probe/rate_limited")
@@ -295,6 +311,7 @@ class TestCanonicalTypeSnapshots:
         assert body["title"] == "Rate limited"
         assert body["status"] == 429
         assert body["detail"] == "slow down"
+        assert body["user_message"] == "slow down"
         assert body["retry_after_seconds"] == 30
 
     def test_upstream_unavailable(self, composed_client: TestClient) -> None:
@@ -304,6 +321,8 @@ class TestCanonicalTypeSnapshots:
         assert body["type"] == _type_uri("upstream_unavailable")
         assert body["title"] == "Upstream unavailable"
         assert body["status"] == 502
+        assert body["detail"] == "LLM timed out"
+        assert body["user_message"] == "LLM timed out"
         assert body["upstream"] == "openrouter"
 
     def test_idempotency_conflict(self, composed_client: TestClient) -> None:
@@ -313,6 +332,7 @@ class TestCanonicalTypeSnapshots:
         assert body["type"] == _type_uri("idempotency_conflict")
         assert body["title"] == "Idempotency conflict"
         assert body["detail"] == ("idempotency key reused with a different body")
+        assert body["user_message"] == "idempotency key reused with a different body"
         assert body["idempotency_key"] == "abc-123"
 
     def test_would_orphan_owners_group(self, composed_client: TestClient) -> None:
@@ -324,6 +344,9 @@ class TestCanonicalTypeSnapshots:
         assert body["title"] == "Would orphan owners group"
         assert body["status"] == 422
         assert body["detail"] == "cannot remove the last member of the 'owners' group"
+        assert body["user_message"] == (
+            "cannot remove the last member of the 'owners' group"
+        )
 
     def test_approval_required(self, composed_client: TestClient) -> None:
         resp = composed_client.get("/api/_probe/approval_required")
@@ -335,6 +358,7 @@ class TestCanonicalTypeSnapshots:
         assert body["approval_request_id"] == "01HXAPPRID"
         assert body["expires_at"] == "2026-04-21T12:00:00Z"
         assert body["detail"] == "agent action pending approval"
+        assert body["user_message"] == "agent action pending approval"
         assert body["card_summary"] == "Approve expense $5"
 
     def test_internal_fallback(self, composed_client: TestClient) -> None:
@@ -345,7 +369,23 @@ class TestCanonicalTypeSnapshots:
         assert body["type"] == _type_uri("internal")
         assert body["title"] == "Internal server error"
         assert body["status"] == 500
+        assert body["detail"] == "Internal server error"
+        assert body["user_message"] == "Internal server error"
         assert body["instance"] == "/api/_probe/internal"
+        _assert_problem_ids(body)
+
+    def test_unexpected_exception_path(self, composed_client: TestClient) -> None:
+        """Unexpected exceptions become safe 500 problem+json responses."""
+        resp = composed_client.get("/api/_probe/unexpected")
+        assert resp.status_code == 500
+        assert resp.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+        body = resp.json()
+        assert body["type"] == _type_uri("internal")
+        assert body["title"] == "Internal server error"
+        assert body["detail"] == "Internal server error"
+        assert body["user_message"] == "Internal server error"
+        assert "database password leaked" not in str(body)
+        _assert_problem_ids(body)
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +405,7 @@ _PROBE_PATHS: tuple[str, ...] = (
     "/api/_probe/would_orphan_owners_group",
     "/api/_probe/approval_required",
     "/api/_probe/internal",
+    "/api/_probe/unexpected",
 )
 
 
@@ -388,6 +429,18 @@ class TestCrossCuttingEnvelopeInvariants:
         """Inbound ``X-Correlation-Id`` survives the error-envelope path."""
         resp = composed_client.get(path, headers={"X-Correlation-Id": "01HXOBSERVABLE"})
         assert resp.headers.get("X-Correlation-Id") == "01HXOBSERVABLE"
+        assert resp.headers.get("X-Correlation-Id-Echo") == "01HXOBSERVABLE"
+        assert resp.json()["error_id"] == "01HXOBSERVABLE"
+
+    @pytest.mark.parametrize("path", _PROBE_PATHS)
+    def test_request_id_can_back_error_id(
+        self, composed_client: TestClient, path: str
+    ) -> None:
+        request_id = "123e4567-e89b-12d3-a456-426614174000"
+        resp = composed_client.get(path, headers={"X-Request-Id": request_id})
+        assert resp.headers.get("X-Correlation-Id") == request_id
+        assert resp.headers.get("X-Request-Id") == request_id
+        assert resp.json()["error_id"] == request_id
 
     @pytest.mark.parametrize("path", _PROBE_PATHS)
     def test_instance_equals_request_path(
@@ -403,6 +456,12 @@ class TestCrossCuttingEnvelopeInvariants:
         """Every rendered envelope carries a full URI under ``type``."""
         body = composed_client.get(path).json()
         assert body["type"].startswith(CANONICAL_TYPE_BASE)
+
+    @pytest.mark.parametrize("path", _PROBE_PATHS)
+    def test_mandatory_error_id_and_user_message(
+        self, composed_client: TestClient, path: str
+    ) -> None:
+        _assert_problem_ids(composed_client.get(path).json())
 
 
 class TestSPACatchAllAPIFallthrough:
@@ -424,5 +483,8 @@ class TestSPACatchAllAPIFallthrough:
         body = resp.json()
         assert body["type"] == f"{CANONICAL_TYPE_BASE}not_found"
         assert body["status"] == 404
+        assert body["detail"] == "Not found"
+        assert body["user_message"] == "Not found"
+        _assert_problem_ids(body)
         assert "title" in body
         assert "instance" in body
