@@ -141,10 +141,7 @@ export default function CapabilityChain(props: CapabilityChainProps) {
                 >
                   <span className="llm-graph-chain__pm-summary">
                     <span className="llm-graph-chain__pm-model">
-                      {model?.display_name ?? pm.api_model_id}
-                    </span>
-                    <span className="llm-graph-chain__pm-provider">
-                      {provider?.name ?? "Unknown provider"}
+                      {model?.display_name ?? "(missing model)"}
                     </span>
                     {assignmentThinkingLevel ? (
                       <span className="llm-graph-chain__pm-thinking">

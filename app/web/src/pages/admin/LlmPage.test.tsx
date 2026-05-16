@@ -306,9 +306,8 @@ describe("Admin LlmPage", () => {
       const assignmentProviderModel = within(chatManagerRung()).getByRole("button", {
         name: /^Open provider-model google\/gemma-4-31b-it/,
       });
-      expect(
-        within(assignmentProviderModel).getByText("OpenRouter"),
-      ).toHaveClass("llm-graph-chain__pm-provider");
+      expect(assignmentProviderModel).toHaveTextContent("Gemma 4 31B IT");
+      expect(assignmentProviderModel).not.toHaveTextContent("OpenRouter");
       expect(
         within(assignmentProviderModel).queryByLabelText(/Recent usage:/),
       ).not.toBeInTheDocument();
@@ -647,6 +646,33 @@ describe("Admin LlmPage", () => {
       expect(thinkingChip.compareDocumentPosition(contextChip)).toBe(
         Node.DOCUMENT_POSITION_FOLLOWING,
       );
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("keeps assignment provider-model rungs compact when model metadata is missing", async () => {
+    const missingModelGraph = {
+      ...graph,
+      models: graph.models.filter((model) => model.id !== "model_gemma"),
+    };
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/graph": [
+        { body: missingModelGraph },
+        { body: missingModelGraph },
+        { body: missingModelGraph },
+      ],
+    });
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      const assignmentProviderModel = within(chatManagerRung()).getByRole("button", {
+        name: /^Open provider-model google\/gemma-4-31b-it/,
+      });
+      expect(assignmentProviderModel).toHaveTextContent("(missing model)");
+      expect(assignmentProviderModel).not.toHaveTextContent("OpenRouter");
+      expect(assignmentProviderModel).not.toHaveTextContent("google/gemma-4-31b-it");
     } finally {
       fetcher.restore();
     }
@@ -1688,9 +1714,7 @@ describe("Admin LlmPage", () => {
       expect(providerModelButton.querySelector(".llm-graph-chain__pm-thinking")).toBeNull();
       expect(providerModelButton).not.toHaveTextContent("Provider-model settings");
       expect(providerModelButton).not.toHaveTextContent(/via\s+OpenRouter/i);
-      expect(within(providerModelButton).getByText("OpenRouter")).toHaveClass(
-        "llm-graph-chain__pm-provider",
-      );
+      expect(providerModelButton).not.toHaveTextContent("OpenRouter");
       expect(providerModelButton).not.toHaveTextContent("google/gemma-4-31b-it");
       expect(chatManagerAssignmentButton()).not.toHaveTextContent("Gemma 4 31B IT");
       expect(chatManagerAssignmentButton()).not.toHaveTextContent(/via\s+OpenRouter/i);

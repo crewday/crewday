@@ -1475,6 +1475,14 @@ so the graph page does not carry a duplicate overflow action.
   by capability key. Creating inheritance over an existing direct chain
   opens a destructive confirmation dialog and, when confirmed, clears
   the direct assignments atomically with edge creation.
+- **Assignment graph rungs.** The assignment column's inline
+  provider-model edit target follows the same compact selected-row
+  contract as the direct assignment modal: visible text shows the
+  model display name and assignment thinking override only. Provider
+  names, provider/model API ids, usage totals, and detailed
+  provider-model metadata stay out of the visible rung label; they
+  remain available from the provider-model edit drawer and accessible
+  control label.
 - **Hover and selection.**
   - Hover a provider card → every model offered by that provider and
     every assignment that resolves through it highlights; everything
