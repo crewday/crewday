@@ -29,7 +29,13 @@ from typing import Literal, Protocol, TypedDict
 from app.util.redact import ConsentSet
 
 __all__ = [
+    "ChatContent",
+    "ChatImageUrlBlock",
+    "ChatImageUrlRef",
+    "ChatInputAudioBlock",
+    "ChatInputAudioRef",
     "ChatMessage",
+    "ChatTextBlock",
     "LLMCapabilityMissing",
     "LLMClient",
     "LLMResponse",

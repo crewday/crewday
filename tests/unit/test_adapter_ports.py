@@ -28,6 +28,7 @@ from sqlalchemy import Executable, Result, ScalarResult
 
 from app.adapters.db.ports import DbSession, UnitOfWork
 from app.adapters.llm.ports import (
+    ChatContent,
     ChatMessage,
     LLMCapabilityMissing,
     LLMClient,
@@ -421,6 +422,28 @@ def test_llm_chat_echoes_last_message() -> None:
         ],
     )
     assert resp.text == "hello"
+
+
+def test_llm_chat_accepts_multimodal_content_blocks() -> None:
+    client: LLMClient = _EchoLLMClient()
+    content: ChatContent = [
+        {"type": "text", "text": "inspect this"},
+        {
+            "type": "image_url",
+            "image_url": {"url": "data:image/png;base64,cGl4ZWxz"},
+        },
+        {
+            "type": "input_audio",
+            "input_audio": {"data": "YXVkaW8=", "format": "mp3"},
+        },
+    ]
+
+    resp = client.chat(
+        model_id="google/gemma-3-12b",
+        messages=[{"role": "user", "content": content}],
+    )
+
+    assert resp.text == content
 
 
 def test_llm_stream_chat_yields_tokens() -> None:

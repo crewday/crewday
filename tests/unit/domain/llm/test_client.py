@@ -169,6 +169,7 @@ def _seed_provider_model(
     session: Session,
     *,
     api_model_id: str,
+    capabilities: Sequence[str] = ("chat",),
 ) -> LlmProviderModel:
     provider = LlmProvider(
         id=new_ulid(),
@@ -184,7 +185,7 @@ def _seed_provider_model(
         id=new_ulid(),
         canonical_name=f"canonical/{api_model_id}",
         display_name=api_model_id,
-        capabilities=["chat"],
+        capabilities=list(capabilities),
         is_active=True,
         price_source="",
         created_at=_PINNED,
@@ -215,8 +216,12 @@ def _seed_assignment(
     capability: str,
     api_model_id: str,
     priority: int = 0,
+    required_capabilities: Sequence[str] = (),
+    model_capabilities: Sequence[str] = ("chat",),
 ) -> LlmAssignment:
-    pm = _seed_provider_model(session, api_model_id=api_model_id)
+    pm = _seed_provider_model(
+        session, api_model_id=api_model_id, capabilities=model_capabilities
+    )
     row = LlmAssignment(
         id=new_ulid(),
         workspace_id=None,
@@ -228,7 +233,7 @@ def _seed_assignment(
         max_tokens=None,
         temperature=None,
         extra_api_params={},
-        required_capabilities=[],
+        required_capabilities=list(required_capabilities),
         created_at=_PINNED,
     )
     session.add(row)
@@ -304,8 +309,14 @@ class _StubAdapter:
     looping forever.
     """
 
-    def __init__(self, script: list[LLMResponse | Exception]) -> None:
+    def __init__(
+        self,
+        script: list[LLMResponse | Exception],
+        *,
+        mutate_first_multimodal_message: bool = False,
+    ) -> None:
         self._script: list[LLMResponse | Exception] = list(script)
+        self._mutate_first_multimodal_message = mutate_first_multimodal_message
         self.calls: list[dict[str, Any]] = []
 
     def chat(
@@ -332,6 +343,10 @@ class _StubAdapter:
                 "consents": consents,
             }
         )
+        if self._mutate_first_multimodal_message and len(self.calls) == 1 and messages:
+            content = messages[0]["content"]
+            if isinstance(content, list):
+                content.append({"type": "text", "text": "mutated by adapter"})
         if not self._script:
             raise AssertionError(
                 "stub adapter script exhausted; test under-provisioned the script"
@@ -446,6 +461,57 @@ class TestHappyPath:
         assert len(adapter.calls) == 1
         assert adapter.calls[0]["model_id"] == "primary/model"
 
+    def test_user_content_with_image_builds_one_multimodal_message(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        ws = _seed_workspace(session)
+        ctx = _build_context(ws.id, slug=ws.slug)
+        _seed_assignment(
+            session,
+            workspace_id=ws.id,
+            capability="documents.ocr",
+            api_model_id="vision/model",
+            required_capabilities=["vision"],
+            model_capabilities=["vision"],
+        )
+        _seed_ledger(session, workspace_id=ws.id, cap_cents=500)
+
+        adapter = _StubAdapter([_ok_response("receipt text")])
+        client = LLMClient(adapter, pricing=_FREE_PRICING)
+        image_ref = {"url": "data:image/png;base64,cGl4ZWxz"}
+
+        token = set_current(ctx)
+        try:
+            result = _run(
+                client.chat(
+                    session,
+                    ctx,
+                    capability="documents.ocr",
+                    user_content=[{"type": "text", "text": "read this receipt"}],
+                    images=[image_ref],
+                    attribution=_attribution(),
+                    consents=ConsentSet.none(),
+                    clock=clock,
+                )
+            )
+            session.flush()
+        finally:
+            reset_current(token)
+
+        assert result.text == "receipt text"
+        assert adapter.calls[0]["messages"] == [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "read this receipt"},
+                    {"type": "image_url", "image_url": image_ref},
+                ],
+            }
+        ]
+        rows = _fetch_rows(session, workspace_id=ws.id)
+        assert len(rows) == 1
+        assert rows[0].status == "ok"
+
     def test_audio_seconds_are_priced_and_persisted(
         self, session: Session, clock: FrozenClock
     ) -> None:
@@ -456,6 +522,8 @@ class TestHappyPath:
             workspace_id=ws.id,
             capability="voice.transcribe",
             api_model_id="primary/model",
+            required_capabilities=["audio_input"],
+            model_capabilities=["audio_input"],
         )
         _seed_ledger(session, workspace_id=ws.id, cap_cents=500)
 
@@ -478,6 +546,7 @@ class TestHappyPath:
             "primary/model": PriceComponents(audio_cost_per_hour_usd=Decimal("0.0400"))
         }
         client = LLMClient(adapter, pricing=pricing)
+        audio_ref = {"data": "YXVkaW8=", "format": "mp3"}
 
         token = set_current(ctx)
         try:
@@ -486,7 +555,8 @@ class TestHappyPath:
                     session,
                     ctx,
                     capability="voice.transcribe",
-                    messages=[{"role": "user", "content": "audio"}],
+                    user_content="transcribe this audio",
+                    audio=[audio_ref],
                     attribution=_attribution(),
                     consents=ConsentSet.none(),
                     clock=clock,
@@ -497,6 +567,15 @@ class TestHappyPath:
             reset_current(token)
 
         assert result.usage.seconds == 9.2
+        assert adapter.calls[0]["messages"] == [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "transcribe this audio"},
+                    {"type": "input_audio", "input_audio": audio_ref},
+                ],
+            }
+        ]
         rows = _fetch_rows(session, workspace_id=ws.id)
         assert len(rows) == 1
         assert rows[0].cost_usd == Decimal("0.000102")
@@ -808,6 +887,87 @@ class TestRetryableThenSuccess:
         assert rows[0].finish_reason == "safety"
         assert rows[0].cost_cents == 0
 
+    def test_multimodal_call_records_failed_rung_then_success(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        ws = _seed_workspace(session)
+        ctx = _build_context(ws.id, slug=ws.slug)
+        _seed_assignment(
+            session,
+            workspace_id=ws.id,
+            capability="documents.ocr",
+            api_model_id="primary/vision",
+            priority=0,
+            required_capabilities=["vision"],
+            model_capabilities=["vision"],
+        )
+        _seed_assignment(
+            session,
+            workspace_id=ws.id,
+            capability="documents.ocr",
+            api_model_id="secondary/vision",
+            priority=1,
+            required_capabilities=["vision"],
+            model_capabilities=["vision"],
+        )
+        _seed_ledger(session, workspace_id=ws.id, cap_cents=500)
+
+        adapter = _StubAdapter(
+            [
+                LlmTransportError("primary down"),
+                _ok_response("fallback text"),
+            ],
+            mutate_first_multimodal_message=True,
+        )
+        client = LLMClient(adapter, pricing=_FREE_PRICING)
+        image_ref = {"url": "data:image/png;base64,cGl4ZWxz"}
+
+        token = set_current(ctx)
+        try:
+            result = _run(
+                client.chat(
+                    session,
+                    ctx,
+                    capability="documents.ocr",
+                    user_content="read this image",
+                    images=[image_ref],
+                    attribution=_attribution(),
+                    consents=ConsentSet.none(),
+                    clock=clock,
+                )
+            )
+            session.flush()
+        finally:
+            reset_current(token)
+
+        assert result.text == "fallback text"
+        assert result.fallback_attempts == 1
+        assert [call["model_id"] for call in adapter.calls] == [
+            "primary/vision",
+            "secondary/vision",
+        ]
+        expected_messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "read this image"},
+                    {"type": "image_url", "image_url": image_ref},
+                ],
+            }
+        ]
+        assert adapter.calls[1]["messages"] == expected_messages
+        assert adapter.calls[0]["messages"] != adapter.calls[1]["messages"]
+        assert (
+            adapter.calls[0]["messages"][0]["content"]
+            is not adapter.calls[1]["messages"][0]["content"]
+        )
+
+        rows = _fetch_rows(session, workspace_id=ws.id)
+        assert [(row.status, row.fallback_attempts) for row in rows] == [
+            ("error", 0),
+            ("ok", 1),
+        ]
+
 
 # ---------------------------------------------------------------------------
 # 3. Terminal error — non-retryable 4xx propagates immediately
@@ -968,6 +1128,45 @@ class TestCapabilityUnassigned:
 
         rows = _fetch_rows(session, workspace_id=ws.id)
         assert rows == []
+
+    def test_assignment_missing_media_capability_fails_before_adapter_call(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        ws = _seed_workspace(session)
+        ctx = _build_context(ws.id, slug=ws.slug)
+        _seed_assignment(
+            session,
+            workspace_id=ws.id,
+            capability="documents.ocr",
+            api_model_id="text/model",
+            required_capabilities=["vision"],
+            model_capabilities=["chat"],
+        )
+        _seed_ledger(session, workspace_id=ws.id, cap_cents=500)
+
+        adapter = _StubAdapter([])
+        client = LLMClient(adapter, pricing=_FREE_PRICING)
+
+        token = set_current(ctx)
+        try:
+            with pytest.raises(CapabilityUnassignedError):
+                _run(
+                    client.chat(
+                        session,
+                        ctx,
+                        capability="documents.ocr",
+                        user_content="read this image",
+                        images=[{"url": "data:image/png;base64,cGl4ZWxz"}],
+                        attribution=_attribution(),
+                        consents=ConsentSet.none(),
+                        clock=clock,
+                    )
+                )
+        finally:
+            reset_current(token)
+
+        assert adapter.calls == []
+        assert _fetch_rows(session, workspace_id=ws.id) == []
 
 
 # ---------------------------------------------------------------------------

@@ -50,13 +50,21 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import TypeGuard, cast
 
 from sqlalchemy.orm import Session
 
 from app.adapters.llm.ports import (
+    ChatContent,
+    ChatImageUrlBlock,
+    ChatImageUrlRef,
+    ChatInputAudioBlock,
+    ChatInputAudioRef,
     ChatMessage,
+    ChatTextBlock,
     LlmContentRefused,
     LlmProviderError,
     LlmRateLimited,
@@ -91,6 +99,7 @@ __all__ = [
     "LLMChainExhausted",
     "LLMClient",
     "LLMResult",
+    "build_user_chat_messages",
     "is_retryable_error",
 ]
 
@@ -258,7 +267,10 @@ class LLMClient:
         ctx: WorkspaceContext,
         *,
         capability: str,
-        messages: Sequence[ChatMessage],
+        messages: Sequence[ChatMessage] | None = None,
+        user_content: ChatContent | None = None,
+        images: Sequence[ChatImageUrlRef | ChatImageUrlBlock] = (),
+        audio: Sequence[ChatInputAudioRef | ChatInputAudioBlock] = (),
         attribution: AgentAttribution,
         max_output_tokens: int | None = None,
         tools: Sequence[Tool] | None = None,
@@ -341,9 +353,22 @@ class LLMClient:
         the walk — workspace consent does not change inside a single
         capability turn, and re-reading per rung would burn an
         unnecessary DB round-trip.
+
+        ``messages`` remains the exact adapter-chat payload for
+        text-only and custom multi-turn callers. Media callers may
+        instead pass ``user_content`` plus ``images`` / ``audio``;
+        the wrapper builds one user chat message from the same
+        :mod:`app.adapters.llm.ports` content block types and then
+        runs the normal resolve / budget / fallback / recorder path.
         """
         # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
         c = clock if clock is not None else SystemClock()
+        prepared_messages = build_user_chat_messages(
+            messages=messages,
+            user_content=user_content,
+            images=images,
+            audio=audio,
+        )
 
         chain = resolve_model(session, ctx, capability, clock=c)
         if not chain:
@@ -395,7 +420,7 @@ class LLMClient:
                 response = await asyncio.to_thread(
                     self._adapter.chat,
                     model_id=model_pick.api_model_id,
-                    messages=list(messages),
+                    messages=_copy_chat_messages(prepared_messages),
                     max_tokens=max_output_tokens or model_pick.max_tokens or 1024,
                     temperature=(
                         model_pick.temperature
@@ -593,6 +618,91 @@ class LLMClient:
             fallback_attempts=fallback_attempts,
             correlation_id=correlation_id,
         ) from last_error
+
+
+def _copy_chat_messages(messages: Sequence[ChatMessage]) -> list[ChatMessage]:
+    return deepcopy(list(messages))
+
+
+def build_user_chat_messages(
+    *,
+    messages: Sequence[ChatMessage] | None = None,
+    user_content: ChatContent | None = None,
+    images: Sequence[ChatImageUrlRef | ChatImageUrlBlock] = (),
+    audio: Sequence[ChatInputAudioRef | ChatInputAudioBlock] = (),
+) -> list[ChatMessage]:
+    """Return the chat payload for a capability call.
+
+    Exact ``messages`` callers keep full control over the chat history.
+    The ``user_content`` / ``images`` / ``audio`` path is intentionally
+    narrower: it creates one user turn containing the supplied typed
+    content blocks so multimodal callers do not need to duplicate the
+    adapter wire shape.
+    """
+    if messages is not None:
+        if user_content is not None or images or audio:
+            raise ValueError(
+                "messages cannot be combined with user_content, images, or audio"
+            )
+        return list(messages)
+    if user_content is None and not images and not audio:
+        raise ValueError("messages or user_content/images/audio is required")
+
+    content = _build_user_content(user_content, images=images, audio=audio)
+    return [{"role": "user", "content": content}]
+
+
+def _build_user_content(
+    user_content: ChatContent | None,
+    *,
+    images: Sequence[ChatImageUrlRef | ChatImageUrlBlock],
+    audio: Sequence[ChatInputAudioRef | ChatInputAudioBlock],
+) -> ChatContent:
+    has_media = bool(images or audio)
+    if isinstance(user_content, str):
+        if not has_media:
+            return user_content
+        blocks: list[ChatTextBlock | ChatImageUrlBlock | ChatInputAudioBlock] = [
+            {"type": "text", "text": user_content}
+        ]
+    else:
+        blocks = list(user_content) if user_content is not None else []
+
+    blocks.extend(_image_block(image) for image in images)
+    blocks.extend(_audio_block(audio_ref) for audio_ref in audio)
+    if not blocks:
+        raise ValueError("user_content must include at least one content block")
+    return blocks
+
+
+def _image_block(
+    image: ChatImageUrlRef | ChatImageUrlBlock,
+) -> ChatImageUrlBlock:
+    if _is_image_block(image):
+        return {"type": "image_url", "image_url": image["image_url"]}
+    ref = cast(ChatImageUrlRef, image)
+    return {"type": "image_url", "image_url": {"url": ref["url"]}}
+
+
+def _is_image_block(
+    image: ChatImageUrlRef | ChatImageUrlBlock,
+) -> TypeGuard[ChatImageUrlBlock]:
+    return "image_url" in image
+
+
+def _audio_block(
+    audio_ref: ChatInputAudioRef | ChatInputAudioBlock,
+) -> ChatInputAudioBlock:
+    if _is_audio_block(audio_ref):
+        return {"type": "input_audio", "input_audio": audio_ref["input_audio"]}
+    ref = cast(ChatInputAudioRef, audio_ref)
+    return {"type": "input_audio", "input_audio": ref}
+
+
+def _is_audio_block(
+    audio_ref: ChatInputAudioRef | ChatInputAudioBlock,
+) -> TypeGuard[ChatInputAudioBlock]:
+    return "input_audio" in audio_ref
 
 
 def _record_terminal_error(

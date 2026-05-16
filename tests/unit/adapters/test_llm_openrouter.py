@@ -41,7 +41,13 @@ from app.adapters.llm.openrouter import (
     fetch_openrouter_model_metadata,
     normalize_openrouter_model_id,
 )
-from app.adapters.llm.ports import ChatMessage, LLMResponse, LlmThinkingLevel, Tool
+from app.adapters.llm.ports import (
+    ChatContent,
+    ChatMessage,
+    LLMResponse,
+    LlmThinkingLevel,
+    Tool,
+)
 from app.util.clock import FrozenClock
 
 # ---------------------------------------------------------------------------
@@ -357,6 +363,27 @@ class TestChatHappyPath:
         )
 
         assert resp.text.startswith("Block the Tuesday morning slot")
+        body = _json_body(handler.requests[0])
+        assert body["messages"] == messages
+
+    def test_multimodal_chat_content_passes_messages_verbatim(self) -> None:
+        handler = _RecordingHandler(responses=[httpx.Response(200, json=_CHAT_FIXTURE)])
+        client = _make_client(handler)
+        content: ChatContent = [
+            {"type": "text", "text": "inspect this"},
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,cGl4ZWxz"},
+            },
+            {
+                "type": "input_audio",
+                "input_audio": {"data": "YXVkaW8=", "format": "mp3"},
+            },
+        ]
+        messages: list[ChatMessage] = [{"role": "user", "content": content}]
+
+        client.chat(model_id=_MODEL, messages=messages)
+
         body = _json_body(handler.requests[0])
         assert body["messages"] == messages
 
