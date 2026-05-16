@@ -811,8 +811,9 @@ def _redact_mapping(
     # "input_audio": {"data": "..."}}``. Both routinely match the
     # credential-shape regex and would silently break valid model
     # calls if scrubbed. Detect the shape once at the mapping level
-    # and skip the free-text sweep on the opaque binary leaf while
-    # still running every other key through the regular rules.
+    # and, for outbound LLM calls only, skip the free-text sweep on
+    # the opaque binary leaf while still running every other key
+    # through the regular rules.
     is_image_block = _looks_like_image_block(mapping)
     is_audio_block = _looks_like_audio_block(mapping)
 
@@ -832,11 +833,12 @@ def _redact_mapping(
             redacted[key] = raw
             continue
 
-        # Image-block carve-out: preserve the bytes wrapper verbatim.
+        # Image-block carve-out: route the bytes wrapper through the
+        # scope-aware helper below.
         # The outer ``type`` discriminator also survives so the
         # provider can still route the block. Structural children
-        # (``image_url`` sub-dict) carry the opaque URL we want to
-        # keep, so we recurse without regex-scrubbing its leaf.
+        # (``image_url`` sub-dict) carry the opaque URL. LLM scope
+        # keeps it for provider calls; log/export scopes scrub it.
         # ``type``, ``text``, and any other string siblings fall
         # through to the normal rules — a prompt carrying a Bearer
         # token right next to the image should still be caught.
@@ -939,18 +941,19 @@ def _redact_image_url_block(
     depth: int,
     max_depth: int,
 ) -> dict[object, object]:
-    """Return a shallow copy of an ``image_url`` sub-dict, URL preserved.
+    """Return a shallow copy of an ``image_url`` sub-dict.
 
     The ``url`` leaf carries the opaque ``data:<mime>;base64,<payload>``
-    wrapper; we keep it verbatim because scrubbing it as a credential
-    would break every vision call. Other keys under the block (a
-    future ``detail``, ``size``, …) run through the regular redactor
-    so no latent PII sneaks past the carve-out.
+    wrapper; scope="llm" keeps it verbatim because scrubbing it as a
+    credential would break every vision call. Log/export scopes scrub it
+    like any other string. Other keys under the block (a future ``detail``,
+    ``size``, …) run through the regular redactor so no latent PII sneaks
+    past the carve-out.
     """
     out: dict[object, object] = {}
     for key, raw in block.items():
         if key == "url" and isinstance(raw, str):
-            out[key] = raw
+            out[key] = raw if scope == "llm" else scrub_string(raw)
             continue
         # Any other key stays under the normal rule set — we thread
         # the live depth / scope / consents through so a deep
@@ -973,11 +976,11 @@ def _redact_audio_block(
     depth: int,
     max_depth: int,
 ) -> dict[object, object]:
-    """Return a shallow copy of an audio sub-dict, data preserved."""
+    """Return a shallow copy of an audio sub-dict."""
     out: dict[object, object] = {}
     for key, raw in block.items():
         if key == "data" and isinstance(raw, str):
-            out[key] = raw
+            out[key] = raw if scope == "llm" else scrub_string(raw)
             continue
         out[key] = _redact(
             raw,

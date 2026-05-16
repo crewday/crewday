@@ -724,6 +724,19 @@ class TestImageBlockCarveOut:
         assert isinstance(image_url, dict)
         assert image_url["url"] == data_url
 
+    def test_base64_image_url_scrubbed_from_logs(self) -> None:
+        fake_payload = "A" * 64
+        data_url = f"data:image/jpeg;base64,{fake_payload}"
+        block = {"type": "image_url", "image_url": {"url": data_url}}
+
+        out = redact(block, scope="log")
+
+        assert isinstance(out, dict)
+        image_url = out["image_url"]
+        assert isinstance(image_url, dict)
+        assert image_url["url"] != data_url
+        assert fake_payload not in image_url["url"]
+
     def test_sibling_text_block_still_scrubs_pii(self) -> None:
         # Messages list with two content blocks: a PII-laden text
         # block and an image block. The text must still be scrubbed.
@@ -778,7 +791,7 @@ class TestImageBlockCarveOut:
 
 
 class TestAudioBlockCarveOut:
-    """``{"type": "input_audio", ...}`` blocks keep base64 audio intact."""
+    """``{"type": "input_audio", ...}`` blocks preserve audio for LLM calls."""
 
     def test_base64_audio_data_survives(self) -> None:
         fake_payload = "A" * 64
@@ -791,6 +804,22 @@ class TestAudioBlockCarveOut:
         input_audio = out["input_audio"]
         assert isinstance(input_audio, dict)
         assert input_audio["data"] == fake_payload
+        assert input_audio["format"] == "mp3"
+
+    def test_base64_audio_data_scrubbed_from_logs(self) -> None:
+        fake_payload = "A" * 64
+        block = {
+            "type": "input_audio",
+            "input_audio": {"data": fake_payload, "format": "mp3"},
+        }
+
+        out = redact(block, scope="log")
+
+        assert isinstance(out, dict)
+        input_audio = out["input_audio"]
+        assert isinstance(input_audio, dict)
+        assert input_audio["data"] != fake_payload
+        assert fake_payload not in input_audio["data"]
         assert input_audio["format"] == "mp3"
 
 

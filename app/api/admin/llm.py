@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import hashlib
 import math
+import subprocess
+import tempfile
 import time
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import Annotated, Any, Final, Literal, Self, cast
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -222,6 +226,7 @@ _PLAYGROUND_IMAGE_UPLOAD_MAX_BYTES = 5 * 1024 * 1024
 _PLAYGROUND_AUDIO_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
 _PLAYGROUND_IMAGE_URL_FETCH_TIMEOUT_S: Final[float] = 5.0
 _PLAYGROUND_IMAGE_URL_FETCH_SCHEMES: Final[frozenset[str]] = frozenset({"https"})
+_PLAYGROUND_MEDIA_CONVERSION_TIMEOUT_S: Final[float] = 15.0
 _PLAYGROUND_MAX_TOKENS_LIMIT = 32_000
 _PLAYGROUND_AUDIO_FORMAT_BY_CONTENT_TYPE: Final[dict[str, str]] = {
     "audio/aac": "aac",
@@ -244,6 +249,7 @@ _PLAYGROUND_AUDIO_FORMATS: Final[frozenset[str]] = frozenset(
     {"aac", "aiff", "flac", "m4a", "mp3", "ogg", "pcm16", "pcm24", "wav", "webm"}
 )
 type PlaygroundAudioRef = ChatInputAudioRef
+type PlaygroundMediaKind = Literal["audio", "image"]
 LlmThinkingLevel = Literal["disabled", "low", "medium", "high"]
 LlmThinkingStrategy = Literal[
     "none",
@@ -254,6 +260,16 @@ LlmThinkingStrategy = Literal[
 LlmProviderType = Literal["openrouter", "openai_compatible", "fake", "local_embedding"]
 LlmAudioInputTransform = Literal["passthrough", "wav_16khz_mono"]
 LlmImageInputFormat = Literal["preserve", "jpeg", "png", "webp"]
+
+
+def _image_input_format(value: str | None) -> LlmImageInputFormat:
+    if value == "jpeg":
+        return "jpeg"
+    if value == "png":
+        return "png"
+    if value == "webp":
+        return "webp"
+    return "preserve"
 
 
 def _thinking_level(value: str | None) -> LlmThinkingLevel:
@@ -585,6 +601,27 @@ async def _playground_upload_data_url(upload: FormUploadFile) -> str:
     return f"data:{content_type};base64,{encoded}"
 
 
+def _playground_decode_data_url(
+    data_url: str,
+    *,
+    expected_prefix: str,
+    error: str,
+) -> tuple[str, bytes]:
+    prefix, sep, payload = data_url.partition(",")
+    if not sep:
+        raise _unprocessable(error)
+    media_type = prefix.removeprefix("data:").split(";", 1)[0].lower()
+    if not media_type.startswith(expected_prefix):
+        raise _unprocessable(error)
+    try:
+        decoded = base64.b64decode(payload, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise _unprocessable(error) from exc
+    if not decoded:
+        raise _unprocessable(error)
+    return media_type, decoded
+
+
 def _playground_audio_format(content_type: str, filename_or_url: str = "") -> str:
     media_type = content_type.split(";", 1)[0].strip().lower()
     filename = filename_or_url.rsplit("/", 1)[-1]
@@ -615,6 +652,184 @@ def _playground_audio_ref_from_bytes(
         "data": base64.b64encode(payload).decode("ascii"),
         "format": _playground_audio_format(content_type, filename_or_url),
     }
+
+
+def _playground_media_suffix(media_type: str) -> str:
+    subtype = media_type.split("/", 1)[-1].split("+", 1)[0].lower()
+    if subtype in {"jpeg", "jpg"}:
+        return ".jpg"
+    if subtype in {"mpeg", "mp3"}:
+        return ".mp3"
+    if subtype:
+        return f".{subtype}"
+    return ".bin"
+
+
+def _playground_ffmpeg_convert(
+    payload: bytes,
+    *,
+    input_suffix: str,
+    output_suffix: str,
+    output_max_bytes: int,
+    args: list[str],
+    kind: PlaygroundMediaKind,
+) -> bytes:
+    if not payload:
+        raise _unprocessable(f"playground_{kind}_empty")
+    with tempfile.TemporaryDirectory(prefix=f"crewday-playground-{kind}-") as tmp_raw:
+        tmp = Path(tmp_raw)
+        input_path = tmp / f"input{input_suffix}"
+        output_path = tmp / f"output{output_suffix}"
+        input_path.write_bytes(payload)
+        command = [
+            "ffmpeg",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(input_path),
+            *args,
+            str(output_path),
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                check=False,
+                timeout=_PLAYGROUND_MEDIA_CONVERSION_TIMEOUT_S,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise _unprocessable(
+                f"playground_{kind}_conversion_failed",
+                message=(
+                    f"{kind.capitalize()} could not be converted for this provider."
+                ),
+            ) from exc
+        if result.returncode != 0 or not output_path.exists():
+            raise _unprocessable(
+                f"playground_{kind}_conversion_failed",
+                message=(
+                    f"{kind.capitalize()} could not be converted for this provider."
+                ),
+            )
+        converted = output_path.read_bytes()
+    if not converted:
+        raise _unprocessable(f"playground_{kind}_conversion_failed")
+    if len(converted) > output_max_bytes:
+        raise _unprocessable(
+            f"playground_{kind}_file_too_large",
+            message=f"Converted {kind} is too large for a playground run.",
+        )
+    return converted
+
+
+async def _playground_normalized_audio_ref(
+    audio_ref: PlaygroundAudioRef | None,
+    provider_model: LlmProviderModel,
+) -> PlaygroundAudioRef | None:
+    if audio_ref is None or provider_model.audio_input_transform == "passthrough":
+        return audio_ref
+
+    try:
+        payload = base64.b64decode(audio_ref["data"], validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise _unprocessable("playground_audio_conversion_failed") from exc
+
+    converted = await asyncio.to_thread(
+        _playground_ffmpeg_convert,
+        payload,
+        input_suffix=f".{audio_ref['format']}",
+        output_suffix=".wav",
+        output_max_bytes=_PLAYGROUND_AUDIO_UPLOAD_MAX_BYTES,
+        kind="audio",
+        args=[
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-sample_fmt",
+            "s16",
+            "-f",
+            "wav",
+        ],
+    )
+    return {
+        "data": base64.b64encode(converted).decode("ascii"),
+        "format": "wav",
+    }
+
+
+def _playground_image_output_type(
+    media_type: str, image_input_format: LlmImageInputFormat
+) -> tuple[str, str, bool]:
+    if image_input_format == "preserve":
+        normalized_media_type = (
+            "image/jpeg" if media_type == "image/jpg" else media_type
+        )
+    else:
+        normalized_media_type = f"image/{image_input_format}"
+    suffix = _playground_media_suffix(normalized_media_type)
+    return normalized_media_type, suffix, normalized_media_type == "image/jpeg"
+
+
+def _playground_image_scale_filter(max_edge_px: int | None) -> str | None:
+    if max_edge_px is None:
+        return None
+    return (
+        "scale="
+        f"'if(gt(max(iw,ih),{max_edge_px}),"
+        f"if(gte(iw,ih),{max_edge_px},-1),iw)':"
+        f"'if(gt(max(iw,ih),{max_edge_px}),"
+        f"if(gte(iw,ih),-1,{max_edge_px}),ih)'"
+    )
+
+
+async def _playground_normalized_image_ref(
+    image_ref: str | None,
+    provider_model: LlmProviderModel,
+) -> str | None:
+    if image_ref is None:
+        return None
+    if (
+        provider_model.image_input_format == "preserve"
+        and provider_model.image_input_max_edge_px is None
+    ):
+        return image_ref
+
+    media_type, payload = _playground_decode_data_url(
+        image_ref,
+        expected_prefix="image/",
+        error="playground_image_conversion_failed",
+    )
+    image_input_format = _image_input_format(provider_model.image_input_format)
+    output_media_type, output_suffix, strip_alpha = _playground_image_output_type(
+        media_type, image_input_format
+    )
+    filters = [
+        value
+        for value in (
+            _playground_image_scale_filter(provider_model.image_input_max_edge_px),
+            "format=rgb24" if strip_alpha else None,
+        )
+        if value is not None
+    ]
+    args = ["-frames:v", "1"]
+    if filters:
+        args.extend(["-vf", ",".join(filters)])
+    converted = await asyncio.to_thread(
+        _playground_ffmpeg_convert,
+        payload,
+        input_suffix=_playground_media_suffix(media_type),
+        output_suffix=output_suffix,
+        output_max_bytes=_PLAYGROUND_IMAGE_UPLOAD_MAX_BYTES,
+        kind="image",
+        args=args,
+    )
+    encoded = base64.b64encode(converted).decode("ascii")
+    return f"data:{output_media_type};base64,{encoded}"
 
 
 async def _playground_upload_audio_ref(
@@ -3309,6 +3524,8 @@ def build_admin_llm_router() -> APIRouter:
             raise _unprocessable("audio_requires_audio_model")
         image_ref = await _playground_image_ref(payload, image_url)
         audio_ref = await _playground_audio_ref(payload, upload_audio_ref)
+        image_ref = await _playground_normalized_image_ref(image_ref, provider_model)
+        audio_ref = await _playground_normalized_audio_ref(audio_ref, provider_model)
         messages = _playground_messages(
             payload,
             provider_model,

@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import base64
+import binascii
+import io
 import json
+import struct
+import subprocess
+import tempfile
+import wave
+import zlib
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import httpx
 import pytest
@@ -83,6 +91,78 @@ class SeededLlm:
     provider_model_id: str
     assignment_id: str
     prompt_id: str
+
+
+def _png_chunk(kind: bytes, payload: bytes) -> bytes:
+    return (
+        struct.pack(">I", len(payload))
+        + kind
+        + payload
+        + struct.pack(">I", binascii.crc32(kind + payload) & 0xFFFFFFFF)
+    )
+
+
+def _rgba_png(width: int, height: int) -> bytes:
+    rows = [
+        b"\x00"
+        + b"".join(bytes((x * 40 % 256, y * 80 % 256, 120, 128)) for x in range(width))
+        for y in range(height)
+    ]
+    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", header)
+        + _png_chunk(b"IDAT", zlib.compress(b"".join(rows)))
+        + _png_chunk(b"IEND", b"")
+    )
+
+
+def _data_url_bytes(data_url: str) -> bytes:
+    return base64.b64decode(data_url.partition(",")[2], validate=True)
+
+
+def _png_dimensions(payload: bytes) -> tuple[int, int]:
+    assert payload.startswith(b"\x89PNG\r\n\x1a\n")
+    return struct.unpack(">II", payload[16:24])
+
+
+def _mp3_bytes() -> bytes:
+    with tempfile.TemporaryDirectory(prefix="crewday-test-mp3-") as tmp_raw:
+        output_path = Path(tmp_raw) / "note.mp3"
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=0.05",
+                "-ar",
+                "44100",
+                "-ac",
+                "2",
+                "-codec:a",
+                "libmp3lame",
+                "-b:a",
+                "64k",
+                "-f",
+                "mp3",
+                str(output_path),
+            ],
+            capture_output=True,
+            check=True,
+            timeout=10,
+        )
+        return output_path.read_bytes()
+
+
+def _assert_wav_16khz_mono(payload: bytes) -> None:
+    with wave.open(io.BytesIO(payload), "rb") as wav_file:
+        assert wav_file.getframerate() == 16000
+        assert wav_file.getnchannels() == 1
 
 
 class _FailingLLMClient:
@@ -1039,6 +1119,159 @@ class TestAdminLlmRoutes:
         finally:
             _wipe(session_factory)
 
+    def test_provider_model_playground_converts_audio_for_model_transform(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            llm = _RecordingLLMClient()
+            client.app.state.llm = llm
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                provider.api_key_envelope_ref = None
+                provider_model = s.get(LlmProviderModel, seeded.provider_model_id)
+                assert provider_model is not None
+                provider_model.audio_input_transform = "wav_16khz_mono"
+                model = s.get(LlmModel, seeded.model_id)
+                assert model is not None
+                model.capabilities = [*model.capabilities, "audio_input"]
+                s.commit()
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                data={"prompt": "transcribe this audio"},
+                files={"audio_file": ("note.mp3", _mp3_bytes(), "audio/mpeg")},
+            )
+
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["status"] == "ok"
+            assert llm.calls == 1
+            content = llm.messages[0][0]["content"]
+            assert isinstance(content, list)
+            audio = content[1]["input_audio"]
+            assert audio["format"] == "wav"
+            decoded = base64.b64decode(audio["data"], validate=True)
+            _assert_wav_16khz_mono(decoded)
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_rejects_audio_conversion_failure(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            llm = _RecordingLLMClient()
+            client.app.state.llm = llm
+            with session_factory() as s, tenant_agnostic():
+                provider_model = s.get(LlmProviderModel, seeded.provider_model_id)
+                assert provider_model is not None
+                provider_model.audio_input_transform = "wav_16khz_mono"
+                model = s.get(LlmModel, seeded.model_id)
+                assert model is not None
+                model.capabilities = [*model.capabilities, "audio_input"]
+                s.commit()
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                data={"prompt": "transcribe this audio"},
+                files={"audio_file": ("note.mp3", b"not-an-mp3", "audio/mpeg")},
+            )
+
+            assert resp.status_code == 422, resp.text
+            assert resp.json()["error"] == "playground_audio_conversion_failed"
+            assert llm.calls == 0
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_converts_audio_url_for_model_transform(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            llm = _RecordingLLMClient()
+            client.app.state.llm = llm
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                provider.api_key_envelope_ref = None
+                provider_model = s.get(LlmProviderModel, seeded.provider_model_id)
+                assert provider_model is not None
+                provider_model.audio_input_transform = "wav_16khz_mono"
+                model = s.get(LlmModel, seeded.model_id)
+                assert model is not None
+                model.capabilities = [*model.capabilities, "audio_input"]
+                s.commit()
+
+            fetched: list[tuple[str, float, int, frozenset[str]]] = []
+
+            async def fake_safe_fetch(
+                url: str,
+                *,
+                timeout_seconds: float,
+                max_body_bytes: int,
+                allowed_schemes: frozenset[str],
+            ) -> httpx.Response:
+                fetched.append((url, timeout_seconds, max_body_bytes, allowed_schemes))
+                return httpx.Response(
+                    200,
+                    headers={"content-type": "audio/mpeg"},
+                    content=_mp3_bytes(),
+                )
+
+            monkeypatch.setattr("app.api.admin.llm.safe_fetch", fake_safe_fetch)
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                json={
+                    "prompt": "transcribe this audio",
+                    "audio_url": "https://audio.example.test/note.mp3",
+                },
+            )
+
+            assert resp.status_code == 200, resp.text
+            assert fetched == [
+                (
+                    "https://audio.example.test/note.mp3",
+                    5.0,
+                    25 * 1024 * 1024,
+                    frozenset({"https"}),
+                )
+            ]
+            assert llm.calls == 1
+            content = llm.messages[0][0]["content"]
+            assert isinstance(content, list)
+            audio = content[1]["input_audio"]
+            assert audio["format"] == "wav"
+            _assert_wav_16khz_mono(base64.b64decode(audio["data"], validate=True))
+        finally:
+            _wipe(session_factory)
+
     def test_provider_model_playground_fetches_audio_url_as_input_audio(
         self,
         client: TestClient,
@@ -1209,6 +1442,121 @@ class TestAdminLlmRoutes:
             assert (
                 image_block["image_url"]["url"] == f"data:image/png;base64,{expected}"
             )
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_resizes_image_for_model_transform(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            llm = _RecordingLLMClient()
+            client.app.state.llm = llm
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                provider.api_key_envelope_ref = None
+                provider_model = s.get(LlmProviderModel, seeded.provider_model_id)
+                assert provider_model is not None
+                provider_model.image_input_format = "png"
+                provider_model.image_input_max_edge_px = 2
+                s.commit()
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                data={"prompt": "describe this image"},
+                files={"image_file": ("receipt.png", _rgba_png(4, 2), "image/png")},
+            )
+
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["status"] == "ok"
+            assert llm.calls == 1
+            content = llm.messages[0][0]["content"]
+            assert isinstance(content, list)
+            image_url = content[1]["image_url"]["url"]
+            assert image_url.startswith("data:image/png;base64,")
+            assert _png_dimensions(_data_url_bytes(image_url)) == (2, 1)
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_flattens_alpha_for_jpeg_transform(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            llm = _RecordingLLMClient()
+            client.app.state.llm = llm
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                provider.api_key_envelope_ref = None
+                provider_model = s.get(LlmProviderModel, seeded.provider_model_id)
+                assert provider_model is not None
+                provider_model.image_input_format = "jpeg"
+                s.commit()
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                data={"prompt": "describe this image"},
+                files={"image_file": ("receipt.png", _rgba_png(2, 2), "image/png")},
+            )
+
+            assert resp.status_code == 200, resp.text
+            assert llm.calls == 1
+            content = llm.messages[0][0]["content"]
+            assert isinstance(content, list)
+            image_url = content[1]["image_url"]["url"]
+            assert image_url.startswith("data:image/jpeg;base64,")
+            assert _data_url_bytes(image_url).startswith(b"\xff\xd8")
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_rejects_image_conversion_failure(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            llm = _RecordingLLMClient()
+            client.app.state.llm = llm
+            with session_factory() as s, tenant_agnostic():
+                provider_model = s.get(LlmProviderModel, seeded.provider_model_id)
+                assert provider_model is not None
+                provider_model.image_input_format = "png"
+                s.commit()
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                data={"prompt": "describe this image"},
+                files={"image_file": ("receipt.png", b"not-a-png", "image/png")},
+            )
+
+            assert resp.status_code == 422, resp.text
+            assert resp.json()["error"] == "playground_image_conversion_failed"
+            assert llm.calls == 0
         finally:
             _wipe(session_factory)
 
