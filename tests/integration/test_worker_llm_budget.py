@@ -30,11 +30,13 @@ from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import Engine, delete, select
+from sqlalchemy import Engine, Table, delete, select
+from sqlalchemy.engine import Connection
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.adapters.db.session as _session_mod
+from app.adapters.db.base import Base
 from app.adapters.db.llm.models import BudgetLedger
 from app.adapters.db.llm.models import LlmUsage as LlmUsageRow
 from app.adapters.db.workspace.models import Workspace
@@ -73,6 +75,28 @@ _LLM_TABLES: tuple[str, ...] = (
     "llm_usage",
     "budget_ledger",
 )
+
+
+def _workspace_dependent_tables() -> tuple[Table, ...]:
+    """Return workspace-owned tables in child-first deletion order."""
+    workspace_table = Workspace.__table__
+    dependent_names = {workspace_table.name}
+    for table in Base.metadata.sorted_tables:
+        if table.name in dependent_names:
+            continue
+        if any(fk.column.table.name in dependent_names for fk in table.foreign_keys):
+            dependent_names.add(table.name)
+    return tuple(
+        table
+        for table in reversed(Base.metadata.sorted_tables)
+        if table.name in dependent_names and table.name != workspace_table.name
+    )
+
+
+def _delete_workspace_rows(conn: Connection) -> None:
+    for table in _workspace_dependent_tables():
+        conn.execute(delete(table))
+    conn.execute(delete(Workspace))
 
 
 @pytest.fixture(autouse=True)
@@ -129,14 +153,10 @@ def clean_budget_tables(engine: Engine) -> Iterator[None]:
     rewrite" assertion even if the job never ran.
     """
     with engine.begin() as conn:
-        conn.execute(delete(BudgetLedger))
-        conn.execute(delete(LlmUsageRow))
-        conn.execute(delete(Workspace))
+        _delete_workspace_rows(conn)
     yield
     with engine.begin() as conn:
-        conn.execute(delete(BudgetLedger))
-        conn.execute(delete(LlmUsageRow))
-        conn.execute(delete(Workspace))
+        _delete_workspace_rows(conn)
 
 
 # ---------------------------------------------------------------------------
