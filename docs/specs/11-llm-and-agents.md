@@ -1300,6 +1300,12 @@ the `app/config/llm_pricing.yml` file from earlier drafts is retired.
   per call, and audio duration cost is USD per hour of submitted
   audio. All pricing fields are optional at the admin API boundary;
   omitted or NULL values are evaluated as zero.
+- OpenRouter transcription models may publish audio-duration prices as
+  per-second, per-minute, or per-hour values. Metadata sync normalizes
+  duration-priced audio to `.audio_cost_per_hour_usd` using structured
+  unit fields when OpenRouter exposes them (`display_pricing`,
+  `pricing_json`, or equivalent page metadata); token-priced
+  transcription models remain on input/output token pricing.
 - A worker job `sync_llm_pricing` runs **weekly** (cron
   `0 3 * * 1` UTC), fetches from each configured price source (v1:
   OpenRouter only), and updates syncable
@@ -1442,8 +1448,12 @@ so the graph page does not carry a duplicate overflow action.
   Provider/model API ids, priority columns, matching capability chips,
   call/cost summaries, and arrow-button reordering are intentionally
   omitted from the selected-row view; drag-and-drop is the primary
-  reorder control. The inheritance pane sits above the playground,
-  which remains the bottom section of the modal. Parent capability
+  reorder control. Available rows are ordered with compatible/addable
+  provider-models first, then incompatible rows; within each group they
+  sort by model display name, provider name, API model id, and provider-
+  model id so the same model across multiple providers remains
+  deterministic. The inheritance pane sits above the playground, which
+  remains the bottom section of the modal. Parent capability
   selectors are searchable and ordered by the number of direct
   inheritance children already pointing at each parent, descending, then
   by capability key. Creating inheritance over an existing direct chain

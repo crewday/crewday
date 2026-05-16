@@ -153,11 +153,40 @@ _DEFAULT_OCR_MIME: Final[str] = "image/jpeg"
 _GEMMA_THINKING_SYSTEM_TOKEN: Final[str] = "<|think|>"
 _PRICE_QUANTUM: Final[Decimal] = Decimal("0.0001")
 _PER_MILLION: Final[Decimal] = Decimal("1000000")
+_PER_SECOND_AUDIO_HOUR_MULTIPLIER: Final[Decimal] = Decimal("3600")
+_PER_MINUTE_AUDIO_HOUR_MULTIPLIER: Final[Decimal] = Decimal("60")
+_PER_HOUR_AUDIO_HOUR_MULTIPLIER: Final[Decimal] = Decimal("1")
 _MODEL_ID_PARTS: Final[int] = 2
 _MODEL_ID_MAX_LENGTH: Final[int] = 240
 _MODEL_ID_VENDOR_MAX_LENGTH: Final[int] = 80
 _MODEL_ID_CHARS: Final[frozenset[str]] = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_:/"
+)
+_AUDIO_DURATION_UNIT_BY_MODEL_ID: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "mistralai/voxtral-mini-transcribe": "audio_minutes",
+        "openai/whisper-large-v3-turbo": "audio_hours",
+        "qwen/qwen3-asr-flash-2026-02-10": "audio_seconds",
+    }
+)
+_AUDIO_DURATION_HOUR_MULTIPLIERS: Final[Mapping[str, Decimal]] = MappingProxyType(
+    {
+        "audio_second": _PER_SECOND_AUDIO_HOUR_MULTIPLIER,
+        "audio_seconds": _PER_SECOND_AUDIO_HOUR_MULTIPLIER,
+        "per second": _PER_SECOND_AUDIO_HOUR_MULTIPLIER,
+        "second": _PER_SECOND_AUDIO_HOUR_MULTIPLIER,
+        "seconds": _PER_SECOND_AUDIO_HOUR_MULTIPLIER,
+        "audio_minute": _PER_MINUTE_AUDIO_HOUR_MULTIPLIER,
+        "audio_minutes": _PER_MINUTE_AUDIO_HOUR_MULTIPLIER,
+        "per minute": _PER_MINUTE_AUDIO_HOUR_MULTIPLIER,
+        "minute": _PER_MINUTE_AUDIO_HOUR_MULTIPLIER,
+        "minutes": _PER_MINUTE_AUDIO_HOUR_MULTIPLIER,
+        "audio_hour": _PER_HOUR_AUDIO_HOUR_MULTIPLIER,
+        "audio_hours": _PER_HOUR_AUDIO_HOUR_MULTIPLIER,
+        "per hour": _PER_HOUR_AUDIO_HOUR_MULTIPLIER,
+        "hour": _PER_HOUR_AUDIO_HOUR_MULTIPLIER,
+        "hours": _PER_HOUR_AUDIO_HOUR_MULTIPLIER,
+    }
 )
 
 
@@ -382,6 +411,7 @@ def _openrouter_model_metadata(
         architecture=architecture,
         endpoint=endpoint,
         entry=entry,
+        pricing=pricing,
     )
     top_provider = (
         _mapping(entry.get("top_provider")) or endpoint or MappingProxyType({})
@@ -409,7 +439,12 @@ def _openrouter_model_metadata(
         output_cost_per_million=_per_million_price(pricing.get("completion")),
         fixed_cost_per_call_usd=_fixed_price(pricing.get("request")),
         audio_cost_per_hour_usd=(
-            _hour_price(pricing.get("prompt"))
+            _audio_hour_price(
+                model_id=model_id,
+                entry=entry,
+                endpoint=endpoint,
+                pricing=pricing,
+            )
             if is_duration_priced_audio
             else Decimal("0.0000")
         ),
@@ -437,10 +472,13 @@ def _is_duration_priced_audio(
     architecture: Mapping[str, object],
     endpoint: Mapping[str, object] | None,
     entry: Mapping[str, object],
+    pricing: Mapping[str, object],
 ) -> bool:
     if (_string(architecture.get("modality")) or "").lower() != (
         "audio->transcription"
     ):
+        return False
+    if _positive_decimal(pricing.get("completion")) is not None:
         return False
     context_length = _positive_int(
         endpoint.get("context_length") if endpoint is not None else None,
@@ -541,11 +579,90 @@ def _fixed_price(value: object) -> Decimal | None:
     return price.quantize(_PRICE_QUANTUM)
 
 
-def _hour_price(value: object) -> Decimal:
-    price = _decimal(value)
+def _audio_hour_price(
+    *,
+    model_id: str,
+    entry: Mapping[str, object],
+    endpoint: Mapping[str, object] | None,
+    pricing: Mapping[str, object],
+) -> Decimal:
+    price = _decimal(pricing.get("prompt"))
     if price is None:
         return Decimal("0.0000")
-    return price.quantize(_PRICE_QUANTUM)
+    multiplier = _audio_duration_hour_multiplier(
+        model_id=model_id,
+        entry=entry,
+        endpoint=endpoint,
+        pricing=pricing,
+    )
+    return (price * multiplier).quantize(_PRICE_QUANTUM)
+
+
+def _audio_duration_hour_multiplier(
+    *,
+    model_id: str,
+    entry: Mapping[str, object],
+    endpoint: Mapping[str, object] | None,
+    pricing: Mapping[str, object],
+) -> Decimal:
+    for unit in _audio_duration_unit_candidates(
+        entry=entry, endpoint=endpoint, pricing=pricing
+    ):
+        multiplier = _AUDIO_DURATION_HOUR_MULTIPLIERS.get(unit.lower())
+        if multiplier is not None:
+            return multiplier
+    fallback_unit = _AUDIO_DURATION_UNIT_BY_MODEL_ID.get(model_id)
+    if fallback_unit is not None:
+        return _AUDIO_DURATION_HOUR_MULTIPLIERS[fallback_unit]
+    return _PER_HOUR_AUDIO_HOUR_MULTIPLIER
+
+
+def _audio_duration_unit_candidates(
+    *,
+    entry: Mapping[str, object],
+    endpoint: Mapping[str, object] | None,
+    pricing: Mapping[str, object],
+) -> Iterator[str]:
+    containers = [pricing, entry]
+    if endpoint is not None:
+        containers.append(endpoint)
+    for container in containers:
+        pricing_json = _structured_mapping(container.get("pricing_json"))
+        if pricing_json is not None:
+            yield from _pricing_json_duration_units(pricing_json)
+    for container in containers:
+        yield from _unit_label_candidates(container)
+        display_pricing = _mapping(container.get("display_pricing"))
+        if display_pricing is not None:
+            yield from _unit_label_candidates(display_pricing)
+
+
+def _unit_label_candidates(container: Mapping[str, object]) -> Iterator[str]:
+    for key in ("unitLabel", "unit_label", "unit"):
+        unit = _string(container.get(key))
+        if unit is not None:
+            yield unit
+
+
+def _pricing_json_duration_units(
+    pricing_json: Mapping[str, object],
+) -> Iterator[str]:
+    for key in ("audio_seconds", "audio_minutes", "audio_hours"):
+        if _positive_decimal(pricing_json.get(key)) is not None:
+            yield key
+
+
+def _structured_mapping(value: object) -> Mapping[str, object] | None:
+    mapping = _mapping(value)
+    if mapping is not None:
+        return mapping
+    if isinstance(value, str) and value.strip():
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+        return _mapping(decoded)
+    return None
 
 
 def _decimal(value: object) -> Decimal | None:
@@ -559,6 +676,13 @@ def _decimal(value: object) -> Decimal | None:
     if isinstance(value, int | float) and value >= 0:
         return Decimal(str(value))
     return None
+
+
+def _positive_decimal(value: object) -> Decimal | None:
+    parsed = _decimal(value)
+    if parsed is None or parsed <= 0:
+        return None
+    return parsed
 
 
 def _display_name_from_model_id(model_id: str) -> str:

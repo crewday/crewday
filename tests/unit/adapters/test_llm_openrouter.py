@@ -1188,12 +1188,190 @@ class TestModelMetadataLookup:
         assert metadata.max_output_tokens is None
         assert str(metadata.input_cost_per_million) == "1.2500"
         assert str(metadata.output_cost_per_million) == "5.0000"
+        assert str(metadata.audio_cost_per_hour_usd) == "0.0000"
         assert metadata.supports_temperature is True
         assert str(handler.requests[0].url) == "https://openrouter.ai/api/v1/models"
         assert (
             str(handler.requests[1].url)
             == "https://openrouter.ai/api/v1/models/openai/gpt-4o-mini-transcribe/endpoints"
         )
+
+    def test_metadata_lookup_maps_structured_audio_duration_unit(self) -> None:
+        handler = _RecordingHandler(
+            responses=[
+                httpx.Response(200, json={"data": []}),
+                httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "id": "example/structured-transcribe",
+                            "name": "Example: Structured Transcribe",
+                            "architecture": {
+                                "modality": "audio->transcription",
+                                "input_modalities": ["audio"],
+                                "output_modalities": ["transcription"],
+                            },
+                            "endpoints": [
+                                {
+                                    "pricing": {"prompt": "0.003"},
+                                    "display_pricing": {"unitLabel": "per minute"},
+                                }
+                            ],
+                        }
+                    },
+                ),
+            ]
+        )
+        http = httpx.Client(transport=httpx.MockTransport(handler))
+
+        metadata = fetch_openrouter_model_metadata(
+            "example/structured-transcribe", http=http
+        )
+
+        assert str(metadata.input_cost_per_million) == "0.0000"
+        assert str(metadata.output_cost_per_million) == "0.0000"
+        assert str(metadata.audio_cost_per_hour_usd) == "0.1800"
+
+    def test_metadata_lookup_prefers_pricing_json_duration_unit(self) -> None:
+        handler = _RecordingHandler(
+            responses=[
+                httpx.Response(200, json={"data": []}),
+                httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "id": "example/pricing-json-transcribe",
+                            "name": "Example: Pricing JSON Transcribe",
+                            "architecture": {
+                                "modality": "audio->transcription",
+                                "input_modalities": ["audio"],
+                                "output_modalities": ["transcription"],
+                            },
+                            "pricing_json": json.dumps(
+                                {"audio_seconds": "0.000035", "audio_minutes": "0"}
+                            ),
+                            "endpoints": [
+                                {
+                                    "pricing": {"prompt": "0.000035"},
+                                    "display_pricing": {"unitLabel": "per minute"},
+                                }
+                            ],
+                        }
+                    },
+                ),
+            ]
+        )
+        http = httpx.Client(transport=httpx.MockTransport(handler))
+
+        metadata = fetch_openrouter_model_metadata(
+            "example/pricing-json-transcribe", http=http
+        )
+
+        assert str(metadata.input_cost_per_million) == "0.0000"
+        assert str(metadata.output_cost_per_million) == "0.0000"
+        assert str(metadata.audio_cost_per_hour_usd) == "0.1260"
+
+    def test_metadata_lookup_keeps_token_priced_transcription_with_output_price(
+        self,
+    ) -> None:
+        handler = _RecordingHandler(
+            responses=[
+                httpx.Response(200, json={"data": []}),
+                httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "id": "example/token-transcribe-without-context",
+                            "name": "Example: Token Transcribe",
+                            "architecture": {
+                                "modality": "audio->transcription",
+                                "input_modalities": ["audio"],
+                                "output_modalities": ["transcription"],
+                            },
+                            "endpoints": [
+                                {
+                                    "pricing": {
+                                        "prompt": "0.00000125",
+                                        "completion": "0.000005",
+                                    }
+                                }
+                            ],
+                        }
+                    },
+                ),
+            ]
+        )
+        http = httpx.Client(transport=httpx.MockTransport(handler))
+
+        metadata = fetch_openrouter_model_metadata(
+            "example/token-transcribe-without-context", http=http
+        )
+
+        assert str(metadata.input_cost_per_million) == "1.2500"
+        assert str(metadata.output_cost_per_million) == "5.0000"
+        assert str(metadata.audio_cost_per_hour_usd) == "0.0000"
+
+    def test_metadata_lookup_maps_per_second_audio_duration(self) -> None:
+        handler = _RecordingHandler(
+            responses=[
+                httpx.Response(200, json={"data": []}),
+                httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "id": "qwen/qwen3-asr-flash-2026-02-10",
+                            "name": "Qwen: Qwen3 ASR Flash",
+                            "architecture": {
+                                "modality": "audio->transcription",
+                                "input_modalities": ["audio"],
+                                "output_modalities": ["transcription"],
+                            },
+                            "endpoints": [{"pricing": {"prompt": "0.000035"}}],
+                        }
+                    },
+                ),
+            ]
+        )
+        http = httpx.Client(transport=httpx.MockTransport(handler))
+
+        metadata = fetch_openrouter_model_metadata(
+            "qwen/qwen3-asr-flash-2026-02-10", http=http
+        )
+
+        assert str(metadata.input_cost_per_million) == "0.0000"
+        assert str(metadata.output_cost_per_million) == "0.0000"
+        assert str(metadata.audio_cost_per_hour_usd) == "0.1260"
+
+    def test_metadata_lookup_maps_per_minute_audio_duration(self) -> None:
+        handler = _RecordingHandler(
+            responses=[
+                httpx.Response(200, json={"data": []}),
+                httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "id": "mistralai/voxtral-mini-transcribe",
+                            "name": "Mistral: Voxtral Mini Transcribe",
+                            "architecture": {
+                                "modality": "audio->transcription",
+                                "input_modalities": ["audio"],
+                                "output_modalities": ["transcription"],
+                            },
+                            "endpoints": [{"pricing": {"prompt": "0.003"}}],
+                        }
+                    },
+                ),
+            ]
+        )
+        http = httpx.Client(transport=httpx.MockTransport(handler))
+
+        metadata = fetch_openrouter_model_metadata(
+            "mistralai/voxtral-mini-transcribe", http=http
+        )
+
+        assert str(metadata.input_cost_per_million) == "0.0000"
+        assert str(metadata.output_cost_per_million) == "0.0000"
+        assert str(metadata.audio_cost_per_hour_usd) == "0.1800"
 
     def test_metadata_lookup_maps_per_hour_whisper_as_audio_duration(self) -> None:
         handler = _RecordingHandler(
@@ -1231,6 +1409,41 @@ class TestModelMetadataLookup:
         assert str(metadata.input_cost_per_million) == "0.0000"
         assert str(metadata.output_cost_per_million) == "0.0000"
         assert str(metadata.audio_cost_per_hour_usd) == "0.0400"
+
+    def test_metadata_lookup_does_not_duration_price_arbitrary_audio_model(
+        self,
+    ) -> None:
+        handler = _RecordingHandler(
+            responses=[
+                httpx.Response(200, json={"data": []}),
+                httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "id": "example/audio-chat",
+                            "name": "Example: Audio Chat",
+                            "architecture": {
+                                "modality": "audio->text",
+                                "input_modalities": ["audio"],
+                                "output_modalities": ["text"],
+                            },
+                            "endpoints": [
+                                {
+                                    "pricing": {"prompt": "0.000035"},
+                                    "display_pricing": {"unitLabel": "per second"},
+                                }
+                            ],
+                        }
+                    },
+                ),
+            ]
+        )
+        http = httpx.Client(transport=httpx.MockTransport(handler))
+
+        metadata = fetch_openrouter_model_metadata("example/audio-chat", http=http)
+
+        assert str(metadata.input_cost_per_million) == "35.0000"
+        assert str(metadata.audio_cost_per_hour_usd) == "0.0000"
 
     def test_missing_model_raises_provider_error(self) -> None:
         handler = _RecordingHandler(
