@@ -14285,6 +14285,14 @@
             ],
             "title": "Audio Cost Per Hour Usd"
           },
+          "audio_input_transform": {
+            "enum": [
+              "passthrough",
+              "wav_16khz_mono"
+            ],
+            "title": "Audio Input Transform",
+            "type": "string"
+          },
           "calls_30d": {
             "default": 0,
             "title": "Calls 30D",
@@ -14319,6 +14327,27 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "image_input_format": {
+            "enum": [
+              "jpeg",
+              "png",
+              "preserve",
+              "webp"
+            ],
+            "title": "Image Input Format",
+            "type": "string"
+          },
+          "image_input_max_edge_px": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Input Max Edge Px"
           },
           "input_cost_per_million": {
             "anyOf": [
@@ -14429,9 +14458,12 @@
         },
         "required": [
           "api_model_id",
+          "audio_input_transform",
           "effective_thinking_strategy",
           "extra_api_params",
           "id",
+          "image_input_format",
+          "image_input_max_edge_px",
           "is_enabled",
           "max_tokens_override",
           "model_id",
@@ -18825,6 +18857,15 @@
             ],
             "title": "Audio Cost Per Hour Usd"
           },
+          "audio_input_transform": {
+            "default": "passthrough",
+            "enum": [
+              "passthrough",
+              "wav_16khz_mono"
+            ],
+            "title": "Audio Input Transform",
+            "type": "string"
+          },
           "extra_api_params": {
             "additionalProperties": true,
             "title": "Extra Api Params",
@@ -18841,6 +18882,29 @@
               }
             ],
             "title": "Fixed Cost Per Call Usd"
+          },
+          "image_input_format": {
+            "default": "preserve",
+            "enum": [
+              "jpeg",
+              "png",
+              "preserve",
+              "webp"
+            ],
+            "title": "Image Input Format",
+            "type": "string"
+          },
+          "image_input_max_edge_px": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Input Max Edge Px"
           },
           "input_cost_per_million": {
             "anyOf": [

@@ -1271,12 +1271,20 @@ to those existing syncable provider-model rows are committed before
 Save.
 
 Provider-model create/edit payloads include
-`price_source_override` (`"" | "none" | "openrouter"`) and
-`price_source_model_id_override`. When a create is syncable, or an edit
-changes either price-source field and the saved row is syncable, the
-route runs the same single-row pricing sync before returning the saved
-row. The response embeds `pricing_sync_result` when a sync was
-attempted; absent means no sync was applicable.
+`price_source_override` (`"" | "none" | "openrouter"`),
+`price_source_model_id_override`, and media input settings stored on the
+`llm_provider_model` row:
+`audio_input_transform` (`"passthrough" | "wav_16khz_mono"`, default
+`"passthrough"`), `image_input_format`
+(`"preserve" | "jpeg" | "png" | "webp"`, default `"preserve"`), and
+`image_input_max_edge_px` (nullable positive integer; null means no
+resize). These media settings apply only when preparing image/audio
+inputs for an upstream provider call and do not change model capability
+tags. When a create is syncable, or an edit changes either price-source
+field and the saved row is syncable, the route runs the same single-row
+pricing sync before returning the saved row. The response embeds
+`pricing_sync_result` when a sync was attempted; absent means no sync
+was applicable.
 
 `POST /admin/api/v1/llm/sync-pricing` accepts an optional body:
 
@@ -1335,6 +1343,10 @@ Direct-mode requests may include `thinking_level` and
 `thinking_strategy` from the current edit drawer state; when present,
 those values override the persisted model/provider-model defaults for
 that playground call only.
+Media inputs use the selected provider-model row's media transform
+settings before the upstream call: audio transform, image output format,
+and optional largest-edge resize. Those settings are independent of the
+`vision` and `audio_input` capability checks.
 Multipart requests may include `image_file` for vision-capable models or
 `audio_file` for `audio_input` models. Audio-capable requests may also
 include `audio_url`; the server fetches HTTPS URLs through the §15 SSRF

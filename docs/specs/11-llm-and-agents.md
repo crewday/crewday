@@ -825,6 +825,9 @@ llm_provider_model
 ├── output_cost_per_million    numeric(10,4)?  -- USD per 1M output tokens; unset = 0
 ├── fixed_cost_per_call_usd    numeric(10,4)?  -- USD per call; unset = 0
 ├── audio_cost_per_hour_usd    numeric(10,4)?  -- USD per hour of audio duration; unset = 0
+├── audio_input_transform      text            -- passthrough | wav_16khz_mono; default passthrough
+├── image_input_format         text            -- preserve | jpeg | png | webp; default preserve
+├── image_input_max_edge_px    int?            -- NULL = no resize; positive value caps largest edge
 ├── max_tokens_override        int?
 ├── supports_system_prompt     bool            -- some reasoning models reject system prompts
 ├── supports_temperature       bool            -- o-series models forbid temperature
@@ -848,6 +851,18 @@ llm_provider_model
   before the call. `supports_system_prompt = false` folds the system
   prompt into the first user turn. These flags exist because they
   matter in practice on o-series / reasoning-first models.
+- Media input transform settings live on the provider-model row because
+  accepted wire formats vary by provider endpoint even when the
+  canonical model's capability tags are unchanged. They apply only to
+  media inputs immediately before an upstream provider call:
+  `audio_input_transform = passthrough` forwards accepted audio bytes as
+  received, `wav_16khz_mono` normalises audio to 16 kHz mono WAV,
+  `image_input_format = preserve` keeps the input format, and
+  `jpeg`/`png`/`webp` transcode images before upload. A NULL
+  `image_input_max_edge_px` means no resize; a positive value resizes
+  images to fit the largest edge within that many pixels. Capability
+  tags such as `vision` and `audio_input` still say whether media is
+  allowed; these settings do not grant or remove capabilities.
 - Thinking is configured in two parts. `thinking_level` is the
   product-level intensity vocabulary (`disabled`, `low`, `medium`,
   `high`). `llm_model.thinking_level` is the provider-agnostic default,
@@ -1424,8 +1439,9 @@ so the graph page does not carry a duplicate overflow action.
   row show a plus affordance that creates the provider-model row and then
   opens it for editing.
 - **Provider-model editing.** Provider-model edit drawers expose enabled
-  state, pricing, support flags, price-source override, price-source
-  model override, and a thinking-strategy override. The price-source
+  state, pricing, media input transform settings, support flags,
+  price-source override, price-source model override, and a
+  thinking-strategy override. The price-source
   controls make `none` the pinned/manual state, `openrouter` an
   explicit OpenRouter sync source, and blank the inherited state. The
   SYNC affordance is shown next to the price-source model override only
@@ -1525,6 +1541,9 @@ so the graph page does not carry a duplicate overflow action.
   Playground prompts and responses are not persisted to `llm_usage` or
   prompt history. The request is rejected before the upstream call when
   `max_tokens` exceeds the selected model's known output-token limit.
+  The selected `llm_provider_model`'s media input transform settings
+  govern only image/audio inputs prepared for that upstream call; the
+  playground does not use those fields to infer model capabilities.
   Vision playground images supplied as uploads or HTTPS image URLs are
   converted to base64 `data:image/...` URLs before the upstream request;
   remote URLs are fetched through the §15 SSRF guard and raw external

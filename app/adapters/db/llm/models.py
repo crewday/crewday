@@ -177,6 +177,16 @@ _LLM_THINKING_STRATEGY_VALUES: tuple[str, ...] = (
     "glm_extra_body",
     "openrouter_extra_body",
 )
+_LLM_AUDIO_INPUT_TRANSFORM_VALUES: tuple[str, ...] = (
+    "passthrough",
+    "wav_16khz_mono",
+)
+_LLM_IMAGE_INPUT_FORMAT_VALUES: tuple[str, ...] = (
+    "preserve",
+    "jpeg",
+    "png",
+    "webp",
+)
 
 
 def _in_clause(values: tuple[str, ...]) -> str:
@@ -1556,6 +1566,19 @@ class LlmProviderModel(Base):
     audio_cost_per_hour_usd: Mapped[Decimal | None] = mapped_column(
         Numeric(10, 4), nullable=True
     )
+    audio_input_transform: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="passthrough",
+        server_default="passthrough",
+    )
+    image_input_format: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="preserve",
+        server_default="preserve",
+    )
+    image_input_max_edge_px: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_tokens_override: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # ``False`` = adapter folds the system prompt into the first user
     # turn. Default ``True`` keeps the existing call shape for the
@@ -1616,6 +1639,19 @@ class LlmProviderModel(Base):
             "OR thinking_strategy_override IN "
             f"({_in_clause(_LLM_THINKING_STRATEGY_VALUES)})",
             name="thinking_strategy_override",
+        ),
+        CheckConstraint(
+            "audio_input_transform IN "
+            f"({_in_clause(_LLM_AUDIO_INPUT_TRANSFORM_VALUES)})",
+            name="audio_input_transform",
+        ),
+        CheckConstraint(
+            f"image_input_format IN ({_in_clause(_LLM_IMAGE_INPUT_FORMAT_VALUES)})",
+            name="image_input_format",
+        ),
+        CheckConstraint(
+            "image_input_max_edge_px IS NULL OR image_input_max_edge_px > 0",
+            name="image_input_max_edge_px_positive",
         ),
         UniqueConstraint(
             "provider_id",

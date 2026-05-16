@@ -1493,6 +1493,9 @@ class TestAdminLlmRoutes:
             assert (
                 provider_model["effective_thinking_strategy"] == "openrouter_extra_body"
             )
+            assert provider_model["audio_input_transform"] == "passthrough"
+            assert provider_model["image_input_format"] == "preserve"
+            assert provider_model["image_input_max_edge_px"] is None
             assert provider_model["spend_usd_30d"] == 0.174606
             assert provider_model["calls_30d"] == 3
             assert body["assignments"][0]["id"] == seeded.assignment_id
@@ -1979,6 +1982,9 @@ class TestAdminLlmRoutes:
             assert provider_model.json()["output_cost_per_million"] == 0
             assert provider_model.json()["fixed_cost_per_call_usd"] == 0
             assert provider_model.json()["audio_cost_per_hour_usd"] == 0
+            assert provider_model.json()["audio_input_transform"] == "passthrough"
+            assert provider_model.json()["image_input_format"] == "preserve"
+            assert provider_model.json()["image_input_max_edge_px"] is None
             assert "thinking_level_override" not in provider_model.json()
             assert "effective_thinking_level" not in provider_model.json()
             assert (
@@ -1995,6 +2001,9 @@ class TestAdminLlmRoutes:
                     "model_id": model.json()["id"],
                     "api_model_id": "text-only-test",
                     "thinking_strategy_override": "",
+                    "audio_input_transform": "wav_16khz_mono",
+                    "image_input_format": "jpeg",
+                    "image_input_max_edge_px": 1024,
                     "is_enabled": False,
                 },
             )
@@ -2007,6 +2016,12 @@ class TestAdminLlmRoutes:
                 inherited_provider_model.json()["effective_thinking_strategy"]
                 == "openrouter_extra_body"
             )
+            assert (
+                inherited_provider_model.json()["audio_input_transform"]
+                == "wav_16khz_mono"
+            )
+            assert inherited_provider_model.json()["image_input_format"] == "jpeg"
+            assert inherited_provider_model.json()["image_input_max_edge_px"] == 1024
             with session_factory() as s, tenant_agnostic():
                 persisted_provider_model = s.get(
                     LlmProviderModel, provider_model.json()["id"]
@@ -2016,6 +2031,11 @@ class TestAdminLlmRoutes:
                 assert persisted_provider_model.output_cost_per_million == Decimal("0")
                 assert persisted_provider_model.fixed_cost_per_call_usd == Decimal("0")
                 assert persisted_provider_model.audio_cost_per_hour_usd == Decimal("0")
+                assert persisted_provider_model.audio_input_transform == (
+                    "wav_16khz_mono"
+                )
+                assert persisted_provider_model.image_input_format == "jpeg"
+                assert persisted_provider_model.image_input_max_edge_px == 1024
 
             unsupported_level_field = client.post(
                 "/admin/api/v1/llm/provider-models",
@@ -2042,6 +2062,41 @@ class TestAdminLlmRoutes:
             assert invalid_provider_strategy.status_code == 422, (
                 invalid_provider_strategy.text
             )
+
+            invalid_audio_transform = client.post(
+                "/admin/api/v1/llm/provider-models",
+                json={
+                    "provider_id": seeded.provider_id,
+                    "model_id": model.json()["id"],
+                    "api_model_id": "bad-audio-transform-test",
+                    "audio_input_transform": "mp3",
+                },
+            )
+            assert invalid_audio_transform.status_code == 422, (
+                invalid_audio_transform.text
+            )
+
+            invalid_image_format = client.post(
+                "/admin/api/v1/llm/provider-models",
+                json={
+                    "provider_id": seeded.provider_id,
+                    "model_id": model.json()["id"],
+                    "api_model_id": "bad-image-format-test",
+                    "image_input_format": "gif",
+                },
+            )
+            assert invalid_image_format.status_code == 422, invalid_image_format.text
+
+            invalid_image_resize = client.post(
+                "/admin/api/v1/llm/provider-models",
+                json={
+                    "provider_id": seeded.provider_id,
+                    "model_id": model.json()["id"],
+                    "api_model_id": "bad-image-resize-test",
+                    "image_input_max_edge_px": 0,
+                },
+            )
+            assert invalid_image_resize.status_code == 422, invalid_image_resize.text
 
             missing = client.post(
                 "/admin/api/v1/llm/assignments",

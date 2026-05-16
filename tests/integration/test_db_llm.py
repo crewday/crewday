@@ -3577,6 +3577,9 @@ class TestRegistryShape:
             "output_cost_per_million",
             "fixed_cost_per_call_usd",
             "audio_cost_per_hour_usd",
+            "audio_input_transform",
+            "image_input_format",
+            "image_input_max_edge_px",
             "max_tokens_override",
             "supports_system_prompt",
             "supports_temperature",
@@ -3595,6 +3598,9 @@ class TestRegistryShape:
         assert audio_cost_type.precision == 10
         assert audio_cost_type.scale == 4
         assert cols["audio_cost_per_hour_usd"]["nullable"] is True
+        assert cols["audio_input_transform"]["nullable"] is False
+        assert cols["image_input_format"]["nullable"] is False
+        assert cols["image_input_max_edge_px"]["nullable"] is True
 
     def test_llm_provider_model_thinking_strategy_override_constraint(
         self, db_session: Session
@@ -3605,6 +3611,45 @@ class TestRegistryShape:
             suffix="TSPM",
         )
         pm.thinking_strategy_override = "turbo"
+
+        with pytest.raises(IntegrityError):
+            db_session.flush()
+        db_session.rollback()
+
+    def test_llm_provider_model_media_transform_constraints(
+        self, db_session: Session
+    ) -> None:
+        pm = _seed_registry_trio(
+            db_session,
+            provider_model_id="01HWA0000000000000000MTAU",
+            suffix="MTAU",
+        )
+        assert pm.audio_input_transform == "passthrough"
+        assert pm.image_input_format == "preserve"
+        assert pm.image_input_max_edge_px is None
+        pm.audio_input_transform = "mp3"
+
+        with pytest.raises(IntegrityError):
+            db_session.flush()
+        db_session.rollback()
+
+        pm = _seed_registry_trio(
+            db_session,
+            provider_model_id="01HWA0000000000000000MTIM",
+            suffix="MTIM",
+        )
+        pm.image_input_format = "gif"
+
+        with pytest.raises(IntegrityError):
+            db_session.flush()
+        db_session.rollback()
+
+        pm = _seed_registry_trio(
+            db_session,
+            provider_model_id="01HWA0000000000000000MTED",
+            suffix="MTED",
+        )
+        pm.image_input_max_edge_px = 0
 
         with pytest.raises(IntegrityError):
             db_session.flush()

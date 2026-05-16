@@ -232,6 +232,8 @@ LlmThinkingStrategy = Literal[
     "openrouter_extra_body",
 ]
 LlmProviderType = Literal["openrouter", "openai_compatible", "fake", "local_embedding"]
+LlmAudioInputTransform = Literal["passthrough", "wav_16khz_mono"]
+LlmImageInputFormat = Literal["preserve", "jpeg", "png", "webp"]
 
 
 def _thinking_level(value: str | None) -> LlmThinkingLevel:
@@ -296,6 +298,9 @@ class LlmProviderModelResponse(BaseModel):
     output_cost_per_million: float | None = None
     fixed_cost_per_call_usd: float | None = None
     audio_cost_per_hour_usd: float | None = None
+    audio_input_transform: LlmAudioInputTransform
+    image_input_format: LlmImageInputFormat
+    image_input_max_edge_px: int | None
     max_tokens_override: int | None
     supports_system_prompt: bool
     supports_temperature: bool
@@ -943,6 +948,9 @@ class ProviderModelPayload(BaseModel):
     output_cost_per_million: float | None = Field(default=None, ge=0)
     fixed_cost_per_call_usd: float | None = Field(default=None, ge=0)
     audio_cost_per_hour_usd: float | None = Field(default=None, ge=0)
+    audio_input_transform: LlmAudioInputTransform = "passthrough"
+    image_input_format: LlmImageInputFormat = "preserve"
+    image_input_max_edge_px: int | None = Field(default=None, ge=1)
     max_tokens_override: int | None = Field(default=None, ge=1)
     supports_system_prompt: bool = True
     supports_temperature: bool = True
@@ -1163,6 +1171,9 @@ def _provider_model_response(
         output_cost_per_million=_money(row.output_cost_per_million),
         fixed_cost_per_call_usd=_money(row.fixed_cost_per_call_usd),
         audio_cost_per_hour_usd=_money(row.audio_cost_per_hour_usd),
+        audio_input_transform=row.audio_input_transform,
+        image_input_format=row.image_input_format,
+        image_input_max_edge_px=row.image_input_max_edge_px,
         max_tokens_override=row.max_tokens_override,
         supports_system_prompt=row.supports_system_prompt,
         supports_temperature=row.supports_temperature,
@@ -3016,6 +3027,9 @@ def build_admin_llm_router() -> APIRouter:
             output_cost_per_million=_money_decimal(payload.output_cost_per_million),
             fixed_cost_per_call_usd=_money_decimal(payload.fixed_cost_per_call_usd),
             audio_cost_per_hour_usd=_money_decimal(payload.audio_cost_per_hour_usd),
+            audio_input_transform=payload.audio_input_transform,
+            image_input_format=payload.image_input_format,
+            image_input_max_edge_px=payload.image_input_max_edge_px,
             max_tokens_override=payload.max_tokens_override,
             supports_system_prompt=payload.supports_system_prompt,
             supports_temperature=payload.supports_temperature,
@@ -3334,6 +3348,9 @@ def build_admin_llm_router() -> APIRouter:
             row.audio_cost_per_hour_usd = _money_decimal(
                 payload.audio_cost_per_hour_usd
             )
+            row.audio_input_transform = payload.audio_input_transform
+            row.image_input_format = payload.image_input_format
+            row.image_input_max_edge_px = payload.image_input_max_edge_px
             row.max_tokens_override = payload.max_tokens_override
             row.supports_system_prompt = payload.supports_system_prompt
             row.supports_temperature = payload.supports_temperature
