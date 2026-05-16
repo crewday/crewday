@@ -2414,11 +2414,12 @@ For users whose workspace / work-engagement settings enable chat.
 ## Cost tracking
 
 Every shipping LLM call writes a `LlmUsage` / `llm_usage` row with
-the provider's reported token counts, a precise estimated USD cost
-(`cost_usd`, six decimal places), and a legacy integer-cent cost
-(`cost_cents`) computed from the serving `llm_provider_model` row's
-per-million, fixed per-call, and duration prices (§ "Price sync"
-keeps them current). Successful low-token calls may therefore carry `cost_usd > 0` while
+the provider's reported token counts, provider-reported audio duration
+seconds when present, a precise estimated USD cost (`cost_usd`, six
+decimal places), and a legacy integer-cent cost (`cost_cents`) computed
+from the serving `llm_provider_model` row's per-million, fixed
+per-call, and duration prices (§ "Price sync" keeps them current).
+Successful low-token or short-duration calls may therefore carry `cost_usd > 0` while
 `cost_cents = 0`. The background worker aggregates `cost_cents` into
 the rolling meter used by the **workspace usage budget** (§ "Workspace
 usage budget" below), preserving the existing cent-denominated cap

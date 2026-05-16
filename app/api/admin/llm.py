@@ -2252,14 +2252,27 @@ def _playground_cost_usd(
     *,
     input_tokens: int,
     output_tokens: int,
+    audio_seconds: float | None = None,
 ) -> Decimal:
+    input_price = _decimal_or_zero(provider_model.input_cost_per_million)
+    output_price = _decimal_or_zero(provider_model.output_cost_per_million)
     cost = (
-        Decimal(input_tokens) * provider_model.input_cost_per_million
-        + Decimal(output_tokens) * provider_model.output_cost_per_million
+        Decimal(input_tokens) * input_price + Decimal(output_tokens) * output_price
     ) / Decimal(1_000_000)
-    if provider_model.fixed_cost_per_call_usd is not None:
-        cost += provider_model.fixed_cost_per_call_usd
+    cost += _decimal_or_zero(provider_model.fixed_cost_per_call_usd)
+    if audio_seconds is not None:
+        cost += (
+            Decimal(str(audio_seconds))
+            * _decimal_or_zero(provider_model.audio_cost_per_hour_usd)
+            / Decimal("3600")
+        )
     return cost.quantize(Decimal("0.000001"))
+
+
+def _decimal_or_zero(value: Decimal | int | float | None) -> Decimal:
+    if value is None:
+        return Decimal("0")
+    return Decimal(str(value))
 
 
 def _embedding_smoke_dimensions(model: LlmModel) -> int:
@@ -2924,6 +2937,7 @@ def build_admin_llm_router() -> APIRouter:
             provider_model,
             input_tokens=response.usage.prompt_tokens,
             output_tokens=response.usage.completion_tokens,
+            audio_seconds=response.usage.seconds,
         )
         return LlmProviderModelPlaygroundResponse(
             status="ok",

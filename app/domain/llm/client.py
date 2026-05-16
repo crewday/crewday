@@ -516,6 +516,7 @@ class LLMClient:
                 api_model_id=model_pick.api_model_id,
                 pricing=self._pricing,
                 workspace_id=ctx.workspace_id,
+                audio_seconds=response.usage.seconds,
             )
             cost_usd = estimate_cost_usd(
                 prompt_tokens=response.usage.prompt_tokens,
@@ -523,6 +524,7 @@ class LLMClient:
                 api_model_id=model_pick.api_model_id,
                 pricing=self._pricing,
                 workspace_id=ctx.workspace_id,
+                audio_seconds=response.usage.seconds,
             )
             record(
                 session,
@@ -539,6 +541,7 @@ class LLMClient:
                 finish_reason=response.finish_reason,
                 attribution=attribution,
                 cost_usd=cost_usd,
+                audio_seconds=response.usage.seconds,
                 attempt=attempt_index,
                 clock=c,
             )

@@ -698,9 +698,11 @@ class LlmUsage(Base):
     a later slice.
 
     ``tokens_in`` / ``tokens_out`` are the provider's reported token
-    counts. ``cost_usd`` is the canonical precise crew.day-computed
-    dollar estimate; ``cost_cents`` remains the compatibility field
-    used by existing budget-cap and admin rollup consumers.
+    counts. ``audio_seconds`` is the provider-reported audio duration
+    for transcription calls. ``cost_usd`` is the canonical precise
+    crew.day-computed dollar estimate; ``cost_cents`` remains the
+    compatibility field used by existing budget-cap and admin rollup
+    consumers.
     ``latency_ms`` is the adapter-measured wall time between
     request-out and body-in.
 
@@ -769,6 +771,7 @@ class LlmUsage(Base):
     provider_model_id: Mapped[str] = mapped_column(String(26), nullable=False)
     tokens_in: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     tokens_out: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    audio_seconds: Mapped[Decimal | None] = mapped_column(Numeric(12, 3), nullable=True)
     cost_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     cost_usd: Mapped[Decimal] = mapped_column(
         Numeric(12, 6),

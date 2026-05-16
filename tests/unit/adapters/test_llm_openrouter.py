@@ -159,6 +159,27 @@ class TestCompleteHappyPath:
         assert resp.usage.prompt_tokens == 42
         assert resp.usage.completion_tokens == 18
         assert resp.usage.total_tokens == 60
+        assert resp.usage.seconds is None
+
+    def test_returns_provider_reported_usage_seconds(self) -> None:
+        payload = dict(_COMPLETE_FIXTURE)
+        payload["usage"] = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "seconds": 9.2,
+        }
+        handler = _RecordingHandler(responses=[httpx.Response(200, json=payload)])
+        client = _make_client(handler)
+
+        resp = client.complete(
+            model_id=_MODEL,
+            prompt="transcribe this audio",
+            max_tokens=64,
+            temperature=0.2,
+        )
+
+        assert resp.usage.seconds == 9.2
 
     def test_request_body_shape_is_openai_compatible(self) -> None:
         handler = _RecordingHandler(

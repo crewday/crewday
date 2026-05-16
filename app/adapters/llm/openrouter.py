@@ -300,6 +300,7 @@ class _Usage(TypedDict, total=False):
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    seconds: int | float
 
 
 class _ChatCompletion(TypedDict, total=False):
@@ -1289,6 +1290,7 @@ def _parse_completion(payload: _ChatCompletion) -> LLMResponse:
         prompt_tokens=int(usage_raw.get("prompt_tokens", 0) or 0),
         completion_tokens=int(usage_raw.get("completion_tokens", 0) or 0),
         total_tokens=int(usage_raw.get("total_tokens", 0) or 0),
+        seconds=_usage_seconds(usage_raw.get("seconds")),
     )
 
     # Prefer the model echoed back by the provider; some routes rewrite
@@ -1304,6 +1306,18 @@ def _parse_completion(payload: _ChatCompletion) -> LLMResponse:
         finish_reason=finish_reason,
         tool_calls=tool_calls,
     )
+
+
+def _usage_seconds(value: object) -> float | None:
+    if value is None:
+        return None
+    if not isinstance(value, str | int | float):
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        return None
+    return seconds if seconds >= 0 else None
 
 
 def _parse_tool_calls(raw_calls: Sequence[_WireToolCall]) -> tuple[ToolCall, ...]:

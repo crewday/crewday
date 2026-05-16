@@ -117,6 +117,7 @@ class _RecordingLLMClient:
         self.max_tokens: list[int] = []
         self.thinking_levels: list[str] = []
         self.thinking_strategies: list[str] = []
+        self.usage_seconds: float | None = None
 
     def chat(
         self,
@@ -140,7 +141,10 @@ class _RecordingLLMClient:
         return LLMResponse(
             text="ok",
             usage=LLMUsage(
-                prompt_tokens=1_000, completion_tokens=1_000, total_tokens=2_000
+                prompt_tokens=1_000,
+                completion_tokens=1_000,
+                total_tokens=2_000,
+                seconds=self.usage_seconds,
             ),
             model_id=model_id,
             finish_reason="stop",
@@ -826,6 +830,45 @@ class TestAdminLlmRoutes:
             )
             assert huge_model_default.status_code == 200, huge_model_default.text
             assert llm.max_tokens[-1] == 32_000
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_prices_provider_reported_audio_seconds(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            llm = _RecordingLLMClient()
+            llm.usage_seconds = 9.2
+            client.app.state.llm = llm
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                provider.api_key_envelope_ref = None
+                provider_model = s.get(LlmProviderModel, seeded.provider_model_id)
+                assert provider_model is not None
+                provider_model.input_cost_per_million = Decimal("0")
+                provider_model.output_cost_per_million = Decimal("0")
+                provider_model.fixed_cost_per_call_usd = None
+                provider_model.audio_cost_per_hour_usd = Decimal("0.0400")
+                s.commit()
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                json={"prompt": "hello", "max_tokens": 64},
+            )
+
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["cost_usd"] == "0.000102"
+            assert resp.json()["cost_cents"] == 0
         finally:
             _wipe(session_factory)
 

@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -60,6 +61,7 @@ from app.adapters.llm.ports import (
 from app.domain.llm.budget import (
     WINDOW_DAYS,
     BudgetExceeded,
+    PriceComponents,
     PricingTable,
 )
 from app.domain.llm.client import (
@@ -443,6 +445,63 @@ class TestHappyPath:
         # The adapter saw exactly one call with our wire-form model id.
         assert len(adapter.calls) == 1
         assert adapter.calls[0]["model_id"] == "primary/model"
+
+    def test_audio_seconds_are_priced_and_persisted(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        ws = _seed_workspace(session)
+        ctx = _build_context(ws.id, slug=ws.slug)
+        _seed_assignment(
+            session,
+            workspace_id=ws.id,
+            capability="voice.transcribe",
+            api_model_id="primary/model",
+        )
+        _seed_ledger(session, workspace_id=ws.id, cap_cents=500)
+
+        adapter = _StubAdapter(
+            [
+                LLMResponse(
+                    text="transcript",
+                    usage=LLMUsage(
+                        prompt_tokens=0,
+                        completion_tokens=0,
+                        total_tokens=0,
+                        seconds=9.2,
+                    ),
+                    model_id="stub/model",
+                    finish_reason="stop",
+                )
+            ]
+        )
+        pricing: PricingTable = {
+            "primary/model": PriceComponents(audio_cost_per_hour_usd=Decimal("0.0400"))
+        }
+        client = LLMClient(adapter, pricing=pricing)
+
+        token = set_current(ctx)
+        try:
+            result = _run(
+                client.chat(
+                    session,
+                    ctx,
+                    capability="voice.transcribe",
+                    messages=[{"role": "user", "content": "audio"}],
+                    attribution=_attribution(),
+                    consents=ConsentSet.none(),
+                    clock=clock,
+                )
+            )
+            session.flush()
+        finally:
+            reset_current(token)
+
+        assert result.usage.seconds == 9.2
+        rows = _fetch_rows(session, workspace_id=ws.id)
+        assert len(rows) == 1
+        assert rows[0].cost_usd == Decimal("0.000102")
+        assert rows[0].cost_cents == 0
+        assert rows[0].audio_seconds == Decimal("9.200")
 
     def test_passes_tool_calls_through_on_success(
         self, session: Session, clock: FrozenClock

@@ -108,6 +108,7 @@ __all__ = [
     "WINDOW_LABEL",
     "BudgetExceeded",
     "LlmUsage",
+    "PriceComponents",
     "PricingTable",
     "UsageStatus",
     "check_budget",
@@ -181,17 +182,26 @@ _IP_BUDGET_MULTIPLIER: Final[int] = 3
 UsageStatus = Literal["ok", "error", "refused", "timeout"]
 
 
-# Pricing table: ``api_model_id`` → ``(input_cents_per_million,
-# output_cents_per_million)``. The per-million denomination matches
-# OpenRouter / OpenAI-compatible wire conventions. Budget caps remain
-# cent-denominated for compatibility, while ``llm_usage.cost_usd``
-# preserves the precise per-call USD amount for admin reporting.
+# Pricing table: ``api_model_id`` → :class:`PriceComponents` or the
+# legacy ``(input_cents_per_million, output_cents_per_million)`` tuple.
+# The per-million denomination matches OpenRouter / OpenAI-compatible
+# wire conventions. Budget caps remain cent-denominated for
+# compatibility, while ``llm_usage.cost_usd`` preserves the precise
+# per-call USD amount for admin reporting.
 #
 # An unknown key returns ``(0, 0)`` and logs a WARNING at call time
 # (§11 "Pricing source"). A ``:free``-suffixed model is short-
 # circuited to ``(0, 0)`` without a warning — the meter records the
 # row for telemetry but the cost contribution is zero.
-PricingTable = dict[str, tuple[int, int]]
+@dataclass(frozen=True, slots=True)
+class PriceComponents:
+    input_cents_per_million: int = 0
+    output_cents_per_million: int = 0
+    fixed_cost_per_call_usd: Decimal = Decimal("0")
+    audio_cost_per_hour_usd: Decimal = Decimal("0")
+
+
+PricingTable = dict[str, tuple[int, int] | PriceComponents]
 
 
 def default_pricing_table() -> PricingTable:
@@ -375,6 +385,7 @@ class LlmUsage:
     status: UsageStatus
     cost_usd: Decimal = Decimal("0.000000")
     latency_ms: int = 0
+    audio_seconds: float | None = None
     # cd-wjpl agent-trail telemetry. Defaults keep pre-cd-wjpl
     # callers (e.g. the digest worker smoke path) compiling without
     # a change — the DB columns are nullable / server-defaulted.
@@ -478,6 +489,7 @@ def estimate_cost_usd(
     api_model_id: str,
     pricing: PricingTable,
     workspace_id: str | None = None,
+    audio_seconds: float | Decimal | None = None,
 ) -> Decimal:
     """Estimate the call's precise USD cost for per-call reporting."""
     if _zero_cost_for_unpriced_model(
@@ -488,13 +500,17 @@ def estimate_cost_usd(
     if prices is None:
         _log_unknown_pricing_model(api_model_id=api_model_id, workspace_id=workspace_id)
         return Decimal("0.000000")
-    input_per_million, output_per_million = prices
+    components = _price_components(prices)
     total_cents_per_million = (
-        prompt_tokens * input_per_million + max_output_tokens * output_per_million
+        prompt_tokens * components.input_cents_per_million
+        + max_output_tokens * components.output_cents_per_million
     )
-    return (Decimal(total_cents_per_million) / Decimal("100000000")).quantize(
-        _USD_QUANT
+    cost = (
+        Decimal(total_cents_per_million) / Decimal("100000000")
+        + components.fixed_cost_per_call_usd
+        + _audio_cost_usd(audio_seconds, components.audio_cost_per_hour_usd)
     )
+    return cost.quantize(_USD_QUANT)
 
 
 def estimate_cost_cents(
@@ -504,6 +520,7 @@ def estimate_cost_cents(
     api_model_id: str,
     pricing: PricingTable,
     workspace_id: str | None = None,
+    audio_seconds: float | Decimal | None = None,
 ) -> int:
     """Estimate the call's cost in cents.
 
@@ -532,13 +549,36 @@ def estimate_cost_cents(
     if prices is None:
         _log_unknown_pricing_model(api_model_id=api_model_id, workspace_id=workspace_id)
         return 0
-    input_per_million, output_per_million = prices
-    # Integer maths: rely on Python's true-div + int() to floor; the
-    # spec pins cent resolution so sub-cent remainders are discarded.
-    # Multiplying first keeps precision high enough that the floor is
-    # always within one cent of the real cost.
-    total = prompt_tokens * input_per_million + max_output_tokens * output_per_million
-    return total // 1_000_000
+    cost_usd = estimate_cost_usd(
+        prompt_tokens,
+        max_output_tokens,
+        api_model_id=api_model_id,
+        pricing=pricing,
+        workspace_id=workspace_id,
+        audio_seconds=audio_seconds,
+    )
+    return int(cost_usd * Decimal("100"))
+
+
+def _price_components(value: tuple[int, int] | PriceComponents) -> PriceComponents:
+    if isinstance(value, PriceComponents):
+        return value
+    input_per_million, output_per_million = value
+    return PriceComponents(
+        input_cents_per_million=input_per_million,
+        output_cents_per_million=output_per_million,
+    )
+
+
+def _audio_cost_usd(
+    audio_seconds: float | Decimal | None, audio_cost_per_hour_usd: Decimal
+) -> Decimal:
+    if audio_seconds is None or audio_cost_per_hour_usd == 0:
+        return Decimal("0")
+    seconds = Decimal(str(audio_seconds))
+    if seconds <= 0:
+        return Decimal("0")
+    return seconds * audio_cost_per_hour_usd / Decimal("3600")
 
 
 # ---------------------------------------------------------------------------
@@ -1100,6 +1140,7 @@ def record_usage(
         provider_model_id=usage.api_model_id,
         tokens_in=usage.prompt_tokens,
         tokens_out=usage.completion_tokens,
+        audio_seconds=usage.audio_seconds,
         cost_cents=usage.cost_cents,
         cost_usd=usage.cost_usd,
         latency_ms=usage.latency_ms,

@@ -201,6 +201,7 @@ def record(
     finish_reason: str | None,
     attribution: AgentAttribution,
     cost_usd: Decimal | None = None,
+    audio_seconds: float | None = None,
     attempt: int = 0,
     clock: Clock | None = None,
 ) -> RecordedCall:
@@ -292,6 +293,7 @@ def record(
         attempt=attempt,
         status=status,
         latency_ms=latency_ms,
+        audio_seconds=audio_seconds,
         fallback_attempts=fallback_attempts,
         finish_reason=finish_reason,
         actor_user_id=attribution.actor_user_id,

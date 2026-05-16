@@ -163,6 +163,7 @@ class LLMUsage:
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    seconds: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
