@@ -46,6 +46,7 @@ from app.adapters.llm.fastembed import (
     FastEmbedEmbeddingError,
 )
 from app.adapters.llm.openrouter import (
+    OpenRouterClient,
     OpenRouterModelMetadata,
     fetch_openrouter_model_metadata,
     normalize_openrouter_model_id,
@@ -58,7 +59,7 @@ from app.adapters.llm.ports import (
     LlmTransportError,
 )
 from app.adapters.storage.envelope import Aes256GcmEnvelope
-from app.adapters.storage.ports import EnvelopeOwner
+from app.adapters.storage.ports import EnvelopeDecryptError, EnvelopeOwner
 from app.api.admin.deps import (
     require_deployment_scope,
     require_deployment_session_scope,
@@ -1614,6 +1615,44 @@ def _encrypt_provider_api_key(
     return _envelope_id_from_pointer(pointer)
 
 
+def _decrypt_provider_api_key(
+    session: Session,
+    *,
+    provider: LlmProvider,
+    settings: Settings,
+) -> SecretStr | None:
+    if provider.api_key_envelope_ref is None:
+        return None
+    if settings.root_key is None:
+        raise ServiceUnavailable(
+            "CREWDAY_ROOT_KEY is required to read LLM provider API keys",
+            extra={
+                "error": "root_key_required",
+                "upstream": "secret_envelope",
+            },
+        )
+    envelope = Aes256GcmEnvelope(
+        settings.root_key,
+        repository=SqlAlchemySecretEnvelopeRepository(session),
+    )
+    try:
+        plaintext = envelope.decrypt(
+            bytes((_ROW_BACKED_ENVELOPE_VERSION,))
+            + provider.api_key_envelope_ref.encode("utf-8"),
+            purpose=_LLM_PROVIDER_API_KEY_PURPOSE,
+            expected_owner=EnvelopeOwner(kind="llm_provider", id=provider.id),
+        )
+    except EnvelopeDecryptError as exc:
+        raise _unprocessable("provider_client_unavailable") from exc
+    try:
+        decoded = plaintext.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _unprocessable("provider_client_unavailable") from exc
+    if not decoded.strip():
+        raise _unprocessable("provider_client_unavailable")
+    return SecretStr(decoded)
+
+
 def _validate_model_payload(
     session: Session,
     payload: ModelPayload,
@@ -2229,9 +2268,24 @@ def _playground_temperature(
     return value if value is not None else 0.0
 
 
-def _playground_llm(request: Request, provider: LlmProvider) -> LLMClient:
+def _playground_llm(
+    request: Request, session: Session, provider: LlmProvider
+) -> LLMClient:
     if provider.provider_type == "fake":
         return FakeLLMClient()
+    if provider.provider_type == "openai_compatible":
+        if not provider.api_endpoint:
+            raise _unprocessable("provider_endpoint_required")
+        return OpenRouterClient(
+            _decrypt_provider_api_key(
+                session,
+                provider=provider,
+                settings=_settings_from_request(request),
+            ),
+            base_url=provider.api_endpoint,
+            timeout=float(provider.timeout_s),
+            api_key_required=False,
+        )
     if provider.provider_type != "openrouter":
         raise _unprocessable("provider_type_not_supported")
     llm = getattr(request.app.state, "llm", None)
@@ -2898,7 +2952,7 @@ def build_admin_llm_router() -> APIRouter:
             temperature = _playground_temperature(
                 payload, provider_model, model, assignment
             )
-        llm = _playground_llm(request, provider)
+            llm = _playground_llm(request, session, provider)
         started = time.monotonic()
         try:
             response = llm.chat(

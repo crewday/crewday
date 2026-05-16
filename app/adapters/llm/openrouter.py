@@ -805,11 +805,12 @@ class OpenRouterClient:
 
     def __init__(
         self,
-        api_key: SecretStr | OpenRouterConfigSource,
+        api_key: SecretStr | OpenRouterConfigSource | None,
         *,
         base_url: str = _DEFAULT_BASE_URL,
         timeout: float = 60.0,
         max_retries: int = 3,
+        api_key_required: bool = True,
         http: httpx.Client | None = None,
         clock: Clock | None = None,
         sleep: Callable[[float], None] = time.sleep,
@@ -819,7 +820,7 @@ class OpenRouterClient:
             raise ValueError("max_retries must be >= 1")
         self._config_source = (
             StaticOpenRouterConfigSource(api_key)
-            if isinstance(api_key, SecretStr)
+            if isinstance(api_key, SecretStr) or api_key is None
             else api_key
         )
         # ``rstrip('/')`` so callers can pass either
@@ -828,6 +829,7 @@ class OpenRouterClient:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._max_retries = max_retries
+        self._api_key_required = api_key_required
         self._clock = clock or SystemClock()
         self._sleep = sleep
         # ``http`` is provided by tests (preloaded with
@@ -837,7 +839,7 @@ class OpenRouterClient:
 
     def is_configured(self) -> bool:
         """Return whether a request can currently resolve an API key."""
-        return self._config_source.api_key() is not None
+        return self._config_source.api_key() is not None or not self._api_key_required
 
     # ------------------------------------------------------------------
     # Public LLMClient surface
@@ -1211,14 +1213,16 @@ class OpenRouterClient:
         inside the string we're about to hand to :mod:`httpx`.
         """
         api_key = self._config_source.api_key()
-        if api_key is None:
+        if api_key is None and self._api_key_required:
             raise LlmTransportError("openrouter api key is not configured")
-        return {
-            "Authorization": f"Bearer {api_key.get_secret_value()}",
+        headers = {
             "Content-Type": "application/json",
             "HTTP-Referer": _ATTRIBUTION_REFERER,
             "X-Title": _ATTRIBUTION_TITLE,
         }
+        if api_key is not None:
+            headers["Authorization"] = f"Bearer {api_key.get_secret_value()}"
+        return headers
 
 
 # ---------------------------------------------------------------------------

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -830,6 +832,85 @@ class TestAdminLlmRoutes:
             )
             assert huge_model_default.status_code == 200, huge_model_default.text
             assert llm.max_tokens[-1] == 32_000
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_runs_openai_compatible_custom_endpoint(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            seen: list[httpx.Request] = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                seen.append(request)
+                body = json.loads(request.content)
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": "chatcmpl-test",
+                        "model": body["model"],
+                        "choices": [
+                            {
+                                "message": {
+                                    "role": "assistant",
+                                    "content": "ollama pong",
+                                },
+                                "finish_reason": "stop",
+                            }
+                        ],
+                        "usage": {
+                            "prompt_tokens": 2,
+                            "completion_tokens": 3,
+                            "total_tokens": 5,
+                        },
+                    },
+                )
+
+            transport = httpx.MockTransport(handler)
+            real_client = httpx.Client
+
+            def mock_client(**kwargs: object) -> httpx.Client:
+                return real_client(
+                    transport=transport,
+                    timeout=kwargs.get("timeout"),
+                )
+
+            monkeypatch.setattr("app.adapters.llm.openrouter.httpx.Client", mock_client)
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                model = s.get(LlmModel, seeded.model_id)
+                assert provider is not None
+                assert model is not None
+                provider.name = "Ollama"
+                provider.provider_type = "openai_compatible"
+                provider.api_endpoint = "http://ollama.test/v1"
+                provider.api_key_envelope_ref = None
+                model.thinking_strategy = "none"
+                s.commit()
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                json={"prompt": "hello ollama", "max_tokens": 32},
+            )
+
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["status"] == "ok"
+            assert body["assistant_text"] == "ollama pong"
+            assert body["provider_used"] == "Ollama"
+            assert len(seen) == 1
+            assert str(seen[0].url) == "http://ollama.test/v1/chat/completions"
+            assert "Authorization" not in seen[0].headers
         finally:
             _wipe(session_factory)
 
