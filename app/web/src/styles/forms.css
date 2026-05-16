@@ -210,6 +210,55 @@
   background: var(--paper-2);
 }
 
+.confirmation-modal__body {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: flex-start;
+  gap: 14px;
+}
+.confirmation-modal__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+}
+.confirmation-modal__mark--rust {
+  color: var(--rust);
+  background: var(--rust-soft);
+  border-color: color-mix(in srgb, var(--rust) 28%, var(--line));
+}
+.confirmation-modal__mark--moss {
+  color: var(--moss);
+  background: var(--moss-soft);
+  border-color: color-mix(in srgb, var(--moss) 28%, var(--line));
+}
+.confirmation-modal__copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.confirmation-modal__copy p {
+  margin: 0;
+}
+.confirmation-modal__copy ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.confirmation-modal__copy code {
+  overflow-wrap: anywhere;
+}
+.confirmation-modal__footer {
+  justify-content: space-between;
+}
+
 @media (max-width: 560px) {
   .form-modal-dialog.modal--sheet[open],
   .sheet-form-dialog.modal--sheet[open] {
@@ -240,6 +289,12 @@
   .form-modal__footer .btn,
   .sheet-form__footer .btn {
     width: 100%;
+  }
+  .confirmation-modal__body {
+    grid-template-columns: 1fr;
+  }
+  .confirmation-modal__footer {
+    justify-content: flex-start;
   }
 }
 

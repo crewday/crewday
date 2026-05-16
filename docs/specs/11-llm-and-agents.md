@@ -1104,7 +1104,11 @@ The deployment-admin API exposes explicit inheritance edges at
 `/admin/api/v1/llm/inheritance`: `POST` creates an edge, `PUT
 /{capability}` changes its parent, and `DELETE /{capability}` removes
 the explicit edge. Request bodies never include `workspace_id`; active
-rows are deployment-level (`workspace_id IS NULL`). The write path
+rows are deployment-level (`workspace_id IS NULL`). Creating an
+inheritance edge for a capability that already owns direct assignments
+requires `clear_direct_assignments = true`; the API deletes those direct
+assignments and creates the edge in one transaction, otherwise it
+returns `409 capability_direct_assignments_exist`. The write path
 rejects unknown capability keys with `422 unknown_capability`,
 self-loops with `422 capability_inheritance_self_loop`, and multi-hop
 cycles with `422 capability_inheritance_cycle`.
@@ -1413,7 +1417,13 @@ so the graph page does not carry a duplicate overflow action.
   Provider/model API ids, priority columns, matching capability chips,
   call/cost summaries, and arrow-button reordering are intentionally
   omitted from the selected-row view; drag-and-drop is the primary
-  reorder control.
+  reorder control. The inheritance pane sits above the playground,
+  which remains the bottom section of the modal. Parent capability
+  selectors are searchable and ordered by the number of direct
+  inheritance children already pointing at each parent, descending, then
+  by capability key. Creating inheritance over an existing direct chain
+  opens a destructive confirmation dialog and, when confirmed, clears
+  the direct assignments atomically with edge creation.
 - **Hover and selection.**
   - Hover a provider card → every model offered by that provider and
     every assignment that resolves through it highlights; everything

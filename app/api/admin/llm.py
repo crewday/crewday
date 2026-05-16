@@ -728,6 +728,7 @@ class CapabilityInheritancePayload(BaseModel):
 
     capability: str
     inherits_from: str
+    clear_direct_assignments: bool = False
 
 
 class CapabilityInheritanceUpdatePayload(BaseModel):
@@ -1359,6 +1360,21 @@ def _not_found() -> NotFound:
 
 def _conflict(error: str) -> Conflict:
     return Conflict(extra={"error": error})
+
+
+def _direct_assignments_for_capability(
+    session: Session, capability: str
+) -> list[LlmAssignment]:
+    return list(
+        session.scalars(
+            select(LlmAssignment)
+            .where(
+                LlmAssignment.workspace_id.is_(None),
+                LlmAssignment.capability == capability,
+            )
+            .order_by(LlmAssignment.priority, LlmAssignment.id)
+        ).all()
+    )
 
 
 def _unprocessable(
@@ -2982,6 +2998,13 @@ def build_admin_llm_router() -> APIRouter:
             )
             if existing is not None:
                 raise _conflict("capability_inheritance_exists")
+            direct_assignments = _direct_assignments_for_capability(
+                session, payload.capability
+            )
+            if direct_assignments and not payload.clear_direct_assignments:
+                raise _conflict("capability_direct_assignments_exist")
+            for assignment in direct_assignments:
+                session.delete(assignment)
             row = LlmCapabilityInheritance(
                 id=new_ulid(),
                 workspace_id=None,

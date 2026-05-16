@@ -1319,6 +1319,56 @@ class TestAdminLlmRoutes:
         finally:
             _wipe(session_factory)
 
+    def test_inheritance_create_requires_clear_flag_for_direct_assignments(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+
+            blocked = client.post(
+                "/admin/api/v1/llm/inheritance",
+                json={
+                    "capability": "chat.manager",
+                    "inherits_from": "default",
+                },
+            )
+            assert blocked.status_code == 409, blocked.text
+            assert blocked.json()["error"] == "capability_direct_assignments_exist"
+
+            created = client.post(
+                "/admin/api/v1/llm/inheritance",
+                json={
+                    "capability": "chat.manager",
+                    "inherits_from": "default",
+                    "clear_direct_assignments": True,
+                },
+            )
+            assert created.status_code == 200, created.text
+            assert created.json() == {
+                "capability": "chat.manager",
+                "inherits_from": "default",
+                "source": "explicit",
+            }
+
+            with session_factory() as s, tenant_agnostic():
+                assert s.get(LlmAssignment, seeded.assignment_id) is None
+                edge = s.scalar(
+                    select(LlmCapabilityInheritance).where(
+                        LlmCapabilityInheritance.capability == "chat.manager"
+                    )
+                )
+                assert edge is not None
+                assert edge.inherits_from == "default"
+        finally:
+            _wipe(session_factory)
+
     def test_inheritance_crud_rejects_unknown_capabilities_self_loops_and_cycles(
         self,
         client: TestClient,

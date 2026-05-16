@@ -30,16 +30,24 @@ export function buildLlmGraphLayout(
   const assignmentGroups = buildAssignmentGroups(graph, indexes);
   const fallback = buildFallbackRanks(graph, assignmentGroups);
   const assignedOrder = firstSeenAssignedOrder(assignmentGroups, indexes);
+  const tieBreak = {
+    provider: mergeRanks(fallback.provider, assignedOrder.provider),
+    model: mergeRanks(fallback.model, assignedOrder.model),
+    providerModel: mergeRanks(fallback.providerModel, assignedOrder.providerModel),
+  };
 
-  let providerRanks = mergeRanks(fallback.provider, assignedOrder.provider);
-  let providerModelRanks = mergeRanks(
-    fallback.providerModel,
-    assignedOrder.providerModel,
-  );
+  let providerRanks = new Map(tieBreak.provider);
+  let providerModelRanks = new Map(tieBreak.providerModel);
   let assignmentGroupRanks = new Map(fallback.assignmentGroup);
 
   for (let i = 0; i < LAYOUT_SWEEPS; i += 1) {
-    providerRanks = rankProviders(graph.providers, indexes, providerModelRanks, fallback);
+    providerRanks = rankProviders(
+      graph.providers,
+      indexes,
+      providerModelRanks,
+      fallback,
+      tieBreak.provider,
+    );
     assignmentGroupRanks = rankAssignmentGroups(
       assignmentGroups,
       indexes,
@@ -52,18 +60,29 @@ export function buildLlmGraphLayout(
       providerRanks,
       assignmentGroupRanks,
       fallback,
+      tieBreak.providerModel,
     );
   }
 
-  const modelRanks = rankModels(graph.models, indexes, providerModelRanks, fallback);
-  const orderedProviders = stableByRank(graph.providers, providerRanks, fallback.provider);
-  const orderedModels = stableByRank(graph.models, modelRanks, fallback.model);
+  const modelRanks = rankModels(
+    graph.models,
+    indexes,
+    providerModelRanks,
+    fallback,
+    tieBreak.model,
+  );
+  const orderedProviders = stableByRank(
+    graph.providers,
+    providerRanks,
+    tieBreak.provider,
+  );
+  const orderedModels = stableByRank(graph.models, modelRanks, tieBreak.model);
   const providerModelsByModelId = new Map<string, LlmProviderModel[]>();
   for (const model of orderedModels) {
     const rows = indexes.providerModelsByModelId.get(model.id) ?? [];
     providerModelsByModelId.set(
       model.id,
-      stableByRank(rows, providerModelRanks, fallback.providerModel),
+      stableByRank(rows, providerModelRanks, tieBreak.providerModel),
     );
   }
 
@@ -141,6 +160,7 @@ function itemId<T>(item: T): string {
 
 interface AssignedOrder {
   provider: Map<string, number>;
+  model: Map<string, number>;
   providerModel: Map<string, number>;
 }
 
@@ -149,16 +169,18 @@ function firstSeenAssignedOrder(
   indexes: LlmIndexes,
 ): AssignedOrder {
   const provider = new Map<string, number>();
+  const model = new Map<string, number>();
   const providerModel = new Map<string, number>();
   for (const group of assignmentGroups) {
     for (const assignment of group.chain) {
       const pm = indexes.pmById.get(assignment.provider_model_id);
       if (!pm) continue;
       if (!provider.has(pm.provider_id)) provider.set(pm.provider_id, provider.size);
+      if (!model.has(pm.model_id)) model.set(pm.model_id, model.size);
       if (!providerModel.has(pm.id)) providerModel.set(pm.id, providerModel.size);
     }
   }
-  return { provider, providerModel };
+  return { provider, model, providerModel };
 }
 
 function mergeRanks(
@@ -178,6 +200,7 @@ function rankProviders(
   indexes: LlmIndexes,
   providerModelRanks: Map<string, number>,
   fallback: FallbackRanks,
+  tieBreak: Map<string, number>,
 ): Map<string, number> {
   const ranks = new Map<string, number>();
   for (const provider of providers) {
@@ -192,7 +215,7 @@ function rankProviders(
         : disconnectedRank(fallback.provider, provider.id),
     );
   }
-  return normalizeRanks(providers, ranks, fallback.provider);
+  return normalizeRanks(providers, ranks, tieBreak);
 }
 
 function rankModels(
@@ -200,6 +223,7 @@ function rankModels(
   indexes: LlmIndexes,
   providerModelRanks: Map<string, number>,
   fallback: FallbackRanks,
+  tieBreak: Map<string, number>,
 ): Map<string, number> {
   const ranks = new Map<string, number>();
   for (const model of models) {
@@ -214,7 +238,7 @@ function rankModels(
         : disconnectedRank(fallback.model, model.id),
     );
   }
-  return normalizeRanks(models, ranks, fallback.model);
+  return normalizeRanks(models, ranks, tieBreak);
 }
 
 function rankAssignmentGroups(
@@ -252,6 +276,7 @@ function rankProviderModels(
   providerRanks: Map<string, number>,
   assignmentGroupRanks: Map<string, number>,
   fallback: FallbackRanks,
+  tieBreak: Map<string, number>,
 ): Map<string, number> {
   const assignmentGroupsByProviderModel = new Map<string, number[]>();
   for (const assignments of indexes.assignmentsByCapability.values()) {
@@ -278,7 +303,7 @@ function rankProviderModels(
         : disconnectedRank(fallback.providerModel, providerModel.id),
     );
   }
-  return normalizeRanks(providerModels, ranks, fallback.providerModel);
+  return normalizeRanks(providerModels, ranks, tieBreak);
 }
 
 function stableByRank<T>(

@@ -10,6 +10,7 @@ import {
 import FormField, { type FieldRequirement } from "@/components/FormField";
 
 type FormModalWidth = "default" | "narrow" | "wide";
+type FormModalRole = "dialog" | "alertdialog";
 
 interface FormModalProps {
   open: boolean;
@@ -30,6 +31,7 @@ interface FormModalProps {
   closeDisabled?: boolean;
   contentElement?: "form" | "section";
   noValidate?: boolean;
+  dialogRole?: FormModalRole;
   onSubmit?: FormEventHandler<HTMLFormElement>;
   onCancel?: ReactEventHandler<HTMLDialogElement>;
 }
@@ -67,6 +69,7 @@ export default function FormModal(props: FormModalProps) {
     closeDisabled = false,
     contentElement = "form",
     noValidate = false,
+    dialogRole,
     onSubmit,
     onCancel,
   } = props;
@@ -110,6 +113,7 @@ export default function FormModal(props: FormModalProps) {
       )}
       aria-labelledby={resolvedTitleId}
       aria-describedby={describedBy}
+      role={dialogRole}
       onCancel={onCancel}
       onClose={onClose}
     >

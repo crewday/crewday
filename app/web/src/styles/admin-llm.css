@@ -1198,6 +1198,9 @@
   gap: 10px;
   flex-wrap: wrap;
 }
+.llm-assignment-dialog__inheritance-footer {
+  justify-content: space-between;
+}
 .llm-assignment-picker {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -1399,6 +1402,9 @@
   .llm-assignment-dialog__inherit-actions,
   .llm-assignment-editor__actions {
     align-items: stretch;
+    flex-direction: column;
+  }
+  .llm-assignment-dialog__inheritance-footer {
     flex-direction: column;
   }
   .llm-assignment-picker__selected {

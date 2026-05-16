@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { DragEvent, FormEvent, KeyboardEvent, ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { GripVertical, Plus, Trash2 } from "lucide-react";
-import FormModal, { FormModalField } from "@/components/FormModal";
+import ConfirmationModal from "@/components/ConfirmationModal";
+import FormModal from "@/components/FormModal";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { useReorderableList } from "@/components/useReorderableList";
 import { Chip } from "@/components/common";
@@ -69,6 +70,9 @@ function apiErrorCopy(error: unknown, fallback: string): string {
     if (code === "capability_inheritance_exists") {
       return "This capability already has an explicit parent. Change the existing parent instead.";
     }
+    if (code === "capability_direct_assignments_exist") {
+      return "This capability still has directly assigned models. Confirm replacement before creating inheritance.";
+    }
     return error.detail ?? error.title ?? error.message ?? fallback;
   }
   return error instanceof Error ? error.message : fallback;
@@ -102,6 +106,30 @@ function capabilityOption(capability: LlmCapabilityEntry): SearchableSelectOptio
       capability.required_capabilities.join(" "),
     ].join(" "),
   };
+}
+
+function sortedParentOptions(
+  graph: LlmGraphPayload,
+  capabilityKey: string | null,
+  indexes: LlmIndexes,
+): LlmCapabilityEntry[] {
+  const childCounts = new Map<string, number>();
+  for (const edge of graph.inheritance) {
+    childCounts.set(
+      edge.inherits_from,
+      (childCounts.get(edge.inherits_from) ?? 0) + 1,
+    );
+  }
+  return [
+    ...graph.capabilities.filter(
+      (cap) =>
+        cap.key !== capabilityKey && !indexes.inheritanceByChild.has(cap.key),
+    ),
+  ].sort((left, right) => {
+    const countDiff =
+      (childCounts.get(right.key) ?? 0) - (childCounts.get(left.key) ?? 0);
+    return countDiff || left.key.localeCompare(right.key);
+  });
 }
 
 function thinkingLabel(level: LlmThinkingLevel): string {
@@ -180,12 +208,14 @@ export default function LlmAssignmentModal({
   const [draggedProviderModelId, setDraggedProviderModelId] = useState<string | null>(
     null,
   );
+  const [replacementParent, setReplacementParent] = useState<string | null>(null);
   const [clientErr, setClientErr] = useState<string | null>(null);
   const [serverErr, setServerErr] = useState<string | null>(null);
 
   useEffect(() => {
     setInheritParent(explicitParent ?? "");
     setDraggedProviderModelId(null);
+    setReplacementParent(null);
     setClientErr(null);
     setServerErr(null);
   }, [capabilityKey, explicitParent]);
@@ -255,7 +285,13 @@ export default function LlmAssignmentModal({
   });
 
   const saveInheritance = useMutation({
-    mutationFn: (inheritsFrom: string) => {
+    mutationFn: ({
+      inheritsFrom,
+      clearDirectAssignments,
+    }: {
+      inheritsFrom: string;
+      clearDirectAssignments?: boolean;
+    }) => {
       if (!capabilityKey) throw new Error("Capability is missing.");
       if (explicitParent) {
         return fetchJson(
@@ -265,10 +301,17 @@ export default function LlmAssignmentModal({
       }
       return fetchJson("/admin/api/v1/llm/inheritance", {
         method: "POST",
-        body: { capability: capabilityKey, inherits_from: inheritsFrom },
+        body: {
+          capability: capabilityKey,
+          inherits_from: inheritsFrom,
+          ...(clearDirectAssignments ? { clear_direct_assignments: true } : {}),
+        },
       });
     },
-    onSuccess: invalidate,
+    onSuccess: async () => {
+      setReplacementParent(null);
+      await invalidate();
+    },
     onError: (error: Error) =>
       setServerErr(apiErrorCopy(error, "Inheritance save failed.")),
   });
@@ -292,9 +335,14 @@ export default function LlmAssignmentModal({
   const availableProviderModels = graph.provider_models.filter(
     (pm) => providerModelIsAvailable(pm, indexes) && !selectedProviderModelIds.has(pm.id),
   );
-  const eligibleParentOptions = graph.capabilities.filter(
-    (cap) => cap.key !== capabilityKey && !indexes.inheritanceByChild.has(cap.key),
+  const eligibleParentOptions = useMemo(
+    () => sortedParentOptions(graph, capabilityKey, indexes),
+    [capabilityKey, graph, indexes],
   );
+  const directAssignmentNames = chain.map((assignment) => {
+    const pm = indexes.pmById.get(assignment.provider_model_id);
+    return pm ? providerModelLabel(pm, indexes) : assignment.provider_model_id;
+  });
   const err = clientErr ?? serverErr;
   const titleId = capabilityKey ? "llm-assignment-modal-title" : undefined;
   const pending =
@@ -348,115 +396,153 @@ export default function LlmAssignmentModal({
       setClientErr("A capability cannot inherit from itself.");
       return;
     }
-    saveInheritance.mutate(inheritParent);
+    if (!explicitParent && chain.length > 0) {
+      setReplacementParent(inheritParent);
+      return;
+    }
+    saveInheritance.mutate({ inheritsFrom: inheritParent });
   }
 
   return (
-    <FormModal
-      open={capabilityKey !== null}
-      title={capabilityKey ?? "Capability"}
-      titleId={titleId}
-      eyebrow={explicitParent ? "Inherited assignment chain" : "Direct assignment chain"}
-      width="wide"
-      bodyClassName="llm-assignment-dialog__body"
-      contentElement="section"
-      onClose={onClose}
-      actions={
-        capability && explicitParent ? (
-          <>
-            <button
-              type="submit"
-              form={INHERITANCE_FORM_ID}
-              className="btn btn--moss"
-              disabled={pending || !inheritParent}
-            >
-              Change inheritance
-            </button>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              disabled={pending}
-              onClick={() => {
-                setClientErr(null);
-                setServerErr(null);
-                deleteInheritance.mutate();
-              }}
-            >
-              Remove inheritance
-            </button>
-          </>
-        ) : null
-      }
-    >
-      <section
-        className="llm-assignment-dialog__content"
-        aria-busy={pending}
+    <>
+      <FormModal
+        open={capabilityKey !== null}
+        title={capabilityKey ?? "Capability"}
+        titleId={titleId}
+        eyebrow={explicitParent ? "Inherited assignment chain" : "Direct assignment chain"}
+        width="wide"
+        bodyClassName="llm-assignment-dialog__body"
+        footerClassName={
+          capability && explicitParent
+            ? "llm-assignment-dialog__inheritance-footer"
+            : undefined
+        }
+        contentElement="section"
+        onClose={onClose}
+        actions={
+          capability && explicitParent ? (
+            <>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                disabled={pending}
+                onClick={() => {
+                  setClientErr(null);
+                  setServerErr(null);
+                  deleteInheritance.mutate();
+                }}
+              >
+                Remove inheritance
+              </button>
+              <button
+                type="submit"
+                form={INHERITANCE_FORM_ID}
+                className="btn btn--moss"
+                disabled={pending || !inheritParent}
+              >
+                Change inheritance
+              </button>
+            </>
+          ) : null
+        }
       >
-        {capability ? <CapabilityHeader capability={capability} /> : null}
-        {err ? (
-          <p className="form-error" role="alert">
-            {err}
-          </p>
-        ) : null}
-        {capability && explicitParent ? (
-          <InheritanceOnlyPanel
-            capability={capability}
-            explicitParent={explicitParent}
-            chain={indexes.assignmentsByCapability.get(explicitParent) ?? []}
-            indexes={indexes}
-            inheritedChildren={inheritedChildren}
-            inheritParent={inheritParent}
-            eligibleParentOptions={eligibleParentOptions}
-            pending={pending}
-            onParentChange={setInheritParent}
-            onSubmit={submitInheritance}
-          />
-        ) : capability ? (
-          <>
-            <DirectChainPicker
+        <section
+          className="llm-assignment-dialog__content"
+          aria-busy={pending}
+        >
+          {capability ? <CapabilityHeader capability={capability} /> : null}
+          {err ? (
+            <p className="form-error" role="alert">
+              {err}
+            </p>
+          ) : null}
+          {capability && explicitParent ? (
+            <InheritanceOnlyPanel
               capability={capability}
-              chain={chain}
-              availableProviderModels={availableProviderModels}
+              explicitParent={explicitParent}
+              chain={indexes.assignmentsByCapability.get(explicitParent) ?? []}
               indexes={indexes}
-              pending={pending}
-              draggedProviderModelId={draggedProviderModelId}
-              onAdd={addProviderModel}
-              onDelete={(assignmentId) => {
-                setClientErr(null);
-                setServerErr(null);
-                deleteAssignment.mutate(assignmentId);
-              }}
-              onMoveTo={moveAssignmentTo}
-              onThinkingChange={(assignmentId, thinkingOverride) => {
-                setClientErr(null);
-                setServerErr(null);
-                updateAssignmentThinking.mutate({ assignmentId, thinkingOverride });
-              }}
-              onProviderModelDrag={setDraggedProviderModelId}
-            />
-            {playgroundAssignment && playgroundProviderModel ? (
-              <LlmPlayground
-                providerModel={playgroundProviderModel}
-                model={playgroundModel}
-                mode="assignment"
-                assignment={playgroundAssignment}
-                titleId="llm-assignment-playground-title"
-                description="Run a stateless smoke test through this assignment. Assignment tuning applies automatically."
-              />
-            ) : null}
-            <CreateInheritancePanel
-              capability={capability}
-              chainLength={chain.length}
+              inheritedChildren={inheritedChildren}
               inheritParent={inheritParent}
               eligibleParentOptions={eligibleParentOptions}
               pending={pending}
               onParentChange={setInheritParent}
               onSubmit={submitInheritance}
             />
-          </>
-        ) : null}
-      </section>
-    </FormModal>
+          ) : capability ? (
+            <>
+              <DirectChainPicker
+                capability={capability}
+                chain={chain}
+                availableProviderModels={availableProviderModels}
+                indexes={indexes}
+                pending={pending}
+                draggedProviderModelId={draggedProviderModelId}
+                onAdd={addProviderModel}
+                onDelete={(assignmentId) => {
+                  setClientErr(null);
+                  setServerErr(null);
+                  deleteAssignment.mutate(assignmentId);
+                }}
+                onMoveTo={moveAssignmentTo}
+                onThinkingChange={(assignmentId, thinkingOverride) => {
+                  setClientErr(null);
+                  setServerErr(null);
+                  updateAssignmentThinking.mutate({ assignmentId, thinkingOverride });
+                }}
+                onProviderModelDrag={setDraggedProviderModelId}
+              />
+              <CreateInheritancePanel
+                capability={capability}
+                inheritParent={inheritParent}
+                eligibleParentOptions={eligibleParentOptions}
+                pending={pending}
+                onParentChange={setInheritParent}
+                onSubmit={submitInheritance}
+              />
+              {playgroundAssignment && playgroundProviderModel ? (
+                <LlmPlayground
+                  providerModel={playgroundProviderModel}
+                  model={playgroundModel}
+                  mode="assignment"
+                  assignment={playgroundAssignment}
+                  titleId="llm-assignment-playground-title"
+                  description="Run a stateless smoke test through this assignment. Assignment tuning applies automatically."
+                />
+              ) : null}
+            </>
+          ) : null}
+        </section>
+      </FormModal>
+      <ConfirmationModal
+        open={replacementParent !== null}
+        title="Replace direct assignment chain?"
+        confirmLabel="Create inheritance"
+        pending={saveInheritance.isPending}
+        onCancel={() => {
+          if (!saveInheritance.isPending) setReplacementParent(null);
+        }}
+        onConfirm={() => {
+          if (!replacementParent) return;
+          setClientErr(null);
+          setServerErr(null);
+          saveInheritance.mutate({
+            inheritsFrom: replacementParent,
+            clearDirectAssignments: true,
+          });
+        }}
+      >
+        <p>
+          Creating inheritance for <code>{capabilityKey}</code> will remove{" "}
+          {chain.length} directly assigned {chain.length === 1 ? "model" : "models"}.
+        </p>
+        <ul>
+          {directAssignmentNames.map((name) => (
+            <li key={name}>{name}</li>
+          ))}
+        </ul>
+      </ConfirmationModal>
+    </>
   );
 }
 
@@ -590,7 +676,6 @@ function InheritedChainSummary({
 
 function CreateInheritancePanel({
   capability,
-  chainLength,
   inheritParent,
   eligibleParentOptions,
   pending,
@@ -598,7 +683,6 @@ function CreateInheritancePanel({
   onSubmit,
 }: {
   capability: LlmCapabilityEntry;
-  chainLength: number;
   inheritParent: string;
   eligibleParentOptions: LlmCapabilityEntry[];
   pending: boolean;
@@ -618,25 +702,23 @@ function CreateInheritancePanel({
           direct chain instead of owning one here.
         </p>
       </div>
-      <FormModalField label="Parent capability" requirement="optional">
-        <select
-          value={inheritParent}
-          onChange={(event) => onParentChange(event.target.value)}
-          disabled={chainLength > 0}
-        >
-          <option value="">No explicit parent</option>
-          {eligibleParentOptions.map((option) => (
-            <option key={option.key} value={option.key}>
-              {option.key}
-            </option>
-          ))}
-        </select>
-      </FormModalField>
+      <SearchableSelect
+        label="Parent capability"
+        requirement="required"
+        className="form-modal__field"
+        value={inheritParent}
+        options={eligibleParentOptions.map(capabilityOption)}
+        onChange={onParentChange}
+        disabled={pending}
+        required
+        blankOption={{ label: "No explicit parent" }}
+        placeholder="Search parent capabilities..."
+      />
       <div className="llm-assignment-dialog__inherit-actions">
         <button
           type="submit"
           className="btn btn--ghost"
-          disabled={pending || chainLength > 0 || !inheritParent}
+          disabled={pending || !inheritParent}
         >
           Create inheritance
         </button>
@@ -876,7 +958,7 @@ function ProviderModelRow({
   actionLabel: "Add" | "Remove";
   ariaLabel?: string;
   onDragStart: (event: DragEvent<HTMLElement>) => void;
-  onDragEnd: () => void;
+  onDragEnd: (event: DragEvent<HTMLElement>) => void;
   onKeyDown?: (event: KeyboardEvent<HTMLElement>) => void;
   onAction: () => void;
   children?: ReactNode;

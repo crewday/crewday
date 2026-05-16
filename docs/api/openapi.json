@@ -5660,6 +5660,11 @@
             "title": "Capability",
             "type": "string"
           },
+          "clear_direct_assignments": {
+            "default": false,
+            "title": "Clear Direct Assignments",
+            "type": "boolean"
+          },
           "inherits_from": {
             "title": "Inherits From",
             "type": "string"

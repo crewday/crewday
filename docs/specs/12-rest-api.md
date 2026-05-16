@@ -1213,7 +1213,7 @@ PATCH  /admin/api/v1/llm/assignments/reorder         # body: [{capability, ids_i
 
 # Capability inheritance.
 GET    /admin/api/v1/llm/inheritance
-POST   /admin/api/v1/llm/inheritance                 # body: { capability, inherits_from }
+POST   /admin/api/v1/llm/inheritance                 # body: { capability, inherits_from, clear_direct_assignments? } ; 409 when direct assignments exist without clear_direct_assignments
 PUT    /admin/api/v1/llm/inheritance/{capability}    # body: { inherits_from } ; 422 on unknown/self-loop/cycle
 DELETE /admin/api/v1/llm/inheritance/{capability}
 

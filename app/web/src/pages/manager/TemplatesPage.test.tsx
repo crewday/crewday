@@ -158,17 +158,28 @@ function callPath(call: FetchCall): string {
 }
 
 function dataTransfer(): DataTransfer {
+  const data: Record<string, string> = {};
   return {
-    data: {} as Record<string, string>,
     effectAllowed: "move",
     dropEffect: "move",
+    files: [] as unknown as FileList,
+    items: [] as unknown as DataTransferItemList,
+    types: [],
+    clearData(format?: string) {
+      if (format) {
+        delete data[format];
+        return;
+      }
+      for (const key of Object.keys(data)) delete data[key];
+    },
     setData(format: string, value: string) {
-      this.data[format] = value;
+      data[format] = value;
     },
     getData(format: string) {
-      return this.data[format] ?? "";
+      return data[format] ?? "";
     },
-  } as DataTransfer;
+    setDragImage: vi.fn(),
+  } as unknown as DataTransfer;
 }
 
 async function fireDrop(from: HTMLElement, to: HTMLElement): Promise<void> {

@@ -2505,9 +2505,14 @@ describe("Admin LlmPage", () => {
       expect(inheritedChild).toHaveClass("llm-graph-node__child", "is-error");
       fireEvent.click(inheritedChild);
       const dialog = assignmentDialog("voice.transcribe");
-      fireEvent.change(within(dialog).getByLabelText(/Parent capability/), {
-        target: { value: "chat.manager" },
+      const createParentPicker = within(dialog).getByRole("combobox", {
+        name: /Parent capability/,
       });
+      fireEvent.focus(createParentPicker);
+      fireEvent.change(createParentPicker, { target: { value: "chat.manager" } });
+      fireEvent.mouseDown(
+        within(dialog).getByRole("option", { name: /chat\.manager/ }),
+      );
       fireEvent.click(within(dialog).getByRole("button", { name: "Create inheritance" }));
 
       await waitFor(() => {

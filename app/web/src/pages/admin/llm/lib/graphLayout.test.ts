@@ -215,6 +215,39 @@ describe("buildLlmGraphLayout", () => {
     expect(group?.chain.map((item) => item.id)).toEqual(["primary", "fallback"]);
   });
 
+  it("uses assignment priority as the model tie-break when graph ranks are equal", () => {
+    const graph: LlmGraphPayload = {
+      providers: [provider("provider_openrouter", "OpenRouter")],
+      models: [model("model_deepseek", "DeepSeek"), model("model_gemma", "Gemma")],
+      provider_models: [
+        providerModel("pm_deepseek", "provider_openrouter", "model_deepseek"),
+        providerModel("pm_gemma", "provider_openrouter", "model_gemma"),
+      ],
+      capabilities: [capability("default")],
+      inheritance: [],
+      assignments: [
+        assignment("assign_deepseek", "default", 1, "pm_deepseek"),
+        assignment("assign_gemma", "default", 0, "pm_gemma"),
+      ],
+      assignment_issues: [],
+      totals: {
+        spend_usd_30d: 0,
+        calls_30d: 0,
+        provider_count: 1,
+        model_count: 2,
+        capability_count: 1,
+        unassigned_capabilities: [],
+      },
+    };
+
+    const layout = layoutFor(graph);
+
+    expect(layout.models.map((item) => item.id)).toEqual([
+      "model_gemma",
+      "model_deepseek",
+    ]);
+  });
+
   it("keeps unconnected nodes stable after connected graph nodes", () => {
     const graph: LlmGraphPayload = {
       providers: [

@@ -78,6 +78,15 @@ function providerModelRow(dialog: HTMLElement, name: string): HTMLElement {
   return row;
 }
 
+function visibleOptionLabels(dialog: HTMLElement, label: RegExp): string[] {
+  const picker = within(dialog).getByRole("combobox", { name: label });
+  fireEvent.focus(picker);
+  const listbox = within(dialog).getByRole("listbox", { name: label });
+  return within(listbox)
+    .getAllByRole("option")
+    .map((option) => option.textContent ?? "");
+}
+
 function pickerColumn(dialog: HTMLElement, heading: string): HTMLElement {
   const column = within(dialog).getByText(heading).closest("section");
   if (!(column instanceof HTMLElement)) throw new Error(`${heading} column not found`);
@@ -118,6 +127,112 @@ const inheritedGraph: LlmGraphPayload = {
   ],
   inheritance: [
     ...baseGraph.inheritance,
+    {
+      capability: "chat.admin",
+      inherits_from: "chat.manager",
+      source: "explicit",
+    },
+  ],
+};
+
+const sortedParentsGraph: LlmGraphPayload = {
+  ...baseGraph,
+  capabilities: [
+    ...baseGraph.capabilities,
+    {
+      key: "alpha.parent",
+      description: "One inherited child",
+      required_capabilities: ["chat"],
+      spend_usd_30d: 0,
+      calls_30d: 0,
+      direct_spend_usd_30d: 0,
+      direct_calls_30d: 0,
+      inherited_spend_usd_30d: 0,
+      inherited_calls_30d: 0,
+    },
+    {
+      key: "beta.parent",
+      description: "Two inherited children",
+      required_capabilities: ["chat"],
+      spend_usd_30d: 0,
+      calls_30d: 0,
+      direct_spend_usd_30d: 0,
+      direct_calls_30d: 0,
+      inherited_spend_usd_30d: 0,
+      inherited_calls_30d: 0,
+    },
+    {
+      key: "child.one",
+      description: "First child",
+      required_capabilities: ["chat"],
+      spend_usd_30d: 0,
+      calls_30d: 0,
+      direct_spend_usd_30d: 0,
+      direct_calls_30d: 0,
+      inherited_spend_usd_30d: 0,
+      inherited_calls_30d: 0,
+    },
+    {
+      key: "child.two",
+      description: "Second child",
+      required_capabilities: ["chat"],
+      spend_usd_30d: 0,
+      calls_30d: 0,
+      direct_spend_usd_30d: 0,
+      direct_calls_30d: 0,
+      inherited_spend_usd_30d: 0,
+      inherited_calls_30d: 0,
+    },
+    {
+      key: "child.three",
+      description: "Third child",
+      required_capabilities: ["chat"],
+      spend_usd_30d: 0,
+      calls_30d: 0,
+      direct_spend_usd_30d: 0,
+      direct_calls_30d: 0,
+      inherited_spend_usd_30d: 0,
+      inherited_calls_30d: 0,
+    },
+  ],
+  inheritance: [
+    ...baseGraph.inheritance,
+    {
+      capability: "child.one",
+      inherits_from: "beta.parent",
+      source: "explicit",
+    },
+    {
+      capability: "child.two",
+      inherits_from: "beta.parent",
+      source: "explicit",
+    },
+    {
+      capability: "child.three",
+      inherits_from: "alpha.parent",
+      source: "explicit",
+    },
+  ],
+};
+
+const sortedInheritedParentsGraph: LlmGraphPayload = {
+  ...sortedParentsGraph,
+  capabilities: [
+    ...sortedParentsGraph.capabilities,
+    {
+      key: "chat.admin",
+      description: "Deployment-admin embedded chat agent",
+      required_capabilities: ["chat", "function_calling"],
+      spend_usd_30d: 0,
+      calls_30d: 0,
+      direct_spend_usd_30d: 0,
+      direct_calls_30d: 0,
+      inherited_spend_usd_30d: 0,
+      inherited_calls_30d: 0,
+    },
+  ],
+  inheritance: [
+    ...sortedParentsGraph.inheritance,
     {
       capability: "chat.admin",
       inherits_from: "chat.manager",
@@ -173,7 +288,15 @@ describe("LlmAssignmentModal", () => {
     const changeButton = within(dialog).getByRole("button", {
       name: "Change inheritance",
     });
-    expect(changeButton.closest(".form-modal__footer")).toBeInTheDocument();
+    const footer = changeButton.closest(".form-modal__footer");
+    expect(footer).toHaveClass("llm-assignment-dialog__inheritance-footer");
+    const removeButton = within(dialog).getByRole("button", {
+      name: "Remove inheritance",
+    });
+    expect(
+      removeButton.compareDocumentPosition(changeButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     fireEvent.click(changeButton);
 
     await waitFor(() => {
@@ -192,10 +315,7 @@ describe("LlmAssignmentModal", () => {
     )!;
     expect(bodyOf(put)).toEqual({ inherits_from: "default" });
 
-    const removeButton = within(dialog).getByRole("button", {
-      name: "Remove inheritance",
-    });
-    expect(removeButton.closest(".form-modal__footer")).toBeInTheDocument();
+    expect(removeButton.closest(".form-modal__footer")).toBe(footer);
     fireEvent.click(removeButton);
 
     await waitFor(() => {
@@ -246,6 +366,92 @@ describe("LlmAssignmentModal", () => {
       expect(
         within(dialog).getByRole("button", { name: "Change inheritance" }),
       ).toBeEnabled();
+    });
+  });
+
+  it("sorts searchable parent capabilities by existing inheritance usage", () => {
+    installFetch();
+    renderAssignment("chat.manager", sortedParentsGraph);
+    const dialog = screen.getByRole("dialog", { name: "chat.manager" });
+
+    const createOptions = visibleOptionLabels(dialog, /Parent capability/);
+    expect(createOptions[0]).toContain("No explicit parent");
+    expect(createOptions[1]).toContain("beta.parent");
+    expect(createOptions[2]).toContain("alpha.parent");
+    expect(createOptions[3]).toContain("default");
+    expect(
+      within(dialog).getByRole("combobox", { name: /Parent capability/ }),
+    ).toHaveAttribute("aria-autocomplete", "list");
+  });
+
+  it("uses the same sorted parent order when changing inheritance", () => {
+    installFetch();
+    renderAssignment("chat.admin", sortedInheritedParentsGraph);
+    const dialog = screen.getByRole("dialog", { name: "chat.admin" });
+
+    const changeOptions = visibleOptionLabels(dialog, /Change inheritance/);
+    expect(changeOptions[0]).toContain("Choose a parent capability");
+    expect(changeOptions[1]).toContain("beta.parent");
+    expect(changeOptions[2]).toContain("alpha.parent");
+    expect(changeOptions[3]).toContain("chat.manager");
+    expect(changeOptions[4]).toContain("default");
+  });
+
+  it("keeps inheritance above the playground and confirms replacing direct assignments", async () => {
+    const calls = installFetch();
+    renderAssignment("chat.manager");
+    const dialog = screen.getByRole("dialog", { name: "chat.manager" });
+
+    const inheritancePane = within(dialog)
+      .getByText(/Create an explicit parent/)
+      .closest(".llm-assignment-dialog__inheritance");
+    const playground = within(dialog).getByRole("region", { name: "Playground" });
+    expect(inheritancePane).toBeInstanceOf(HTMLElement);
+    expect(
+      inheritancePane!.compareDocumentPosition(playground) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    const parentPicker = within(dialog).getByRole("combobox", {
+      name: /Parent capability/,
+    });
+    fireEvent.focus(parentPicker);
+    fireEvent.change(parentPicker, { target: { value: "default" } });
+    fireEvent.mouseDown(within(dialog).getByRole("option", { name: /default/ }));
+
+    const createButton = within(dialog).getByRole("button", {
+      name: "Create inheritance",
+    });
+    expect(createButton).toBeEnabled();
+    fireEvent.click(createButton);
+
+    const confirmation = screen.getByRole("alertdialog", {
+      name: "Replace direct assignment chain?",
+    });
+    expect(confirmation).toHaveTextContent("chat.manager");
+    expect(confirmation).toHaveTextContent("Gemma 4 31B IT via OpenRouter");
+    fireEvent.click(
+      within(confirmation).getByRole("button", { name: "Create inheritance" }),
+    );
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/inheritance" &&
+            call.init.method === "POST",
+        ),
+      ).toBe(true);
+    });
+    const post = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/inheritance" &&
+        call.init.method === "POST",
+    )!;
+    expect(bodyOf(post)).toEqual({
+      capability: "chat.manager",
+      inherits_from: "default",
+      clear_direct_assignments: true,
     });
   });
 
