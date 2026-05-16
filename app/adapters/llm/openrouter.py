@@ -236,28 +236,19 @@ def fetch_openrouter_model_metadata(
     close_http = http is None
     client = http or httpx.Client(timeout=timeout)
     try:
-        try:
-            response = client.get(
-                f"{base_url.rstrip('/')}/models",
-                headers={
-                    "HTTP-Referer": _ATTRIBUTION_REFERER,
-                    "X-Title": _ATTRIBUTION_TITLE,
-                },
-            )
-        except httpx.TimeoutException as exc:
-            raise LlmTransportError("openrouter metadata request timed out") from exc
-        except httpx.HTTPError as exc:
-            raise LlmTransportError(
-                f"openrouter metadata request failed: {type(exc).__name__}"
-            ) from exc
-        if response.status_code >= 400:
-            raise LlmTransportError(
-                f"openrouter metadata request failed: {response.status_code}"
-            )
+        response = _fetch_openrouter_metadata_response(
+            client, f"{base_url.rstrip('/')}/models"
+        )
         payload = _decode_models_payload(response)
         for entry in payload:
             if _string(entry.get("id")) == model_id:
                 return _openrouter_model_metadata(entry)
+        detail_response = _fetch_openrouter_metadata_response(
+            client, f"{base_url.rstrip('/')}/models/{model_id}/endpoints"
+        )
+        detail = _decode_model_detail_payload(detail_response)
+        if _string(detail.get("id")) == model_id:
+            return _openrouter_model_metadata(detail)
     finally:
         if close_http:
             client.close()
@@ -317,6 +308,32 @@ class _ChatCompletion(TypedDict, total=False):
     usage: _Usage
 
 
+def _fetch_openrouter_metadata_response(
+    client: httpx.Client, url: str
+) -> httpx.Response:
+    try:
+        response = client.get(
+            url,
+            headers={
+                "HTTP-Referer": _ATTRIBUTION_REFERER,
+                "X-Title": _ATTRIBUTION_TITLE,
+            },
+        )
+    except httpx.TimeoutException as exc:
+        raise LlmTransportError("openrouter metadata request timed out") from exc
+    except httpx.HTTPError as exc:
+        raise LlmTransportError(
+            f"openrouter metadata request failed: {type(exc).__name__}"
+        ) from exc
+    if response.status_code == 404:
+        raise LlmProviderError("openrouter model not found")
+    if response.status_code >= 400:
+        raise LlmTransportError(
+            f"openrouter metadata request failed: {response.status_code}"
+        )
+    return response
+
+
 def _decode_models_payload(response: httpx.Response) -> list[Mapping[str, object]]:
     try:
         payload = response.json()
@@ -336,16 +353,35 @@ def _decode_models_payload(response: httpx.Response) -> list[Mapping[str, object
     return entries
 
 
+def _decode_model_detail_payload(response: httpx.Response) -> Mapping[str, object]:
+    try:
+        payload = response.json()
+    except json.JSONDecodeError as exc:
+        raise LlmTransportError("openrouter metadata returned non-JSON body") from exc
+    root = _mapping(payload)
+    if root is None:
+        raise LlmTransportError("openrouter metadata returned non-object JSON body")
+    data = _mapping(root.get("data"))
+    if data is None:
+        raise LlmTransportError("openrouter metadata response contained no data")
+    return data
+
+
 def _openrouter_model_metadata(
     entry: Mapping[str, object],
 ) -> OpenRouterModelMetadata:
     model_id = _string(entry.get("id"))
     if model_id is None:
         raise LlmTransportError("openrouter metadata row lacked an id")
-    pricing = _mapping(entry.get("pricing")) or MappingProxyType({})
-    top_provider = _mapping(entry.get("top_provider")) or MappingProxyType({})
     architecture = _mapping(entry.get("architecture")) or MappingProxyType({})
+    endpoint = _first_endpoint(entry.get("endpoints"))
+    pricing = _openrouter_pricing(entry=entry, architecture=architecture)
+    top_provider = (
+        _mapping(entry.get("top_provider")) or endpoint or MappingProxyType({})
+    )
     supported_parameters = _string_set(entry.get("supported_parameters"))
+    if not supported_parameters and endpoint is not None:
+        supported_parameters = _string_set(endpoint.get("supported_parameters"))
     capabilities = _openrouter_capabilities(
         architecture=architecture,
         supported_parameters=supported_parameters,
@@ -368,6 +404,33 @@ def _openrouter_model_metadata(
         thinking_level="disabled",
         thinking_strategy="openrouter_extra_body" if has_reasoning else "none",
     )
+
+
+def _openrouter_pricing(
+    *, entry: Mapping[str, object], architecture: Mapping[str, object]
+) -> Mapping[str, object]:
+    pricing = _mapping(entry.get("pricing"))
+    if pricing is not None:
+        return pricing
+    endpoint = _first_endpoint(entry.get("endpoints"))
+    if endpoint is None:
+        return MappingProxyType({})
+    pricing = _mapping(endpoint.get("pricing")) or MappingProxyType({})
+    modality = (_string(architecture.get("modality")) or "").lower()
+    context_length = _positive_int(endpoint.get("context_length"))
+    if modality == "audio->transcription" and context_length is None:
+        return MappingProxyType({})
+    return pricing
+
+
+def _first_endpoint(value: object) -> Mapping[str, object] | None:
+    if not isinstance(value, list):
+        return None
+    for item in value:
+        endpoint = _mapping(item)
+        if endpoint is not None:
+            return endpoint
+    return None
 
 
 def _openrouter_capabilities(

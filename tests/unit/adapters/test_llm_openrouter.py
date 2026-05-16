@@ -1123,9 +1123,98 @@ class TestModelMetadataLookup:
         assert metadata.capabilities == ["embeddings"]
         assert str(metadata.input_cost_per_million) == "0.0200"
 
+    def test_metadata_lookup_falls_back_to_endpoint_detail(self) -> None:
+        handler = _RecordingHandler(
+            responses=[
+                httpx.Response(200, json={"data": []}),
+                httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "id": "openai/gpt-4o-mini-transcribe",
+                            "name": "OpenAI: GPT-4o Mini Transcribe",
+                            "architecture": {
+                                "modality": "audio->transcription",
+                                "input_modalities": ["audio"],
+                                "output_modalities": ["transcription"],
+                            },
+                            "endpoints": [
+                                {
+                                    "context_length": 128000,
+                                    "pricing": {
+                                        "prompt": "0.00000125",
+                                        "completion": "0.000005",
+                                    },
+                                    "supported_parameters": ["temperature"],
+                                }
+                            ],
+                        }
+                    },
+                ),
+            ]
+        )
+        http = httpx.Client(transport=httpx.MockTransport(handler))
+
+        metadata = fetch_openrouter_model_metadata(
+            "openai/gpt-4o-mini-transcribe", http=http
+        )
+
+        assert metadata.model_id == "openai/gpt-4o-mini-transcribe"
+        assert metadata.display_name == "OpenAI: GPT-4o Mini Transcribe"
+        assert metadata.capabilities == ["audio_input"]
+        assert metadata.context_window == 128000
+        assert metadata.max_output_tokens is None
+        assert str(metadata.input_cost_per_million) == "1.2500"
+        assert str(metadata.output_cost_per_million) == "5.0000"
+        assert metadata.supports_temperature is True
+        assert str(handler.requests[0].url) == "https://openrouter.ai/api/v1/models"
+        assert (
+            str(handler.requests[1].url)
+            == "https://openrouter.ai/api/v1/models/openai/gpt-4o-mini-transcribe/endpoints"
+        )
+
+    def test_metadata_lookup_does_not_map_per_hour_whisper_as_tokens(self) -> None:
+        handler = _RecordingHandler(
+            responses=[
+                httpx.Response(200, json={"data": []}),
+                httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "id": "openai/whisper-large-v3-turbo",
+                            "name": "OpenAI: Whisper Large V3 Turbo",
+                            "architecture": {
+                                "modality": "audio->transcription",
+                                "input_modalities": ["audio"],
+                                "output_modalities": ["transcription"],
+                            },
+                            "endpoints": [
+                                {
+                                    "context_length": 0,
+                                    "pricing": {"prompt": "0.04", "completion": "0"},
+                                }
+                            ],
+                        }
+                    },
+                ),
+            ]
+        )
+        http = httpx.Client(transport=httpx.MockTransport(handler))
+
+        metadata = fetch_openrouter_model_metadata(
+            "openai/whisper-large-v3-turbo", http=http
+        )
+
+        assert metadata.capabilities == ["audio_input"]
+        assert str(metadata.input_cost_per_million) == "0.0000"
+        assert str(metadata.output_cost_per_million) == "0.0000"
+
     def test_missing_model_raises_provider_error(self) -> None:
         handler = _RecordingHandler(
-            responses=[httpx.Response(200, json={"data": [{"id": "other/model"}]})]
+            responses=[
+                httpx.Response(200, json={"data": [{"id": "other/model"}]}),
+                httpx.Response(404, json={"error": "not found"}),
+            ]
         )
         http = httpx.Client(transport=httpx.MockTransport(handler))
 
