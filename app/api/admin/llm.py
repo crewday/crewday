@@ -2857,7 +2857,7 @@ def _embedding_smoke_client(
 def _safe_provider_error(exc: BaseException, *, provider_name: str) -> str:
     message = scrub_string(str(exc))
     if message.lower().startswith("openrouter "):
-        label = provider_name.strip() or "Provider"
+        label = scrub_string(provider_name.strip()) or "Provider"
         message = f"{label}{message[len('openrouter') :]}"
     return message[:500]
 

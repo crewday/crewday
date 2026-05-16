@@ -795,13 +795,126 @@ class TestServerErrorRetry:
         assert sleeps == [0.5]
 
     def test_500_exhausted_raises_llm_transport_error(self) -> None:
-        handler = _RecordingHandler(responses=[httpx.Response(502, text="bad gateway")])
+        handler = _RecordingHandler(
+            responses=[
+                httpx.Response(
+                    502,
+                    json={
+                        "error": {
+                            "message": "failed to process inputs: image: unknown format"
+                        }
+                    },
+                )
+            ]
+        )
+        sleeps: list[float] = []
+        client = _make_client(
+            handler,
+            sleeps=sleeps,
+            max_retries=3,
+            provider_label="Ollama Blaze",
+        )
+
+        with pytest.raises(LlmTransportError) as exc_info:
+            client.complete(model_id=_MODEL, prompt="hi")
+
+        message = str(exc_info.value)
+        assert message == (
+            "Ollama Blaze returned 502 after 3 attempt(s): "
+            "failed to process inputs: image: unknown format"
+        )
+        assert len(handler.requests) == 3
+
+    def test_final_retry_error_detail_redacts_secrets_and_media(self) -> None:
+        media = "data:image/png;base64," + base64.b64encode(b"image-bytes").decode(
+            "ascii"
+        )
+        handler = _RecordingHandler(
+            responses=[
+                httpx.Response(
+                    500,
+                    json={
+                        "error": {
+                            "message": (
+                                "provider failed Authorization: Bearer sk-test-secret "
+                                f"while reading {media}"
+                            )
+                        }
+                    },
+                )
+            ]
+        )
         sleeps: list[float] = []
         client = _make_client(handler, sleeps=sleeps, max_retries=3)
 
-        with pytest.raises(LlmTransportError, match="502"):
+        with pytest.raises(LlmTransportError) as exc_info:
+            client.complete(model_id=_MODEL, prompt="secret request prompt")
+
+        message = str(exc_info.value)
+        assert "openrouter returned 500 after 3 attempt(s):" in message
+        assert "<redacted:credential>" in message
+        assert "<redacted:media>" in message
+        assert "sk-test-secret" not in message
+        assert "data:image/png;base64" not in message
+        assert "secret request prompt" not in message
+        assert len(handler.requests) == 3
+
+    def test_final_retry_error_detail_redacts_raw_base64_and_stays_bounded(
+        self,
+    ) -> None:
+        raw_media = base64.b64encode(b"\xff" * 256).decode("ascii")
+        handler = _RecordingHandler(
+            responses=[
+                httpx.Response(
+                    500,
+                    json={
+                        "error": {
+                            "message": f"provider failed {raw_media} " + ("x" * 5000)
+                        }
+                    },
+                )
+            ]
+        )
+        client = _make_client(handler, max_retries=3)
+
+        with pytest.raises(LlmTransportError) as exc_info:
             client.complete(model_id=_MODEL, prompt="hi")
 
+        message = str(exc_info.value)
+        assert "<redacted:media>" in message
+        assert raw_media[:80] not in message
+        assert len(message) <= len("openrouter returned 500 after 3 attempt(s): ") + 200
+        assert len(handler.requests) == 3
+
+    def test_final_retry_ignores_structured_echo_without_safe_message(self) -> None:
+        handler = _RecordingHandler(
+            responses=[
+                httpx.Response(
+                    500,
+                    json={
+                        "request": {
+                            "messages": [{"content": "secret request prompt"}],
+                            "image": "data:image/png;base64,abc123",
+                        },
+                        "headers": {
+                            "Authorization": "Bearer sk-test-secret",
+                            "X-Debug": "raw-header",
+                        },
+                    },
+                )
+            ]
+        )
+        client = _make_client(handler, max_retries=3)
+
+        with pytest.raises(LlmTransportError) as exc_info:
+            client.complete(model_id=_MODEL, prompt="hi")
+
+        message = str(exc_info.value)
+        assert message == "openrouter returned 500 after 3 attempt(s)"
+        assert "secret request prompt" not in message
+        assert "sk-test-secret" not in message
+        assert "raw-header" not in message
+        assert "data:image/png;base64" not in message
         assert len(handler.requests) == 3
 
 

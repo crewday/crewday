@@ -1777,6 +1777,76 @@ class TestAdminLlmRoutes:
         finally:
             _wipe(session_factory)
 
+    def test_provider_model_playground_includes_safe_final_retry_detail(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        class FailingFinalRetryClient:
+            def chat(
+                self,
+                *,
+                model_id: str,
+                messages: list[ChatMessage],
+                max_tokens: int = 1024,
+                temperature: float = 0.0,
+                thinking_level: str = "disabled",
+                thinking_strategy: str = "none",
+                tools: object = None,
+                consents: object = None,
+            ) -> LLMResponse:
+                del (
+                    model_id,
+                    messages,
+                    max_tokens,
+                    temperature,
+                    thinking_level,
+                    thinking_strategy,
+                    tools,
+                    consents,
+                )
+                raise LlmTransportError(
+                    "openrouter returned 500 after 3 attempt(s): "
+                    "failed to process inputs: image: unknown format "
+                    "Authorization: Bearer sk-openrouter-secret"
+                )
+
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            client.app.state.llm = FailingFinalRetryClient()
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                provider.name = "Ollama Blaze"
+                s.commit()
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                json={"prompt": "hello"},
+            )
+
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["status"] == "error"
+            assert body["provider_used"] == "Ollama Blaze"
+            assert body["error_message"].startswith(
+                "Ollama Blaze returned 500 after 3 attempt(s):"
+            )
+            assert (
+                "failed to process inputs: image: unknown format"
+                in body["error_message"]
+            )
+            assert "sk-openrouter-secret" not in body["error_message"]
+            assert "<redacted:credential>" in body["error_message"]
+        finally:
+            _wipe(session_factory)
+
     def test_graph_calls_prompts_and_sync_pricing_shapes(
         self,
         client: TestClient,

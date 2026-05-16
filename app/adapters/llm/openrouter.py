@@ -57,6 +57,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -90,7 +91,7 @@ from app.adapters.storage.envelope import Aes256GcmEnvelope
 from app.adapters.storage.ports import EnvelopeDecryptError
 from app.tenancy import tenant_agnostic
 from app.util.clock import Clock, SystemClock
-from app.util.redact import ConsentSet, redact
+from app.util.redact import ConsentSet, redact, scrub_string
 
 __all__ = [
     "OPENROUTER_API_KEY_PURPOSE",
@@ -138,6 +139,15 @@ _OPENROUTER_ENVELOPE_ROW_VERSION: Final[int] = 0x02
 # between frames; the stream terminates with ``data: [DONE]``.
 _SSE_DATA_PREFIX: Final[str] = "data: "
 _SSE_DONE_SENTINEL: Final[str] = "[DONE]"
+_ERROR_DETAIL_DATA_URL_RE: Final[re.Pattern[str]] = re.compile(
+    r"data:[^\s\"')]+;base64,[A-Za-z0-9+/=_-]*",
+    re.IGNORECASE,
+)
+_ERROR_DETAIL_BASE64_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/]{128,}={0,2}(?![A-Za-z0-9+/=_-])"
+)
+_ERROR_DETAIL_MAX_CHARS: Final[int] = 200
+_ERROR_DETAIL_SCRUB_CHARS: Final[int] = 2_000
 
 # OCR defaults. The spec points vision-capable assignments at
 # ``google/gemma-3-27b-it`` (§11 catalog), which accepts a JPEG via
@@ -1117,9 +1127,11 @@ class OpenRouterClient:
                     elapsed_ms,
                 )
                 if attempt + 1 >= self._max_retries:
+                    detail = _safe_error_detail(response)
+                    detail_suffix = f": {detail}" if detail else ""
                     raise LlmTransportError(
                         f"{self._provider_label} returned {response.status_code} after "
-                        f"{self._max_retries} attempt(s)"
+                        f"{self._max_retries} attempt(s){detail_suffix}"
                     )
                 self._sleep(_backoff_seconds(attempt))
                 continue
@@ -1550,16 +1562,30 @@ def _safe_error_detail(response: httpx.Response) -> str:
     try:
         body = response.json()
     except json.JSONDecodeError:
-        return response.text[:200]
+        return _safe_error_detail_text(response.text)
+    if isinstance(body, str):
+        return _safe_error_detail_text(body)
     if isinstance(body, dict):
         error = body.get("error")
         if isinstance(error, dict):
-            message = error.get("message")
-            if isinstance(message, str):
-                return message[:200]
+            for key in ("message", "detail"):
+                message = error.get(key)
+                if isinstance(message, str):
+                    return _safe_error_detail_text(message)
         if isinstance(error, str):
-            return error[:200]
-    return response.text[:200]
+            return _safe_error_detail_text(error)
+        for key in ("message", "detail"):
+            message = body.get(key)
+            if isinstance(message, str):
+                return _safe_error_detail_text(message)
+    return ""
+
+
+def _safe_error_detail_text(value: str) -> str:
+    bounded = value[:_ERROR_DETAIL_SCRUB_CHARS]
+    without_media = _ERROR_DETAIL_DATA_URL_RE.sub("<redacted:media>", bounded)
+    without_media = _ERROR_DETAIL_BASE64_RE.sub("<redacted:media>", without_media)
+    return scrub_string(without_media)[:_ERROR_DETAIL_MAX_CHARS]
 
 
 def _backoff_seconds(attempt_idx: int) -> float:
