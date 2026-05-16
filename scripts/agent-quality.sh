@@ -11,8 +11,9 @@
 #   2. ruff check . --fix     (auto-fix lint)
 #   3. ruff check .           (report remaining lint)
 #   4. ruff format --check .  (catch any remaining formatting drift)
-#   5. mypy app               (strict type check; CI parity)
-#   6. pytest --testmon-forceselect
+#   5. migration tree check  (dev-stack readyz can read Alembic scripts)
+#   6. mypy app              (strict type check; CI parity)
+#   7. pytest --testmon-forceselect
 #
 # Exit 0 only when every gate is clean. Non-zero exit means there is
 # something the agent must fix by hand — the unfixable items are
@@ -68,11 +69,49 @@ done
 ruff_fix_status=0
 ruff_check_status=0
 ruff_fmt_status=0
+migration_tree_status=0
 mypy_status=0
 pytest_status=0
 
 section() {
   printf '\n=== %s ===\n' "$1"
+}
+
+check_migration_script_tree() {
+  local versions_dir="migrations/versions"
+
+  if [[ ! -d "$versions_dir" ]]; then
+    echo "missing $versions_dir; /readyz cannot resolve the Alembic script tree" >&2
+    return 1
+  fi
+
+  local dir
+  for dir in migrations "$versions_dir"; do
+    if [[ ! -r "$dir" || ! -x "$dir" ]]; then
+      echo "$dir must be readable/executable by this user" >&2
+      return 1
+    fi
+    if [[ -n "$(find "$dir" -maxdepth 0 ! -perm -005 -print)" ]]; then
+      echo "$dir must be world-readable/executable for the dev app container" >&2
+      return 1
+    fi
+  done
+
+  local migration_count
+  migration_count="$(find "$versions_dir" -type f -name '*.py' | wc -l | tr -d ' ')"
+  if [[ "$migration_count" -eq 0 ]]; then
+    echo "no Python migration scripts found under $versions_dir" >&2
+    return 1
+  fi
+
+  local unreadable
+  unreadable="$(find "$versions_dir" -type f -name '*.py' ! -perm -004 -print)"
+  if [[ -n "$unreadable" ]]; then
+    echo "migration scripts must be world-readable for the dev app container:" >&2
+    printf '%s\n' "$unreadable" >&2
+    echo "fix: chmod a+r <file>" >&2
+    return 1
+  fi
 }
 
 section "ruff format (autofix)"
@@ -86,6 +125,9 @@ uv run ruff check . || ruff_check_status=$?
 
 section "ruff format --check (verify formatting clean)"
 uv run ruff format --check . || ruff_fmt_status=$?
+
+section "migration script tree visibility"
+check_migration_script_tree || migration_tree_status=$?
 
 section "mypy --strict app (no autofix)"
 uv run mypy app || mypy_status=$?
@@ -123,6 +165,12 @@ if [[ $ruff_fmt_status -eq 0 ]]; then
   echo "ruff format check:  ok"
 else
   echo "ruff format check:  FAILED — formatter would still rewrite files"
+  overall=1
+fi
+if [[ $migration_tree_status -eq 0 ]]; then
+  echo "migration tree:     ok"
+else
+  echo "migration tree:     FAILED — fix unreadable or missing migration scripts"
   overall=1
 fi
 if [[ $mypy_status -eq 0 ]]; then

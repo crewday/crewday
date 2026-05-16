@@ -223,11 +223,11 @@ def _pin_migrations_current(
     class _FakeScriptDir:
         @staticmethod
         def from_config(cfg: object) -> _FakeScriptDir:
-            if script_heads_raises is not None:
-                raise script_heads_raises
             return _FakeScriptDir()
 
         def get_heads(self) -> tuple[str, ...]:
+            if script_heads_raises is not None:
+                raise script_heads_raises
             return tuple(script)
 
     monkeypatch.setattr(health_module, "MigrationContext", _FakeMigrationCtx)
@@ -417,6 +417,22 @@ class TestReadyzMigrationsBehind:
         _pin_migrations_current(
             monkeypatch,
             script_heads_raises=CommandError("Multiple heads are present"),
+        )
+        app = _bare_app(_settings(), clock=FrozenClock(_NOW))
+        resp = _client(app).get("/readyz")
+        assert resp.status_code == 503
+        row = next(c for c in resp.json()["checks"] if c["check"] == "migrations")
+        assert row["detail"] == "alembic_script_tree_unreadable"
+
+    def test_alembic_script_tree_permission_error_fails_closed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Unreadable migration files must fail readiness, not weaken the gate."""
+        session = _fake_session(heartbeat=_NOW - timedelta(seconds=5))
+        _install_uow(monkeypatch, session)
+        _pin_migrations_current(
+            monkeypatch,
+            script_heads_raises=PermissionError("permission denied"),
         )
         app = _bare_app(_settings(), clock=FrozenClock(_NOW))
         resp = _client(app).get("/readyz")
