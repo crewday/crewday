@@ -176,7 +176,11 @@ def _assert_problem_error(
     assert body["status"] == status_code
     assert body["error"] == symbol
     assert body["instance"] == response.request.url.path
-    assert "detail" not in body
+    assert isinstance(body["error_id"], str)
+    assert body["error_id"]
+    assert isinstance(body["user_message"], str)
+    assert body["user_message"]
+    assert body["detail"] == body["user_message"]
 
 
 def _seed_workspace_with_owner(

@@ -89,10 +89,24 @@ def _assert_abuse_problem(
     assert body["status"] == status_code
     assert body["instance"] == "/api/v1/signup/start"
     assert body["error"] == error
+    assert isinstance(body["error_id"], str)
+    assert body["error_id"]
+    assert isinstance(body["user_message"], str)
+    assert body["user_message"]
+    assert body["detail"] == body["user_message"]
     if retry_after_seconds is None:
         assert "retry_after_seconds" not in body
         assert "Retry-After" not in response.headers
-        assert set(body) == {"type", "title", "status", "instance", "error"}
+        assert set(body) == {
+            "type",
+            "title",
+            "status",
+            "instance",
+            "error",
+            "error_id",
+            "user_message",
+            "detail",
+        }
     else:
         assert type(body["retry_after_seconds"]) is int
         assert body["retry_after_seconds"] == retry_after_seconds
@@ -103,6 +117,9 @@ def _assert_abuse_problem(
             "status",
             "instance",
             "error",
+            "error_id",
+            "user_message",
+            "detail",
             "retry_after_seconds",
         }
     return body

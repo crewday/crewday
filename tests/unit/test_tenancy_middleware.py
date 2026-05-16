@@ -92,10 +92,14 @@ def _assert_canonical_not_found(response: object, *, instance: str) -> None:
     assert body["title"] == "Not found"
     assert body["status"] == 404
     assert body["instance"] == instance
-    # No ``detail`` or ``errors[]`` on the constant-time envelope —
-    # a branch-specific detail would distinguish "unknown slug" from
-    # "exists elsewhere" on the wire and break §15.
-    assert "detail" not in body
+    assert isinstance(body["error_id"], str)
+    assert body["error_id"]
+    assert isinstance(body["user_message"], str)
+    assert body["user_message"]
+    assert body["detail"] == body["user_message"]
+    # No ``errors[]`` on the constant-time envelope: branch-specific
+    # validation details would distinguish "unknown slug" from "exists
+    # elsewhere" on the wire and break §15.
     assert "errors" not in body
 
 
@@ -1609,8 +1613,8 @@ class TestConstantTimeEnvelope:
         # §15 tenant-isolation test suite — both branches must emit the
         # same canonical RFC 7807 envelope. The ``instance`` field
         # reflects the URL the caller chose (deterministic from input,
-        # not from DB state) and varies across these two probes; every
-        # other field must match byte-for-byte. Stripping ``instance``
+        # not from DB state), and ``error_id`` is request-scoped. Every
+        # other field must match byte-for-byte. Stripping those fields
         # before the equality check keeps the §15 invariant honest:
         # for any single URL, the slug-miss and member-miss bodies
         # produce identical bytes.
@@ -1618,9 +1622,17 @@ class TestConstantTimeEnvelope:
         member_miss_body = member_miss.json()
         assert slug_miss_body.pop("instance") == "/w/unknown-slug/api/v1/ping"
         assert member_miss_body.pop("instance") == "/w/members-club/api/v1/ping"
+        slug_error_id = slug_miss_body.pop("error_id")
+        member_error_id = member_miss_body.pop("error_id")
+        assert isinstance(slug_error_id, str)
+        assert slug_error_id
+        assert isinstance(member_error_id, str)
+        assert member_error_id
         assert slug_miss_body == member_miss_body
         assert slug_miss_body == {
             "type": "https://crewday.dev/errors/not_found",
             "title": "Not found",
             "status": 404,
+            "user_message": "Not found",
+            "detail": "Not found",
         }

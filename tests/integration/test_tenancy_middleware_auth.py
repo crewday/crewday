@@ -105,11 +105,17 @@ def _assert_user_state_problem(
 ) -> None:
     assert response.status_code == 401
     assert response.headers["content-type"].startswith("application/problem+json")
-    assert response.json() == {
+    body = response.json()
+    error_id = body.pop("error_id")
+    assert isinstance(error_id, str)
+    assert error_id
+    assert body == {
         "type": f"{_PROBLEM_TYPE_BASE}{type_name}",
         "title": "Unauthorized",
         "status": 401,
         "instance": instance,
+        "user_message": "Unauthorized",
+        "detail": "Unauthorized",
     }
 
 
@@ -391,17 +397,25 @@ class TestCrossTenantConstantTime:
         assert member_miss.status_code == 404
         # §15 — both branches must emit the same canonical RFC 7807
         # envelope. ``instance`` reflects the URL the caller chose
-        # (deterministic from input, not DB state) and varies across
-        # these two probes; every other field must match byte-for-byte.
+        # (deterministic from input, not DB state), and ``error_id`` is
+        # request-scoped. Every other field must match byte-for-byte.
         slug_body = slug_miss.json()
         member_body = member_miss.json()
         assert slug_body.pop("instance") == "/w/never-existed/api/v1/ping"
         assert member_body.pop("instance") == "/w/real-ct-ws/api/v1/ping"
+        slug_error_id = slug_body.pop("error_id")
+        member_error_id = member_body.pop("error_id")
+        assert isinstance(slug_error_id, str)
+        assert slug_error_id
+        assert isinstance(member_error_id, str)
+        assert member_error_id
         assert slug_body == member_body
         assert slug_body == {
             "type": "https://crewday.dev/errors/not_found",
             "title": "Not found",
             "status": 404,
+            "user_message": "Not found",
+            "detail": "Not found",
         }
 
     def test_slug_miss_and_member_miss_timings_overlap(

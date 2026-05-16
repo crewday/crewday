@@ -7,15 +7,15 @@ existed), and asserts:
 
 1. Every probe returns **404** (never 200, never 403 — a 403 leaks
    workspace existence; §15 "Constant-time cross-tenant responses").
-2. For **the same URL**, the response body is **byte-identical**
-   between "slug exists but caller isn't a member" and "slug never
-   existed" — the envelope is the shared RFC 7807 ``problem+json``
-   shape the tenancy middleware funnels every rejection branch
-   through (§12 "Errors", §15). The body's ``instance`` field is the
-   request URL itself, so it is deterministic from input and matches
-   trivially across the two branches when the URL matches; an
-   attacker-controlled value already known to the attacker cannot
-   leak DB state.
+2. For **the same URL**, the response body is identical after
+   normalizing request-scoped ``error_id`` between "slug exists but
+   caller isn't a member" and "slug never existed" — the envelope is
+   the shared RFC 7807 ``problem+json`` shape the tenancy middleware
+   funnels every rejection branch through (§12 "Errors", §15). The
+   body's ``instance`` field is the request URL itself, so it is
+   deterministic from input and matches trivially across the two
+   branches when the URL matches; an attacker-controlled value already
+   known to the attacker cannot leak DB state.
 3. The response **header set** matches across both branches (order is
    not required; set equality is — any branch-specific header would
    be a timing/identification leak).
@@ -57,6 +57,7 @@ from statistics import median
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.routing import Route
 
@@ -247,6 +248,8 @@ _EXPECTED_ENVELOPE_FIELDS: dict[str, object] = {
     "type": "https://crewday.dev/errors/not_found",
     "title": "Not found",
     "status": 404,
+    "user_message": "Not found",
+    "detail": "Not found",
 }
 
 
@@ -261,12 +264,20 @@ def _expected_envelope_for(path: str) -> dict[str, object]:
     return {**_EXPECTED_ENVELOPE_FIELDS, "instance": path}
 
 
+def _assert_canonical_envelope(response: Response, path: str) -> dict[str, object]:
+    body = response.json()
+    error_id = body.pop("error_id")
+    assert isinstance(error_id, str)
+    assert error_id
+    assert body == _expected_envelope_for(path)
+    return body
+
+
 # Headers we intentionally allow to VARY per response:
 #
-# * ``content-length`` varies with body length; the body is identical
-#   per-URL but differs across URLs because ``instance`` carries the
-#   request path — exclude it from header-set comparison so the
-#   per-URL slug-vs-member byte-equality stays the load-bearing check.
+# * ``content-length`` varies with body length; ``instance`` carries the
+#   request path and ``error_id`` is request-scoped, so body comparisons
+#   normalize those dynamic fields directly.
 # * ``x-request-id`` is a fresh ULID per request (§12 "Agent audit
 #   headers"); equality by name + presence, not by value.
 # * ``set-cookie`` may be emitted by session-refresh when the cookie
@@ -346,9 +357,7 @@ class TestHttpCrossTenantMatrix:
         slug_miss_baseline_path = "/w/never-existed-slug/api/v1/ping"
         slug_miss_baseline = client.get(slug_miss_baseline_path)
         assert slug_miss_baseline.status_code == 404
-        assert slug_miss_baseline.json() == _expected_envelope_for(
-            slug_miss_baseline_path
-        )
+        _assert_canonical_envelope(slug_miss_baseline, slug_miss_baseline_path)
         baseline_headers = _header_set(slug_miss_baseline)
 
         for path_template, verb in sample:
@@ -367,10 +376,7 @@ class TestHttpCrossTenantMatrix:
                     f"{response.status_code}; cross-tenant probe must "
                     f"always be 404 (never 200, never 403 — §15)"
                 )
-                assert response.json() == _expected_envelope_for(expected_path), (
-                    f"{verb} {expected_path} ({tag}) envelope drifted: "
-                    f"{response.json()!r}"
-                )
+                _assert_canonical_envelope(response, expected_path)
                 headers = _header_set(response)
                 assert headers == baseline_headers, (
                     f"{verb} {expected_path} ({tag}) header-set drift: "
@@ -401,14 +407,11 @@ class TestHttpCrossTenantMatrix:
         )
         assert baseline.status_code == 404
         assert token_probe.status_code == 404
-        # Same URL on both probes ⇒ byte-identical body. Both responses
-        # carry the canonical RFC 7807 envelope with ``instance`` ==
-        # ``target_path`` (§12 "Errors", §15 "Constant-time cross-tenant
-        # responses").
-        expected = _expected_envelope_for(target_path)
-        assert baseline.json() == expected
-        assert token_probe.json() == expected
-        assert baseline.content == token_probe.content
+        # Same URL on both probes yields the same canonical envelope
+        # after stripping the request-scoped ``error_id``.
+        assert _assert_canonical_envelope(
+            baseline, target_path
+        ) == _assert_canonical_envelope(token_probe, target_path)
 
     @pytest.mark.skipif(
         os.environ.get("CREWDAY_SKIP_TIMING_TEST") == "1",

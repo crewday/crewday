@@ -261,11 +261,20 @@ def test_messaging_router_documents_problem_json_validation_errors() -> None:
                     "type": {"type": "string"},
                     "title": {"type": "string"},
                     "status": {"type": "integer"},
+                    "error_id": {"minLength": 1, "type": "string"},
+                    "user_message": {"minLength": 1, "type": "string"},
                     "detail": {"type": "string"},
                     "instance": {"type": "string"},
                     "errors": {"items": {"type": "object"}, "type": "array"},
                 },
-                "required": ["type", "title", "status", "instance"],
+                "required": [
+                    "error_id",
+                    "instance",
+                    "status",
+                    "title",
+                    "type",
+                    "user_message",
+                ],
                 "type": "object",
             }
         }
@@ -418,6 +427,9 @@ def test_notifications_list_rejects_duplicate_cursor_query_params() -> None:
     assert resp.headers["content-type"].startswith("application/problem+json")
     body = resp.json()
     assert body["type"].endswith("/validation")
+    assert isinstance(body["error_id"], str)
+    assert body["error_id"]
+    assert body["user_message"] == "cursor may be provided at most once"
     assert body["detail"] == "cursor may be provided at most once"
 
 

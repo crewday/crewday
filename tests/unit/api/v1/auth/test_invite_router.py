@@ -93,7 +93,11 @@ def _assert_problem(exc: DomainError, status_code: int, symbol: str) -> None:
     assert body["status"] == status_code
     assert body["instance"] == "/boom"
     assert body["error"] == symbol
-    assert "detail" not in body
+    assert isinstance(body["error_id"], str)
+    assert body["error_id"]
+    assert isinstance(body["user_message"], str)
+    assert body["user_message"]
+    assert body["detail"] == body["user_message"]
     assert "errors" not in body
 
 

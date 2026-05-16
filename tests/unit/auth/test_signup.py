@@ -253,10 +253,15 @@ def _assert_problem(
     assert body["status"] == status_code
     assert body["instance"] == "/boom"
     assert body["error"] == error
+    assert isinstance(body["error_id"], str)
+    assert body["error_id"]
+    assert isinstance(body["user_message"], str)
+    assert body["user_message"]
     if detail is None:
-        assert "detail" not in body
+        assert body["detail"] == body["user_message"]
     else:
         assert body["detail"] == detail
+        assert body["user_message"] == detail
     for key, value in (extra or {}).items():
         assert body[key] == value
     return body

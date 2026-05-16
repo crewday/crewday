@@ -199,10 +199,15 @@ def _assert_problem_error(
     assert body["status"] == status_code
     assert body["instance"] == response.request.url.path
     assert body["error"] == error
+    assert isinstance(body["error_id"], str)
+    assert body["error_id"]
+    assert isinstance(body["user_message"], str)
+    assert body["user_message"]
     if detail is None:
-        assert "detail" not in body
+        assert body["detail"] == body["user_message"]
     else:
         assert body["detail"] == detail
+        assert body["user_message"] == detail
     return body
 
 

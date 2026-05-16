@@ -62,11 +62,17 @@ _PROBLEM_TYPE_BASE = "https://crewday.dev/errors/"
 def _assert_delegating_user_inactive(response: Response, *, instance: str) -> None:
     assert response.status_code == 401, response.text
     assert response.headers["content-type"].startswith("application/problem+json")
-    assert response.json() == {
+    body = response.json()
+    error_id = body.pop("error_id")
+    assert isinstance(error_id, str)
+    assert error_id
+    assert body == {
         "type": f"{_PROBLEM_TYPE_BASE}delegating_user_inactive",
         "title": "Unauthorized",
         "status": 401,
         "instance": instance,
+        "user_message": "Unauthorized",
+        "detail": "Unauthorized",
     }
 
 

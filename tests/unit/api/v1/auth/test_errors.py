@@ -30,6 +30,13 @@ def _type_uri(short_name: str) -> str:
     return f"{CANONICAL_TYPE_BASE}{short_name}"
 
 
+def _assert_problem_body(body: dict[str, object], expected: dict[str, object]) -> None:
+    error_id = body.pop("error_id")
+    assert isinstance(error_id, str)
+    assert error_id
+    assert body == expected
+
+
 def test_auth_conflict_preserves_legacy_error_extension() -> None:
     client = _client_raising(auth_conflict("already_consumed"))
 
@@ -37,13 +44,18 @@ def test_auth_conflict_preserves_legacy_error_extension() -> None:
 
     assert response.status_code == 409
     assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
-    assert response.json() == {
-        "type": _type_uri("conflict"),
-        "title": "Conflict",
-        "status": 409,
-        "instance": "/boom",
-        "error": "already_consumed",
-    }
+    _assert_problem_body(
+        response.json(),
+        {
+            "type": _type_uri("conflict"),
+            "title": "Conflict",
+            "status": 409,
+            "instance": "/boom",
+            "error": "already_consumed",
+            "user_message": "Already consumed",
+            "detail": "Already consumed",
+        },
+    )
 
 
 def test_auth_bad_request_preserves_legacy_error_extension() -> None:
@@ -53,13 +65,18 @@ def test_auth_bad_request_preserves_legacy_error_extension() -> None:
 
     assert response.status_code == 400
     assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
-    assert response.json() == {
-        "type": _type_uri("validation"),
-        "title": "Bad request",
-        "status": 400,
-        "instance": "/boom",
-        "error": "invalid_token",
-    }
+    _assert_problem_body(
+        response.json(),
+        {
+            "type": _type_uri("validation"),
+            "title": "Bad request",
+            "status": 400,
+            "instance": "/boom",
+            "error": "invalid_token",
+            "user_message": "Invalid token",
+            "detail": "Invalid token",
+        },
+    )
 
 
 def test_auth_gone_preserves_legacy_error_extension() -> None:
@@ -69,13 +86,18 @@ def test_auth_gone_preserves_legacy_error_extension() -> None:
 
     assert response.status_code == 410
     assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
-    assert response.json() == {
-        "type": _type_uri("gone"),
-        "title": "Gone",
-        "status": 410,
-        "instance": "/boom",
-        "error": "expired",
-    }
+    _assert_problem_body(
+        response.json(),
+        {
+            "type": _type_uri("gone"),
+            "title": "Gone",
+            "status": 410,
+            "instance": "/boom",
+            "error": "expired",
+            "user_message": "Expired",
+            "detail": "Expired",
+        },
+    )
 
 
 def test_auth_extra_cannot_clobber_symbol_or_reserved_problem_fields() -> None:
@@ -95,14 +117,19 @@ def test_auth_extra_cannot_clobber_symbol_or_reserved_problem_fields() -> None:
     response = client.get("/boom")
 
     assert response.status_code == 409
-    assert response.json() == {
-        "type": _type_uri("conflict"),
-        "title": "Conflict",
-        "status": 409,
-        "instance": "/boom",
-        "error": "already_consumed",
-        "safe": "ok",
-    }
+    _assert_problem_body(
+        response.json(),
+        {
+            "type": _type_uri("conflict"),
+            "title": "Conflict",
+            "status": 409,
+            "instance": "/boom",
+            "error": "already_consumed",
+            "user_message": "Already consumed",
+            "detail": "Already consumed",
+            "safe": "ok",
+        },
+    )
 
 
 def test_auth_rate_limited_sets_retry_after_header() -> None:

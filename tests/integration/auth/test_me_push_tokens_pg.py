@@ -388,11 +388,16 @@ class TestPostMePushToken:
         )
         assert r.status_code == 501
         assert r.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
-        assert r.json() == {
+        body = r.json()
+        error_id = body.pop("error_id")
+        assert isinstance(error_id, str)
+        assert error_id
+        assert body == {
             "type": "https://crewday.dev/errors/not_implemented",
             "title": "Not implemented",
             "status": 501,
             "instance": "/api/v1/me/push-tokens",
+            "user_message": "native push delivery is not enabled on this deployment",
             "detail": "native push delivery is not enabled on this deployment",
             "error": "push_unavailable",
         }
