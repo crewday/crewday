@@ -6,9 +6,11 @@ import json
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from functools import cached_property
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
@@ -22,29 +24,27 @@ from app.adapters.llm.ports import (
     LlmTransportError,
     Tool,
 )
-from app.api.admin._owners import ensure_deployment_owner
-from app.api.admin._usage_helpers import _QUOTA_CAP_KEY
-from app.api.admin._workspace_state import (
-    format_archived_at,
-    load_workspace,
-    set_archived_at,
-    set_verification_state,
-    verification_state_of,
+from app.agent.dispatcher import (
+    _MUTATING_METHODS,
+    _build_index,
+    _coerce_body,
+    _confirm_metadata,
+    _format_path,
+    _is_valid_x_cli_metadata,
+    _split_inputs,
+    _tool_activity_label,
+    _tool_description,
+    _tool_input_schema,
 )
+from app.api.admin._workspace_state import load_workspace
 from app.api.admin.agent import (
+    _ADMIN_AGENT_CHANNEL,
     AdminAgentActionProducer,
     AdminAgentActionProposal,
     AdminAgentTextReply,
 )
-from app.api.admin.settings import (
-    preview_deployment_setting_for_agent,
-    write_deployment_setting,
-)
+from app.api.admin.settings import preview_deployment_setting_for_agent
 from app.api.admin.usage import UsageCapPayload
-from app.api.transport import admin_sse
-from app.audit import write_deployment_audit
-from app.capabilities import Capabilities
-from app.config import Settings
 from app.domain.agent.runtime import (
     DelegatedToken,
     GateDecision,
@@ -52,7 +52,7 @@ from app.domain.agent.runtime import (
     ToolDispatcher,
     ToolResult,
 )
-from app.domain.errors import DomainError, ServiceUnavailable, Validation
+from app.domain.errors import ServiceUnavailable
 from app.domain.llm.router import CapabilityUnassignedError, resolve_primary
 from app.tenancy import DeploymentContext, tenant_agnostic
 from app.tenancy.context import WorkspaceContext
@@ -73,13 +73,21 @@ _log = logging.getLogger(__name__)
 _CAPABILITY: Literal["chat.admin"] = "chat.admin"
 _AGENT_LABEL: Literal["admin-chat-agent"] = "admin-chat-agent"
 _GATE_SOURCE: Literal["workspace_always"] = "workspace_always"
-
-_SUPPORTED_TOOL_NAMES: frozenset[str] = frozenset(
+_ADMIN_API_ROOT = "/admin/api/v1"
+_ADMIN_AGENT_API_ROOT = f"{_ADMIN_API_ROOT}/agent"
+_SURFACE_ADMIN_PATH = (
+    Path(__file__).resolve().parents[3] / "cli/crewday/_surface_admin.json"
+)
+_BODY_METHODS = frozenset({"POST", "PATCH", "PUT"})
+_SESSION_ONLY_ADMIN_SECRET_OPERATION_IDS = frozenset(
     {
-        "admin.settings.update",
-        "admin.usage.workspaces.cap",
-        "admin.workspaces.trust",
-        "admin.workspaces.archive",
+        "admin.llm.providers.key.set",
+        "admin.llm.providers.key.clear",
+    }
+)
+_SESSION_ONLY_ADMIN_SECRET_PATHS = frozenset(
+    {
+        f"{_ADMIN_API_ROOT}/llm/providers/{{provider_id}}/key",
     }
 )
 
@@ -100,9 +108,11 @@ class AdminAgentRuntimeActionProducer(AdminAgentActionProducer):
         *,
         llm: LLMClient,
         tools: Sequence[Tool] | None = None,
+        dispatcher: DeploymentAdminToolDispatcher | None = None,
     ) -> None:
         self._llm = llm
-        self._tools = tuple(tools) if tools is not None else _admin_tools()
+        self._dispatcher = dispatcher
+        self._tools = tuple(tools) if tools is not None else _admin_tools(dispatcher)
 
     def produce_action(
         self,
@@ -147,7 +157,11 @@ class AdminAgentRuntimeActionProducer(AdminAgentActionProducer):
             if reply is not None:
                 return reply
             return None
-        proposal = _resolve_supported_proposal(resolved_call, session=session)
+        proposal = _resolve_supported_proposal(
+            resolved_call,
+            session=session,
+            dispatcher=self._dispatcher,
+        )
         if proposal is None:
             return None
         return AdminAgentActionProposal(
@@ -161,7 +175,7 @@ class AdminAgentRuntimeActionProducer(AdminAgentActionProducer):
 
 
 class DeploymentAdminToolDispatcher(ToolDispatcher):
-    """Replay supported deployment-admin action cards through domain code."""
+    """Replay deployment-admin tool calls through the admin OpenAPI surface."""
 
     def __init__(
         self,
@@ -171,13 +185,79 @@ class DeploymentAdminToolDispatcher(ToolDispatcher):
     ) -> None:
         self._fallback = fallback
         self._app = app
+        self._client: TestClient | None = None
 
     @property
     def tools(self) -> tuple[Tool, ...]:
-        return _admin_tools()
+        if self._app is None:
+            return ()
+        return self._tools
+
+    @cached_property
+    def _schema(self) -> Mapping[str, Any]:
+        if self._app is None:
+            return {}
+        schema = self._app.openapi()
+        return schema if isinstance(schema, Mapping) else {}
+
+    @cached_property
+    def _index(self) -> Mapping[str, Any]:
+        paths = self._schema.get("paths")
+        if not isinstance(paths, Mapping):
+            paths = {}
+        return _build_index(paths)
+
+    @cached_property
+    def _components(self) -> Mapping[str, Any]:
+        components = self._schema.get("components")
+        return components if isinstance(components, Mapping) else {}
+
+    @cached_property
+    def _surface_operation_ids(self) -> frozenset[str]:
+        return _load_admin_surface_operation_ids()
+
+    @cached_property
+    def _tools(self) -> tuple[Tool, ...]:
+        return tuple(
+            {
+                "name": op_id,
+                "description": _tool_description(op_id, entry.operation),
+                "input_schema": _tool_input_schema(
+                    entry,
+                    workspace_slug="",
+                    components=self._components,
+                ),
+            }
+            for op_id, entry in sorted(self._index.items())
+            if _is_deployment_admin_agent_tool(
+                op_id,
+                entry,
+                surface_operation_ids=self._surface_operation_ids,
+            )
+        )
 
     def is_gated(self, call: ToolCall) -> GateDecision:
-        if call.name in _SUPPORTED_TOOL_NAMES:
+        entry = self._index.get(call.name)
+        if (
+            entry is not None
+            and _deployment_admin_agent_rejection(
+                call.name,
+                entry,
+                surface_operation_ids=self._surface_operation_ids,
+            )
+            is None
+        ):
+            if entry.method not in _MUTATING_METHODS:
+                return GateDecision(gated=False)
+            resolved = _confirm_metadata(entry.operation.get("x-agent-confirm"))
+            if resolved is not None:
+                summary, risk = resolved
+                return GateDecision(
+                    gated=True,
+                    card_summary=summary,
+                    card_risk=risk,
+                    pre_approval_source="annotation",
+                )
             return GateDecision(
                 gated=True,
                 card_summary=f"{call.name} requires confirmation.",
@@ -195,15 +275,23 @@ class DeploymentAdminToolDispatcher(ToolDispatcher):
         token: DelegatedToken,
         headers: Mapping[str, str],
     ) -> ToolResult:
-        if call.name == "admin.settings.update":
-            return _dispatch_settings_update(call, headers=headers, app=self._app)
-        if call.name == "admin.usage.workspaces.cap":
-            return _dispatch_usage_cap(call, headers=headers)
-        if call.name == "admin.workspaces.trust":
-            return _dispatch_workspace_trust(call, headers=headers)
-        if call.name == "admin.workspaces.archive":
-            return _dispatch_workspace_archive(call, headers=headers)
-        if self._fallback is not None:
+        entry = self._index.get(call.name)
+        if entry is not None:
+            rejection = _deployment_admin_agent_rejection(
+                call.name,
+                entry,
+                surface_operation_ids=self._surface_operation_ids,
+            )
+            if rejection is None or _is_admin_api_path(entry.path):
+                return self._dispatch_admin_openapi_tool(call, entry, token, headers)
+            if _is_admin_agent_replay(headers):
+                return ToolResult(
+                    call_id=call.id,
+                    status_code=403,
+                    body={"detail": rejection},
+                    mutated=False,
+                )
+        if self._fallback is not None and not _is_admin_agent_replay(headers):
             return self._fallback.dispatch(call, token=token, headers=headers)
         return ToolResult(
             call_id=call.id,
@@ -213,17 +301,138 @@ class DeploymentAdminToolDispatcher(ToolDispatcher):
         )
 
     def activity_label_for(self, call: ToolCall) -> str:
-        if self._fallback is not None and call.name not in _SUPPORTED_TOOL_NAMES:
+        entry = self._index.get(call.name)
+        if entry is not None and _is_admin_api_path(entry.path):
+            return _tool_activity_label(call.name, entry.operation)
+        if self._fallback is not None:
             return self._fallback.activity_label_for(call)
-        return {
-            "admin.settings.update": "Updating settings",
-            "admin.usage.workspaces.cap": "Updating workspace budget",
-            "admin.workspaces.trust": "Updating workspace trust",
-            "admin.workspaces.archive": "Archiving workspace",
-        }.get(call.name, "Working")
+        return "Working"
+
+    def resolve_proposal(
+        self,
+        call: ToolCall,
+        *,
+        session: Session,
+    ) -> _ResolvedProposal | None:
+        if call.name == "admin.settings.update":
+            return _settings_update_proposal(call)
+        if call.name == "admin.usage.workspaces.cap":
+            return _usage_cap_proposal(call, session=session)
+        if call.name == "admin.workspaces.trust":
+            return _workspace_id_proposal(
+                call,
+                session=session,
+                summary="Trust workspace",
+                label="Workspace",
+                risk="medium",
+            )
+        if call.name == "admin.workspaces.archive":
+            return _workspace_id_proposal(
+                call,
+                session=session,
+                summary="Archive workspace",
+                label="Workspace",
+                risk="high",
+            )
+        entry = self._index.get(call.name)
+        if entry is None:
+            return None
+        if (
+            _deployment_admin_agent_rejection(
+                call.name,
+                entry,
+                surface_operation_ids=self._surface_operation_ids,
+            )
+            is not None
+        ):
+            return None
+        if entry.method not in _MUTATING_METHODS:
+            return None
+        try:
+            _split_inputs(entry, call.input, components=self._components)
+        except ValueError:
+            return None
+        decision = self.is_gated(call)
+        risk = decision.card_risk if decision.gated else "medium"
+        summary = (
+            decision.card_summary
+            if decision.gated and decision.card_summary
+            else _tool_activity_label(call.name, entry.operation)
+        )
+        return _ResolvedProposal(
+            call=ToolCall(id=call.id, name=call.name, input=dict(call.input)),
+            summary=summary,
+            fields=_proposal_fields(call),
+            risk=risk,
+        )
+
+    def _dispatch_admin_openapi_tool(
+        self,
+        call: ToolCall,
+        entry: Any,
+        token: DelegatedToken,
+        headers: Mapping[str, str],
+    ) -> ToolResult:
+        if call.name == "admin.settings.update":
+            setting_error = _settings_update_rejection(call)
+            if setting_error is not None:
+                return _result(call, 422, {"error": setting_error})
+        rejection = _deployment_admin_agent_rejection(
+            call.name,
+            entry,
+            surface_operation_ids=self._surface_operation_ids,
+        )
+        if rejection is not None:
+            return ToolResult(
+                call_id=call.id,
+                status_code=403,
+                body={"detail": rejection},
+                mutated=False,
+            )
+        try:
+            path_vars, query, body = _split_inputs(
+                entry,
+                call.input,
+                components=self._components,
+            )
+        except ValueError as exc:
+            return ToolResult(
+                call_id=call.id,
+                status_code=422,
+                body={"detail": str(exc)},
+                mutated=False,
+            )
+        response = self._get_client().request(
+            method=entry.method,
+            url=_format_path(entry.path, path_vars),
+            params=_query_params(query),
+            json=body if entry.method in _BODY_METHODS else None,
+            headers=_admin_request_headers(token, headers, has_body=body is not None),
+        )
+        return ToolResult(
+            call_id=call.id,
+            status_code=response.status_code,
+            body=_coerce_body(response.content, response.headers.get("content-type")),
+            mutated=entry.method in _MUTATING_METHODS and response.status_code < 400,
+        )
+
+    def _get_client(self) -> TestClient:
+        if self._app is None:
+            raise RuntimeError("deployment admin dispatcher requires a FastAPI app")
+        if self._client is None:
+            self._client = TestClient(self._app, raise_server_exceptions=False)
+        return self._client
 
 
-def _admin_tools() -> tuple[Tool, ...]:
+def _admin_tools(
+    dispatcher: DeploymentAdminToolDispatcher | None = None,
+) -> tuple[Tool, ...]:
+    if dispatcher is None:
+        return _legacy_admin_tools()
+    return dispatcher.tools
+
+
+def _legacy_admin_tools() -> tuple[Tool, ...]:
     return (
         {
             "name": "admin.settings.update",
@@ -275,6 +484,127 @@ def _admin_tools() -> tuple[Tool, ...]:
             },
         },
     )
+
+
+def _load_admin_surface_operation_ids() -> frozenset[str]:
+    try:
+        raw = json.loads(_SURFACE_ADMIN_PATH.read_text(encoding="utf-8"))
+    except OSError, json.JSONDecodeError:
+        return frozenset()
+    if not isinstance(raw, list):
+        return frozenset()
+    return frozenset(
+        op_id
+        for item in raw
+        if isinstance(item, Mapping)
+        and isinstance((op_id := item.get("operation_id")), str)
+        and op_id
+    )
+
+
+def _is_deployment_admin_agent_tool(
+    op_id: str,
+    entry: Any,
+    *,
+    surface_operation_ids: frozenset[str],
+) -> bool:
+    return (
+        _deployment_admin_agent_rejection(
+            op_id,
+            entry,
+            surface_operation_ids=surface_operation_ids,
+        )
+        is None
+    )
+
+
+def _deployment_admin_agent_rejection(
+    op_id: str,
+    entry: Any,
+    *,
+    surface_operation_ids: frozenset[str],
+) -> str | None:
+    if not _is_admin_api_path(entry.path):
+        return "tool is outside the deployment-admin agent surface"
+    if _is_admin_agent_api_path(entry.path):
+        return "tool controls the admin agent session itself"
+    if _is_session_only_admin_secret_route(op_id, entry.path):
+        return "tool requires an interactive session"
+    if entry.operation.get("x-agent-forbidden") is True:
+        return "tool is forbidden to delegated agents"
+    if entry.operation.get("x-interactive-only") is True:
+        return "tool requires an interactive session"
+    if _is_valid_x_cli_metadata(entry.operation):
+        return None
+    if op_id in surface_operation_ids:
+        return None
+    return "tool is not backed by admin surface metadata"
+
+
+def _is_admin_api_path(path: str) -> bool:
+    return path == _ADMIN_API_ROOT or path.startswith(f"{_ADMIN_API_ROOT}/")
+
+
+def _is_admin_agent_api_path(path: str) -> bool:
+    return path == _ADMIN_AGENT_API_ROOT or path.startswith(f"{_ADMIN_AGENT_API_ROOT}/")
+
+
+def _is_session_only_admin_secret_route(op_id: str, path: str) -> bool:
+    return (
+        op_id in _SESSION_ONLY_ADMIN_SECRET_OPERATION_IDS
+        or path in _SESSION_ONLY_ADMIN_SECRET_PATHS
+    )
+
+
+def _is_admin_agent_replay(headers: Mapping[str, str]) -> bool:
+    return headers.get("X-Agent-Channel") == _ADMIN_AGENT_CHANNEL
+
+
+def _query_params(query: Mapping[str, object]) -> dict[str, str] | None:
+    if not query:
+        return None
+    params: dict[str, str] = {}
+    for key, value in query.items():
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            params[key] = "" if value is None else str(value)
+        else:
+            params[key] = json.dumps(value)
+    return params
+
+
+def _admin_request_headers(
+    token: DelegatedToken,
+    caller_headers: Mapping[str, str],
+    *,
+    has_body: bool,
+) -> dict[str, str]:
+    merged: dict[str, str] = {
+        "Authorization": f"Bearer {token.plaintext}",
+    }
+    if has_body:
+        merged["Content-Type"] = "application/json"
+    canonical = {key.lower(): key for key in merged}
+    for key, value in caller_headers.items():
+        if key.lower() == "authorization":
+            continue
+        existing = canonical.get(key.lower())
+        if existing is not None:
+            merged[existing] = value
+        else:
+            merged[key] = value
+            canonical[key.lower()] = key
+    return merged
+
+
+def _proposal_fields(call: ToolCall) -> tuple[tuple[str, str], ...]:
+    fields: list[tuple[str, str]] = []
+    for key, value in call.input.items():
+        if len(fields) >= 6:
+            break
+        fields.append((str(key), _display_setting_value(value)))
+    if not fields:
+        fields.append(("Tool", call.name))
+    return tuple(fields)
 
 
 def _prompt(*, message: str, page_context: str) -> list[ChatMessage]:
@@ -366,7 +696,10 @@ def _resolve_supported_proposal(
     call: ToolCall,
     *,
     session: Session,
+    dispatcher: DeploymentAdminToolDispatcher | None = None,
 ) -> _ResolvedProposal | None:
+    if dispatcher is not None:
+        return dispatcher.resolve_proposal(call, session=session)
     if call.name == "admin.settings.update":
         return _settings_update_proposal(call)
     if call.name == "admin.usage.workspaces.cap":
@@ -413,6 +746,19 @@ def _settings_update_proposal(call: ToolCall) -> _ResolvedProposal | None:
         ),
         risk="medium",
     )
+
+
+def _settings_update_rejection(call: ToolCall) -> str | None:
+    key = _input_str(call.input, "key")
+    if key is None or "value" not in call.input:
+        return "invalid_setting_input"
+    preview = preview_deployment_setting_for_agent(
+        key=key,
+        raw_value=call.input["value"],
+    )
+    if preview is None:
+        return "invalid_setting_value"
+    return None
 
 
 def _usage_cap_proposal(
@@ -469,313 +815,12 @@ def _workspace_id_proposal(
     )
 
 
-def _dispatch_settings_update(
-    call: ToolCall,
-    *,
-    headers: Mapping[str, str],
-    app: FastAPI | None,
-) -> ToolResult:
-    # code-health: ignore[nloc] Replay keeps validation, audit, and SSE inline.
-    key = _input_str(call.input, "key")
-    if key is None or "value" not in call.input:
-        return _result(call, 422, {"error": "invalid_setting_input"})
-    ctx = _ctx_from_headers(
-        headers
-    )  # code-health: ignore[duplicate] Replay tools validate independently.  # noqa: E501
-    if ctx is None:
-        return _result(call, 422, {"error": "missing_replay_actor"})
-    if app is None:
-        return _result(call, 503, {"error": "dispatcher_not_configured"})
-    settings = getattr(app.state, "settings", None)
-    if not isinstance(settings, Settings):
-        return _result(call, 503, {"error": "deployment_settings_unavailable"})
-    capabilities = getattr(app.state, "capabilities", None)
-    preview = preview_deployment_setting_for_agent(
-        key=key,
-        raw_value=call.input["value"],
-    )
-    if preview is None:
-        return _result(call, 422, {"error": "invalid_setting_value"})
-
-    from app.adapters.db.session import make_uow
-
-    with make_uow() as session:
-        if not isinstance(session, Session):
-            return _result(call, 500, {"error": "unsupported_session"})
-        try:
-            result = write_deployment_setting(
-                key=preview.key,
-                raw_value=preview.value,
-                ctx=ctx,
-                session=session,
-                settings=settings,
-            )
-        except Validation as exc:
-            return _result(
-                call,
-                422,
-                {"error": str(exc.extra.get("error", "invalid_setting_value"))},
-            )
-        except DomainError:
-            return _result(call, 404, {"error": "not_found"})
-        correlation_id = _replay_correlation_id(headers, call)
-        _audit_replay(
-            session,
-            ctx=ctx,
-            correlation_id=correlation_id,
-            entity_kind="deployment_setting",
-            entity_id=key,
-            action="deployment_setting.updated",
-            diff=result.audit_diff,
-        )
-        if isinstance(capabilities, Capabilities):
-            capabilities.refresh_settings(session)
-        session.flush()
-
-    _publish_admin_replay_event(
-        kind="admin.audit.appended",
-        ctx=ctx,
-        correlation_id=correlation_id,
-        payload={
-            "entity_kind": "deployment_setting",
-            "entity_id": key,
-            "action": "deployment_setting.updated",
-        },
-    )
-    _publish_admin_replay_event(
-        kind="admin.settings.updated",
-        ctx=ctx,
-        correlation_id=correlation_id,
-        payload={"key": key},
-    )
-    return _result(
-        call,
-        200,
-        result.response.model_dump(mode="json"),
-        mutated=True,
-    )
-
-
-def _dispatch_usage_cap(
-    call: ToolCall,
-    *,
-    headers: Mapping[str, str],
-) -> ToolResult:
-    # code-health: ignore[nloc] Replay dispatch keeps audit order local.
-    workspace_id = _input_str(call.input, "id")
-    if workspace_id is None:
-        return _result(call, 422, {"error": "invalid_cap_input"})
-    try:
-        payload = UsageCapPayload(cap_cents_30d=call.input.get("cap_cents_30d"))
-    except ValidationError:
-        return _result(call, 422, {"error": "invalid_cap"})
-    if payload.cap_cents_30d < 0:
-        return _result(call, 422, {"error": "invalid_cap"})
-    ctx = _ctx_from_headers(
-        headers
-    )  # code-health: ignore[duplicate] Replay tools validate independently.  # noqa: E501
-    if ctx is None:
-        return _result(call, 422, {"error": "missing_replay_actor"})
-    from app.adapters.db.session import make_uow
-
-    with make_uow() as session:
-        if not isinstance(session, Session):
-            return _result(call, 500, {"error": "unsupported_session"})
-        workspace = load_workspace(session, workspace_id=workspace_id)
-        if workspace is None:
-            return _result(call, 404, {"error": "not_found"})
-        previous_quota = (
-            workspace.quota_json if isinstance(workspace.quota_json, dict) else {}
-        )
-        previous_cap = previous_quota.get(_QUOTA_CAP_KEY)
-        if previous_cap == payload.cap_cents_30d:
-            return _result(
-                call,
-                200,
-                {"workspace_id": workspace.id, "cap_cents_30d": payload.cap_cents_30d},
-                mutated=True,
-            )
-        with tenant_agnostic():
-            updated_quota = dict(previous_quota)
-            updated_quota[_QUOTA_CAP_KEY] = payload.cap_cents_30d
-            workspace.quota_json = updated_quota
-            _audit_replay(
-                session,
-                ctx=ctx,
-                correlation_id=call.id,
-                entity_kind="workspace",
-                entity_id=workspace.id,
-                action="usage.cap_updated",
-                diff={
-                    "cap_cents_30d": {
-                        "before": previous_cap,
-                        "after": payload.cap_cents_30d,
-                    }
-                },
-            )
-            session.flush()
-    return _result(
-        call,
-        200,
-        {"workspace_id": workspace_id, "cap_cents_30d": payload.cap_cents_30d},
-        mutated=True,
-    )
-
-
-def _dispatch_workspace_trust(
-    call: ToolCall,
-    *,
-    headers: Mapping[str, str],
-) -> ToolResult:
-    workspace_id = _input_str(call.input, "id")
-    if workspace_id is None:
-        return _result(call, 422, {"error": "invalid_workspace_input"})
-    ctx = _ctx_from_headers(headers)
-    if ctx is None:
-        return _result(call, 422, {"error": "missing_replay_actor"})
-    from app.adapters.db.session import make_uow
-
-    with make_uow() as session:
-        if not isinstance(session, Session):
-            return _result(call, 500, {"error": "unsupported_session"})
-        workspace = load_workspace(session, workspace_id=workspace_id)
-        if workspace is None:
-            return _result(call, 404, {"error": "not_found"})
-        previous = verification_state_of(workspace)
-        if previous != "trusted":
-            with tenant_agnostic():
-                set_verification_state(workspace, value="trusted")
-                _audit_replay(
-                    session,
-                    ctx=ctx,
-                    correlation_id=call.id,
-                    entity_kind="workspace",
-                    entity_id=workspace.id,
-                    action="workspace.trusted",
-                    diff={
-                        "verification_state": {"before": previous, "after": "trusted"}
-                    },
-                )
-                session.flush()
-    return _result(
-        call,
-        200,
-        {"id": workspace_id, "verification_state": "trusted"},
-        mutated=True,
-    )
-
-
-def _dispatch_workspace_archive(
-    call: ToolCall,
-    *,
-    headers: Mapping[str, str],
-) -> ToolResult:
-    workspace_id = _input_str(call.input, "id")
-    if workspace_id is None:
-        return _result(call, 422, {"error": "invalid_workspace_input"})
-    ctx = _ctx_from_headers(headers)
-    if ctx is None:
-        return _result(call, 422, {"error": "missing_replay_actor"})
-    from app.adapters.db.session import make_uow
-
-    with make_uow() as session:
-        if not isinstance(session, Session):
-            return _result(call, 500, {"error": "unsupported_session"})
-        try:
-            ensure_deployment_owner(session, ctx=ctx)
-        except DomainError:
-            return _result(call, 404, {"error": "not_found"})
-        workspace = load_workspace(session, workspace_id=workspace_id)
-        if workspace is None:
-            return _result(call, 404, {"error": "not_found"})
-        archived_at = format_archived_at(workspace)
-        if archived_at is None:
-            moment = datetime.now(UTC)
-            with tenant_agnostic():
-                set_archived_at(workspace, when=moment)
-                archived_at = moment.isoformat()
-                _audit_replay(
-                    session,
-                    ctx=ctx,
-                    correlation_id=call.id,
-                    entity_kind="workspace",
-                    entity_id=workspace.id,
-                    action="workspace.archived",
-                    diff={"archived_at": {"before": None, "after": archived_at}},
-                )
-                session.flush()
-    return _result(
-        call, 200, {"id": workspace_id, "archived_at": archived_at}, mutated=True
-    )
-
-
-def _ctx_from_headers(headers: Mapping[str, str]) -> DeploymentContext | None:
-    actor_id = headers.get("X-Crewday-Replay-Actor-Id")
-    if not actor_id:
-        return None
-    return DeploymentContext(
-        principal=headers.get("X-Crewday-Replay-Principal", "admin_agent_replay"),
-        user_id=actor_id,
-        actor_kind="user",
-        deployment_scopes=frozenset(),
-    )
-
-
 def _display_setting_value(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, str):
         return value
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
-
-
-def _replay_correlation_id(headers: Mapping[str, str], call: ToolCall) -> str:
-    value = headers.get("Idempotency-Key")
-    if value:
-        return value
-    return call.id
-
-
-def _publish_admin_replay_event(
-    *,
-    kind: str,
-    ctx: DeploymentContext,
-    correlation_id: str,
-    payload: Mapping[str, Any],
-) -> None:
-    occurred_at = datetime.now(UTC)
-    body = dict(payload)
-    body.setdefault("actor_id", ctx.user_id)
-    body.setdefault("correlation_id", correlation_id)
-    body.setdefault("occurred_at", occurred_at.isoformat())
-    admin_sse.default_admin_fanout.publish(kind=kind, payload=body)
-
-
-def _audit_replay(
-    session: Session,
-    *,
-    ctx: DeploymentContext,
-    correlation_id: str,
-    entity_kind: str,
-    entity_id: str,
-    action: str,
-    diff: dict[str, Any],
-) -> None:
-    # code-health: ignore[params] Deployment audit helper mirrors audit row fields.
-    from app.authz.deployment_owners import is_deployment_owner
-
-    write_deployment_audit(
-        session,
-        actor_id=ctx.user_id,
-        actor_kind="user",
-        actor_grant_role="manager",
-        actor_was_owner_member=is_deployment_owner(session, user_id=ctx.user_id),
-        correlation_id=correlation_id,
-        entity_kind=entity_kind,
-        entity_id=entity_id,
-        action=action,
-        diff=diff,
-    )
 
 
 def _result(

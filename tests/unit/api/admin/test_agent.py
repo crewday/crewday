@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from copy import deepcopy
 
 import pytest
 from fastapi.testclient import TestClient
@@ -39,6 +40,8 @@ from app.tenancy import tenant_agnostic
 from app.util.ulid import new_ulid
 from tests.unit.api.admin._helpers import (
     PINNED,
+    TEST_ACCEPT_LANGUAGE,
+    TEST_UA,
     build_client,
     engine_fixture,
     install_admin_cookie,
@@ -231,6 +234,29 @@ def _seed_admin_model_default(session_factory: sessionmaker[Session]) -> None:
         seed_default_registry(session)
         session.commit()
     invalidate_cache()
+
+
+def _admin_replay_headers(client: TestClient) -> dict[str, str]:
+    cookie = client.cookies.get(SESSION_COOKIE_NAME)
+    assert cookie is not None
+    return {
+        "Cookie": f"{SESSION_COOKIE_NAME}={cookie}",
+        "User-Agent": TEST_UA,
+        "Accept-Language": TEST_ACCEPT_LANGUAGE,
+    }
+
+
+def _install_workspace_openapi_route(client: TestClient) -> None:
+    def _workspace_items(slug: str) -> dict[str, str]:
+        return {"slug": slug}
+
+    client.app.add_api_route(
+        "/w/{slug}/api/v1/inventory/items",
+        _workspace_items,
+        methods=["GET"],
+        operation_id="inventory.items.list",
+    )
+    client.app.openapi_schema = None
 
 
 @contextmanager
@@ -1003,10 +1029,214 @@ class TestAdminAgent:
         assert resp.json()["error"] == "dispatcher_not_configured"
         _assert_no_agent_writes(session_factory)
 
+    def test_deployment_admin_dispatcher_catalog_uses_admin_openapi_surface(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        dispatcher = DeploymentAdminToolDispatcher(app=client.app)
+
+        tool_names = {tool["name"] for tool in dispatcher.tools}
+
+        assert "admin.llm.models.create" in tool_names
+        assert "admin.llm.provider_models.create" in tool_names
+        assert "admin.llm.assignments.create" in tool_names
+        assert "admin.llm.graph" in tool_names
+        assert "admin.agent.message.create" not in tool_names
+        assert "admin.agent.action.approve" not in tool_names
+        assert "admin.agent.action.deny" not in tool_names
+        assert "admin.llm.providers.key.set" not in tool_names
+        assert "admin.llm.providers.key.clear" not in tool_names
+
+    def test_deployment_admin_dispatcher_read_route_uses_fastapi_deps(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        dispatcher = DeploymentAdminToolDispatcher(app=client.app)
+
+        result = dispatcher.dispatch(
+            ToolCall(id="call_graph", name="admin.llm.graph", input={}),
+            token=DelegatedToken(plaintext="mip_test", token_id="tok_test"),
+            headers=_admin_replay_headers(client),
+        )
+
+        assert result.status_code == 200, result.body
+        assert result.mutated is False
+        assert isinstance(result.body, dict)
+        assert "providers" in result.body
+        assert "models" in result.body
+
+    def test_deployment_admin_dispatcher_write_route_uses_fastapi_deps(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        user_id, cookie = seed_admin(
+            session_factory,
+            settings=settings,
+            email="dispatcher-owner@example.com",
+            display_name="Dispatcher Owner",
+            owner=True,
+        )
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+        dispatcher = DeploymentAdminToolDispatcher(app=client.app)
+
+        result = dispatcher.dispatch(
+            ToolCall(
+                id="call_setting",
+                name="admin.settings.update",
+                input={"key": "signup_enabled", "value": False},
+            ),
+            token=DelegatedToken(plaintext="mip_test", token_id="tok_test"),
+            headers=_admin_replay_headers(client),
+        )
+
+        assert result.status_code == 200, result.body
+        assert result.mutated is True
+        assert isinstance(result.body, dict)
+        assert result.body["key"] == "signup_enabled"
+        assert result.body["value"] is False
+        with session_factory() as session, tenant_agnostic():
+            setting = session.get(DeploymentSetting, "signup_enabled")
+        assert setting is not None
+        assert setting.value is False
+        assert setting.updated_by == user_id
+
+    def test_deployment_admin_dispatcher_forbidden_admin_tools_do_not_mutate(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        dispatcher = DeploymentAdminToolDispatcher(app=client.app)
+
+        self_recursive = dispatcher.dispatch(
+            ToolCall(id="call_agent", name="admin.agent.message.create", input={}),
+            token=DelegatedToken(plaintext="mip_test", token_id="tok_test"),
+            headers=_admin_replay_headers(client),
+        )
+        interactive = dispatcher.dispatch(
+            ToolCall(
+                id="call_key",
+                name="admin.llm.providers.key.set",
+                input={"provider_id": "provider_1", "api_key": "sk-secret"},
+            ),
+            token=DelegatedToken(plaintext="mip_test", token_id="tok_test"),
+            headers=_admin_replay_headers(client),
+        )
+        unknown = dispatcher.dispatch(
+            ToolCall(id="call_unknown", name="admin.nope", input={}),
+            token=DelegatedToken(plaintext="mip_test", token_id="tok_test"),
+            headers=_admin_replay_headers(client),
+        )
+
+        assert self_recursive.status_code == 403
+        assert self_recursive.mutated is False
+        assert interactive.status_code == 403
+        assert interactive.mutated is False
+        assert unknown.status_code == 404
+        assert unknown.mutated is False
+        _assert_no_agent_writes(session_factory)
+
+    def test_deployment_admin_dispatcher_fails_closed_for_admin_non_admin_tool(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        _install_workspace_openapi_route(client)
+        fallback = _FakeDispatcher()
+        dispatcher = DeploymentAdminToolDispatcher(fallback=fallback, app=client.app)
+        headers = {
+            **_admin_replay_headers(client),
+            "X-Agent-Channel": "web_admin_sidebar",
+        }
+
+        result = dispatcher.dispatch(
+            ToolCall(id="call_workspace", name="inventory.items.list", input={}),
+            token=DelegatedToken(plaintext="mip_test", token_id="tok_test"),
+            headers=headers,
+        )
+
+        assert result.status_code == 403
+        assert result.mutated is False
+        assert fallback.calls == []
+        _assert_no_agent_writes(session_factory)
+
+    def test_deployment_admin_dispatcher_preserves_fallback_for_non_admin_replay(
+        self,
+        client: TestClient,
+    ) -> None:
+        _install_workspace_openapi_route(client)
+        fallback = _FakeDispatcher()
+        dispatcher = DeploymentAdminToolDispatcher(fallback=fallback, app=client.app)
+
+        result = dispatcher.dispatch(
+            ToolCall(id="call_workspace", name="inventory.items.list", input={}),
+            token=DelegatedToken(plaintext="mip_test", token_id="tok_test"),
+            headers={"X-Agent-Channel": "approval-replay"},
+        )
+
+        assert result.status_code == 200
+        assert result.body == {"ok": True, "tool": "inventory.items.list"}
+        assert result.mutated is True
+        assert [call.name for call, _headers in fallback.calls] == [
+            "inventory.items.list"
+        ]
+        assert (
+            dispatcher.activity_label_for(
+                ToolCall(id="call_workspace", name="inventory.items.list", input={})
+            )
+            == "Inventory items list"
+        )
+
+    def test_deployment_admin_dispatcher_forbids_secret_routes_after_metadata_drift(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        schema = deepcopy(client.app.openapi())
+        operation = schema["paths"]["/admin/api/v1/llm/providers/{provider_id}/key"][
+            "put"
+        ]
+        operation.pop("x-interactive-only", None)
+        client.app.openapi_schema = schema
+        dispatcher = DeploymentAdminToolDispatcher(app=client.app)
+
+        tool_names = {tool["name"] for tool in dispatcher.tools}
+        result = dispatcher.dispatch(
+            ToolCall(
+                id="call_key",
+                name="admin.llm.providers.key.set",
+                input={"provider_id": "provider_1", "api_key": "sk-secret"},
+            ),
+            token=DelegatedToken(plaintext="mip_test", token_id="tok_test"),
+            headers=_admin_replay_headers(client),
+        )
+
+        assert "admin.llm.providers.key.set" not in tool_names
+        assert result.status_code == 403
+        assert result.mutated is False
+        _assert_no_agent_writes(session_factory)
+
     def test_deployment_admin_dispatcher_rejects_invalid_cap_before_mutation(
         self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
     ) -> None:
-        dispatcher = DeploymentAdminToolDispatcher()
+        install_admin_cookie(client, session_factory, settings)
+        dispatcher = DeploymentAdminToolDispatcher(app=client.app)
 
         result = dispatcher.dispatch(
             ToolCall(
@@ -1015,18 +1245,27 @@ class TestAdminAgent:
                 input={"id": "ws_123", "cap_cents_30d": -1},
             ),
             token=DelegatedToken(plaintext="mip_test", token_id="tok_test"),
-            headers={"X-Crewday-Replay-Actor-Id": "user_admin"},
+            headers=_admin_replay_headers(client),
         )
 
         assert result.status_code == 422
-        assert result.body == {"error": "invalid_cap"}
         assert result.mutated is False
 
     def test_deployment_admin_dispatcher_rejects_secret_setting_replay(
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
+        settings: Settings,
     ) -> None:
+        user_id, cookie = seed_admin(
+            session_factory,
+            settings=settings,
+            email="secret-setting-owner@example.com",
+            display_name="Secret Setting Owner",
+            owner=True,
+        )
+        _ = user_id
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
         dispatcher = DeploymentAdminToolDispatcher(app=client.app)
 
         result = dispatcher.dispatch(
@@ -1039,7 +1278,7 @@ class TestAdminAgent:
                 },
             ),
             token=DelegatedToken(plaintext="mip_test", token_id="tok_test"),
-            headers={"X-Crewday-Replay-Actor-Id": "user_admin"},
+            headers=_admin_replay_headers(client),
         )
 
         assert result.status_code == 422
@@ -1059,9 +1298,19 @@ class TestAdminAgent:
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
+        settings: Settings,
         key: str,
         value: object,
     ) -> None:
+        user_id, cookie = seed_admin(
+            session_factory,
+            settings=settings,
+            email=f"invalid-{key.replace('_', '-')}@example.com",
+            display_name="Invalid Setting Owner",
+            owner=True,
+        )
+        _ = user_id
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
         dispatcher = DeploymentAdminToolDispatcher(app=client.app)
 
         result = dispatcher.dispatch(
@@ -1071,7 +1320,7 @@ class TestAdminAgent:
                 input={"key": key, "value": value},
             ),
             token=DelegatedToken(plaintext="mip_test", token_id="tok_test"),
-            headers={"X-Crewday-Replay-Actor-Id": "user_admin"},
+            headers=_admin_replay_headers(client),
         )
 
         assert result.status_code == 422

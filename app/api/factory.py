@@ -498,8 +498,12 @@ def _wire_admin_agent_runtime(app: FastAPI) -> None:
         if hasattr(app.state, "admin_agent_action_producer"):
             delattr(app.state, "admin_agent_action_producer")
         return
-    app.state.tool_dispatcher = DeploymentAdminToolDispatcher(dispatcher, app=app)
-    app.state.admin_agent_action_producer = AdminAgentRuntimeActionProducer(llm=llm)
+    admin_dispatcher = DeploymentAdminToolDispatcher(dispatcher, app=app)
+    app.state.tool_dispatcher = admin_dispatcher
+    app.state.admin_agent_action_producer = AdminAgentRuntimeActionProducer(
+        llm=llm,
+        dispatcher=admin_dispatcher,
+    )
     _log.info(
         "admin agent action producer wired",
         extra={"event": "admin_agent.producer_wired"},

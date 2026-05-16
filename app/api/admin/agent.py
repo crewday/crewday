@@ -464,7 +464,7 @@ def _approve_action_row(
     result = dispatcher.dispatch(
         tool_call,
         token=_replay_token(),
-        headers=_replay_headers(ctx, row),
+        headers=_replay_headers(request, ctx, row),
     )
     if result.status_code >= 400:
         raise AdminAgentActionReplayFailed(
@@ -1015,16 +1015,27 @@ def _replay_token() -> DelegatedToken:
 
 
 def _replay_headers(
+    request: Request,
     ctx: DeploymentContext,
     row: AdminAgentActionRow,
 ) -> dict[str, str]:
-    return {
+    headers = {
         "Idempotency-Key": row.idempotency_key,
         "X-Agent-Channel": _ADMIN_AGENT_CHANNEL,
         "X-Agent-Page": row.page_context,
         "X-Crewday-Replay": "1",
         "X-Crewday-Replay-Actor-Id": ctx.user_id,
     }
+    cookie = request.headers.get("cookie")
+    if cookie:
+        headers["Cookie"] = cookie
+    user_agent = request.headers.get("user-agent")
+    if user_agent:
+        headers["User-Agent"] = user_agent
+    accept_language = request.headers.get("accept-language")
+    if accept_language:
+        headers["Accept-Language"] = accept_language
+    return headers
 
 
 def _result_to_json(result: ToolResult) -> dict[str, Any]:
