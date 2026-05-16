@@ -137,6 +137,93 @@ def _engagement(session: Session, *, workspace_id: str, user_id: str) -> str:
     return eng_id
 
 
+def _seed_autofill_assignment(session: Session, *, api_model_id: str) -> str:
+    from app.adapters.db.llm.models import (
+        LlmAssignment,
+        LlmModel,
+        LlmProvider,
+        LlmProviderModel,
+    )
+    from app.domain.llm.router import invalidate_cache
+
+    invalidate_cache()
+    provider_id = new_ulid()
+    model_id = new_ulid()
+    provider_model_id = new_ulid()
+    assignment_id = new_ulid()
+    with tenant_agnostic():
+        session.add(
+            LlmProvider(
+                id=provider_id,
+                name=f"test-provider-{provider_id[-6:]}",
+                provider_type="fake",
+                timeout_s=60,
+                requests_per_minute=60,
+                is_enabled=True,
+                created_at=_PINNED,
+                updated_at=_PINNED,
+            )
+        )
+        session.add(
+            LlmModel(
+                id=model_id,
+                canonical_name=f"test-model-{model_id[-6:]}",
+                display_name="Test vision model",
+                capabilities=["vision", "json_mode"],
+                is_active=True,
+                price_source="",
+                created_at=_PINNED,
+                updated_at=_PINNED,
+            )
+        )
+        session.flush()
+        session.add(
+            LlmProviderModel(
+                id=provider_model_id,
+                provider_id=provider_id,
+                model_id=model_id,
+                api_model_id=api_model_id,
+                supports_system_prompt=True,
+                supports_temperature=True,
+                is_enabled=True,
+                created_at=_PINNED,
+                updated_at=_PINNED,
+            )
+        )
+        session.flush()
+        session.add(
+            LlmAssignment(
+                id=assignment_id,
+                workspace_id=None,
+                capability="expenses.autofill",
+                model_id=provider_model_id,
+                provider="fake",
+                priority=0,
+                enabled=True,
+                max_tokens=512,
+                temperature=0.0,
+                extra_api_params={},
+                required_capabilities=["vision", "json_mode"],
+                created_at=_PINNED,
+            )
+        )
+        session.flush()
+    invalidate_cache()
+    return assignment_id
+
+
+def _disable_llm_assignment(session: Session, assignment_id: str) -> None:
+    from app.adapters.db.llm.models import LlmAssignment
+    from app.domain.llm.router import invalidate_cache
+
+    with tenant_agnostic():
+        row = session.get(LlmAssignment, assignment_id)
+        if row is not None:
+            row.enabled = False
+            session.flush()
+    invalidate_cache()
+
+
 @pytest.fixture
 def seeded(
     session_factory: sessionmaker[Session],
@@ -1915,18 +2002,28 @@ class TestReceiptScan:
             database_url="sqlite:///:memory:",
             llm_ocr_model="test/gemma-vision",
         )
+        with session_factory() as s:
+            assignment_id = _seed_autofill_assignment(
+                s, api_model_id="test/capability-vision"
+            )
+            s.commit()
 
-        with _client_for(session_factory, seeded["worker_ctx"], storage) as client:
-            client.app.dependency_overrides[get_llm] = _build_stub_llm(
-                chat_payload=TestReceiptScan._high_confidence_payload()
-            )
-            client.app.dependency_overrides[get_settings] = lambda: settings
-            r = client.post(
-                "/api/v1/expenses/scan",
-                files={"image": ("r.jpg", b"\x89PNG\x00bytes", "image/jpeg")},
-            )
-            assert r.status_code == 200, r.text
-            body = r.json()
+        try:
+            with _client_for(session_factory, seeded["worker_ctx"], storage) as client:
+                client.app.dependency_overrides[get_llm] = _build_stub_llm(
+                    chat_payload=TestReceiptScan._high_confidence_payload()
+                )
+                client.app.dependency_overrides[get_settings] = lambda: settings
+                r = client.post(
+                    "/api/v1/expenses/scan",
+                    files={"image": ("r.jpg", b"\x89PNG\x00bytes", "image/jpeg")},
+                )
+                assert r.status_code == 200, r.text
+                body = r.json()
+        finally:
+            with session_factory() as s:
+                _disable_llm_assignment(s, assignment_id)
+                s.commit()
 
         # Top-level keys mirror app/web/src/types/expense.ts exactly —
         # if either side drifts, this assertion catches it before the
@@ -1984,6 +2081,10 @@ class TestReceiptScan:
             assert rows[0].status == "ok"
             assert rows[0].tokens_in == 42
             assert rows[0].tokens_out == 17
+            assert rows[0].provider_model_id == "test/capability-vision"
+            assert rows[0].assignment_id == assignment_id
+            assert rows[0].fallback_attempts == 0
+            assert rows[0].finish_reason == "stop"
 
     def test_oversize_image_returns_422(
         self,
