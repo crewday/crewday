@@ -439,6 +439,21 @@ def _prepare_file_payload(
     return raw, sniffed_type, len(raw)
 
 
+def prepare_file_evidence_payload(
+    payload: EvidenceUpload,
+    *,
+    mime_sniffer: MimeSniffer | None = None,
+    photo_normalizer: PhotoNormalizer | None = None,
+) -> tuple[bytes, str, int]:
+    """Validate and normalize a file-bearing evidence payload."""
+
+    return _prepare_file_payload(
+        payload,
+        mime_sniffer=mime_sniffer,
+        photo_normalizer=photo_normalizer,
+    )
+
+
 def _gps_payload_bytes(payload: EvidenceUpload) -> bytes:
     if payload.gps_lat is None or payload.gps_lon is None:
         raise EvidenceGpsPayloadInvalid("gps evidence requires gps_lat and gps_lon")

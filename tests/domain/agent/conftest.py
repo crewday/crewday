@@ -332,7 +332,7 @@ class ScriptedLLMClient:
     the runtime loop.
     """
 
-    replies: list[LLMResponse] = field(default_factory=list)
+    replies: list[LLMResponse | Exception] = field(default_factory=list)
     chat_calls: int = 0
     last_messages: list[ChatMessage] | None = None
     last_tools: Sequence[Tool] | None = None
@@ -355,9 +355,12 @@ class ScriptedLLMClient:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        thinking_level: str = "disabled",
+        thinking_strategy: str = "none",
         tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> LLMResponse:
+        del thinking_level, thinking_strategy
         self.chat_calls += 1
         self.last_messages = list(messages)
         self.last_tools = tools
@@ -368,7 +371,10 @@ class ScriptedLLMClient:
                 model_id=model_id,
                 finish_reason="stop",
             )
-        return self.replies.pop(0)
+        head = self.replies.pop(0)
+        if isinstance(head, Exception):
+            raise head
+        return head
 
     def ocr(
         self,
@@ -548,6 +554,8 @@ def seed_assignment(
     workspace_id: str,
     capability: str,
     api_model_id: str = "fake/chat-model",
+    model_capabilities: Sequence[str] = ("chat",),
+    audio_input_transform: str = "passthrough",
 ) -> None:
     """Seed an :class:`LlmAssignment` + the registry trio it needs."""
     from app.adapters.db.llm.models import (
@@ -572,7 +580,7 @@ def seed_assignment(
         id=new_ulid(),
         canonical_name=api_model_id,
         display_name=api_model_id,
-        capabilities=["chat"],
+        capabilities=list(model_capabilities),
         is_active=True,
         price_source="",
         created_at=_PINNED,
@@ -587,6 +595,7 @@ def seed_assignment(
         api_model_id=api_model_id,
         supports_system_prompt=True,
         supports_temperature=True,
+        audio_input_transform=audio_input_transform,
         is_enabled=True,
         created_at=_PINNED,
         updated_at=_PINNED,

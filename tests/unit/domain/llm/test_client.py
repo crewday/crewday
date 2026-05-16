@@ -58,6 +58,7 @@ from app.adapters.llm.ports import (
     Tool,
     ToolCall,
 )
+from app.domain.llm import client as client_module
 from app.domain.llm.budget import (
     WINDOW_DAYS,
     BudgetExceeded,
@@ -170,6 +171,7 @@ def _seed_provider_model(
     *,
     api_model_id: str,
     capabilities: Sequence[str] = ("chat",),
+    audio_input_transform: str = "passthrough",
 ) -> LlmProviderModel:
     provider = LlmProvider(
         id=new_ulid(),
@@ -200,6 +202,7 @@ def _seed_provider_model(
         api_model_id=api_model_id,
         supports_system_prompt=True,
         supports_temperature=True,
+        audio_input_transform=audio_input_transform,
         is_enabled=True,
         created_at=_PINNED,
         updated_at=_PINNED,
@@ -218,9 +221,13 @@ def _seed_assignment(
     priority: int = 0,
     required_capabilities: Sequence[str] = (),
     model_capabilities: Sequence[str] = ("chat",),
+    audio_input_transform: str = "passthrough",
 ) -> LlmAssignment:
     pm = _seed_provider_model(
-        session, api_model_id=api_model_id, capabilities=model_capabilities
+        session,
+        api_model_id=api_model_id,
+        capabilities=model_capabilities,
+        audio_input_transform=audio_input_transform,
     )
     row = LlmAssignment(
         id=new_ulid(),
@@ -581,6 +588,64 @@ class TestHappyPath:
         assert rows[0].cost_usd == Decimal("0.000102")
         assert rows[0].cost_cents == 0
         assert rows[0].audio_seconds == Decimal("9.200")
+
+    def test_audio_input_transform_applies_per_provider_model(
+        self,
+        session: Session,
+        clock: FrozenClock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        ws = _seed_workspace(session)
+        ctx = _build_context(ws.id, slug=ws.slug)
+        _seed_assignment(
+            session,
+            workspace_id=ws.id,
+            capability="voice.transcribe",
+            api_model_id="primary/model",
+            required_capabilities=["audio_input"],
+            model_capabilities=["audio_input"],
+            audio_input_transform="wav_16khz_mono",
+        )
+        _seed_ledger(session, workspace_id=ws.id, cap_cents=500)
+        adapter = _StubAdapter([_ok_response("transcript")])
+        client = LLMClient(adapter, pricing=_FREE_PRICING)
+        audio_ref = {"data": "YXVkaW8=", "format": "mp3"}
+        transformed_ref = {"data": "d2F2", "format": "wav"}
+        calls: list[tuple[dict[str, str], str]] = []
+
+        def _fake_normalize(ref: dict[str, str], *, transform: str) -> dict[str, str]:
+            calls.append((dict(ref), transform))
+            return transformed_ref
+
+        monkeypatch.setattr(client_module, "normalize_audio_ref", _fake_normalize)
+
+        token = set_current(ctx)
+        try:
+            _run(
+                client.chat(
+                    session,
+                    ctx,
+                    capability="voice.transcribe",
+                    user_content="transcribe this audio",
+                    audio=[audio_ref],
+                    attribution=_attribution(),
+                    consents=ConsentSet.none(),
+                    clock=clock,
+                )
+            )
+        finally:
+            reset_current(token)
+
+        assert calls == [(audio_ref, "wav_16khz_mono")]
+        assert adapter.calls[0]["messages"] == [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "transcribe this audio"},
+                    {"type": "input_audio", "input_audio": transformed_ref},
+                ],
+            }
+        ]
 
     def test_passes_tool_calls_through_on_success(
         self, session: Session, clock: FrozenClock

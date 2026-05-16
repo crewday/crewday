@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+from decimal import Decimal
+
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.audit.models import AuditLog
-from app.adapters.db.llm.models import ApprovalRequest
-from app.adapters.llm.ports import Tool
+from app.adapters.db.llm.models import ApprovalRequest, LlmUsage
+from app.adapters.llm.ports import LlmProviderError, LLMResponse, Tool
+from app.adapters.llm.ports import LLMUsage as AdapterLLMUsage
 from app.domain.agent.runtime import GateDecision, ToolResult
 from app.domain.agent.staff_chat import (
     STAFF_CHAT_AGENT_LABEL,
@@ -15,12 +20,19 @@ from app.domain.agent.staff_chat import (
     STAFF_CHAT_CHANNEL,
     STAFF_CHAT_HISTORY_CAP,
     STAFF_CHAT_SCOPE,
+    VOICE_TRANSCRIPTION_PROMPT,
+    VoiceTranscriptionUnavailable,
     is_staff_chat_tool,
     is_voice_input_enabled,
     run_staff_chat_turn,
+    run_staff_chat_voice_turn,
     staff_chat_tool_names,
     suggest_staff_chat_tool,
+    transcribe_voice_note,
 )
+from app.domain.llm import client as client_module
+from app.domain.llm.client import LLMClient as RoutedLLMClient
+from app.domain.llm.media import MediaTransformError
 from app.events.bus import EventBus
 from app.events.types import (
     AgentActionPending,
@@ -45,6 +57,15 @@ from tests.domain.agent.conftest import (
     seed_user,
     seed_workspace,
 )
+
+
+class _StaticMimeSniffer:
+    def __init__(self, content_type: str | None) -> None:
+        self.content_type = content_type
+
+    def sniff(self, payload: bytes, *, hint: str | None = None) -> str | None:
+        del payload, hint
+        return self.content_type
 
 
 def _bind_and_seed(db_session: Session) -> tuple[WorkspaceContext, str]:
@@ -110,6 +131,406 @@ def test_voice_input_requires_workspace_setting_and_assignment() -> None:
         {"voice.enabled": True},
         {STAFF_CHAT_CAPABILITY},
     )
+
+
+def test_voice_note_transcription_uses_fixed_prompt_and_audio_capability(
+    db_session: Session,
+    clock: FrozenClock,
+) -> None:
+    ctx, _channel_id = _bind_and_seed(db_session)
+    seed_assignment(
+        db_session,
+        workspace_id=ctx.workspace_id,
+        capability="voice.transcribe",
+        api_model_id="fake/audio-model",
+        model_capabilities=("audio_input",),
+    )
+    audio_llm = ScriptedLLMClient(
+        replies=[
+            LLMResponse(
+                text="Report the leaking sink",
+                usage=AdapterLLMUsage(
+                    prompt_tokens=3,
+                    completion_tokens=4,
+                    total_tokens=7,
+                    seconds=3.5,
+                ),
+                model_id="fake/audio-model",
+                finish_reason="stop",
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        transcribe_voice_note(
+            ctx,
+            session=db_session,
+            audio_bytes=b"fake audio",
+            declared_mime="audio/wav",
+            workspace_settings={"voice.enabled": True},
+            assigned_capabilities={"voice.transcribe", STAFF_CHAT_CAPABILITY},
+            llm_client=RoutedLLMClient(audio_llm),
+            mime_sniffer=_StaticMimeSniffer("audio/wav"),
+            clock=clock,
+        )
+    )
+
+    assert result.transcript == "Report the leaking sink"
+    assert audio_llm.last_messages == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": VOICE_TRANSCRIPTION_PROMPT},
+                {
+                    "type": "input_audio",
+                    "input_audio": {"data": "ZmFrZSBhdWRpbw==", "format": "wav"},
+                },
+            ],
+        }
+    ]
+    rows = list(db_session.scalars(select(LlmUsage)).all())
+    assert len(rows) == 1
+    assert rows[0].capability == "voice.transcribe"
+    assert rows[0].audio_seconds == Decimal("3.500")
+    assert rows[0].fallback_attempts == 0
+
+
+def test_voice_note_transcription_maps_mp4_container_to_m4a_format(
+    db_session: Session,
+    clock: FrozenClock,
+) -> None:
+    ctx, _channel_id = _bind_and_seed(db_session)
+    seed_assignment(
+        db_session,
+        workspace_id=ctx.workspace_id,
+        capability="voice.transcribe",
+        api_model_id="fake/audio-model",
+        model_capabilities=("audio_input",),
+    )
+    audio_llm = ScriptedLLMClient(replies=[make_text_response("mp4 transcript")])
+
+    result = asyncio.run(
+        transcribe_voice_note(
+            ctx,
+            session=db_session,
+            audio_bytes=b"fake mp4 audio",
+            declared_mime="audio/mp4",
+            workspace_settings={"voice.enabled": True},
+            assigned_capabilities={"voice.transcribe", STAFF_CHAT_CAPABILITY},
+            llm_client=RoutedLLMClient(audio_llm),
+            mime_sniffer=_StaticMimeSniffer("audio/mp4"),
+            filename="note.mp4",
+            clock=clock,
+        )
+    )
+
+    assert result.transcript == "mp4 transcript"
+    assert audio_llm.last_messages is not None
+    content = audio_llm.last_messages[0]["content"]
+    assert isinstance(content, list)
+    assert content[1]["input_audio"]["format"] == "m4a"
+
+
+def test_voice_note_transcript_then_staff_chat_intent_are_separate_steps(
+    db_session: Session,
+    bus: EventBus,
+    clock: FrozenClock,
+) -> None:
+    ctx, channel_id = _bind_and_seed(db_session)
+    seed_assignment(
+        db_session,
+        workspace_id=ctx.workspace_id,
+        capability="voice.transcribe",
+        api_model_id="fake/audio-model",
+        model_capabilities=("audio_input",),
+    )
+    audio_llm = ScriptedLLMClient(
+        replies=[make_text_response("Mark the kitchen task done")]
+    )
+    chat_llm = ScriptedLLMClient(
+        replies=[
+            make_tool_call_response("mark_task_done", {"task_id": "task_123"}),
+            make_text_response("Marked it done."),
+        ]
+    )
+    dispatcher = FakeToolDispatcher(
+        responses={
+            "mark_task_done": [
+                ToolResult(
+                    call_id="placeholder",
+                    status_code=200,
+                    body={"id": "task_123", "state": "completed"},
+                    mutated=True,
+                )
+            ]
+        }
+    )
+
+    transcription, outcome = run_staff_chat_voice_turn(
+        ctx,
+        session=db_session,
+        thread_id=channel_id,
+        audio_bytes=b"fake audio",
+        declared_mime="audio/wav",
+        workspace_settings={"voice.enabled": True},
+        assigned_capabilities={"voice.transcribe", STAFF_CHAT_CAPABILITY},
+        routed_llm_client=RoutedLLMClient(audio_llm),
+        chat_llm_client=chat_llm,
+        tool_dispatcher=dispatcher,
+        token_factory=FakeTokenFactory(),
+        trigger="event",
+        mime_sniffer=_StaticMimeSniffer("audio/wav"),
+        event_bus=bus,
+        clock=clock,
+    )
+
+    assert transcription.transcript == "Mark the kitchen task done"
+    assert outcome.outcome == "replied"
+    assert audio_llm.chat_calls == 1
+    assert chat_llm.chat_calls == 2
+    assert dispatcher.captured[0].call.name == "mark_task_done"
+    assert chat_llm.last_messages is not None
+    rendered = "".join(message["content"] for message in chat_llm.last_messages)
+    assert "Mark the kitchen task done" in rendered
+    assert "ZmFrZSBhdWRpbw==" not in rendered
+    assert "input_audio" not in rendered
+    rows = list(
+        db_session.scalars(
+            select(LlmUsage).order_by(LlmUsage.attempt.asc(), LlmUsage.capability.asc())
+        ).all()
+    )
+    assert {row.capability for row in rows} == {
+        "voice.transcribe",
+        STAFF_CHAT_CAPABILITY,
+    }
+
+
+@pytest.mark.parametrize(
+    ("workspace_settings", "assigned_capabilities", "sniffed_type", "error_reason"),
+    [
+        ({"voice.enabled": False}, {"voice.transcribe"}, "audio/wav", "voice_disabled"),
+        ({"voice.enabled": True}, set(), "audio/wav", "voice_disabled"),
+        (
+            {"voice.enabled": True},
+            {"voice.transcribe"},
+            "text/plain",
+            "unsupported_mime",
+        ),
+    ],
+)
+def test_voice_note_failures_do_not_enter_staff_chat(
+    db_session: Session,
+    bus: EventBus,
+    clock: FrozenClock,
+    workspace_settings: dict[str, object],
+    assigned_capabilities: set[str],
+    sniffed_type: str,
+    error_reason: str,
+) -> None:
+    ctx, channel_id = _bind_and_seed(db_session)
+    seed_assignment(
+        db_session,
+        workspace_id=ctx.workspace_id,
+        capability="voice.transcribe",
+        api_model_id="fake/audio-model",
+        model_capabilities=("audio_input",),
+    )
+    audio_llm = ScriptedLLMClient(replies=[make_text_response("ignored")])
+    chat_llm = ScriptedLLMClient(replies=[make_text_response("ignored")])
+    dispatcher = FakeToolDispatcher()
+
+    with pytest.raises(VoiceTranscriptionUnavailable) as exc_info:
+        run_staff_chat_voice_turn(
+            ctx,
+            session=db_session,
+            thread_id=channel_id,
+            audio_bytes=b"fake audio",
+            declared_mime="audio/wav",
+            workspace_settings=workspace_settings,
+            assigned_capabilities=assigned_capabilities,
+            routed_llm_client=RoutedLLMClient(audio_llm),
+            chat_llm_client=chat_llm,
+            tool_dispatcher=dispatcher,
+            token_factory=FakeTokenFactory(),
+            trigger="event",
+            mime_sniffer=_StaticMimeSniffer(sniffed_type),
+            event_bus=bus,
+            clock=clock,
+        )
+
+    assert exc_info.value.reason == error_reason
+    assert chat_llm.chat_calls == 0
+    assert dispatcher.captured == []
+
+
+def test_voice_provider_failure_does_not_enter_staff_chat(
+    db_session: Session,
+    bus: EventBus,
+    clock: FrozenClock,
+) -> None:
+    ctx, channel_id = _bind_and_seed(db_session)
+    seed_assignment(
+        db_session,
+        workspace_id=ctx.workspace_id,
+        capability="voice.transcribe",
+        api_model_id="fake/audio-model",
+        model_capabilities=("audio_input",),
+    )
+    audio_llm = ScriptedLLMClient(replies=[LlmProviderError("upstream rejected")])
+    chat_llm = ScriptedLLMClient(replies=[make_text_response("ignored")])
+    dispatcher = FakeToolDispatcher()
+
+    with pytest.raises(VoiceTranscriptionUnavailable) as exc_info:
+        run_staff_chat_voice_turn(
+            ctx,
+            session=db_session,
+            thread_id=channel_id,
+            audio_bytes=b"fake audio",
+            declared_mime="audio/wav",
+            workspace_settings={"voice.enabled": True},
+            assigned_capabilities={"voice.transcribe"},
+            routed_llm_client=RoutedLLMClient(audio_llm),
+            chat_llm_client=chat_llm,
+            tool_dispatcher=dispatcher,
+            token_factory=FakeTokenFactory(),
+            trigger="event",
+            mime_sniffer=_StaticMimeSniffer("audio/wav"),
+            event_bus=bus,
+            clock=clock,
+        )
+
+    assert exc_info.value.reason == "provider_failed"
+    assert chat_llm.chat_calls == 0
+    assert dispatcher.captured == []
+
+
+def test_voice_unassigned_failure_does_not_enter_staff_chat(
+    db_session: Session,
+    bus: EventBus,
+    clock: FrozenClock,
+) -> None:
+    ctx, channel_id = _bind_and_seed(db_session)
+    audio_llm = ScriptedLLMClient(replies=[make_text_response("ignored")])
+    chat_llm = ScriptedLLMClient(replies=[make_text_response("ignored")])
+    dispatcher = FakeToolDispatcher()
+
+    with pytest.raises(VoiceTranscriptionUnavailable) as exc_info:
+        run_staff_chat_voice_turn(
+            ctx,
+            session=db_session,
+            thread_id=channel_id,
+            audio_bytes=b"fake audio",
+            declared_mime="audio/wav",
+            workspace_settings={"voice.enabled": True},
+            assigned_capabilities={"voice.transcribe"},
+            routed_llm_client=RoutedLLMClient(audio_llm),
+            chat_llm_client=chat_llm,
+            tool_dispatcher=dispatcher,
+            token_factory=FakeTokenFactory(),
+            trigger="event",
+            mime_sniffer=_StaticMimeSniffer("audio/wav"),
+            event_bus=bus,
+            clock=clock,
+        )
+
+    assert exc_info.value.reason == "voice_unassigned"
+    assert audio_llm.chat_calls == 0
+    assert chat_llm.chat_calls == 0
+    assert dispatcher.captured == []
+
+
+def test_voice_oversize_failure_does_not_enter_staff_chat(
+    db_session: Session,
+    bus: EventBus,
+    clock: FrozenClock,
+) -> None:
+    ctx, channel_id = _bind_and_seed(db_session)
+    seed_assignment(
+        db_session,
+        workspace_id=ctx.workspace_id,
+        capability="voice.transcribe",
+        api_model_id="fake/audio-model",
+        model_capabilities=("audio_input",),
+    )
+    audio_llm = ScriptedLLMClient(replies=[make_text_response("ignored")])
+    chat_llm = ScriptedLLMClient(replies=[make_text_response("ignored")])
+    dispatcher = FakeToolDispatcher()
+
+    with pytest.raises(VoiceTranscriptionUnavailable) as exc_info:
+        run_staff_chat_voice_turn(
+            ctx,
+            session=db_session,
+            thread_id=channel_id,
+            audio_bytes=b"x" * (25 * 1024 * 1024 + 1),
+            declared_mime="audio/wav",
+            workspace_settings={"voice.enabled": True},
+            assigned_capabilities={"voice.transcribe"},
+            routed_llm_client=RoutedLLMClient(audio_llm),
+            chat_llm_client=chat_llm,
+            tool_dispatcher=dispatcher,
+            token_factory=FakeTokenFactory(),
+            trigger="event",
+            mime_sniffer=_StaticMimeSniffer("audio/wav"),
+            event_bus=bus,
+            clock=clock,
+        )
+
+    assert exc_info.value.reason == "audio_too_large"
+    assert audio_llm.chat_calls == 0
+    assert chat_llm.chat_calls == 0
+    assert dispatcher.captured == []
+
+
+def test_voice_audio_conversion_failure_does_not_enter_staff_chat(
+    db_session: Session,
+    bus: EventBus,
+    clock: FrozenClock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx, channel_id = _bind_and_seed(db_session)
+    seed_assignment(
+        db_session,
+        workspace_id=ctx.workspace_id,
+        capability="voice.transcribe",
+        api_model_id="fake/audio-model",
+        model_capabilities=("audio_input",),
+        audio_input_transform="wav_16khz_mono",
+    )
+
+    def fail_transform(
+        audio_ref: dict[str, object], transform: str
+    ) -> dict[str, object]:
+        del audio_ref, transform
+        raise MediaTransformError("conversion failed")
+
+    monkeypatch.setattr(client_module, "normalize_audio_ref", fail_transform)
+    audio_llm = ScriptedLLMClient(replies=[make_text_response("ignored")])
+    chat_llm = ScriptedLLMClient(replies=[make_text_response("ignored")])
+    dispatcher = FakeToolDispatcher()
+
+    with pytest.raises(VoiceTranscriptionUnavailable) as exc_info:
+        run_staff_chat_voice_turn(
+            ctx,
+            session=db_session,
+            thread_id=channel_id,
+            audio_bytes=b"fake audio",
+            declared_mime="audio/wav",
+            workspace_settings={"voice.enabled": True},
+            assigned_capabilities={"voice.transcribe"},
+            routed_llm_client=RoutedLLMClient(audio_llm),
+            chat_llm_client=chat_llm,
+            tool_dispatcher=dispatcher,
+            token_factory=FakeTokenFactory(),
+            trigger="event",
+            mime_sniffer=_StaticMimeSniffer("audio/wav"),
+            event_bus=bus,
+            clock=clock,
+        )
+
+    assert exc_info.value.reason == "audio_conversion_failed"
+    assert audio_llm.chat_calls == 0
+    assert chat_llm.chat_calls == 0
+    assert dispatcher.captured == []
 
 
 def test_staff_chat_turn_uses_employee_capability_and_worker_channel(

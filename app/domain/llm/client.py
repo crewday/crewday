@@ -85,6 +85,7 @@ from app.domain.llm.budget import (
     estimate_cost_usd,
 )
 from app.domain.llm.consent import load_consent_set
+from app.domain.llm.media import normalize_audio_ref
 from app.domain.llm.router import (
     CapabilityUnassignedError,
     ModelPick,
@@ -418,17 +419,11 @@ class LLMClient:
             started = c.now()
             try:
                 response = await asyncio.to_thread(
-                    self._adapter.chat,
-                    model_id=model_pick.api_model_id,
-                    messages=_copy_chat_messages(prepared_messages),
+                    _adapter_chat_for_model,
+                    self._adapter,
+                    model_pick=model_pick,
+                    messages=prepared_messages,
                     max_tokens=max_output_tokens or model_pick.max_tokens or 1024,
-                    temperature=(
-                        model_pick.temperature
-                        if model_pick.temperature is not None
-                        else 0.0
-                    ),
-                    thinking_level=model_pick.thinking_level,
-                    thinking_strategy=model_pick.thinking_strategy,
                     tools=tools,
                     consents=effective_consents,
                 )
@@ -622,6 +617,50 @@ class LLMClient:
 
 def _copy_chat_messages(messages: Sequence[ChatMessage]) -> list[ChatMessage]:
     return deepcopy(list(messages))
+
+
+def _adapter_chat_for_model(
+    adapter: LLMAdapter,
+    *,
+    model_pick: ModelPick,
+    messages: Sequence[ChatMessage],
+    max_tokens: int,
+    tools: Sequence[Tool] | None,
+    consents: ConsentSet | None,
+) -> LLMResponse:
+    return adapter.chat(
+        model_id=model_pick.api_model_id,
+        messages=_messages_for_model(messages, model_pick),
+        max_tokens=max_tokens,
+        temperature=(
+            model_pick.temperature if model_pick.temperature is not None else 0.0
+        ),
+        thinking_level=model_pick.thinking_level,
+        thinking_strategy=model_pick.thinking_strategy,
+        tools=tools,
+        consents=consents,
+    )
+
+
+def _messages_for_model(
+    messages: Sequence[ChatMessage], model_pick: ModelPick
+) -> list[ChatMessage]:
+    copied = _copy_chat_messages(messages)
+    if model_pick.audio_input_transform == "passthrough":
+        return copied
+
+    for message in copied:
+        content = message["content"]
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if block["type"] != "input_audio":
+                continue
+            block["input_audio"] = normalize_audio_ref(
+                block["input_audio"],
+                transform=model_pick.audio_input_transform,
+            )
+    return copied
 
 
 def build_user_chat_messages(

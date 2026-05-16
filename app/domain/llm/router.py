@@ -112,6 +112,7 @@ from app.adapters.db.llm.models import (
 from app.adapters.llm.ports import LlmThinkingLevel, LlmThinkingStrategy
 from app.config import get_settings
 from app.demo.guardrails import demo_free_model_pick, llm_capability_allowed_in_demo
+from app.domain.llm.media import AudioInputTransform, coerce_audio_input_transform
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import LlmAssignmentChanged
@@ -246,6 +247,7 @@ class ModelPick:
     extra_api_params: Mapping[str, Any] = field(default_factory=dict)
     thinking_level: LlmThinkingLevel = "disabled"
     thinking_strategy: LlmThinkingStrategy = "none"
+    audio_input_transform: AudioInputTransform = "passthrough"
     # Capability tags copied from the §11 catalogue on save
     # (``vision``, ``json_mode``, …). Adapter cross-checks the
     # target model before dispatch.
@@ -589,6 +591,9 @@ def _to_pick(
         extra_api_params=extra,
         thinking_level=thinking_level,
         thinking_strategy=thinking_strategy,
+        audio_input_transform=coerce_audio_input_transform(
+            provider_model.audio_input_transform
+        ),
         required_capabilities=required,
         assignment_id=row.id,
     )
