@@ -231,15 +231,17 @@ feedback_submission
 ├── moderation_decision        text NULL — keep | reject (set by the agent pipeline)
 ├── moderation_reason          text NULL — abuse | gibberish | nsfw | off_topic (on reject)
 ├── reformulated_title         text NULL — ≤120 chars; set on keep; THIS is what the public board shows
-├── reformulated_body          text NULL — ≤500 chars; set on keep; internal only (used for clustering prompt)
-├── embedding                  vector(384)  — embedding of `reformulated_title + "\n" + reformulated_body`; cosine
+├── reformulated_body          text NULL — ≤500 chars; set on keep; internal only (operator review / trace)
+├── embedding_title_en         text NULL — ≤120 chars; canonical English title used for embeddings + clustering
+├── embedding_body_en          text NULL — ≤500 chars; canonical English body used for embeddings + clustering
+├── embedding                  vector(384)  — embedding of `embedding_title_en + "\n" + embedding_body_en`; cosine
 ├── embedded_at                tstz NULL — timestamp of the embedding pass (for reprocessing)
 └── moderation_note            text NULL — operator-free-text when hidden/spam (post-hoc correction)
 
 feedback_cluster
 ├── id                     ULID PK
-├── summary                text — one-line label (≤120 chars), set by the clustering agent
-├── description            text NULL — optional 2-3 sentence elaboration
+├── summary                text — one-line English label (≤120 chars), set by the clustering agent
+├── description            text NULL — optional English 2-3 sentence elaboration
 ├── summary_embedding      vector(384) — embedding of `summary + "\n" + (description ?? "")`; cosine
 ├── submission_count       int — denormalised count of non-hidden, non-rejected members
 ├── first_submitted_at     tstz
@@ -320,15 +322,22 @@ so the audit table is the single source of truth for ban history.
 - **`body` is stored after the regex redaction pass** in "PII
   posture" — email addresses, phone numbers, long digit strings,
   URLs are rewritten to placeholders before the row is inserted.
-  It is then fed to the agent pipeline; from that point on, only
-  the agent's `reformulated_title` / `reformulated_body` are used
-  in prompts and public rendering.
+  It is then fed to the agent pipeline; from that point on, public
+  submission rendering uses the agent's `reformulated_title`, while
+  prompts and vector search use the canonical `embedding_*_en`
+  fields plus the reformulated text only as trace/display context.
 - **Embeddings are 384-dimensional `float32`** under v1, matching
   the seeded embedding model (see §03 and app §11). The dimension
   is a deployment-time choice; changing it requires a migration
   that re-embeds every submission and cluster. The RPC contract
   (§03) includes the dimension in the response so the site can
   detect a silent mismatch.
+- **Embedding input is canonical English.** `feedback.moderate`
+  emits `embedding_title_en` / `embedding_body_en` for every kept
+  submission. For English submissions they may match the
+  reformulated display fields; for any other language they are the
+  concise English translation/paraphrase used for vector search,
+  cluster prompts, and future re-embeds. `/embed` never translates.
 - **Vector index**: SQLite uses a `sqlite-vec` virtual table
   keyed by `id`; Postgres uses a `vector_cosine_ops` IVF index.
   Either way the site-api code paths only see a single SQL layer
@@ -344,7 +353,8 @@ and the embedding model.
 ```
                       ┌─────────────────────────┐
 submit ──────────────▶│ 1. moderate + reformulate
-                      │   + embed (one RPC)    │
+                      │   + canonicalize + embed
+                      │   (one RPC)            │
                       └────────────┬────────────┘
                                    │
                     reject │ keep  │
@@ -402,9 +412,13 @@ moderation verdict.
   imperative or noun phrase: "Let the agent assign tasks based on
   room type". This is what the board shows.
 - `reformulated_body` — cleaned-up 2-3 sentence paraphrase (≤ 500
-  chars) in the submission's detected language. Used for the
-  clustering prompt in stage 3 and for operator review via CLI.
-  Never rendered publicly.
+  chars) in the submission's detected language. Used for operator
+  review via CLI. Never rendered publicly.
+- `embedding_title_en` / `embedding_body_en` — concise English
+  canonical text used for embeddings and cluster prompts. For
+  English submissions these may be identical to the reformulated
+  fields; otherwise they are a translation/paraphrase that preserves
+  the same intent without adding detail.
 - `detected_language` — two-letter ISO code.
 
 The agent does **not** invent content. If the submission is
@@ -412,16 +426,16 @@ unclear, the title captures the uncertainty (e.g. "Unclear request
 related to scheduling") rather than making up specifics.
 
 **Embedding** — the agent returns a 384-dim `float32` vector of
-`reformulated_title + "\n" + reformulated_body`. Normalised to
+`embedding_title_en + "\n" + embedding_body_en`. Normalised to
 unit length so cosine similarity = dot product. v1 default model
 is a locally-run `BAAI/bge-small-en-v1.5` via the app's
 `feedback.embed` capability (app §11); larger / hosted models can
-be swapped in without changing this spec. v1 concatenates title
-and body with a single newline; if real-corpus recall trends
-body-heavy (a sparse title plus a long body drowning out the
-title's signal), a known-tunable next pass is to repeat the title
-2-3× before the body to bias the embedding toward it. Treat as a
-recall lever, not a v1 change.
+be swapped in without changing this spec. v1 concatenates the
+canonical English title and body with a single newline; if
+real-corpus recall trends body-heavy (a sparse title plus a long
+body drowning out the title's signal), a known-tunable next pass is
+to repeat the title 2-3× before the body to bias the embedding
+toward it. Treat as a recall lever, not a v1 change.
 
 Stage 1 is **synchronous** on submit, under a 3 s budget. Timeouts
 or non-200 responses → the submission is stored with
@@ -455,9 +469,11 @@ LIMIT :k
 ### Stage 3 — cluster assignment
 
 RPC: `POST /_internal/feedback/cluster` (§03). Input is the
-reformulated pair plus the top-K candidates. Output is either an
-existing `cluster_id` (from the candidates) or `new_cluster` with
-a `new_summary`, `new_description`, and `new_summary_embedding`.
+canonical English embedding pair plus the top-K candidates; the
+reformulated pair is included only as trace/display context. Output
+is either an existing `cluster_id` (from the candidates) or
+`new_cluster` with an English `new_summary`, `new_description`, and
+`new_summary_embedding`.
 
 - The LLM sees **only the top-K candidates**, not the entire
   cluster set. The site has already pre-filtered with embeddings,
@@ -587,8 +603,8 @@ site-admin submissions hide <id> [--reason "<free text>"]
 site-admin submissions rejected-list [--reason <category>] [--since <ts>]
 site-admin submissions unreject <id>              # clears reject, re-runs the pipeline
 site-admin submissions reprocess <id>             # force-re-run the pipeline on a kept submission
-site-admin submissions force-keep <id> --title "..." --body "..."  # operator authors reformulated text and skips the pipeline
-site-admin submissions show <id>                  # shows verbatim body + reformulated pair + agent's reasoning
+site-admin submissions force-keep <id> --title "..." --body "..." [--embedding-title-en "..."] [--embedding-body-en "..."]  # operator authors kept text and skips the pipeline
+site-admin submissions show <id>                  # shows verbatim body + reformulated pair + English embedding text + agent's reasoning
 
 site-admin notify <cluster-id>                    # dispatches "your idea is now in progress" emails
 ```
@@ -614,12 +630,17 @@ site-admin notify <cluster-id>                    # dispatches "your idea is now
 - `submissions force-keep` is the operator escape hatch for a
   submission the agent persistently rejects (or that fails the
   pipeline entirely). It writes the operator-supplied
-  `reformulated_title` / `reformulated_body` directly, sets
+  `reformulated_title` / `reformulated_body` and
+  `embedding_title_en` / `embedding_body_en` directly, sets
   `moderation_decision='keep'` and `status='accepted'`, and queues
   a `/embed` call to populate `embedding` so the next batch
-  re-cluster pass can place the submission. Editing
+  re-cluster pass can place the submission. If the operator omits
+  the English fields, the CLI defaults them to the reformulated
+  fields and warns that non-English display text needs explicit
+  English embedding text for reliable clustering. Editing
   `moderation_decision` directly in the DB is **not** an escape
-  hatch: such a row has no `reformulated_*` and no `embedding`,
+  hatch: such a row has no `reformulated_*`, no `embedding_*_en`,
+  and no `embedding`,
   so the pipeline cannot cluster it until `reprocess` is run; the
   CLI is the supported path.
 

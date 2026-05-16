@@ -295,8 +295,10 @@ this roadmap are:
   `/_internal/feedback/*` routes, and a new `embeddings` tag on
   `llm_model`. The default `feedback.embed` model is a bundled
   local ONNX embedder (`BAAI/bge-small-en-v1.5` via fastembed,
-  ~30 MB in the image). All three capabilities are off by
-  default on self-host.
+  ~30 MB in the image). The moderation capability emits canonical
+  English embedding text so the English local embedder can cluster
+  multilingual submissions consistently. All three capabilities are
+  off by default on self-host.
 
 None of these land on self-host deployments by default; they are
 SaaS-operator configurations at `crew.day`.

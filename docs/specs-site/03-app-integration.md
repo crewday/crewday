@@ -34,9 +34,9 @@ Three endpoints under `/_internal/feedback/`:
 
 | Path | Capability (app §11) | Purpose |
 |------|----------------------|---------|
-| `POST /_internal/feedback/moderate` | `feedback.moderate` | Decide keep/reject + (on keep) reformulate + embed |
+| `POST /_internal/feedback/moderate` | `feedback.moderate` | Decide keep/reject + (on keep) reformulate + emit English embedding text + embed |
 | `POST /_internal/feedback/embed` | `feedback.embed` | Embed one or more texts — used post-hoc for new cluster summaries, operator-triggered re-embeds, and the fallback path when `moderate` returned no vector |
-| `POST /_internal/feedback/cluster` | `feedback.cluster` | Assign a reformulated submission to one of a top-K candidate list, or propose a new cluster |
+| `POST /_internal/feedback/cluster` | `feedback.cluster` | Assign a canonical English submission to one of a top-K candidate list, or propose a new cluster |
 
 All three share the same auth, the same shared errors, the same
 versioning. The `/_internal/` prefix carries the same
@@ -105,8 +105,9 @@ Request:
   sends or stores a source discriminator.
 - `policy.embed`: `true` means return an embedding in the same
   call (routes to `feedback.embed` internally). `false` means the
-  site will call `/embed` separately — useful when the operator
-  is reprocessing moderation only.
+  site will call `/embed` separately with the returned
+  `embedding_title_en + "\n" + embedding_body_en` — useful when
+  the operator is reprocessing moderation only.
 
 Response (keep):
 
@@ -122,6 +123,8 @@ Response (keep):
     "decision": "keep",
     "reformulated_title": "Let the agent set per-room cleaning cadence",
     "reformulated_body": "The submitter wants to tell the agent that some rooms (e.g. bedrooms) need a deep clean weekly, while others need it less often, so the auto-scheduled tasks respect per-room frequency.",
+    "embedding_title_en": "Let the agent set per-room cleaning cadence",
+    "embedding_body_en": "The submitter wants per-room cleaning frequency rules so the agent can schedule deep cleans for bedrooms weekly and schedule other rooms less often.",
     "detected_language": "en",
     "reasoning": "Clear feature request for per-room cleaning cadence; constructive tone; English.",
     "embedding": [0.0213, -0.0184, ...]
@@ -145,6 +148,8 @@ Response (reject):
     "reasoning": "Fewer than 5 real words across any supported language.",
     "reformulated_title": null,
     "reformulated_body": null,
+    "embedding_title_en": null,
+    "embedding_body_en": null,
     "detected_language": null,
     "embedding": null
   }
@@ -162,6 +167,12 @@ Notes:
   to the submitter.
 - `reformulated_title` ≤ 120 chars; `reformulated_body` ≤ 500
   chars. The app enforces both caps on its side.
+- `embedding_title_en` ≤ 120 chars; `embedding_body_en` ≤ 500
+  chars. They are present on every `keep`, regardless of
+  `policy.embed`, because the site stores them as the stable source
+  text for vector search and later re-embeds. They are concise
+  English canonical text derived from the reformulated fields; they
+  may be identical when `detected_language="en"`.
 - `embedding` is present only when `policy.embed=true` **and**
   `decision=keep`. Array of `embed_dim` `float32` numbers, unit-
   normalised (L2). `embed_dim` matches the assigned embedding
@@ -174,9 +185,10 @@ JSON-encoded). Above cap → `413`.
 
 ### Endpoint 2 — `/embed`
 
-Pure embedding service. No LLM call in this path; the app talks
-directly to the configured embedding model (local or hosted; see
-app §11).
+Pure embedding service. No LLM call and no translation in this path;
+the app talks directly to the configured embedding model (local or
+hosted; see app §11). Feedback-pipeline callers pass canonical
+English text produced by `feedback.moderate`.
 
 Request:
 
@@ -207,6 +219,10 @@ Response:
   size ≤ 256 KiB. The response `embeddings` array has the same
   length and the same ordering. Site gets a 400 if lengths
   disagree.
+- For feedback submissions, each text is exactly
+  `embedding_title_en + "\n" + embedding_body_en`. For cluster
+  summaries, each text is `summary + "\n" + (description ?? "")`;
+  cluster summaries and descriptions are English.
 - `llm_cost_usd` is `0.0` for locally-run models; the metering
   still uses the call against the `feedback.embed` deployment
   budget as a safety net if a hosted model ever replaces the
@@ -242,7 +258,9 @@ Request (synchronous, batch of 1):
     {
       "ref": "sub_01JK...",
       "reformulated_title": "Let the agent set per-room cleaning cadence",
-      "reformulated_body": "The submitter wants..."
+      "reformulated_body": "The submitter wants...",
+      "embedding_title_en": "Let the agent set per-room cleaning cadence",
+      "embedding_body_en": "The submitter wants per-room cleaning frequency rules..."
     }
   ],
   "policy": {
@@ -259,6 +277,10 @@ Request (scheduled batch):
 
 - Same shape, but `submissions` may be up to 50 items per call,
   each requesting its own assignment.
+- `embedding_title_en` / `embedding_body_en` are the primary fields
+  the clustering model reasons over. `reformulated_*` fields are
+  trace/display context only and may be in the submitter's detected
+  language.
 - `candidates` is the **union** of the per-submission top-K
   candidates the site retrieved locally; the app may use any
   candidate from the array for any submission. Cap `candidates`
@@ -334,6 +356,8 @@ Notes:
   `candidates[].id` values the site passed in, or the literal
   `"new_cluster"`. Any other value → site rejects the response
   as malformed and retries with `force_existing_only=true`.
+- `new_summary` and `new_description` are English because they seed
+  the public cluster and its future `summary_embedding`.
 - `new_summary_embedding` is present iff
   `policy.return_new_summary_embedding=true` and `cluster_id="new_cluster"`.
   Saves a follow-up `/embed` call.

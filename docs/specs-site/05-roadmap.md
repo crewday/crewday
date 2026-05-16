@@ -101,7 +101,8 @@ refused. Operator can walk the backlog via CLI.
 The big phase: three new capabilities on the app side, a vector
 store on the site side, and the public board lights up.
 
-- `reformulated_title`, `reformulated_body`, `embedding`,
+- `reformulated_title`, `reformulated_body`,
+  `embedding_title_en`, `embedding_body_en`, `embedding`,
   `moderation_decision`, `moderation_reason`, `detected_language`,
   `embedded_at` columns added to `feedback_submission`
   (migration).
@@ -125,12 +126,13 @@ store on the site side, and the public board lights up.
 - **Site-side pipeline:**
   - Stage 1 (sync on submit): call `/moderate` with
     `policy.embed=true`. Reject → store + done. Keep → store
-    reformulated + embedding.
+    reformulated display text, canonical English embedding text, and
+    embedding.
   - Stage 2: local vector search for top-K (default 8) candidate
     clusters.
-  - Stage 3: call `/cluster` with reformulated + candidates.
-    Store assignment; if `new_cluster`, create the cluster with
-    the returned `new_summary_embedding`.
+  - Stage 3: call `/cluster` with canonical English embedding text
+    + candidates. Store assignment; if `new_cluster`, create the
+    cluster with the returned `new_summary_embedding`.
   - Scheduled batch worker every 6 h: re-runs pending
     submissions through the pipeline, runs the merge-check pass
     on near-duplicate cluster pairs.

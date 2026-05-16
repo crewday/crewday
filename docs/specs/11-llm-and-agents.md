@@ -927,9 +927,9 @@ check returns `422 assignment_missing_capability`.
 | `chat.detect_language` | Detect message language for auto-translation (§10, §18)                     | `chat`, `json_mode`          |
 | `chat.translate`       | Translate a message into the workspace default language (§10, §18)          | `chat`                       |
 | `documents.ocr`        | Vision fallback for image-bearing documents when local OCR yields no text   | `vision`                     |
-| `feedback.moderate`    | **Deployment-scope.** Moderate + reformulate one marketing-site suggestion — called from `site/` over `/_internal/feedback/moderate`. Emits a keep/reject verdict plus (on keep) `reformulated_title`, `reformulated_body`, and `detected_language`. May emit an embedding in-line when `policy.embed=true`. | `chat`, `json_mode`          |
-| `feedback.embed`       | **Deployment-scope.** Compute dense embeddings for one or more texts — called from `site/` over `/_internal/feedback/embed`. Used by the suggestion-box pipeline for submission embeddings, cluster summary embeddings, and operator re-embeds. | `embeddings`                 |
-| `feedback.cluster`     | **Deployment-scope.** Classify a reformulated marketing-site submission against a site-provided top-K candidate list, or propose a new cluster — called from `site/` over `/_internal/feedback/cluster`. | `chat`, `json_mode`          |
+| `feedback.moderate`    | **Deployment-scope.** Moderate + reformulate one marketing-site suggestion — called from `site/` over `/_internal/feedback/moderate`. Emits a keep/reject verdict plus (on keep) `reformulated_title`, `reformulated_body`, `detected_language`, and canonical English `embedding_title_en` / `embedding_body_en`. May emit an embedding in-line when `policy.embed=true`. | `chat`, `json_mode`          |
+| `feedback.embed`       | **Deployment-scope.** Compute dense embeddings for one or more canonical English texts — called from `site/` over `/_internal/feedback/embed`. Used by the suggestion-box pipeline for submission embeddings, cluster summary embeddings, and operator re-embeds. It does not translate. | `embeddings`                 |
+| `feedback.cluster`     | **Deployment-scope.** Classify a canonical English marketing-site submission against a site-provided top-K candidate list, or propose a new cluster — called from `site/` over `/_internal/feedback/cluster`. | `chat`, `json_mode`          |
 
 The `required_capabilities` column lives in code — capabilities are a
 closed enum declared by the application, not workspace-configurable.
@@ -970,6 +970,12 @@ rather than the workspace audit log.
   Cohere, OpenAI, Google) is a pure-data change — a new
   `llm_provider` + `llm_provider_model` row plus an
   `llm_assignment` override.
+- The suggestion-box pipeline embeds canonical English text. The
+  `feedback.moderate` assignment is responsible for producing that
+  text for every kept submission; `feedback.embed` only vectorises
+  the strings it receives. This keeps the default English embedding
+  model viable while preserving detected-language reformulations for
+  operator review.
 - `feedback.moderate` and `feedback.cluster` default to
   `google/gemma-4-31b-it` — same default chain as other
   classify-small-text capabilities.
