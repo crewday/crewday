@@ -195,6 +195,21 @@ class AdminAgentActionReplayFailed(ServiceUnavailable):
     type_name = "admin_agent_action_replay_failed"
 
 
+def _admin_agent_self_openapi(
+    verb: str, summary: str, *, mutates: bool
+) -> dict[str, object]:
+    return {
+        "x-agent-forbidden": True,
+        "x-cli": {
+            "hidden": True,
+            "group": "agent",
+            "verb": verb,
+            "summary": summary,
+            "mutates": mutates,
+        },
+    }
+
+
 def build_admin_agent_router() -> APIRouter:
     """Return the deployment-admin agent sidebar router."""
 
@@ -204,6 +219,9 @@ def build_admin_agent_router() -> APIRouter:
         "/log",
         response_model=list[AdminAgentMessage],
         operation_id="admin.agent.log.list",
+        openapi_extra=_admin_agent_self_openapi(
+            "log-list", "List this admin agent transcript", mutates=False
+        ),
     )
     def get_log(ctx: _Ctx, session: _Db) -> list[AdminAgentMessage]:
         # justification: deployment-admin transcript rows are not workspace-scoped.
@@ -223,6 +241,9 @@ def build_admin_agent_router() -> APIRouter:
         response_model=AdminAgentMessage,
         status_code=status.HTTP_201_CREATED,
         operation_id="admin.agent.message.create",
+        openapi_extra=_admin_agent_self_openapi(
+            "message-create", "Send a message to this admin agent", mutates=True
+        ),
     )
     def post_message(
         request: Request,
@@ -351,6 +372,9 @@ def build_admin_agent_router() -> APIRouter:
         "/actions",
         response_model=list[AdminAgentAction],
         operation_id="admin.agent.actions.list",
+        openapi_extra=_admin_agent_self_openapi(
+            "actions-list", "List pending actions for this admin agent", mutates=False
+        ),
     )
     def get_actions(ctx: _Ctx, session: _Db) -> list[AdminAgentAction]:
         # justification: deployment-admin action rows are not workspace-scoped.
@@ -373,6 +397,9 @@ def build_admin_agent_router() -> APIRouter:
         "/action/{action_id}/approve",
         response_model=AdminAgentDecisionResponse,
         operation_id="admin.agent.action.approve",
+        openapi_extra=_admin_agent_self_openapi(
+            "action-approve", "Approve this admin agent action", mutates=True
+        ),
     )
     def approve_action(
         action_id: str,
@@ -392,6 +419,9 @@ def build_admin_agent_router() -> APIRouter:
         "/action/{action_id}/deny",
         response_model=AdminAgentDecisionResponse,
         operation_id="admin.agent.action.deny",
+        openapi_extra=_admin_agent_self_openapi(
+            "action-deny", "Deny this admin agent action", mutates=True
+        ),
     )
     def deny_action(
         action_id: str,

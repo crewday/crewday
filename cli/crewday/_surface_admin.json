@@ -1110,109 +1110,6 @@
     }
   },
   {
-    "body_schema_ref": null,
-    "group": "admin-agent",
-    "http": {
-      "method": "GET",
-      "path": "/admin/api/v1/agent/actions"
-    },
-    "idempotent": true,
-    "name": "agent-actions-list",
-    "operation_id": "admin.agent.actions.list",
-    "path_params": [],
-    "query_params": [],
-    "response_schema_ref": null,
-    "summary": "Get Actions",
-    "x_agent_confirm": null,
-    "x_cli": null
-  },
-  {
-    "body_schema_ref": null,
-    "group": "admin-agent",
-    "http": {
-      "method": "GET",
-      "path": "/admin/api/v1/agent/log"
-    },
-    "idempotent": true,
-    "name": "agent-log-list",
-    "operation_id": "admin.agent.log.list",
-    "path_params": [],
-    "query_params": [],
-    "response_schema_ref": null,
-    "summary": "Get Log",
-    "x_agent_confirm": null,
-    "x_cli": null
-  },
-  {
-    "body_schema_ref": null,
-    "group": "admin-agent",
-    "http": {
-      "method": "POST",
-      "path": "/admin/api/v1/agent/action/{action_id}/approve"
-    },
-    "idempotent": false,
-    "name": "approve",
-    "operation_id": "admin.agent.action.approve",
-    "path_params": [
-      {
-        "name": "action_id",
-        "required": true,
-        "schema": {
-          "title": "Action Id",
-          "type": "string"
-        }
-      }
-    ],
-    "query_params": [],
-    "response_schema_ref": "#/components/schemas/AdminAgentDecisionResponse",
-    "summary": "Approve Action",
-    "x_agent_confirm": null,
-    "x_cli": null
-  },
-  {
-    "body_schema_ref": null,
-    "group": "admin-agent",
-    "http": {
-      "method": "POST",
-      "path": "/admin/api/v1/agent/action/{action_id}/deny"
-    },
-    "idempotent": false,
-    "name": "deny",
-    "operation_id": "admin.agent.action.deny",
-    "path_params": [
-      {
-        "name": "action_id",
-        "required": true,
-        "schema": {
-          "title": "Action Id",
-          "type": "string"
-        }
-      }
-    ],
-    "query_params": [],
-    "response_schema_ref": "#/components/schemas/AdminAgentDecisionResponse",
-    "summary": "Deny Action",
-    "x_agent_confirm": null,
-    "x_cli": null
-  },
-  {
-    "body_schema_ref": "#/components/schemas/AdminAgentMessageRequest",
-    "group": "admin-agent",
-    "http": {
-      "method": "POST",
-      "path": "/admin/api/v1/agent/message"
-    },
-    "idempotent": false,
-    "name": "message",
-    "operation_id": "admin.agent.message.create",
-    "path_params": [],
-    "query_params": [],
-    "response_schema_ref": "#/components/schemas/AdminAgentMessage",
-    "summary": "Post Message",
-    "x_agent_confirm": null,
-    "x_cli": null
-  },
-  {
     "body_schema_ref": "#/components/schemas/AssignmentPayload-Input",
     "group": "llm",
     "http": {
@@ -1227,7 +1124,12 @@
     "response_schema_ref": "#/components/schemas/LlmAssignmentResponse",
     "summary": "Create Assignment",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Create an LLM assignment",
+      "verb": "assignments"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1253,7 +1155,12 @@
     "response_schema_ref": null,
     "summary": "Delete Assignment",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Delete an LLM assignment",
+      "verb": "assignments-delete"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1270,7 +1177,12 @@
     "response_schema_ref": null,
     "summary": "List Assignments",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": false,
+      "summary": "List LLM assignments",
+      "verb": "assignments-list"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1287,7 +1199,12 @@
     "response_schema_ref": null,
     "summary": "Reorder Assignments",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Reorder LLM assignments",
+      "verb": "assignments-reorder-update"
+    }
   },
   {
     "body_schema_ref": "#/components/schemas/AssignmentUpdatePayload",
@@ -1313,7 +1230,12 @@
     "response_schema_ref": "#/components/schemas/LlmAssignmentResponse",
     "summary": "Update Assignment",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Update an LLM assignment",
+      "verb": "assignments-replace"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1339,7 +1261,12 @@
     "response_schema_ref": "#/components/schemas/LlmAssignmentResponse",
     "summary": "Get Assignment",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": false,
+      "summary": "Show an LLM assignment",
+      "verb": "assignments-show"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1428,7 +1355,12 @@
     "response_schema_ref": null,
     "summary": "List Calls",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": false,
+      "summary": "List LLM calls",
+      "verb": "calls-list"
+    }
   },
   {
     "body_schema_ref": "#/components/schemas/LlmProviderModelEmbeddingSmokeRequest",
@@ -1454,7 +1386,12 @@
     "response_schema_ref": "#/components/schemas/LlmProviderModelEmbeddingSmokeResponse",
     "summary": "Provider Model Embedding Smoke",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Run a provider-model embedding smoke test",
+      "verb": "embedding-smoke"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1471,7 +1408,12 @@
     "response_schema_ref": "#/components/schemas/LlmGraphPayload",
     "summary": "Graph",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": false,
+      "summary": "Read the full LLM graph",
+      "verb": "graph-list"
+    }
   },
   {
     "body_schema_ref": "#/components/schemas/CapabilityInheritancePayload",
@@ -1488,7 +1430,12 @@
     "response_schema_ref": "#/components/schemas/LlmCapabilityInheritanceResponse",
     "summary": "Create Inheritance",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Create LLM capability inheritance",
+      "verb": "inheritance"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1514,7 +1461,12 @@
     "response_schema_ref": null,
     "summary": "Delete Inheritance",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Delete LLM capability inheritance",
+      "verb": "inheritance-delete"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1531,7 +1483,12 @@
     "response_schema_ref": null,
     "summary": "List Inheritance",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": false,
+      "summary": "List LLM capability inheritance",
+      "verb": "inheritance-list"
+    }
   },
   {
     "body_schema_ref": "#/components/schemas/CapabilityInheritanceUpdatePayload",
@@ -1557,7 +1514,12 @@
     "response_schema_ref": "#/components/schemas/LlmCapabilityInheritanceResponse",
     "summary": "Update Inheritance",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Update LLM capability inheritance",
+      "verb": "inheritance-replace"
+    }
   },
   {
     "body_schema_ref": "#/components/schemas/ModelPayload",
@@ -1574,7 +1536,12 @@
     "response_schema_ref": "#/components/schemas/LlmModelResponse",
     "summary": "Create Model",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Create an LLM model",
+      "verb": "models"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1600,7 +1567,12 @@
     "response_schema_ref": null,
     "summary": "Delete Model",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Delete an LLM model",
+      "verb": "models-delete"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1617,7 +1589,12 @@
     "response_schema_ref": null,
     "summary": "List Models",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": false,
+      "summary": "List LLM models",
+      "verb": "models-list"
+    }
   },
   {
     "body_schema_ref": "#/components/schemas/ModelPayload",
@@ -1643,7 +1620,12 @@
     "response_schema_ref": "#/components/schemas/LlmModelResponse",
     "summary": "Update Model",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Update an LLM model",
+      "verb": "models-replace"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1669,7 +1651,12 @@
     "response_schema_ref": "#/components/schemas/LlmModelResponse",
     "summary": "Get Model",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": false,
+      "summary": "Show an LLM model",
+      "verb": "models-show"
+    }
   },
   {
     "body_schema_ref": "#/components/schemas/OpenRouterModelPreviewRequest",
@@ -1686,7 +1673,12 @@
     "response_schema_ref": "#/components/schemas/OpenRouterModelPreviewResponse",
     "summary": "Openrouter Model Preview",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Preview OpenRouter model metadata",
+      "verb": "openrouter-preview"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1712,7 +1704,12 @@
     "response_schema_ref": "#/components/schemas/LlmProviderModelPlaygroundResponse",
     "summary": "Provider Model Playground",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Run a provider-model playground prompt",
+      "verb": "playground"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1729,7 +1726,12 @@
     "response_schema_ref": null,
     "summary": "List Prompts",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": false,
+      "summary": "List LLM prompts",
+      "verb": "prompts-list"
+    }
   },
   {
     "body_schema_ref": "#/components/schemas/PromptUpdatePayload",
@@ -1755,7 +1757,12 @@
     "response_schema_ref": "#/components/schemas/LlmPromptTemplateDetail",
     "summary": "Update Prompt",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Update an LLM prompt",
+      "verb": "prompts-replace"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1781,7 +1788,12 @@
     "response_schema_ref": null,
     "summary": "Prompt Revisions",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": false,
+      "summary": "List LLM prompt revisions",
+      "verb": "prompts-revisions-list"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1807,7 +1819,12 @@
     "response_schema_ref": "#/components/schemas/LlmPromptTemplateDetail",
     "summary": "Get Prompt",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": false,
+      "summary": "Show an LLM prompt",
+      "verb": "prompts-show"
+    }
   },
   {
     "body_schema_ref": "#/components/schemas/ProviderModelPayload",
@@ -1824,7 +1841,12 @@
     "response_schema_ref": "#/components/schemas/LlmProviderModelResponse",
     "summary": "Create Provider Model",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Create a provider model",
+      "verb": "provider-models"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1850,7 +1872,12 @@
     "response_schema_ref": null,
     "summary": "Delete Provider Model",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Delete a provider model",
+      "verb": "provider-models-delete"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1898,7 +1925,12 @@
     "response_schema_ref": null,
     "summary": "List Provider Models",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": false,
+      "summary": "List provider models",
+      "verb": "provider-models-list"
+    }
   },
   {
     "body_schema_ref": "#/components/schemas/ProviderModelPayload",
@@ -1924,7 +1956,12 @@
     "response_schema_ref": "#/components/schemas/LlmProviderModelResponse",
     "summary": "Update Provider Model",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Update a provider model",
+      "verb": "provider-models-replace"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1950,7 +1987,12 @@
     "response_schema_ref": "#/components/schemas/LlmProviderModelResponse",
     "summary": "Get Provider Model",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": false,
+      "summary": "Show a provider model",
+      "verb": "provider-models-show"
+    }
   },
   {
     "body_schema_ref": null,
@@ -1978,6 +2020,8 @@
     "x_agent_confirm": null,
     "x_cli": {
       "group": "llm",
+      "mutates": true,
+      "summary": "Sync pricing for a provider model",
       "verb": "provider-models-sync-pricing"
     }
   },
@@ -1996,7 +2040,12 @@
     "response_schema_ref": "#/components/schemas/LlmProviderResponse",
     "summary": "Create Provider",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Create an LLM provider",
+      "verb": "providers"
+    }
   },
   {
     "body_schema_ref": null,
@@ -2022,59 +2071,12 @@
     "response_schema_ref": null,
     "summary": "Delete Provider",
     "x_agent_confirm": null,
-    "x_cli": null
-  },
-  {
-    "body_schema_ref": null,
-    "group": "llm",
-    "http": {
-      "method": "DELETE",
-      "path": "/admin/api/v1/llm/providers/{provider_id}/key"
-    },
-    "idempotent": true,
-    "name": "providers-key-delete",
-    "operation_id": "admin.llm.providers.key.clear",
-    "path_params": [
-      {
-        "name": "provider_id",
-        "required": true,
-        "schema": {
-          "title": "Provider Id",
-          "type": "string"
-        }
-      }
-    ],
-    "query_params": [],
-    "response_schema_ref": "#/components/schemas/LlmProviderResponse",
-    "summary": "Clear Provider Key",
-    "x_agent_confirm": null,
-    "x_cli": null
-  },
-  {
-    "body_schema_ref": "#/components/schemas/LlmProviderKeyPayload",
-    "group": "llm",
-    "http": {
-      "method": "PUT",
-      "path": "/admin/api/v1/llm/providers/{provider_id}/key"
-    },
-    "idempotent": true,
-    "name": "providers-key-replace",
-    "operation_id": "admin.llm.providers.key.set",
-    "path_params": [
-      {
-        "name": "provider_id",
-        "required": true,
-        "schema": {
-          "title": "Provider Id",
-          "type": "string"
-        }
-      }
-    ],
-    "query_params": [],
-    "response_schema_ref": "#/components/schemas/LlmProviderResponse",
-    "summary": "Set Provider Key",
-    "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Delete an LLM provider",
+      "verb": "providers-delete"
+    }
   },
   {
     "body_schema_ref": null,
@@ -2091,7 +2093,12 @@
     "response_schema_ref": null,
     "summary": "List Providers",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": false,
+      "summary": "List LLM providers",
+      "verb": "providers-list"
+    }
   },
   {
     "body_schema_ref": "#/components/schemas/ProviderPayload",
@@ -2117,7 +2124,12 @@
     "response_schema_ref": "#/components/schemas/LlmProviderResponse",
     "summary": "Update Provider",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Update an LLM provider",
+      "verb": "providers-replace"
+    }
   },
   {
     "body_schema_ref": null,
@@ -2143,7 +2155,12 @@
     "response_schema_ref": "#/components/schemas/LlmProviderResponse",
     "summary": "Get Provider",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": false,
+      "summary": "Show an LLM provider",
+      "verb": "providers-show"
+    }
   },
   {
     "body_schema_ref": null,
@@ -2169,7 +2186,12 @@
     "response_schema_ref": "#/components/schemas/LlmPromptTemplateDetail",
     "summary": "Reset Prompt",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Reset an LLM prompt to its default",
+      "verb": "reset-to-default"
+    }
   },
   {
     "body_schema_ref": null,
@@ -2186,6 +2208,11 @@
     "response_schema_ref": "#/components/schemas/LlmSyncPricingResult",
     "summary": "Sync Pricing",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "llm",
+      "mutates": true,
+      "summary": "Sync LLM pricing",
+      "verb": "sync-pricing"
+    }
   }
 ]

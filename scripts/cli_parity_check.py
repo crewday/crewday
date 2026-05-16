@@ -29,6 +29,8 @@ from crewday._runtime import (
 _CLI_METHODS: Final[frozenset[str]] = frozenset(
     {"get", "post", "put", "patch", "delete", "head"}
 )
+_MUTATING_METHODS: Final[frozenset[str]] = frozenset({"post", "put", "patch", "delete"})
+_ADMIN_API_PREFIX: Final[str] = "/admin/api/v1"
 _OPERATION_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
@@ -47,6 +49,13 @@ class OpenApiOperation:
     operation_id: str
     path: str
     method: str
+    operation: Mapping[str, Any]
+
+    @property
+    def is_admin(self) -> bool:
+        return self.path == _ADMIN_API_PREFIX or self.path.startswith(
+            f"{_ADMIN_API_PREFIX}/"
+        )
 
 
 def _has_valid_x_cli_metadata(operation: Mapping[str, Any]) -> bool:
@@ -70,6 +79,11 @@ class ParityReport:
     help_tree_extra: tuple[str, ...]
     help_tree_changed: tuple[str, ...]
     missing_from_cli: tuple[str, ...]
+    admin_missing_x_cli: tuple[str, ...]
+    admin_missing_from_surface: tuple[str, ...]
+    admin_hidden_without_reviewed_exclusion: tuple[str, ...]
+    admin_unavailable_without_reviewed_exclusion: tuple[str, ...]
+    admin_mutation_confirmation_missing: tuple[str, ...]
     removed_from_openapi: tuple[str, ...]
     invalid_operation_ids: tuple[str, ...]
 
@@ -80,6 +94,11 @@ class ParityReport:
             or self.help_tree_extra
             or self.help_tree_changed
             or self.missing_from_cli
+            or self.admin_missing_x_cli
+            or self.admin_missing_from_surface
+            or self.admin_hidden_without_reviewed_exclusion
+            or self.admin_unavailable_without_reviewed_exclusion
+            or self.admin_mutation_confirmation_missing
             or self.removed_from_openapi
             or self.invalid_operation_ids
         )
@@ -230,17 +249,13 @@ def _iter_openapi_operations(schema: Mapping[str, Any]) -> Iterable[OpenApiOpera
                 or not isinstance(operation, Mapping)
             ):
                 continue
-            x_cli = operation.get("x-cli")
-            if isinstance(x_cli, Mapping) and x_cli.get("hidden") is True:
-                continue
-            if not _has_valid_x_cli_metadata(operation):
-                continue
             operation_id = operation.get("operationId")
             if isinstance(operation_id, str) and operation_id:
                 yield OpenApiOperation(
                     operation_id=operation_id,
                     path=path,
                     method=method.upper(),
+                    operation=operation,
                 )
 
 
@@ -261,12 +276,117 @@ def _excluded_operation_ids(
     return excluded
 
 
+def _is_hidden(operation: OpenApiOperation) -> bool:
+    x_cli = operation.operation.get("x-cli")
+    return isinstance(x_cli, Mapping) and x_cli.get("hidden") is True
+
+
+def _is_cli_candidate(operation: OpenApiOperation) -> bool:
+    return not _is_hidden(operation) and _has_valid_x_cli_metadata(operation.operation)
+
+
+def _admin_eligible_operations(
+    operations: Sequence[OpenApiOperation],
+    excluded: set[str],
+) -> tuple[OpenApiOperation, ...]:
+    return tuple(
+        operation
+        for operation in operations
+        if operation.is_admin
+        and operation.operation_id not in excluded
+        and not _is_hidden(operation)
+    )
+
+
+def _operation_mutates(operation: OpenApiOperation) -> bool:
+    x_cli = operation.operation.get("x-cli")
+    if isinstance(x_cli, Mapping) and isinstance(x_cli.get("mutates"), bool):
+        return bool(x_cli["mutates"])
+    return operation.method.lower() in _MUTATING_METHODS
+
+
+def _admin_default_confirmation_policy_applies(operation: OpenApiOperation) -> bool:
+    return operation.is_admin
+
+
+def _admin_missing_x_cli(operations: Sequence[OpenApiOperation]) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            operation.operation_id
+            for operation in operations
+            if not _is_cli_candidate(operation)
+        )
+    )
+
+
+def _admin_hidden_without_reviewed_exclusion(
+    operations: Sequence[OpenApiOperation],
+    excluded: set[str],
+) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            operation.operation_id
+            for operation in operations
+            if operation.is_admin
+            and _is_hidden(operation)
+            and operation.operation_id not in excluded
+        )
+    )
+
+
+def _admin_unavailable_without_reviewed_exclusion(
+    operations: Sequence[OpenApiOperation],
+    excluded: set[str],
+) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            operation.operation_id
+            for operation in operations
+            if operation.is_admin
+            and not _is_hidden(operation)
+            and operation.operation_id not in excluded
+            and (
+                operation.operation.get("x-agent-forbidden") is True
+                or operation.operation.get("x-interactive-only") is True
+            )
+        )
+    )
+
+
+def _admin_mutation_confirmation_missing(
+    operations: Sequence[OpenApiOperation],
+) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            operation.operation_id
+            for operation in operations
+            if _operation_mutates(operation)
+            and operation.operation.get("x-agent-confirm") is None
+            and not _admin_default_confirmation_policy_applies(operation)
+        )
+    )
+
+
 def _operation_ids_from_surface(entries: Sequence[SurfaceEntry]) -> set[str]:
     return {
         entry.operation_id
         for entry in entries
         if entry.operation_id is not None
         and _has_valid_x_cli_metadata({"x-cli": entry.x_cli})
+    }
+
+
+def _operation_ids_from_surface_file(path: Path) -> set[str]:
+    with path.open("rb") as fh:
+        raw = json.load(fh)
+    if not isinstance(raw, list):
+        return set()
+    return {
+        op_id
+        for item in raw
+        if isinstance(item, Mapping)
+        and isinstance((op_id := item.get("operation_id")), str)
+        and op_id
     }
 
 
@@ -304,15 +424,40 @@ def build_report(
     operations = tuple(_iter_openapi_operations(schema))
     exclusions = _codegen.load_exclusions(exclusions_path)
     excluded = _excluded_operation_ids(operations, exclusions)
-    openapi_ids = {operation.operation_id for operation in operations}
+    cli_operations = tuple(
+        operation
+        for operation in operations
+        if _is_cli_candidate(operation) and operation.operation_id not in excluded
+    )
+    openapi_ids = {operation.operation_id for operation in cli_operations}
     cli_ids = _operation_ids_from_surface(entries)
     covered_ids = cli_ids | override_covered | excluded
+    admin_eligible = _admin_eligible_operations(operations, excluded)
+    admin_surface_ids = _operation_ids_from_surface_file(surface_admin_path)
 
     return ParityReport(
         help_tree_missing=missing,
         help_tree_extra=extra,
         help_tree_changed=changed,
         missing_from_cli=tuple(sorted(openapi_ids - covered_ids)),
+        admin_missing_x_cli=_admin_missing_x_cli(admin_eligible),
+        admin_missing_from_surface=tuple(
+            sorted(
+                operation.operation_id
+                for operation in admin_eligible
+                if _is_cli_candidate(operation)
+                and operation.operation_id not in admin_surface_ids
+            )
+        ),
+        admin_hidden_without_reviewed_exclusion=(
+            _admin_hidden_without_reviewed_exclusion(operations, excluded)
+        ),
+        admin_unavailable_without_reviewed_exclusion=(
+            _admin_unavailable_without_reviewed_exclusion(operations, excluded)
+        ),
+        admin_mutation_confirmation_missing=_admin_mutation_confirmation_missing(
+            admin_eligible
+        ),
         removed_from_openapi=tuple(sorted(cli_ids - openapi_ids)),
         invalid_operation_ids=_invalid_operation_ids(operations),
     )
@@ -343,6 +488,26 @@ def print_report(report: ParityReport) -> None:
     _print_block(
         "OpenAPI operations missing from CLI surface:",
         report.missing_from_cli,
+    )
+    _print_block(
+        "Admin operations missing valid x-cli metadata or reviewed exclusion:",
+        report.admin_missing_x_cli,
+    )
+    _print_block(
+        "Admin operations missing from _surface_admin.json:",
+        report.admin_missing_from_surface,
+    )
+    _print_block(
+        "Hidden admin operations missing a reviewed exclusion:",
+        report.admin_hidden_without_reviewed_exclusion,
+    )
+    _print_block(
+        "Forbidden or interactive-only admin operations missing a reviewed exclusion:",
+        report.admin_unavailable_without_reviewed_exclusion,
+    )
+    _print_block(
+        "Admin mutating operations missing confirmation coverage:",
+        report.admin_mutation_confirmation_missing,
     )
     _print_block(
         "CLI surface operations removed from OpenAPI:",

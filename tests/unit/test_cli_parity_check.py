@@ -52,6 +52,29 @@ def _schema(*operation_ids: str, include_x_cli: bool = True) -> dict[str, object
     return {"openapi": "3.1.0", "paths": paths}
 
 
+def _admin_schema(
+    operation_id: str,
+    *,
+    method: str = "get",
+    include_x_cli: bool = True,
+) -> dict[str, object]:
+    operation: dict[str, object] = {
+        "operationId": operation_id,
+        "responses": {"200": {"description": "ok"}},
+    }
+    if include_x_cli:
+        operation["x-cli"] = {
+            "group": "demo",
+            "verb": operation_id.rsplit(".", 1)[-1],
+            "summary": f"{operation_id} summary",
+            "mutates": method.lower() != "get",
+        }
+    return {
+        "openapi": "3.1.0",
+        "paths": {"/admin/api/v1/demo": {method: operation}},
+    }
+
+
 def _paths(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     surface = tmp_path / "_surface.json"
     surface_admin = tmp_path / "_surface_admin.json"
@@ -91,6 +114,178 @@ def test_report_names_openapi_operations_missing_from_surface(tmp_path: Path) ->
 
     assert report.missing_from_cli == ("demo.create",)
     assert not report.ok
+
+
+def test_report_requires_admin_operations_in_admin_surface(tmp_path: Path) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [])
+    _write_json(surface_admin, [])
+    _write_json(schema, _admin_schema("admin.demo.list"))
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.admin_missing_from_surface == ("admin.demo.list",)
+    assert not report.ok
+
+
+def test_report_requires_admin_x_cli_or_reviewed_exclusion(tmp_path: Path) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [])
+    _write_json(surface_admin, [])
+    _write_json(schema, _admin_schema("admin.demo.unannotated", include_x_cli=False))
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.admin_missing_x_cli == ("admin.demo.unannotated",)
+    assert not report.ok
+
+
+def test_report_accepts_reviewed_admin_exclusion(tmp_path: Path) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [])
+    _write_json(surface_admin, [])
+    exclusions.write_text(
+        "exclusions:\n"
+        "  - operation_id: admin.demo.secret\n"
+        "    reason: interactive session only\n",
+        encoding="utf-8",
+    )
+    _write_json(schema, _admin_schema("admin.demo.secret", include_x_cli=False))
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.admin_missing_x_cli == ()
+    assert report.admin_missing_from_surface == ()
+    assert report.ok
+
+
+def test_report_requires_reviewed_exclusion_for_hidden_admin_operation(
+    tmp_path: Path,
+) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [])
+    _write_json(surface_admin, [])
+    _write_json(
+        schema,
+        {
+            "openapi": "3.1.0",
+            "paths": {
+                "/admin/api/v1/agent/message": {
+                    "post": {
+                        "operationId": "admin.agent.message.create",
+                        "responses": {"200": {"description": "ok"}},
+                        "x-cli": {
+                            "hidden": True,
+                            "group": "agent",
+                            "verb": "message-create",
+                            "summary": "Message agent",
+                            "mutates": True,
+                        },
+                    }
+                }
+            },
+        },
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.admin_hidden_without_reviewed_exclusion == (
+        "admin.agent.message.create",
+    )
+    assert not report.ok
+
+
+def test_report_requires_reviewed_exclusion_for_unavailable_admin_operation(
+    tmp_path: Path,
+) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    entry = _entry(
+        operation_id="admin.demo.secret",
+        group="demo",
+        name="secret",
+        path="/admin/api/v1/demo/secret",
+        method="POST",
+    )
+    _write_json(surface, [])
+    _write_json(surface_admin, [entry])
+    _write_json(
+        schema,
+        {
+            "openapi": "3.1.0",
+            "paths": {
+                "/admin/api/v1/demo/secret": {
+                    "post": {
+                        "operationId": "admin.demo.secret",
+                        "responses": {"200": {"description": "ok"}},
+                        "x-agent-forbidden": True,
+                        "x-interactive-only": True,
+                        "x-cli": {
+                            "group": "demo",
+                            "verb": "secret",
+                            "summary": "Rotate a secret",
+                            "mutates": True,
+                        },
+                    }
+                }
+            },
+        },
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.admin_unavailable_without_reviewed_exclusion == ("admin.demo.secret",)
+    assert not report.ok
+
+
+def test_report_documents_admin_default_mutation_confirmation(
+    tmp_path: Path,
+) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    entry = _entry(
+        operation_id="admin.demo.create",
+        group="demo",
+        name="create",
+        path="/admin/api/v1/demo",
+        method="POST",
+    )
+    _write_json(surface, [])
+    _write_json(surface_admin, [entry])
+    _write_json(schema, _admin_schema("admin.demo.create", method="post"))
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.admin_mutation_confirmation_missing == ()
+    assert report.ok
 
 
 def test_report_ignores_openapi_operations_without_valid_x_cli(

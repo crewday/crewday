@@ -457,6 +457,69 @@ def test_exclusions_filter_applies_across_surfaces() -> None:
     assert "transport.events" not in op_ids
 
 
+def test_exclusions_filter_admin_secret_and_self_routes() -> None:
+    schema = {
+        "paths": {
+            "/admin/api/v1/llm/models": {
+                "post": {
+                    "operationId": "admin.llm.models.create",
+                    "x-cli": {
+                        "group": "llm",
+                        "verb": "models",
+                        "summary": "Create model",
+                        "mutates": True,
+                    },
+                    "responses": {"200": {}},
+                }
+            },
+            "/admin/api/v1/llm/providers/{provider_id}/key": {
+                "put": {
+                    "operationId": "admin.llm.providers.key.set",
+                    "x-cli": {
+                        "group": "llm",
+                        "verb": "providers-key-replace",
+                        "summary": "Set key",
+                        "mutates": True,
+                    },
+                    "x-agent-forbidden": True,
+                    "x-interactive-only": True,
+                    "responses": {"200": {}},
+                }
+            },
+            "/admin/api/v1/agent/message": {
+                "post": {
+                    "operationId": "admin.agent.message.create",
+                    "x-cli": {
+                        "hidden": True,
+                        "group": "agent",
+                        "verb": "message-create",
+                        "summary": "Message agent",
+                        "mutates": True,
+                    },
+                    "x-agent-forbidden": True,
+                    "responses": {"200": {}},
+                }
+            },
+        }
+    }
+    exclusions = [
+        Exclusion(
+            reason="secret-bearing provider key route",
+            operation_id="admin.llm.providers.key.set",
+        ),
+        Exclusion(
+            reason="admin-agent self endpoint",
+            operation_id="admin.agent.message.create",
+        ),
+    ]
+
+    surfaces = generate_surfaces(schema=schema, exclusions=exclusions)
+
+    assert [entry["operation_id"] for entry in surfaces["admin"]] == [
+        "admin.llm.models.create"
+    ]
+
+
 def test_entry_shape_is_exhaustive() -> None:
     """Every descriptor entry has the documented keys, nothing more."""
     schema = _synthetic_schema()

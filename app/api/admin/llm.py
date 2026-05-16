@@ -114,6 +114,26 @@ _SessionWriteCtx = Annotated[
     Depends(require_deployment_session_scope("deployment.llm:write")),
 ]
 
+
+def _llm_cli(verb: str, summary: str, *, mutates: bool) -> dict[str, object]:
+    return {
+        "x-cli": {
+            "group": "llm",
+            "verb": verb,
+            "summary": summary,
+            "mutates": mutates,
+        },
+    }
+
+
+def _llm_secret_cli(verb: str, summary: str) -> dict[str, object]:
+    return {
+        **_llm_cli(verb, summary, mutates=True),
+        "x-agent-forbidden": True,
+        "x-interactive-only": True,
+    }
+
+
 _OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1"
 _LLM_PROVIDER_API_KEY_PURPOSE = "llm_provider.api_key"
 _ROW_BACKED_ENVELOPE_VERSION = 0x02
@@ -2632,7 +2652,10 @@ def build_admin_llm_router() -> APIRouter:
     router = APIRouter(prefix="/llm", tags=["admin", "llm"])
 
     @router.get(
-        "/graph", response_model=LlmGraphPayload, operation_id="admin.llm.graph"
+        "/graph",
+        response_model=LlmGraphPayload,
+        operation_id="admin.llm.graph",
+        openapi_extra=_llm_cli("graph-list", "Read the full LLM graph", mutates=False),
     )
     def graph(_ctx: _ReadCtx, session: _Db) -> LlmGraphPayload:
         return _load_graph(session)
@@ -2641,6 +2664,7 @@ def build_admin_llm_router() -> APIRouter:
         "/providers",
         response_model=list[LlmProviderResponse],
         operation_id="admin.llm.providers.list",
+        openapi_extra=_llm_cli("providers-list", "List LLM providers", mutates=False),
     )
     def list_providers(_ctx: _ReadCtx, session: _Db) -> list[LlmProviderResponse]:
         with tenant_agnostic():
@@ -2657,6 +2681,7 @@ def build_admin_llm_router() -> APIRouter:
         "/providers",
         response_model=LlmProviderResponse,
         operation_id="admin.llm.providers.create",
+        openapi_extra=_llm_cli("providers", "Create an LLM provider", mutates=True),
     )
     def create_provider(
         ctx: _WriteCtx, request: Request, session: _Db, payload: ProviderPayload
@@ -2688,6 +2713,7 @@ def build_admin_llm_router() -> APIRouter:
         "/providers/{provider_id}",
         response_model=LlmProviderResponse,
         operation_id="admin.llm.providers.get",
+        openapi_extra=_llm_cli("providers-show", "Show an LLM provider", mutates=False),
     )
     def get_provider(
         _ctx: _ReadCtx, session: _Db, provider_id: str
@@ -2707,6 +2733,9 @@ def build_admin_llm_router() -> APIRouter:
         "/providers/{provider_id}",
         response_model=LlmProviderResponse,
         operation_id="admin.llm.providers.update",
+        openapi_extra=_llm_cli(
+            "providers-replace", "Update an LLM provider", mutates=True
+        ),
     )
     def update_provider(
         ctx: _WriteCtx,
@@ -2743,7 +2772,9 @@ def build_admin_llm_router() -> APIRouter:
         "/providers/{provider_id}/key",
         response_model=LlmProviderResponse,
         operation_id="admin.llm.providers.key.set",
-        openapi_extra={"x-interactive-only": True},
+        openapi_extra=_llm_secret_cli(
+            "providers-key-replace", "Set an LLM provider API key"
+        ),
     )
     def set_provider_key(
         ctx: _SessionWriteCtx,
@@ -2779,7 +2810,9 @@ def build_admin_llm_router() -> APIRouter:
         "/providers/{provider_id}/key",
         response_model=LlmProviderResponse,
         operation_id="admin.llm.providers.key.clear",
-        openapi_extra={"x-interactive-only": True},
+        openapi_extra=_llm_secret_cli(
+            "providers-key-delete", "Clear an LLM provider API key"
+        ),
     )
     def clear_provider_key(
         ctx: _SessionWriteCtx,
@@ -2808,6 +2841,9 @@ def build_admin_llm_router() -> APIRouter:
         "/providers/{provider_id}",
         status_code=204,
         operation_id="admin.llm.providers.delete",
+        openapi_extra=_llm_cli(
+            "providers-delete", "Delete an LLM provider", mutates=True
+        ),
     )
     def delete_provider(
         ctx: _WriteCtx, request: Request, session: _Db, provider_id: str
@@ -2831,6 +2867,7 @@ def build_admin_llm_router() -> APIRouter:
         "/models",
         response_model=list[LlmModelResponse],
         operation_id="admin.llm.models.list",
+        openapi_extra=_llm_cli("models-list", "List LLM models", mutates=False),
     )
     def list_models(_ctx: _ReadCtx, session: _Db) -> list[LlmModelResponse]:
         with tenant_agnostic():
@@ -2847,6 +2884,7 @@ def build_admin_llm_router() -> APIRouter:
         "/models",
         response_model=LlmModelResponse,
         operation_id="admin.llm.models.create",
+        openapi_extra=_llm_cli("models", "Create an LLM model", mutates=True),
     )
     def create_model(
         ctx: _WriteCtx, request: Request, session: _Db, payload: ModelPayload
@@ -2883,6 +2921,9 @@ def build_admin_llm_router() -> APIRouter:
         "/models/openrouter-preview",
         response_model=OpenRouterModelPreviewResponse,
         operation_id="admin.llm.models.openrouter_preview",
+        openapi_extra=_llm_cli(
+            "openrouter-preview", "Preview OpenRouter model metadata", mutates=True
+        ),
     )
     def openrouter_model_preview(
         ctx: _WriteCtx,
@@ -2900,6 +2941,7 @@ def build_admin_llm_router() -> APIRouter:
         "/models/{model_id}",
         response_model=LlmModelResponse,
         operation_id="admin.llm.models.get",
+        openapi_extra=_llm_cli("models-show", "Show an LLM model", mutates=False),
     )
     def get_model(_ctx: _ReadCtx, session: _Db, model_id: str) -> LlmModelResponse:
         with tenant_agnostic():
@@ -2917,6 +2959,7 @@ def build_admin_llm_router() -> APIRouter:
         "/models/{model_id}",
         response_model=LlmModelResponse,
         operation_id="admin.llm.models.update",
+        openapi_extra=_llm_cli("models-replace", "Update an LLM model", mutates=True),
     )
     def update_model(
         ctx: _WriteCtx,
@@ -2956,7 +2999,10 @@ def build_admin_llm_router() -> APIRouter:
         return _model_response(row, Counter({model_id: int(count or 0)}))
 
     @router.delete(
-        "/models/{model_id}", status_code=204, operation_id="admin.llm.models.delete"
+        "/models/{model_id}",
+        status_code=204,
+        operation_id="admin.llm.models.delete",
+        openapi_extra=_llm_cli("models-delete", "Delete an LLM model", mutates=True),
     )
     def delete_model(
         ctx: _WriteCtx, request: Request, session: _Db, model_id: str
@@ -2980,6 +3026,9 @@ def build_admin_llm_router() -> APIRouter:
         "/provider-models",
         response_model=list[LlmProviderModelResponse],
         operation_id="admin.llm.provider_models.list",
+        openapi_extra=_llm_cli(
+            "provider-models-list", "List provider models", mutates=False
+        ),
     )
     def list_provider_models(
         _ctx: _ReadCtx,
@@ -3013,6 +3062,9 @@ def build_admin_llm_router() -> APIRouter:
         "/provider-models",
         response_model=LlmProviderModelResponse,
         operation_id="admin.llm.provider_models.create",
+        openapi_extra=_llm_cli(
+            "provider-models", "Create a provider model", mutates=True
+        ),
     )
     def create_provider_model(
         ctx: _WriteCtx, request: Request, session: _Db, payload: ProviderModelPayload
@@ -3058,6 +3110,9 @@ def build_admin_llm_router() -> APIRouter:
         "/provider-models/{provider_model_id}",
         response_model=LlmProviderModelResponse,
         operation_id="admin.llm.provider_models.get",
+        openapi_extra=_llm_cli(
+            "provider-models-show", "Show a provider model", mutates=False
+        ),
     )
     def get_provider_model(
         _ctx: _ReadCtx, session: _Db, provider_model_id: str
@@ -3071,9 +3126,11 @@ def build_admin_llm_router() -> APIRouter:
         "/provider-models/{provider_model_id}/sync-pricing",
         response_model=LlmProviderModelSyncPricingResponse,
         operation_id="admin.llm.provider_models.sync_pricing",
-        openapi_extra={
-            "x-cli": {"group": "llm", "verb": "provider-models-sync-pricing"},
-        },
+        openapi_extra=_llm_cli(
+            "provider-models-sync-pricing",
+            "Sync pricing for a provider model",
+            mutates=True,
+        ),
     )
     def sync_provider_model_pricing(
         ctx: _WriteCtx,
@@ -3100,6 +3157,9 @@ def build_admin_llm_router() -> APIRouter:
         "/provider-models/{provider_model_id}/embedding-smoke",
         response_model=LlmProviderModelEmbeddingSmokeResponse,
         operation_id="admin.llm.provider_models.embedding_smoke",
+        openapi_extra=_llm_cli(
+            "embedding-smoke", "Run a provider-model embedding smoke test", mutates=True
+        ),
     )
     def provider_model_embedding_smoke(
         _ctx: _WriteCtx,
@@ -3144,6 +3204,9 @@ def build_admin_llm_router() -> APIRouter:
         response_model=LlmProviderModelPlaygroundResponse,
         operation_id="admin.llm.provider_models.playground",
         openapi_extra={
+            **_llm_cli(
+                "playground", "Run a provider-model playground prompt", mutates=True
+            ),
             "requestBody": {
                 "content": {
                     "application/json": {
@@ -3210,7 +3273,7 @@ def build_admin_llm_router() -> APIRouter:
                     },
                 },
                 "required": True,
-            }
+            },
         },
     )
     async def provider_model_playground(
@@ -3316,6 +3379,9 @@ def build_admin_llm_router() -> APIRouter:
         "/provider-models/{provider_model_id}",
         response_model=LlmProviderModelResponse,
         operation_id="admin.llm.provider_models.update",
+        openapi_extra=_llm_cli(
+            "provider-models-replace", "Update a provider model", mutates=True
+        ),
     )
     def update_provider_model(
         ctx: _WriteCtx,
@@ -3381,6 +3447,9 @@ def build_admin_llm_router() -> APIRouter:
         "/provider-models/{provider_model_id}",
         status_code=204,
         operation_id="admin.llm.provider_models.delete",
+        openapi_extra=_llm_cli(
+            "provider-models-delete", "Delete a provider model", mutates=True
+        ),
     )
     def delete_provider_model(
         ctx: _WriteCtx, request: Request, session: _Db, provider_model_id: str
@@ -3402,6 +3471,9 @@ def build_admin_llm_router() -> APIRouter:
         "/assignments",
         response_model=list[LlmAssignmentResponse],
         operation_id="admin.llm.assignments.list",
+        openapi_extra=_llm_cli(
+            "assignments-list", "List LLM assignments", mutates=False
+        ),
     )
     def list_assignments(_ctx: _ReadCtx, session: _Db) -> list[LlmAssignmentResponse]:
         cutoff = _now() - timedelta(days=30)
@@ -3435,6 +3507,9 @@ def build_admin_llm_router() -> APIRouter:
         "/inheritance",
         response_model=list[LlmCapabilityInheritanceResponse],
         operation_id="admin.llm.inheritance.list",
+        openapi_extra=_llm_cli(
+            "inheritance-list", "List LLM capability inheritance", mutates=False
+        ),
     )
     def list_inheritance(
         _ctx: _ReadCtx, session: _Db
@@ -3453,6 +3528,9 @@ def build_admin_llm_router() -> APIRouter:
         "/inheritance",
         response_model=LlmCapabilityInheritanceResponse,
         operation_id="admin.llm.inheritance.create",
+        openapi_extra=_llm_cli(
+            "inheritance", "Create LLM capability inheritance", mutates=True
+        ),
     )
     def create_inheritance(
         ctx: _WriteCtx,
@@ -3499,6 +3577,9 @@ def build_admin_llm_router() -> APIRouter:
         "/inheritance/{capability}",
         response_model=LlmCapabilityInheritanceResponse,
         operation_id="admin.llm.inheritance.update",
+        openapi_extra=_llm_cli(
+            "inheritance-replace", "Update LLM capability inheritance", mutates=True
+        ),
     )
     def update_inheritance(
         ctx: _WriteCtx,
@@ -3525,6 +3606,9 @@ def build_admin_llm_router() -> APIRouter:
         "/inheritance/{capability}",
         status_code=204,
         operation_id="admin.llm.inheritance.delete",
+        openapi_extra=_llm_cli(
+            "inheritance-delete", "Delete LLM capability inheritance", mutates=True
+        ),
     )
     def delete_inheritance(
         ctx: _WriteCtx,
@@ -3543,6 +3627,7 @@ def build_admin_llm_router() -> APIRouter:
         "/assignments",
         response_model=LlmAssignmentResponse,
         operation_id="admin.llm.assignments.create",
+        openapi_extra=_llm_cli("assignments", "Create an LLM assignment", mutates=True),
     )
     def create_assignment(
         ctx: _WriteCtx, session: _Db, request: Request, payload: AssignmentPayload
@@ -3602,6 +3687,9 @@ def build_admin_llm_router() -> APIRouter:
         "/assignments/reorder",
         response_model=list[LlmAssignmentResponse],
         operation_id="admin.llm.assignments.reorder",
+        openapi_extra=_llm_cli(
+            "assignments-reorder-update", "Reorder LLM assignments", mutates=True
+        ),
     )
     def reorder_assignments(
         ctx: _WriteCtx,
@@ -3671,6 +3759,9 @@ def build_admin_llm_router() -> APIRouter:
         "/assignments/{assignment_id}",
         response_model=LlmAssignmentResponse,
         operation_id="admin.llm.assignments.get",
+        openapi_extra=_llm_cli(
+            "assignments-show", "Show an LLM assignment", mutates=False
+        ),
     )
     def get_assignment(
         _ctx: _ReadCtx, session: _Db, assignment_id: str
@@ -3693,6 +3784,9 @@ def build_admin_llm_router() -> APIRouter:
         "/assignments/{assignment_id}",
         response_model=LlmAssignmentResponse,
         operation_id="admin.llm.assignments.update",
+        openapi_extra=_llm_cli(
+            "assignments-replace", "Update an LLM assignment", mutates=True
+        ),
     )
     def update_assignment(
         ctx: _WriteCtx,
@@ -3776,6 +3870,9 @@ def build_admin_llm_router() -> APIRouter:
         "/assignments/{assignment_id}",
         status_code=204,
         operation_id="admin.llm.assignments.delete",
+        openapi_extra=_llm_cli(
+            "assignments-delete", "Delete an LLM assignment", mutates=True
+        ),
     )
     def delete_assignment(
         ctx: _WriteCtx,
@@ -3794,6 +3891,7 @@ def build_admin_llm_router() -> APIRouter:
         "/prompts",
         response_model=list[LlmPromptTemplateResponse],
         operation_id="admin.llm.prompts.list",
+        openapi_extra=_llm_cli("prompts-list", "List LLM prompts", mutates=False),
     )
     def list_prompts(_ctx: _ReadCtx, session: _Db) -> list[LlmPromptTemplateResponse]:
         with tenant_agnostic():
@@ -3822,6 +3920,7 @@ def build_admin_llm_router() -> APIRouter:
         "/prompts/{prompt_id}",
         response_model=LlmPromptTemplateDetail,
         operation_id="admin.llm.prompts.get",
+        openapi_extra=_llm_cli("prompts-show", "Show an LLM prompt", mutates=False),
     )
     def get_prompt(
         _ctx: _ReadCtx, session: _Db, prompt_id: str
@@ -3846,6 +3945,7 @@ def build_admin_llm_router() -> APIRouter:
         "/prompts/{prompt_id}",
         response_model=LlmPromptTemplateDetail,
         operation_id="admin.llm.prompts.update",
+        openapi_extra=_llm_cli("prompts-replace", "Update an LLM prompt", mutates=True),
     )
     def update_prompt(
         ctx: _WriteCtx, session: _Db, prompt_id: str, payload: PromptUpdatePayload
@@ -3884,6 +3984,9 @@ def build_admin_llm_router() -> APIRouter:
         "/prompts/{prompt_id}/revisions",
         response_model=list[LlmPromptRevisionResponse],
         operation_id="admin.llm.prompts.revisions",
+        openapi_extra=_llm_cli(
+            "prompts-revisions-list", "List LLM prompt revisions", mutates=False
+        ),
     )
     def prompt_revisions(
         _ctx: _ReadCtx, session: _Db, prompt_id: str
@@ -3915,6 +4018,9 @@ def build_admin_llm_router() -> APIRouter:
         "/prompts/{prompt_id}/reset-to-default",
         response_model=LlmPromptTemplateDetail,
         operation_id="admin.llm.prompts.reset",
+        openapi_extra=_llm_cli(
+            "reset-to-default", "Reset an LLM prompt to its default", mutates=True
+        ),
     )
     def reset_prompt(
         ctx: _WriteCtx, session: _Db, prompt_id: str
@@ -3955,6 +4061,7 @@ def build_admin_llm_router() -> APIRouter:
         "/calls",
         response_model=list[LlmCallResponse],
         operation_id="admin.llm.calls.list",
+        openapi_extra=_llm_cli("calls-list", "List LLM calls", mutates=False),
     )
     def list_calls(
         _ctx: _ReadCtx,
@@ -4030,6 +4137,7 @@ def build_admin_llm_router() -> APIRouter:
         "/sync-pricing",
         response_model=LlmSyncPricingResult,
         operation_id="admin.llm.sync_pricing",
+        openapi_extra=_llm_cli("sync-pricing", "Sync LLM pricing", mutates=True),
     )
     def sync_pricing(
         ctx: _WriteCtx,

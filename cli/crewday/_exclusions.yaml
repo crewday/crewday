@@ -143,3 +143,29 @@ exclusions:
     reason: "flat alias of /assets/; canonical CLI route is assets.list"
   - operation_id: "asset_types.list_flat"
     reason: "flat alias of /assets/asset_types; canonical CLI route is asset_types.list"
+
+  # ----- Deployment-admin interactive / self-recursive routes -----
+  #
+  # Provider API-key writes carry secret material and are deliberately
+  # session-only. The admin SPA may call them under a passkey-backed
+  # human session, but generated CLI commands and delegated admin-agent
+  # tools must not expose raw key rotation.
+  - operation_id: "admin.llm.providers.key.set"
+    reason: "secret-bearing provider API-key write; interactive admin session only"
+  - operation_id: "admin.llm.providers.key.clear"
+    reason: "secret-bearing provider API-key clear; interactive admin session only"
+
+  # The admin agent's own transcript / message / action-control
+  # endpoints are UI plumbing for the sidebar. They must not appear in
+  # the tool catalog the same agent can call, or it could recursively
+  # message itself and approve/deny its own proposals.
+  - operation_id: "admin.agent.log.list"
+    reason: "admin-agent self endpoint; not a generated deployment-admin tool"
+  - operation_id: "admin.agent.message.create"
+    reason: "admin-agent self endpoint; not a generated deployment-admin tool"
+  - operation_id: "admin.agent.actions.list"
+    reason: "admin-agent self endpoint; not a generated deployment-admin tool"
+  - operation_id: "admin.agent.action.approve"
+    reason: "admin-agent self endpoint; not a generated deployment-admin tool"
+  - operation_id: "admin.agent.action.deny"
+    reason: "admin-agent self endpoint; not a generated deployment-admin tool"

@@ -139,6 +139,10 @@ mandatory reason. Canonical list:
   `crewday admin version` covers the operational use case.
 
 Adding an exclusion without a reason fails CI lint.
+For the deployment-admin surface, any `/admin/api/v1/*` operation
+marked `x-agent-forbidden` or `x-interactive-only` must also be
+listed here with a reviewed reason so the shared `deploy` /
+admin-agent descriptor cannot silently expose it.
 
 ### `--help` generation
 
@@ -173,6 +177,13 @@ authors maintain one template per route, used everywhere.
 Non-delegated callers (human running `crewday` with a scoped
 token or a passkey session) never see these cards; they are not
 the subject of the per-user gate.
+
+The deployment-admin embedded agent uses the generated
+`_surface_admin.json` catalog but applies a stricter default than the
+workspace chat agent: every mutating `/admin/api/v1/*` tool call is
+gated. When a route carries `x-agent-confirm`, that card copy wins;
+otherwise the admin agent shows the generic mutation-confirmation
+card from §11 before replaying the HTTP call.
 
 ## Global flags
 

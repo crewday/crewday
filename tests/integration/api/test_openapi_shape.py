@@ -207,6 +207,123 @@ class TestOpenapiIntegration:
             assert x_cli["mutates"] is mutates
             assert x_cli["summary"]
 
+    def test_admin_llm_agent_surface_metadata_is_explicit(
+        self, pinned_settings: Settings, real_make_uow: None
+    ) -> None:
+        """Admin LLM tools declare generated-surface eligibility explicitly."""
+        resp = _client(pinned_settings).get("/api/openapi.json")
+        paths = resp.json()["paths"]
+
+        eligible_cases = [
+            ("/admin/api/v1/llm/providers", "post", "admin.llm.providers.create"),
+            (
+                "/admin/api/v1/llm/providers/{provider_id}",
+                "put",
+                "admin.llm.providers.update",
+            ),
+            (
+                "/admin/api/v1/llm/providers/{provider_id}",
+                "delete",
+                "admin.llm.providers.delete",
+            ),
+            ("/admin/api/v1/llm/models", "post", "admin.llm.models.create"),
+            (
+                "/admin/api/v1/llm/models/{model_id}",
+                "put",
+                "admin.llm.models.update",
+            ),
+            (
+                "/admin/api/v1/llm/models/{model_id}",
+                "delete",
+                "admin.llm.models.delete",
+            ),
+            (
+                "/admin/api/v1/llm/provider-models",
+                "post",
+                "admin.llm.provider_models.create",
+            ),
+            (
+                "/admin/api/v1/llm/provider-models/{provider_model_id}",
+                "put",
+                "admin.llm.provider_models.update",
+            ),
+            (
+                "/admin/api/v1/llm/provider-models/{provider_model_id}",
+                "delete",
+                "admin.llm.provider_models.delete",
+            ),
+            (
+                "/admin/api/v1/llm/assignments",
+                "post",
+                "admin.llm.assignments.create",
+            ),
+            (
+                "/admin/api/v1/llm/assignments/reorder",
+                "patch",
+                "admin.llm.assignments.reorder",
+            ),
+            (
+                "/admin/api/v1/llm/assignments/{assignment_id}",
+                "put",
+                "admin.llm.assignments.update",
+            ),
+            (
+                "/admin/api/v1/llm/assignments/{assignment_id}",
+                "delete",
+                "admin.llm.assignments.delete",
+            ),
+            (
+                "/admin/api/v1/llm/inheritance",
+                "post",
+                "admin.llm.inheritance.create",
+            ),
+            (
+                "/admin/api/v1/llm/inheritance/{capability}",
+                "put",
+                "admin.llm.inheritance.update",
+            ),
+            (
+                "/admin/api/v1/llm/inheritance/{capability}",
+                "delete",
+                "admin.llm.inheritance.delete",
+            ),
+            (
+                "/admin/api/v1/llm/prompts/{prompt_id}",
+                "put",
+                "admin.llm.prompts.update",
+            ),
+            (
+                "/admin/api/v1/llm/prompts/{prompt_id}/reset-to-default",
+                "post",
+                "admin.llm.prompts.reset",
+            ),
+        ]
+
+        for path, method, operation_id in eligible_cases:
+            operation = paths[path][method]
+            assert operation["operationId"] == operation_id
+            x_cli = operation["x-cli"]
+            assert x_cli["group"] == "llm"
+            assert x_cli["verb"]
+            assert x_cli["summary"]
+            assert x_cli["mutates"] is True
+
+        for method in ("put", "delete"):
+            operation = paths["/admin/api/v1/llm/providers/{provider_id}/key"][method]
+            assert operation["x-interactive-only"] is True
+            assert operation["x-agent-forbidden"] is True
+
+        for path, method in (
+            ("/admin/api/v1/agent/log", "get"),
+            ("/admin/api/v1/agent/message", "post"),
+            ("/admin/api/v1/agent/actions", "get"),
+            ("/admin/api/v1/agent/action/{action_id}/approve", "post"),
+            ("/admin/api/v1/agent/action/{action_id}/deny", "post"),
+        ):
+            operation = paths[path][method]
+            assert operation["x-agent-forbidden"] is True
+            assert operation["x-cli"]["hidden"] is True
+
     def test_admin_problem_responses_match_runtime_envelope(
         self, pinned_settings: Settings, real_make_uow: None
     ) -> None:
@@ -259,10 +376,12 @@ class TestOpenapiIntegration:
             assert "application/json" not in response["content"]
             problem_schema = response["content"]["application/problem+json"]["schema"]
             assert set(problem_schema["required"]) == {
+                "error_id",
                 "type",
                 "title",
                 "status",
                 "instance",
+                "user_message",
             }
             assert problem_schema["additionalProperties"] is True
 

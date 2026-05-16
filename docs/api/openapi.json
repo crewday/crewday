@@ -33357,7 +33357,15 @@
         "tags": [
           "admin",
           "admin-agent"
-        ]
+        ],
+        "x-agent-forbidden": true,
+        "x-cli": {
+          "group": "agent",
+          "hidden": true,
+          "mutates": true,
+          "summary": "Approve this admin agent action",
+          "verb": "action-approve"
+        }
       }
     },
     "/admin/api/v1/agent/action/{action_id}/deny": {
@@ -33930,7 +33938,15 @@
         "tags": [
           "admin",
           "admin-agent"
-        ]
+        ],
+        "x-agent-forbidden": true,
+        "x-cli": {
+          "group": "agent",
+          "hidden": true,
+          "mutates": true,
+          "summary": "Deny this admin agent action",
+          "verb": "action-deny"
+        }
       }
     },
     "/admin/api/v1/agent/actions": {
@@ -34498,7 +34514,15 @@
         "tags": [
           "admin",
           "admin-agent"
-        ]
+        ],
+        "x-agent-forbidden": true,
+        "x-cli": {
+          "group": "agent",
+          "hidden": true,
+          "mutates": false,
+          "summary": "List pending actions for this admin agent",
+          "verb": "actions-list"
+        }
       }
     },
     "/admin/api/v1/agent/log": {
@@ -35066,7 +35090,15 @@
         "tags": [
           "admin",
           "admin-agent"
-        ]
+        ],
+        "x-agent-forbidden": true,
+        "x-cli": {
+          "group": "agent",
+          "hidden": true,
+          "mutates": false,
+          "summary": "List this admin agent transcript",
+          "verb": "log-list"
+        }
       }
     },
     "/admin/api/v1/agent/message": {
@@ -35640,7 +35672,15 @@
         "tags": [
           "admin",
           "admin-agent"
-        ]
+        ],
+        "x-agent-forbidden": true,
+        "x-cli": {
+          "group": "agent",
+          "hidden": true,
+          "mutates": true,
+          "summary": "Send a message to this admin agent",
+          "verb": "message-create"
+        }
       }
     },
     "/admin/api/v1/agent_docs": {
@@ -41624,7 +41664,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": false,
+          "summary": "List LLM assignments",
+          "verb": "assignments-list"
+        }
       },
       "post": {
         "operationId": "admin.llm.assignments.create",
@@ -42197,7 +42243,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Create an LLM assignment",
+          "verb": "assignments"
+        }
       }
     },
     "/admin/api/v1/llm/assignments/reorder": {
@@ -42780,7 +42832,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Reorder LLM assignments",
+          "verb": "assignments-reorder-update"
+        }
       }
     },
     "/admin/api/v1/llm/assignments/{assignment_id}": {
@@ -43347,7 +43405,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Delete an LLM assignment",
+          "verb": "assignments-delete"
+        }
       },
       "get": {
         "operationId": "admin.llm.assignments.get",
@@ -43919,7 +43983,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": false,
+          "summary": "Show an LLM assignment",
+          "verb": "assignments-show"
+        }
       },
       "put": {
         "operationId": "admin.llm.assignments.update",
@@ -44501,7 +44571,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Update an LLM assignment",
+          "verb": "assignments-replace"
+        }
       }
     },
     "/admin/api/v1/llm/calls": {
@@ -45146,7 +45222,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": false,
+          "summary": "List LLM calls",
+          "verb": "calls-list"
+        }
       }
     },
     "/admin/api/v1/llm/graph": {
@@ -45711,7 +45793,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": false,
+          "summary": "Read the full LLM graph",
+          "verb": "graph-list"
+        }
       }
     },
     "/admin/api/v1/llm/inheritance": {
@@ -46280,7 +46368,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": false,
+          "summary": "List LLM capability inheritance",
+          "verb": "inheritance-list"
+        }
       },
       "post": {
         "operationId": "admin.llm.inheritance.create",
@@ -46853,7 +46947,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Create LLM capability inheritance",
+          "verb": "inheritance"
+        }
       }
     },
     "/admin/api/v1/llm/inheritance/{capability}": {
@@ -47420,7 +47520,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Delete LLM capability inheritance",
+          "verb": "inheritance-delete"
+        }
       },
       "put": {
         "operationId": "admin.llm.inheritance.update",
@@ -48002,7 +48108,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Update LLM capability inheritance",
+          "verb": "inheritance-replace"
+        }
       }
     },
     "/admin/api/v1/llm/models": {
@@ -48571,7 +48683,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": false,
+          "summary": "List LLM models",
+          "verb": "models-list"
+        }
       },
       "post": {
         "operationId": "admin.llm.models.create",
@@ -49144,7 +49262,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Create an LLM model",
+          "verb": "models"
+        }
       }
     },
     "/admin/api/v1/llm/models/openrouter-preview": {
@@ -49719,7 +49843,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Preview OpenRouter model metadata",
+          "verb": "openrouter-preview"
+        }
       }
     },
     "/admin/api/v1/llm/models/{model_id}": {
@@ -50286,7 +50416,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Delete an LLM model",
+          "verb": "models-delete"
+        }
       },
       "get": {
         "operationId": "admin.llm.models.get",
@@ -50858,7 +50994,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": false,
+          "summary": "Show an LLM model",
+          "verb": "models-show"
+        }
       },
       "put": {
         "operationId": "admin.llm.models.update",
@@ -51440,7 +51582,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Update an LLM model",
+          "verb": "models-replace"
+        }
       }
     },
     "/admin/api/v1/llm/prompts": {
@@ -52009,7 +52157,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": false,
+          "summary": "List LLM prompts",
+          "verb": "prompts-list"
+        }
       }
     },
     "/admin/api/v1/llm/prompts/{prompt_id}": {
@@ -52583,7 +52737,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": false,
+          "summary": "Show an LLM prompt",
+          "verb": "prompts-show"
+        }
       },
       "put": {
         "operationId": "admin.llm.prompts.update",
@@ -53165,7 +53325,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Update an LLM prompt",
+          "verb": "prompts-replace"
+        }
       }
     },
     "/admin/api/v1/llm/prompts/{prompt_id}/reset-to-default": {
@@ -53739,7 +53905,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Reset an LLM prompt to its default",
+          "verb": "reset-to-default"
+        }
       }
     },
     "/admin/api/v1/llm/prompts/{prompt_id}/revisions": {
@@ -54317,7 +54489,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": false,
+          "summary": "List LLM prompt revisions",
+          "verb": "prompts-revisions-list"
+        }
       }
     },
     "/admin/api/v1/llm/provider-models": {
@@ -54918,7 +55096,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": false,
+          "summary": "List provider models",
+          "verb": "provider-models-list"
+        }
       },
       "post": {
         "operationId": "admin.llm.provider_models.create",
@@ -55491,7 +55675,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Create a provider model",
+          "verb": "provider-models"
+        }
       }
     },
     "/admin/api/v1/llm/provider-models/{provider_model_id}": {
@@ -56058,7 +56248,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Delete a provider model",
+          "verb": "provider-models-delete"
+        }
       },
       "get": {
         "operationId": "admin.llm.provider_models.get",
@@ -56630,7 +56826,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": false,
+          "summary": "Show a provider model",
+          "verb": "provider-models-show"
+        }
       },
       "put": {
         "operationId": "admin.llm.provider_models.update",
@@ -57212,7 +57414,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Update a provider model",
+          "verb": "provider-models-replace"
+        }
       }
     },
     "/admin/api/v1/llm/provider-models/{provider_model_id}/embedding-smoke": {
@@ -57796,7 +58004,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Run a provider-model embedding smoke test",
+          "verb": "embedding-smoke"
+        }
       }
     },
     "/admin/api/v1/llm/provider-models/{provider_model_id}/playground": {
@@ -58590,7 +58804,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Run a provider-model playground prompt",
+          "verb": "playground"
+        }
       }
     },
     "/admin/api/v1/llm/provider-models/{provider_model_id}/sync-pricing": {
@@ -59167,6 +59387,8 @@
         ],
         "x-cli": {
           "group": "llm",
+          "mutates": true,
+          "summary": "Sync pricing for a provider model",
           "verb": "provider-models-sync-pricing"
         }
       }
@@ -59737,7 +59959,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": false,
+          "summary": "List LLM providers",
+          "verb": "providers-list"
+        }
       },
       "post": {
         "operationId": "admin.llm.providers.create",
@@ -60310,7 +60538,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Create an LLM provider",
+          "verb": "providers"
+        }
       }
     },
     "/admin/api/v1/llm/providers/{provider_id}": {
@@ -60877,7 +61111,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Delete an LLM provider",
+          "verb": "providers-delete"
+        }
       },
       "get": {
         "operationId": "admin.llm.providers.get",
@@ -61449,7 +61689,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": false,
+          "summary": "Show an LLM provider",
+          "verb": "providers-show"
+        }
       },
       "put": {
         "operationId": "admin.llm.providers.update",
@@ -62031,7 +62277,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Update an LLM provider",
+          "verb": "providers-replace"
+        }
       }
     },
     "/admin/api/v1/llm/providers/{provider_id}/key": {
@@ -62606,6 +62858,13 @@
           "admin",
           "llm"
         ],
+        "x-agent-forbidden": true,
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Clear an LLM provider API key",
+          "verb": "providers-key-delete"
+        },
         "x-interactive-only": true
       },
       "put": {
@@ -63189,6 +63448,13 @@
           "admin",
           "llm"
         ],
+        "x-agent-forbidden": true,
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Set an LLM provider API key",
+          "verb": "providers-key-replace"
+        },
         "x-interactive-only": true
       }
     },
@@ -63771,7 +64037,13 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "mutates": true,
+          "summary": "Sync LLM pricing",
+          "verb": "sync-pricing"
+        }
       }
     },
     "/admin/api/v1/me": {
