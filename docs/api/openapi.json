@@ -53979,7 +53979,11 @@
           "admin",
           "admin",
           "llm"
-        ]
+        ],
+        "x-cli": {
+          "group": "llm",
+          "verb": "provider-models-sync-pricing"
+        }
       }
     },
     "/admin/api/v1/llm/providers": {

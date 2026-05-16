@@ -2739,6 +2739,9 @@ def build_admin_llm_router() -> APIRouter:
         "/provider-models/{provider_model_id}/sync-pricing",
         response_model=LlmProviderModelSyncPricingResponse,
         operation_id="admin.llm.provider_models.sync_pricing",
+        openapi_extra={
+            "x-cli": {"group": "llm", "verb": "provider-models-sync-pricing"},
+        },
     )
     def sync_provider_model_pricing(
         ctx: _WriteCtx,

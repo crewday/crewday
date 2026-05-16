@@ -1431,6 +1431,32 @@
     "x_cli": null
   },
   {
+    "body_schema_ref": "#/components/schemas/LlmProviderModelEmbeddingSmokeRequest",
+    "group": "llm",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/llm/provider-models/{provider_model_id}/embedding-smoke"
+    },
+    "idempotent": false,
+    "name": "embedding-smoke",
+    "operation_id": "admin.llm.provider_models.embedding_smoke",
+    "path_params": [
+      {
+        "name": "provider_model_id",
+        "required": true,
+        "schema": {
+          "title": "Provider Model Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmProviderModelEmbeddingSmokeResponse",
+    "summary": "Provider Model Embedding Smoke",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1927,6 +1953,35 @@
     "x_cli": null
   },
   {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/llm/provider-models/{provider_model_id}/sync-pricing"
+    },
+    "idempotent": false,
+    "name": "provider-models-sync-pricing",
+    "operation_id": "admin.llm.provider_models.sync_pricing",
+    "path_params": [
+      {
+        "name": "provider_model_id",
+        "required": true,
+        "schema": {
+          "title": "Provider Model Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmProviderModelSyncPricingResponse",
+    "summary": "Sync Provider Model Pricing",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "llm",
+      "verb": "provider-models-sync-pricing"
+    }
+  },
+  {
     "body_schema_ref": "#/components/schemas/ProviderPayload",
     "group": "llm",
     "http": {
@@ -1966,6 +2021,58 @@
     "query_params": [],
     "response_schema_ref": null,
     "summary": "Delete Provider",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "DELETE",
+      "path": "/admin/api/v1/llm/providers/{provider_id}/key"
+    },
+    "idempotent": true,
+    "name": "providers-key-delete",
+    "operation_id": "admin.llm.providers.key.clear",
+    "path_params": [
+      {
+        "name": "provider_id",
+        "required": true,
+        "schema": {
+          "title": "Provider Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmProviderResponse",
+    "summary": "Clear Provider Key",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/LlmProviderKeyPayload",
+    "group": "llm",
+    "http": {
+      "method": "PUT",
+      "path": "/admin/api/v1/llm/providers/{provider_id}/key"
+    },
+    "idempotent": true,
+    "name": "providers-key-replace",
+    "operation_id": "admin.llm.providers.key.set",
+    "path_params": [
+      {
+        "name": "provider_id",
+        "required": true,
+        "schema": {
+          "title": "Provider Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmProviderResponse",
+    "summary": "Set Provider Key",
     "x_agent_confirm": null,
     "x_cli": null
   },
