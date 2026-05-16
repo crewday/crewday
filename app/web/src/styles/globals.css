@@ -37,6 +37,7 @@
 @import "./inventory.css";
 @import "./auth-gate.css";
 @import "./error-toast.css";
+@import "./inline-error-alert.css";
 
 .panel--inset {
   background: var(--paper-2);

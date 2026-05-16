@@ -12,7 +12,10 @@ interface FetchCall {
 }
 
 function installFetch(
-  responseFor?: (url: string, init: RequestInit) => { status?: number; body: unknown },
+  responseFor?: (
+    url: string,
+    init: RequestInit,
+  ) => { status?: number; body: unknown; headers?: Record<string, string> },
 ): FetchCall[] {
   const calls: FetchCall[] = [];
   const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
@@ -26,6 +29,9 @@ function installFetch(
       ok,
       status,
       statusText: ok ? "OK" : "Error",
+      headers: {
+        get: (name: string) => response.headers?.[name] ?? null,
+      },
       text: async () => JSON.stringify(response.body),
     } as Response;
   });
@@ -536,6 +542,67 @@ describe("LlmAssignmentModal", () => {
       required_capabilities: ["chat", "function_calling"],
       is_enabled: true,
     });
+  });
+
+  it("renders assignment API failures through an expandable inline error alert", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+    installFetch((url, init) =>
+      url === "/admin/api/v1/llm/assignments" && init.method === "POST"
+        ? {
+            status: 409,
+            headers: { "X-Request-Id": "req_assignment" },
+            body: {
+              type: "https://crewday.dev/errors/conflict",
+              title: "Conflict",
+              status: 409,
+              detail: "Provider-model lacks a required capability.",
+              user_message: "Choose a compatible model.",
+              error: "assignment_missing_capability",
+              error_id: "err_assignment",
+              instance: "/admin/api/v1/llm/assignments",
+              errors: [{
+                loc: ["body", "provider_model_id"],
+                msg: "Missing function_calling",
+                type: "value_error",
+              }],
+              approval_request_id: "approval_assignment",
+            },
+          }
+        : { body: {} },
+    );
+    renderAssignment("chat.manager");
+    const dialog = screen.getByRole("dialog", { name: "chat.manager" });
+
+    fireEvent.click(
+      within(providerModelRow(dialog, "Fast Chat")).getByRole("button", {
+        name: /Add Fast Chat/,
+      }),
+    );
+
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "That provider-model does not satisfy this capability. Choose a compatible model.",
+    );
+    expect(within(alert).queryByText("err_assignment")).not.toBeInTheDocument();
+
+    fireEvent.click(within(alert).getByRole("button", { name: "Show error details" }));
+
+    expect(within(alert).getByText("err_assignment")).toBeInTheDocument();
+    expect(within(alert).getByText("409")).toBeInTheDocument();
+    expect(within(alert).getByText("conflict")).toBeInTheDocument();
+    expect(within(alert).getByText("Conflict")).toBeInTheDocument();
+    expect(within(alert).getByText("assignment_missing_capability")).toBeInTheDocument();
+    expect(within(alert).getByText("/admin/api/v1/llm/assignments")).toBeInTheDocument();
+    expect(within(alert).getByText("req_assignment")).toBeInTheDocument();
+    expect(within(alert).getByText("Missing function_calling")).toBeInTheDocument();
+    expect(within(alert).getByText("Approval request id: approval_assignment")).toBeInTheDocument();
+
+    fireEvent.click(within(alert).getByRole("button", { name: "Copy error ID" }));
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("err_assignment");
   });
 
   it("adds new provider-models after the highest existing priority", async () => {

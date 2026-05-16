@@ -4,10 +4,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { GripVertical, Plus, Trash2 } from "lucide-react";
 import ConfirmationModal from "@/components/ConfirmationModal";
 import FormModal from "@/components/FormModal";
+import InlineErrorAlert from "@/components/InlineErrorAlert";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { useReorderableList } from "@/components/useReorderableList";
 import { Chip } from "@/components/common";
-import { ApiError, fetchJson } from "@/lib/api";
+import { fetchJson, toDisplayError, type DisplayError } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import type {
   LlmAssignment,
@@ -57,31 +58,21 @@ const PROVIDER_MODEL_SORT_COLLATOR = new Intl.Collator("en", {
   sensitivity: "base",
 });
 
-function apiErrorCopy(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) {
-    const code =
-      typeof error.problem?.error === "string" ? error.problem.error : undefined;
-    if (code === "assignment_missing_capability") {
-      return "That provider-model does not satisfy this capability. Choose a compatible model.";
-    }
-    if (code === "capability_inheritance_cycle") {
-      return "That inheritance change would create a cycle. Choose a different parent.";
-    }
-    if (code === "capability_inheritance_self_loop") {
-      return "A capability cannot inherit from itself.";
-    }
-    if (code === "default_capability_inheritance_forbidden") {
-      return "The default capability must own the deployment fallback chain.";
-    }
-    if (code === "capability_inheritance_exists") {
-      return "This capability already has an explicit parent. Change the existing parent instead.";
-    }
-    if (code === "capability_direct_assignments_exist") {
-      return "This capability still has directly assigned models. Confirm replacement before creating inheritance.";
-    }
-    return error.detail ?? error.title ?? error.message ?? fallback;
-  }
-  return error instanceof Error ? error.message : fallback;
+const ASSIGNMENT_ERROR_MESSAGES: Record<string, string> = {
+  assignment_missing_capability: "That provider-model does not satisfy this capability. Choose a compatible model.",
+  capability_inheritance_cycle: "That inheritance change would create a cycle. Choose a different parent.",
+  capability_inheritance_self_loop: "A capability cannot inherit from itself.",
+  default_capability_inheritance_forbidden: "The default capability must own the deployment fallback chain.",
+  capability_inheritance_exists: "This capability already has an explicit parent. Change the existing parent instead.",
+  capability_direct_assignments_exist: "This capability still has directly assigned models. Confirm replacement before creating inheritance.",
+};
+
+function assignmentDisplayError(error: unknown, fallback: string): DisplayError {
+  const displayError = toDisplayError(error, fallback);
+  const message = displayError.machineCode
+    ? ASSIGNMENT_ERROR_MESSAGES[displayError.machineCode]
+    : undefined;
+  return message ? { ...displayError, message } : displayError;
 }
 
 function compatibleMissing(
@@ -256,7 +247,7 @@ export default function LlmAssignmentModal({
   );
   const [replacementParent, setReplacementParent] = useState<string | null>(null);
   const [clientErr, setClientErr] = useState<string | null>(null);
-  const [serverErr, setServerErr] = useState<string | null>(null);
+  const [serverErr, setServerErr] = useState<DisplayError | null>(null);
 
   useEffect(() => {
     setInheritParent(explicitParent ?? "");
@@ -286,7 +277,7 @@ export default function LlmAssignmentModal({
     },
     onSuccess: invalidate,
     onError: (error: Error) =>
-      setServerErr(apiErrorCopy(error, "Assignment create failed.")),
+      setServerErr(assignmentDisplayError(error, "Assignment create failed.")),
   });
 
   const deleteAssignment = useMutation({
@@ -296,7 +287,7 @@ export default function LlmAssignmentModal({
       }),
     onSuccess: invalidate,
     onError: (error: Error) =>
-      setServerErr(apiErrorCopy(error, "Assignment delete failed.")),
+      setServerErr(assignmentDisplayError(error, "Assignment delete failed.")),
   });
 
   const reorderAssignments = useMutation({
@@ -307,7 +298,7 @@ export default function LlmAssignmentModal({
       }),
     onSuccess: invalidate,
     onError: (error: Error) =>
-      setServerErr(apiErrorCopy(error, "Assignment reorder failed.")),
+      setServerErr(assignmentDisplayError(error, "Assignment reorder failed.")),
   });
 
   const updateAssignmentThinking = useMutation({
@@ -327,7 +318,7 @@ export default function LlmAssignmentModal({
       }),
     onSuccess: invalidate,
     onError: (error: Error) =>
-      setServerErr(apiErrorCopy(error, "Assignment thinking save failed.")),
+      setServerErr(assignmentDisplayError(error, "Assignment thinking save failed.")),
   });
 
   const saveInheritance = useMutation({
@@ -359,7 +350,7 @@ export default function LlmAssignmentModal({
       await invalidate();
     },
     onError: (error: Error) =>
-      setServerErr(apiErrorCopy(error, "Inheritance save failed.")),
+      setServerErr(assignmentDisplayError(error, "Inheritance save failed.")),
   });
 
   const deleteInheritance = useMutation({
@@ -372,7 +363,7 @@ export default function LlmAssignmentModal({
     },
     onSuccess: invalidate,
     onError: (error: Error) =>
-      setServerErr(apiErrorCopy(error, "Inheritance delete failed.")),
+      setServerErr(assignmentDisplayError(error, "Inheritance delete failed.")),
   });
 
   const selectedProviderModelIds = new Set(
@@ -399,7 +390,7 @@ export default function LlmAssignmentModal({
     const pm = indexes.pmById.get(assignment.provider_model_id);
     return pm ? providerModelLabel(pm, indexes) : assignment.provider_model_id;
   });
-  const err = clientErr ?? serverErr;
+  const serverAlert = clientErr ? null : serverErr;
   const titleId = capabilityKey ? "llm-assignment-modal-title" : undefined;
   const pending =
     createAssignment.isPending ||
@@ -516,11 +507,12 @@ export default function LlmAssignmentModal({
           aria-busy={pending}
         >
           {capability ? <CapabilityHeader capability={capability} /> : null}
-          {err ? (
+          {clientErr ? (
             <p className="form-error" role="alert">
-              {err}
+              {clientErr}
             </p>
           ) : null}
+          {serverAlert ? <InlineErrorAlert error={serverAlert} /> : null}
           {capability && explicitParent ? (
             <InheritanceOnlyPanel
               capability={capability}

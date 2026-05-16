@@ -10,8 +10,9 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Check, Copy, X } from "lucide-react";
-import type { DisplayError, DisplayErrorDetail } from "@/lib/displayError";
+import { X } from "lucide-react";
+import DisplayErrorDetails from "@/components/DisplayErrorDetails";
+import type { DisplayError } from "@/lib/displayError";
 import {
   type ErrorToastEvent,
   type ErrorToastSource,
@@ -147,19 +148,12 @@ function ErrorToast({
   onUpdate: (key: string, patch: Partial<ErrorToastItem>) => void;
 }) {
   const detailsId = useId();
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (toast.expanded || toast.hovered || toast.focused) return undefined;
     const timeout = window.setTimeout(() => onDismiss(toast.key), AUTO_DISMISS_MS);
     return () => window.clearTimeout(timeout);
   }, [onDismiss, toast.expanded, toast.focused, toast.hovered, toast.key]);
-
-  useEffect(() => {
-    if (!copied) return undefined;
-    const timeout = window.setTimeout(() => setCopied(false), 1_800);
-    return () => window.clearTimeout(timeout);
-  }, [copied]);
 
   const toggleDetails = () => {
     onUpdate(toast.key, { expanded: !toast.expanded });
@@ -179,11 +173,6 @@ function ErrorToast({
       event.stopPropagation();
       onDismiss(toast.key);
     }
-  };
-
-  const copyErrorId = () => {
-    if (!toast.error.id || !navigator.clipboard) return;
-    void navigator.clipboard.writeText(toast.error.id).then(() => setCopied(true), () => undefined);
   };
 
   return (
@@ -222,108 +211,9 @@ function ErrorToast({
 
       {toast.expanded ? (
         <div className="error-toast__details" id={detailsId}>
-          <dl className="error-toast__properties">
-            <ErrorProperty label="Error ID" value={toast.error.id}>
-              {toast.error.id ? (
-                <button
-                  type="button"
-                  className="error-toast__copy"
-                  aria-label="Copy error ID"
-                  onClick={copyErrorId}
-                >
-                  {copied ? (
-                    <>
-                      <Check size={13} strokeWidth={2.5} aria-hidden="true" />
-                      Copied
-                    </>
-                  ) : (
-                    <>
-                      <Copy size={13} strokeWidth={2} aria-hidden="true" />
-                      Copy
-                    </>
-                  )}
-                </button>
-              ) : null}
-            </ErrorProperty>
-            <ErrorProperty label="Status" value={toast.error.status?.toString() ?? null} />
-            <ErrorProperty label="Type" value={toast.error.type} />
-            <ErrorProperty label="Title" value={toast.error.title} />
-            <ErrorProperty label="Machine code" value={toast.error.machineCode} />
-            <ErrorProperty label="Instance" value={toast.error.instance} />
-            <ErrorProperty label="Request ID" value={toast.error.requestId} />
-          </dl>
-          <ErrorFieldList fieldErrors={toast.error.fieldErrors} />
-          <ErrorDetailList details={toast.error.details} />
+          <DisplayErrorDetails error={toast.error} classNamePrefix="error-toast" />
         </div>
       ) : null}
-    </section>
-  );
-}
-
-function ErrorProperty({
-  children,
-  label,
-  value,
-}: {
-  children?: ReactNode;
-  label: string;
-  value: string | null;
-}) {
-  return (
-    <div className="error-toast__property">
-      <dt>{label}</dt>
-      <dd>
-        <span>{value ?? "Not provided"}</span>
-        {children}
-      </dd>
-    </div>
-  );
-}
-
-function ErrorFieldList({
-  fieldErrors,
-}: {
-  fieldErrors: DisplayError["fieldErrors"];
-}) {
-  return (
-    <section className="error-toast__block" aria-label="Field errors">
-      <h2 className="error-toast__block-title">Field errors</h2>
-      {fieldErrors.length > 0 ? (
-        <ul className="error-toast__list">
-          {fieldErrors.map((fieldError, index) => (
-            <li key={`${fieldError.loc?.join(".") ?? "field"}-${index}`}>
-              <span>{fieldError.msg ?? "Invalid field"}</span>
-              {fieldError.loc?.length ? (
-                <code>{fieldError.loc.map(String).join(".")}</code>
-              ) : null}
-              {fieldError.type ? <small>{fieldError.type}</small> : null}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="error-toast__empty">None</p>
-      )}
-    </section>
-  );
-}
-
-function ErrorDetailList({ details }: { details: ReadonlyArray<DisplayErrorDetail> }) {
-  return (
-    <section className="error-toast__block" aria-label="Details">
-      <h2 className="error-toast__block-title">Details</h2>
-      {details.length > 0 ? (
-        <ul className="error-toast__list">
-          {details.map((detail, index) => (
-            <li key={`${detail.label}-${detail.path ?? "detail"}-${index}`}>
-              <span>{detail.label}: {detail.message}</span>
-              {detail.path ? <code>{detail.path}</code> : null}
-              {detail.type ? <small>{detail.type}</small> : null}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="error-toast__empty">None</p>
-      )}
     </section>
   );
 }

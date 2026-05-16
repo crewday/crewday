@@ -85,6 +85,7 @@ export function toDisplayError(error: unknown, fallback: string = DEFAULT_FALLBA
       fieldErrors,
       instance,
       machineCode,
+      problem: apiError.problem,
       requestId,
       status: apiError.status,
       title,
@@ -128,6 +129,7 @@ function apiDetails(input: {
   fieldErrors: ReadonlyArray<ProblemFieldError>;
   instance: string | null;
   machineCode: string | null;
+  problem: ProblemDetail | null;
   requestId: string | null;
   status: number;
   title: string | null;
@@ -153,8 +155,56 @@ function apiDetails(input: {
       nonEmptyString(fieldError.type),
     );
   }
+  addExtensionDetails(details, input.problem);
 
   return details;
+}
+
+function addExtensionDetails(
+  details: DisplayErrorDetail[],
+  problem: ProblemDetail | null,
+): void {
+  if (!problem) return;
+  const standardKeys = new Set([
+    "type",
+    "title",
+    "status",
+    "detail",
+    "instance",
+    "error_id",
+    "user_message",
+    "error",
+    "errors",
+  ]);
+  for (const [key, value] of Object.entries(problem)) {
+    if (standardKeys.has(key)) continue;
+    addDetail(
+      details,
+      humanizeExtensionKey(key),
+      stringifyExtensionValue(value),
+      key,
+      "extension",
+    );
+  }
+}
+
+function humanizeExtensionKey(key: string): string {
+  const words = key
+    .split("_")
+    .filter(Boolean)
+    .join(" ");
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : key;
+}
+
+function stringifyExtensionValue(value: unknown): string | null {
+  if (typeof value === "string") return nonEmptyString(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value === null || value === undefined) return null;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return null;
+  }
 }
 
 function genericDetails(error: unknown): ReadonlyArray<DisplayErrorDetail> {
