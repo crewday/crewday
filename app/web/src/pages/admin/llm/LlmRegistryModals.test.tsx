@@ -71,6 +71,21 @@ function bodyOf(call: FetchCall): unknown {
 
 const baseGraph = graph as LlmGraphPayload;
 
+function graphWithGemmaMedia(
+  capabilities: string[],
+  providerModel: Partial<LlmProviderModel> = {},
+): LlmGraphPayload {
+  return {
+    ...baseGraph,
+    models: baseGraph.models.map((model) =>
+      model.id === "model_gemma" ? { ...model, capabilities } : model,
+    ),
+    provider_models: baseGraph.provider_models.map((row) =>
+      row.id === "pm_gemma" ? { ...row, ...providerModel } : row,
+    ),
+  };
+}
+
 function playgroundSection(): HTMLElement {
   return screen.getByRole("region", { name: "Playground" });
 }
@@ -1027,6 +1042,9 @@ describe("LlmRegistryModals", () => {
                   output_cost_per_million: 0,
                   fixed_cost_per_call_usd: null,
                   audio_cost_per_hour_usd: 0.04,
+                  audio_input_transform: "passthrough",
+                  image_input_format: "preserve",
+                  image_input_max_edge_px: null,
                   max_tokens_override: null,
                   supports_system_prompt: false,
                   supports_temperature: false,
@@ -1090,6 +1108,9 @@ describe("LlmRegistryModals", () => {
                   output_cost_per_million: 5,
                   fixed_cost_per_call_usd: null,
                   audio_cost_per_hour_usd: null,
+                  audio_input_transform: "passthrough",
+                  image_input_format: "preserve",
+                  image_input_max_edge_px: null,
                   max_tokens_override: null,
                   supports_system_prompt: false,
                   supports_temperature: true,
@@ -1314,6 +1335,70 @@ describe("LlmRegistryModals", () => {
     ).toBe(true);
   });
 
+  it("syncs text-only price-source drafts with hidden media defaults", async () => {
+    const testGraph: LlmGraphPayload = {
+      ...baseGraph,
+      models: baseGraph.models.map((model) =>
+        model.id === "model_text"
+          ? {
+              ...model,
+              price_source: "openrouter",
+              price_source_model_id: "test/text-only",
+            }
+          : model,
+      ),
+      provider_models: baseGraph.provider_models.map((pm) =>
+        pm.id === "pm_text"
+          ? {
+              ...pm,
+              audio_input_transform: "wav_16khz_mono",
+              image_input_format: "png",
+              image_input_max_edge_px: 1024,
+              price_source_override: "",
+            }
+          : pm,
+      ),
+    };
+    const calls = installFetch((url, init) => {
+      if (
+        url === "/admin/api/v1/llm/provider-models/pm_text" &&
+        init.method === "PUT"
+      ) {
+        return { body: testGraph.provider_models[1]! };
+      }
+      return { body: {} };
+    });
+    renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_text" });
+
+    expect(screen.queryByText("Audio input")).not.toBeInTheDocument();
+    expect(screen.queryByText("Image input")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Price source model override/), {
+      target: { value: "openrouter/text-only" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sync pricing" }));
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/provider-models/pm_text" &&
+            call.init.method === "PUT",
+        ),
+      ).toBe(true);
+    });
+    const put = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/provider-models/pm_text" &&
+        call.init.method === "PUT",
+    )!;
+    expect(bodyOf(put)).toMatchObject({
+      audio_input_transform: "passthrough",
+      image_input_format: "preserve",
+      image_input_max_edge_px: null,
+      price_source_model_id_override: "openrouter/text-only",
+    });
+  });
+
   it("shows provider-model pricing sync errors without clearing manual costs", async () => {
     installFetch((url) => {
       if (url === "/admin/api/v1/llm/provider-models/pm_gemma/sync-pricing") {
@@ -1377,6 +1462,187 @@ describe("LlmRegistryModals", () => {
       fixed_cost_per_call_usd: null,
       audio_cost_per_hour_usd: null,
     });
+  });
+
+  it("shows audio transform only for audio-capable provider-models and saves it", async () => {
+    const calls = installFetch();
+    renderRegistry(
+      graphWithGemmaMedia(["chat", "audio_input"], {
+        audio_input_transform: "wav_16khz_mono",
+      }),
+      { kind: "providerModel", mode: "edit", id: "pm_gemma" },
+    );
+
+    const audioTransform = screen.getByLabelText(/Audio input transform/);
+    expect(screen.getByText("Audio input")).toBeInTheDocument();
+    expect(audioTransform).toHaveValue("wav_16khz_mono");
+    expect(screen.queryByText("Image input")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Image input format/)).not.toBeInTheDocument();
+
+    fireEvent.change(audioTransform, { target: { value: "passthrough" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+            call.init.method === "PUT",
+        ),
+      ).toBe(true);
+    });
+    const put = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+        call.init.method === "PUT",
+    )!;
+    expect(bodyOf(put)).toMatchObject({
+      audio_input_transform: "passthrough",
+      image_input_format: "preserve",
+      image_input_max_edge_px: null,
+    });
+  });
+
+  it("shows image transform controls only for vision-capable provider-models and saves them", async () => {
+    const calls = installFetch();
+    renderRegistry(
+      graphWithGemmaMedia(["chat", "vision"], {
+        image_input_format: "jpeg",
+        image_input_max_edge_px: 1024,
+      }),
+      { kind: "providerModel", mode: "edit", id: "pm_gemma" },
+    );
+
+    const imageFormat = screen.getByLabelText(/Image input format/);
+    const imageMaxEdge = screen.getByLabelText(/Image max edge/);
+    expect(screen.getByText("Image input")).toBeInTheDocument();
+    expect(imageFormat).toHaveValue("jpeg");
+    expect(imageMaxEdge).toHaveValue(1024);
+    expect(screen.queryByText("Audio input")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Audio input transform/)).not.toBeInTheDocument();
+
+    fireEvent.change(imageFormat, { target: { value: "webp" } });
+    fireEvent.change(imageMaxEdge, { target: { value: "2048" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+            call.init.method === "PUT",
+        ),
+      ).toBe(true);
+    });
+    const put = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+        call.init.method === "PUT",
+    )!;
+    expect(bodyOf(put)).toMatchObject({
+      audio_input_transform: "passthrough",
+      image_input_format: "webp",
+      image_input_max_edge_px: 2048,
+    });
+  });
+
+  it("rejects zero image max edge and submits blank as no resize", async () => {
+    const calls = installFetch();
+    renderRegistry(
+      graphWithGemmaMedia(["chat", "vision"], {
+        image_input_format: "webp",
+        image_input_max_edge_px: 1024,
+      }),
+      { kind: "providerModel", mode: "edit", id: "pm_gemma" },
+    );
+
+    const imageMaxEdge = screen.getByLabelText(/Image max edge/);
+    fireEvent.change(imageMaxEdge, { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Image max edge must be a positive whole number.",
+    );
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+          call.init.method === "PUT",
+      ),
+    ).toBe(false);
+
+    fireEvent.change(imageMaxEdge, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+            call.init.method === "PUT",
+        ),
+      ).toBe(true);
+    });
+    const put = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+        call.init.method === "PUT",
+    )!;
+    expect(bodyOf(put)).toMatchObject({ image_input_max_edge_px: null });
+  });
+
+  it("hides media transform controls for text-only provider-models and submits defaults", async () => {
+    const calls = installFetch();
+    renderRegistry(
+      {
+        ...baseGraph,
+        provider_models: baseGraph.provider_models.map((row) =>
+          row.id === "pm_text"
+            ? {
+                ...row,
+                audio_input_transform: "wav_16khz_mono",
+                image_input_format: "png",
+                image_input_max_edge_px: 1024,
+              }
+            : row,
+        ),
+      },
+      { kind: "providerModel", mode: "edit", id: "pm_text" },
+    );
+
+    expect(screen.queryByText("Audio input")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Audio input transform/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Image input")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Image input format/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/provider-models/pm_text" &&
+            call.init.method === "PUT",
+        ),
+      ).toBe(true);
+    });
+    const put = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/provider-models/pm_text" &&
+        call.init.method === "PUT",
+    )!;
+    expect(bodyOf(put)).toMatchObject({
+      audio_input_transform: "passthrough",
+      image_input_format: "preserve",
+      image_input_max_edge_px: null,
+    });
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+          call.init.method === "PUT",
+      ),
+    ).toBe(false);
   });
 
   it("keeps malformed provider-model pricing field-level invalid", async () => {

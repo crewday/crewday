@@ -31,6 +31,8 @@ export type LlmProviderType =
 export type LlmApiKeyStatus = "present" | "missing" | "rotating";
 export type LlmPriceSource = "openrouter" | "manual" | "";
 export type LlmPriceSourceOverride = "" | "none" | "openrouter";
+export type LlmAudioInputTransform = "passthrough" | "wav_16khz_mono";
+export type LlmImageInputFormat = "preserve" | "jpeg" | "png" | "webp";
 export type LlmThinkingLevel = "disabled" | "low" | "medium" | "high";
 export type LlmThinkingStrategy =
   | "none"
@@ -83,6 +85,9 @@ export interface LlmProviderModel {
   output_cost_per_million: number | null;
   fixed_cost_per_call_usd: number | null;
   audio_cost_per_hour_usd: number | null;
+  audio_input_transform: LlmAudioInputTransform;
+  image_input_format: LlmImageInputFormat;
+  image_input_max_edge_px: number | null;
   max_tokens_override: number | null;
   supports_system_prompt: boolean;
   supports_temperature: boolean;

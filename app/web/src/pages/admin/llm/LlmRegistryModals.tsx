@@ -11,6 +11,8 @@ import { ApiError, fetchJson } from "@/lib/api";
 import { formatDecimal, formatInteger } from "@/lib/numberFormat";
 import { qk } from "@/lib/queryKeys";
 import type {
+  LlmAudioInputTransform,
+  LlmImageInputFormat,
   LlmModel,
   LlmPriceSource,
   LlmPriceSourceOverride,
@@ -131,6 +133,9 @@ interface ProviderModelPayload {
   output_cost_per_million: number | null;
   fixed_cost_per_call_usd: number | null;
   audio_cost_per_hour_usd: number | null;
+  audio_input_transform: LlmAudioInputTransform;
+  image_input_format: LlmImageInputFormat;
+  image_input_max_edge_px: number | null;
   max_tokens_override: number | null;
   supports_system_prompt: boolean;
   supports_temperature: boolean;
@@ -159,6 +164,24 @@ const CAPABILITY_TAGS = [
   "embeddings",
 ] as const;
 
+const AUDIO_INPUT_TRANSFORM_OPTIONS: {
+  value: LlmAudioInputTransform;
+  label: string;
+}[] = [
+  { value: "passthrough", label: "Passthrough" },
+  { value: "wav_16khz_mono", label: "WAV, 16 kHz mono" },
+];
+
+const IMAGE_INPUT_FORMAT_OPTIONS: {
+  value: LlmImageInputFormat;
+  label: string;
+}[] = [
+  { value: "preserve", label: "Preserve" },
+  { value: "jpeg", label: "JPEG" },
+  { value: "png", label: "PNG" },
+  { value: "webp", label: "WEBP" },
+];
+
 function emptyToNull(value: string): string | null {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
@@ -178,6 +201,43 @@ function optionalNonNegativeNumber(
     return { ok: false, error: `${label} must be zero or more.` };
   }
   return { ok: true, value: parsed };
+}
+
+function modelHasCapability(
+  model: LlmModel | undefined,
+  capability: string,
+): boolean {
+  return model?.capabilities.includes(capability) ?? false;
+}
+
+function isAudioInputTransform(value: string): value is LlmAudioInputTransform {
+  return value === "passthrough" || value === "wav_16khz_mono";
+}
+
+function isImageInputFormat(value: string): value is LlmImageInputFormat {
+  return (
+    value === "preserve" || value === "jpeg" || value === "png" || value === "webp"
+  );
+}
+
+function persistedMediaPayload(
+  providerModel: LlmProviderModel,
+  model: LlmModel | undefined,
+): Pick<
+  ProviderModelPayload,
+  "audio_input_transform" | "image_input_format" | "image_input_max_edge_px"
+> {
+  return {
+    audio_input_transform: modelHasCapability(model, "audio_input")
+      ? providerModel.audio_input_transform
+      : "passthrough",
+    image_input_format: modelHasCapability(model, "vision")
+      ? providerModel.image_input_format
+      : "preserve",
+    image_input_max_edge_px: modelHasCapability(model, "vision")
+      ? providerModel.image_input_max_edge_px
+      : null,
+  };
 }
 
 function errorCode(error: unknown): string | null {
@@ -827,6 +887,9 @@ function ModelForm({
         output_cost_per_million: null,
         fixed_cost_per_call_usd: null,
         audio_cost_per_hour_usd: null,
+        audio_input_transform: "passthrough",
+        image_input_format: "preserve",
+        image_input_max_edge_px: null,
         max_tokens_override: null,
         supports_system_prompt: true,
         supports_temperature: true,
@@ -1348,6 +1411,18 @@ function ProviderModelForm(props: ProviderModelFormProps) {
       ? ""
       : String(providerModel.audio_cost_per_hour_usd),
   );
+  const [audioInputTransform, setAudioInputTransform] =
+    useState<LlmAudioInputTransform>(
+      providerModel?.audio_input_transform ?? "passthrough",
+    );
+  const [imageInputFormat, setImageInputFormat] = useState<LlmImageInputFormat>(
+    providerModel?.image_input_format ?? "preserve",
+  );
+  const [imageInputMaxEdgePx, setImageInputMaxEdgePx] = useState(
+    providerModel?.image_input_max_edge_px == null
+      ? ""
+      : String(providerModel.image_input_max_edge_px),
+  );
   const [maxTokens, setMaxTokens] = useState(
     providerModel?.max_tokens_override == null
       ? ""
@@ -1390,6 +1465,8 @@ function ProviderModelForm(props: ProviderModelFormProps) {
     () => models.find((item) => item.id === modelId),
     [modelId, models],
   );
+  const supportsAudioInput = modelHasCapability(selectedModel, "audio_input");
+  const supportsVision = modelHasCapability(selectedModel, "vision");
   const persistedModel = useMemo(
     () =>
       providerModel
@@ -1541,6 +1618,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
 
   function persistedPayloadWithPriceSourceDraft(): ProviderModelPayload | null {
     if (!providerModel) return null;
+    const mediaPayload = persistedMediaPayload(providerModel, persistedModel);
     return {
       provider_id: providerModel.provider_id,
       model_id: providerModel.model_id,
@@ -1549,6 +1627,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
       output_cost_per_million: providerModel.output_cost_per_million,
       fixed_cost_per_call_usd: providerModel.fixed_cost_per_call_usd,
       audio_cost_per_hour_usd: providerModel.audio_cost_per_hour_usd,
+      ...mediaPayload,
       max_tokens_override: providerModel.max_tokens_override,
       supports_system_prompt: providerModel.supports_system_prompt,
       supports_temperature: providerModel.supports_temperature,
@@ -1588,6 +1667,13 @@ function ProviderModelForm(props: ProviderModelFormProps) {
     if (!fixedParsed.ok) return setClientErr(fixedParsed.error);
     const audioParsed = optionalNonNegativeNumber(audioCost, "Audio cost");
     if (!audioParsed.ok) return setClientErr(audioParsed.error);
+    const imageMaxEdgeValue = supportsVision ? numberOrNull(imageInputMaxEdgePx) : null;
+    if (
+      imageMaxEdgeValue !== null &&
+      (!Number.isInteger(imageMaxEdgeValue) || imageMaxEdgeValue < 1)
+    ) {
+      return setClientErr("Image max edge must be a positive whole number.");
+    }
     const maxTokensValue = numberOrNull(maxTokens);
     if (maxTokensValue !== null && (!Number.isInteger(maxTokensValue) || maxTokensValue < 1)) {
       return setClientErr("Max tokens override must be a positive whole number.");
@@ -1614,6 +1700,11 @@ function ProviderModelForm(props: ProviderModelFormProps) {
       output_cost_per_million: outputParsed.value,
       fixed_cost_per_call_usd: fixedParsed.value,
       audio_cost_per_hour_usd: audioParsed.value,
+      audio_input_transform: supportsAudioInput
+        ? audioInputTransform
+        : "passthrough",
+      image_input_format: supportsVision ? imageInputFormat : "preserve",
+      image_input_max_edge_px: supportsVision ? imageMaxEdgeValue : null,
       max_tokens_override: maxTokensValue,
       supports_system_prompt: supportsSystemPrompt,
       supports_temperature: supportsTemperature,
@@ -1789,6 +1880,63 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             />
           </FormModalField>
         </FormModalGrid>
+        {supportsAudioInput ? (
+          <fieldset className="llm-registry-form__fieldset">
+            <legend>Audio input</legend>
+            <FormModalField label="Audio input transform" requirement="optional">
+              <select
+                value={audioInputTransform}
+                onChange={(e) => {
+                  if (isAudioInputTransform(e.target.value)) {
+                    setAudioInputTransform(e.target.value);
+                  }
+                }}
+              >
+                {AUDIO_INPUT_TRANSFORM_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </FormModalField>
+          </fieldset>
+        ) : null}
+        {supportsVision ? (
+          <fieldset className="llm-registry-form__fieldset">
+            <legend>Image input</legend>
+            <FormModalGrid>
+              <FormModalField label="Image input format" requirement="optional">
+                <select
+                  value={imageInputFormat}
+                  onChange={(e) => {
+                    if (isImageInputFormat(e.target.value)) {
+                      setImageInputFormat(e.target.value);
+                    }
+                  }}
+                >
+                  {IMAGE_INPUT_FORMAT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </FormModalField>
+              <FormModalField label="Image max edge" requirement="optional">
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={imageInputMaxEdgePx}
+                  onChange={(e) => setImageInputMaxEdgePx(e.target.value)}
+                  aria-invalid={
+                    clientErr === "Image max edge must be a positive whole number."
+                  }
+                  aria-describedby={errId}
+                />
+              </FormModalField>
+            </FormModalGrid>
+          </fieldset>
+        ) : null}
         <FormModalGrid>
           <FormModalField label="Price source override" requirement="optional">
             <select

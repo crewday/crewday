@@ -6,6 +6,7 @@ import type { ReactElement } from "react";
 import { __resetApiProvidersForTests } from "@/lib/api";
 import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
 import adminLlmCss from "@/styles/admin-llm.css?raw";
+import type { LlmGraphPayload } from "@/types";
 import LlmPage from "./LlmPage";
 import LlmUsagePage from "./LlmUsagePage";
 import { calls, graph, prompts } from "./LlmPage.testData";
@@ -80,6 +81,16 @@ function installPageFetch(extra: Record<string, FakeResponse[]> = {}) {
     "/admin/api/v1/llm/prompts": [{ body: prompts }, { body: prompts }, { body: prompts }],
     ...extra,
   });
+}
+
+function graphWithGemmaCapabilities(capabilities: string[]): LlmGraphPayload {
+  const baseGraph = graph as LlmGraphPayload;
+  return {
+    ...baseGraph,
+    models: baseGraph.models.map((model) =>
+      model.id === "model_gemma" ? { ...model, capabilities } : model,
+    ),
+  };
 }
 
 function openOverflowItem(label: string): void {
@@ -1184,6 +1195,9 @@ describe("Admin LlmPage", () => {
                   output_cost_per_million: 0.2,
                   fixed_cost_per_call_usd: null,
                   audio_cost_per_hour_usd: null,
+                  audio_input_transform: "passthrough",
+                  image_input_format: "preserve",
+                  image_input_max_edge_px: null,
                   max_tokens_override: null,
                   supports_system_prompt: true,
                   supports_temperature: true,
@@ -1505,6 +1519,94 @@ describe("Admin LlmPage", () => {
           ),
         ).toHaveLength(2);
       });
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("saves provider-model media transform controls from the graph drawer", async () => {
+    const mediaGraph = graphWithGemmaCapabilities([
+      "chat",
+      "json_mode",
+      "function_calling",
+      "vision",
+      "audio_input",
+    ]);
+    const updatedGraph: LlmGraphPayload = {
+      ...mediaGraph,
+      provider_models: mediaGraph.provider_models.map((row) =>
+        row.id === "pm_gemma"
+          ? {
+              ...row,
+              audio_input_transform: "wav_16khz_mono",
+              image_input_format: "webp",
+              image_input_max_edge_px: 2048,
+            }
+          : row,
+      ),
+    };
+    const fetcher = installPageFetch({
+      "/admin/api/v1/llm/graph": [
+        { body: mediaGraph },
+        { body: updatedGraph },
+        { body: updatedGraph },
+      ],
+      "/admin/api/v1/llm/provider-models/pm_gemma": [
+        { body: updatedGraph.provider_models[0] },
+      ],
+    });
+    try {
+      render(<Harness />);
+      await findOpenRouterProvider();
+
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: /OpenRouter provider model for Gemma 4 31B IT/,
+        }),
+      );
+      fireEvent.change(screen.getByLabelText(/Audio input transform/), {
+        target: { value: "wav_16khz_mono" },
+      });
+      fireEvent.change(screen.getByLabelText(/Image input format/), {
+        target: { value: "webp" },
+      });
+      fireEvent.change(screen.getByLabelText(/Image max edge/), {
+        target: { value: "2048" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
+
+      await waitFor(() => {
+        expect(
+          fetcher.calls.some(
+            (call) =>
+              call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+              call.init.method === "PUT",
+          ),
+        ).toBe(true);
+      });
+      const put = fetcher.calls.find(
+        (call) =>
+          call.url === "/admin/api/v1/llm/provider-models/pm_gemma" &&
+          call.init.method === "PUT",
+      );
+      expect(jsonBody(put!)).toMatchObject({
+        audio_input_transform: "wav_16khz_mono",
+        image_input_format: "webp",
+        image_input_max_edge_px: 2048,
+      });
+      expect(
+        fetcher.calls.filter((call) => call.url === "/admin/api/v1/llm/graph"),
+      ).toHaveLength(2);
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: /OpenRouter provider model for Gemma 4 31B IT/,
+        }),
+      );
+      expect(screen.getByLabelText(/Audio input transform/)).toHaveValue(
+        "wav_16khz_mono",
+      );
+      expect(screen.getByLabelText(/Image input format/)).toHaveValue("webp");
+      expect(screen.getByLabelText(/Image max edge/)).toHaveValue(2048);
     } finally {
       fetcher.restore();
     }
