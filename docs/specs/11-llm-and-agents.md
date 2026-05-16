@@ -1525,6 +1525,16 @@ so the graph page does not carry a duplicate overflow action.
   Playground prompts and responses are not persisted to `llm_usage` or
   prompt history. The request is rejected before the upstream call when
   `max_tokens` exceeds the selected model's known output-token limit.
+  Vision playground images supplied as uploads or HTTPS image URLs are
+  converted to base64 `data:image/...` URLs before the upstream request;
+  remote URLs are fetched through the §15 SSRF guard and raw external
+  image URLs are never forwarded to the provider.
+  Audio playground inputs are available when the selected model carries
+  `audio_input`; the server accepts either an upload or HTTPS/base64
+  data URL, fetches URL bytes through the §15 SSRF guard, base64-encodes
+  the bytes, and sends an OpenAI/OpenRouter-compatible `input_audio`
+  content block. Raw external audio URLs are never forwarded to the
+  provider.
   Direct runs without an explicit token count cap the default at the
   playground safety limit (32,000 tokens), even when the provider
   advertises a larger model maximum.

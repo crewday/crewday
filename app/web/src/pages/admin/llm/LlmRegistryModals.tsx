@@ -279,8 +279,11 @@ function providerAllowsApiKey(providerType: LlmProviderType): boolean {
   return providerType !== "fake" && providerType !== "local_embedding";
 }
 
-function modelSupportsChat(model: LlmModel | undefined): boolean {
-  return Boolean(model?.capabilities.includes("chat"));
+function modelSupportsPlayground(model: LlmModel | undefined): boolean {
+  return Boolean(
+    model?.capabilities.includes("chat") ||
+      model?.capabilities.includes("audio_input"),
+  );
 }
 
 function modelSupportsEmbeddings(model: LlmModel | undefined): boolean {
@@ -1893,7 +1896,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             {err}
           </p>
         ) : null}
-        {mode === "edit" && providerModel && modelSupportsChat(persistedModel) ? (
+        {mode === "edit" && providerModel && modelSupportsPlayground(persistedModel) ? (
           <LlmPlayground
             providerModel={providerModel}
             model={persistedModel}
@@ -1901,12 +1904,11 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             thinkingLevel={playgroundThinkingLevel}
             thinkingStrategy={playgroundThinkingStrategy}
             titleId="llm-provider-model-playground-title"
-            description="Run a stateless smoke test against this provider-model."
           />
         ) : null}
         {mode === "edit" &&
         providerModel &&
-        !modelSupportsChat(persistedModel) &&
+        !modelSupportsPlayground(persistedModel) &&
         modelSupportsEmbeddings(persistedModel) ? (
           <LlmEmbeddingSmoke
             providerModel={providerModel}

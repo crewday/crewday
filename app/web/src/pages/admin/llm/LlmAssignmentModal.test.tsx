@@ -538,6 +538,46 @@ describe("LlmAssignmentModal", () => {
     });
   });
 
+  it("adds new provider-models after the highest existing priority", async () => {
+    const sparsePriorityGraph: LlmGraphPayload = {
+      ...baseGraph,
+      assignments: baseGraph.assignments.map((assignment) =>
+        assignment.id === "assign_chat_manager"
+          ? { ...assignment, priority: 1 }
+          : assignment,
+      ),
+    };
+    const calls = installFetch();
+    renderAssignment("chat.manager", sparsePriorityGraph);
+    const dialog = screen.getByRole("dialog", { name: "chat.manager" });
+
+    fireEvent.click(
+      within(providerModelRow(dialog, "Fast Chat")).getByRole("button", {
+        name: /Add Fast Chat/,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/assignments" &&
+            call.init.method === "POST",
+        ),
+      ).toBe(true);
+    });
+    const post = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/assignments" &&
+        call.init.method === "POST",
+    )!;
+    expect(bodyOf(post)).toMatchObject({
+      capability: "chat.manager",
+      provider_model_id: "pm_fast",
+      priority: 2,
+    });
+  });
+
   it("sorts available provider-models by compatibility, model, and provider", () => {
     installFetch();
     const sortedAvailableGraph: LlmGraphPayload = {
@@ -877,6 +917,10 @@ describe("LlmAssignmentModal", () => {
     renderAssignment("chat.manager", twoRungGraph);
     const dialog = screen.getByRole("dialog", { name: "chat.manager" });
 
+    const gemmaRow = providerModelRow(dialog, "Gemma 4 31B IT");
+    expect(
+      gemmaRow.querySelector(".llm-assignment-provider-model__meta")?.textContent,
+    ).toBe("OpenRouter");
     expect(within(dialog).queryByRole("button", { name: /Move .* up/ })).not.toBeInTheDocument();
     expect(providerModelRow(dialog, "Fast Chat")).toHaveAttribute(
       "aria-keyshortcuts",

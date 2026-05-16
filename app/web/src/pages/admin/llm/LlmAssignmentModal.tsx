@@ -223,6 +223,13 @@ function directAssignments(
   return capabilityKey ? (indexes.assignmentsByCapability.get(capabilityKey) ?? []) : [];
 }
 
+function nextAssignmentPriority(chain: LlmAssignment[]): number {
+  return chain.reduce(
+    (next, assignment) => Math.max(next, assignment.priority + 1),
+    0,
+  );
+}
+
 export default function LlmAssignmentModal({
   capabilityKey,
   graph,
@@ -272,7 +279,7 @@ export default function LlmAssignmentModal({
         body: assignmentCreatePayload(
           capability,
           providerModelId,
-          chain.length,
+          nextAssignmentPriority(chain),
           indexes,
         ),
       });
@@ -419,7 +426,12 @@ export default function LlmAssignmentModal({
     setServerErr(null);
     if (selectedProviderModelIds.has(providerModelId)) return;
     try {
-      assignmentCreatePayload(capability, providerModelId, chain.length, indexes);
+      assignmentCreatePayload(
+        capability,
+        providerModelId,
+        nextAssignmentPriority(chain),
+        indexes,
+      );
     } catch (error) {
       setClientErr(error instanceof Error ? error.message : "Assignment is invalid.");
       return;
@@ -1089,15 +1101,15 @@ function ProviderModelSummary({
   }
   const model = indexes.modelsById.get(providerModel.model_id);
   const provider = indexes.providersById.get(providerModel.provider_id);
+  const providerName = provider?.name ?? "Provider";
   return (
     <span className="llm-assignment-provider-model__main">
       <strong>{model?.display_name ?? "Unknown model"}</strong>
-      {variant === "available" ? (
-        <span className="llm-assignment-provider-model__meta">
-          {provider?.name ?? "Provider"} ·{" "}
-          {thinkingLabel(model?.thinking_level ?? "disabled")}
-        </span>
-      ) : null}
+      <span className="llm-assignment-provider-model__meta">
+        {variant === "available"
+          ? `${providerName} · ${thinkingLabel(model?.thinking_level ?? "disabled")}`
+          : providerName}
+      </span>
       {missing.length ? (
         <span className="llm-assignment-provider-model__chips">
           <Chip tone="rust" size="sm">

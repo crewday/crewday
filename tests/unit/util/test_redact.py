@@ -777,6 +777,23 @@ class TestImageBlockCarveOut:
         assert "<redacted:phone>" in out["text"]
 
 
+class TestAudioBlockCarveOut:
+    """``{"type": "input_audio", ...}`` blocks keep base64 audio intact."""
+
+    def test_base64_audio_data_survives(self) -> None:
+        fake_payload = "A" * 64
+        block = {
+            "type": "input_audio",
+            "input_audio": {"data": fake_payload, "format": "mp3"},
+        }
+        out = redact(block, scope="llm")
+        assert isinstance(out, dict)
+        input_audio = out["input_audio"]
+        assert isinstance(input_audio, dict)
+        assert input_audio["data"] == fake_payload
+        assert input_audio["format"] == "mp3"
+
+
 # ---------------------------------------------------------------------------
 # Structural recursion
 # ---------------------------------------------------------------------------

@@ -1287,6 +1287,7 @@ The request body is:
   "max_tokens": 64,
   "temperature": 0.2,
   "image_url": null,
+  "audio_url": null,
   "assignment_id": null,
   "thinking_level": "high",
   "thinking_strategy": "gemma_system_token"
@@ -1298,7 +1299,7 @@ The request body is:
 an `assignment_id` whose deployment-level assignment points at that same
 provider-model, then applies that row's tuning defaults. The endpoint
 rejects blank prompts, invalid token/temperature values, missing or
-disabled provider-model/provider/model rows, unsupported image/system
+disabled provider-model/provider/model rows, unsupported image/audio/system
 prompt/temperature combinations, and assignment/provider-model
 mismatches with 4xx validation envelopes before any upstream call.
 `max_tokens` must also fit the selected model's `max_output_tokens`
@@ -1307,6 +1308,12 @@ Direct-mode requests may include `thinking_level` and
 `thinking_strategy` from the current edit drawer state; when present,
 those values override the persisted model/provider-model defaults for
 that playground call only.
+Multipart requests may include `image_file` for vision-capable models or
+`audio_file` for `audio_input` models. Audio-capable requests may also
+include `audio_url`; the server fetches HTTPS URLs through the §15 SSRF
+guard, accepts base64 `data:audio/...` URLs, and base64-encodes the bytes
+into an `input_audio` content block because upstream chat-completions
+audio input does not accept direct URLs.
 
 Responses are typed and stateless: successful calls return
 `status: "ok"`, assistant text, provider/model/provider-model identifiers,

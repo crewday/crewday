@@ -108,7 +108,17 @@ class ChatImageUrlBlock(TypedDict):
     image_url: ChatImageUrlRef
 
 
-type ChatContent = str | list[ChatTextBlock | ChatImageUrlBlock]
+class ChatInputAudioRef(TypedDict):
+    data: str
+    format: str
+
+
+class ChatInputAudioBlock(TypedDict):
+    type: Literal["input_audio"]
+    input_audio: ChatInputAudioRef
+
+
+type ChatContent = str | list[ChatTextBlock | ChatImageUrlBlock | ChatInputAudioBlock]
 
 
 class ChatMessage(TypedDict):

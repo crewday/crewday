@@ -2405,6 +2405,27 @@ describe("Admin LlmPage", () => {
     }
   });
 
+  it("lets playground response blocks grow instead of scrolling internally", () => {
+    expect(adminLlmCss).toMatch(
+      /\.llm-playground-result__output,\s*\.llm-playground-result__reasoning pre\s*{[^}]*overflow: visible;/m,
+    );
+    expect(adminLlmCss).not.toMatch(
+      /\.llm-playground-result__output,\s*\.llm-playground-result__reasoning pre\s*{[^}]*max-height:/m,
+    );
+    expect(adminLlmCss).not.toMatch(
+      /\.llm-playground-result__output,\s*\.llm-playground-result__reasoning pre\s*{[^}]*overflow: auto;/m,
+    );
+  });
+
+  it("draws graph edge endpoints above cards so nested links stay visible", () => {
+    expect(adminLlmCss).toMatch(
+      /\.llm-graph__edges\s*{[\s\S]*pointer-events: none;[\s\S]*z-index: 2;/m,
+    );
+    expect(adminLlmCss).toMatch(
+      /\.llm-graph__col-header,\s*\.llm-graph__col\s*{[\s\S]*z-index: 1;/m,
+    );
+  });
+
   it("anchors provider-model graph edges to provider-model subcards", async () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
       function getBoundingClientRectMock(this: HTMLElement) {

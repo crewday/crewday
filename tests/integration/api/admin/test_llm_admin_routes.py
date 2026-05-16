@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -993,6 +994,224 @@ class TestAdminLlmRoutes:
         finally:
             _wipe(session_factory)
 
+    def test_provider_model_playground_accepts_multipart_audio_upload(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            llm = _RecordingLLMClient()
+            client.app.state.llm = llm
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                provider.api_key_envelope_ref = None
+                model = s.get(LlmModel, seeded.model_id)
+                assert model is not None
+                model.capabilities = [*model.capabilities, "audio_input"]
+                s.commit()
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                data={"prompt": "transcribe this audio"},
+                files={"audio_file": ("note.mp3", b"audio-bytes", "audio/mpeg")},
+            )
+
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["status"] == "ok"
+            assert llm.calls == 1
+            sent = llm.messages[0]
+            assert sent[0]["role"] == "user"
+            content = sent[0]["content"]
+            assert isinstance(content, list)
+            assert content[0] == {"type": "text", "text": "transcribe this audio"}
+            assert content[1]["type"] == "input_audio"
+            audio = content[1]["input_audio"]
+            assert audio["format"] == "mp3"
+            assert audio["data"] == base64.b64encode(b"audio-bytes").decode("ascii")
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_fetches_audio_url_as_input_audio(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            llm = _RecordingLLMClient()
+            client.app.state.llm = llm
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                provider.api_key_envelope_ref = None
+                model = s.get(LlmModel, seeded.model_id)
+                assert model is not None
+                model.capabilities = [*model.capabilities, "audio_input"]
+                s.commit()
+
+            fetched: list[tuple[str, float, int, frozenset[str]]] = []
+
+            async def fake_safe_fetch(
+                url: str,
+                *,
+                timeout_seconds: float,
+                max_body_bytes: int,
+                allowed_schemes: frozenset[str],
+            ) -> httpx.Response:
+                fetched.append((url, timeout_seconds, max_body_bytes, allowed_schemes))
+                return httpx.Response(
+                    200,
+                    headers={"content-type": "audio/mpeg"},
+                    content=b"audio-url-bytes",
+                )
+
+            monkeypatch.setattr("app.api.admin.llm.safe_fetch", fake_safe_fetch)
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                json={
+                    "prompt": "transcribe this audio",
+                    "audio_url": "https://audio.example.test/note.mp3",
+                },
+            )
+
+            assert resp.status_code == 200, resp.text
+            assert fetched == [
+                (
+                    "https://audio.example.test/note.mp3",
+                    5.0,
+                    25 * 1024 * 1024,
+                    frozenset({"https"}),
+                )
+            ]
+            content = llm.messages[0][0]["content"]
+            assert isinstance(content, list)
+            assert content[0] == {"type": "text", "text": "transcribe this audio"}
+            audio_block = content[1]
+            assert audio_block["type"] == "input_audio"
+            expected = base64.b64encode(b"audio-url-bytes").decode("ascii")
+            assert audio_block["input_audio"] == {"data": expected, "format": "mp3"}
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_rejects_invalid_audio_data_url(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            llm = _RecordingLLMClient()
+            client.app.state.llm = llm
+            with session_factory() as s, tenant_agnostic():
+                model = s.get(LlmModel, seeded.model_id)
+                assert model is not None
+                model.capabilities = [*model.capabilities, "audio_input"]
+                s.commit()
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                json={
+                    "prompt": "transcribe this audio",
+                    "audio_url": "data:audio/mpeg;base64,not-valid-base64!",
+                },
+            )
+
+            assert resp.status_code == 422, resp.text
+            assert resp.json()["error"] == "playground_audio_url_unavailable"
+            assert llm.calls == 0
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_fetches_image_url_as_data_url(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            llm = _RecordingLLMClient()
+            client.app.state.llm = llm
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                provider.api_key_envelope_ref = None
+                s.commit()
+
+            fetched: list[tuple[str, float, int, frozenset[str]]] = []
+
+            async def fake_safe_fetch(
+                url: str,
+                *,
+                timeout_seconds: float,
+                max_body_bytes: int,
+                allowed_schemes: frozenset[str],
+            ) -> httpx.Response:
+                fetched.append((url, timeout_seconds, max_body_bytes, allowed_schemes))
+                return httpx.Response(
+                    200,
+                    headers={"content-type": "image/png"},
+                    content=b"image-url-bytes",
+                )
+
+            monkeypatch.setattr("app.api.admin.llm.safe_fetch", fake_safe_fetch)
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                json={
+                    "prompt": "describe this image",
+                    "image_url": "https://images.example.test/receipt.png",
+                },
+            )
+
+            assert resp.status_code == 200, resp.text
+            assert fetched == [
+                (
+                    "https://images.example.test/receipt.png",
+                    5.0,
+                    5 * 1024 * 1024,
+                    frozenset({"https"}),
+                )
+            ]
+            content = llm.messages[0][0]["content"]
+            assert isinstance(content, list)
+            image_block = content[1]
+            assert image_block["type"] == "image_url"
+            expected = base64.b64encode(b"image-url-bytes").decode("ascii")
+            assert (
+                image_block["image_url"]["url"] == f"data:image/png;base64,{expected}"
+            )
+        finally:
+            _wipe(session_factory)
+
     def test_provider_model_playground_rejects_disabled_and_assignment_mismatch(
         self,
         client: TestClient,
@@ -1143,6 +1362,70 @@ class TestAdminLlmRoutes:
             assert body["error_code"] == "provider_rejected_request"
             assert "sk-test-secret-token" not in body["error_message"]
             assert "<redacted:credential>" in body["error_message"]
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_relabels_openrouter_error_prefix(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        class FailingOpenRouterLabelClient:
+            def chat(
+                self,
+                *,
+                model_id: str,
+                messages: list[ChatMessage],
+                max_tokens: int = 1024,
+                temperature: float = 0.0,
+                thinking_level: str = "disabled",
+                thinking_strategy: str = "none",
+                tools: object = None,
+                consents: object = None,
+            ) -> LLMResponse:
+                del (
+                    model_id,
+                    messages,
+                    max_tokens,
+                    temperature,
+                    thinking_level,
+                    thinking_strategy,
+                    tools,
+                    consents,
+                )
+                raise LlmProviderError(
+                    "openrouter rejected request: 400 image URLs are not currently "
+                    "supported, please use base64 encoded data instead"
+                )
+
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            client.app.state.llm = FailingOpenRouterLabelClient()
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                provider.name = "Ollama Blaze"
+                s.commit()
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                json={"prompt": "hello"},
+            )
+
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["status"] == "error"
+            assert body["provider_used"] == "Ollama Blaze"
+            assert body["error_message"].startswith(
+                "Ollama Blaze rejected request: 400"
+            )
+            assert "openrouter rejected request" not in body["error_message"]
         finally:
             _wipe(session_factory)
 

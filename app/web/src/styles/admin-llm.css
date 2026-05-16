@@ -438,7 +438,7 @@
   width: 100%;
   min-height: 42px;
   padding: 7px 8px;
-  border: 1px dashed var(--line);
+  border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--card);
   color: var(--ink);
@@ -454,9 +454,6 @@
   border-style: solid;
   outline: 0;
   box-shadow: 0 0 0 2px var(--moss-soft);
-}
-.llm-graph-chain__rung.is-primary {
-  border-style: solid;
 }
 .llm-graph-chain__rung.is-linked {
   border-color: var(--moss);
@@ -978,8 +975,6 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--line);
 }
 .llm-playground__head h4 {
   margin: 0;
@@ -1107,9 +1102,43 @@
   font-size: 12px;
   font-weight: 600;
 }
-.llm-playground__vision {
+.llm-playground-disclosure {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+}
+.llm-playground-disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 11px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+  list-style: none;
+}
+.llm-playground-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.llm-playground-disclosure > summary::before {
+  content: "▸";
+  color: var(--ink-3);
+  font-size: 12px;
+  transition: transform 140ms ease;
+}
+.llm-playground-disclosure[open] > summary::before {
+  transform: rotate(90deg);
+}
+.llm-playground-disclosure > summary:focus-visible {
+  outline: 2px solid var(--moss);
+  outline-offset: 2px;
+}
+.llm-playground-disclosure__body {
   display: grid;
   gap: 10px;
+  padding: 0 11px 11px;
 }
 .llm-playground__actions {
   display: flex;
@@ -1139,10 +1168,9 @@
 }
 .llm-playground-result__output,
 .llm-playground-result__reasoning pre {
-  max-height: 220px;
   margin: 0;
   padding: 10px 12px;
-  overflow: auto;
+  overflow: visible;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--paper);
@@ -1535,7 +1563,7 @@
   position: absolute; inset: 0;
   width: 100%; height: 100%;
   pointer-events: none;
-  z-index: 0;
+  z-index: 2;
   overflow: visible;
 }
 .llm-graph__col-header,

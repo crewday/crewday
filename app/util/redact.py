@@ -54,16 +54,17 @@ Behaviour overview
    passwords stay redacted even if the consent set contains a
    matching token.
 
-4. **Image / binary block carve-out** (``scope="llm"`` only):
+4. **Multimodal binary block carve-out** (``scope="llm"`` only):
    multimodal content blocks that wrap opaque bytes (the OpenAI /
    OpenRouter vision shape
-   ``{"type": "image_url", "image_url": {"url": "data:..."}}``)
-   skip the free-text regex sweep on the ``url`` leaf. The base64
+   ``{"type": "image_url", "image_url": {"url": "data:..."}}`` and
+   audio shape ``{"type": "input_audio", "input_audio": {"data": "..."}}``)
+   skip the free-text regex sweep on the binary leaf. The base64
    payload is unstructured noise from a PII perspective and
    routinely hits the ``base64url`` credential rule, which would
-   silently break every vision call. Key rules + recursion still
+   silently break valid model calls. Key rules + recursion still
    apply to every other key under the block, so a stray ``email``
-   next to the image bytes is still caught.
+   next to the bytes is still caught.
 
 5. **Structural recursion**: :class:`dict`, :class:`list`,
    :class:`tuple`, :class:`set`, :class:`frozenset` are walked with
@@ -803,15 +804,17 @@ def _redact_mapping(
 ) -> dict[object, object]:
     """Walk a ``dict``, applying key rules + recursing into values."""
     # code-health: ignore[ccn] Redaction mapping policy is an ordered branch table.  # noqa: E501
-    # Image / binary multimodal block carve-out. OpenAI / OpenRouter
+    # Binary multimodal block carve-out. OpenAI / OpenRouter
     # vision requests arrive as ``{"type": "image_url",
     # "image_url": {"url": "data:..."}}`` — the ``url`` is a base64
-    # payload that routinely matches the credential-shape regex and
-    # would silently break every vision call. Detect the shape once
-    # at the mapping level and skip the free-text sweep on the URL
-    # leaf while still running every other key through the regular
-    # rules (so a stray PII field next to the bytes is still caught).
+    # payload. Audio requests use ``{"type": "input_audio",
+    # "input_audio": {"data": "..."}}``. Both routinely match the
+    # credential-shape regex and would silently break valid model
+    # calls if scrubbed. Detect the shape once at the mapping level
+    # and skip the free-text sweep on the opaque binary leaf while
+    # still running every other key through the regular rules.
     is_image_block = _looks_like_image_block(mapping)
+    is_audio_block = _looks_like_audio_block(mapping)
 
     redacted: dict[object, object] = {}
     for key, raw in mapping.items():
@@ -844,6 +847,21 @@ def _redact_mapping(
             and isinstance(raw, dict)
         ):
             redacted[key] = _redact_image_url_block(
+                raw,
+                scope=scope,
+                consents=consents,
+                depth=depth + 1,
+                max_depth=max_depth,
+            )
+            continue
+
+        if (
+            is_audio_block
+            and isinstance(key, str)
+            and key in ("input_audio", "inputAudio")
+            and isinstance(raw, dict)
+        ):
+            redacted[key] = _redact_audio_block(
                 raw,
                 scope=scope,
                 consents=consents,
@@ -908,6 +926,11 @@ def _looks_like_image_block(mapping: dict[object, object]) -> bool:
     return type_value in ("image_url", "image")
 
 
+def _looks_like_audio_block(mapping: dict[object, object]) -> bool:
+    """Return ``True`` if ``mapping`` is a multimodal audio block."""
+    return mapping.get("type") == "input_audio"
+
+
 def _redact_image_url_block(
     block: dict[object, object],
     *,
@@ -932,6 +955,30 @@ def _redact_image_url_block(
         # Any other key stays under the normal rule set — we thread
         # the live depth / scope / consents through so a deep
         # pathological block still respects the recursion cap.
+        out[key] = _redact(
+            raw,
+            scope=scope,
+            consents=consents,
+            depth=depth + 1,
+            max_depth=max_depth,
+        )
+    return out
+
+
+def _redact_audio_block(
+    block: dict[object, object],
+    *,
+    scope: RedactScope,
+    consents: ConsentSet | None,
+    depth: int,
+    max_depth: int,
+) -> dict[object, object]:
+    """Return a shallow copy of an audio sub-dict, data preserved."""
+    out: dict[object, object] = {}
+    for key, raw in block.items():
+        if key == "data" and isinstance(raw, str):
+            out[key] = raw
+            continue
         out[key] = _redact(
             raw,
             scope=scope,

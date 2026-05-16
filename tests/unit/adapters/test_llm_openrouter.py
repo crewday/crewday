@@ -113,6 +113,7 @@ def _make_client(
     *,
     sleeps: list[float] | None = None,
     max_retries: int = 3,
+    provider_label: str = "openrouter",
 ) -> OpenRouterClient:
     transport = httpx.MockTransport(handler)
     http = httpx.Client(transport=transport)
@@ -124,6 +125,7 @@ def _make_client(
         http=http,
         clock=clock,
         sleep=sleep_sink,
+        provider_label=provider_label,
     )
 
 
@@ -817,6 +819,30 @@ class TestNonRetryableClientError:
         # One call, no retries, no sleeps.
         assert len(handler.requests) == 1
         assert sleeps == []
+
+    def test_provider_label_is_used_in_provider_errors(self) -> None:
+        handler = _RecordingHandler(
+            responses=[
+                httpx.Response(
+                    400,
+                    json={
+                        "error": {
+                            "message": (
+                                "image URLs are not currently supported, "
+                                "please use base64 encoded data instead"
+                            )
+                        }
+                    },
+                )
+            ]
+        )
+        client = _make_client(handler, provider_label="Ollama Blaze")
+
+        with pytest.raises(LlmProviderError) as exc_info:
+            client.complete(model_id=_MODEL, prompt="hi")
+
+        assert str(exc_info.value).startswith("Ollama Blaze rejected request: 400")
+        assert "openrouter rejected request" not in str(exc_info.value)
 
     def test_422_is_not_retried(self) -> None:
         """Unprocessable Entity is a spec violation — retrying is pointless."""

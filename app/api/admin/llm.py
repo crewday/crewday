@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import math
 import time
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Annotated, Any, Literal, Self, cast
+from typing import Annotated, Any, Final, Literal, Self, cast
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import (
@@ -52,7 +53,11 @@ from app.adapters.llm.openrouter import (
     normalize_openrouter_model_id,
 )
 from app.adapters.llm.ports import (
+    ChatImageUrlBlock,
+    ChatInputAudioBlock,
+    ChatInputAudioRef,
     ChatMessage,
+    ChatTextBlock,
     LLMClient,
     LlmProviderError,
     LlmRateLimited,
@@ -89,6 +94,7 @@ from app.domain.llm.router import (
 )
 from app.events.bus import bus as default_event_bus
 from app.events.types import LlmAssignmentChanged
+from app.net.fetch_guard import FetchGuardError, FetchGuardSizeLimit, safe_fetch
 from app.tenancy import DeploymentContext, tenant_agnostic
 from app.util.redact import ConsentSet, scrub_string
 from app.util.ulid import new_ulid
@@ -193,7 +199,31 @@ _MODEL_CAPABILITY_TAGS = frozenset(
     }
 )
 _PLAYGROUND_IMAGE_UPLOAD_MAX_BYTES = 5 * 1024 * 1024
+_PLAYGROUND_AUDIO_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
+_PLAYGROUND_IMAGE_URL_FETCH_TIMEOUT_S: Final[float] = 5.0
+_PLAYGROUND_IMAGE_URL_FETCH_SCHEMES: Final[frozenset[str]] = frozenset({"https"})
 _PLAYGROUND_MAX_TOKENS_LIMIT = 32_000
+_PLAYGROUND_AUDIO_FORMAT_BY_CONTENT_TYPE: Final[dict[str, str]] = {
+    "audio/aac": "aac",
+    "audio/aiff": "aiff",
+    "audio/flac": "flac",
+    "audio/m4a": "m4a",
+    "audio/mp3": "mp3",
+    "audio/mp4": "m4a",
+    "audio/mpeg": "mp3",
+    "audio/ogg": "ogg",
+    "audio/wav": "wav",
+    "audio/webm": "webm",
+    "audio/x-aiff": "aiff",
+    "audio/x-flac": "flac",
+    "audio/x-m4a": "m4a",
+    "audio/x-wav": "wav",
+    "video/webm": "webm",
+}
+_PLAYGROUND_AUDIO_FORMATS: Final[frozenset[str]] = frozenset(
+    {"aac", "aiff", "flac", "m4a", "mp3", "ogg", "pcm16", "pcm24", "wav", "webm"}
+)
+type PlaygroundAudioRef = ChatInputAudioRef
 LlmThinkingLevel = Literal["disabled", "low", "medium", "high"]
 LlmThinkingStrategy = Literal[
     "none",
@@ -463,6 +493,7 @@ class LlmProviderModelPlaygroundRequest(BaseModel):
     max_tokens: int | None = Field(default=None, ge=1, le=32_000)
     temperature: float | None = Field(default=None, ge=0, le=2)
     image_url: str | None = Field(default=None, max_length=262_144)
+    audio_url: str | None = Field(default=None, max_length=262_144)
     assignment_id: str | None = None
     thinking_level: LlmThinkingLevel | None = None
     thinking_strategy: LlmThinkingStrategy | None = None
@@ -475,7 +506,7 @@ class LlmProviderModelPlaygroundRequest(BaseModel):
             raise ValueError("prompt must not be blank")
         return stripped
 
-    @field_validator("system_prompt", "image_url")
+    @field_validator("system_prompt", "image_url", "audio_url")
     @classmethod
     def _strip_optional_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -529,6 +560,198 @@ async def _playground_upload_data_url(upload: FormUploadFile) -> str:
     return f"data:{content_type};base64,{encoded}"
 
 
+def _playground_audio_format(content_type: str, filename_or_url: str = "") -> str:
+    media_type = content_type.split(";", 1)[0].strip().lower()
+    filename = filename_or_url.rsplit("/", 1)[-1]
+    filename = filename.split("?", 1)[0].split("#", 1)[0]
+    suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    format_name = _PLAYGROUND_AUDIO_FORMAT_BY_CONTENT_TYPE.get(media_type, suffix)
+    if format_name == "wave":
+        format_name = "wav"
+    if format_name not in _PLAYGROUND_AUDIO_FORMATS:
+        raise _unprocessable("playground_audio_type_unsupported")
+    if media_type and not (
+        media_type.startswith("audio/")
+        or media_type in {"application/octet-stream", "video/webm"}
+    ):
+        raise _unprocessable("playground_audio_type_unsupported")
+    return format_name
+
+
+def _playground_audio_ref_from_bytes(
+    payload: bytes,
+    *,
+    content_type: str,
+    filename_or_url: str = "",
+) -> PlaygroundAudioRef:
+    if not payload:
+        raise _unprocessable("playground_audio_empty")
+    return {
+        "data": base64.b64encode(payload).decode("ascii"),
+        "format": _playground_audio_format(content_type, filename_or_url),
+    }
+
+
+async def _playground_upload_audio_ref(
+    upload: FormUploadFile,
+) -> PlaygroundAudioRef:
+    try:
+        content_type = upload.content_type or ""
+        total = 0
+        pieces: list[bytes] = []
+        while True:
+            read_size = min(
+                64 * 1024,
+                _PLAYGROUND_AUDIO_UPLOAD_MAX_BYTES + 1 - total,
+            )
+            chunk = await upload.read(read_size)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > _PLAYGROUND_AUDIO_UPLOAD_MAX_BYTES:
+                raise _unprocessable("playground_audio_file_too_large")
+            pieces.append(chunk)
+
+        payload = b"".join(pieces)
+        return _playground_audio_ref_from_bytes(
+            payload,
+            content_type=content_type,
+            filename_or_url=upload.filename or "",
+        )
+    finally:
+        await upload.close()
+
+
+def _is_playground_data_image_url(value: str) -> bool:
+    prefix, sep, _payload = value.partition(",")
+    return (
+        bool(sep)
+        and prefix.lower().startswith("data:image/")
+        and ";base64" in prefix.lower()
+    )
+
+
+async def _playground_image_url_data_url(image_url: str) -> str:
+    if _is_playground_data_image_url(image_url):
+        return image_url
+
+    try:
+        response = await safe_fetch(
+            image_url,
+            timeout_seconds=_PLAYGROUND_IMAGE_URL_FETCH_TIMEOUT_S,
+            max_body_bytes=_PLAYGROUND_IMAGE_UPLOAD_MAX_BYTES,
+            allowed_schemes=_PLAYGROUND_IMAGE_URL_FETCH_SCHEMES,
+        )
+    except FetchGuardSizeLimit as exc:
+        raise _unprocessable(
+            "playground_image_file_too_large",
+            message="Image URL response is too large for a playground run.",
+        ) from exc
+    except FetchGuardError as exc:
+        raise _unprocessable(
+            "playground_image_url_unavailable",
+            message="Image URL must be a public HTTPS image or a base64 data URL.",
+        ) from exc
+
+    if not 200 <= response.status_code < 300:
+        raise _unprocessable(
+            "playground_image_url_unavailable",
+            message="Image URL could not be fetched for the playground run.",
+        )
+
+    content_type = response.headers.get("content-type", "")
+    media_type = content_type.split(";", 1)[0].strip().lower()
+    if not media_type.startswith("image/"):
+        raise _unprocessable(
+            "playground_image_type_unsupported",
+            message="Image URL did not return an image content type.",
+        )
+    if not response.content:
+        raise _unprocessable("playground_image_empty")
+
+    encoded = base64.b64encode(response.content).decode("ascii")
+    return f"data:{media_type};base64,{encoded}"
+
+
+def _is_playground_data_audio_url(value: str) -> bool:
+    prefix, sep, _payload = value.partition(",")
+    return (
+        bool(sep)
+        and prefix.lower().startswith("data:audio/")
+        and ";base64" in prefix.lower()
+    )
+
+
+def _playground_data_audio_ref(audio_url: str) -> PlaygroundAudioRef:
+    prefix, _sep, payload = audio_url.partition(",")
+    media_type = prefix.removeprefix("data:").split(";", 1)[0]
+    try:
+        decoded = base64.b64decode(payload, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise _unprocessable("playground_audio_url_unavailable") from exc
+    return _playground_audio_ref_from_bytes(
+        decoded,
+        content_type=media_type,
+        filename_or_url=audio_url,
+    )
+
+
+async def _playground_audio_url_ref(audio_url: str) -> PlaygroundAudioRef:
+    if _is_playground_data_audio_url(audio_url):
+        return _playground_data_audio_ref(audio_url)
+
+    try:
+        response = await safe_fetch(
+            audio_url,
+            timeout_seconds=_PLAYGROUND_IMAGE_URL_FETCH_TIMEOUT_S,
+            max_body_bytes=_PLAYGROUND_AUDIO_UPLOAD_MAX_BYTES,
+            allowed_schemes=_PLAYGROUND_IMAGE_URL_FETCH_SCHEMES,
+        )
+    except FetchGuardSizeLimit as exc:
+        raise _unprocessable(
+            "playground_audio_file_too_large",
+            message="Audio URL response is too large for a playground run.",
+        ) from exc
+    except FetchGuardError as exc:
+        raise _unprocessable(
+            "playground_audio_url_unavailable",
+            message="Audio URL must be a public HTTPS audio file or a base64 data URL.",
+        ) from exc
+
+    if not 200 <= response.status_code < 300:
+        raise _unprocessable(
+            "playground_audio_url_unavailable",
+            message="Audio URL could not be fetched for the playground run.",
+        )
+
+    return _playground_audio_ref_from_bytes(
+        response.content,
+        content_type=response.headers.get("content-type", ""),
+        filename_or_url=audio_url,
+    )
+
+
+async def _playground_image_ref(
+    payload: LlmProviderModelPlaygroundRequest, upload_image_url: str | None
+) -> str | None:
+    if upload_image_url is not None:
+        return upload_image_url
+    if payload.image_url is None:
+        return None
+    return await _playground_image_url_data_url(payload.image_url)
+
+
+async def _playground_audio_ref(
+    payload: LlmProviderModelPlaygroundRequest,
+    upload_audio_ref: PlaygroundAudioRef | None,
+) -> PlaygroundAudioRef | None:
+    if upload_audio_ref is not None:
+        return upload_audio_ref
+    if payload.audio_url is None:
+        return None
+    return await _playground_audio_url_ref(payload.audio_url)
+
+
 def _validate_playground_payload(raw: object) -> LlmProviderModelPlaygroundRequest:
     if not isinstance(raw, dict):
         raise _unprocessable("playground_payload_invalid")
@@ -540,14 +763,14 @@ def _validate_playground_payload(raw: object) -> LlmProviderModelPlaygroundReque
 
 async def _playground_request_payload(
     request: Request,
-) -> tuple[LlmProviderModelPlaygroundRequest, str | None]:
+) -> tuple[LlmProviderModelPlaygroundRequest, str | None, PlaygroundAudioRef | None]:
     content_type = request.headers.get("content-type", "").lower()
     if not content_type.startswith("multipart/form-data"):
         try:
             raw = await request.json()
         except ValueError as exc:
             raise _unprocessable("playground_payload_invalid") from exc
-        return _validate_playground_payload(raw), None
+        return _validate_playground_payload(raw), None, None
 
     form = await request.form()
     form_raw: dict[str, object] = {
@@ -557,20 +780,48 @@ async def _playground_request_payload(
         "max_tokens": _playground_form_text(form, "max_tokens"),
         "temperature": _playground_form_text(form, "temperature"),
         "image_url": _playground_form_text(form, "image_url"),
+        "audio_url": _playground_form_text(form, "audio_url"),
         "assignment_id": _playground_form_text(form, "assignment_id"),
         "thinking_level": _playground_form_text(form, "thinking_level"),
         "thinking_strategy": _playground_form_text(form, "thinking_strategy"),
     }
     payload = _validate_playground_payload(form_raw)
-    upload = form.get("image_file")
-    if upload is None:
-        return payload, None
-    if not isinstance(upload, FormUploadFile):
+    image_upload = form.get("image_file")
+    audio_upload = form.get("audio_file")
+    if image_upload is not None and not isinstance(image_upload, FormUploadFile):
+        if isinstance(audio_upload, FormUploadFile):
+            await audio_upload.close()
         raise _unprocessable("playground_image_upload_invalid")
-    if payload.image_url is not None:
-        await upload.close()
+    if audio_upload is not None and not isinstance(audio_upload, FormUploadFile):
+        if isinstance(image_upload, FormUploadFile):
+            await image_upload.close()
+        raise _unprocessable("playground_audio_upload_invalid")
+    if image_upload is not None and payload.image_url is not None:
+        await image_upload.close()
+        if isinstance(audio_upload, FormUploadFile):
+            await audio_upload.close()
         raise _unprocessable("playground_image_multiple_sources")
-    return payload, await _playground_upload_data_url(upload)
+    if audio_upload is not None and payload.audio_url is not None:
+        if isinstance(image_upload, FormUploadFile):
+            await image_upload.close()
+        await audio_upload.close()
+        raise _unprocessable("playground_audio_multiple_sources")
+    try:
+        image_url = (
+            await _playground_upload_data_url(image_upload)
+            if image_upload is not None
+            else None
+        )
+        audio_ref = (
+            await _playground_upload_audio_ref(audio_upload)
+            if audio_upload is not None
+            else None
+        )
+    except Exception:
+        if isinstance(audio_upload, FormUploadFile):
+            await audio_upload.close()
+        raise
+    return payload, image_url, audio_ref
 
 
 class LlmProviderModelPlaygroundResponse(BaseModel):
@@ -2177,27 +2428,35 @@ def _playground_messages(
     provider_model: LlmProviderModel,
     model: LlmModel,
     image_url: str | None = None,
+    audio_ref: PlaygroundAudioRef | None = None,
 ) -> list[ChatMessage]:
-    if "chat" not in set(model.capabilities or []):
+    capabilities = set(model.capabilities or [])
+    if "chat" not in capabilities and audio_ref is None:
         raise _unprocessable("playground_requires_chat_model")
     if payload.system_prompt is not None and not provider_model.supports_system_prompt:
         raise _unprocessable("system_prompt_not_supported")
     image_ref = image_url if image_url is not None else payload.image_url
-    if image_ref is not None and "vision" not in set(model.capabilities or []):
+    if image_ref is not None and "vision" not in capabilities:
         raise _unprocessable("image_requires_vision_model")
+    if audio_ref is not None and "audio_input" not in capabilities:
+        raise _unprocessable("audio_requires_audio_model")
     messages: list[ChatMessage] = []
     if payload.system_prompt is not None:
         messages.append({"role": "system", "content": payload.system_prompt})
-    if image_ref is None:
+    if image_ref is None and audio_ref is None:
         messages.append({"role": "user", "content": payload.prompt})
     else:
+        content: list[ChatTextBlock | ChatImageUrlBlock | ChatInputAudioBlock] = [
+            {"type": "text", "text": payload.prompt}
+        ]
+        if image_ref is not None:
+            content.append({"type": "image_url", "image_url": {"url": image_ref}})
+        if audio_ref is not None:
+            content.append({"type": "input_audio", "input_audio": audio_ref})
         messages.append(
             {
                 "role": "user",
-                "content": [
-                    {"type": "text", "text": payload.prompt},
-                    {"type": "image_url", "image_url": {"url": image_ref}},
-                ],
+                "content": content,
             }
         )
     return messages
@@ -2285,6 +2544,7 @@ def _playground_llm(
             base_url=provider.api_endpoint,
             timeout=float(provider.timeout_s),
             api_key_required=False,
+            provider_label=provider.name,
         )
     if provider.provider_type != "openrouter":
         raise _unprocessable("provider_type_not_supported")
@@ -2348,8 +2608,12 @@ def _embedding_smoke_client(
     )
 
 
-def _safe_provider_error(exc: BaseException) -> str:
-    return scrub_string(str(exc))[:500]
+def _safe_provider_error(exc: BaseException, *, provider_name: str) -> str:
+    message = scrub_string(str(exc))
+    if message.lower().startswith("openrouter "):
+        label = provider_name.strip() or "Provider"
+        message = f"{label}{message[len('openrouter') :]}"
+    return message[:500]
 
 
 def build_admin_llm_router() -> APIRouter:
@@ -2904,6 +3168,11 @@ def build_admin_llm_router() -> APIRouter:
                                     "maxLength": 262144,
                                     "nullable": True,
                                 },
+                                "audio_url": {
+                                    "type": "string",
+                                    "maxLength": 262144,
+                                    "nullable": True,
+                                },
                                 "assignment_id": {"type": "string", "nullable": True},
                                 "thinking_level": {
                                     "type": "string",
@@ -2921,6 +3190,7 @@ def build_admin_llm_router() -> APIRouter:
                                     "nullable": True,
                                 },
                                 "image_file": {"type": "string", "format": "binary"},
+                                "audio_file": {"type": "string", "format": "binary"},
                             },
                         }
                     },
@@ -2935,7 +3205,9 @@ def build_admin_llm_router() -> APIRouter:
         session: _Db,
         provider_model_id: str,
     ) -> LlmProviderModelPlaygroundResponse:
-        payload, image_url = await _playground_request_payload(request)
+        payload, image_url, upload_audio_ref = await _playground_request_payload(
+            request
+        )
         with tenant_agnostic():
             provider_model, provider, model = _load_playground_target(
                 session, provider_model_id
@@ -2945,7 +3217,6 @@ def build_admin_llm_router() -> APIRouter:
                 payload=payload,
                 provider_model_id=provider_model_id,
             )
-            messages = _playground_messages(payload, provider_model, model, image_url)
             max_tokens = _playground_max_tokens(
                 payload, provider_model, model, assignment
             )
@@ -2953,6 +3224,21 @@ def build_admin_llm_router() -> APIRouter:
                 payload, provider_model, model, assignment
             )
             llm = _playground_llm(request, session, provider)
+        has_image = image_url is not None or payload.image_url is not None
+        if has_image and "vision" not in set(model.capabilities or []):
+            raise _unprocessable("image_requires_vision_model")
+        has_audio = upload_audio_ref is not None or payload.audio_url is not None
+        if has_audio and "audio_input" not in set(model.capabilities or []):
+            raise _unprocessable("audio_requires_audio_model")
+        image_ref = await _playground_image_ref(payload, image_url)
+        audio_ref = await _playground_audio_ref(payload, upload_audio_ref)
+        messages = _playground_messages(
+            payload,
+            provider_model,
+            model,
+            image_ref,
+            audio_ref,
+        )
         started = time.monotonic()
         try:
             response = llm.chat(
@@ -2988,7 +3274,7 @@ def build_admin_llm_router() -> APIRouter:
                 latency_ms=max(0, round((time.monotonic() - started) * 1000)),
                 error_id=request_correlation_id(request),
                 error_code="provider_rejected_request",
-                error_message=_safe_provider_error(exc),
+                error_message=_safe_provider_error(exc, provider_name=provider.name),
             )
         cost_usd = _playground_cost_usd(
             provider_model,

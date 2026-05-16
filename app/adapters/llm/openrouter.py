@@ -811,6 +811,7 @@ class OpenRouterClient:
         timeout: float = 60.0,
         max_retries: int = 3,
         api_key_required: bool = True,
+        provider_label: str = "openrouter",
         http: httpx.Client | None = None,
         clock: Clock | None = None,
         sleep: Callable[[float], None] = time.sleep,
@@ -830,6 +831,7 @@ class OpenRouterClient:
         self._timeout = timeout
         self._max_retries = max_retries
         self._api_key_required = api_key_required
+        self._provider_label = provider_label.strip() or "provider"
         self._clock = clock or SystemClock()
         self._sleep = sleep
         # ``http`` is provided by tests (preloaded with
@@ -1056,7 +1058,7 @@ class OpenRouterClient:
                 )
                 if attempt + 1 >= self._max_retries:
                     raise LlmTransportError(
-                        f"openrouter request timed out after "
+                        f"{self._provider_label} request timed out after "
                         f"{self._max_retries} attempt(s)"
                     ) from exc
                 self._sleep(_backoff_seconds(attempt))
@@ -1071,7 +1073,7 @@ class OpenRouterClient:
                 )
                 if attempt + 1 >= self._max_retries:
                     raise LlmTransportError(
-                        f"openrouter transport failed after "
+                        f"{self._provider_label} transport failed after "
                         f"{self._max_retries} attempt(s): {type(exc).__name__}"
                     ) from exc
                 self._sleep(_backoff_seconds(attempt))
@@ -1097,7 +1099,8 @@ class OpenRouterClient:
                 )
                 if attempt + 1 >= self._max_retries:
                     raise LlmRateLimited(
-                        f"openrouter rate limited after {self._max_retries} attempt(s)"
+                        f"{self._provider_label} rate limited after "
+                        f"{self._max_retries} attempt(s)"
                     )
                 self._sleep(_backoff_seconds(attempt))
                 continue
@@ -1115,7 +1118,7 @@ class OpenRouterClient:
                 )
                 if attempt + 1 >= self._max_retries:
                     raise LlmTransportError(
-                        f"openrouter returned {response.status_code} after "
+                        f"{self._provider_label} returned {response.status_code} after "
                         f"{self._max_retries} attempt(s)"
                     )
                 self._sleep(_backoff_seconds(attempt))
@@ -1123,7 +1126,7 @@ class OpenRouterClient:
 
             # 4xx other than 408 / 429 → permanent: raise immediately.
             raise LlmProviderError(
-                f"openrouter rejected request: {response.status_code} "
+                f"{self._provider_label} rejected request: {response.status_code} "
                 f"{_safe_error_detail(response)}"
             )
 
@@ -1132,9 +1135,12 @@ class OpenRouterClient:
         # fallback so mypy sees the function always returns or raises.
         if last_transport_exc is not None:
             raise LlmTransportError(
-                f"openrouter transport failed: {type(last_transport_exc).__name__}"
+                f"{self._provider_label} transport failed: "
+                f"{type(last_transport_exc).__name__}"
             ) from last_transport_exc
-        raise LlmTransportError(f"openrouter request failed with status {last_status}")
+        raise LlmTransportError(
+            f"{self._provider_label} request failed with status {last_status}"
+        )
 
     def _stream_request(self, body: Mapping[str, object]) -> Iterator[str]:
         """Open a streaming POST and yield content chunks.
@@ -1176,19 +1182,21 @@ class OpenRouterClient:
                 timeout=stream_timeout,
             ) as response:
                 if response.status_code == 429:
-                    raise LlmRateLimited("openrouter rate limited mid-stream")
+                    raise LlmRateLimited(
+                        f"{self._provider_label} rate limited mid-stream"
+                    )
                 if 400 <= response.status_code < 500:
                     # Drain once so the error body (if any) is available
                     # to the exception message.
                     response.read()
                     raise LlmProviderError(
-                        f"openrouter rejected stream request: "
+                        f"{self._provider_label} rejected stream request: "
                         f"{response.status_code} {_safe_error_detail(response)}"
                     )
                 if response.status_code >= 500:
                     response.read()
                     raise LlmTransportError(
-                        f"openrouter stream failed: {response.status_code}"
+                        f"{self._provider_label} stream failed: {response.status_code}"
                     )
 
                 for line in response.iter_lines():
@@ -1199,10 +1207,10 @@ class OpenRouterClient:
                         return
                     yield chunk
         except httpx.TimeoutException as exc:
-            raise LlmTransportError("openrouter stream timed out") from exc
+            raise LlmTransportError(f"{self._provider_label} stream timed out") from exc
         except httpx.HTTPError as exc:
             raise LlmTransportError(
-                f"openrouter stream transport failed: {type(exc).__name__}"
+                f"{self._provider_label} stream transport failed: {type(exc).__name__}"
             ) from exc
 
     def _build_headers(self) -> dict[str, str]:
@@ -1214,7 +1222,7 @@ class OpenRouterClient:
         """
         api_key = self._config_source.api_key()
         if api_key is None and self._api_key_required:
-            raise LlmTransportError("openrouter api key is not configured")
+            raise LlmTransportError(f"{self._provider_label} api key is not configured")
         headers = {
             "Content-Type": "application/json",
             "HTTP-Referer": _ATTRIBUTION_REFERER,

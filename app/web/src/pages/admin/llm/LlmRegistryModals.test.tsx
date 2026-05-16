@@ -75,6 +75,16 @@ function playgroundSection(): HTMLElement {
   return screen.getByRole("region", { name: "Playground" });
 }
 
+function openPlaygroundDisclosure(playground: HTMLElement, title: string): void {
+  const summary = Array.from(playground.querySelectorAll("summary")).find(
+    (candidate) => candidate.textContent === title,
+  );
+  if (!(summary instanceof HTMLElement)) {
+    throw new Error(`Expected playground disclosure ${title}.`);
+  }
+  fireEvent.click(summary);
+}
+
 function elementById(id: string): HTMLElement {
   const element = document.getElementById(id);
   if (!(element instanceof HTMLElement)) throw new Error(`Expected #${id}.`);
@@ -311,6 +321,11 @@ describe("LlmRegistryModals", () => {
     renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
 
     const playground = playgroundSection();
+    expect(
+      within(playground).queryByText("Run a stateless smoke test against this provider-model."),
+    ).not.toBeInTheDocument();
+    expect(playground.querySelector("summary")?.textContent).toBe("System prompt");
+    openPlaygroundDisclosure(playground, "System prompt");
     const systemPrompt = within(playground).getByLabelText("System prompt Optional");
     const prompt = within(playground).getByLabelText("Prompt Required");
     expect(systemPrompt.compareDocumentPosition(prompt)).toBe(
@@ -359,8 +374,29 @@ describe("LlmRegistryModals", () => {
     renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
 
     const playground = playgroundSection();
+    expect(within(playground).getByText("Image")).toBeInTheDocument();
+    openPlaygroundDisclosure(playground, "Image");
     expect(within(playground).getByLabelText("Image URL Optional")).toBeInTheDocument();
     expect(within(playground).getByLabelText("Upload playground image")).toBeInTheDocument();
+  });
+
+  it("shows audio input for audio-capable provider-models", () => {
+    installFetch();
+    const testGraph: LlmGraphPayload = {
+      ...baseGraph,
+      models: baseGraph.models.map((model) =>
+        model.id === "model_gemma"
+          ? { ...model, capabilities: [...model.capabilities, "audio_input"] }
+          : model,
+      ),
+    };
+    renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    const playground = playgroundSection();
+    expect(within(playground).getByText("Audio")).toBeInTheDocument();
+    openPlaygroundDisclosure(playground, "Audio");
+    expect(within(playground).getByLabelText("Audio URL Optional")).toBeInTheDocument();
+    expect(within(playground).getByLabelText("Upload playground audio")).toBeInTheDocument();
   });
 
   it("runs a direct playground prompt without saving the provider-model", async () => {
@@ -468,6 +504,7 @@ describe("LlmRegistryModals", () => {
     fireEvent.change(within(playground).getByLabelText("Prompt Required"), {
       target: { value: "Describe this image." },
     });
+    openPlaygroundDisclosure(playground, "Image");
     const image = new File(["image-bytes"], "receipt.png", { type: "image/png" });
     fireEvent.change(within(playground).getByLabelText("Upload playground image"), {
       target: { files: [image] },
@@ -483,6 +520,120 @@ describe("LlmRegistryModals", () => {
     expect(form.get("mode")).toBe("direct");
     expect(form.get("prompt")).toBe("Describe this image.");
     expect((form.get("image_file") as File).name).toBe("receipt.png");
+  });
+
+  it("submits uploaded playground audio as multipart form data", async () => {
+    const calls = installFetch((url) =>
+      url === "/admin/api/v1/llm/provider-models/pm_gemma/playground"
+        ? {
+            body: {
+              status: "ok",
+              assistant_text: "audio pong",
+              reasoning_text: null,
+              model_used: "google/gemma-4-31b-it",
+              provider_used: "OpenRouter",
+              provider_model_id: "pm_gemma",
+              assignment_id: null,
+              latency_ms: 42,
+              input_tokens: 6,
+              output_tokens: 2,
+              reasoning_tokens: null,
+              finish_reason: "stop",
+              stop_reason: "stop",
+              cost_usd: "0.000001",
+              cost_cents: 0,
+              error_message: null,
+            },
+          }
+        : { body: {} },
+    );
+    const testGraph: LlmGraphPayload = {
+      ...baseGraph,
+      models: baseGraph.models.map((model) =>
+        model.id === "model_gemma"
+          ? { ...model, capabilities: [...model.capabilities, "audio_input"] }
+          : model,
+      ),
+    };
+    renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    const playground = playgroundSection();
+    fireEvent.change(within(playground).getByLabelText("Prompt Required"), {
+      target: { value: "Transcribe this audio." },
+    });
+    openPlaygroundDisclosure(playground, "Audio");
+    const audio = new File(["audio-bytes"], "note.mp3", { type: "audio/mpeg" });
+    fireEvent.change(within(playground).getByLabelText("Upload playground audio"), {
+      target: { files: [audio] },
+    });
+    fireEvent.click(within(playground).getByRole("button", { name: "Run playground" }));
+
+    expect(await within(playground).findByText("audio pong")).toBeInTheDocument();
+    const post = calls.find(
+      (call) => call.url === "/admin/api/v1/llm/provider-models/pm_gemma/playground",
+    );
+    expect(post?.init.body).toBeInstanceOf(FormData);
+    const form = post!.init.body as FormData;
+    expect(form.get("mode")).toBe("direct");
+    expect(form.get("prompt")).toBe("Transcribe this audio.");
+    expect((form.get("audio_file") as File).name).toBe("note.mp3");
+  });
+
+  it("submits playground audio URLs without saving the provider-model", async () => {
+    const calls = installFetch((url) =>
+      url === "/admin/api/v1/llm/provider-models/pm_gemma/playground"
+        ? {
+            body: {
+              status: "ok",
+              assistant_text: "audio url pong",
+              reasoning_text: null,
+              model_used: "google/gemma-4-31b-it",
+              provider_used: "OpenRouter",
+              provider_model_id: "pm_gemma",
+              assignment_id: null,
+              latency_ms: 42,
+              input_tokens: 6,
+              output_tokens: 2,
+              reasoning_tokens: null,
+              finish_reason: "stop",
+              stop_reason: "stop",
+              cost_usd: "0.000001",
+              cost_cents: 0,
+              error_message: null,
+            },
+          }
+        : { body: {} },
+    );
+    const testGraph: LlmGraphPayload = {
+      ...baseGraph,
+      models: baseGraph.models.map((model) =>
+        model.id === "model_gemma"
+          ? { ...model, capabilities: [...model.capabilities, "audio_input"] }
+          : model,
+      ),
+    };
+    renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+
+    const playground = playgroundSection();
+    fireEvent.change(within(playground).getByLabelText("Prompt Required"), {
+      target: { value: "Transcribe this URL." },
+    });
+    openPlaygroundDisclosure(playground, "Audio");
+    fireEvent.change(within(playground).getByLabelText("Audio URL Optional"), {
+      target: { value: "https://audio.example.test/note.mp3" },
+    });
+    fireEvent.click(within(playground).getByRole("button", { name: "Run playground" }));
+
+    expect(await within(playground).findByText("audio url pong")).toBeInTheDocument();
+    const post = calls.find(
+      (call) => call.url === "/admin/api/v1/llm/provider-models/pm_gemma/playground",
+    );
+    expect(post?.init.body).not.toBeInstanceOf(FormData);
+    expect(bodyOf(post!)).toMatchObject({
+      mode: "direct",
+      prompt: "Transcribe this URL.",
+      audio_url: "https://audio.example.test/note.mp3",
+    });
   });
 
   it("does not send unsupported system prompt or temperature playground fields", async () => {
@@ -525,6 +676,7 @@ describe("LlmRegistryModals", () => {
     renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
 
     const playground = playgroundSection();
+    openPlaygroundDisclosure(playground, "System prompt");
     expect(
       within(playground).getByRole("textbox", { name: /^System prompt/ }),
     ).toBeDisabled();
@@ -716,6 +868,7 @@ describe("LlmRegistryModals", () => {
     const playground = playgroundSection();
     const prompt = within(playground).getByLabelText("Prompt Required");
     fireEvent.change(prompt, { target: { value: "Say pong." } });
+    openPlaygroundDisclosure(playground, "System prompt");
     fireEvent.change(within(playground).getByLabelText("System prompt Optional"), {
       target: { value: "Be terse." },
     });

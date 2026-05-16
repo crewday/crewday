@@ -59,7 +59,6 @@ export default function CapabilityChain(props: CapabilityChainProps) {
           hasSelection && !mutedPath.assignments.has(a.id) ? "is-dim" : "",
           searchMatches?.assignments.has(a.id) ? "is-search-match" : "",
           missing.length ? "is-error" : "",
-          a.priority === 0 ? "is-primary" : "",
         ]
           .filter(Boolean)
           .join(" ");

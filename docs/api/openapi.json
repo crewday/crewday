@@ -52898,6 +52898,18 @@
                     ],
                     "title": "Assignment Id"
                   },
+                  "audio_url": {
+                    "anyOf": [
+                      {
+                        "maxLength": 262144,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Audio Url"
+                  },
                   "image_url": {
                     "anyOf": [
                       {
@@ -53009,6 +53021,15 @@
               "schema": {
                 "properties": {
                   "assignment_id": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "audio_file": {
+                    "format": "binary",
+                    "type": "string"
+                  },
+                  "audio_url": {
+                    "maxLength": 262144,
                     "nullable": true,
                     "type": "string"
                   },
