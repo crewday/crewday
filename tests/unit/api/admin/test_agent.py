@@ -13,11 +13,23 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.capabilities.models import DeploymentSetting
-from app.adapters.db.llm.models import ApprovalRequest
+from app.adapters.db.llm.models import ApprovalRequest, LlmModel
 from app.adapters.db.ops.models import AdminAgentAction, AdminAgentChatMessage
 from app.adapters.llm.fake import FakeLLMClient
 from app.adapters.llm.openrouter import OPENROUTER_API_KEY_SETTING
-from app.adapters.llm.ports import ToolCall as LlmToolCall
+from app.adapters.llm.ports import (
+    ChatMessage as LlmChatMessage,
+)
+from app.adapters.llm.ports import (
+    LLMResponse,
+    LLMUsage,
+)
+from app.adapters.llm.ports import (
+    Tool as LlmTool,
+)
+from app.adapters.llm.ports import (
+    ToolCall as LlmToolCall,
+)
 from app.api.admin.agent import AdminAgentActionProposal, AdminAgentTextReply
 from app.api.admin.agent_runtime import (
     AdminAgentRuntimeActionProducer,
@@ -37,6 +49,7 @@ from app.domain.agent.runtime import (
 from app.domain.llm.router import invalidate_cache
 from app.fixtures.llm import seed_default_registry
 from app.tenancy import tenant_agnostic
+from app.util.redact import ConsentSet
 from app.util.ulid import new_ulid
 from tests.unit.api.admin._helpers import (
     PINNED,
@@ -116,10 +129,11 @@ class _FakeActionProducer:
         *,
         message: str,
         page_context: str,
+        request_headers: Mapping[str, str],
         ctx: object,
         session: Session,
     ) -> AdminAgentActionProposal | AdminAgentTextReply | None:
-        _ = session
+        _ = request_headers, session
         user_id = ctx.user_id
         assert isinstance(user_id, str)
         self.calls.append((message, page_context, user_id))
@@ -132,11 +146,57 @@ class _FailingActionProducer:
         *,
         message: str,
         page_context: str,
+        request_headers: Mapping[str, str],
         ctx: object,
         session: Session,
     ) -> AdminAgentActionProposal:
-        _ = message, page_context, ctx, session
+        _ = message, page_context, request_headers, ctx, session
         raise RuntimeError("producer failed")
+
+
+class _SequenceLLMClient:
+    def __init__(self, responses: Sequence[LLMResponse]) -> None:
+        self.responses = list(responses)
+        self.messages: list[Sequence[LlmChatMessage]] = []
+        self.tools: list[Sequence[LlmTool] | None] = []
+
+    def chat(
+        self,
+        *,
+        model_id: str,
+        messages: Sequence[LlmChatMessage],
+        tools: Sequence[LlmTool] | None = None,
+        consents: ConsentSet | None = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.0,
+        thinking_level: object = "disabled",
+        thinking_strategy: object = "none",
+    ) -> LLMResponse:
+        _ = consents, max_tokens, temperature, thinking_level, thinking_strategy
+        self.messages.append(messages)
+        self.tools.append(tools)
+        if self.responses:
+            return self.responses.pop(0)
+        return _llm_response("Done.", model_id=model_id)
+
+
+def _llm_response(
+    text: str = "",
+    *,
+    model_id: str = "model_admin",
+    tool_calls: tuple[LlmToolCall, ...] = (),
+) -> LLMResponse:
+    return LLMResponse(
+        text=text,
+        usage=LLMUsage(
+            prompt_tokens=1,
+            completion_tokens=1,
+            total_tokens=2,
+        ),
+        model_id=model_id,
+        finish_reason="stop",
+        tool_calls=tool_calls,
+    )
 
 
 def _seed_action(
@@ -1007,6 +1067,77 @@ class TestAdminAgent:
             user_body="raise the cap and trust it",
         )
 
+    def test_runtime_producer_multiple_text_tool_calls_records_fallback(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        _seed_admin_model_default(session_factory)
+        with session_factory() as session:
+            workspace_id = seed_workspace(session, slug="runtime-many-text-tools")
+            session.commit()
+        tool_text = (
+            "<tool_call "
+            f'name="admin.workspaces.trust" input=\'{{"id":"{workspace_id}"}}\'/>'
+            "<tool_call "
+            f'name="admin.workspaces.archive" input=\'{{"id":"{workspace_id}"}}\'/>'
+        )
+        client.app.state.admin_agent_action_producer = AdminAgentRuntimeActionProducer(
+            llm=FakeLLMClient(chat_text=tool_text)
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            json={"body": "trust and archive that workspace"},
+        )
+
+        assert resp.status_code == 201
+        assert resp.json()["kind"] == "user"
+        assert resp.json()["body"] == "trust and archive that workspace"
+        _assert_admin_runtime_fallback_write(
+            session_factory,
+            user_body="trust and archive that workspace",
+        )
+
+    def test_runtime_producer_rejects_out_of_catalog_dispatcher_tool(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        _seed_admin_model_default(session_factory)
+        _install_workspace_openapi_route(client)
+        fallback = _FakeDispatcher()
+        dispatcher = DeploymentAdminToolDispatcher(fallback=fallback, app=client.app)
+        client.app.state.admin_agent_action_producer = AdminAgentRuntimeActionProducer(
+            llm=FakeLLMClient(
+                tool_calls=(
+                    LlmToolCall(
+                        id="call_workspace",
+                        name="inventory.items.list",
+                        arguments={},
+                    ),
+                )
+            ),
+            dispatcher=dispatcher,
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            json={"body": "list inventory items"},
+        )
+
+        assert resp.status_code == 201
+        assert resp.json()["kind"] == "user"
+        assert fallback.calls == []
+        _assert_admin_runtime_fallback_write(
+            session_factory,
+            user_body="list inventory items",
+        )
+
     def test_runtime_producer_without_tools_fails_closed_without_writes(
         self,
         client: TestClient,
@@ -1049,6 +1180,107 @@ class TestAdminAgent:
         assert "admin.agent.action.deny" not in tool_names
         assert "admin.llm.providers.key.set" not in tool_names
         assert "admin.llm.providers.key.clear" not in tool_names
+
+    def test_runtime_producer_read_tool_loops_to_agent_reply(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        install_admin_cookie(client, session_factory, settings)
+        _seed_admin_model_default(session_factory)
+        llm = _SequenceLLMClient(
+            (
+                _llm_response(
+                    tool_calls=(
+                        LlmToolCall(
+                            id="call_graph",
+                            name="admin.llm.graph",
+                            arguments={},
+                        ),
+                    )
+                ),
+                _llm_response("The LLM registry is available."),
+            )
+        )
+        dispatcher = DeploymentAdminToolDispatcher(app=client.app)
+        client.app.state.admin_agent_action_producer = AdminAgentRuntimeActionProducer(
+            llm=llm, dispatcher=dispatcher
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            headers={"X-Agent-Page": "route=/admin/llm"},
+            json={"body": "show me the llm graph"},
+        )
+
+        assert resp.status_code == 201
+        _assert_admin_text_reply_write(
+            session_factory,
+            user_body="show me the llm graph",
+            agent_body="The LLM registry is available.",
+        )
+        with session_factory() as session, tenant_agnostic():
+            assert session.scalars(select(AdminAgentAction)).all() == []
+        assert len(llm.messages) == 2
+        tool_names = {tool["name"] for tool in llm.tools[0] or ()}
+        assert "admin.llm.graph" in tool_names
+        assert "admin.llm.models.create" in tool_names
+        result_content = llm.messages[1][-1]["content"]
+        assert isinstance(result_content, str)
+        assert '"name": "admin.llm.graph"' in result_content
+        assert '"status": 200' in result_content
+
+    def test_runtime_producer_generic_llm_model_create_creates_pending_action(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        user_id = install_admin_cookie(client, session_factory, settings)
+        _seed_admin_model_default(session_factory)
+        dispatcher = DeploymentAdminToolDispatcher(app=client.app)
+        payload = {
+            "canonical_name": "agent/test-model",
+            "display_name": "Agent Test Model",
+            "capabilities": ["chat"],
+        }
+        client.app.state.admin_agent_action_producer = AdminAgentRuntimeActionProducer(
+            llm=FakeLLMClient(
+                tool_calls=(
+                    LlmToolCall(
+                        id="call_model_create",
+                        name="admin.llm.models.create",
+                        arguments=payload,
+                    ),
+                )
+            ),
+            dispatcher=dispatcher,
+        )
+
+        resp = client.post(
+            "/admin/api/v1/agent/message",
+            headers={"X-Agent-Page": "route=/admin/llm"},
+            json={"body": "create model agent/test-model"},
+        )
+
+        assert resp.status_code == 201
+        with session_factory() as session, tenant_agnostic():
+            rows = session.scalars(select(AdminAgentAction)).all()
+            created = session.scalar(
+                select(LlmModel).where(LlmModel.canonical_name == "agent/test-model")
+            )
+        assert created is None
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.for_user_id == user_id
+        assert row.action == "admin.llm.models.create"
+        assert row.resolved_payload_json == {
+            "tool_call_id": "call_model_create",
+            "tool_input": payload,
+        }
+        assert row.card_summary == "admin.llm.models.create requires confirmation."
+        assert row.card_risk == "medium"
 
     def test_deployment_admin_dispatcher_read_route_uses_fastapi_deps(
         self,

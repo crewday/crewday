@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property
@@ -90,6 +91,12 @@ _SESSION_ONLY_ADMIN_SECRET_PATHS = frozenset(
         f"{_ADMIN_API_ROOT}/llm/providers/{{provider_id}}/key",
     }
 )
+_MAX_ADMIN_TOOL_ITERATIONS = 8
+_TEXT_TOOL_CALL_RE = re.compile(
+    r'^\s*<tool_call\s+name="(?P<name>[a-zA-Z0-9_.\-]+)"\s+input=(?P<quote>[\'"])'
+    r"(?P<input>.*?)(?P=quote)\s*/>\s*$",
+    re.DOTALL,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,12 +120,14 @@ class AdminAgentRuntimeActionProducer(AdminAgentActionProducer):
         self._llm = llm
         self._dispatcher = dispatcher
         self._tools = tuple(tools) if tools is not None else _admin_tools(dispatcher)
+        self._tool_names = frozenset(tool["name"] for tool in self._tools)
 
     def produce_action(
         self,
         *,
         message: str,
         page_context: str,
+        request_headers: Mapping[str, str],
         ctx: DeploymentContext,
         session: Session,
     ) -> AdminAgentActionProposal | AdminAgentTextReply | None:
@@ -128,11 +137,13 @@ class AdminAgentRuntimeActionProducer(AdminAgentActionProducer):
         if model_id is None:
             raise _unavailable("admin_agent_model_unavailable")
         try:
-            response = self._llm.chat(
+            result = self._run_tool_loop(
                 model_id=model_id,
-                messages=_prompt(message=message, page_context=page_context),
-                tools=self._tools,
-                consents=ConsentSet.none(),
+                message=message,
+                page_context=page_context,
+                request_headers=request_headers,
+                ctx=ctx,
+                session=session,
             )
         except (
             LlmContentRefused,
@@ -149,14 +160,78 @@ class AdminAgentRuntimeActionProducer(AdminAgentActionProducer):
                 },
             )
             raise _unavailable("admin_agent_model_unavailable") from exc
+        return result
+
+    def _run_tool_loop(
+        self,
+        *,
+        model_id: str,
+        message: str,
+        page_context: str,
+        request_headers: Mapping[str, str],
+        ctx: DeploymentContext,
+        session: Session,
+    ) -> AdminAgentActionProposal | AdminAgentTextReply | None:
+        history = _prompt(message=message, page_context=page_context)
+        for _iteration in range(_MAX_ADMIN_TOOL_ITERATIONS):
+            response = self._llm.chat(
+                model_id=model_id,
+                messages=history,
+                tools=self._tools,
+                consents=ConsentSet.none(),
+            )
+            outcome = self._resolve_response(
+                response,
+                history=history,
+                page_context=page_context,
+                request_headers=request_headers,
+                ctx=ctx,
+                session=session,
+            )
+            if isinstance(outcome, list):
+                history = outcome
+                continue
+            return outcome
+        return None
+
+    def _resolve_response(
+        self,
+        response: LLMResponse,
+        *,
+        history: list[ChatMessage],
+        page_context: str,
+        request_headers: Mapping[str, str],
+        ctx: DeploymentContext,
+        session: Session,
+    ) -> AdminAgentActionProposal | AdminAgentTextReply | list[ChatMessage] | None:
         if len(response.tool_calls) > 1:
             return None
         resolved_call = _resolve_tool_call(response)
         if resolved_call is None:
+            if _contains_text_tool_call(response.text):
+                return None
             reply = _text_reply(response.text)
             if reply is not None:
                 return reply
             return None
+        if resolved_call.name not in self._tool_names:
+            return None
+        if self._dispatcher is not None:
+            decision = self._dispatcher.is_gated(resolved_call)
+            if not decision.gated:
+                result = self._dispatcher.dispatch(
+                    resolved_call,
+                    token=_tool_dispatch_token(ctx, request_headers),
+                    headers=_admin_tool_headers(
+                        request_headers,
+                        page_context=page_context,
+                    ),
+                )
+                return _append_tool_result_to_history(
+                    history,
+                    resolved_call,
+                    result,
+                )
         proposal = _resolve_supported_proposal(
             resolved_call,
             session=session,
@@ -572,6 +647,58 @@ def _query_params(query: Mapping[str, object]) -> dict[str, str] | None:
     return params
 
 
+def _tool_dispatch_token(
+    ctx: DeploymentContext,
+    request_headers: Mapping[str, str],
+) -> DelegatedToken:
+    bearer = _bearer_token(request_headers)
+    if bearer is not None:
+        return DelegatedToken(plaintext=bearer, token_id=ctx.principal)
+    return DelegatedToken(
+        plaintext=f"mip_ADMIN_READ_{new_ulid()}",
+        token_id=ctx.principal,
+    )
+
+
+def _bearer_token(headers: Mapping[str, str]) -> str | None:
+    value = _header(headers, "authorization")
+    if value is None or not value.lower().startswith("bearer "):
+        return None
+    token = value[7:].strip()
+    return token or None
+
+
+def _admin_tool_headers(
+    request_headers: Mapping[str, str],
+    *,
+    page_context: str,
+) -> dict[str, str]:
+    headers: dict[str, str] = {
+        "X-Agent-Channel": _ADMIN_AGENT_CHANNEL,
+        "X-Agent-Page": page_context,
+    }
+    for source, target in (
+        ("cookie", "Cookie"),
+        ("user-agent", "User-Agent"),
+        ("accept-language", "Accept-Language"),
+    ):
+        value = _header(request_headers, source)
+        if value:
+            headers[target] = value
+    return headers
+
+
+def _header(headers: Mapping[str, str], name: str) -> str | None:
+    value = headers.get(name)
+    if value is not None:
+        return value
+    lower = name.lower()
+    for key, candidate in headers.items():
+        if key.lower() == lower:
+            return candidate
+    return None
+
+
 def _admin_request_headers(
     token: DelegatedToken,
     caller_headers: Mapping[str, str],
@@ -594,6 +721,23 @@ def _admin_request_headers(
             merged[key] = value
             canonical[key.lower()] = key
     return merged
+
+
+def _append_tool_result_to_history(
+    history: list[ChatMessage],
+    call: ToolCall,
+    result: ToolResult,
+) -> list[ChatMessage]:
+    rendered = json.dumps(
+        {
+            "tool_call_id": result.call_id,
+            "name": call.name,
+            "status": result.status_code,
+            "body": result.body,
+        },
+        default=str,
+    )
+    return [*history, {"role": "assistant", "content": rendered}]
 
 
 def _proposal_fields(call: ToolCall) -> tuple[tuple[str, str], ...]:
@@ -667,29 +811,23 @@ def _text_reply(text: str) -> AdminAgentTextReply | None:
 
 
 def _parse_text_tool_call(text: str) -> ToolCall | None:
-    if "<tool_call" not in text:
+    if text.count("<tool_call") != 1:
         return None
-    prefix = '<tool_call name="'
-    start = text.find(prefix)
-    if start < 0:
+    match = _TEXT_TOOL_CALL_RE.fullmatch(text)
+    if match is None:
         return None
-    name_start = start + len(prefix)
-    name_end = text.find('"', name_start)
-    input_prefix = " input='"
-    input_start = text.find(input_prefix, name_end)
-    if name_end < 0 or input_start < 0:
-        return None
-    input_start += len(input_prefix)
-    input_end = text.find("'/>", input_start)
-    if input_end < 0:
-        return None
+    raw_input = match.group("input")
     try:
-        payload = json.loads(text[input_start:input_end])
+        payload = json.loads(raw_input)
     except json.JSONDecodeError:
         return None
     if not isinstance(payload, dict):
         return None
-    return ToolCall(id=new_ulid(), name=text[name_start:name_end], input=payload)
+    return ToolCall(id=new_ulid(), name=match.group("name"), input=payload)
+
+
+def _contains_text_tool_call(text: str) -> bool:
+    return "<tool_call" in text
 
 
 def _resolve_supported_proposal(

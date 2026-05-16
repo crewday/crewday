@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal, Protocol
@@ -108,6 +108,7 @@ class AdminAgentActionProducer(Protocol):
         *,
         message: str,
         page_context: str,
+        request_headers: Mapping[str, str],
         ctx: DeploymentContext,
         session: Session,
     ) -> AdminAgentActionProposal | AdminAgentTextReply | None:
@@ -275,6 +276,7 @@ def build_admin_agent_router() -> APIRouter:
                 producer.produce_action(
                     message=body.body,
                     page_context=page,
+                    request_headers=request.headers,
                     ctx=ctx,
                     session=session,
                 )
