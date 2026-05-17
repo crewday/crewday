@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import App from "@/App";
 import { AuthProvider, __resetAuthStoreForTests } from "@/auth";
 import { RoleProvider } from "@/context/RoleContext";
@@ -22,6 +22,39 @@ function renderAppAt(path: string) {
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[path]}>
+        <AuthProvider>
+          <ThemeProvider>
+            <RoleProvider>
+              <WorkspaceProvider>
+                <SseProvider>
+                  <App />
+                </SseProvider>
+              </WorkspaceProvider>
+            </RoleProvider>
+          </ThemeProvider>
+        </AuthProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+function NavigateToTodayButton() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate("/today")}>
+      Go to today
+    </button>
+  );
+}
+
+function renderAppAtWithNavigator(path: string) {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter initialEntries={[path]}>
+        <NavigateToTodayButton />
         <AuthProvider>
           <ThemeProvider>
             <RoleProvider>
@@ -109,6 +142,29 @@ describe("/styleguide", () => {
       expect(
         screen.queryByRole("heading", { name: "Paper, moss, and a little grit." }),
       ).not.toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
+  it("starts auth bootstrap after navigating from inline table styleguide to an app route", async () => {
+    const { calls, restore } = installFetch({
+      "/api/v1/runtime/info": [{ body: { runtime: { demo_mode: false } } }],
+      "/api/v1/auth/me": [{ status: 401, body: { detail: "no session" } }],
+    });
+    try {
+      renderAppAtWithNavigator("/styleguide/inline-table-forms");
+
+      expect(
+        await screen.findByRole("heading", { name: "Inline table forms for operational lists." }),
+      ).toBeInTheDocument();
+      expect(calls.some((call) => call.url.endsWith("/api/v1/auth/me"))).toBe(false);
+
+      fireEvent.click(screen.getByRole("button", { name: "Go to today" }));
+
+      await waitFor(() => {
+        expect(calls.some((call) => call.url.endsWith("/api/v1/auth/me"))).toBe(true);
+      });
     } finally {
       restore();
     }

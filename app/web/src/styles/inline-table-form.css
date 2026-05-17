@@ -328,11 +328,6 @@
   white-space: nowrap;
 }
 
-.inline-table-form__status--dirty {
-  background: var(--sand-soft);
-  color: var(--ink-2);
-}
-
 .inline-table-form__status--saving {
   background: var(--sky-soft);
   color: var(--sky);

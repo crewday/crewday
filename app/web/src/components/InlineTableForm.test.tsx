@@ -403,6 +403,39 @@ describe("InlineTableForm", () => {
     expect(screen.getByLabelText("Owner")).toHaveFocus();
   });
 
+  it("does not enter edit mode when single-clicking interactive read content", () => {
+    const onEdit = vi.fn();
+    const interactiveColumns: InlineTableColumn<Draft>[] = [
+      {
+        ...columns[0]!,
+        renderRead: ({ row }) => (
+          <button type="button" onClick={() => undefined}>
+            {row.draft.title}
+          </button>
+        ),
+      },
+      columns[1]!,
+    ];
+
+    render(
+      <InlineTableForm
+        ariaLabel="Interactive read rows"
+        columns={interactiveColumns}
+        rows={[{ ...editableRow(), editing: false, dirty: false }]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        onEdit={onEdit}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm linen" }));
+
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("Title")).toBeNull();
+  });
+
   it("supports factory create rows by default and replaces them after create", () => {
     const onCreate = vi.fn();
     render(

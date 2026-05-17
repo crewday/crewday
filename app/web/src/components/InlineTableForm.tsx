@@ -504,7 +504,8 @@ export function InlineTableForm<TDraft>({
                       data-label={plainLabel(column.mobileLabel ?? column.header)}
                       data-inline-table-row={row.id}
                       data-inline-table-column={column.key}
-                      onClick={() => {
+                      onClick={(event) => {
+                        if (isInteractiveEventTarget(event.target)) return;
                         if (activationMode === "singleClick" && !isTrailingCreate) activateCell(column.key);
                       }}
                       onDoubleClick={() => {

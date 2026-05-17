@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import type { Dispatch, ReactNode, SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Dispatch, MutableRefObject, ReactNode, SetStateAction } from "react";
 import { CheckCircle2, RotateCcw } from "lucide-react";
 import {
   InlineCheckboxField,
@@ -75,11 +75,24 @@ const defaultStates = [
   { value: "blocked", label: "Blocked" },
 ];
 
+let demoRowCounter = 0;
+
+function nextDemoRowId(prefix: string) {
+  demoRowCounter += 1;
+  return `${prefix}-${Date.now()}-${demoRowCounter}`;
+}
+
 export default function InlineTableFormsDemoPage() {
   const [tasks, setTasks] = useState<InlineTableRow<TaskDraft>[]>(initialTasks);
   const [checklist, setChecklist] = useState<InlineTableRow<ChecklistDraft>[]>(initialChecklist);
   const [assignments, setAssignments] = useState<InlineTableRow<AssignmentDraft>[]>(initialAssignments);
   const [defaultRows, setDefaultRows] = useState<InlineTableRow<DefaultDraft>[]>(initialDefaultRows);
+  const assignmentSaveTimers = useRef<number[]>([]);
+
+  useEffect(() => () => {
+    assignmentSaveTimers.current.forEach((timer) => window.clearTimeout(timer));
+    assignmentSaveTimers.current = [];
+  }, []);
 
   const taskColumns = useMemo<InlineTableColumn<TaskDraft>[]>(() => [
     {
@@ -409,7 +422,7 @@ export default function InlineTableFormsDemoPage() {
             onEdit={(id) => setRowsEditing(setAssignments, id, true)}
             onDelete={(id) => deleteRow(setAssignments, id)}
             onCancel={(id) => resetAssignment(setAssignments, id)}
-            onSave={(id) => saveAssignment(setAssignments, id)}
+            onSave={(id) => saveAssignment(setAssignments, id, assignmentSaveTimers)}
             getRowLabel={(row) => row.draft.window}
             renderDetail={({ row }) => (
               <div className="inline-table-demo__note-line">
@@ -569,7 +582,7 @@ function createTask(
   setRows: Dispatch<SetStateAction<InlineTableRow<TaskDraft>[]>>,
   draft: TaskDraft,
 ) {
-  const savedId = `t-${Date.now()}`;
+  const savedId = nextDemoRowId("t");
   setRows((rows) => [
     ...rows,
     {
@@ -585,7 +598,7 @@ function createDefaultRow(
   setRows: Dispatch<SetStateAction<InlineTableRow<DefaultDraft>[]>>,
   draft: DefaultDraft,
 ) {
-  const savedId = `d-${Date.now()}`;
+  const savedId = nextDemoRowId("d");
   setRows((rows) => [
     ...rows,
     {
@@ -623,9 +636,11 @@ function resetAssignment(
 function saveAssignment(
   setRows: Dispatch<SetStateAction<InlineTableRow<AssignmentDraft>[]>>,
   id: string,
+  timers: MutableRefObject<number[]>,
 ) {
   setRows((rows) => rows.map((row) => row.id === id ? { ...row, saving: true, error: undefined } : row));
-  window.setTimeout(() => {
+  const timer = window.setTimeout(() => {
+    timers.current = timers.current.filter((candidate) => candidate !== timer);
     setRows((rows) => rows.map((row) => {
       if (row.id !== id) return row;
       if (id === "a-2") {
@@ -646,6 +661,7 @@ function saveAssignment(
       };
     }));
   }, 450);
+  timers.current = [...timers.current, timer];
 }
 
 const initialTasks: InlineTableRow<TaskDraft>[] = [
