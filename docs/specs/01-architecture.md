@@ -566,7 +566,7 @@ capabilities are live (see "Capability registry" above) but do
 - Dev: `pytest`, `pytest-asyncio`, `schemathesis`, `playwright`,
   `ruff`, `mypy`, `locust`.
 
-The frontend (`mocks/web/`) is built with Node 22 (Vite) in a
+The frontend (`app/web/` and `mocks/web/`) is built with Node 24 (Vite) in a
 multi-stage Docker build. The runtime image (`python:3.14-slim`) has
 no Node; only the compiled `dist/` artefacts are copied into it.
 The `docker-compose` `dev` profile adds a `web-dev` service that

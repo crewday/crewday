@@ -170,7 +170,7 @@ services:
   # ``http://web-dev:5173`` (and ``ws://web-dev:5173`` for HMR).
   # ``CREWDAY_VITE_DEV_URL`` on ``app-api`` points here.
   web-dev:
-    image: node:22-alpine
+    image: node:24-alpine
     container_name: crewday-web-dev
     restart: unless-stopped
     working_dir: /web
@@ -246,7 +246,7 @@ services:
   # websockets misbehave under the prefix, set ``server.hmr.path``
   # in ``mocks/web/vite.config.ts`` to ``'/mocks/@vite/ws'``.
   mocks-web-dev:
-    image: node:22-alpine
+    image: node:24-alpine
     container_name: crewday-mocks-web-dev
     restart: unless-stopped
     working_dir: /web
