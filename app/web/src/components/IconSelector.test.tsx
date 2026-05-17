@@ -50,6 +50,19 @@ describe("IconSelector", () => {
     expect(screen.queryByText("LegacyRoleIcon")).not.toBeInTheDocument();
   });
 
+  it("keeps disabled selectors closed", () => {
+    const onChange = vi.fn();
+    render(<IconSelector label="Icon" value="" disabled onChange={onChange} />);
+
+    const preview = screen.getByRole("button", { name: "Icon: No icon. Edit icon" });
+    expect(preview).toBeDisabled();
+
+    fireEvent.click(preview);
+
+    expect(screen.queryByRole("dialog", { name: "Icon choices" })).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("treats object prototype names as unknown stored values", () => {
     expect(isAssetIconName("toString")).toBe(false);
     render(<IconSelector label="Icon" value="toString" onChange={vi.fn()} />);

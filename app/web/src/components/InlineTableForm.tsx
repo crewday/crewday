@@ -12,6 +12,7 @@ import {
 } from "react";
 import { Check, Pencil, Trash2, X } from "lucide-react";
 import ConfirmationModal from "@/components/ConfirmationModal";
+import IconSelector from "@/components/IconSelector";
 import { EmptyState } from "@/components/common";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 
@@ -938,6 +939,46 @@ export function InlineSearchableSelectField({
         renderOptionSecondaryText={renderOptionSecondaryText}
         className="inline-table-form__searchable-select-field"
         inputClassName="inline-table-form__control inline-table-form__control--searchable-select"
+      />
+    </div>
+  );
+}
+
+export interface InlineIconFieldProps {
+  value: string;
+  onChange: (value: string) => void;
+  label: string;
+  disabled?: boolean;
+  allowEmpty?: boolean;
+  error?: string;
+  errorId?: string;
+}
+
+export function InlineIconField({
+  value,
+  onChange,
+  label,
+  disabled,
+  allowEmpty,
+  error,
+  errorId,
+}: InlineIconFieldProps) {
+  return (
+    <div
+      className="inline-table-form__icon-field"
+      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+        event.stopPropagation();
+      }}
+    >
+      <IconSelector
+        label={label}
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        allowEmpty={allowEmpty}
+        error={error}
+        errorId={errorId}
+        className="inline-table-form__icon-selector"
       />
     </div>
   );

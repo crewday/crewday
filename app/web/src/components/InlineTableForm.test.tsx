@@ -1,8 +1,9 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
   InlineNumberField,
+  InlineIconField,
   InlineNoteField,
   InlineSearchableSelectField,
   InlineSelectField,
@@ -22,6 +23,10 @@ interface Draft {
 
 interface NumberDraft {
   quantity: string;
+}
+
+interface IconDraft {
+  iconName: string;
 }
 
 const ownerOptions = [
@@ -100,6 +105,23 @@ const searchableColumns: InlineTableColumn<Draft>[] = [
         blankOption={{ label: "Unassigned", secondaryText: "None" }}
         renderOptionSecondaryText={(option) => option.secondaryText}
         onChange={(owner) => update({ owner })}
+      />
+    ),
+  },
+];
+
+const iconColumns: InlineTableColumn<IconDraft>[] = [
+  {
+    key: "icon",
+    header: "Icon",
+    width: { px: 180 },
+    renderRead: ({ row }) => <span>{row.draft.iconName || "No icon"}</span>,
+    renderEdit: ({ row, update, disabled }) => (
+      <InlineIconField
+        label="Role icon"
+        value={row.draft.iconName}
+        disabled={disabled}
+        onChange={(iconName) => update({ iconName })}
       />
     ),
   },
@@ -297,6 +319,76 @@ describe("InlineTableForm", () => {
 
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     expect(onDraftChange).not.toHaveBeenCalled();
+  });
+
+  it("selects and clears icons through the inline icon field", async () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<InlineIconField label="Role icon" value="" onChange={onChange} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Role icon: No icon. Edit icon" }));
+    await waitFor(() => expect(screen.getByLabelText("Search role icon choices")).toHaveFocus());
+    fireEvent.change(screen.getByLabelText("Search role icon choices"), { target: { value: "waves" } });
+    fireEvent.click(screen.getByRole("button", { name: "Select Waves icon" }));
+
+    expect(onChange).toHaveBeenCalledWith("Waves");
+
+    onChange.mockClear();
+    rerender(<InlineIconField label="Role icon" value="ChefHat" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Role icon: Chef Hat. Edit icon" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Role icon choices" })).getByRole("button", { name: "No icon" }));
+
+    expect(onChange).toHaveBeenCalledWith("");
+  });
+
+  it("keeps inline icon values accessible and disabled without exposing unknown names", () => {
+    const onChange = vi.fn();
+    render(<InlineIconField label="Role icon" value="LegacyRoleIcon" disabled onChange={onChange} />);
+
+    const preview = screen.getByRole("button", { name: "Role icon: Unknown icon. Edit icon" });
+    expect(preview).toBeDisabled();
+    expect(screen.queryByText("LegacyRoleIcon")).not.toBeInTheDocument();
+
+    fireEvent.click(preview);
+
+    expect(screen.queryByRole("dialog", { name: "Role icon choices" })).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("uses inline icon fields inside rows without leaking picker keys to row shortcuts", async () => {
+    const onDraftChange = vi.fn();
+    const onSave = vi.fn();
+    const onCancel = vi.fn();
+    const onDelete = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Icon rows"
+        columns={iconColumns}
+        rows={[{ id: "icon-1", editing: true, dirty: true, draft: { iconName: "ChefHat" }, label: "Chef" }]}
+        saveMode="explicit"
+        onDraftChange={onDraftChange}
+        onSave={onSave}
+        onCancel={onCancel}
+        onDelete={onDelete}
+      />,
+    );
+
+    const preview = screen.getByRole("button", { name: "Role icon: Chef Hat. Edit icon" });
+    fireEvent.keyDown(preview, { key: "Enter" });
+    await waitFor(() => expect(screen.getByLabelText("Search role icon choices")).toHaveFocus());
+
+    const search = screen.getByLabelText("Search role icon choices");
+    fireEvent.keyDown(search, { key: "Enter" });
+    fireEvent.keyDown(search, { key: "d" });
+    fireEvent.keyDown(search, { key: "Escape" });
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(onDelete).not.toHaveBeenCalled();
+
+    fireEvent.click(preview);
+    fireEvent.click(within(screen.getByRole("group", { name: "Role icon choices" })).getByRole("button", { name: "No icon" }));
+
+    expect(onDraftChange).toHaveBeenCalledWith("icon-1", { iconName: "" });
   });
 
   it("passes time field changes through as raw strings", () => {
@@ -1103,6 +1195,7 @@ describe("InlineTableForm", () => {
     expect(inlineTableCss).toContain(".inline-table-form__group:focus-visible");
     expect(inlineTableCss).toContain(".inline-table-form__group.is-selected:focus-visible");
     expect(inlineTableCss).toContain(".inline-table-form__group.is-delete-armed:focus-visible");
+    expect(inlineTableCss).toContain(".inline-table-form__icon-selector .icon-selector__selected:disabled:hover");
     expect(inlineTableCss).toMatch(
       /@media \(max-width: 720px\)\s*{[\s\S]*\.inline-table-form__head\s*{\s*display: none;/m,
     );

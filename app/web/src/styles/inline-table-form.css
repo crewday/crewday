@@ -244,6 +244,59 @@
   cursor: text;
 }
 
+.inline-table-form__icon-field {
+  width: 100%;
+  min-width: 0;
+}
+
+.inline-table-form__icon-selector {
+  width: 100%;
+  min-width: 0;
+  gap: 0;
+}
+
+.inline-table-form__icon-selector .form-field__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.inline-table-form__icon-selector .icon-selector__selected {
+  min-height: 38px;
+  padding: 5px 8px;
+  border-color: transparent;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.inline-table-form__icon-selector .icon-selector__selected:hover {
+  border-color: var(--line);
+  background: var(--paper);
+}
+
+.inline-table-form__icon-selector .icon-selector__selected:disabled,
+.inline-table-form__icon-selector .icon-selector__selected:disabled:hover {
+  border-color: transparent;
+  background: transparent;
+}
+
+.inline-table-form__icon-selector .icon-selector__selected[aria-expanded="true"] {
+  background: var(--card);
+}
+
+.inline-table-form__icon-selector .icon-selector__selected-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+}
+
+.inline-table-form__icon-selector .icon-selector__popover {
+  min-width: min(420px, calc(100vw - 32px));
+}
+
 .inline-table-form__note {
   display: block;
   min-height: 72px;
