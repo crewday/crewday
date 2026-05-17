@@ -761,6 +761,185 @@ describe("InlineTableForm", () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
+  it("supports batch actions for multiple dirty rows without row save and cancel controls", () => {
+    const onSubmit = vi.fn();
+    const onDelete = vi.fn();
+    const rows: InlineTableRow<Draft>[] = [
+      {
+        ...editableRow(),
+        id: "r-1",
+        dirty: true,
+        draft: { title: "Count towels", owner: "maria", note: "" },
+      },
+      {
+        ...editableRow(),
+        id: "r-2",
+        dirty: true,
+        draft: { title: "Count soap", owner: "enzo", note: "" },
+      },
+      {
+        ...editableRow(),
+        id: "r-3",
+        dirty: false,
+        draft: { title: "Count tea", owner: "maria", note: "" },
+      },
+    ];
+
+    render(
+      <InlineTableForm
+        ariaLabel="Batch rows"
+        columns={columns}
+        rows={rows}
+        saveMode="batch"
+        onDraftChange={vi.fn()}
+        onDelete={onDelete}
+        renderBatchActions={(batch) => (
+          <button type="button" disabled={!batch.canSubmit} onClick={() => onSubmit(batch.dirtyRows)}>
+            Commit {batch.dirtyRows.length} changes
+          </button>
+        )}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(3);
+
+    fireEvent.click(screen.getByRole("button", { name: "Commit 2 changes" }));
+
+    expect(onSubmit).toHaveBeenCalledWith([rows[0], rows[1]]);
+  });
+
+  it("exposes batch dirty, validation, error, saving, and disabled row state", () => {
+    render(
+      <InlineTableForm
+        ariaLabel="Batch state rows"
+        columns={columns}
+        rows={[
+          { ...editableRow(), id: "dirty", dirty: true },
+          { ...editableRow(), id: "invalid", validation: "Title is required." },
+          { ...editableRow(), id: "error", error: "Save failed." },
+          { ...editableRow(), id: "saving", saving: true },
+          { ...editableRow(), id: "disabled", disabled: true },
+        ]}
+        saveMode="batch"
+        onDraftChange={vi.fn()}
+        renderBatchActions={(batch) => (
+          <output>
+            dirty {batch.dirtyRows.length}, validation {batch.validationRows.length}, errors{" "}
+            {batch.errorRows.length}, saving {batch.savingRows.length}, disabled{" "}
+            {batch.disabledRows.length}, can submit {String(batch.canSubmit)}
+          </output>
+        )}
+      />,
+    );
+
+    expect(screen.getByText("Title is required.")).toBeInTheDocument();
+    expect(screen.getByText("Save failed.")).toBeInTheDocument();
+    expect(screen.getByText("Saving")).toBeInTheDocument();
+    expect(screen.getByText("Locked")).toBeInTheDocument();
+    expect(screen.getByText("dirty 5, validation 1, errors 1, saving 1, disabled 1, can submit false"))
+      .toBeInTheDocument();
+  });
+
+  it("lets callers discard all batch draft changes when a batch cancel is provided", () => {
+    function Harness() {
+      const [rows, setRows] = useState<InlineTableRow<Draft>[]>([
+        {
+          id: "r-1",
+          editing: true,
+          dirty: true,
+          committedDraft: { title: "Original", owner: "maria", note: "" },
+          draft: { title: "Changed", owner: "maria", note: "" },
+        },
+      ]);
+
+      return (
+        <InlineTableForm
+          ariaLabel="Batch discard rows"
+          columns={columns}
+          rows={rows}
+          saveMode="batch"
+          onDraftChange={(rowId, patch) => {
+            setRows((current) => current.map((row) => (
+              row.id === rowId
+                ? { ...row, draft: { ...row.draft, ...patch }, dirty: true }
+                : row
+            )));
+          }}
+          onBatchCancel={() => {
+            setRows((current) => current.map((row) => ({
+              ...row,
+              draft: row.committedDraft ?? row.draft,
+              dirty: false,
+            })));
+          }}
+          renderBatchActions={(batch) => (
+            <button type="button" disabled={!batch.canDiscard} onClick={batch.discard}>
+              Discard changes
+            </button>
+          )}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    expect(screen.getByDisplayValue("Changed")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+
+    expect(screen.getByDisplayValue("Original")).toBeInTheDocument();
+  });
+
+  it("does not row-save or row-cancel from edited-cell keyboard shortcuts in batch mode", () => {
+    const onSave = vi.fn();
+    const onCancel = vi.fn();
+    const onDraftChange = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Batch keyboard rows"
+        columns={columns}
+        rows={[editableRow()]}
+        saveMode="batch"
+        onDraftChange={onDraftChange}
+        onSave={onSave}
+        onCancel={onCancel}
+        renderBatchActions={() => <button type="button">Commit changes</button>}
+      />,
+    );
+
+    const title = screen.getByLabelText("Title");
+    fireEvent.change(title, { target: { value: "Batch count" } });
+    expect(fireEvent.keyDown(title, { key: "Enter" })).toBe(false);
+    fireEvent.keyDown(title, { key: "Escape" });
+
+    expect(onDraftChange).toHaveBeenCalledWith("r-1", { title: "Batch count" });
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it("blocks batch submit while a dirty row is disabled", () => {
+    render(
+      <InlineTableForm
+        ariaLabel="Batch disabled dirty rows"
+        columns={columns}
+        rows={[
+          { ...editableRow(), id: "ready", dirty: true },
+          { ...editableRow(), id: "locked", dirty: true, disabled: true },
+        ]}
+        saveMode="batch"
+        onDraftChange={vi.fn()}
+        renderBatchActions={(batch) => (
+          <button type="button" disabled={!batch.canSubmit}>
+            Commit {batch.dirtyRows.length} changes
+          </button>
+        )}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Commit 2 changes" })).toBeDisabled();
+  });
+
   it("cancels new or dirty edits on Escape", () => {
     const { onCancel } = renderInlineTable({
       rows: [{ ...editableRow(), isNew: true, dirty: true }],

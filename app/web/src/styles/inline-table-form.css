@@ -500,6 +500,12 @@
   justify-content: flex-start;
 }
 
+.inline-table-form__batch-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .inline-table-form__empty {
   padding: 18px;
   color: var(--ink-3);

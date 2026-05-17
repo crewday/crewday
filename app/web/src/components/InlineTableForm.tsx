@@ -17,7 +17,7 @@ import { EmptyState } from "@/components/common";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { useReorderableList } from "@/components/useReorderableList";
 
-export type InlineTableSaveMode = "explicit" | "autosave";
+export type InlineTableSaveMode = "explicit" | "autosave" | "batch";
 export type InlineTableRowStatus = "idle" | "dirty" | "saving" | "error" | "disabled";
 export type InlineTableActionDisplay = "text" | "icons";
 export type InlineTableActivationMode = "doubleClick" | "singleClick";
@@ -74,6 +74,22 @@ export interface InlineTableReorder<TDraft> {
   orderedRows: readonly InlineTableRow<TDraft>[];
 }
 
+export interface InlineTableBatchContext<TDraft> {
+  rows: readonly InlineTableRow<TDraft>[];
+  dirtyRows: readonly InlineTableRow<TDraft>[];
+  validationRows: readonly InlineTableRow<TDraft>[];
+  errorRows: readonly InlineTableRow<TDraft>[];
+  savingRows: readonly InlineTableRow<TDraft>[];
+  disabledRows: readonly InlineTableRow<TDraft>[];
+  hasDirtyRows: boolean;
+  hasValidation: boolean;
+  hasErrors: boolean;
+  isSaving: boolean;
+  canSubmit: boolean;
+  canDiscard: boolean;
+  discard: () => void;
+}
+
 /**
  * Reusable inline table editor for dense operational forms.
  *
@@ -83,15 +99,11 @@ export interface InlineTableReorder<TDraft> {
  * text-action table, a compact high-volume sheet, or a select-first table that
  * needs `e`/`dd` shortcuts.
  */
-export interface InlineTableFormProps<TDraft> {
+interface InlineTableFormBaseProps<TDraft> {
   ariaLabel: string;
   columns: readonly InlineTableColumn<TDraft>[];
   rows: readonly InlineTableRow<TDraft>[];
-  /** Defaults to autosave; use explicit only when the workflow needs a deliberate commit button. */
-  saveMode?: InlineTableSaveMode;
   onDraftChange: (rowId: string, patch: Partial<TDraft>) => void;
-  onSave: (rowId: string) => void;
-  onCancel: (rowId: string) => void;
   onEdit?: (rowId: string) => void;
   onDelete?: (rowId: string) => void;
   /** Opt-in row reordering for read-mode rows. Caller owns persisting the returned order. */
@@ -123,6 +135,31 @@ export interface InlineTableFormProps<TDraft> {
   compact?: boolean;
 }
 
+interface InlineTableRowSaveProps {
+  /** Defaults to autosave; use explicit only when the workflow needs a deliberate commit button. */
+  saveMode?: "explicit" | "autosave";
+  onSave: (rowId: string) => void;
+  onCancel: (rowId: string) => void;
+  renderBatchActions?: never;
+  onBatchCancel?: never;
+}
+
+interface InlineTableBatchProps<TDraft> {
+  saveMode: "batch";
+  /** Batch mode uses caller-owned global actions; row save/cancel callbacks are optional no-ops. */
+  onSave?: (rowId: string) => void;
+  onCancel?: (rowId: string) => void;
+  /** Batch-mode global action affordance for caller-owned submit/discard controls. */
+  renderBatchActions?: (context: InlineTableBatchContext<TDraft>) => ReactNode;
+  /** Optional batch-mode discard/cancel callback exposed through renderBatchActions context. */
+  onBatchCancel?: () => void;
+}
+
+export type InlineTableFormProps<TDraft> = InlineTableFormBaseProps<TDraft> & (
+  | InlineTableRowSaveProps
+  | InlineTableBatchProps<TDraft>
+);
+
 export function InlineTableForm<TDraft>({
   ariaLabel,
   columns,
@@ -144,6 +181,8 @@ export function InlineTableForm<TDraft>({
   trailingCreateRow,
   emptyState,
   renderDetail,
+  renderBatchActions,
+  onBatchCancel,
   getRowLabel,
   className,
   compact = false,
@@ -175,6 +214,9 @@ export function InlineTableForm<TDraft>({
   ].filter(Boolean).join(" ");
   const activeTrailingCreateRow = trailingCreateRow ?? factoryCreateRow ?? undefined;
   const renderedRows = activeTrailingCreateRow ? [...rows, activeTrailingCreateRow] : rows;
+  const batchActions = saveMode === "batch" && renderBatchActions
+    ? renderBatchActions(makeBatchContext(rows, onBatchCancel))
+    : null;
   const reorderableRows = onReorder
     ? rows.filter((row) => !isRowEditing(row) && !isRowDisabled(row))
     : [];
@@ -313,7 +355,7 @@ export function InlineTableForm<TDraft>({
 
   const saveRow = (row: InlineTableRow<TDraft>, isTrailingCreate: boolean) => {
     if (factoryCreateRow?.id !== row.id) {
-      exitRow(row, () => onSave(row.id), { selectCreated: row.isNew || isTrailingCreate });
+      exitRow(row, () => onSave?.(row.id), { selectCreated: row.isNew || isTrailingCreate });
       return;
     }
     const validation = validateCreate?.(row.draft);
@@ -337,7 +379,7 @@ export function InlineTableForm<TDraft>({
       setFactoryCreateRow(makeFactoryCreateRow(createEmptyDraft ?? (() => row.draft), createRowLabel));
       return;
     }
-    exitRow(row, () => onCancel(row.id));
+    exitRow(row, () => onCancel?.(row.id));
   };
 
   const exitRow = (row: InlineTableRow<TDraft>, action: () => void, options?: { selectCreated?: boolean }) => {
@@ -529,11 +571,11 @@ export function InlineTableForm<TDraft>({
                     return;
                   }
                   if (row.dirty) {
-                    onSave(row.id);
+                    onSave?.(row.id);
                     return;
                   }
                   if (editing && !isTrailingCreate) {
-                    onCancel(row.id);
+                    onCancel?.(row.id);
                   }
                 }}
                 onKeyDown={(event) => {
@@ -551,6 +593,10 @@ export function InlineTableForm<TDraft>({
                       onMoveSelection: (direction) => moveSelectedRow(row.id, direction),
                       lastDeleteKeyRef,
                     });
+                    return;
+                  }
+                  if (saveMode === "batch") {
+                    handleBatchGroupKeyDown(event);
                     return;
                   }
                   handleGroupKeyDown(event, {
@@ -612,6 +658,7 @@ export function InlineTableForm<TDraft>({
                       onSave={() => saveRow(row, isTrailingCreate)}
                       onCancel={() => cancelRow(row)}
                       actionDisplay={actionDisplay}
+                      hideRowCommit={saveMode === "batch"}
                       hideCancel={isTrailingCreate && !row.dirty}
                       onActionPointerDown={() => {
                         suppressAutosaveBlurRef.current = row.id;
@@ -648,6 +695,11 @@ export function InlineTableForm<TDraft>({
         </div>
       </div>
       {addRow ? <div className="inline-table-form__add">{addRow}</div> : null}
+      {batchActions ? (
+        <div className="inline-table-form__batch-actions">
+          {batchActions}
+        </div>
+      ) : null}
       <ConfirmationModal
         open={Boolean(deleteConfirmationRow)}
         title="Delete this row?"
@@ -676,6 +728,7 @@ function InlineTableActions({
   onSave,
   onCancel,
   actionDisplay,
+  hideRowCommit,
   hideCancel,
   onActionPointerDown,
 }: {
@@ -696,6 +749,7 @@ function InlineTableActions({
   onSave: () => void;
   onCancel: () => void;
   actionDisplay: InlineTableActionDisplay;
+  hideRowCommit: boolean;
   hideCancel: boolean;
   onActionPointerDown: () => void;
 }) {
@@ -743,7 +797,7 @@ function InlineTableActions({
           onPointerDown={onActionPointerDown}
         />
       ) : null}
-      {!hideCancel ? (
+      {!hideRowCommit && !hideCancel ? (
         <InlineTableActionButton
           action="cancel"
           display={actionDisplay}
@@ -752,7 +806,7 @@ function InlineTableActions({
           onPointerDown={onActionPointerDown}
         />
       ) : null}
-      {saveMode === "explicit" ? (
+      {!hideRowCommit && saveMode === "explicit" ? (
         <InlineTableActionButton
           action="save"
           display={actionDisplay}
@@ -1177,6 +1231,41 @@ function rowStatus<TDraft>(row: InlineTableRow<TDraft>): InlineTableRowStatus {
   return "idle";
 }
 
+function makeBatchContext<TDraft>(
+  rows: readonly InlineTableRow<TDraft>[],
+  onBatchCancel: (() => void) | undefined,
+): InlineTableBatchContext<TDraft> {
+  const dirtyRows = rows.filter((row) => row.dirty);
+  const dirtyDisabledRows = dirtyRows.filter((row) => row.disabled);
+  const validationRows = rows.filter((row) => row.validation);
+  const errorRows = rows.filter((row) => row.error);
+  const savingRows = rows.filter((row) => row.saving);
+  const disabledRows = rows.filter((row) => row.disabled);
+  const hasValidation = validationRows.length > 0;
+  const hasErrors = errorRows.length > 0;
+  const isSaving = savingRows.length > 0;
+
+  return {
+    rows,
+    dirtyRows,
+    validationRows,
+    errorRows,
+    savingRows,
+    disabledRows,
+    hasDirtyRows: dirtyRows.length > 0,
+    hasValidation,
+    hasErrors,
+    isSaving,
+    canSubmit: dirtyRows.length > 0
+      && dirtyDisabledRows.length === 0
+      && !hasValidation
+      && !hasErrors
+      && !isSaving,
+    canDiscard: Boolean(onBatchCancel) && dirtyRows.length > 0 && !isSaving,
+    discard: () => onBatchCancel?.(),
+  };
+}
+
 function isRowEditing<TDraft>(row: InlineTableRow<TDraft>) {
   return row.editing ?? false;
 }
@@ -1341,6 +1430,15 @@ function handleGroupKeyDown(
   if (target instanceof HTMLElement && target.closest("[data-inline-table-enter-save='false']")) return;
   event.preventDefault();
   options.onSave();
+}
+
+function handleBatchGroupKeyDown(event: KeyboardEvent<HTMLElement>) {
+  if (event.key !== "Enter") return;
+  const target = event.target;
+  if (target instanceof HTMLTextAreaElement && event.shiftKey) return;
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  if (target instanceof HTMLElement && target.closest("[data-inline-table-enter-save='false']")) return;
+  event.preventDefault();
 }
 
 function isInteractiveEventTarget(target: EventTarget) {
