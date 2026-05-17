@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
+  InlineNumberField,
   InlineNoteField,
   InlineSelectField,
   InlineTableForm,
@@ -15,6 +16,10 @@ interface Draft {
   title: string;
   owner: string;
   note: string;
+}
+
+interface NumberDraft {
+  quantity: string;
 }
 
 const ownerOptions = [
@@ -48,6 +53,26 @@ const columns: InlineTableColumn<Draft>[] = [
         disabled={disabled}
         ariaLabel="Owner"
         onChange={(owner) => update({ owner })}
+      />
+    ),
+  },
+];
+
+const numberColumns: InlineTableColumn<NumberDraft>[] = [
+  {
+    key: "quantity",
+    header: "Quantity",
+    renderRead: ({ row }) => <span>{row.draft.quantity}</span>,
+    renderEdit: ({ row, update, disabled }) => (
+      <InlineNumberField
+        value={row.draft.quantity}
+        min={0}
+        max={12}
+        step="0.25"
+        placeholder="0"
+        disabled={disabled}
+        ariaLabel="Quantity"
+        onChange={(quantity) => update({ quantity })}
       />
     ),
   },
@@ -89,6 +114,67 @@ function renderInlineTable({
 }
 
 describe("InlineTableForm", () => {
+  it("renders number fields with numeric attributes and disabled state", () => {
+    render(
+      <InlineNumberField
+        value="1.50"
+        min={0}
+        max="10"
+        step="0.25"
+        placeholder="0.00"
+        disabled
+        ariaLabel="Amount"
+        onChange={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByLabelText("Amount");
+    expect(input).toHaveAttribute("type", "text");
+    expect(input).toHaveAttribute("inputmode", "decimal");
+    expect(input).toHaveClass("inline-table-form__control");
+    expect(input).toHaveAttribute("min", "0");
+    expect(input).toHaveAttribute("max", "10");
+    expect(input).toHaveAttribute("step", "0.25");
+    expect(input).toHaveAttribute("placeholder", "0.00");
+    expect(input).toBeDisabled();
+    expect((input as HTMLInputElement).value).toBe("1.50");
+  });
+
+  it("passes number field changes through as raw strings", () => {
+    const onChange = vi.fn();
+    render(<InlineNumberField value="1." ariaLabel="Decimal amount" onChange={onChange} />);
+
+    const input = screen.getByLabelText("Decimal amount");
+    expect((input as HTMLInputElement).value).toBe("1.");
+    fireEvent.change(input, { target: { value: "-" } });
+
+    expect(onChange).toHaveBeenCalledWith("-");
+  });
+
+  it("saves and cancels table rows from number fields", () => {
+    const onSave = vi.fn();
+    const onCancel = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Number rows"
+        columns={numberColumns}
+        rows={[{ id: "n-1", editing: true, dirty: true, draft: { quantity: "1.5" } }]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={onSave}
+        onCancel={onCancel}
+        getRowLabel={(row) => `Quantity ${row.draft.quantity}`}
+      />,
+    );
+
+    const input = screen.getByLabelText("Quantity");
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(onSave).toHaveBeenCalledWith("n-1");
+    expect(onCancel).toHaveBeenCalledWith("n-1");
+  });
+
   it("renders column render props and multi-row detail content", () => {
     renderInlineTable();
 

@@ -4,6 +4,7 @@ import { CheckCircle2, RotateCcw } from "lucide-react";
 import {
   InlineCheckboxField,
   InlineDateField,
+  InlineNumberField,
   InlineNoteField,
   InlineSelectField,
   InlineTableForm,
@@ -26,6 +27,7 @@ interface TaskDraft {
 interface ChecklistDraft {
   done: boolean;
   item: string;
+  minutes: string;
   owner: string;
   phase: string;
 }
@@ -191,7 +193,7 @@ export default function InlineTableFormsDemoPage() {
     {
       key: "item",
       header: "Checklist item",
-      width: { flex: 1.9, min: 240 },
+      width: { flex: 1.8, min: 220 },
       renderRead: ({ row }) => <ReadText value={row.draft.item} />,
       renderEdit: ({ row, update, disabled }) => (
         <InlineTextField
@@ -199,6 +201,25 @@ export default function InlineTableFormsDemoPage() {
           disabled={disabled}
           ariaLabel="Checklist item"
           onChange={(item) => update({ item })}
+        />
+      ),
+    },
+    {
+      key: "minutes",
+      header: "Min",
+      width: { px: 96 },
+      align: "end",
+      renderRead: ({ row }) => <ReadText value={row.draft.minutes} />,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineNumberField
+          value={row.draft.minutes}
+          min={0}
+          max={240}
+          step={5}
+          placeholder="0"
+          disabled={disabled}
+          ariaLabel="Checklist minutes"
+          onChange={(minutes) => update({ minutes })}
         />
       ),
     },
@@ -732,19 +753,19 @@ const initialChecklist: InlineTableRow<ChecklistDraft>[] = [
     id: "c-1",
     editing: true,
     dirty: true,
-    draft: { done: false, item: "Photo balcony chairs after staging", owner: "sora", phase: "walkthrough" },
+    draft: { done: false, item: "Photo balcony chairs after staging", minutes: "15", owner: "sora", phase: "walkthrough" },
   },
   {
     id: "c-2",
     editing: false,
-    draft: { done: true, item: "Replace entry code in guest guide", owner: "maria", phase: "handoff" },
+    draft: { done: true, item: "Replace entry code in guest guide", minutes: "5", owner: "maria", phase: "handoff" },
   },
   {
     id: "c-3",
     editing: false,
     disabled: true,
     meta: <span><RotateCcw size={13} aria-hidden="true" /> Synced from template</span>,
-    draft: { done: false, item: "Do not edit - template controlled", owner: "enzo", phase: "prep" },
+    draft: { done: false, item: "Do not edit - template controlled", minutes: "30", owner: "enzo", phase: "prep" },
   },
 ];
 

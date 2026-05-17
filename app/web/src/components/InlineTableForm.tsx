@@ -757,6 +757,42 @@ export function InlineTextField({
   );
 }
 
+export function InlineNumberField({
+  value,
+  onChange,
+  min,
+  max,
+  step,
+  placeholder,
+  disabled,
+  ariaLabel,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  min?: number | string;
+  max?: number | string;
+  step?: number | string;
+  placeholder?: string;
+  disabled?: boolean;
+  ariaLabel?: string;
+}) {
+  return (
+    <input
+      className="inline-table-form__control"
+      type="text"
+      inputMode="decimal"
+      value={value}
+      min={min}
+      max={max}
+      step={step}
+      placeholder={placeholder}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      onChange={(event) => onChange(event.currentTarget.value)}
+    />
+  );
+}
+
 export function InlineDateField({
   value,
   onChange,
