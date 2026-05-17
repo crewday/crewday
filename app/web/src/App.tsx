@@ -95,6 +95,9 @@ const STYLEGUIDE_ENABLED =
 const StyleguidePage = STYLEGUIDE_ENABLED
   ? lazy(() => import("@/pages/StyleguidePage"))
   : null;
+const InlineTableFormsDemoPage = STYLEGUIDE_ENABLED
+  ? lazy(() => import("@/pages/InlineTableFormsDemoPage"))
+  : null;
 
 function RoleHome() {
   const { user } = useAuth();
@@ -442,6 +445,16 @@ export default function App() {
             element={
               <Suspense fallback={null}>
                 <StyleguidePage />
+              </Suspense>
+            }
+          />
+        ) : null}
+        {InlineTableFormsDemoPage ? (
+          <Route
+            path="/styleguide/inline-table-forms"
+            element={
+              <Suspense fallback={null}>
+                <InlineTableFormsDemoPage />
               </Suspense>
             }
           />

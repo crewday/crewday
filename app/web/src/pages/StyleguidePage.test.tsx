@@ -73,6 +73,28 @@ describe("/styleguide", () => {
     }
   });
 
+  it("renders the inline table form demo without auth bootstrap", async () => {
+    const { calls, restore } = installFetch({
+      "/api/v1/runtime/info": [{ body: { runtime: { demo_mode: false } } }],
+    });
+    try {
+      renderAppAt("/styleguide/inline-table-forms");
+
+      expect(
+        await screen.findByRole("heading", { name: "Inline table forms for operational lists." }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("table", { name: "Task quick-entry inline table" })).toBeInTheDocument();
+      expect(screen.queryByRole("navigation", { name: "Shell controls" })).toBeNull();
+
+      await waitFor(() => {
+        expect(calls.some((call) => call.url.endsWith("/api/v1/runtime/info"))).toBe(true);
+      });
+      expect(calls.some((call) => call.url.endsWith("/api/v1/auth/me"))).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
   it("still runs auth bootstrap on app routes", async () => {
     const { calls, restore } = installFetch({
       "/api/v1/runtime/info": [{ body: { runtime: { demo_mode: false } } }],
