@@ -1097,6 +1097,82 @@ class TestAdminLlmRoutes:
         finally:
             _wipe(session_factory)
 
+    def test_provider_model_playground_accepts_vision_only_model(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            llm = _RecordingLLMClient()
+            client.app.state.llm = llm
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                provider.api_key_envelope_ref = None
+                model = s.get(LlmModel, seeded.model_id)
+                assert model is not None
+                model.capabilities = ["vision"]
+                s.commit()
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                data={},
+                files={"image_file": ("document.png", b"image-bytes", "image/png")},
+            )
+
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["status"] == "ok"
+            assert llm.calls == 1
+            content = llm.messages[0][0]["content"]
+            assert isinstance(content, list)
+            assert content[0] == {
+                "type": "text",
+                "text": "Extract the text from this image.",
+            }
+            assert content[1]["type"] == "image_url"
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_requires_image_for_vision_only_model(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            client.app.state.llm = _RecordingLLMClient()
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                provider.api_key_envelope_ref = None
+                model = s.get(LlmModel, seeded.model_id)
+                assert model is not None
+                model.capabilities = ["vision"]
+                s.commit()
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                json={"prompt": "read this document"},
+            )
+
+            assert resp.status_code == 422, resp.text
+            assert resp.json()["error"] == "playground_image_required"
+        finally:
+            _wipe(session_factory)
+
     def test_provider_model_playground_accepts_multipart_audio_upload(
         self,
         client: TestClient,

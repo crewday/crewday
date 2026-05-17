@@ -33,6 +33,8 @@ interface PlaygroundErrorNotice {
   errorId: string | null;
 }
 
+const DEFAULT_VISION_ONLY_PROMPT = "Extract the text from this image.";
+
 export default function LlmPlayground({
   providerModel,
   model,
@@ -77,20 +79,26 @@ export default function LlmPlayground({
   });
 
   function runPlayground(): void {
-    if (!prompt.trim()) {
-      setResult(null);
-      setClientErr({
-        message: "Prompt is required.",
-        code: "prompt_required",
-        errorId: null,
-      });
-      return;
-    }
     if (supportsVision && imageUrl.trim() && imageFile) {
       setResult(null);
       setClientErr({
         message: "Use either an image URL or an uploaded image, not both.",
         code: "playground_image_multiple_sources",
+        errorId: null,
+      });
+      return;
+    }
+    if (
+      !supportsChat &&
+      supportsVision &&
+      !supportsAudio &&
+      !imageFile &&
+      !imageUrl.trim()
+    ) {
+      setResult(null);
+      setClientErr({
+        message: "Image is required for this vision-only model.",
+        code: "playground_image_required",
         errorId: null,
       });
       return;
@@ -113,6 +121,15 @@ export default function LlmPlayground({
       });
       return;
     }
+    if (!effectivePrompt()) {
+      setResult(null);
+      setClientErr({
+        message: "Prompt is required.",
+        code: "prompt_required",
+        errorId: null,
+      });
+      return;
+    }
     if (mode === "assignment" && !assignment) {
       setResult(null);
       setClientErr({
@@ -130,7 +147,7 @@ export default function LlmPlayground({
   function buildPlaygroundBody(): FormData | Record<string, unknown> {
     const base = {
       mode,
-      prompt: prompt.trim(),
+      prompt: effectivePrompt(),
       system_prompt: supportsSystemPrompt ? emptyToNull(systemPrompt) : null,
       max_tokens: null,
       temperature: null,
@@ -151,6 +168,15 @@ export default function LlmPlayground({
     if (supportsVision && imageFile !== null) body.append("image_file", imageFile);
     if (supportsAudio && audioFile !== null) body.append("audio_file", audioFile);
     return body;
+  }
+
+  function effectivePrompt(): string {
+    const trimmed = prompt.trim();
+    if (trimmed) return trimmed;
+    if (!supportsChat && supportsVision && !supportsAudio && (imageFile || imageUrl.trim())) {
+      return DEFAULT_VISION_ONLY_PROMPT;
+    }
+    return "";
   }
 
   function resetPlayground(): void {
@@ -542,6 +568,20 @@ function playgroundErrorCopy(error: unknown): PlaygroundErrorNotice {
     }
     if (code === "audio_requires_audio_model") {
       return { message: "Audio requires an audio-input model.", code, errorId };
+    }
+    if (code === "playground_image_required") {
+      return {
+        message: "Image is required for this vision-only model.",
+        code,
+        errorId,
+      };
+    }
+    if (code === "playground_audio_required") {
+      return {
+        message: "Audio is required for this audio-only model.",
+        code,
+        errorId,
+      };
     }
     if (code === "playground_image_file_too_large") {
       return {

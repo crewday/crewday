@@ -418,6 +418,59 @@ describe("LlmRegistryModals", () => {
     expect(within(playground).getByLabelText("Upload playground image")).toBeInTheDocument();
   });
 
+  it("shows the playground for vision-only provider-models", async () => {
+    const calls = installFetch((url) =>
+      url === "/admin/api/v1/llm/provider-models/pm_gemma/playground"
+        ? {
+            body: {
+              status: "ok",
+              assistant_text: "ocr pong",
+              reasoning_text: null,
+              model_used: "glm-ocr",
+              provider_used: "Ollama Blaze",
+              provider_model_id: "pm_gemma",
+              assignment_id: null,
+              latency_ms: 42,
+              input_tokens: 6,
+              output_tokens: 2,
+              reasoning_tokens: null,
+              finish_reason: "stop",
+              stop_reason: "stop",
+              cost_usd: "0.000001",
+              cost_cents: 0,
+              error_message: null,
+            },
+          }
+        : { body: {} },
+    );
+    renderRegistry(graphWithGemmaMedia(["vision"]), {
+      kind: "providerModel",
+      mode: "edit",
+      id: "pm_gemma",
+    });
+
+    const playground = playgroundSection();
+    fireEvent.click(within(playground).getByRole("button", { name: "Run playground" }));
+    expect(await within(playground).findByRole("alert")).toHaveTextContent(
+      "Image is required for this vision-only model.",
+    );
+
+    openPlaygroundDisclosure(playground, "Image");
+    const image = new File(["image-bytes"], "document.png", { type: "image/png" });
+    fireEvent.change(within(playground).getByLabelText("Upload playground image"), {
+      target: { files: [image] },
+    });
+    fireEvent.click(within(playground).getByRole("button", { name: "Run playground" }));
+
+    expect(await within(playground).findByText("ocr pong")).toBeInTheDocument();
+    const post = calls.find(
+      (call) => call.url === "/admin/api/v1/llm/provider-models/pm_gemma/playground",
+    );
+    expect(post?.init.body).toBeInstanceOf(FormData);
+    const form = post!.init.body as FormData;
+    expect(form.get("prompt")).toBe("Extract the text from this image.");
+  });
+
   it("shows audio input for audio-capable provider-models", () => {
     installFetch();
     const testGraph: LlmGraphPayload = {

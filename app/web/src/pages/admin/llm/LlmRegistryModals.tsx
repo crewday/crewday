@@ -365,6 +365,7 @@ function providerAllowsApiKey(providerType: LlmProviderType): boolean {
 function modelSupportsPlayground(model: LlmModel | undefined): boolean {
   return Boolean(
     model?.capabilities.includes("chat") ||
+      model?.capabilities.includes("vision") ||
       model?.capabilities.includes("audio_input"),
   );
 }

@@ -229,6 +229,8 @@ _PLAYGROUND_IMAGE_URL_FETCH_TIMEOUT_S: Final[float] = 5.0
 _PLAYGROUND_IMAGE_URL_FETCH_SCHEMES: Final[frozenset[str]] = frozenset({"https"})
 _PLAYGROUND_MEDIA_CONVERSION_TIMEOUT_S: Final[float] = 15.0
 _PLAYGROUND_MAX_TOKENS_LIMIT = 32_000
+_PLAYGROUND_DEFAULT_VISION_PROMPT: Final[str] = "Extract the text from this image."
+_PLAYGROUND_DEFAULT_AUDIO_PROMPT: Final[str] = "Transcribe this audio."
 _PLAYGROUND_AUDIO_FORMAT_BY_CONTENT_TYPE: Final[dict[str, str]] = {
     "audio/aac": "aac",
     "audio/aiff": "aiff",
@@ -532,7 +534,7 @@ class LlmProviderModelPlaygroundRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal["direct", "assignment"] = "direct"
-    prompt: str = Field(min_length=1, max_length=16_000)
+    prompt: str = Field(default="", max_length=16_000)
     system_prompt: str | None = Field(default=None, max_length=8_000)
     max_tokens: int | None = Field(default=None, ge=1, le=32_000)
     temperature: float | None = Field(default=None, ge=0, le=2)
@@ -545,10 +547,7 @@ class LlmProviderModelPlaygroundRequest(BaseModel):
     @field_validator("prompt")
     @classmethod
     def _strip_prompt(cls, value: str) -> str:
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("prompt must not be blank")
-        return stripped
+        return value.strip()
 
     @field_validator("system_prompt", "image_url", "audio_url")
     @classmethod
@@ -2675,6 +2674,23 @@ def _validate_playground_assignment(
     return assignment
 
 
+def _playground_effective_prompt(
+    payload: LlmProviderModelPlaygroundRequest,
+    *,
+    capabilities: set[str],
+    image_ref: str | None,
+    audio_ref: PlaygroundAudioRef | None,
+) -> str:
+    if payload.prompt:
+        return payload.prompt
+    if "chat" not in capabilities:
+        if image_ref is not None and "vision" in capabilities:
+            return _PLAYGROUND_DEFAULT_VISION_PROMPT
+        if audio_ref is not None and "audio_input" in capabilities:
+            return _PLAYGROUND_DEFAULT_AUDIO_PROMPT
+    raise _unprocessable("prompt_required")
+
+
 def _playground_messages(
     payload: LlmProviderModelPlaygroundRequest,
     provider_model: LlmProviderModel,
@@ -2683,23 +2699,33 @@ def _playground_messages(
     audio_ref: PlaygroundAudioRef | None = None,
 ) -> list[ChatMessage]:
     capabilities = set(model.capabilities or [])
-    if "chat" not in capabilities and audio_ref is None:
+    image_ref = image_url if image_url is not None else payload.image_url
+    if "chat" not in capabilities and image_ref is None and audio_ref is None:
+        if "vision" in capabilities:
+            raise _unprocessable("playground_image_required")
+        if "audio_input" in capabilities:
+            raise _unprocessable("playground_audio_required")
         raise _unprocessable("playground_requires_chat_model")
     if payload.system_prompt is not None and not provider_model.supports_system_prompt:
         raise _unprocessable("system_prompt_not_supported")
-    image_ref = image_url if image_url is not None else payload.image_url
     if image_ref is not None and "vision" not in capabilities:
         raise _unprocessable("image_requires_vision_model")
     if audio_ref is not None and "audio_input" not in capabilities:
         raise _unprocessable("audio_requires_audio_model")
+    prompt = _playground_effective_prompt(
+        payload,
+        capabilities=capabilities,
+        image_ref=image_ref,
+        audio_ref=audio_ref,
+    )
     messages: list[ChatMessage] = []
     if payload.system_prompt is not None:
         messages.append({"role": "system", "content": payload.system_prompt})
     if image_ref is None and audio_ref is None:
-        messages.append({"role": "user", "content": payload.prompt})
+        messages.append({"role": "user", "content": prompt})
     else:
         content: list[ChatTextBlock | ChatImageUrlBlock | ChatInputAudioBlock] = [
-            {"type": "text", "text": payload.prompt}
+            {"type": "text", "text": prompt}
         ]
         if image_ref is not None:
             content.append({"type": "image_url", "image_url": {"url": image_ref}})

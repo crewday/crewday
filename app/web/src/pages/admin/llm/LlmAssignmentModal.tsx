@@ -406,7 +406,11 @@ export default function LlmAssignmentModal({
   const playgroundModel = playgroundProviderModel
     ? indexes.modelsById.get(playgroundProviderModel.model_id)
     : undefined;
-  const playgroundSupportsChat = Boolean(playgroundModel?.capabilities.includes("chat"));
+  const playgroundSupportsGeneration = Boolean(
+    playgroundModel?.capabilities.includes("chat") ||
+      playgroundModel?.capabilities.includes("vision") ||
+      playgroundModel?.capabilities.includes("audio_input"),
+  );
   const playgroundSupportsEmbeddings = Boolean(
     playgroundModel?.capabilities.includes("embeddings"),
   );
@@ -557,7 +561,9 @@ export default function LlmAssignmentModal({
                 onParentChange={setInheritParent}
                 onSubmit={submitInheritance}
               />
-              {playgroundAssignment && playgroundProviderModel && playgroundSupportsChat ? (
+              {playgroundAssignment &&
+              playgroundProviderModel &&
+              playgroundSupportsGeneration ? (
                 <LlmPlayground
                   providerModel={playgroundProviderModel}
                   model={playgroundModel}
@@ -569,7 +575,7 @@ export default function LlmAssignmentModal({
               ) : null}
               {playgroundAssignment &&
               playgroundProviderModel &&
-              !playgroundSupportsChat &&
+              !playgroundSupportsGeneration &&
               playgroundSupportsEmbeddings ? (
                 <LlmEmbeddingSmoke
                   providerModel={playgroundProviderModel}
