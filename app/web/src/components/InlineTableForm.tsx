@@ -13,6 +13,7 @@ import {
 import { Check, Pencil, Trash2, X } from "lucide-react";
 import ConfirmationModal from "@/components/ConfirmationModal";
 import { EmptyState } from "@/components/common";
+import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 
 export type InlineTableSaveMode = "explicit" | "autosave";
 export type InlineTableRowStatus = "idle" | "dirty" | "saving" | "error" | "disabled";
@@ -883,6 +884,65 @@ export function InlineSelectField({
   );
 }
 
+export interface InlineSearchableSelectBlankOption {
+  label: string;
+  secondaryText?: string;
+  searchText?: string;
+}
+
+export interface InlineSearchableSelectFieldProps {
+  value: string;
+  options: readonly SearchableSelectOption[];
+  onChange: (value: string) => void;
+  label?: string;
+  ariaLabel?: string;
+  disabled?: boolean;
+  blankOption?: InlineSearchableSelectBlankOption;
+  placeholder?: string;
+  noResultsLabel?: string;
+  renderOptionSecondaryText?: (option: SearchableSelectOption) => ReactNode;
+}
+
+export function InlineSearchableSelectField({
+  value,
+  options,
+  onChange,
+  label,
+  ariaLabel,
+  disabled,
+  blankOption,
+  placeholder,
+  noResultsLabel,
+  renderOptionSecondaryText,
+}: InlineSearchableSelectFieldProps) {
+  const resolvedLabel = label ?? ariaLabel ?? "Select option";
+
+  return (
+    <div
+      className="inline-table-form__searchable-select"
+      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+        if (isInlineSearchableSelectKey(event.key) && isComboboxEventTarget(event.target)) {
+          event.stopPropagation();
+        }
+      }}
+    >
+      <SearchableSelect
+        label={resolvedLabel}
+        value={value}
+        options={options}
+        onChange={onChange}
+        disabled={disabled}
+        blankOption={blankOption}
+        placeholder={placeholder}
+        noResultsLabel={noResultsLabel}
+        renderOptionSecondaryText={renderOptionSecondaryText}
+        className="inline-table-form__searchable-select-field"
+        inputClassName="inline-table-form__control inline-table-form__control--searchable-select"
+      />
+    </div>
+  );
+}
+
 export function InlineCheckboxField({
   checked,
   onChange,
@@ -1106,6 +1166,14 @@ function isInteractiveEventTarget(target: EventTarget) {
 
 function isEditableShortcutTarget(target: EventTarget) {
   return target instanceof HTMLElement && Boolean(target.closest("input, select, textarea, [contenteditable='true']"));
+}
+
+function isComboboxEventTarget(target: EventTarget) {
+  return target instanceof HTMLElement && target.getAttribute("role") === "combobox";
+}
+
+function isInlineSearchableSelectKey(key: string) {
+  return key === "Enter" || key === "Escape" || key === "ArrowDown" || key === "ArrowUp";
 }
 
 function focusCellControl(root: HTMLElement | null, rowId: string, columnKey: string) {

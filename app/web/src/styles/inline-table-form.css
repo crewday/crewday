@@ -220,6 +220,30 @@
   cursor: not-allowed;
 }
 
+.inline-table-form__searchable-select {
+  width: 100%;
+  min-width: 0;
+}
+
+.inline-table-form__searchable-select-field {
+  width: 100%;
+  min-width: 0;
+  gap: 0;
+}
+
+.inline-table-form__searchable-select-field .form-field__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.inline-table-form__control--searchable-select {
+  cursor: text;
+}
+
 .inline-table-form__note {
   display: block;
   min-height: 72px;

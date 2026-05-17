@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   InlineNumberField,
   InlineNoteField,
+  InlineSearchableSelectField,
   InlineSelectField,
   InlineTableForm,
   type InlineTableColumn,
@@ -26,6 +27,12 @@ interface NumberDraft {
 const ownerOptions = [
   { value: "maria", label: "Maria" },
   { value: "enzo", label: "Enzo" },
+];
+
+const searchableOwnerOptions = [
+  { value: "maria", label: "Maria", secondaryText: "Lead" },
+  { value: "enzo", label: "Enzo", secondaryText: "Backup" },
+  { value: "sora", label: "Sora", secondaryText: "Float" },
 ];
 
 const columns: InlineTableColumn<Draft>[] = [
@@ -74,6 +81,25 @@ const numberColumns: InlineTableColumn<NumberDraft>[] = [
         disabled={disabled}
         ariaLabel="Quantity"
         onChange={(quantity) => update({ quantity })}
+      />
+    ),
+  },
+];
+
+const searchableColumns: InlineTableColumn<Draft>[] = [
+  {
+    key: "owner",
+    header: "Owner",
+    renderRead: ({ row }) => <span>{row.draft.owner}</span>,
+    renderEdit: ({ row, update, disabled }) => (
+      <InlineSearchableSelectField
+        value={row.draft.owner}
+        options={searchableOwnerOptions}
+        disabled={disabled}
+        ariaLabel="Search owner"
+        blankOption={{ label: "Unassigned", secondaryText: "None" }}
+        renderOptionSecondaryText={(option) => option.secondaryText}
+        onChange={(owner) => update({ owner })}
       />
     ),
   },
@@ -174,6 +200,103 @@ describe("InlineTableForm", () => {
     expect(input).toHaveAttribute("step", "900");
     expect(input).toBeDisabled();
     expect((input as HTMLInputElement).value).toBe("09:30");
+  });
+
+  it("updates row drafts from searchable select option selection", () => {
+    const onDraftChange = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Searchable owner rows"
+        columns={searchableColumns}
+        rows={[editableRow()]}
+        saveMode="explicit"
+        onDraftChange={onDraftChange}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByRole("combobox", { name: /search owner/i });
+    expect(input).toHaveClass("inline-table-form__control", "inline-table-form__control--searchable-select");
+
+    fireEvent.focus(input);
+    fireEvent.mouseDown(screen.getByRole("option", { name: /enzo.*backup/i }));
+
+    expect(onDraftChange).toHaveBeenCalledWith("r-1", { owner: "enzo" });
+    expect(input).toHaveValue("Enzo");
+  });
+
+  it("supports blank searchable select options inside inline rows", () => {
+    const onDraftChange = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Blank searchable owner rows"
+        columns={searchableColumns}
+        rows={[{ ...editableRow(), draft: { ...editableRow().draft, owner: "maria" } }]}
+        saveMode="explicit"
+        onDraftChange={onDraftChange}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByRole("combobox", { name: /search owner/i });
+    fireEvent.focus(input);
+    fireEvent.mouseDown(screen.getByRole("option", { name: /unassigned.*none/i }));
+
+    expect(onDraftChange).toHaveBeenCalledWith("r-1", { owner: "" });
+    expect(input).toHaveValue("Unassigned");
+  });
+
+  it("keeps searchable select keyboard interaction from saving or canceling the row", () => {
+    const onDraftChange = vi.fn();
+    const onSave = vi.fn();
+    const onCancel = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Searchable keyboard rows"
+        columns={searchableColumns}
+        rows={[editableRow()]}
+        saveMode="explicit"
+        onDraftChange={onDraftChange}
+        onSave={onSave}
+        onCancel={onCancel}
+      />,
+    );
+
+    const input = screen.getByRole("combobox", { name: /search owner/i });
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(onDraftChange).toHaveBeenCalledWith("r-1", { owner: "enzo" });
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it("prevents disabled searchable select changes in inline rows", () => {
+    const onDraftChange = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Disabled searchable owner rows"
+        columns={searchableColumns}
+        rows={[{ ...editableRow(), disabled: true }]}
+        saveMode="explicit"
+        onDraftChange={onDraftChange}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByRole("combobox", { name: /search owner/i });
+    expect(input).toBeDisabled();
+    expect(input.closest(".searchable-select")).toHaveClass("searchable-select--disabled");
+
+    fireEvent.focus(input);
+
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(onDraftChange).not.toHaveBeenCalled();
   });
 
   it("passes time field changes through as raw strings", () => {
