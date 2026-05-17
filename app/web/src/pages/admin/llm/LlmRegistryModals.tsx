@@ -164,6 +164,16 @@ const CAPABILITY_TAGS = [
   "embeddings",
 ] as const;
 
+const GENERATIVE_CAPABILITY_TAGS = new Set<string>([
+  "chat",
+  "vision",
+  "audio_input",
+  "reasoning",
+  "function_calling",
+  "json_mode",
+  "streaming",
+]);
+
 const AUDIO_INPUT_TRANSFORM_OPTIONS: {
   value: LlmAudioInputTransform;
   label: string;
@@ -208,6 +218,18 @@ function modelHasCapability(
   capability: string,
 ): boolean {
   return model?.capabilities.includes(capability) ?? false;
+}
+
+function capabilitiesInclude(capabilities: string[], capability: string): boolean {
+  return capabilities.includes(capability);
+}
+
+function capabilitiesSupportGeneration(capabilities: string[]): boolean {
+  return capabilities.some((capability) => GENERATIVE_CAPABILITY_TAGS.has(capability));
+}
+
+function modelSupportsGeneration(model: LlmModel | undefined): boolean {
+  return model ? capabilitiesSupportGeneration(model.capabilities) : false;
 }
 
 function isAudioInputTransform(value: string): value is LlmAudioInputTransform {
@@ -317,6 +339,7 @@ function formatUsdAmount(value: number): string {
 function providerTypeLabel(providerType: LlmProviderType): string {
   if (providerType === "openrouter") return "OpenRouter provider";
   if (providerType === "openai_compatible") return "OpenAI compatible";
+  if (providerType === "ollama") return "Ollama";
   if (providerType === "local_embedding") return "Local embedding";
   return "Fake";
 }
@@ -544,8 +567,11 @@ function ProviderForm(props: ProviderFormProps) {
     const timeoutValue = Number(timeout);
     const rpmValue = Number(rpm);
     if (!name.trim()) return setClientErr("Name is required.");
-    if (providerType === "openai_compatible" && !apiEndpoint.trim()) {
-      return setClientErr("OpenAI-compatible providers need an API endpoint.");
+    if (
+      (providerType === "openai_compatible" || providerType === "ollama") &&
+      !apiEndpoint.trim()
+    ) {
+      return setClientErr(`${providerTypeLabel(providerType)} providers need an API endpoint.`);
     }
     if (!Number.isInteger(timeoutValue) || timeoutValue < 1) {
       return setClientErr("Timeout must be at least 1 second.");
@@ -642,26 +668,28 @@ function ProviderForm(props: ProviderFormProps) {
             >
               <option value="openrouter">OpenRouter</option>
               <option value="openai_compatible">OpenAI compatible</option>
+              <option value="ollama">Ollama</option>
               <option value="local_embedding">Local embedding</option>
               <option value="fake">Fake</option>
             </select>
           </FormModalField>
-          <FormModalField label="Enabled" requirement="required">
+          <FormModalField label="API endpoint" requirement="optional">
             <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
+              value={apiEndpoint}
+              onChange={(e) => setApiEndpoint(e.target.value)}
+              aria-invalid={
+                clientErr ===
+                `${providerTypeLabel(providerType)} providers need an API endpoint.`
+              }
+              aria-describedby={errId}
             />
           </FormModalField>
         </FormModalGrid>
-        <FormModalField label="API endpoint" requirement="optional">
+        <FormModalField label="Enabled" requirement="required">
           <input
-            value={apiEndpoint}
-            onChange={(e) => setApiEndpoint(e.target.value)}
-            aria-invalid={
-              clientErr === "OpenAI-compatible providers need an API endpoint."
-            }
-            aria-describedby={errId}
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
           />
         </FormModalField>
         {mode === "edit" && provider && providerAllowsApiKey(provider.provider_type) ? (
@@ -831,6 +859,9 @@ function ModelForm({
   const [clientErr, setClientErr] = useState<string | null>(null);
   const [serverErr, setServerErr] = useState<string | null>(null);
   const [creatingProviderId, setCreatingProviderId] = useState<string | null>(null);
+  const supportsEmbeddings = capabilitiesInclude(capabilities, "embeddings");
+  const supportsReasoning = capabilitiesInclude(capabilities, "reasoning");
+  const supportsGeneration = capabilitiesSupportGeneration(capabilities);
 
   const modelProviderRows = useMemo(() => {
     if (mode !== "edit" || !model) return [];
@@ -1093,9 +1124,11 @@ function ModelForm({
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const contextValue = numberOrNull(contextWindow);
-    const outputValue = numberOrNull(maxOutput);
-    const embeddingDimensionsValue = numberOrNull(embeddingDimensions);
-    const temperatureValue = numberOrNull(temperature);
+    const outputValue = supportsGeneration ? numberOrNull(maxOutput) : null;
+    const embeddingDimensionsValue = supportsEmbeddings
+      ? numberOrNull(embeddingDimensions)
+      : null;
+    const temperatureValue = supportsGeneration ? numberOrNull(temperature) : null;
     if (!canonicalName.trim()) return setClientErr("Canonical name is required.");
     if (!displayName.trim()) return setClientErr("Display name is required.");
     if (contextValue !== null && (!Number.isInteger(contextValue) || contextValue < 1)) {
@@ -1126,8 +1159,8 @@ function ModelForm({
       max_output_tokens: outputValue,
       embedding_dimensions: embeddingDimensionsValue,
       temperature: temperatureValue,
-      thinking_level: thinkingLevel,
-      thinking_strategy: thinkingStrategy,
+      thinking_level: supportsReasoning ? thinkingLevel : "disabled",
+      thinking_strategy: supportsReasoning ? thinkingStrategy : "none",
       price_source: priceSource,
       price_source_model_id: emptyToNull(priceSourceModel),
       is_active: active,
@@ -1215,77 +1248,90 @@ function ModelForm({
               aria-describedby={errId}
             />
           </FormModalField>
-          <FormModalField label="Max output tokens" requirement="optional">
-            <input
-              type="number"
-              min="1"
-              value={maxOutput}
-              onChange={(e) => setMaxOutput(e.target.value)}
-              aria-invalid={clientErr === "Max output tokens must be a positive whole number."}
-              aria-describedby={errId}
-            />
-          </FormModalField>
-        </FormModalGrid>
-        <FormModalGrid>
-          <FormModalField label="Embedding dimensions" requirement="optional">
-            <input
-              type="number"
-              min="1"
-              value={embeddingDimensions}
-              onChange={(e) => setEmbeddingDimensions(e.target.value)}
-              aria-invalid={
-                clientErr === "Embedding dimensions must be a positive whole number."
-              }
-              aria-describedby={errId}
-            />
-          </FormModalField>
-          <FormModalField label="Temperature" requirement="optional">
-            <input
-              type="number"
-              min="0"
-              max="2"
-              step="0.1"
-              value={temperature}
-              onChange={(e) => setTemperature(e.target.value)}
-              aria-invalid={clientErr === "Temperature must be between 0 and 2."}
-              aria-describedby={errId}
-            />
-          </FormModalField>
-        </FormModalGrid>
-        <FormModalGrid>
-          <FormModalField label="Thinking strategy" requirement="optional">
-            <select
-              value={thinkingStrategy}
-              onChange={(e) => {
-                if (isThinkingStrategy(e.target.value)) {
-                  setThinkingStrategy(e.target.value);
+          {supportsGeneration ? (
+            <FormModalField label="Max output tokens" requirement="optional">
+              <input
+                type="number"
+                min="1"
+                value={maxOutput}
+                onChange={(e) => setMaxOutput(e.target.value)}
+                aria-invalid={
+                  clientErr === "Max output tokens must be a positive whole number."
                 }
-              }}
-            >
-              {THINKING_STRATEGY_OPTIONS.map((strategy) => (
-                <option key={strategy} value={strategy}>
-                  {thinkingStrategyLabel(strategy)}
-                </option>
-              ))}
-            </select>
-          </FormModalField>
-          <FormModalField label="Thinking level" requirement="optional">
-            <select
-              value={thinkingLevel}
-              onChange={(e) => {
-                if (isThinkingLevel(e.target.value)) {
-                  setThinkingLevel(e.target.value);
-                }
-              }}
-            >
-              {THINKING_LEVEL_OPTIONS.map((level) => (
-                <option key={level} value={level}>
-                  {thinkingLevelLabel(level)}
-                </option>
-              ))}
-            </select>
-          </FormModalField>
+                aria-describedby={errId}
+              />
+            </FormModalField>
+          ) : null}
         </FormModalGrid>
+        {supportsEmbeddings || supportsGeneration ? (
+          <FormModalGrid>
+            {supportsEmbeddings ? (
+              <FormModalField label="Embedding dimensions" requirement="optional">
+                <input
+                  type="number"
+                  min="1"
+                  value={embeddingDimensions}
+                  onChange={(e) => setEmbeddingDimensions(e.target.value)}
+                  aria-invalid={
+                    clientErr ===
+                    "Embedding dimensions must be a positive whole number."
+                  }
+                  aria-describedby={errId}
+                />
+              </FormModalField>
+            ) : null}
+            {supportsGeneration ? (
+              <FormModalField label="Temperature" requirement="optional">
+                <input
+                  type="number"
+                  min="0"
+                  max="2"
+                  step="0.1"
+                  value={temperature}
+                  onChange={(e) => setTemperature(e.target.value)}
+                  aria-invalid={clientErr === "Temperature must be between 0 and 2."}
+                  aria-describedby={errId}
+                />
+              </FormModalField>
+            ) : null}
+          </FormModalGrid>
+        ) : null}
+        {supportsReasoning ? (
+          <FormModalGrid>
+            <FormModalField label="Thinking strategy" requirement="optional">
+              <select
+                value={thinkingStrategy}
+                onChange={(e) => {
+                  if (isThinkingStrategy(e.target.value)) {
+                    setThinkingStrategy(e.target.value);
+                  }
+                }}
+              >
+                {THINKING_STRATEGY_OPTIONS.map((strategy) => (
+                  <option key={strategy} value={strategy}>
+                    {thinkingStrategyLabel(strategy)}
+                  </option>
+                ))}
+              </select>
+            </FormModalField>
+            <FormModalField label="Thinking level" requirement="optional">
+              <select
+                value={thinkingLevel}
+                onChange={(e) => {
+                  if (isThinkingLevel(e.target.value)) {
+                    setThinkingLevel(e.target.value);
+                  }
+                }}
+              >
+                {THINKING_LEVEL_OPTIONS.map((level) => (
+                  <option key={level} value={level}>
+                    {thinkingLevelLabel(level)}
+                  </option>
+                ))}
+              </select>
+            </FormModalField>
+          </FormModalGrid>
+        ) : null}
         <FormModalGrid>
           <FormModalField label="Price source" requirement="required">
             <select
@@ -1467,6 +1513,8 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   );
   const supportsAudioInput = modelHasCapability(selectedModel, "audio_input");
   const supportsVision = modelHasCapability(selectedModel, "vision");
+  const supportsReasoning = modelHasCapability(selectedModel, "reasoning");
+  const supportsGeneration = modelSupportsGeneration(selectedModel);
   const persistedModel = useMemo(
     () =>
       providerModel
@@ -1665,7 +1713,9 @@ function ProviderModelForm(props: ProviderModelFormProps) {
     if (!outputParsed.ok) return setClientErr(outputParsed.error);
     const fixedParsed = optionalNonNegativeNumber(fixedCost, "Fixed cost");
     if (!fixedParsed.ok) return setClientErr(fixedParsed.error);
-    const audioParsed = optionalNonNegativeNumber(audioCost, "Audio cost");
+    const audioParsed: ReturnType<typeof optionalNonNegativeNumber> = supportsAudioInput
+      ? optionalNonNegativeNumber(audioCost, "Audio cost")
+      : { ok: true, value: null };
     if (!audioParsed.ok) return setClientErr(audioParsed.error);
     const imageMaxEdgeValue = supportsVision ? numberOrNull(imageInputMaxEdgePx) : null;
     if (
@@ -1674,7 +1724,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
     ) {
       return setClientErr("Image max edge must be a positive whole number.");
     }
-    const maxTokensValue = numberOrNull(maxTokens);
+    const maxTokensValue = supportsGeneration ? numberOrNull(maxTokens) : null;
     if (maxTokensValue !== null && (!Number.isInteger(maxTokensValue) || maxTokensValue < 1)) {
       return setClientErr("Max tokens override must be a positive whole number.");
     }
@@ -1706,10 +1756,12 @@ function ProviderModelForm(props: ProviderModelFormProps) {
       image_input_format: supportsVision ? imageInputFormat : "preserve",
       image_input_max_edge_px: supportsVision ? imageMaxEdgeValue : null,
       max_tokens_override: maxTokensValue,
-      supports_system_prompt: supportsSystemPrompt,
-      supports_temperature: supportsTemperature,
+      supports_system_prompt: supportsGeneration ? supportsSystemPrompt : true,
+      supports_temperature: supportsGeneration ? supportsTemperature : true,
       thinking_strategy_override:
-        thinkingStrategyOverride === "inherit" ? null : thinkingStrategyOverride,
+        supportsReasoning && thinkingStrategyOverride !== "inherit"
+          ? thinkingStrategyOverride
+          : null,
       extra_api_params: parsedExtra,
       price_source_override: priceSourceOverride,
       price_source_model_id_override: emptyToNull(priceSourceModelOverride),
@@ -1794,44 +1846,51 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             aria-describedby={errId}
           />
         </FormModalField>
-        <FormModalGrid className="llm-provider-model-costs">
-          <FormModalField label="Max tokens override" requirement="optional">
-            <input
-              type="number"
-              min="1"
-              value={maxTokens}
-              onChange={(e) => setMaxTokens(e.target.value)}
-              aria-invalid={
-                clientErr === "Max tokens override must be a positive whole number."
-              }
-              aria-describedby={errId}
-            />
-          </FormModalField>
-          <FormModalField
-            label="Thinking strategy"
-            requirement="optional"
-            helpId={thinkingStrategyHelpId}
-            helpText={`Model default: ${thinkingStrategyLabel(inheritedThinkingStrategy)}.`}
-          >
-            <select
-              value={thinkingStrategyOverride}
-              aria-describedby={describedBy(thinkingStrategyHelpId, errId)}
-              onChange={(e) => {
-                const next = e.target.value;
-                if (next === "inherit" || isThinkingStrategy(next)) {
-                  setThinkingStrategyOverride(next);
-                }
-              }}
-            >
-              <option value="inherit">Model default</option>
-              {THINKING_STRATEGY_OPTIONS.map((strategy) => (
-                <option key={strategy} value={strategy}>
-                  {thinkingStrategyLabel(strategy)}
-                </option>
-              ))}
-            </select>
-          </FormModalField>
-        </FormModalGrid>
+        {supportsGeneration || supportsReasoning ? (
+          <FormModalGrid className="llm-provider-model-costs">
+            {supportsGeneration ? (
+              <FormModalField label="Max tokens override" requirement="optional">
+                <input
+                  type="number"
+                  min="1"
+                  value={maxTokens}
+                  onChange={(e) => setMaxTokens(e.target.value)}
+                  aria-invalid={
+                    clientErr ===
+                    "Max tokens override must be a positive whole number."
+                  }
+                  aria-describedby={errId}
+                />
+              </FormModalField>
+            ) : null}
+            {supportsReasoning ? (
+              <FormModalField
+                label="Thinking strategy"
+                requirement="optional"
+                helpId={thinkingStrategyHelpId}
+                helpText={`Model default: ${thinkingStrategyLabel(inheritedThinkingStrategy)}.`}
+              >
+                <select
+                  value={thinkingStrategyOverride}
+                  aria-describedby={describedBy(thinkingStrategyHelpId, errId)}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    if (next === "inherit" || isThinkingStrategy(next)) {
+                      setThinkingStrategyOverride(next);
+                    }
+                  }}
+                >
+                  <option value="inherit">Model default</option>
+                  {THINKING_STRATEGY_OPTIONS.map((strategy) => (
+                    <option key={strategy} value={strategy}>
+                      {thinkingStrategyLabel(strategy)}
+                    </option>
+                  ))}
+                </select>
+              </FormModalField>
+            ) : null}
+          </FormModalGrid>
+        ) : null}
         <FormModalGrid className="llm-provider-model-costs">
           <FormModalField label="Input cost per 1M" requirement="optional">
             <input
@@ -1868,75 +1927,20 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               aria-describedby={errId}
             />
           </FormModalField>
-          <FormModalField label="Audio cost per hour" requirement="optional">
-            <input
-              type="number"
-              min="0"
-              step="0.0001"
-              value={audioCost}
-              onChange={(e) => setAudioCost(e.target.value)}
-              aria-invalid={clientErr === "Audio cost must be zero or more."}
-              aria-describedby={errId}
-            />
-          </FormModalField>
-        </FormModalGrid>
-        {supportsAudioInput ? (
-          <fieldset className="llm-registry-form__fieldset">
-            <legend>Audio input</legend>
-            <FormModalField label="Audio input transform" requirement="optional">
-              <select
-                value={audioInputTransform}
-                onChange={(e) => {
-                  if (isAudioInputTransform(e.target.value)) {
-                    setAudioInputTransform(e.target.value);
-                  }
-                }}
-              >
-                {AUDIO_INPUT_TRANSFORM_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+          {supportsAudioInput ? (
+            <FormModalField label="Audio cost per hour" requirement="optional">
+              <input
+                type="number"
+                min="0"
+                step="0.0001"
+                value={audioCost}
+                onChange={(e) => setAudioCost(e.target.value)}
+                aria-invalid={clientErr === "Audio cost must be zero or more."}
+                aria-describedby={errId}
+              />
             </FormModalField>
-          </fieldset>
-        ) : null}
-        {supportsVision ? (
-          <fieldset className="llm-registry-form__fieldset">
-            <legend>Image input</legend>
-            <FormModalGrid>
-              <FormModalField label="Image input format" requirement="optional">
-                <select
-                  value={imageInputFormat}
-                  onChange={(e) => {
-                    if (isImageInputFormat(e.target.value)) {
-                      setImageInputFormat(e.target.value);
-                    }
-                  }}
-                >
-                  {IMAGE_INPUT_FORMAT_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </FormModalField>
-              <FormModalField label="Image max edge" requirement="optional">
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={imageInputMaxEdgePx}
-                  onChange={(e) => setImageInputMaxEdgePx(e.target.value)}
-                  aria-invalid={
-                    clientErr === "Image max edge must be a positive whole number."
-                  }
-                  aria-describedby={errId}
-                />
-              </FormModalField>
-            </FormModalGrid>
-          </fieldset>
-        ) : null}
+          ) : null}
+        </FormModalGrid>
         <FormModalGrid>
           <FormModalField label="Price source override" requirement="optional">
             <select
@@ -2004,23 +2008,82 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             onChange={(e) => setEnabled(e.target.checked)}
           />
         </FormModalField>
-        <fieldset className="llm-registry-form__fieldset">
-          <legend>Provider support overrides</legend>
-          <div className="llm-registry-form__checks">
-            <RegistryCheckPill
-              checked={supportsSystemPrompt}
-              onChange={setSupportsSystemPrompt}
-            >
-              System prompt
-            </RegistryCheckPill>
-            <RegistryCheckPill
-              checked={supportsTemperature}
-              onChange={setSupportsTemperature}
-            >
-              Temperature
-            </RegistryCheckPill>
-          </div>
-        </fieldset>
+        {supportsGeneration ? (
+          <fieldset className="llm-registry-form__fieldset">
+            <legend>Provider support overrides</legend>
+            <div className="llm-registry-form__checks">
+              <RegistryCheckPill
+                checked={supportsSystemPrompt}
+                onChange={setSupportsSystemPrompt}
+              >
+                System prompt
+              </RegistryCheckPill>
+              <RegistryCheckPill
+                checked={supportsTemperature}
+                onChange={setSupportsTemperature}
+              >
+                Temperature
+              </RegistryCheckPill>
+            </div>
+          </fieldset>
+        ) : null}
+        {supportsVision ? (
+          <fieldset className="llm-registry-form__fieldset">
+            <legend>Image input</legend>
+            <FormModalGrid>
+              <FormModalField label="Image input format" requirement="optional">
+                <select
+                  value={imageInputFormat}
+                  onChange={(e) => {
+                    if (isImageInputFormat(e.target.value)) {
+                      setImageInputFormat(e.target.value);
+                    }
+                  }}
+                >
+                  {IMAGE_INPUT_FORMAT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </FormModalField>
+              <FormModalField label="Image max edge" requirement="optional">
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={imageInputMaxEdgePx}
+                  onChange={(e) => setImageInputMaxEdgePx(e.target.value)}
+                  aria-invalid={
+                    clientErr === "Image max edge must be a positive whole number."
+                  }
+                  aria-describedby={errId}
+                />
+              </FormModalField>
+            </FormModalGrid>
+          </fieldset>
+        ) : null}
+        {supportsAudioInput ? (
+          <fieldset className="llm-registry-form__fieldset">
+            <legend>Audio input</legend>
+            <FormModalField label="Audio input transform" requirement="optional">
+              <select
+                value={audioInputTransform}
+                onChange={(e) => {
+                  if (isAudioInputTransform(e.target.value)) {
+                    setAudioInputTransform(e.target.value);
+                  }
+                }}
+              >
+                {AUDIO_INPUT_TRANSFORM_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </FormModalField>
+          </fieldset>
+        ) : null}
         <FormModalField
           label="Extra API params"
           requirement="optional"

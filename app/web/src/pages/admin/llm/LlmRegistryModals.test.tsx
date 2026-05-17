@@ -113,6 +113,26 @@ function expectControlBeforeHelp(control: HTMLElement, help: HTMLElement) {
 }
 
 describe("LlmRegistryModals", () => {
+  it("renders provider endpoint before enabled in the edit form", () => {
+    installFetch();
+    renderRegistry(baseGraph, {
+      kind: "provider",
+      mode: "edit",
+      id: "prov_openrouter",
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "OpenRouter" });
+    const type = within(dialog).getByLabelText(/Type/);
+    const endpoint = within(dialog).getByLabelText(/API endpoint/);
+    const enabled = within(dialog).getByLabelText(/Enabled/);
+    expect(
+      type.compareDocumentPosition(endpoint) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      endpoint.compareDocumentPosition(enabled) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("replaces the provider key ref field with missing-key set controls", async () => {
     const calls = installFetch((url) =>
       url === "/admin/api/v1/llm/providers/prov_openrouter/key"
@@ -333,7 +353,10 @@ describe("LlmRegistryModals", () => {
 
   it("renders the edit-only provider-model playground as a direct-only smoke test", () => {
     installFetch();
-    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+    renderRegistry(
+      graphWithGemmaMedia(["chat", "json_mode", "function_calling", "reasoning"]),
+      { kind: "providerModel", mode: "edit", id: "pm_gemma" },
+    );
 
     const playground = playgroundSection();
     expect(
@@ -439,7 +462,10 @@ describe("LlmRegistryModals", () => {
           }
         : { body: {} },
     );
-    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+    renderRegistry(
+      graphWithGemmaMedia(["chat", "audio_input", "reasoning"]),
+      { kind: "providerModel", mode: "edit", id: "pm_gemma" },
+    );
 
     const playground = playgroundSection();
     fireEvent.change(within(playground).getByLabelText("Prompt Required"), {
@@ -738,7 +764,10 @@ describe("LlmRegistryModals", () => {
           }
         : { body: {} },
     );
-    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+    renderRegistry(
+      graphWithGemmaMedia(["chat", "audio_input", "reasoning"]),
+      { kind: "providerModel", mode: "edit", id: "pm_gemma" },
+    );
 
     fireEvent.change(screen.getByLabelText(/Thinking strategy/), {
       target: { value: "gemma_system_token" },
@@ -795,7 +824,10 @@ describe("LlmRegistryModals", () => {
           }
         : { body: {} },
     );
-    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+    renderRegistry(
+      graphWithGemmaMedia(["chat", "audio_input"]),
+      { kind: "providerModel", mode: "edit", id: "pm_gemma" },
+    );
 
     const playground = playgroundSection();
     fireEvent.click(within(playground).getByRole("button", { name: "Run playground" }));
@@ -835,7 +867,10 @@ describe("LlmRegistryModals", () => {
           }
         : { body: {} },
     );
-    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+    renderRegistry(
+      graphWithGemmaMedia(["chat", "audio_input"]),
+      { kind: "providerModel", mode: "edit", id: "pm_gemma" },
+    );
 
     const playground = playgroundSection();
     fireEvent.change(within(playground).getByLabelText("Prompt Required"), {
@@ -878,7 +913,10 @@ describe("LlmRegistryModals", () => {
           }
         : { body: {} },
     );
-    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+    renderRegistry(
+      graphWithGemmaMedia(["chat", "audio_input"]),
+      { kind: "providerModel", mode: "edit", id: "pm_gemma" },
+    );
 
     const playground = playgroundSection();
     const prompt = within(playground).getByLabelText("Prompt Required");
@@ -898,7 +936,10 @@ describe("LlmRegistryModals", () => {
 
   it("saves model thinking defaults from the fixed dropdown values", async () => {
     const calls = installFetch();
-    renderRegistry(baseGraph, { kind: "model", mode: "edit", id: "model_gemma" });
+    renderRegistry(
+      graphWithGemmaMedia(["chat", "json_mode", "function_calling", "reasoning"]),
+      { kind: "model", mode: "edit", id: "model_gemma" },
+    );
 
     const thinking = screen.getByLabelText(/Thinking level/);
     const strategy = screen.getByLabelText(/Thinking strategy/);
@@ -953,6 +994,37 @@ describe("LlmRegistryModals", () => {
     expect(bodyOf(put)).toMatchObject({
       thinking_level: "medium",
       thinking_strategy: "gemma_system_token",
+    });
+  });
+
+  it("hides model controls outside the selected capabilities and submits defaults", async () => {
+    const calls = installFetch();
+    renderRegistry(baseGraph, { kind: "model", mode: "edit", id: "model_gemma" });
+
+    expect(screen.queryByLabelText(/Embedding dimensions/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Thinking strategy/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Thinking level/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save model" }));
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/models/model_gemma" &&
+            call.init.method === "PUT",
+        ),
+      ).toBe(true);
+    });
+    const put = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/models/model_gemma" &&
+        call.init.method === "PUT",
+    )!;
+    expect(bodyOf(put)).toMatchObject({
+      embedding_dimensions: null,
+      thinking_level: "disabled",
+      thinking_strategy: "none",
     });
   });
 
@@ -1158,7 +1230,10 @@ describe("LlmRegistryModals", () => {
       }
       return { body: {} };
     });
-    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+    renderRegistry(
+      graphWithGemmaMedia(["chat", "audio_input"]),
+      { kind: "providerModel", mode: "edit", id: "pm_gemma" },
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Sync pricing" }));
 
@@ -1201,7 +1276,10 @@ describe("LlmRegistryModals", () => {
       } as Response);
     });
     (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
-    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+    renderRegistry(
+      graphWithGemmaMedia(["chat", "audio_input"]),
+      { kind: "providerModel", mode: "edit", id: "pm_gemma" },
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Sync pricing" }));
 
@@ -1273,7 +1351,10 @@ describe("LlmRegistryModals", () => {
       }
       return { body: {} };
     });
-    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+    renderRegistry(
+      graphWithGemmaMedia(["chat", "audio_input"]),
+      { kind: "providerModel", mode: "edit", id: "pm_gemma" },
+    );
 
     const override = screen.getByLabelText(/Price source model override/);
     fireEvent.change(override, { target: { value: "openrouter/google-gemma" } });
@@ -1309,7 +1390,10 @@ describe("LlmRegistryModals", () => {
       }
       return { body: {} };
     });
-    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+    renderRegistry(
+      graphWithGemmaMedia(["chat", "audio_input"]),
+      { kind: "providerModel", mode: "edit", id: "pm_gemma" },
+    );
 
     fireEvent.change(screen.getByLabelText(/Price source model override/), {
       target: { value: "openrouter/dirty-gemma" },
@@ -1437,7 +1521,7 @@ describe("LlmRegistryModals", () => {
     const calls = installFetch();
     renderRegistry(baseGraph, { kind: "providerModel", mode: "create" });
 
-    expect(screen.getByLabelText(/Audio cost per hour/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Audio cost per hour/)).not.toBeInTheDocument();
     expect(screen.getByLabelText(/Input cost per 1M/).closest("label")).toHaveClass(
       "form-field--optional",
     );
@@ -1501,6 +1585,30 @@ describe("LlmRegistryModals", () => {
       image_input_format: "preserve",
       image_input_max_edge_px: null,
     });
+  });
+
+  it("orders provider-model media controls after support overrides", () => {
+    renderRegistry(
+      graphWithGemmaMedia(["chat", "vision", "audio_input"], {
+        audio_input_transform: "wav_16khz_mono",
+        image_input_format: "jpeg",
+        image_input_max_edge_px: 1024,
+      }),
+      { kind: "providerModel", mode: "edit", id: "pm_gemma" },
+    );
+
+    const dialog = screen.getByRole("dialog", {
+      name: "OpenRouter / Gemma 4 31B IT",
+    });
+    const legends = Array.from(dialog.querySelectorAll("legend")).map(
+      (legend) => legend.textContent,
+    );
+    expect(legends.indexOf("Provider support overrides")).toBeLessThan(
+      legends.indexOf("Image input"),
+    );
+    expect(legends.indexOf("Image input")).toBeLessThan(
+      legends.indexOf("Audio input"),
+    );
   });
 
   it("shows image transform controls only for vision-capable provider-models and saves them", async () => {
@@ -1612,6 +1720,7 @@ describe("LlmRegistryModals", () => {
 
     expect(screen.queryByText("Audio input")).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Audio input transform/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Audio cost per hour/)).not.toBeInTheDocument();
     expect(screen.queryByText("Image input")).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Image input format/)).not.toBeInTheDocument();
 
@@ -1645,9 +1754,63 @@ describe("LlmRegistryModals", () => {
     ).toBe(false);
   });
 
+  it("hides provider-model runtime overrides for embedding-only models", async () => {
+    const calls = installFetch();
+    const testGraph: LlmGraphPayload = {
+      ...baseGraph,
+      models: baseGraph.models.map((model) =>
+        model.id === "model_text"
+          ? { ...model, capabilities: ["embeddings"], embedding_dimensions: 384 }
+          : model,
+      ),
+      provider_models: baseGraph.provider_models.map((row) =>
+        row.id === "pm_text"
+          ? {
+              ...row,
+              max_tokens_override: 2048,
+              supports_system_prompt: false,
+              supports_temperature: false,
+              thinking_strategy_override: "openrouter_extra_body",
+            }
+          : row,
+      ),
+    };
+    renderRegistry(testGraph, { kind: "providerModel", mode: "edit", id: "pm_text" });
+
+    expect(screen.queryByLabelText(/Max tokens override/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Provider support overrides")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Thinking strategy/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save provider-model" }));
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.url === "/admin/api/v1/llm/provider-models/pm_text" &&
+            call.init.method === "PUT",
+        ),
+      ).toBe(true);
+    });
+    const put = calls.find(
+      (call) =>
+        call.url === "/admin/api/v1/llm/provider-models/pm_text" &&
+        call.init.method === "PUT",
+    )!;
+    expect(bodyOf(put)).toMatchObject({
+      max_tokens_override: null,
+      supports_system_prompt: true,
+      supports_temperature: true,
+      thinking_strategy_override: null,
+    });
+  });
+
   it("keeps malformed provider-model pricing field-level invalid", async () => {
     const calls = installFetch();
-    renderRegistry(baseGraph, { kind: "providerModel", mode: "edit", id: "pm_gemma" });
+    renderRegistry(
+      graphWithGemmaMedia(["chat", "audio_input"]),
+      { kind: "providerModel", mode: "edit", id: "pm_gemma" },
+    );
 
     fireEvent.change(screen.getByLabelText(/Audio cost per hour/), {
       target: { value: "-1" },
@@ -1676,7 +1839,11 @@ describe("LlmRegistryModals", () => {
       ...baseGraph,
       models: baseGraph.models.map((model) =>
         model.id === "model_gemma"
-          ? { ...model, thinking_strategy: "gemma_system_token" }
+          ? {
+              ...model,
+              capabilities: [...model.capabilities, "reasoning"],
+              thinking_strategy: "gemma_system_token",
+            }
           : model,
       ),
     };
@@ -1758,7 +1925,10 @@ describe("LlmRegistryModals", () => {
 
   it("renders provider-model strategy help after the associated control", () => {
     installFetch();
-    renderRegistry(baseGraph, { kind: "providerModel", mode: "create" });
+    renderRegistry(
+      graphWithGemmaMedia(["chat", "json_mode", "function_calling", "reasoning"]),
+      { kind: "providerModel", mode: "edit", id: "pm_gemma" },
+    );
 
     const strategy = screen.getByLabelText(/Thinking strategy/);
     const strategyHelp = elementById("llm-provider-model-thinking-strategy-help");
@@ -1787,7 +1957,11 @@ describe("LlmRegistryModals", () => {
       ...baseGraph,
       models: baseGraph.models.map((model) =>
         model.id === "model_gemma"
-          ? { ...model, thinking_strategy: "gemma_system_token" }
+          ? {
+              ...model,
+              capabilities: [...model.capabilities, "reasoning"],
+              thinking_strategy: "gemma_system_token",
+            }
           : model,
       ),
       provider_models: baseGraph.provider_models.map((pm) =>
@@ -1848,7 +2022,11 @@ describe("LlmRegistryModals", () => {
       ...baseGraph,
       models: baseGraph.models.map((model) =>
         model.id === "model_gemma"
-          ? { ...model, thinking_strategy: "gemma_system_token" }
+          ? {
+              ...model,
+              capabilities: [...model.capabilities, "reasoning"],
+              thinking_strategy: "gemma_system_token",
+            }
           : model,
       ),
       provider_models: baseGraph.provider_models.map((pm) =>

@@ -430,7 +430,7 @@ crewday deploy                          # HTTP-backed deployment-admin group
   # Providers
   llm provider list
   llm provider show <id>
-  llm provider create --name <n> --type openrouter|openai_compatible|fake \
+  llm provider create --name <n> --type openrouter|openai_compatible|ollama|fake \
                       [--endpoint <url>] [--api-key-ref <envelope:...>] \
                       [--default-model <id>] [--priority <n>] [--disabled]
   llm provider edit <id> [--name] [--endpoint] [--default-model] [--priority] [--enable|--disable]

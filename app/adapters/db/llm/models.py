@@ -1297,6 +1297,7 @@ class LlmPromptTemplateRevision(Base):
 _LLM_PROVIDER_TYPE_VALUES: tuple[str, ...] = (
     "openrouter",
     "openai_compatible",
+    "ollama",
     "fake",
     "local_embedding",
 )
@@ -1351,11 +1352,11 @@ class LlmProvider(Base):
     # Display name; uniqueness is enforced at the DB level so the
     # admin UI never shows two providers with the same label.
     name: Mapped[str] = mapped_column(String, nullable=False)
-    # ``openrouter | openai_compatible | fake | local_embedding``. CHECK clamps the
-    # set; widening is additive.
+    # ``openrouter | openai_compatible | ollama | fake | local_embedding``. CHECK
+    # clamps the set; widening is additive.
     provider_type: Mapped[str] = mapped_column(String, nullable=False)
     # Optional override for the provider type's default URL. Required
-    # for ``openai_compatible``; ignored for ``fake``; nullable for
+    # for ``openai_compatible`` / ``ollama``; ignored for ``fake``; nullable for
     # ``openrouter`` (the default URL is good).
     api_endpoint: Mapped[str | None] = mapped_column(String, nullable=True)
     # Opaque envelope pointer — never the ciphertext.

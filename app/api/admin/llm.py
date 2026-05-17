@@ -50,6 +50,7 @@ from app.adapters.llm.fastembed import (
     FastEmbedEmbeddingClient,
     FastEmbedEmbeddingError,
 )
+from app.adapters.llm.ollama import OllamaClient
 from app.adapters.llm.openrouter import (
     OpenRouterClient,
     OpenRouterModelMetadata,
@@ -257,7 +258,9 @@ LlmThinkingStrategy = Literal[
     "glm_extra_body",
     "openrouter_extra_body",
 ]
-LlmProviderType = Literal["openrouter", "openai_compatible", "fake", "local_embedding"]
+LlmProviderType = Literal[
+    "openrouter", "openai_compatible", "ollama", "fake", "local_embedding"
+]
 LlmAudioInputTransform = Literal["passthrough", "wav_16khz_mono"]
 LlmImageInputFormat = Literal["preserve", "jpeg", "png", "webp"]
 
@@ -1138,8 +1141,11 @@ class ProviderPayload(BaseModel):
 
     @model_validator(mode="after")
     def _validate_endpoint(self) -> Self:
-        if self.provider_type == "openai_compatible" and not self.api_endpoint:
-            raise ValueError("openai_compatible providers require api_endpoint")
+        if (
+            self.provider_type in {"openai_compatible", "ollama"}
+            and not self.api_endpoint
+        ):
+            raise ValueError(f"{self.provider_type} providers require api_endpoint")
         return self
 
 
@@ -2708,6 +2714,17 @@ def _playground_messages(
     return messages
 
 
+def _playground_uses_transcription_endpoint(
+    model: LlmModel, audio_ref: PlaygroundAudioRef | None
+) -> bool:
+    capabilities = set(model.capabilities or [])
+    return (
+        audio_ref is not None
+        and "audio_input" in capabilities
+        and "chat" not in capabilities
+    )
+
+
 def _playground_max_tokens(
     payload: LlmProviderModelPlaygroundRequest,
     provider_model: LlmProviderModel,
@@ -2790,6 +2807,19 @@ def _playground_llm(
             base_url=provider.api_endpoint,
             timeout=float(provider.timeout_s),
             api_key_required=False,
+            provider_label=provider.name,
+        )
+    if provider.provider_type == "ollama":
+        if not provider.api_endpoint:
+            raise _unprocessable("provider_endpoint_required")
+        return OllamaClient(
+            _decrypt_provider_api_key(
+                session,
+                provider=provider,
+                settings=_settings_from_request(request),
+            ),
+            base_url=provider.api_endpoint,
+            timeout=float(provider.timeout_s),
             provider_label=provider.name,
         )
     if provider.provider_type != "openrouter":
@@ -3524,8 +3554,14 @@ def build_admin_llm_router() -> APIRouter:
             raise _unprocessable("audio_requires_audio_model")
         image_ref = await _playground_image_ref(payload, image_url)
         audio_ref = await _playground_audio_ref(payload, upload_audio_ref)
+        use_transcription_endpoint = _playground_uses_transcription_endpoint(
+            model, audio_ref
+        )
         image_ref = await _playground_normalized_image_ref(image_ref, provider_model)
-        audio_ref = await _playground_normalized_audio_ref(audio_ref, provider_model)
+        if not use_transcription_endpoint:
+            audio_ref = await _playground_normalized_audio_ref(
+                audio_ref, provider_model
+            )
         messages = _playground_messages(
             payload,
             provider_model,
@@ -3535,29 +3571,40 @@ def build_admin_llm_router() -> APIRouter:
         )
         started = time.monotonic()
         try:
-            response = llm.chat(
-                model_id=provider_model.api_model_id,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                thinking_level=(
-                    payload.thinking_level
-                    or _thinking_level(
-                        assignment.thinking_level_override
-                        if assignment is not None
-                        and assignment.thinking_level_override is not None
-                        else model.thinking_level
-                    )
-                ),
-                thinking_strategy=(
-                    payload.thinking_strategy
-                    or _thinking_strategy(
-                        provider_model.thinking_strategy_override
-                        or model.thinking_strategy
-                    )
-                ),
-                consents=ConsentSet.none(),
-            )
+            if use_transcription_endpoint:
+                transcribe = getattr(llm, "transcribe", None)
+                if not callable(transcribe):
+                    raise LlmProviderError("provider does not support transcription")
+                response = transcribe(
+                    model_id=provider_model.api_model_id,
+                    audio=audio_ref,
+                    temperature=temperature,
+                    consents=ConsentSet.none(),
+                )
+            else:
+                response = llm.chat(
+                    model_id=provider_model.api_model_id,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    thinking_level=(
+                        payload.thinking_level
+                        or _thinking_level(
+                            assignment.thinking_level_override
+                            if assignment is not None
+                            and assignment.thinking_level_override is not None
+                            else model.thinking_level
+                        )
+                    ),
+                    thinking_strategy=(
+                        payload.thinking_strategy
+                        or _thinking_strategy(
+                            provider_model.thinking_strategy_override
+                            or model.thinking_strategy
+                        )
+                    ),
+                    consents=ConsentSet.none(),
+                )
         except (LlmProviderError, LlmRateLimited, LlmTransportError) as exc:
             return LlmProviderModelPlaygroundResponse(
                 status="error",

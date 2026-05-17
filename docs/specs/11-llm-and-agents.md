@@ -675,7 +675,7 @@ equivalents (§13).
 llm_provider
 ├── id                     ULID PK
 ├── name                   text            -- display name; unique
-├── provider_type          text            -- openrouter | openai_compatible | fake | local_embedding
+├── provider_type          text            -- openrouter | openai_compatible | ollama | fake | local_embedding
 ├── api_endpoint           text?           -- overrides the type's default URL
 ├── api_key_envelope_ref   text?           -- pointer into secret_envelope (§15); never the ciphertext
 ├── default_model          text?           -- adapter default model id; not routing/fallback order
@@ -689,8 +689,12 @@ llm_provider
 - **Provider types shipped in v1:**
   - `openrouter` — default; endpoint `https://openrouter.ai/api/v1`.
   - `openai_compatible` — generic OpenAI-shaped HTTP. Covers
-    self-hosted gateways (Ollama, vLLM, LM Studio) and secondary
-    clouds behind OpenAI-shaped APIs. Requires `api_endpoint`.
+    self-hosted gateways (vLLM, LM Studio) and secondary clouds behind
+    OpenAI-shaped APIs. Requires `api_endpoint`.
+  - `ollama` — Ollama-native HTTP. Requires `api_endpoint`, normally
+    `http://127.0.0.1:11434/api` or the equivalent host route. Text
+    calls use `/api/chat`; Gemma 4 audio is sent in Ollama's native
+    multimodal message shape rather than OpenAI `input_audio`.
   - `fake` — in-process canned responses for tests and fixture-based
     few-shot regressions. Never available in production. The factory
     selects this adapter when `CREWDAY_LLM_PROVIDER=fake` (see §16
@@ -1558,10 +1562,19 @@ so the graph page does not carry a duplicate overflow action.
   image URLs are never forwarded to the provider.
   Audio playground inputs are available when the selected model carries
   `audio_input`; the server accepts either an upload or HTTPS/base64
-  data URL, fetches URL bytes through the §15 SSRF guard, base64-encodes
-  the bytes, and sends an OpenAI/OpenRouter-compatible `input_audio`
-  content block. Raw external audio URLs are never forwarded to the
-  provider.
+  data URL, fetches URL bytes through the §15 SSRF guard, and
+  base64-encodes the bytes. Chat-capable OpenRouter models receive an
+  OpenAI/OpenRouter-compatible `input_audio` content block. Audio-only
+  transcription models that lack `chat` use OpenRouter's
+  `/audio/transcriptions` STT endpoint with the original base64 audio ref;
+  the provider-model audio transform is skipped for this STT path because
+  the endpoint accepts native audio formats such as MP3 and WAV directly.
+  `ollama` providers receive audio through Ollama's native multimodal
+  `/api/chat` shape after the provider-model audio transform runs; Gemma
+  4 audio-capable models should normally use `wav_16khz_mono` because
+  Ollama's native audio path accepts WAV where MP3 may be rejected as an
+  unknown image/media format. Raw external audio URLs are never forwarded
+  to the provider.
   Direct runs without an explicit token count cap the default at the
   playground safety limit (32,000 tokens), even when the provider
   advertises a larger model maximum.

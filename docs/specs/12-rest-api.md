@@ -1350,9 +1350,18 @@ and optional largest-edge resize. Those settings are independent of the
 Multipart requests may include `image_file` for vision-capable models or
 `audio_file` for `audio_input` models. Audio-capable requests may also
 include `audio_url`; the server fetches HTTPS URLs through the §15 SSRF
-guard, accepts base64 `data:audio/...` URLs, and base64-encodes the bytes
-into an `input_audio` content block because upstream chat-completions
-audio input does not accept direct URLs.
+guard and accepts base64 `data:audio/...` URLs. Chat-capable OpenRouter
+models receive a base64 `input_audio` content block because upstream
+chat-completions audio input does not accept direct URLs. Audio-only
+transcription models that lack `chat` use OpenRouter's
+`/audio/transcriptions` endpoint with the original base64 audio ref and
+skip provider-model audio transforms because the STT endpoint accepts
+native audio formats directly.
+`ollama` providers receive audio through Ollama's native multimodal
+`/api/chat` shape after the provider-model audio transform runs; Gemma 4
+audio-capable models should normally use `wav_16khz_mono` because
+Ollama's native audio path accepts WAV where MP3 may be rejected as an
+unknown image/media format.
 
 Responses are typed and stateless: successful calls return
 `status: "ok"`, assistant text, provider/model/provider-model identifiers,

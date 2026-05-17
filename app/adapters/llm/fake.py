@@ -34,6 +34,7 @@ from collections.abc import Iterator, Sequence
 from typing import Final
 
 from app.adapters.llm.ports import (
+    ChatInputAudioRef,
     ChatMessage,
     LLMCapabilityMissing,
     LLMResponse,
@@ -199,6 +200,29 @@ class FakeLLMClient:
     ) -> str:
         del consents  # in-process fake never reaches an upstream provider
         return self._ocr_text
+
+    def transcribe(
+        self,
+        *,
+        model_id: str,
+        audio: ChatInputAudioRef,
+        temperature: float = 0.0,
+        consents: ConsentSet | None = None,
+    ) -> LLMResponse:
+        del temperature, consents
+        text = self._chat_text or "transcript"
+        seconds = 1.0 if audio["data"] else None
+        return LLMResponse(
+            text=text,
+            usage=LLMUsage(
+                prompt_tokens=0,
+                completion_tokens=len(text),
+                total_tokens=len(text),
+                seconds=seconds,
+            ),
+            model_id=model_id,
+            finish_reason="stop",
+        )
 
     def stream_chat(
         self,

@@ -375,6 +375,33 @@ class _StubAdapter:
         raise NotImplementedError
 
 
+class _TranscribingStubAdapter(_StubAdapter):
+    def transcribe(
+        self,
+        *,
+        model_id: str,
+        audio: dict[str, str],
+        temperature: float = 0.0,
+        consents: ConsentSet | None = None,
+    ) -> LLMResponse:
+        self.calls.append(
+            {
+                "model_id": model_id,
+                "audio": audio,
+                "temperature": temperature,
+                "consents": consents,
+            }
+        )
+        if not self._script:
+            raise AssertionError(
+                "stub adapter script exhausted; test under-provisioned the script"
+            )
+        head = self._script.pop(0)
+        if isinstance(head, Exception):
+            raise head
+        return head
+
+
 def _ok_response(text: str = "ok", finish_reason: str = "stop") -> LLMResponse:
     return LLMResponse(
         text=text,
@@ -588,6 +615,79 @@ class TestHappyPath:
         assert rows[0].cost_usd == Decimal("0.000102")
         assert rows[0].cost_cents == 0
         assert rows[0].audio_seconds == Decimal("9.200")
+
+    def test_audio_only_capability_uses_adapter_transcription(
+        self,
+        session: Session,
+        clock: FrozenClock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        ws = _seed_workspace(session)
+        ctx = _build_context(ws.id, slug=ws.slug)
+        _seed_assignment(
+            session,
+            workspace_id=ws.id,
+            capability="voice.transcribe",
+            api_model_id="openai/whisper-large-v3-turbo",
+            required_capabilities=["audio_input"],
+            model_capabilities=["audio_input"],
+            audio_input_transform="wav_16khz_mono",
+        )
+        _seed_ledger(session, workspace_id=ws.id, cap_cents=500)
+
+        adapter = _TranscribingStubAdapter(
+            [
+                LLMResponse(
+                    text="transcript",
+                    usage=LLMUsage(
+                        prompt_tokens=0,
+                        completion_tokens=1,
+                        total_tokens=1,
+                        seconds=9.2,
+                    ),
+                    model_id="openai/whisper-large-v3-turbo",
+                    finish_reason="stop",
+                )
+            ]
+        )
+        client = LLMClient(adapter, pricing=_FREE_PRICING)
+        audio_ref = {"data": "YXVkaW8=", "format": "mp3"}
+        transformed_ref = {"data": "d2F2", "format": "wav"}
+        transform_calls: list[tuple[dict[str, str], str]] = []
+
+        def _fake_normalize(ref: dict[str, str], *, transform: str) -> dict[str, str]:
+            transform_calls.append((dict(ref), transform))
+            return transformed_ref
+
+        monkeypatch.setattr(client_module, "normalize_audio_ref", _fake_normalize)
+
+        token = set_current(ctx)
+        try:
+            result = _run(
+                client.chat(
+                    session,
+                    ctx,
+                    capability="voice.transcribe",
+                    user_content="transcribe this audio",
+                    audio=[audio_ref],
+                    attribution=_attribution(),
+                    consents=ConsentSet.none(),
+                    clock=clock,
+                )
+            )
+        finally:
+            reset_current(token)
+
+        assert result.text == "transcript"
+        assert transform_calls == [(audio_ref, "wav_16khz_mono")]
+        assert adapter.calls == [
+            {
+                "model_id": "openai/whisper-large-v3-turbo",
+                "audio": transformed_ref,
+                "temperature": 0.0,
+                "consents": ConsentSet.none(),
+            }
+        ]
 
     def test_audio_input_transform_applies_per_provider_model(
         self,

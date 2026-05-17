@@ -197,6 +197,7 @@ class _RecordingLLMClient:
     def __init__(self) -> None:
         self.calls = 0
         self.messages: list[list[ChatMessage]] = []
+        self.transcriptions: list[dict[str, str]] = []
         self.max_tokens: list[int] = []
         self.thinking_levels: list[str] = []
         self.thinking_strategies: list[str] = []
@@ -227,6 +228,28 @@ class _RecordingLLMClient:
                 prompt_tokens=1_000,
                 completion_tokens=1_000,
                 total_tokens=2_000,
+                seconds=self.usage_seconds,
+            ),
+            model_id=model_id,
+            finish_reason="stop",
+        )
+
+    def transcribe(
+        self,
+        *,
+        model_id: str,
+        audio: dict[str, str],
+        temperature: float = 0.0,
+        consents: object = None,
+    ) -> LLMResponse:
+        del temperature, consents
+        self.transcriptions.append(audio)
+        return LLMResponse(
+            text="transcript",
+            usage=LLMUsage(
+                prompt_tokens=0,
+                completion_tokens=1,
+                total_tokens=1,
                 seconds=self.usage_seconds,
             ),
             model_id=model_id,
@@ -1097,11 +1120,12 @@ class TestAdminLlmRoutes:
                 model.capabilities = [*model.capabilities, "audio_input"]
                 s.commit()
 
+            mp3_bytes = _mp3_bytes()
             resp = client.post(
                 f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
                 "/playground",
                 data={"prompt": "transcribe this audio"},
-                files={"audio_file": ("note.mp3", b"audio-bytes", "audio/mpeg")},
+                files={"audio_file": ("note.mp3", mp3_bytes, "audio/mpeg")},
             )
 
             assert resp.status_code == 200, resp.text
@@ -1115,7 +1139,136 @@ class TestAdminLlmRoutes:
             assert content[1]["type"] == "input_audio"
             audio = content[1]["input_audio"]
             assert audio["format"] == "mp3"
-            assert audio["data"] == base64.b64encode(b"audio-bytes").decode("ascii")
+            assert audio["data"] == base64.b64encode(mp3_bytes).decode("ascii")
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_uses_stt_for_audio_only_model(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            llm = _RecordingLLMClient()
+            client.app.state.llm = llm
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                provider.api_key_envelope_ref = None
+                model = s.get(LlmModel, seeded.model_id)
+                assert model is not None
+                model.capabilities = ["audio_input"]
+                provider_model = s.get(LlmProviderModel, seeded.provider_model_id)
+                assert provider_model is not None
+                provider_model.api_model_id = "openai/whisper-large-v3-turbo"
+                provider_model.audio_input_transform = "wav_16khz_mono"
+                s.commit()
+
+            mp3_bytes = _mp3_bytes()
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                data={"prompt": "transcribe this audio"},
+                files={"audio_file": ("note.mp3", mp3_bytes, "audio/mpeg")},
+            )
+
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["status"] == "ok"
+            assert body["assistant_text"] == "transcript"
+            assert llm.calls == 0
+            assert llm.transcriptions == [
+                {
+                    "data": base64.b64encode(mp3_bytes).decode("ascii"),
+                    "format": "mp3",
+                }
+            ]
+        finally:
+            _wipe(session_factory)
+
+    def test_provider_model_playground_runs_ollama_native_audio(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        try:
+            client.cookies.set(
+                SESSION_COOKIE_NAME,
+                _seed_admin(session_factory, settings=pinned_settings),
+            )
+            seeded = _seed_llm_graph(session_factory)
+            seen: list[httpx.Request] = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                seen.append(request)
+                body = json.loads(request.content)
+                return httpx.Response(
+                    200,
+                    json={
+                        "model": body["model"],
+                        "message": {"role": "assistant", "content": "audio ok"},
+                        "done": True,
+                        "done_reason": "stop",
+                        "prompt_eval_count": 4,
+                        "eval_count": 2,
+                    },
+                )
+
+            transport = httpx.MockTransport(handler)
+            real_client = httpx.Client
+
+            def mock_client(**kwargs: object) -> httpx.Client:
+                return real_client(
+                    transport=transport,
+                    timeout=kwargs.get("timeout"),
+                )
+
+            monkeypatch.setattr("app.adapters.llm.ollama.httpx.Client", mock_client)
+            with session_factory() as s, tenant_agnostic():
+                provider = s.get(LlmProvider, seeded.provider_id)
+                assert provider is not None
+                provider.name = "Ollama Blaze"
+                provider.provider_type = "ollama"
+                provider.api_endpoint = "http://127.0.0.1:11434/v1"
+                provider.api_key_envelope_ref = None
+                model = s.get(LlmModel, seeded.model_id)
+                assert model is not None
+                model.capabilities = ["chat", "vision", "audio_input"]
+                provider_model = s.get(LlmProviderModel, seeded.provider_model_id)
+                assert provider_model is not None
+                provider_model.api_model_id = "gemma4:e4b"
+                provider_model.audio_input_transform = "wav_16khz_mono"
+                s.commit()
+
+            resp = client.post(
+                f"/admin/api/v1/llm/provider-models/{seeded.provider_model_id}"
+                "/playground",
+                data={"prompt": "transcribe this audio"},
+                files={"audio_file": ("note.mp3", _mp3_bytes(), "audio/mpeg")},
+            )
+
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["status"] == "ok"
+            assert body["assistant_text"] == "audio ok"
+            assert len(seen) == 1
+            assert str(seen[0].url) == "http://127.0.0.1:11434/api/chat"
+            sent = json.loads(seen[0].content)
+            assert sent["model"] == "gemma4:e4b"
+            assert len(sent["messages"]) == 1
+            message = sent["messages"][0]
+            assert message["role"] == "user"
+            assert message["content"] == "transcribe this audio"
+            assert len(message["images"]) == 1
+            _assert_wav_16khz_mono(base64.b64decode(message["images"][0]))
         finally:
             _wipe(session_factory)
 
@@ -2803,6 +2956,22 @@ class TestAdminLlmRoutes:
             )
             assert update_without_key.status_code == 200, update_without_key.text
             assert update_without_key.json()["api_key_ref"] == envelope_ref
+
+            update_to_ollama = client.put(
+                f"/admin/api/v1/llm/providers/{seeded.provider_id}",
+                json={
+                    "name": "Ollama Blaze",
+                    "provider_type": "ollama",
+                    "api_endpoint": "http://127.0.0.1:11434/api",
+                    "requests_per_minute": 120,
+                    "timeout_s": 60,
+                    "is_enabled": True,
+                },
+            )
+            assert update_to_ollama.status_code == 200, update_to_ollama.text
+            assert update_to_ollama.json()["provider_type"] == "ollama"
+            assert update_to_ollama.json()["endpoint"] == "http://127.0.0.1:11434/api"
+            assert update_to_ollama.json()["api_key_ref"] == envelope_ref
 
             update_with_ref = client.put(
                 f"/admin/api/v1/llm/providers/{seeded.provider_id}",

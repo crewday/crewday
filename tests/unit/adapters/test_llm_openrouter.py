@@ -348,6 +348,44 @@ class TestCompleteHappyPath:
         assert req.headers["content-type"].startswith("application/json")
 
 
+class TestTranscriptionHappyPath:
+    def test_audio_transcription_uses_stt_endpoint(self) -> None:
+        payload = {
+            "text": "hello from audio",
+            "usage": {
+                "input_tokens": 83,
+                "output_tokens": 30,
+                "total_tokens": 113,
+                "seconds": 9.2,
+            },
+        }
+        handler = _RecordingHandler(responses=[httpx.Response(200, json=payload)])
+        client = _make_client(handler)
+
+        resp = client.transcribe(
+            model_id="openai/whisper-large-v3-turbo",
+            audio={"data": "YXVkaW8=", "format": "mp3"},
+            temperature=0.0,
+        )
+
+        assert resp.text == "hello from audio"
+        assert resp.model_id == "openai/whisper-large-v3-turbo"
+        assert resp.finish_reason == "stop"
+        assert resp.usage.prompt_tokens == 83
+        assert resp.usage.completion_tokens == 30
+        assert resp.usage.total_tokens == 113
+        assert resp.usage.seconds == 9.2
+        req = handler.requests[0]
+        assert req.method == "POST"
+        assert req.url.path == "/api/v1/audio/transcriptions"
+        body = _json_body(req)
+        assert body == {
+            "model": "openai/whisper-large-v3-turbo",
+            "input_audio": {"data": "YXVkaW8=", "format": "mp3"},
+            "temperature": 0.0,
+        }
+
+
 class TestChatHappyPath:
     def test_multi_turn_passes_messages_verbatim(self) -> None:
         handler = _RecordingHandler(responses=[httpx.Response(200, json=_CHAT_FIXTURE)])

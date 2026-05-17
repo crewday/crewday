@@ -14556,6 +14556,7 @@
             "enum": [
               "fake",
               "local_embedding",
+              "ollama",
               "openai_compatible",
               "openrouter"
             ],
@@ -19053,6 +19054,7 @@
             "enum": [
               "fake",
               "local_embedding",
+              "ollama",
               "openai_compatible",
               "openrouter"
             ],
@@ -133649,7 +133651,7 @@
         }
       ],
       "post": {
-        "description": "Run a receipt blob through the LLM and return parsed fields.\n\n\"Preview\" semantic: the route does NOT create a claim, attach a\nblob, or write any DB row apart from the workspace-scoped\nLLM usage ledger row that every LLM call costs. It exists for\nthe SPA to surface extracted suggestions on the upload screen\nbefore the worker commits to a claim. To persist the same result,\nthe SPA chains ``POST /uploads`` \u2192 ``POST /expenses`` \u2192 ``POST\n/expenses/{id}/attachments`` and lets the wired\n``extraction_runner`` re-run the same extraction inside the\nattach transaction.\n\nDisabled at the deployment level when ``settings.llm_ocr_model``\nis unset \u2014 the response is 503 ``scan_not_configured`` so a\ncaller can distinguish \"no model assigned\" from \"transient\nprovider error\".\n\nThe hint fields (``hint_currency``, ``hint_vendor``) are reserved\nfor the v1 endpoint surface; the current pipeline does not yet\nfeed them into the prompt. Wiring is tracked alongside cd-e626's\nprompt-tuning work \u2014 surfacing them here keeps the contract\nstable for the SPA. **Crucially the prompt body still carries\nonly the OCR text** \u2014 these hints are never forwarded to the\nLLM, so an attacker who supplies a doctored ``hint_vendor``\ncannot inject prompt content the model sees today.\n\nEvery successful or failed LLM call lands one usage row\n(capability ``expenses.autofill``) so the workspace usage budget\nenvelope stays honest even when callers exercise the preview\nsurface.",
+        "description": "Run a receipt blob through the LLM and return parsed fields.\n\n\"Preview\" semantic: the route does NOT create a claim, attach a\nblob, or write any DB row apart from the workspace-scoped\nLLM usage ledger row that every LLM call costs. It exists for\nthe SPA to surface extracted suggestions on the upload screen\nbefore the worker commits to a claim. To persist the same result,\nthe SPA chains ``POST /uploads`` \u2192 ``POST /expenses`` \u2192 ``POST\n/expenses/{id}/attachments`` and lets the wired\n``extraction_runner`` re-run the same extraction inside the\nattach transaction.\n\nDisabled at the deployment level when neither the\n``expenses.autofill`` assignment nor the legacy\n``settings.llm_ocr_model`` fallback is present \u2014 the response is\n503 ``scan_not_configured`` so a caller can distinguish \"no model\nassigned\" from \"transient provider error\".\n\nThe hint fields (``hint_currency``, ``hint_vendor``) are reserved\nfor the v1 endpoint surface; the current pipeline does not yet\nfeed them into the prompt. Wiring is tracked alongside cd-e626's\nprompt-tuning work \u2014 surfacing them here keeps the contract\nstable for the SPA. **Crucially the prompt body still carries\nonly the fixed extraction instruction plus the receipt image** \u2014\nthese hints are never forwarded to the LLM, so an attacker who\nsupplies a doctored ``hint_vendor`` cannot inject prompt content\nthe model sees today.\n\nEvery successful or failed LLM call lands one usage row\n(capability ``expenses.autofill``) so the workspace usage budget\nenvelope stays honest even when callers exercise the preview\nsurface.",
         "operationId": "scan_expense_receipt",
         "requestBody": {
           "content": {

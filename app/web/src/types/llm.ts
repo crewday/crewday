@@ -26,6 +26,7 @@ export interface LLMCall {
 export type LlmProviderType =
   | "openrouter"
   | "openai_compatible"
+  | "ollama"
   | "fake"
   | "local_embedding";
 export type LlmApiKeyStatus = "present" | "missing" | "rotating";

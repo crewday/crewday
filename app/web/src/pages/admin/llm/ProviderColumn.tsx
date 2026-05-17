@@ -16,6 +16,7 @@ interface ProviderColumnProps {
 function providerTypeLabel(provider: LlmProvider): string {
   if (provider.provider_type === "openrouter") return "OpenRouter provider";
   if (provider.provider_type === "openai_compatible") return "OpenAI compatible";
+  if (provider.provider_type === "ollama") return "Ollama";
   if (provider.provider_type === "local_embedding") return "Local embedding";
   return "Fake";
 }

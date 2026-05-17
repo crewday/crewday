@@ -749,7 +749,7 @@ fix the offender.
   See §11 "LLM graph admin".
 - **LLM provider.** One `llm_provider` row per upstream service or local
   runtime. Fields:
-  `provider_type ∈ {openrouter, openai_compatible, fake, local_embedding}`,
+  `provider_type ∈ {openrouter, openai_compatible, ollama, fake, local_embedding}`,
   endpoint, envelope-stored API key, default model, rate limits. Deployment-
   scope; edited from `/admin/llm` or `crewday deploy llm provider …`.
   See §11 "Provider / model / provider-model registry".

@@ -823,6 +823,51 @@ class TestAudioBlockCarveOut:
         assert input_audio["format"] == "mp3"
 
 
+class TestOllamaImagesCarveOut:
+    """Native Ollama ``messages[].images`` blobs preserve audio for LLM calls."""
+
+    def test_base64_images_survive_llm_scope(self) -> None:
+        fake_payload = "A" * 64
+        message = {
+            "role": "user",
+            "content": "Transcribe and translate this audio to English",
+            "images": [fake_payload],
+        }
+
+        out = redact(message, scope="llm")
+
+        assert isinstance(out, dict)
+        assert out["images"] == [fake_payload]
+
+    def test_base64_images_scrubbed_from_logs(self) -> None:
+        fake_payload = "A" * 64
+        message = {
+            "role": "user",
+            "content": "Transcribe and translate this audio to English",
+            "images": [fake_payload],
+        }
+
+        out = redact(message, scope="log")
+
+        assert isinstance(out, dict)
+        images = out["images"]
+        assert isinstance(images, list)
+        assert images[0] != fake_payload
+        assert fake_payload not in images[0]
+
+    def test_plain_images_list_not_affected(self) -> None:
+        payload = {
+            "images": ["A" * 64],
+            "note": "contact jean@example.com",
+        }
+
+        out = redact(payload, scope="llm")
+
+        assert isinstance(out, dict)
+        assert out["images"] != payload["images"]
+        assert "<redacted:email>" in out["note"]
+
+
 # ---------------------------------------------------------------------------
 # Structural recursion
 # ---------------------------------------------------------------------------

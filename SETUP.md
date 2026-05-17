@@ -337,6 +337,7 @@ Use the wrapper for normal quality gates:
 ```
 
 It runs `ruff format`, `ruff check --fix`, remaining lint/format checks,
+repairs container-readable permissions for bind-mounted source files,
 `mypy --strict app`, and pytest through `pytest-testmon`. Use:
 
 ```bash

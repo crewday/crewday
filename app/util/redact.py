@@ -816,6 +816,7 @@ def _redact_mapping(
     # through the regular rules.
     is_image_block = _looks_like_image_block(mapping)
     is_audio_block = _looks_like_audio_block(mapping)
+    is_ollama_message = _looks_like_ollama_message(mapping)
 
     redacted: dict[object, object] = {}
     for key, raw in mapping.items():
@@ -864,6 +865,36 @@ def _redact_mapping(
             and isinstance(raw, dict)
         ):
             redacted[key] = _redact_audio_block(
+                raw,
+                scope=scope,
+                consents=consents,
+                depth=depth + 1,
+                max_depth=max_depth,
+            )
+            continue
+
+        if (
+            isinstance(key, str)
+            and key in ("input_audio", "inputAudio")
+            and isinstance(raw, dict)
+            and _looks_like_audio_ref(raw)
+        ):
+            redacted[key] = _redact_audio_block(
+                raw,
+                scope=scope,
+                consents=consents,
+                depth=depth + 1,
+                max_depth=max_depth,
+            )
+            continue
+
+        if (
+            is_ollama_message
+            and isinstance(key, str)
+            and key == "images"
+            and isinstance(raw, list)
+        ):
+            redacted[key] = _redact_ollama_images(
                 raw,
                 scope=scope,
                 consents=consents,
@@ -933,6 +964,24 @@ def _looks_like_audio_block(mapping: dict[object, object]) -> bool:
     return mapping.get("type") == "input_audio"
 
 
+def _looks_like_audio_ref(mapping: dict[object, object]) -> bool:
+    """Return ``True`` if ``mapping`` is an OpenAI / OpenRouter audio ref."""
+    return isinstance(mapping.get("data"), str) and isinstance(
+        mapping.get("format"), str
+    )
+
+
+def _looks_like_ollama_message(mapping: dict[object, object]) -> bool:
+    """Return ``True`` if ``mapping`` is a native Ollama multimodal message."""
+    images = mapping.get("images")
+    return (
+        isinstance(mapping.get("role"), str)
+        and isinstance(mapping.get("content"), str)
+        and isinstance(images, list)
+        and all(isinstance(item, str) for item in images)
+    )
+
+
 def _redact_image_url_block(
     block: dict[object, object],
     *,
@@ -964,6 +1013,32 @@ def _redact_image_url_block(
             consents=consents,
             depth=depth + 1,
             max_depth=max_depth,
+        )
+    return out
+
+
+def _redact_ollama_images(
+    images: list[object],
+    *,
+    scope: RedactScope,
+    consents: ConsentSet | None,
+    depth: int,
+    max_depth: int,
+) -> list[object]:
+    """Return Ollama-native multimodal blobs without corrupting LLM calls."""
+    out: list[object] = []
+    for raw in images:
+        if isinstance(raw, str):
+            out.append(raw if scope == "llm" else scrub_string(raw))
+            continue
+        out.append(
+            _redact(
+                raw,
+                scope=scope,
+                consents=consents,
+                depth=depth + 1,
+                max_depth=max_depth,
+            )
         )
     return out
 

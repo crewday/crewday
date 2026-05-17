@@ -54,10 +54,8 @@ and ``docs/specs/01-architecture.md`` §"Adapters/llm".
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
-import re
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -75,6 +73,7 @@ from app.adapters.db.ports import UnitOfWork
 from app.adapters.db.secrets.repositories import SqlAlchemySecretEnvelopeRepository
 from app.adapters.db.session import make_uow
 from app.adapters.llm.ports import (
+    ChatInputAudioRef,
     ChatMessage,
     LlmContentRefused,
     LlmProviderError,
@@ -87,11 +86,20 @@ from app.adapters.llm.ports import (
     Tool,
     ToolCall,
 )
+from app.adapters.llm.shared import (
+    build_data_url as _build_data_url,
+)
+from app.adapters.llm.shared import (
+    redact_body as _redact_body,
+)
+from app.adapters.llm.shared import (
+    safe_error_detail as _safe_error_detail,
+)
 from app.adapters.storage.envelope import Aes256GcmEnvelope
 from app.adapters.storage.ports import EnvelopeDecryptError
 from app.tenancy import tenant_agnostic
 from app.util.clock import Clock, SystemClock
-from app.util.redact import ConsentSet, redact, scrub_string
+from app.util.redact import ConsentSet
 
 __all__ = [
     "OPENROUTER_API_KEY_PURPOSE",
@@ -139,16 +147,6 @@ _OPENROUTER_ENVELOPE_ROW_VERSION: Final[int] = 0x02
 # between frames; the stream terminates with ``data: [DONE]``.
 _SSE_DATA_PREFIX: Final[str] = "data: "
 _SSE_DONE_SENTINEL: Final[str] = "[DONE]"
-_ERROR_DETAIL_DATA_URL_RE: Final[re.Pattern[str]] = re.compile(
-    r"data:[^\s\"')]+;base64,[A-Za-z0-9+/=_-]*",
-    re.IGNORECASE,
-)
-_ERROR_DETAIL_BASE64_RE: Final[re.Pattern[str]] = re.compile(
-    r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/]{128,}={0,2}(?![A-Za-z0-9+/=_-])"
-)
-_ERROR_DETAIL_MAX_CHARS: Final[int] = 200
-_ERROR_DETAIL_SCRUB_CHARS: Final[int] = 2_000
-
 # OCR defaults. The spec points vision-capable assignments at
 # ``google/gemma-3-27b-it`` (§11 catalog), which accepts a JPEG via
 # data-URL; we default the MIME to ``image/jpeg`` because receipts
@@ -347,6 +345,18 @@ class _ChatCompletion(TypedDict, total=False):
     model: str
     choices: list[_Choice]
     usage: _Usage
+
+
+class _TranscriptionUsage(TypedDict, total=False):
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    seconds: int | float
+
+
+class _Transcription(TypedDict, total=False):
+    text: str
+    usage: _TranscriptionUsage
 
 
 def _fetch_openrouter_metadata_response(
@@ -922,6 +932,26 @@ class OpenRouterClient:
             consents=consents,
         )
 
+    def transcribe(
+        self,
+        *,
+        model_id: str,
+        audio: ChatInputAudioRef,
+        temperature: float = 0.0,
+        consents: ConsentSet | None = None,
+    ) -> LLMResponse:
+        """Speech-to-text transcription via OpenRouter's STT endpoint."""
+        body: dict[str, object] = {
+            "model": model_id,
+            "input_audio": {"data": audio["data"], "format": audio["format"]},
+            "temperature": temperature,
+        }
+        response = self._post_with_retry(
+            _redact_body(body, consents),
+            path="/audio/transcriptions",
+        )
+        return _parse_transcription(response, model_id=model_id)
+
     def ocr(
         self,
         *,
@@ -966,7 +996,7 @@ class OpenRouterClient:
             stream=False,
         )
         response = self._post_with_retry(_redact_body(body, consents))
-        parsed = _parse_completion(response)
+        parsed = _parse_completion(cast(_ChatCompletion, response))
         return parsed.text
 
     def stream_chat(
@@ -1039,17 +1069,19 @@ class OpenRouterClient:
             tools=tools,
         )
         response = self._post_with_retry(_redact_body(body, consents))
-        return _parse_completion(response)
+        return _parse_completion(cast(_ChatCompletion, response))
 
-    def _post_with_retry(self, body: Mapping[str, object]) -> _ChatCompletion:
-        """POST to ``/chat/completions`` with retry on 429 / 5xx.
+    def _post_with_retry(
+        self, body: Mapping[str, object], *, path: str = "/chat/completions"
+    ) -> Mapping[str, object]:
+        """POST to an OpenRouter JSON endpoint with retry on 429 / 5xx.
 
         Returns the parsed JSON body on 2xx. On final failure, raises
         one of :class:`LlmRateLimited`, :class:`LlmProviderError`,
         :class:`LlmTransportError` depending on the terminal reason.
         """
         # code-health: ignore[nloc] Explicit adapter flow.
-        url = f"{self._base_url}/chat/completions"
+        url = f"{self._base_url}{path}"
         headers = self._build_headers()
 
         last_status: int | None = None
@@ -1363,34 +1395,6 @@ def _serialise_tool(tool: Tool) -> dict[str, object]:
     }
 
 
-def _build_data_url(image_bytes: bytes, *, mime_type: str) -> str:
-    """Return a ``data:<mime>;base64,<payload>`` URL for vision requests."""
-    encoded = base64.b64encode(image_bytes).decode("ascii")
-    return f"data:{mime_type};base64,{encoded}"
-
-
-def _redact_body(
-    body: Mapping[str, object], consents: ConsentSet | None
-) -> dict[str, object]:
-    """Run the outbound body through the §15 redaction seam.
-
-    Called once per outbound request — the final step before the
-    JSON bytes hit the wire. Passing ``consents=None`` falls back to
-    :meth:`ConsentSet.none`, i.e. redact everything. The function
-    returns a deep copy so the caller's original body (which lives
-    on the call frame) is untouched.
-
-    See ``docs/specs/15-security-privacy.md`` §"Logging and redaction"
-    and ``docs/specs/11-llm-and-agents.md`` §"Redaction layer" for
-    the exact rule set.
-    """
-    effective = consents if consents is not None else ConsentSet.none()
-    redacted = redact(dict(body), scope="llm", consents=effective)
-    if not isinstance(redacted, dict):  # pragma: no cover - defensive
-        raise TypeError("redact() must preserve dict shape on outbound body")
-    return redacted
-
-
 # ---------------------------------------------------------------------------
 # Response parsing
 # ---------------------------------------------------------------------------
@@ -1453,6 +1457,33 @@ def _parse_completion(payload: _ChatCompletion) -> LLMResponse:
         model_id=model_id,
         finish_reason=finish_reason,
         tool_calls=tool_calls,
+    )
+
+
+def _parse_transcription(
+    payload: Mapping[str, object], *, model_id: str
+) -> LLMResponse:
+    """Build an :class:`LLMResponse` from OpenRouter's STT response."""
+    transcription = cast(_Transcription, payload)
+    text = transcription.get("text")
+    if not isinstance(text, str):
+        raise LlmTransportError("openrouter transcription response lacked text")
+    usage_raw = transcription.get("usage") or _TranscriptionUsage()
+    prompt_tokens = int(usage_raw.get("input_tokens", 0) or 0)
+    completion_tokens = int(usage_raw.get("output_tokens", 0) or 0)
+    total_tokens = int(
+        usage_raw.get("total_tokens", prompt_tokens + completion_tokens) or 0
+    )
+    return LLMResponse(
+        text=text,
+        usage=LLMUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            seconds=_usage_seconds(usage_raw.get("seconds")),
+        ),
+        model_id=model_id,
+        finish_reason="stop",
     )
 
 
@@ -1550,42 +1581,6 @@ def _parse_sse_line(line: str) -> str | None:
     if not isinstance(content, str) or not content:
         return None
     return content
-
-
-def _safe_error_detail(response: httpx.Response) -> str:
-    """Return a short, log-safe summary of an error response body.
-
-    Never includes the API key — the key is only ever in the request
-    headers we set, and ``httpx`` does not echo request headers back
-    in ``Response`` objects.
-    """
-    try:
-        body = response.json()
-    except json.JSONDecodeError:
-        return _safe_error_detail_text(response.text)
-    if isinstance(body, str):
-        return _safe_error_detail_text(body)
-    if isinstance(body, dict):
-        error = body.get("error")
-        if isinstance(error, dict):
-            for key in ("message", "detail"):
-                message = error.get(key)
-                if isinstance(message, str):
-                    return _safe_error_detail_text(message)
-        if isinstance(error, str):
-            return _safe_error_detail_text(error)
-        for key in ("message", "detail"):
-            message = body.get(key)
-            if isinstance(message, str):
-                return _safe_error_detail_text(message)
-    return ""
-
-
-def _safe_error_detail_text(value: str) -> str:
-    bounded = value[:_ERROR_DETAIL_SCRUB_CHARS]
-    without_media = _ERROR_DETAIL_DATA_URL_RE.sub("<redacted:media>", bounded)
-    without_media = _ERROR_DETAIL_BASE64_RE.sub("<redacted:media>", without_media)
-    return scrub_string(without_media)[:_ERROR_DETAIL_MAX_CHARS]
 
 
 def _backoff_seconds(attempt_idx: int) -> float:

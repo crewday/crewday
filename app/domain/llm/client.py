@@ -53,7 +53,7 @@ from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TypeGuard, cast
+from typing import Protocol, TypeGuard, cast
 
 from sqlalchemy.orm import Session
 
@@ -160,6 +160,17 @@ class LLMResult:
     fallback_attempts: int
     correlation_id: str
     tool_calls: tuple[ToolCall, ...] = field(default_factory=tuple)
+
+
+class _TranscriptionAdapter(Protocol):
+    def transcribe(
+        self,
+        *,
+        model_id: str,
+        audio: ChatInputAudioRef,
+        temperature: float = 0.0,
+        consents: ConsentSet | None = None,
+    ) -> LLMResponse: ...
 
 
 class LLMChainExhausted(RuntimeError):
@@ -628,9 +639,22 @@ def _adapter_chat_for_model(
     tools: Sequence[Tool] | None,
     consents: ConsentSet | None,
 ) -> LLMResponse:
+    prepared_messages = _messages_for_model(messages, model_pick)
+    transcription_audio = _transcription_audio_ref(
+        model_pick, messages=prepared_messages, tools=tools
+    )
+    if transcription_audio is not None and _supports_transcription(adapter):
+        return adapter.transcribe(
+            model_id=model_pick.api_model_id,
+            audio=transcription_audio,
+            temperature=(
+                model_pick.temperature if model_pick.temperature is not None else 0.0
+            ),
+            consents=consents,
+        )
     return adapter.chat(
         model_id=model_pick.api_model_id,
-        messages=_messages_for_model(messages, model_pick),
+        messages=prepared_messages,
         max_tokens=max_tokens,
         temperature=(
             model_pick.temperature if model_pick.temperature is not None else 0.0
@@ -640,6 +664,39 @@ def _adapter_chat_for_model(
         tools=tools,
         consents=consents,
     )
+
+
+def _supports_transcription(adapter: LLMAdapter) -> TypeGuard[_TranscriptionAdapter]:
+    return callable(getattr(adapter, "transcribe", None))
+
+
+def _transcription_audio_ref(
+    model_pick: ModelPick,
+    *,
+    messages: Sequence[ChatMessage],
+    tools: Sequence[Tool] | None,
+) -> ChatInputAudioRef | None:
+    required = set(model_pick.required_capabilities)
+    if (
+        tools
+        or "audio_input" not in required
+        or required.intersection({"chat", "vision", "json_mode"})
+    ):
+        return None
+    if len(messages) != 1:
+        return None
+    content = messages[0]["content"]
+    if not isinstance(content, list):
+        return None
+    audio_refs = [
+        block["input_audio"] for block in content if block["type"] == "input_audio"
+    ]
+    has_non_transcription_media = any(
+        block["type"] != "text" and block["type"] != "input_audio" for block in content
+    )
+    if len(audio_refs) != 1 or has_non_transcription_media:
+        return None
+    return audio_refs[0]
 
 
 def _messages_for_model(

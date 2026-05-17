@@ -11,7 +11,7 @@
 #   2. ruff check . --fix     (auto-fix lint)
 #   3. ruff check .           (report remaining lint)
 #   4. ruff format --check .  (catch any remaining formatting drift)
-#   5. migration tree check  (dev-stack readyz can read Alembic scripts)
+#   5. bind-mount visibility (dev-stack containers can read source files)
 #   6. mypy app              (strict type check; CI parity)
 #   7. pytest --testmon-forceselect
 #
@@ -69,7 +69,7 @@ done
 ruff_fix_status=0
 ruff_check_status=0
 ruff_fmt_status=0
-migration_tree_status=0
+bind_mount_visibility_status=0
 mypy_status=0
 pytest_status=0
 
@@ -77,7 +77,52 @@ section() {
   printf '\n=== %s ===\n' "$1"
 }
 
-check_migration_script_tree() {
+fix_bind_mount_visibility() {
+  local -a roots=(
+    "app"
+    "migrations"
+    "scripts"
+    "alembic.ini"
+    "pyproject.toml"
+  )
+  local -a files=()
+  local path
+  local dir
+  local fixed=0
+
+  while IFS= read -r -d '' path; do
+    files+=("$path")
+  done < <(
+    {
+      git ls-files -z -- "${roots[@]}"
+      git ls-files -z --others --exclude-standard -- "${roots[@]}"
+    } | sort -zu
+  )
+
+  for path in "${files[@]}"; do
+    if [[ -f "$path" && -n "$(find "$path" -maxdepth 0 ! -perm -004 -print)" ]]; then
+      chmod a+r "$path"
+      echo "made world-readable: $path"
+      fixed=1
+    fi
+
+    dir="$(dirname "$path")"
+    while [[ "$dir" != "." && "$dir" != "/" ]]; do
+      if [[ -d "$dir" && -n "$(find "$dir" -maxdepth 0 ! -perm -005 -print)" ]]; then
+        chmod a+rx "$dir"
+        echo "made world-readable/executable: $dir"
+        fixed=1
+      fi
+      dir="$(dirname "$dir")"
+    done
+  done
+
+  if [[ $fixed -eq 0 ]]; then
+    echo "bind-mounted source files are container-readable"
+  fi
+}
+
+check_bind_mount_visibility() {
   local versions_dir="migrations/versions"
 
   if [[ ! -d "$versions_dir" ]]; then
@@ -109,7 +154,52 @@ check_migration_script_tree() {
   if [[ -n "$unreadable" ]]; then
     echo "migration scripts must be world-readable for the dev app container:" >&2
     printf '%s\n' "$unreadable" >&2
-    echo "fix: chmod a+r <file>" >&2
+    return 1
+  fi
+
+  local -a roots=(
+    "app"
+    "migrations"
+    "scripts"
+    "alembic.ini"
+    "pyproject.toml"
+  )
+  local -a files=()
+  local path
+  while IFS= read -r -d '' path; do
+    files+=("$path")
+  done < <(
+    {
+      git ls-files -z -- "${roots[@]}"
+      git ls-files -z --others --exclude-standard -- "${roots[@]}"
+    } | sort -zu
+  )
+
+  local unreadable_file_count=0
+  local unreadable_dir_count=0
+  for path in "${files[@]}"; do
+    if [[ -f "$path" && -n "$(find "$path" -maxdepth 0 ! -perm -004 -print)" ]]; then
+      if [[ $unreadable_file_count -eq 0 ]]; then
+        echo "bind-mounted files must be world-readable for dev containers:" >&2
+      fi
+      printf '%s\n' "$path" >&2
+      unreadable_file_count=$((unreadable_file_count + 1))
+    fi
+
+    local dir
+    dir="$(dirname "$path")"
+    while [[ "$dir" != "." && "$dir" != "/" ]]; do
+      if [[ -d "$dir" && -n "$(find "$dir" -maxdepth 0 ! -perm -005 -print)" ]]; then
+        if [[ $unreadable_dir_count -eq 0 ]]; then
+          echo "bind-mounted directories must be world-readable/executable for dev containers:" >&2
+        fi
+        printf '%s\n' "$dir" >&2
+        unreadable_dir_count=$((unreadable_dir_count + 1))
+      fi
+      dir="$(dirname "$dir")"
+    done
+  done
+  if [[ $unreadable_file_count -ne 0 || $unreadable_dir_count -ne 0 ]]; then
     return 1
   fi
 }
@@ -126,8 +216,11 @@ uv run ruff check . || ruff_check_status=$?
 section "ruff format --check (verify formatting clean)"
 uv run ruff format --check . || ruff_fmt_status=$?
 
-section "migration script tree visibility"
-check_migration_script_tree || migration_tree_status=$?
+section "bind-mount visibility (autofix)"
+fix_bind_mount_visibility
+
+section "bind-mount visibility (verify)"
+check_bind_mount_visibility || bind_mount_visibility_status=$?
 
 section "mypy --strict app (no autofix)"
 uv run mypy app || mypy_status=$?
@@ -167,10 +260,10 @@ else
   echo "ruff format check:  FAILED — formatter would still rewrite files"
   overall=1
 fi
-if [[ $migration_tree_status -eq 0 ]]; then
-  echo "migration tree:     ok"
+if [[ $bind_mount_visibility_status -eq 0 ]]; then
+  echo "bind visibility:    ok"
 else
-  echo "migration tree:     FAILED — fix unreadable or missing migration scripts"
+  echo "bind visibility:    FAILED — fix unreadable or missing bind-mounted files"
   overall=1
 fi
 if [[ $mypy_status -eq 0 ]]; then

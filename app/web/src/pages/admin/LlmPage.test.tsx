@@ -1070,13 +1070,19 @@ describe("Admin LlmPage", () => {
   });
 
   it("creates, edits, and handles delete conflicts for canonical models in the sheet dialog", async () => {
+    const graphForReasoningEdit = graphWithGemmaCapabilities([
+      "chat",
+      "json_mode",
+      "function_calling",
+      "reasoning",
+    ]);
     const fetcher = installPageFetch({
       "/admin/api/v1/llm/graph": [
-        { body: graph },
-        { body: graph },
-        { body: graph },
-        { body: graph },
-        { body: graph },
+        { body: graphForReasoningEdit },
+        { body: graphForReasoningEdit },
+        { body: graphForReasoningEdit },
+        { body: graphForReasoningEdit },
+        { body: graphForReasoningEdit },
       ],
       "/admin/api/v1/llm/models": [
         {
@@ -1396,13 +1402,20 @@ describe("Admin LlmPage", () => {
   });
 
   it("creates, edits, and handles delete conflicts for provider-model joins in the sheet dialog", async () => {
+    const graphForMediaReasoningEdit = graphWithGemmaCapabilities([
+      "chat",
+      "json_mode",
+      "function_calling",
+      "audio_input",
+      "reasoning",
+    ]);
     const fetcher = installPageFetch({
       "/admin/api/v1/llm/graph": [
-        { body: graph },
-        { body: graph },
-        { body: graph },
-        { body: graph },
-        { body: graph },
+        { body: graphForMediaReasoningEdit },
+        { body: graphForMediaReasoningEdit },
+        { body: graphForMediaReasoningEdit },
+        { body: graphForMediaReasoningEdit },
+        { body: graphForMediaReasoningEdit },
       ],
       "/admin/api/v1/llm/provider-models": [
         {

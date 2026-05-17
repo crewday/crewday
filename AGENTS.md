@@ -241,15 +241,16 @@ update in your wrap-up.
   `sed`.
 - **Quality gate wrapper.** Run `./scripts/agent-quality.sh` to apply
   `ruff format` + `ruff check --fix` autofixes, re-check the remaining
-  lint/format issues, run `mypy --strict app`, and run pytest through
-  `pytest-testmon` (`--testmon-forceselect`, so it still works with the
-  repo's default marker filter) to deselect cached unaffected tests by
-  default. Use `./scripts/agent-quality.sh --full-tests` when you need
-  the complete pytest suite, and `--skip-tests` only when a separate
-  focused test command already proves the change. Exit 0 means clean;
-  non-zero prints exactly what still needs a manual fix. Use it instead
-  of running the individual `uv run ruff …` / `uv run mypy …` commands
-  by hand.
+  lint/format issues, repair container-readable permissions for
+  bind-mounted source files, run `mypy --strict app`, and run pytest
+  through `pytest-testmon` (`--testmon-forceselect`, so it still works
+  with the repo's default marker filter) to deselect cached unaffected
+  tests by default. Use `./scripts/agent-quality.sh --full-tests` when
+  you need the complete pytest suite, and `--skip-tests` only when a
+  separate focused test command already proves the change. Exit 0 means
+  clean; non-zero prints exactly what still needs a manual fix. Use it
+  instead of running the individual `uv run ruff …` / `uv run mypy …`
+  commands by hand.
 - **Python env sync.** If a Python gate fails during import or pytest
   config loading because a dependency or pytest plugin from
   `pyproject.toml` is missing, run `uv sync --all-groups` from the repo
