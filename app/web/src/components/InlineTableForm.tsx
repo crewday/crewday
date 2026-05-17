@@ -816,6 +816,38 @@ export function InlineDateField({
   );
 }
 
+export function InlineTimeField({
+  value,
+  onChange,
+  disabled,
+  ariaLabel,
+  min,
+  max,
+  step,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  ariaLabel?: string;
+  min?: string;
+  max?: string;
+  step?: number | string;
+}) {
+  return (
+    <input
+      className="inline-table-form__control inline-table-form__control--time"
+      type="time"
+      value={value}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      min={min}
+      max={max}
+      step={step}
+      onChange={(event) => onChange(event.currentTarget.value)}
+    />
+  );
+}
+
 export interface InlineSelectOption {
   value: string;
   label: string;

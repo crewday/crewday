@@ -9,6 +9,7 @@ import {
   type InlineTableColumn,
   type InlineTableRow,
   InlineTextField,
+  InlineTimeField,
 } from "./InlineTableForm";
 import inlineTableCss from "@/styles/inline-table-form.css?raw";
 
@@ -149,6 +150,39 @@ describe("InlineTableForm", () => {
     fireEvent.change(input, { target: { value: "-" } });
 
     expect(onChange).toHaveBeenCalledWith("-");
+  });
+
+  it("renders time fields with time attributes and disabled state", () => {
+    render(
+      <InlineTimeField
+        value="09:30"
+        min="08:00"
+        max="18:00"
+        step={900}
+        disabled
+        ariaLabel="Start time"
+        onChange={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByLabelText("Start time");
+    expect(input).toHaveAttribute("type", "time");
+    expect(input).toHaveClass("inline-table-form__control");
+    expect(input).toHaveClass("inline-table-form__control--time");
+    expect(input).toHaveAttribute("min", "08:00");
+    expect(input).toHaveAttribute("max", "18:00");
+    expect(input).toHaveAttribute("step", "900");
+    expect(input).toBeDisabled();
+    expect((input as HTMLInputElement).value).toBe("09:30");
+  });
+
+  it("passes time field changes through as raw strings", () => {
+    const onChange = vi.fn();
+    render(<InlineTimeField value="09:30" ariaLabel="Shift start time" onChange={onChange} />);
+
+    fireEvent.change(screen.getByLabelText("Shift start time"), { target: { value: "14:45" } });
+
+    expect(onChange).toHaveBeenCalledWith("14:45");
   });
 
   it("saves and cancels table rows from number fields", () => {

@@ -11,6 +11,7 @@ import {
   type InlineTableColumn,
   type InlineTableRow,
   InlineTextField,
+  InlineTimeField,
 } from "@/components/InlineTableForm";
 
 type Priority = "low" | "normal" | "high";
@@ -258,14 +259,17 @@ export default function InlineTableFormsDemoPage() {
   const assignmentColumns = useMemo<InlineTableColumn<AssignmentDraft>[]>(() => [
     {
       key: "window",
-      header: "Window",
+      header: "Start",
       width: { flex: 0.8, min: 130 },
       renderRead: ({ row }) => <ReadText value={row.draft.window} />,
       renderEdit: ({ row, update, disabled }) => (
-        <InlineTextField
+        <InlineTimeField
           value={row.draft.window}
+          min="07:00"
+          max="20:00"
+          step={900}
           disabled={disabled}
-          ariaLabel="Assignment window"
+          ariaLabel="Assignment start time"
           onChange={(window) => update({ window })}
         />
       ),
@@ -773,18 +777,18 @@ const initialAssignments: InlineTableRow<AssignmentDraft>[] = [
   {
     id: "a-1",
     dirty: false,
-    draft: { window: "09:00-11:00", team: "Housekeeping A", property: "villa-sud", backup: "Sora" },
+    draft: { window: "09:00", team: "Housekeeping A", property: "villa-sud", backup: "Sora" },
   },
   {
     id: "a-2",
     dirty: true,
     error: "Crew overlap detected. Choose another backup or cancel the edit.",
-    draft: { window: "11:00-13:00", team: "Turnover pair", property: "harbor-flat", backup: "Maria" },
+    draft: { window: "11:00", team: "Turnover pair", property: "harbor-flat", backup: "Maria" },
   },
   {
     id: "a-3",
     saving: true,
-    draft: { window: "14:00-16:00", team: "Maintenance", property: "loft-north", backup: "Enzo" },
+    draft: { window: "14:00", team: "Maintenance", property: "loft-north", backup: "Enzo" },
   },
 ];
 

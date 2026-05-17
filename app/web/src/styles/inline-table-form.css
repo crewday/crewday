@@ -211,8 +211,13 @@
 }
 
 .inline-table-form__control--date,
+.inline-table-form__control--time,
 .inline-table-form__control--select {
   cursor: pointer;
+}
+
+.inline-table-form__control:disabled {
+  cursor: not-allowed;
 }
 
 .inline-table-form__note {
