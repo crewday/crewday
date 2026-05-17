@@ -10,11 +10,12 @@ import {
   useRef,
   useState,
 } from "react";
-import { Check, Pencil, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, GripVertical, Pencil, Trash2, X } from "lucide-react";
 import ConfirmationModal from "@/components/ConfirmationModal";
 import IconSelector from "@/components/IconSelector";
 import { EmptyState } from "@/components/common";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
+import { useReorderableList } from "@/components/useReorderableList";
 
 export type InlineTableSaveMode = "explicit" | "autosave";
 export type InlineTableRowStatus = "idle" | "dirty" | "saving" | "error" | "disabled";
@@ -65,6 +66,14 @@ export interface InlineTableCellContext<TDraft> {
   cancel: () => void;
 }
 
+export interface InlineTableReorder<TDraft> {
+  rowId: string;
+  fromIndex: number;
+  toIndex: number;
+  orderedRowIds: string[];
+  orderedRows: readonly InlineTableRow<TDraft>[];
+}
+
 /**
  * Reusable inline table editor for dense operational forms.
  *
@@ -85,6 +94,8 @@ export interface InlineTableFormProps<TDraft> {
   onCancel: (rowId: string) => void;
   onEdit?: (rowId: string) => void;
   onDelete?: (rowId: string) => void;
+  /** Opt-in row reordering for read-mode rows. Caller owns persisting the returned order. */
+  onReorder?: (reorder: InlineTableReorder<TDraft>) => void;
   /** Defaults to icons for dense sheets; use text when a page needs extra action clarity. */
   actionDisplay?: InlineTableActionDisplay;
   /** Defaults to single-click entry; use doubleClick for select-first workflows with `e`/`dd`. */
@@ -122,6 +133,7 @@ export function InlineTableForm<TDraft>({
   onCancel,
   onEdit,
   onDelete,
+  onReorder,
   actionDisplay = "icons",
   activationMode = "singleClick",
   addRow,
@@ -153,7 +165,7 @@ export function InlineTableForm<TDraft>({
   ));
   const templateColumns = [
     ...columns.map((column) => columnTemplate(column.width)),
-    "minmax(112px, max-content)",
+    onReorder ? "minmax(184px, max-content)" : "minmax(112px, max-content)",
   ].join(" ");
   const classes = [
     "inline-table-form",
@@ -163,6 +175,37 @@ export function InlineTableForm<TDraft>({
   ].filter(Boolean).join(" ");
   const activeTrailingCreateRow = trailingCreateRow ?? factoryCreateRow ?? undefined;
   const renderedRows = activeTrailingCreateRow ? [...rows, activeTrailingCreateRow] : rows;
+  const reorderableRows = onReorder
+    ? rows.filter((row) => !isRowEditing(row) && !isRowDisabled(row))
+    : [];
+
+  const reorderRow = (rowId: string, toMovableIndex: number) => {
+    if (!onReorder) return;
+    const movingRow = rows.find((row) => row.id === rowId);
+    if (!movingRow || isRowEditing(movingRow) || isRowDisabled(movingRow)) return;
+    const fromIndex = rows.findIndex((row) => row.id === rowId);
+    const targetRow = reorderableRows[toMovableIndex];
+    const toIndex = targetRow ? rows.findIndex((row) => row.id === targetRow.id) : -1;
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+    const orderedRows = moveRow(rows, fromIndex, toIndex);
+    clearDeleteArm();
+    selectRow(rowId, true);
+    onReorder({
+      rowId,
+      fromIndex,
+      toIndex,
+      orderedRows,
+      orderedRowIds: orderedRows.map((row) => row.id),
+    });
+  };
+
+  const reorderable = useReorderableList({
+    items: reorderableRows,
+    getId: (row) => row.id,
+    onMove: reorderRow,
+    disabled: !onReorder || reorderableRows.length < 2,
+  });
+  const reorderListProps = reorderable.getListProps();
 
   useEffect(() => {
     if (!createEmptyDraft || !onCreate || trailingCreateRow || factoryCreateRow) return;
@@ -392,7 +435,12 @@ export function InlineTableForm<TDraft>({
           </div>
         </div>
 
-        <div className="inline-table-form__body" role="rowgroup">
+        <div
+          className="inline-table-form__body"
+          role="rowgroup"
+          onDragLeave={reorderListProps.onDragLeave}
+          onDrop={reorderListProps.onDrop}
+        >
           {renderedRows.length === 0 ? (
             <div className="inline-table-form__empty">
               {emptyState ?? (
@@ -423,6 +471,17 @@ export function InlineTableForm<TDraft>({
             const detail = renderDetail?.(context);
             const selected = selectedRowId === row.id && !disabled && (!editing || isTrailingCreate);
             const deleteArmed = deleteArmedRowId === row.id && selected;
+            const movableIndex = reorderableRows.findIndex((candidate) => candidate.id === row.id);
+            const canReorderRow = Boolean(onReorder)
+              && !editing
+              && !disabled
+              && !isTrailingCreate
+              && movableIndex >= 0;
+            const reorderItemProps = canReorderRow ? reorderable.getItemProps(movableIndex) : null;
+            const dropPosition = reorderable.dropTarget?.id === row.id
+              ? reorderable.dropTarget.position
+              : null;
+            const isDragging = reorderable.draggedId === row.id;
             const activateCell = (columnKey: string) => {
               if (editing || disabled || !onEdit) return;
               editRow(row.id, columnKey);
@@ -444,10 +503,18 @@ export function InlineTableForm<TDraft>({
                   row.disabled ? "is-disabled" : null,
                   selected ? "is-selected" : null,
                   deleteArmed ? "is-delete-armed" : null,
+                  isDragging ? "is-dragging" : null,
+                  dropPosition ? `inline-table-form__group--drop-${dropPosition}` : null,
                 ].filter(Boolean).join(" ")}
+                draggable={reorderItemProps?.draggable}
                 data-inline-table-row-group={row.id}
                 aria-label={label}
                 aria-selected={selected || undefined}
+                onDragStart={reorderItemProps?.onDragStart}
+                onDragOver={reorderItemProps?.onDragOver}
+                onDragLeave={reorderItemProps?.onDragLeave}
+                onDrop={reorderItemProps?.onDrop}
+                onDragEnd={reorderItemProps?.onDragEnd}
                 onClick={(event) => {
                   if (activationMode !== "doubleClick" || editing || disabled) return;
                   if (isInteractiveEventTarget(event.target)) return;
@@ -535,6 +602,13 @@ export function InlineTableForm<TDraft>({
                       status={status}
                       onEdit={onEdit ? () => onEdit(row.id) : undefined}
                       onDelete={onDelete && !isTrailingCreate ? () => requestDelete(row.id) : undefined}
+                      reorderControls={canReorderRow ? {
+                        label,
+                        canMoveUp: movableIndex > 0,
+                        canMoveDown: movableIndex < reorderableRows.length - 1,
+                        onMoveUp: () => reorderRow(row.id, movableIndex - 1),
+                        onMoveDown: () => reorderRow(row.id, movableIndex + 1),
+                      } : undefined}
                       onSave={() => saveRow(row, isTrailingCreate)}
                       onCancel={() => cancelRow(row)}
                       actionDisplay={actionDisplay}
@@ -598,6 +672,7 @@ function InlineTableActions({
   status,
   onEdit,
   onDelete,
+  reorderControls,
   onSave,
   onCancel,
   actionDisplay,
@@ -611,6 +686,13 @@ function InlineTableActions({
   status: InlineTableRowStatus;
   onEdit?: () => void;
   onDelete?: () => void;
+  reorderControls?: {
+    label: string;
+    canMoveUp: boolean;
+    canMoveDown: boolean;
+    onMoveUp: () => void;
+    onMoveDown: () => void;
+  };
   onSave: () => void;
   onCancel: () => void;
   actionDisplay: InlineTableActionDisplay;
@@ -621,6 +703,12 @@ function InlineTableActions({
     return (
       <div className="inline-table-form__actions">
         <InlineTableStatus status={status} />
+        {reorderControls ? (
+          <InlineTableReorderControls
+            {...reorderControls}
+            disabled={disabled}
+          />
+        ) : null}
         {onDelete ? (
           <InlineTableActionButton
             action="delete"
@@ -674,6 +762,54 @@ function InlineTableActions({
         />
       ) : null}
     </div>
+  );
+}
+
+function InlineTableReorderControls({
+  label,
+  canMoveUp,
+  canMoveDown,
+  disabled,
+  onMoveUp,
+  onMoveDown,
+}: {
+  label: string;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  disabled: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+}) {
+  return (
+    <span className="inline-table-form__reorder" role="group" aria-label={`Reorder ${label}`}>
+      <span
+        className="inline-table-form__drag-handle"
+        aria-hidden="true"
+        title="Drag to reorder"
+      >
+        <GripVertical size={15} aria-hidden="true" />
+      </span>
+      <button
+        type="button"
+        className="inline-table-form__icon-btn inline-table-form__icon-btn--icon-only"
+        aria-label={`Move ${label} up`}
+        title={`Move ${label} up`}
+        disabled={disabled || !canMoveUp}
+        onClick={onMoveUp}
+      >
+        <ArrowUp size={15} aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        className="inline-table-form__icon-btn inline-table-form__icon-btn--icon-only"
+        aria-label={`Move ${label} down`}
+        title={`Move ${label} down`}
+        disabled={disabled || !canMoveDown}
+        onClick={onMoveDown}
+      >
+        <ArrowDown size={15} aria-hidden="true" />
+      </button>
+    </span>
   );
 }
 
@@ -1126,6 +1262,14 @@ function readableValue(value: unknown) {
   return null;
 }
 
+function moveRow<T>(rows: readonly T[], fromIndex: number, toIndex: number): T[] {
+  const next = [...rows];
+  const [moved] = next.splice(fromIndex, 1);
+  if (moved === undefined) return next;
+  next.splice(toIndex, 0, moved);
+  return next;
+}
+
 function plainLabel(value: ReactNode) {
   return typeof value === "string" || typeof value === "number" ? String(value) : undefined;
 }
@@ -1152,7 +1296,7 @@ function handleReadRowKeyDown(
     lastDeleteKeyRef: MutableRefObject<{ rowId: string; at: number } | null>;
   },
 ) {
-  if (!options.selected || options.disabled || isEditableShortcutTarget(event.target)) return;
+  if (!options.selected || options.disabled || isInteractiveEventTarget(event.target)) return;
   if (event.key === "ArrowUp" || event.key === "ArrowDown") {
     event.preventDefault();
     options.onMoveSelection(event.key === "ArrowUp" ? "previous" : "next");

@@ -489,6 +489,185 @@ describe("InlineTableForm", () => {
     expect(onDelete).toHaveBeenCalledWith("r-1");
   });
 
+  it("does not render reorder controls or draggable rows by default", () => {
+    render(
+      <InlineTableForm
+        ariaLabel="Default rows"
+        columns={columns}
+        rows={[
+          { ...editableRow(), editing: false, dirty: false },
+          rowWithTitle("r-2", "Restock towels"),
+        ]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        onDelete={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    const rowGroup = screen.getByLabelText("Confirm linen");
+
+    expect(rowGroup).not.toHaveAttribute("draggable");
+    expect(within(rowGroup).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
+      "Delete",
+      "Edit",
+    ]);
+    expect(screen.queryByRole("button", { name: /move .* up/i })).toBeNull();
+  });
+
+  it("reports pointer drag reorders with movement and ordered ids", () => {
+    const onReorder = vi.fn();
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: vi.fn(),
+      getData: vi.fn(),
+    };
+    render(
+      <InlineTableForm
+        ariaLabel="Draggable rows"
+        columns={columns}
+        rows={[
+          rowWithTitle("r-1", "First"),
+          rowWithTitle("r-2", "Second"),
+          rowWithTitle("r-3", "Third"),
+        ]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        onReorder={onReorder}
+        getRowLabel={(row) => row.draft.title}
+      />,
+    );
+
+    const first = screen.getByLabelText("First");
+    const third = screen.getByLabelText("Third");
+
+    expect(first).toHaveAttribute("draggable", "true");
+    fireEvent.dragStart(first, { dataTransfer });
+    fireEvent.dragOver(third, { dataTransfer, clientY: 20 });
+    fireEvent.drop(third, { dataTransfer, clientY: 20 });
+
+    expect(onReorder).toHaveBeenCalledWith({
+      rowId: "r-1",
+      fromIndex: 0,
+      toIndex: 2,
+      orderedRowIds: ["r-2", "r-3", "r-1"],
+      orderedRows: [
+        expect.objectContaining({ id: "r-2" }),
+        expect.objectContaining({ id: "r-3" }),
+        expect.objectContaining({ id: "r-1" }),
+      ],
+    });
+  });
+
+  it("moves rows with keyboard controls and disables edge moves", () => {
+    const onReorder = vi.fn();
+    const onEdit = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Keyboard reorder rows"
+        columns={columns}
+        rows={[
+          rowWithTitle("r-1", "First"),
+          rowWithTitle("r-2", "Second"),
+          rowWithTitle("r-3", "Third"),
+        ]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        onEdit={onEdit}
+        onReorder={onReorder}
+        getRowLabel={(row) => row.draft.title}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Move First up" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move Third down" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Move First down" }));
+
+    expect(onReorder).toHaveBeenCalledWith(expect.objectContaining({
+      rowId: "r-1",
+      fromIndex: 0,
+      toIndex: 1,
+      orderedRowIds: ["r-2", "r-1", "r-3"],
+    }));
+
+    const moveFirstDown = screen.getByRole("button", { name: "Move First down" });
+    moveFirstDown.focus();
+    fireEvent.keyDown(moveFirstDown, { key: "Enter" });
+
+    expect(onEdit).not.toHaveBeenCalled();
+  });
+
+  it("omits reorder controls for disabled edge rows and locks adjacent moves", () => {
+    render(
+      <InlineTableForm
+        ariaLabel="Locked edge reorder rows"
+        columns={columns}
+        rows={[
+          { ...rowWithTitle("r-0", "Locked top"), disabled: true },
+          rowWithTitle("r-1", "First movable"),
+          rowWithTitle("r-2", "Second movable"),
+          { ...rowWithTitle("r-3", "Locked bottom"), disabled: true },
+        ]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        onReorder={vi.fn()}
+        getRowLabel={(row) => row.draft.title}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Move Locked top down" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Move Locked bottom up" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Move First movable up" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move Second movable down" })).toBeDisabled();
+  });
+
+  it("keeps edit, save, and delete shortcuts working when reorder is enabled", () => {
+    const onDelete = vi.fn();
+    const onEdit = vi.fn();
+    const onSave = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Reorder shortcut rows"
+        columns={columns}
+        rows={[
+          rowWithTitle("r-1", "Read row"),
+          { ...rowWithTitle("r-2", "Editing row"), editing: true, dirty: true },
+        ]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={onSave}
+        onCancel={vi.fn()}
+        onDelete={onDelete}
+        onEdit={onEdit}
+        onReorder={vi.fn()}
+        activationMode="doubleClick"
+        getRowLabel={(row) => row.draft.title}
+      />,
+    );
+
+    const readRow = screen.getByLabelText("Read row");
+    fireEvent.click(readRow);
+    fireEvent.keyDown(readRow, { key: "e" });
+    fireEvent.keyDown(readRow, { key: "d" });
+    fireEvent.keyDown(readRow, { key: "d" });
+    fireEvent.keyDown(screen.getByDisplayValue("Editing row"), { key: "Enter" });
+
+    expect(onEdit).toHaveBeenCalledWith("r-1");
+    expect(onDelete).toHaveBeenCalledWith("r-1");
+    expect(onSave).toHaveBeenCalledWith("r-2");
+    expect(screen.queryByRole("button", { name: "Move Editing row up" })).toBeNull();
+  });
+
   it("saves textarea rows on Enter and keeps Shift+Enter for a newline", () => {
     const { onSave } = renderInlineTable();
 
@@ -1214,6 +1393,19 @@ function editableRow(): InlineTableRow<Draft> {
       title: "Confirm linen",
       owner: "maria",
       note: "Bring spare keys.",
+    },
+  };
+}
+
+function rowWithTitle(id: string, title: string): InlineTableRow<Draft> {
+  return {
+    id,
+    editing: false,
+    dirty: false,
+    draft: {
+      title,
+      owner: "maria",
+      note: "",
     },
   };
 }

@@ -120,6 +120,30 @@
   color: var(--ink-3);
 }
 
+.inline-table-form__group.is-dragging {
+  opacity: 0.72;
+}
+
+.inline-table-form__group--drop-before::before,
+.inline-table-form__group--drop-after::after {
+  position: absolute;
+  right: 0;
+  left: 0;
+  z-index: 1;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--moss);
+  content: "";
+}
+
+.inline-table-form__group--drop-before::before {
+  top: -2px;
+}
+
+.inline-table-form__group--drop-after::after {
+  bottom: -2px;
+}
+
 .inline-table-form__th,
 .inline-table-form__td {
   display: flex;
@@ -340,6 +364,25 @@
   justify-content: flex-end;
   gap: 6px;
   min-width: 0;
+}
+
+.inline-table-form__reorder {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.inline-table-form__drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  color: var(--ink-3);
+  cursor: grab;
+}
+
+.inline-table-form__group.is-dragging .inline-table-form__drag-handle {
+  cursor: grabbing;
 }
 
 .inline-table-form__icon-btn {
