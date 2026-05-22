@@ -15,10 +15,10 @@
     "typecheck": "ASTRO_TELEMETRY_DISABLED=1 astro check"
   },
   "dependencies": {
-    "@astrojs/mdx": "^5.0.4",
-    "@astrojs/react": "^5.0.4",
-    "astro": "^6.2.2",
-    "lucide-react": "^1.8.0",
+    "@astrojs/mdx": "^5.0.6",
+    "@astrojs/react": "^5.0.5",
+    "astro": "^6.3.3",
+    "lucide-react": "^1.16.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },
