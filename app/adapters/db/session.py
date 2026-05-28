@@ -184,6 +184,7 @@ class FilteredSession(Session):
 # the one-off cost; subsequent callers reuse the cached factory.
 _default_engine: Engine | None = None
 _default_sessionmaker_: sessionmaker[FilteredSession] | None = None
+type _SessionMaker = sessionmaker[Session] | sessionmaker[FilteredSession]
 
 
 # Install the tenant filter on the ``FilteredSession`` class exactly
@@ -288,7 +289,7 @@ class UnitOfWorkImpl:
 
     __slots__ = ("_factory", "_session")
 
-    def __init__(self, session_factory: sessionmaker[Session] | None = None) -> None:
+    def __init__(self, session_factory: _SessionMaker | None = None) -> None:
         self._factory = session_factory
         self._session: Session | None = None
 
@@ -321,6 +322,13 @@ class UnitOfWorkImpl:
         return None
 
 
-def make_uow() -> UnitOfWorkImpl:
-    """Return a :class:`UnitOfWorkImpl` bound to the default engine."""
-    return UnitOfWorkImpl()
+def make_uow(url: str | None = None) -> UnitOfWorkImpl:
+    """Return a :class:`UnitOfWorkImpl` bound to a database engine."""
+    if url is None:
+        return UnitOfWorkImpl()
+    factory = sessionmaker(
+        bind=make_engine(url),
+        expire_on_commit=False,
+        class_=FilteredSession,
+    )
+    return UnitOfWorkImpl(factory)

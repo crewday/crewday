@@ -157,7 +157,7 @@ class TenantSeed:
 
 
 @pytest.fixture(scope="session")
-def tenant_settings() -> Settings:
+def tenant_settings(db_url: str) -> Settings:
     """Pinned :class:`Settings` for the tenant matrix.
 
     ``phase0_stub_enabled=False`` so the real slug / session / token
@@ -165,7 +165,7 @@ def tenant_settings() -> Settings:
     exact code path we're trying to exercise.
     """
     return Settings.model_construct(
-        database_url="sqlite:///:memory:",
+        database_url=db_url,
         root_key=SecretStr("tenant-matrix-root-key-do-not-reuse"),
         session_owner_ttl_days=7,
         session_user_ttl_days=30,

@@ -40,7 +40,7 @@ def demo_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[TestClient]:
     monkeypatch.setattr(
-        "app.api.factory.make_uow", lambda: UnitOfWorkImpl(session_factory)
+        "app.api.factory.make_uow", lambda _url=None: UnitOfWorkImpl(session_factory)
     )
     monkeypatch.setattr(
         "app.api.deps.make_uow", lambda: UnitOfWorkImpl(session_factory)

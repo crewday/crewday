@@ -38,7 +38,7 @@ def settings() -> Settings:
         database_url="sqlite:///:memory:",
         root_key=SecretStr("unit-test-admin-passkey-revoke-root-key"),
         session_owner_ttl_days=7,
-        session_user_ttl_days=30,
+        session_user_ttl_days=3650,
     )
 
 

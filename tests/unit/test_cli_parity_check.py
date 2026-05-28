@@ -288,29 +288,241 @@ def test_report_documents_admin_default_mutation_confirmation(
     assert report.ok
 
 
-def test_report_ignores_openapi_operations_without_valid_x_cli(
+def test_report_requires_workspace_x_cli_or_reviewed_exclusion(
     tmp_path: Path,
 ) -> None:
     surface, surface_admin, exclusions, schema = _paths(tmp_path)
-    _write_json(surface, [_entry(operation_id="demo.list")])
+    _write_json(surface, [])
     _write_json(
         schema,
         {
             "openapi": "3.1.0",
             "paths": {
-                "/w/{slug}/api/v1/demo": {
-                    "get": {
-                        "operationId": "demo.list",
-                        "responses": {"200": {"description": "ok"}},
-                        "x-cli": {"group": "demo", "verb": "list"},
-                    }
-                },
                 "/w/{slug}/api/v1/not-agent": {
                     "get": {
                         "operationId": "demo.not_agent",
                         "responses": {"200": {"description": "ok"}},
                     }
                 },
+            },
+        },
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.workspace_missing_x_cli == ("demo.not_agent",)
+    assert not report.ok
+
+
+def test_report_requires_workspace_mutation_agent_classification(
+    tmp_path: Path,
+) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(
+        surface, [_entry(operation_id="demo.create", name="create", method="POST")]
+    )
+    _write_json(
+        schema,
+        {
+            "openapi": "3.1.0",
+            "paths": {
+                "/w/{slug}/api/v1/demo": {
+                    "post": {
+                        "operationId": "demo.create",
+                        "responses": {"200": {"description": "ok"}},
+                        "x-cli": {
+                            "group": "demo",
+                            "verb": "create",
+                            "summary": "Create demo",
+                            "mutates": True,
+                        },
+                    }
+                },
+            },
+        },
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.workspace_mutation_classification_invalid == ("demo.create",)
+    assert not report.ok
+
+
+def test_report_treats_non_get_workspace_methods_as_mutating(
+    tmp_path: Path,
+) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(
+        surface, [_entry(operation_id="demo.create", name="create", method="POST")]
+    )
+    _write_json(
+        schema,
+        {
+            "openapi": "3.1.0",
+            "paths": {
+                "/w/{slug}/api/v1/demo": {
+                    "post": {
+                        "operationId": "demo.create",
+                        "responses": {"200": {"description": "ok"}},
+                        "x-cli": {
+                            "group": "demo",
+                            "verb": "create",
+                            "summary": "Create demo",
+                            "mutates": False,
+                        },
+                    }
+                },
+            },
+        },
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.workspace_mutation_classification_invalid == ("demo.create",)
+    assert not report.ok
+
+
+def test_report_rejects_invalid_workspace_agent_confirmation(
+    tmp_path: Path,
+) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(
+        surface, [_entry(operation_id="demo.create", name="create", method="POST")]
+    )
+    _write_json(
+        schema,
+        {
+            "openapi": "3.1.0",
+            "paths": {
+                "/w/{slug}/api/v1/demo": {
+                    "post": {
+                        "operationId": "demo.create",
+                        "responses": {"200": {"description": "ok"}},
+                        "x-agent-confirm": False,
+                        "x-cli": {
+                            "group": "demo",
+                            "verb": "create",
+                            "summary": "Create demo",
+                            "mutates": True,
+                        },
+                    }
+                },
+            },
+        },
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.workspace_mutation_classification_invalid == ("demo.create",)
+    assert not report.ok
+
+
+def test_report_accepts_workspace_mutation_with_single_confirmation(
+    tmp_path: Path,
+) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(
+        surface, [_entry(operation_id="demo.create", name="create", method="POST")]
+    )
+    _write_json(
+        schema,
+        {
+            "openapi": "3.1.0",
+            "paths": {
+                "/w/{slug}/api/v1/demo": {
+                    "post": {
+                        "operationId": "demo.create",
+                        "responses": {"200": {"description": "ok"}},
+                        "x-agent-confirm": {"summary": "Create demo?"},
+                        "x-cli": {
+                            "group": "demo",
+                            "verb": "create",
+                            "summary": "Create demo",
+                            "mutates": True,
+                        },
+                    }
+                },
+            },
+        },
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.workspace_mutation_classification_invalid == ()
+    assert report.ok
+
+
+def test_report_requires_reviewed_exclusion_for_hidden_workspace_operation(
+    tmp_path: Path,
+) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [])
+    _write_json(
+        schema,
+        {
+            "openapi": "3.1.0",
+            "paths": {
+                "/w/{slug}/api/v1/browser-only": {
+                    "get": {
+                        "operationId": "demo.browser_only",
+                        "responses": {"200": {"description": "ok"}},
+                        "x-cli": {"group": "demo", "verb": "browser", "hidden": True},
+                    }
+                },
+            },
+        },
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.workspace_hidden_without_reviewed_exclusion == ("demo.browser_only",)
+    assert not report.ok
+
+
+def test_report_accepts_reviewed_workspace_exclusion(tmp_path: Path) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [])
+    exclusions.write_text(
+        "exclusions:\n"
+        "  - operation_id: demo.browser_only\n"
+        "    reason: browser-only ceremony\n",
+        encoding="utf-8",
+    )
+    _write_json(
+        schema,
+        {
+            "openapi": "3.1.0",
+            "paths": {
                 "/w/{slug}/api/v1/browser-only": {
                     "get": {
                         "operationId": "demo.browser_only",
@@ -330,7 +542,51 @@ def test_report_ignores_openapi_operations_without_valid_x_cli(
     )
 
     assert report.missing_from_cli == ()
+    assert report.workspace_missing_x_cli == ()
+    assert report.workspace_hidden_without_reviewed_exclusion == ()
+    assert report.workspace_mutation_classification_invalid == ()
     assert report.ok
+
+
+def test_main_prints_report_when_codegen_check_fails(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [])
+    _write_json(
+        schema,
+        {
+            "openapi": "3.1.0",
+            "paths": {
+                "/w/{slug}/api/v1/not-agent": {
+                    "get": {
+                        "operationId": "demo.not_agent",
+                        "responses": {"200": {"description": "ok"}},
+                    }
+                },
+            },
+        },
+    )
+
+    status = cli_parity_check.main(
+        [
+            "--surface",
+            str(surface),
+            "--surface-admin",
+            str(surface_admin),
+            "--exclusions",
+            str(exclusions),
+            "--schema",
+            str(schema),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert status == 1
+    assert "crewday codegen: committed surface out of date" in captured.err
+    assert "Workspace operations missing valid x-cli metadata" in captured.err
+    assert "demo.not_agent" in captured.err
 
 
 def test_report_names_surface_operations_removed_from_openapi(tmp_path: Path) -> None:

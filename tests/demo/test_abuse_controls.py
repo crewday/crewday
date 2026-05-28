@@ -35,7 +35,7 @@ def test_mint_throttle_returns_429_on_eleventh_attempt(
     )
     monkeypatch.setattr("app.api.factory.seed_workspace", lambda *_a, **_k: _Seeded())
     monkeypatch.setattr("app.api.factory.mint_demo_cookie", lambda *_a, **_k: "cookie")
-    monkeypatch.setattr("app.api.factory.make_uow", lambda: _fake_uow())
+    monkeypatch.setattr("app.api.factory.make_uow", lambda _url=None: _fake_uow())
 
     client = TestClient(
         create_app(settings=_settings()),

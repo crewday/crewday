@@ -53,7 +53,12 @@ import json
 import logging
 import re
 from collections.abc import AsyncIterator, Callable, Iterator
-from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
+from contextlib import (
+    AbstractAsyncContextManager,
+    AbstractContextManager,
+    asynccontextmanager,
+    contextmanager,
+)
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Final
@@ -616,18 +621,27 @@ def _build_storage(settings: Settings) -> Storage | None:
         return None
     return LocalFsStorage(
         settings.data_dir,
-        signer=HmacSigner(session_factory=_hmac_signer_session, settings=settings),
+        signer=HmacSigner(
+            session_factory=_hmac_signer_session(settings),
+            settings=settings,
+        ),
     )
 
 
-@contextmanager
-def _hmac_signer_session() -> Iterator[Session]:
+def _hmac_signer_session(
+    settings: Settings,
+) -> Callable[[], AbstractContextManager[Session]]:
     """Open a concrete SQLAlchemy session for process-wide signers."""
-    with make_uow() as session:
-        if not isinstance(session, Session):  # pragma: no cover - production seam
-            got = type(session).__name__
-            raise TypeError(f"expected SQLAlchemy Session, got {got}")
-        yield session
+
+    @contextmanager
+    def session_factory() -> Iterator[Session]:
+        with make_uow(settings.database_url) as session:
+            if not isinstance(session, Session):  # pragma: no cover - production seam
+                got = type(session).__name__
+                raise TypeError(f"expected SQLAlchemy Session, got {got}")
+            yield session
+
+    return session_factory
 
 
 def _mount_auth_routers(
@@ -1081,7 +1095,7 @@ def _register_demo_routes(
         start = normalise_start_path(fixture, request.query_params.get("start"))
         persona_key = request.query_params.get("as")
         cookie_secret = _demo_cookie_secret(settings)
-        with make_uow() as session:
+        with make_uow(settings.database_url) as session:
             existing = load_bound_demo_workspace(
                 session,
                 cookie_secret,
@@ -1536,20 +1550,17 @@ def _install_custom_openapi(app: FastAPI) -> None:
     app.openapi = openapi  # type: ignore[method-assign]
 
 
-def _seed_agent_docs_for_lifespan() -> None:
+def _seed_agent_docs_for_lifespan(settings: Settings) -> None:
     """Seed deployment-scoped agent docs during application startup."""
-    from sqlalchemy.orm import Session
-
-    from app.adapters.db.session import make_uow
     from app.services.agent.system_docs import seed_agent_docs
 
-    with make_uow() as session:
+    with make_uow(settings.database_url) as session:
         if not isinstance(session, Session):
             raise TypeError("agent docs seeding requires a SQLAlchemy Session")
         seed_agent_docs(session)
 
 
-def _refresh_capabilities_for_lifespan(app: FastAPI) -> None:
+def _refresh_capabilities_for_lifespan(app: FastAPI, settings: Settings) -> None:
     """Re-read mutable settings from ``deployment_setting`` rows at boot.
 
     :func:`_wire_services` constructs :class:`Capabilities` without a
@@ -1560,14 +1571,10 @@ def _refresh_capabilities_for_lifespan(app: FastAPI) -> None:
     :meth:`Capabilities.refresh_settings`. The original module
     comment claimed the readyz probe did this; it does not.
     """
-    from sqlalchemy.orm import Session
-
-    from app.adapters.db.session import make_uow
-
     capabilities: Capabilities | None = getattr(app.state, "capabilities", None)
     if capabilities is None:
         return
-    with make_uow() as session:
+    with make_uow(settings.database_url) as session:
         if not isinstance(session, Session):
             raise TypeError("capabilities refresh requires a SQLAlchemy Session")
         capabilities.refresh_settings(session)
@@ -1694,8 +1701,8 @@ def _build_worker_lifespan(
         from app.worker import start as scheduler_start
         from app.worker import stop as scheduler_stop
 
-        _seed_agent_docs_for_lifespan()
-        _refresh_capabilities_for_lifespan(app)
+        _seed_agent_docs_for_lifespan(cfg)
+        _refresh_capabilities_for_lifespan(app, cfg)
 
         # Cross-worker SSE relay (cd-nusy). The default bus runs in
         # in-process mode otherwise, which silently strands events
@@ -1710,7 +1717,7 @@ def _build_worker_lifespan(
         # whose ``start`` raises (current implementations don't) must
         # not leave the singleton bus holding a dangling relay or
         # leak the engine pool.
-        relay_engine = make_engine()
+        relay_engine = make_engine(cfg.database_url)
         relay = build_relay(
             engine=relay_engine,
             bus=default_event_bus,
@@ -1727,7 +1734,7 @@ def _build_worker_lifespan(
         # typed event onto its local bus, reusing the router's
         # existing subscriber. SQLite returns a no-op bridge and
         # keeps the single-process dev path.
-        llm_bridge_engine = make_engine()
+        llm_bridge_engine = make_engine(cfg.database_url)
         llm_bridge = build_llm_assignment_invalidation_bridge(
             engine=llm_bridge_engine,
             bus=default_event_bus,

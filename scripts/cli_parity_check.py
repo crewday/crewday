@@ -31,6 +31,7 @@ _CLI_METHODS: Final[frozenset[str]] = frozenset(
 )
 _MUTATING_METHODS: Final[frozenset[str]] = frozenset({"post", "put", "patch", "delete"})
 _ADMIN_API_PREFIX: Final[str] = "/admin/api/v1"
+_WORKSPACE_API_PREFIX: Final[str] = "/w/{slug}/api/v1"
 _OPERATION_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
@@ -57,6 +58,12 @@ class OpenApiOperation:
             f"{_ADMIN_API_PREFIX}/"
         )
 
+    @property
+    def is_workspace(self) -> bool:
+        return self.path == _WORKSPACE_API_PREFIX or self.path.startswith(
+            f"{_WORKSPACE_API_PREFIX}/"
+        )
+
 
 def _has_valid_x_cli_metadata(operation: Mapping[str, Any]) -> bool:
     x_cli = operation.get("x-cli")
@@ -79,6 +86,9 @@ class ParityReport:
     help_tree_extra: tuple[str, ...]
     help_tree_changed: tuple[str, ...]
     missing_from_cli: tuple[str, ...]
+    workspace_missing_x_cli: tuple[str, ...]
+    workspace_hidden_without_reviewed_exclusion: tuple[str, ...]
+    workspace_mutation_classification_invalid: tuple[str, ...]
     admin_missing_x_cli: tuple[str, ...]
     admin_missing_from_surface: tuple[str, ...]
     admin_hidden_without_reviewed_exclusion: tuple[str, ...]
@@ -94,6 +104,9 @@ class ParityReport:
             or self.help_tree_extra
             or self.help_tree_changed
             or self.missing_from_cli
+            or self.workspace_missing_x_cli
+            or self.workspace_hidden_without_reviewed_exclusion
+            or self.workspace_mutation_classification_invalid
             or self.admin_missing_x_cli
             or self.admin_missing_from_surface
             or self.admin_hidden_without_reviewed_exclusion
@@ -298,10 +311,21 @@ def _admin_eligible_operations(
     )
 
 
+def _workspace_unexcluded_operations(
+    operations: Sequence[OpenApiOperation],
+    excluded: set[str],
+) -> tuple[OpenApiOperation, ...]:
+    return tuple(
+        operation
+        for operation in operations
+        if operation.is_workspace and operation.operation_id not in excluded
+    )
+
+
 def _operation_mutates(operation: OpenApiOperation) -> bool:
     x_cli = operation.operation.get("x-cli")
-    if isinstance(x_cli, Mapping) and isinstance(x_cli.get("mutates"), bool):
-        return bool(x_cli["mutates"])
+    if isinstance(x_cli, Mapping) and x_cli.get("mutates") is True:
+        return True
     return operation.method.lower() in _MUTATING_METHODS
 
 
@@ -315,6 +339,57 @@ def _admin_missing_x_cli(operations: Sequence[OpenApiOperation]) -> tuple[str, .
             operation.operation_id
             for operation in operations
             if not _is_cli_candidate(operation)
+        )
+    )
+
+
+def _workspace_missing_x_cli(
+    operations: Sequence[OpenApiOperation],
+) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            operation.operation_id
+            for operation in operations
+            if not _is_hidden(operation)
+            and not _has_valid_x_cli_metadata(operation.operation)
+        )
+    )
+
+
+def _workspace_hidden_without_reviewed_exclusion(
+    operations: Sequence[OpenApiOperation],
+) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            operation.operation_id for operation in operations if _is_hidden(operation)
+        )
+    )
+
+
+def _has_agent_confirmation(operation: OpenApiOperation) -> bool:
+    raw = operation.operation.get("x-agent-confirm")
+    return raw is True or isinstance(raw, Mapping)
+
+
+def _agent_classification_count(operation: OpenApiOperation) -> int:
+    return sum(
+        (
+            _has_agent_confirmation(operation),
+            operation.operation.get("x-agent-forbidden") is True,
+            operation.operation.get("x-interactive-only") is True,
+        )
+    )
+
+
+def _workspace_mutation_classification_invalid(
+    operations: Sequence[OpenApiOperation],
+) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            operation.operation_id
+            for operation in operations
+            if _operation_mutates(operation)
+            and _agent_classification_count(operation) != 1
         )
     )
 
@@ -432,6 +507,7 @@ def build_report(
     openapi_ids = {operation.operation_id for operation in cli_operations}
     cli_ids = _operation_ids_from_surface(entries)
     covered_ids = cli_ids | override_covered | excluded
+    workspace_unexcluded = _workspace_unexcluded_operations(operations, excluded)
     admin_eligible = _admin_eligible_operations(operations, excluded)
     admin_surface_ids = _operation_ids_from_surface_file(surface_admin_path)
 
@@ -440,6 +516,13 @@ def build_report(
         help_tree_extra=extra,
         help_tree_changed=changed,
         missing_from_cli=tuple(sorted(openapi_ids - covered_ids)),
+        workspace_missing_x_cli=_workspace_missing_x_cli(workspace_unexcluded),
+        workspace_hidden_without_reviewed_exclusion=(
+            _workspace_hidden_without_reviewed_exclusion(workspace_unexcluded)
+        ),
+        workspace_mutation_classification_invalid=(
+            _workspace_mutation_classification_invalid(workspace_unexcluded)
+        ),
         admin_missing_x_cli=_admin_missing_x_cli(admin_eligible),
         admin_missing_from_surface=tuple(
             sorted(
@@ -488,6 +571,18 @@ def print_report(report: ParityReport) -> None:
     _print_block(
         "OpenAPI operations missing from CLI surface:",
         report.missing_from_cli,
+    )
+    _print_block(
+        "Workspace operations missing valid x-cli metadata or reviewed exclusion:",
+        report.workspace_missing_x_cli,
+    )
+    _print_block(
+        "Hidden workspace operations missing a reviewed exclusion:",
+        report.workspace_hidden_without_reviewed_exclusion,
+    )
+    _print_block(
+        "Mutating workspace operations missing exactly one agent classification:",
+        report.workspace_mutation_classification_invalid,
     )
     _print_block(
         "Admin operations missing valid x-cli metadata or reviewed exclusion:",
@@ -560,8 +655,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         # while ``build_report`` reads the user-supplied file.
         codegen_argv.extend(["--openapi", str(args.schema)])
     codegen_status = _codegen.main(codegen_argv)
-    if codegen_status != 0:
-        return codegen_status
 
     report = build_report(
         surface_path=args.surface,
@@ -570,6 +663,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         schema_path=args.schema,
     )
     print_report(report)
+    if codegen_status != 0:
+        return codegen_status
     return 0 if report.ok else 1
 
 
