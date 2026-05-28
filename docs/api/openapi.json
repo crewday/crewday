@@ -1451,25 +1451,6 @@
       "AgentLogMessage": {
         "description": "Frontend-compatible agent chat message shape.",
         "properties": {
-          "agent_links": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Links"
-          },
           "at": {
             "format": "date-time",
             "title": "At",
@@ -1491,21 +1472,6 @@
             ],
             "title": "Kind",
             "type": "string"
-          },
-          "links": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Links"
           }
         },
         "required": [
