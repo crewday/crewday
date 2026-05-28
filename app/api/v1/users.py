@@ -1036,6 +1036,14 @@ def build_users_router(
         "/{user_id}/grants",
         response_model=RemoveMemberResponse,
         summary="Remove a user's grants + sessions in the caller's workspace",
+        openapi_extra={
+            "x-agent-confirm": {
+                "summary": "Remove all grants and sessions for user {user_id}?",
+                "verb": "Remove user grants",
+                "risk": "high",
+                "fields_to_show": ["user_id"],
+            },
+        },
     )
     def delete_grants(
         user_id: str,
@@ -1083,6 +1091,7 @@ def build_users_router(
         dependencies=[
             Depends(Permission("users.edit_profile_other", scope_kind="workspace"))
         ],
+        openapi_extra={"x-agent-forbidden": True},
     )
     def post_magic_link(
         user_id: str,
@@ -1199,6 +1208,7 @@ def build_users_router(
         response_model=ResetPasskeyResponse,
         operation_id="users.reset_passkey",
         summary="Owner-initiated worker passkey reset (owners only)",
+        openapi_extra={"x-agent-forbidden": True},
     )
     def post_reset_passkey(
         user_id: str,

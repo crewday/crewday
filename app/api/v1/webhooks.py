@@ -361,6 +361,7 @@ def list_deliveries_route(
             "summary": "Enqueue a test webhook delivery",
             "mutates": True,
         },
+        "x-agent-forbidden": True,
     },
 )
 def test_route(
@@ -414,6 +415,7 @@ def test_route(
             "summary": "Rotate an outbound webhook subscription secret",
             "mutates": True,
         },
+        "x-agent-forbidden": True,
     },
 )
 def rotate_secret_route(
@@ -456,6 +458,7 @@ def rotate_secret_route(
             "summary": "Enable an outbound webhook subscription",
             "mutates": True,
         },
+        "x-agent-forbidden": True,
     },
 )
 def enable_route(webhook_id: str, ctx: _Ctx, session: _Db) -> WebhookResponse:
@@ -491,6 +494,7 @@ def enable_route(webhook_id: str, ctx: _Ctx, session: _Db) -> WebhookResponse:
             "summary": "Create an outbound webhook subscription",
             "mutates": True,
         },
+        "x-agent-forbidden": True,
     },
 )
 def create_route(
@@ -530,6 +534,7 @@ def create_route(
             "summary": "Update an outbound webhook subscription",
             "mutates": True,
         },
+        "x-agent-forbidden": True,
     },
 )
 def update_route(
@@ -573,6 +578,7 @@ def update_route(
             "summary": "Delete an outbound webhook subscription",
             "mutates": True,
         },
+        "x-agent-forbidden": True,
     },
 )
 def delete_route(webhook_id: str, ctx: _Ctx, session: _Db) -> Response:

@@ -582,6 +582,7 @@ def get_approval(
     status_code=status.HTTP_200_OK,
     summary="Approve a pending action and replay it",
     dependencies=[_ApprovalReadGate],
+    openapi_extra={"x-agent-forbidden": True},
 )
 def approve_approval(
     request: Request,
@@ -656,6 +657,7 @@ def _deny_handler(
     status_code=status.HTTP_200_OK,
     summary="Reject a pending action",
     dependencies=[_ApprovalReadGate],
+    openapi_extra={"x-agent-forbidden": True},
 )
 def reject_approval(
     ctx: _DeciderCtx,

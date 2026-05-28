@@ -354,6 +354,12 @@ def build_role_grants_router() -> APIRouter:
                 "summary": "Mint a role grant for a user",
                 "mutates": True,
             },
+            "x-agent-confirm": {
+                "summary": "Mint {grant_role} role grant for user {user_id}?",
+                "verb": "Mint role grant",
+                "risk": "high",
+                "fields_to_show": ["user_id", "grant_role", "scope_property_id"],
+            },
         },
     )
     def create(
@@ -405,6 +411,12 @@ def build_role_grants_router() -> APIRouter:
                 "verb": "update",
                 "summary": "Re-scope a role grant",
                 "mutates": True,
+            },
+            "x-agent-confirm": {
+                "summary": "Re-scope role grant {grant_id}?",
+                "verb": "Re-scope role grant",
+                "risk": "high",
+                "fields_to_show": ["grant_id", "scope_property_id"],
             },
         },
     )
@@ -527,6 +539,12 @@ def build_role_grants_router() -> APIRouter:
                 "verb": "revoke",
                 "summary": "Revoke a role grant",
                 "mutates": True,
+            },
+            "x-agent-confirm": {
+                "summary": "Revoke role grant {grant_id}?",
+                "verb": "Revoke role grant",
+                "risk": "high",
+                "fields_to_show": ["grant_id"],
             },
         },
     )

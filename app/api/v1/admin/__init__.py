@@ -102,6 +102,7 @@ class WorkspaceDeleteResponse(BaseModel):
             "summary": "Download a full workspace export artifact",
             "mutates": False,
         },
+        "x-agent-forbidden": True,
         "x-owner-only": True,
     },
 )
@@ -176,6 +177,7 @@ def _clear_current_session_workspace(
             "summary": "Archive the current workspace",
             "mutates": True,
         },
+        "x-agent-forbidden": True,
         "x-owner-only": True,
     },
 )
@@ -234,6 +236,7 @@ def archive_current_workspace(
             "summary": "Archive and schedule deletion of the current workspace",
             "mutates": True,
         },
+        "x-agent-forbidden": True,
         "x-owner-only": True,
     },
 )

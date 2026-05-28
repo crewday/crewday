@@ -1561,6 +1561,7 @@ def build_payroll_router() -> APIRouter:
         operation_id="payroll.payslips.payout_manifest",
         summary="Stream the payout manifest for a payslip",
         dependencies=[payout_gate],
+        openapi_extra={"x-interactive-only": True},
     )
     def payout_manifest(
         ctx: _Ctx,

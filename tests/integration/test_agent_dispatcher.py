@@ -839,6 +839,9 @@ def test_manager_catalog_includes_representative_ordinary_workspace_tools(
         "messaging.chat_messages.send",
         "settings.workspace.read",
         "stays.create",
+        "auth.tokens.rotate",
+        "tokens.mint",
+        "tokens.revoke",
         "user_leaves.list",
         "user_work_roles.create",
         "users.list",
@@ -847,11 +850,149 @@ def test_manager_catalog_includes_representative_ordinary_workspace_tools(
     }
     assert expected <= tool_names
     assert {
-        "tokens.mint",
-        "tokens.revoke",
+        "auth.passkey.register_start",
+        "auth.passkey.register_finish",
+        "payroll.payslips.payout_manifest",
         "users.reset_passkey",
+        "webhooks.create",
         "workspace_admin.workspace.delete",
     }.isdisjoint(tool_names)
+
+
+def test_security_sensitive_workspace_routes_have_agent_classifications(
+    db_session: Session,
+) -> None:
+    workspace, _manager = _seed_workspace_and_user(db_session)
+    app = create_app(
+        settings=Settings.model_construct(
+            database_url="sqlite:///:memory:",
+            root_key=SecretStr("agent-dispatcher-root-key"),
+            bind_host="127.0.0.1",
+            bind_port=8000,
+            allow_public_bind=False,
+            worker="internal",
+            smtp_host=None,
+            smtp_port=587,
+            smtp_from=None,
+            smtp_use_tls=True,
+            log_level="INFO",
+            cors_allow_origins=[],
+            profile="prod",
+            vite_dev_url="http://127.0.0.1:5173",
+            demo_mode=False,
+            public_url=None,
+            demo_db_denylist=[],
+        )
+    )
+    paths = app.openapi()["paths"]
+
+    def op(operation_id: str) -> dict[str, Any]:
+        for methods in paths.values():
+            for operation in methods.values():
+                if (
+                    isinstance(operation, dict)
+                    and operation.get("operationId") == operation_id
+                ):
+                    return operation
+        raise AssertionError(f"operation {operation_id!r} not found")
+
+    for operation_id in (
+        "tokens.mint",
+        "tokens.revoke",
+        "auth.tokens.revoke_post",
+        "auth.tokens.rotate",
+        "role_grants.create",
+        "role_grants.update",
+        "role_grants.revoke",
+        "permission_groups.create",
+        "permission_groups.update",
+        "permission_groups.delete",
+        "permission_groups.members.add",
+        "permission_groups.members.remove",
+        "permission_rules.create",
+        "permission_rules.revoke",
+        "delete_grants_w__slug__api_v1_users__user_id__grants_delete",
+    ):
+        assert op(operation_id)["x-agent-confirm"]["risk"] == "high"
+
+    for operation_id in (
+        "payroll.payslips.payout_manifest",
+        "admin.users.passkeys.revoke",
+        "auth.passkey.register_start",
+        "auth.passkey.register_finish",
+        "auth.passkey.revoke",
+    ):
+        assert op(operation_id)["x-interactive-only"] is True
+
+    for operation_id in (
+        "approve_approval_w__slug__api_v1_approvals__approval_request_id__approve_post",
+        "reject_approval_w__slug__api_v1_approvals__approval_request_id__reject_post",
+        "users.reset_passkey",
+        "users.magic_link.issue",
+        "workspace_admin.workspace.archive",
+        "workspace_admin.workspace.delete",
+        "workspace_admin.workspace.export",
+        "webhooks.create",
+        "webhooks.update",
+        "webhooks.delete",
+        "webhooks.enable",
+        "webhooks.test",
+        "webhooks.secret.rotate",
+    ):
+        assert op(operation_id)["x-agent-forbidden"] is True
+    assert workspace.slug
+
+
+def test_dispatcher_rejects_classified_security_routes_deterministically(
+    db_session: Session,
+) -> None:
+    workspace, _manager = _seed_workspace_and_user(db_session)
+    app = create_app(
+        settings=Settings.model_construct(
+            database_url="sqlite:///:memory:",
+            root_key=SecretStr("agent-dispatcher-root-key"),
+            bind_host="127.0.0.1",
+            bind_port=8000,
+            allow_public_bind=False,
+            worker="internal",
+            smtp_host=None,
+            smtp_port=587,
+            smtp_from=None,
+            smtp_use_tls=True,
+            log_level="INFO",
+            cors_allow_origins=[],
+            profile="prod",
+            vite_dev_url="http://127.0.0.1:5173",
+            demo_mode=False,
+            public_url=None,
+            demo_db_denylist=[],
+        )
+    )
+    dispatcher = make_default_dispatcher(app, workspace_slug=workspace.slug)
+
+    interactive = dispatcher.dispatch(
+        ToolCall(
+            id="c-payout",
+            name="payroll.payslips.payout_manifest",
+            input={"payslip_id": "pay_001"},
+        ),
+        token=DelegatedToken(plaintext="mip_FAKEKEY_FAKESECRET", token_id="tok"),
+        headers={},
+    )
+    forbidden = dispatcher.dispatch(
+        ToolCall(
+            id="c-reset",
+            name="users.reset_passkey",
+            input={"user_id": "usr_001"},
+        ),
+        token=DelegatedToken(plaintext="mip_FAKEKEY_FAKESECRET", token_id="tok"),
+        headers={},
+    )
+
+    assert interactive.status_code == 403
+    assert interactive.body == {"detail": "tool requires an interactive session"}
+    assert forbidden.status_code == 403
+    assert forbidden.body == {"detail": "tool is forbidden to delegated agents"}
 
 
 def test_dispatcher_tools_catalog_recomputes_authorization_from_current_grants(

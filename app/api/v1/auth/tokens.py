@@ -400,6 +400,12 @@ def build_tokens_router() -> APIRouter:
                 "summary": "Mint a workspace API token — plaintext shown once",
                 "mutates": True,
             },
+            "x-agent-confirm": {
+                "summary": "Mint workspace API token {label}?",
+                "verb": "Mint workspace API token",
+                "risk": "high",
+                "fields_to_show": ["label", "delegate", "scopes", "expires_at_days"],
+            },
         },
     )
     def post_tokens(
@@ -564,6 +570,12 @@ def build_tokens_router() -> APIRouter:
                 "summary": "Revoke a workspace API token",
                 "mutates": True,
             },
+            "x-agent-confirm": {
+                "summary": "Revoke workspace API token {token_id}?",
+                "verb": "Revoke workspace API token",
+                "risk": "high",
+                "fields_to_show": ["token_id"],
+            },
         },
     )
     def delete_token(
@@ -605,6 +617,12 @@ def build_tokens_router() -> APIRouter:
                 "summary": "Revoke a workspace API token (POST alias)",
                 "mutates": True,
             },
+            "x-agent-confirm": {
+                "summary": "Revoke workspace API token {token_id}?",
+                "verb": "Revoke workspace API token",
+                "risk": "high",
+                "fields_to_show": ["token_id"],
+            },
         },
     )
     def post_revoke_token(
@@ -639,6 +657,12 @@ def build_tokens_router() -> APIRouter:
                 "verb": "rotate",
                 "summary": "Rotate a workspace API token's secret",
                 "mutates": True,
+            },
+            "x-agent-confirm": {
+                "summary": "Rotate workspace API token {token_id}?",
+                "verb": "Rotate workspace API token",
+                "risk": "high",
+                "fields_to_show": ["token_id"],
             },
         },
     )

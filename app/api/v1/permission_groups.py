@@ -502,6 +502,12 @@ def build_permission_groups_router() -> APIRouter:
                 "summary": "Create a permission group",
                 "mutates": True,
             },
+            "x-agent-confirm": {
+                "summary": "Create permission group {slug}?",
+                "verb": "Create permission group",
+                "risk": "high",
+                "fields_to_show": ["slug", "name", "capabilities"],
+            },
         },
     )
     def create(
@@ -567,6 +573,12 @@ def build_permission_groups_router() -> APIRouter:
                 "summary": "Rename / re-capability a permission group",
                 "mutates": True,
             },
+            "x-agent-confirm": {
+                "summary": "Update permission group {group_id}?",
+                "verb": "Update permission group",
+                "risk": "high",
+                "fields_to_show": ["group_id", "name", "capabilities"],
+            },
         },
     )
     def update(
@@ -612,6 +624,12 @@ def build_permission_groups_router() -> APIRouter:
                 "verb": "delete",
                 "summary": "Delete a user-defined permission group",
                 "mutates": True,
+            },
+            "x-agent-confirm": {
+                "summary": "Delete permission group {group_id}?",
+                "verb": "Delete permission group",
+                "risk": "high",
+                "fields_to_show": ["group_id"],
             },
         },
     )
@@ -697,6 +715,12 @@ def build_permission_groups_router() -> APIRouter:
                 "summary": "Add a member to a permission group",
                 "mutates": True,
             },
+            "x-agent-confirm": {
+                "summary": "Add user {user_id} to permission group {group_id}?",
+                "verb": "Add permission group member",
+                "risk": "high",
+                "fields_to_show": ["group_id", "user_id"],
+            },
         },
     )
     def add_member_handler(
@@ -737,6 +761,12 @@ def build_permission_groups_router() -> APIRouter:
                 "verb": "members-remove",
                 "summary": "Remove a member from a permission group",
                 "mutates": True,
+            },
+            "x-agent-confirm": {
+                "summary": "Remove user {user_id} from permission group {group_id}?",
+                "verb": "Remove permission group member",
+                "risk": "high",
+                "fields_to_show": ["group_id", "user_id"],
             },
         },
     )

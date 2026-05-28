@@ -508,6 +508,7 @@ def test_tools_catalog_only_advertises_workspace_cli_agent_operations() -> None:
             "method": "post",
             "operationId": "tokens.mint",
             "x-cli": _x_cli("tokens", "create"),
+            "annotation": {"summary": "Mint token?"},
         },
         {
             "path": "/api/v1/auth/me",
@@ -525,7 +526,7 @@ def test_tools_catalog_only_advertises_workspace_cli_agent_operations() -> None:
     )
     disp = OpenAPIToolDispatcher(app=FastAPI(), openapi=schema, workspace_slug="ws")
 
-    assert [tool["name"] for tool in disp.tools] == ["properties.list"]
+    assert [tool["name"] for tool in disp.tools] == ["properties.list", "tokens.mint"]
 
 
 def test_tool_catalog_ignores_legacy_agent_scopes_without_route_permission() -> None:
@@ -831,31 +832,6 @@ def test_dispatch_rejects_known_hidden_cli_tool() -> None:
 
     assert result.status_code == 403
     assert result.body == {"detail": "tool is not backed by CLI metadata"}
-    assert result.mutated is False
-
-
-def test_dispatch_rejects_pending_security_tool_without_agent_classification() -> None:
-    app = _build_app()
-    schema = _schema_with(
-        {
-            "path": "/w/{slug}/api/v1/auth/tokens",
-            "method": "post",
-            "operationId": "tokens.mint",
-            "x-cli": _x_cli("tokens", "create"),
-        }
-    )
-    disp = OpenAPIToolDispatcher(app=app, openapi=schema, workspace_slug="ws-test")
-
-    result = disp.dispatch(
-        ToolCall(id="c-denied", name="tokens.mint", input={}),
-        token=_token(),
-        headers={},
-    )
-
-    assert result.status_code == 403
-    assert result.body == {
-        "detail": "mutating tool is missing exactly one agent classification"
-    }
     assert result.mutated is False
 
 

@@ -1357,40 +1357,6 @@ _CLI_METHODS: Final[frozenset[str]] = frozenset(
 _MUTATING_METHODS: Final[frozenset[str]] = frozenset({"post", "put", "patch", "delete"})
 _PATH_PARAM_RE: Final[re.Pattern[str]] = re.compile(r"\{[^}]+\}")
 
-_SECURITY_CLASSIFICATION_PENDING_OPERATION_IDS: Final[frozenset[str]] = frozenset(
-    {
-        "approve_approval_w__slug__api_v1_approvals__approval_request_id__approve_post",
-        "auth.tokens.revoke_post",
-        "auth.tokens.rotate",
-        "delete_grants_w__slug__api_v1_users__user_id__grants_delete",
-        "payroll.payslips.payout_manifest",
-        "permission_groups.create",
-        "permission_groups.delete",
-        "permission_groups.members.add",
-        "permission_groups.members.remove",
-        "permission_groups.update",
-        "permission_rules.create",
-        "permission_rules.revoke",
-        "reject_approval_w__slug__api_v1_approvals__approval_request_id__reject_post",
-        "role_grants.create",
-        "role_grants.revoke",
-        "role_grants.update",
-        "tokens.mint",
-        "tokens.revoke",
-        "users.magic_link.issue",
-        "users.reset_passkey",
-        "webhooks.create",
-        "webhooks.delete",
-        "webhooks.enable",
-        "webhooks.secret.rotate",
-        "webhooks.test",
-        "webhooks.update",
-        "workspace_admin.workspace.archive",
-        "workspace_admin.workspace.delete",
-        "workspace_admin.workspace.export",
-    }
-)
-
 
 def _declare_cli_metadata(schema: dict[str, Any]) -> None:
     """Stamp valid default ``x-cli`` metadata onto CLI-eligible operations."""
@@ -1425,7 +1391,7 @@ def _declare_cli_metadata(schema: dict[str, Any]) -> None:
 
 
 def _declare_agent_confirmations(schema: dict[str, Any]) -> None:
-    """Gate ordinary mutating workspace tools while security routes await audit."""
+    """Gate ordinary mutating workspace tools without explicit annotations."""
     paths = schema.get("paths")
     if not isinstance(paths, dict):
         return
@@ -1445,10 +1411,7 @@ def _declare_agent_confirmations(schema: dict[str, Any]) -> None:
             ):
                 continue
             operation_id = operation.get("operationId")
-            if (
-                not isinstance(operation_id, str)
-                or operation_id in _SECURITY_CLASSIFICATION_PENDING_OPERATION_IDS
-            ):
+            if not isinstance(operation_id, str):
                 continue
             if not _is_cli_visible_operation(operation):
                 continue

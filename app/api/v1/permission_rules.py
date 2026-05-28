@@ -272,6 +272,19 @@ def build_permission_rules_router() -> APIRouter:
                 "summary": "Create a permission rule",
                 "mutates": True,
             },
+            "x-agent-confirm": {
+                "summary": "Create permission rule for {action_key}?",
+                "verb": "Create permission rule",
+                "risk": "high",
+                "fields_to_show": [
+                    "scope_kind",
+                    "scope_id",
+                    "action_key",
+                    "effect",
+                    "subject_kind",
+                    "subject_id",
+                ],
+            },
         },
     )
     def create(
@@ -306,6 +319,12 @@ def build_permission_rules_router() -> APIRouter:
                 "verb": "revoke",
                 "summary": "Revoke a permission rule",
                 "mutates": True,
+            },
+            "x-agent-confirm": {
+                "summary": "Revoke permission rule {rule_id}?",
+                "verb": "Revoke permission rule",
+                "risk": "high",
+                "fields_to_show": ["rule_id"],
             },
         },
     )

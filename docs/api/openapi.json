@@ -100514,6 +100514,7 @@
         "tags": [
           "workspace_admin"
         ],
+        "x-agent-forbidden": true,
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for workspace_admin.workspace.archive yet."
@@ -101067,6 +101068,7 @@
         "tags": [
           "workspace_admin"
         ],
+        "x-agent-forbidden": true,
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for workspace_admin.workspace.delete yet."
@@ -101621,6 +101623,7 @@
         "tags": [
           "workspace_admin"
         ],
+        "x-agent-forbidden": true,
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for workspace_admin.workspace.export yet."
@@ -106884,6 +106887,7 @@
         "tags": [
           "approvals"
         ],
+        "x-agent-forbidden": true,
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for approve_approval_w__slug__api_v1_approvals__approval_request_id__approve_post yet."
@@ -107025,6 +107029,7 @@
         "tags": [
           "approvals"
         ],
+        "x-agent-forbidden": true,
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for reject_approval_w__slug__api_v1_approvals__approval_request_id__reject_post yet."
@@ -122381,6 +122386,17 @@
           "auth",
           "tokens"
         ],
+        "x-agent-confirm": {
+          "fields_to_show": [
+            "label",
+            "delegate",
+            "scopes",
+            "expires_at_days"
+          ],
+          "risk": "high",
+          "summary": "Mint workspace API token {label}?",
+          "verb": "Mint workspace API token"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for tokens.mint yet."
@@ -122927,6 +122943,14 @@
           "auth",
           "tokens"
         ],
+        "x-agent-confirm": {
+          "fields_to_show": [
+            "token_id"
+          ],
+          "risk": "high",
+          "summary": "Revoke workspace API token {token_id}?",
+          "verb": "Revoke workspace API token"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for tokens.revoke yet."
@@ -124069,6 +124093,14 @@
           "auth",
           "tokens"
         ],
+        "x-agent-confirm": {
+          "fields_to_show": [
+            "token_id"
+          ],
+          "risk": "high",
+          "summary": "Revoke workspace API token {token_id}?",
+          "verb": "Revoke workspace API token"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for auth.tokens.revoke_post yet."
@@ -124635,6 +124667,14 @@
           "auth",
           "tokens"
         ],
+        "x-agent-confirm": {
+          "fields_to_show": [
+            "token_id"
+          ],
+          "risk": "high",
+          "summary": "Rotate workspace API token {token_id}?",
+          "verb": "Rotate workspace API token"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for auth.tokens.rotate yet."
@@ -179622,7 +179662,8 @@
           "mutates": true,
           "summary": "Stream the payout manifest for a payslip",
           "verb": "payslips-payout-manifest"
-        }
+        },
+        "x-interactive-only": true
       }
     },
     "/w/{slug}/api/v1/payroll/payslips/{payslip_id}/pdf": {
@@ -183664,6 +183705,16 @@
           "authz",
           "permission_groups"
         ],
+        "x-agent-confirm": {
+          "fields_to_show": [
+            "slug",
+            "name",
+            "capabilities"
+          ],
+          "risk": "high",
+          "summary": "Create permission group {slug}?",
+          "verb": "Create permission group"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for permission_groups.create yet."
@@ -184210,6 +184261,14 @@
           "authz",
           "permission_groups"
         ],
+        "x-agent-confirm": {
+          "fields_to_show": [
+            "group_id"
+          ],
+          "risk": "high",
+          "summary": "Delete permission group {group_id}?",
+          "verb": "Delete permission group"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for permission_groups.delete yet."
@@ -185335,6 +185394,16 @@
           "authz",
           "permission_groups"
         ],
+        "x-agent-confirm": {
+          "fields_to_show": [
+            "group_id",
+            "name",
+            "capabilities"
+          ],
+          "risk": "high",
+          "summary": "Update permission group {group_id}?",
+          "verb": "Update permission group"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for permission_groups.update yet."
@@ -186495,6 +186564,15 @@
           "authz",
           "permission_groups"
         ],
+        "x-agent-confirm": {
+          "fields_to_show": [
+            "group_id",
+            "user_id"
+          ],
+          "risk": "high",
+          "summary": "Add user {user_id} to permission group {group_id}?",
+          "verb": "Add permission group member"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for permission_groups.members.add yet."
@@ -187050,6 +187128,15 @@
           "authz",
           "permission_groups"
         ],
+        "x-agent-confirm": {
+          "fields_to_show": [
+            "group_id",
+            "user_id"
+          ],
+          "risk": "high",
+          "summary": "Remove user {user_id} from permission group {group_id}?",
+          "verb": "Remove permission group member"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for permission_groups.members.remove yet."
@@ -188315,6 +188402,19 @@
           "authz",
           "permission_rules"
         ],
+        "x-agent-confirm": {
+          "fields_to_show": [
+            "scope_kind",
+            "scope_id",
+            "action_key",
+            "effect",
+            "subject_kind",
+            "subject_id"
+          ],
+          "risk": "high",
+          "summary": "Create permission rule for {action_key}?",
+          "verb": "Create permission rule"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for permission_rules.create yet."
@@ -188911,6 +189011,14 @@
           "authz",
           "permission_rules"
         ],
+        "x-agent-confirm": {
+          "fields_to_show": [
+            "rule_id"
+          ],
+          "risk": "high",
+          "summary": "Revoke permission rule {rule_id}?",
+          "verb": "Revoke permission rule"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for permission_rules.revoke yet."
@@ -206844,6 +206952,16 @@
           "authz",
           "role_grants"
         ],
+        "x-agent-confirm": {
+          "fields_to_show": [
+            "user_id",
+            "grant_role",
+            "scope_property_id"
+          ],
+          "risk": "high",
+          "summary": "Mint {grant_role} role grant for user {user_id}?",
+          "verb": "Mint role grant"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for role_grants.create yet."
@@ -207390,6 +207508,14 @@
           "authz",
           "role_grants"
         ],
+        "x-agent-confirm": {
+          "fields_to_show": [
+            "grant_id"
+          ],
+          "risk": "high",
+          "summary": "Revoke role grant {grant_id}?",
+          "verb": "Revoke role grant"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for role_grants.revoke yet."
@@ -207964,6 +208090,15 @@
           "authz",
           "role_grants"
         ],
+        "x-agent-confirm": {
+          "fields_to_show": [
+            "grant_id",
+            "scope_property_id"
+          ],
+          "risk": "high",
+          "summary": "Re-scope role grant {grant_id}?",
+          "verb": "Re-scope role grant"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for role_grants.update yet."
@@ -264929,6 +265064,14 @@
           "identity",
           "users"
         ],
+        "x-agent-confirm": {
+          "fields_to_show": [
+            "user_id"
+          ],
+          "risk": "high",
+          "summary": "Remove all grants and sessions for user {user_id}?",
+          "verb": "Remove user grants"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for delete_grants_w__slug__api_v1_users__user_id__grants_delete yet."
@@ -265525,6 +265668,7 @@
           "identity",
           "users"
         ],
+        "x-agent-forbidden": true,
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for users.magic_link.issue yet."
@@ -266674,6 +266818,7 @@
           "identity",
           "users"
         ],
+        "x-agent-forbidden": true,
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for users.reset_passkey yet."
@@ -268103,6 +268248,7 @@
         "tags": [
           "webhooks"
         ],
+        "x-agent-forbidden": true,
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for webhooks.create yet."
@@ -268206,6 +268352,7 @@
         "tags": [
           "webhooks"
         ],
+        "x-agent-forbidden": true,
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for webhooks.delete yet."
@@ -268445,6 +268592,7 @@
         "tags": [
           "webhooks"
         ],
+        "x-agent-forbidden": true,
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for webhooks.update yet."
@@ -268695,6 +268843,7 @@
         "tags": [
           "webhooks"
         ],
+        "x-agent-forbidden": true,
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for webhooks.enable yet."
@@ -268818,6 +268967,7 @@
         "tags": [
           "webhooks"
         ],
+        "x-agent-forbidden": true,
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for webhooks.secret.rotate yet."
@@ -268958,6 +269108,7 @@
         "tags": [
           "webhooks"
         ],
+        "x-agent-forbidden": true,
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for webhooks.test yet."
