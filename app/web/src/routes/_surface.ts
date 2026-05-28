@@ -1,8 +1,8 @@
 /**
  * Workspace-relative authenticated-routes manifest for the production SPA.
  *
- * This file is the single source of truth for the SPA's authenticated
- * sitemap. It is consumed by two surfaces:
+ * This file is the sitemap subset of the named frontend route manifest.
+ * It is consumed by two surfaces:
  *
  * 1. The production Vite build, which serialises this list into
  *    `dist/_surface.json` (see the `crewday:emit-surface-manifest`
@@ -20,9 +20,11 @@
  * app's canonical emitted URLs still carry `/w/<slug>/...`; admin
  * routes stay bare because the admin shell is deployment-scope.
  *
- * Note: this is distinct from `cli/crewday/_surface.json`, which
- * describes the HTTP / CLI surface — they are separate artefacts
- * with different schemas and different consumers.
+ * Note: this is distinct from both `dist/_routes.json` and
+ * `cli/crewday/_surface.json`. `dist/_routes.json` is the named
+ * frontend route vocabulary for agent links. `cli/crewday/_surface.json`
+ * describes the HTTP / CLI operation surface generated from OpenAPI.
+ * They are separate artefacts with different schemas and consumers.
  *
  * Inclusion rules (v1):
  *
@@ -40,68 +42,15 @@
  *   `/w/<slug>/`; the live app canonicalizes them to the active
  *   workspace during the walk.
  *
- * The manifest is hand-maintained for v1. If drift becomes a
- * recurring problem, a follow-up Beads task can add an AST-based
- * check that compares this list to the JSX in `App.tsx`.
+ * The underlying named manifest is hand-maintained for v1. If drift
+ * becomes a recurring problem, a follow-up Beads task can add an
+ * AST-based check that compares it to the JSX in `App.tsx`.
  */
 
-export const AUTHENTICATED_ROUTES = [
-  // Shared (any role; the Shell layout picks the right chrome).
-  "/today",
-  "/schedule",
-  "/my/expenses",
-  "/me",
-  "/scheduler",
-  "/history",
-  "/issues/new",
+import { FRONTEND_ROUTES } from "./_manifest";
 
-  // Worker-only surfaces.
-  "/chat",
-  "/asset/scan",
-
-  // Manager-gated pages.
-  "/approvals",
-  "/dashboard",
-  "/leaves",
-  "/settings",
-  "/webhooks",
-  "/chat/channels",
-  "/pay",
-  "/stays",
-  "/instructions",
-  "/properties",
-  "/documents",
-  "/assets",
-  "/inventory",
-  "/asset_types",
-  "/organizations",
-  "/employees",
-  "/expenses",
-  "/templates",
-  "/schedules",
-  "/permissions",
-  "/tokens",
-  "/audit",
-
-  // Client-portal pages.
-  "/portfolio",
-  "/billable-hours",
-  "/quotes",
-  "/invoices",
-
-  // Deployment-admin shell (inside RequireAuth, outside WorkspaceGate).
-  "/admin/dashboard",
-  "/admin/chat-gateway",
-  "/admin/llm",
-  "/admin/llm/graph",
-  "/admin/llm/usage",
-  "/admin/agent-docs",
-  "/admin/usage",
-  "/admin/workspaces",
-  "/admin/signups",
-  "/admin/settings",
-  "/admin/admins",
-  "/admin/audit",
-] as const;
+export const AUTHENTICATED_ROUTES: readonly string[] = FRONTEND_ROUTES.filter(
+  (route) => route.authenticatedSurface,
+).map((route) => route.template);
 
 export type AuthenticatedRoute = (typeof AUTHENTICATED_ROUTES)[number];

@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "node:path";
 import { AUTHENTICATED_ROUTES } from "./src/routes/_surface";
+import { FRONTEND_ROUTE_MANIFEST_JSON } from "./src/routes/_manifest";
 
 // URL-based cache busting in dev: Vite adds ?t=<timestamp> to HMR
 // updates, but the initial request for index.html references raw
@@ -36,13 +37,12 @@ function cacheBustHtml(): PluginOption {
   };
 }
 
-// Emit `dist/_surface.json` at build time so downstream tooling
-// (the §17 360 px sitemap walker, future native shells) can read the
-// authenticated route list without parsing the SPA JSX. The plugin
-// only runs at build time — `apply: 'build'` keeps it a no-op in
-// `vite dev`. Schema is intentionally thin and versioned so we can
-// extend it later (e.g. add a `public` route list or per-route
-// metadata) without breaking existing consumers.
+// Emit route artifacts at build time so downstream tooling can read the
+// SPA surface without parsing the React tree. `_surface.json` keeps the
+// thin schema expected by the §17 360 px sitemap walker. `_routes.json`
+// is the named frontend route vocabulary used by agent-link checks and
+// renderers; it is deliberately separate from `cli/crewday/_surface.json`,
+// which describes OpenAPI-backed CLI operations.
 function emitSurfaceManifest(): PluginOption {
   return {
     name: "crewday:emit-surface-manifest",
@@ -56,6 +56,11 @@ function emitSurfaceManifest(): PluginOption {
         type: "asset",
         fileName: "_surface.json",
         source: `${JSON.stringify(manifest, null, 2)}\n`,
+      });
+      this.emitFile({
+        type: "asset",
+        fileName: "_routes.json",
+        source: `${JSON.stringify(FRONTEND_ROUTE_MANIFEST_JSON, null, 2)}\n`,
       });
     },
   };
