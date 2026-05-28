@@ -105,7 +105,7 @@ describe("PermissionsPage PageTabs", () => {
 
     expect(await screen.findByRole("heading", { name: "Privacy" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Privacy" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("status")).toHaveTextContent("No upstream PII consent selected");
+    expect(screen.getByRole("status")).toHaveTextContent("No agent PII consent selected");
 
     fireEvent.click(screen.getByRole("checkbox", { name: /Legal names/ }));
 
