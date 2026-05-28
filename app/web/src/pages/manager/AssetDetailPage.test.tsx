@@ -180,9 +180,9 @@ afterEach(() => {
 });
 
 describe("<AssetDetailPage>", () => {
-  it("wraps manager asset detail routes in the scope-view permission guard before the manager shell", () => {
+  it("gates manager asset detail routes before asset detail content can render", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="scope\.view" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="asset\/:aid" element={<AssetDetailPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="scope\.view" \/>}>\s*(?:(?!<\/Route>)[\s\S])*?<Route path="asset\/:aid" element={<AssetDetailPage \/>} \/>/,
     );
   });
 
@@ -201,7 +201,7 @@ describe("<AssetDetailPage>", () => {
       expect(within(tablist).getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
       expect(screen.getByRole("heading", { name: "Details" })).toBeInTheDocument();
       expect(screen.getByText("SN-123")).toBeInTheDocument();
-      expect(screen.getByText("1299.00 EUR")).toBeInTheDocument();
+      expect(screen.getByText("1,299.00 EUR")).toBeInTheDocument();
       expect(screen.getByText("Clean filter")).toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "Overview" })).not.toBeInTheDocument();
 

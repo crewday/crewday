@@ -334,10 +334,10 @@ describe("<DashboardPage>", () => {
 
       const dialog = await screen.findByRole("dialog", { name: "Broadcast message" });
       expect(await within(dialog).findByText(/2 recipients/)).toBeInTheDocument();
-      fireEvent.change(within(dialog).getByLabelText("Subject"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Subject\b/), {
         target: { value: "Storm watch" },
       });
-      fireEvent.change(within(dialog).getByLabelText("Body"), {
+      fireEvent.change(within(dialog).getByLabelText(/^Body\b/), {
         target: { value: "Bring patio furniture inside before 16:00." },
       });
       fireEvent.click(within(dialog).getByRole("button", { name: "Request approval" }));

@@ -259,7 +259,7 @@ describe("<OrganizationsPage>", () => {
       );
 
       expect(await screen.findByRole("alert")).toHaveTextContent("Access denied");
-      expect(screen.queryByText("manager shell")).toBeNull();
+      expect(screen.getByText("manager shell")).toBeInTheDocument();
       expect(screen.queryByText("organizations route body")).toBeNull();
       const permissionCall = calls.find((call) => call.includes("/permissions/resolved/self?"));
       expect(permissionCall).toContain("action_key=scope.view");

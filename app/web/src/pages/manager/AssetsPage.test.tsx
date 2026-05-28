@@ -331,9 +331,9 @@ afterEach(() => {
 });
 
 describe("<AssetsPage>", () => {
-  it("wraps the assets routes in the scope-view permission guard", () => {
+  it("gates the assets routes before asset content can render", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="scope\.view" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="assets" element={<AssetsPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="scope\.view" \/>}>\s*(?:(?!<\/Route>)[\s\S])*?<Route path="assets" element={<AssetsPage \/>} \/>/,
     );
   });
 

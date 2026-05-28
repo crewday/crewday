@@ -52,7 +52,7 @@ afterEach(() => {
 });
 
 describe("Permissions privacy tab", () => {
-  it("renders empty upstream PII consent and writes checkbox toggles", async () => {
+  it("renders empty agent PII consent and writes checkbox toggles", async () => {
     const fetchSpy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       const resolved = typeof url === "string" ? url : url.toString();
       const parsed = new URL(resolved, "http://crewday.test");
@@ -89,7 +89,7 @@ describe("Permissions privacy tab", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(
-      "No upstream PII consent selected",
+      "No agent PII consent selected",
     );
     fireEvent.click(screen.getByRole("checkbox", { name: /Legal names/ }));
 

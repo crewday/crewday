@@ -21,6 +21,7 @@ vi.mock("@/components/AgentSidebar", () => ({
 }));
 
 vi.mock("@/lib/offlineQueue", () => ({
+  drainOfflineQueue: vi.fn(() => Promise.resolve()),
   usePendingMutationCount: () => 0,
 }));
 

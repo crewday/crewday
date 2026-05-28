@@ -63,6 +63,7 @@ beforeEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("acme");
+  vi.spyOn(preferences, "persistWorkspace").mockImplementation(() => undefined);
   zxing.decodeFromConstraints.mockReset();
   zxing.releaseAllStreams.mockReset();
   setMediaDevices(undefined);

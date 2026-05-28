@@ -167,19 +167,19 @@ describe("<ExpensesApprovalsPage>", () => {
       expect(screen.getByRole("dialog", { name: "Correct Corner Market" })).toBeInTheDocument();
       expect(screen.getByText(/approval audit row records the before and after values/)).toBeInTheDocument();
 
-      fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "15.499" } });
+      fireEvent.change(screen.getByLabelText(/^Amount\b/), { target: { value: "15.499" } });
       expect(screen.getByText("Enter a positive amount with no more than two decimal places.")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Approve corrected claim" })).toBeDisabled();
 
-      fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "15.49" } });
-      fireEvent.change(screen.getByLabelText("Category"), { target: { value: "maintenance" } });
-      fireEvent.change(screen.getByLabelText("Currency"), { target: { value: "gbp" } });
+      fireEvent.change(screen.getByLabelText(/^Amount\b/), { target: { value: "15.49" } });
+      fireEvent.change(screen.getByLabelText(/^Category\b/), { target: { value: "maintenance" } });
+      fireEvent.change(screen.getByLabelText(/^Currency\b/), { target: { value: "gbp" } });
       fireEvent.click(screen.getByRole("button", { name: "Approve corrected claim" }));
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "Currency GBP is not enabled for this workspace.",
       );
 
-      fireEvent.change(screen.getByLabelText("Currency"), { target: { value: "usd" } });
+      fireEvent.change(screen.getByLabelText(/^Currency\b/), { target: { value: "usd" } });
       fireEvent.click(screen.getByRole("button", { name: "Approve corrected claim" }));
 
       await waitFor(() => {

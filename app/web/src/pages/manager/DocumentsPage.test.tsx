@@ -187,9 +187,9 @@ afterEach(() => {
 });
 
 describe("<DocumentsPage>", () => {
-  it("wraps the real documents route in the document-management permission guard", () => {
+  it("gates the real documents route before document content can render", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="assets\.manage_documents" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="documents" element={<DocumentsPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="assets\.manage_documents" \/>}>\s*(?:(?!<\/Route>)[\s\S])*?<Route path="documents" element={<DocumentsPage \/>} \/>/,
     );
   });
 
