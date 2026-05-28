@@ -5,17 +5,21 @@ import {
   type KeyboardEvent,
   type MutableRefObject,
   type ReactNode,
+  useCallback,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
 } from "react";
-import { ArrowDown, ArrowUp, Check, GripVertical, Pencil, Search, Trash2, X } from "lucide-react";
+import type { InfiniteData } from "@tanstack/react-query";
+import { ArrowDown, ArrowUp, Check, GripVertical, Loader2, Pencil, RotateCcw, Search, Trash2, X } from "lucide-react";
 import ConfirmationModal from "@/components/ConfirmationModal";
 import IconSelector from "@/components/IconSelector";
 import { EmptyState } from "@/components/common";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { useReorderableList } from "@/components/useReorderableList";
+import type { ListEnvelope } from "@/lib/listResponse";
 
 export type InlineTableSaveMode = "explicit" | "autosave" | "batch";
 export type InlineTableRowStatus = "idle" | "dirty" | "saving" | "error" | "disabled";
@@ -103,6 +107,134 @@ export interface InlineTableSearchProps {
   noResultsState?: ReactNode;
 }
 
+export interface UseInlineTableInfiniteRowsOptions<TItem, TDraft> {
+  data?: Pick<InfiniteData<ListEnvelope<TItem>>, "pages"> | null;
+  getRowId: (item: TItem) => string;
+  mapRow: (item: TItem, index: number) => InlineTableRow<TDraft>;
+  mergeRow?: (
+    baseRow: InlineTableRow<TDraft>,
+    localRow: InlineTableRow<TDraft>,
+    item: TItem,
+    index: number,
+  ) => InlineTableRow<TDraft>;
+}
+
+export interface UseInlineTableInfiniteRowsResult<TDraft> {
+  rows: readonly InlineTableRow<TDraft>[];
+  loadedRowCount: number;
+  pageCount: number;
+  nextCursor: string | null;
+  hasMore: boolean;
+  isEmpty: boolean;
+  updateRow: (rowId: string, update: (row: InlineTableRow<TDraft>) => InlineTableRow<TDraft>) => void;
+  patchRowDraft: (rowId: string, patch: Partial<TDraft>) => void;
+  resetRow: (rowId: string) => void;
+  resetRows: () => void;
+}
+
+export function inlineTableNextCursor<TItem>(page: ListEnvelope<TItem>): string | undefined {
+  return page.has_more && page.next_cursor ? page.next_cursor : undefined;
+}
+
+export function useInlineTableInfiniteRows<TItem, TDraft>({
+  data,
+  getRowId,
+  mapRow,
+  mergeRow = mergeInlineTableRowState,
+}: UseInlineTableInfiniteRowsOptions<TItem, TDraft>): UseInlineTableInfiniteRowsResult<TDraft> {
+  const [localRows, setLocalRows] = useState<ReadonlyMap<string, InlineTableRow<TDraft>>>(() => new Map());
+  const rowsByIdRef = useRef<ReadonlyMap<string, InlineTableRow<TDraft>>>(new Map());
+  const baseRowIds = useMemo(() => new Set(data?.pages.flatMap((page) => page.data.map(getRowId)) ?? []), [data, getRowId]);
+
+  const rows = useMemo(() => {
+    let rowIndex = 0;
+    const nextRows: InlineTableRow<TDraft>[] = [];
+
+    for (const page of data?.pages ?? []) {
+      for (const item of page.data) {
+        const baseRow = mapRow(item, rowIndex);
+        const localRow = localRows.get(baseRow.id);
+        nextRows.push(localRow ? mergeRow(baseRow, localRow, item, rowIndex) : baseRow);
+        rowIndex += 1;
+      }
+    }
+
+    rowsByIdRef.current = new Map(nextRows.map((row) => [row.id, row]));
+    return nextRows;
+  }, [data, localRows, mapRow, mergeRow]);
+
+  useEffect(() => {
+    setLocalRows((current) => {
+      const next = new Map<string, InlineTableRow<TDraft>>();
+      for (const [rowId, row] of current) {
+        if (baseRowIds.has(rowId)) next.set(rowId, row);
+      }
+      return next.size === current.size ? current : next;
+    });
+  }, [baseRowIds]);
+
+  const updateRow = useCallback((rowId: string, update: (row: InlineTableRow<TDraft>) => InlineTableRow<TDraft>) => {
+    setLocalRows((current) => {
+      const row = current.get(rowId) ?? rowsByIdRef.current.get(rowId);
+      if (!row) return current;
+      const next = new Map(current);
+      next.set(rowId, update(row));
+      return next;
+    });
+  }, []);
+
+  const patchRowDraft = useCallback((rowId: string, patch: Partial<TDraft>) => {
+    updateRow(rowId, (row) => ({
+      ...row,
+      committedDraft: row.committedDraft ?? row.draft,
+      draft: { ...row.draft, ...patch },
+      dirty: true,
+      error: undefined,
+      validation: undefined,
+    }));
+  }, [updateRow]);
+
+  const resetRow = useCallback((rowId: string) => {
+    setLocalRows((current) => {
+      if (!current.has(rowId)) return current;
+      const next = new Map(current);
+      next.delete(rowId);
+      return next;
+    });
+  }, []);
+
+  const resetRows = useCallback(() => setLocalRows(new Map()), []);
+  const lastPage = data?.pages.at(-1);
+  const nextPageCursor = lastPage ? inlineTableNextCursor(lastPage) : undefined;
+
+  return {
+    rows,
+    loadedRowCount: rows.length,
+    pageCount: data?.pages.length ?? 0,
+    nextCursor: nextPageCursor ?? null,
+    hasMore: nextPageCursor !== undefined,
+    isEmpty: rows.length === 0,
+    updateRow,
+    patchRowDraft,
+    resetRow,
+    resetRows,
+  };
+}
+
+export interface InlineTableLoadMoreProps {
+  hasMore: boolean;
+  isInitialLoading?: boolean;
+  isFetchingMore?: boolean;
+  error?: ReactNode;
+  loadedCount?: number;
+  onLoadMore?: () => void;
+  onRetry?: () => void;
+  loadMoreLabel?: string;
+  loadingLabel?: string;
+  retryLabel?: string;
+  allLoadedLabel?: string;
+}
+
 /**
  * Reusable inline table editor for dense operational forms.
  *
@@ -140,6 +272,8 @@ interface InlineTableFormBaseProps<TDraft> {
   emptyState?: ReactNode;
   /** Optional caller-controlled search/filter chrome. Filtering remains caller-owned. */
   search?: InlineTableSearchProps;
+  /** Optional standard footer slot for cursor loading controls and status. */
+  loadMore?: ReactNode;
   /** Optional full-width detail line for notes, validation help, subtasks, or row metadata. */
   renderDetail?: (context: InlineTableCellContext<TDraft>) => ReactNode;
   /** Improves accessible labels and delete confirmation copy when row content has a stable name. */
@@ -196,6 +330,7 @@ export function InlineTableForm<TDraft>({
   trailingCreateRow,
   emptyState,
   search,
+  loadMore,
   renderDetail,
   renderBatchActions,
   onBatchCancel,
@@ -722,6 +857,7 @@ export function InlineTableForm<TDraft>({
             );
           })}
         </div>
+        {loadMore ? <div className="inline-table-form__load-more-slot">{loadMore}</div> : null}
       </div>
       {addRow ? <div className="inline-table-form__add">{addRow}</div> : null}
       {batchActions ? (
@@ -901,6 +1037,94 @@ function InlineTableSearchToolbar({
           {search.filters}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+export function InlineTableLoadMore({
+  hasMore,
+  isInitialLoading = false,
+  isFetchingMore = false,
+  error,
+  loadedCount,
+  onLoadMore,
+  onRetry,
+  loadMoreLabel = "Load more rows",
+  loadingLabel = "Loading rows",
+  retryLabel = "Retry loading rows",
+  allLoadedLabel = "All rows loaded",
+}: InlineTableLoadMoreProps) {
+  const countLabel = loadedCount === undefined ? null : (
+    <span className="inline-table-form__load-more-count">
+      {loadedCount} loaded
+    </span>
+  );
+
+  if (isInitialLoading) {
+    return (
+      <div className="inline-table-form__load-more" role="status" aria-live="polite" aria-busy="true">
+        <span className="inline-table-form__load-more-status">
+          <Loader2 className="inline-table-form__load-more-spinner" size={15} aria-hidden="true" />
+          {loadingLabel}
+        </span>
+        {countLabel}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="inline-table-form__load-more inline-table-form__load-more--error" role="group" aria-label="Row loading error">
+        <span className="inline-table-form__load-more-status" role="status" aria-live="assertive">
+          {error}
+        </span>
+        {countLabel}
+        {onRetry ? (
+          <button
+            type="button"
+            className="inline-table-form__load-more-button"
+            disabled={isFetchingMore}
+            aria-busy={isFetchingMore || undefined}
+            onClick={onRetry}
+          >
+            {isFetchingMore ? (
+              <Loader2 className="inline-table-form__load-more-spinner" size={15} aria-hidden="true" />
+            ) : (
+              <RotateCcw size={15} aria-hidden="true" />
+            )}
+            {isFetchingMore ? loadingLabel : retryLabel}
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (!hasMore) {
+    return (
+      <div className="inline-table-form__load-more inline-table-form__load-more--complete">
+        <span className="inline-table-form__load-more-status" role="status" aria-live="polite">
+          {allLoadedLabel}
+        </span>
+        {countLabel}
+      </div>
+    );
+  }
+
+  return (
+    <div className="inline-table-form__load-more" role="group" aria-label="Load more table rows" aria-live="polite">
+      <button
+        type="button"
+        className="inline-table-form__load-more-button"
+        disabled={isFetchingMore || !onLoadMore}
+        aria-busy={isFetchingMore || undefined}
+        onClick={onLoadMore}
+      >
+        {isFetchingMore ? (
+          <Loader2 className="inline-table-form__load-more-spinner" size={15} aria-hidden="true" />
+        ) : null}
+        {isFetchingMore ? loadingLabel : loadMoreLabel}
+      </button>
+      {countLabel}
     </div>
   );
 }
@@ -1400,6 +1624,22 @@ function rowStatus<TDraft>(row: InlineTableRow<TDraft>): InlineTableRowStatus {
   if (row.error) return "error";
   if (row.dirty) return "dirty";
   return "idle";
+}
+
+function mergeInlineTableRowState<TDraft>(
+  baseRow: InlineTableRow<TDraft>,
+  localRow: InlineTableRow<TDraft>,
+): InlineTableRow<TDraft> {
+  return {
+    ...baseRow,
+    draft: localRow.draft,
+    committedDraft: localRow.committedDraft ?? baseRow.committedDraft,
+    editing: localRow.editing ?? baseRow.editing,
+    dirty: localRow.dirty ?? baseRow.dirty,
+    saving: localRow.saving ?? baseRow.saving,
+    error: localRow.error ?? baseRow.error,
+    validation: localRow.validation ?? baseRow.validation,
+  };
 }
 
 function makeBatchContext<TDraft>(

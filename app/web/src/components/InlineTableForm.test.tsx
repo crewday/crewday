@@ -1,9 +1,12 @@
+import { QueryClient, QueryClientProvider, useInfiniteQuery } from "@tanstack/react-query";
+import type { InfiniteData } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
   InlineNumberField,
   InlineIconField,
+  InlineTableLoadMore,
   InlineNoteField,
   InlineSearchableSelectField,
   InlineSelectField,
@@ -13,7 +16,10 @@ import {
   type InlineTableRow,
   InlineTextField,
   InlineTimeField,
+  inlineTableNextCursor,
+  useInlineTableInfiniteRows,
 } from "./InlineTableForm";
+import type { ListEnvelope } from "@/lib/listResponse";
 import inlineTableCss from "@/styles/inline-table-form.css?raw";
 
 interface Draft {
@@ -33,6 +39,15 @@ interface IconDraft {
 interface RoleDraft {
   roles: string[];
 }
+
+interface CursorRecord {
+  id: string;
+  title: string;
+  owner: string;
+  note: string;
+}
+
+type CursorPage = ListEnvelope<CursorRecord>;
 
 const ownerOptions = [
   { value: "maria", label: "Maria" },
@@ -1811,9 +1826,114 @@ describe("InlineTableForm", () => {
     expect(nextCreateRow).toHaveClass("is-editing");
   });
 
+  it("shows the inline table loading row while the first cursor page loads", async () => {
+    const firstPage = deferred<CursorPage>();
+    const fetchPage = vi.fn(async () => firstPage.promise);
+    renderInfiniteInlineTable(fetchPage);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Loading rows");
+    expect(screen.getByText("0 loaded")).toBeInTheDocument();
+
+    await act(async () => {
+      firstPage.resolve(cursorPage([cursorRecord("c-1", "Confirm linen")], null));
+    });
+
+    expect(await screen.findByText("Confirm linen")).toBeInTheDocument();
+    expect(screen.getByText("All rows loaded")).toBeInTheDocument();
+  });
+
+  it("appends a cursor page without resetting edited draft state", async () => {
+    const fetchPage = vi.fn(async (cursor: string | null) => (
+      cursor === "cursor-2"
+        ? cursorPage([cursorRecord("c-2", "Restock coffee")], null)
+        : cursorPage([cursorRecord("c-1", "Confirm linen")], "cursor-2")
+    ));
+    renderInfiniteInlineTable(fetchPage);
+
+    expect(await screen.findByText("Confirm linen")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Edited linen" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Load more rows" }));
+
+    expect(await screen.findByText("Restock coffee")).toBeInTheDocument();
+    expect(screen.getByLabelText("Title")).toHaveValue("Edited linen");
+    expect(screen.getByLabelText("Edited linen")).toHaveClass("is-editing");
+    expect(fetchPage).toHaveBeenCalledWith("cursor-2");
+  });
+
+  it("renders cursor load errors and retries the failed page", async () => {
+    const fetchPage = vi
+      .fn<(cursor: string | null) => Promise<CursorPage>>()
+      .mockResolvedValueOnce(cursorPage([cursorRecord("c-1", "Confirm linen")], "cursor-2"))
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValueOnce(cursorPage([cursorRecord("c-2", "Restock coffee")], null));
+    renderInfiniteInlineTable(fetchPage);
+
+    expect(await screen.findByText("Confirm linen")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load more rows" }));
+
+    expect(await screen.findByText("Could not load the next page.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry loading rows" }));
+
+    expect(await screen.findByText("Restock coffee")).toBeInTheDocument();
+    expect(screen.queryByText("Could not load the next page.")).not.toBeInTheDocument();
+    expect(fetchPage).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps cursor retry disabled while the failed page is loading again", async () => {
+    const retryPage = deferred<CursorPage>();
+    const fetchPage = vi
+      .fn<(cursor: string | null) => Promise<CursorPage>>()
+      .mockResolvedValueOnce(cursorPage([cursorRecord("c-1", "Confirm linen")], "cursor-2"))
+      .mockRejectedValueOnce(new Error("network"))
+      .mockImplementationOnce(async () => retryPage.promise);
+    renderInfiniteInlineTable(fetchPage);
+
+    expect(await screen.findByText("Confirm linen")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load more rows" }));
+
+    expect(await screen.findByText("Could not load the next page.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry loading rows" }));
+
+    const retryButton = await screen.findByRole("button", { name: "Loading rows" });
+    expect(retryButton).toBeDisabled();
+
+    await act(async () => {
+      retryPage.resolve(cursorPage([cursorRecord("c-2", "Restock coffee")], null));
+    });
+
+    expect(await screen.findByText("Restock coffee")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Loading rows" })).not.toBeInTheDocument();
+  });
+
+  it("shows the all-loaded cursor state when the final page has no next cursor", async () => {
+    const fetchPage = vi.fn(async () => cursorPage([cursorRecord("c-1", "Confirm linen")], null));
+    renderInfiniteInlineTable(fetchPage);
+
+    expect(await screen.findByText("Confirm linen")).toBeInTheDocument();
+    expect(screen.getByText("All rows loaded")).toBeInTheDocument();
+    expect(screen.getByText("1 loaded")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more rows" })).not.toBeInTheDocument();
+  });
+
+  it("does not expose load more when has_more is true without a next cursor", async () => {
+    const fetchPage = vi.fn(async () => ({
+      data: [cursorRecord("c-1", "Confirm linen")],
+      next_cursor: null,
+      has_more: true,
+    }));
+    renderInfiniteInlineTable(fetchPage);
+
+    expect(await screen.findByText("Confirm linen")).toBeInTheDocument();
+    expect(screen.getByText("All rows loaded")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more rows" })).not.toBeInTheDocument();
+  });
+
   it("keeps mobile label hooks and phone card downgrade styles in CSS", () => {
     expect(inlineTableCss).toContain(".inline-table-form__mobile-label");
     expect(inlineTableCss).toContain(".inline-table-form__group.is-delete-armed");
+    expect(inlineTableCss).toContain(".inline-table-form__load-more");
     expect(inlineTableCss).toContain(".inline-table-form__group:focus-visible");
     expect(inlineTableCss).toContain(".inline-table-form__group.is-selected:focus-visible");
     expect(inlineTableCss).toContain(".inline-table-form__group.is-delete-armed:focus-visible");
@@ -1857,4 +1977,114 @@ function rowWithTitle(id: string, title: string): InlineTableRow<Draft> {
       note: "",
     },
   };
+}
+
+function renderInfiniteInlineTable(fetchPage: (cursor: string | null) => Promise<CursorPage>) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <InfiniteInlineTableHarness fetchPage={fetchPage} />
+    </QueryClientProvider>,
+  );
+}
+
+function InfiniteInlineTableHarness({
+  fetchPage,
+}: {
+  fetchPage: (cursor: string | null) => Promise<CursorPage>;
+}) {
+  const query = useInfiniteQuery<CursorPage, Error, InfiniteData<CursorPage>, readonly ["inline-table-cursor"], string | null>({
+    queryKey: ["inline-table-cursor"],
+    initialPageParam: null,
+    queryFn: ({ pageParam }) => fetchPage(pageParam),
+    getNextPageParam: inlineTableNextCursor,
+  });
+  const infiniteRows = useInlineTableInfiniteRows<CursorRecord, Draft>({
+    data: query.data,
+    getRowId: (record) => record.id,
+    mapRow: cursorRecordToRow,
+  });
+  const loadError = query.error
+    ? query.data ? "Could not load the next page." : "Could not load rows."
+    : null;
+
+  return (
+    <InlineTableForm
+      ariaLabel="Cursor inline table"
+      columns={columns}
+      rows={infiniteRows.rows}
+      saveMode="explicit"
+      onDraftChange={infiniteRows.patchRowDraft}
+      onEdit={(rowId) => infiniteRows.updateRow(rowId, (row) => ({ ...row, editing: true }))}
+      onCancel={infiniteRows.resetRow}
+      onSave={(rowId) => infiniteRows.updateRow(rowId, (row) => ({
+        ...row,
+        dirty: false,
+        editing: false,
+        committedDraft: row.draft,
+      }))}
+      getRowLabel={(row) => row.draft.title}
+      loadMore={(
+        <InlineTableLoadMore
+          hasMore={query.hasNextPage}
+          isInitialLoading={query.isLoading}
+          isFetchingMore={query.isFetchingNextPage}
+          error={loadError}
+          loadedCount={infiniteRows.loadedRowCount}
+          onLoadMore={() => {
+            void query.fetchNextPage();
+          }}
+          onRetry={() => {
+            if (query.data) {
+              void query.fetchNextPage();
+              return;
+            }
+            void query.refetch();
+          }}
+        />
+      )}
+    />
+  );
+}
+
+function cursorRecord(id: string, title: string): CursorRecord {
+  return {
+    id,
+    title,
+    owner: "maria",
+    note: "",
+  };
+}
+
+function cursorPage(data: CursorRecord[], nextCursor: string | null): CursorPage {
+  return {
+    data,
+    next_cursor: nextCursor,
+    has_more: nextCursor !== null,
+  };
+}
+
+function cursorRecordToRow(record: CursorRecord): InlineTableRow<Draft> {
+  const draft = {
+    title: record.title,
+    owner: record.owner,
+    note: record.note,
+  };
+  return {
+    id: record.id,
+    editing: false,
+    dirty: false,
+    draft,
+    committedDraft: draft,
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }

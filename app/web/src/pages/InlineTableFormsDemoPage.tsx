@@ -7,12 +7,15 @@ import {
   InlineNumberField,
   InlineNoteField,
   InlineSelectField,
+  InlineTableLoadMore,
   InlineTableForm,
   type InlineTableColumn,
   type InlineTableRow,
   InlineTextField,
   InlineTimeField,
+  useInlineTableInfiniteRows,
 } from "@/components/InlineTableForm";
+import type { ListEnvelope } from "@/lib/listResponse";
 
 type Priority = "low" | "normal" | "high";
 
@@ -47,6 +50,23 @@ interface DefaultDraft {
   state: string;
 }
 
+interface WorkspaceRecord {
+  id: string;
+  name: string;
+  owner: string;
+  region: string;
+  cap: string;
+  status: string;
+}
+
+interface WorkspaceDraft {
+  name: string;
+  owner: string;
+  region: string;
+  cap: string;
+  status: string;
+}
+
 const assignees = [
   { value: "", label: "Unassigned" },
   { value: "maria", label: "Maria" },
@@ -78,6 +98,45 @@ const defaultStates = [
   { value: "blocked", label: "Blocked" },
 ];
 
+const workspaceStatuses = [
+  { value: "active", label: "Active" },
+  { value: "paused", label: "Paused" },
+];
+
+interface WorkspacePage extends ListEnvelope<WorkspaceRecord> {
+  cursor: string | null;
+}
+
+const workspaceCursorPages: WorkspacePage[] = [
+  {
+    cursor: null,
+    next_cursor: "workspace-page-2",
+    has_more: true,
+    data: [
+      { id: "ws-1", name: "Villa Sud Ops", owner: "Maria", region: "FR-S", cap: "850", status: "active" },
+      { id: "ws-2", name: "Harbor Flat", owner: "Enzo", region: "PT-LIS", cap: "620", status: "active" },
+      { id: "ws-3", name: "Loft North", owner: "Sora", region: "UK-LON", cap: "440", status: "paused" },
+    ],
+  },
+  {
+    cursor: "workspace-page-2",
+    next_cursor: "workspace-page-3",
+    has_more: true,
+    data: [
+      { id: "ws-4", name: "Garden Annex", owner: "Priya", region: "US-CA", cap: "520", status: "active" },
+      { id: "ws-5", name: "Canal House", owner: "Noor", region: "NL-AMS", cap: "730", status: "active" },
+    ],
+  },
+  {
+    cursor: "workspace-page-3",
+    next_cursor: null,
+    has_more: false,
+    data: [
+      { id: "ws-6", name: "Ridge Cabins", owner: "Theo", region: "US-CO", cap: "390", status: "active" },
+    ],
+  },
+];
+
 let demoRowCounter = 0;
 
 function nextDemoRowId(prefix: string) {
@@ -90,13 +149,18 @@ export default function InlineTableFormsDemoPage() {
   const [checklist, setChecklist] = useState<InlineTableRow<ChecklistDraft>[]>(initialChecklist);
   const [assignments, setAssignments] = useState<InlineTableRow<AssignmentDraft>[]>(initialAssignments);
   const [defaultRows, setDefaultRows] = useState<InlineTableRow<DefaultDraft>[]>(initialDefaultRows);
+  const [workspacePages, setWorkspacePages] = useState<WorkspacePage[]>(() => [workspaceCursorPages[0]!]);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [workspaceLoadError, setWorkspaceLoadError] = useState<ReactNode>(null);
   const [taskSearch, setTaskSearch] = useState("linen");
   const [emptySearch, setEmptySearch] = useState("no match");
   const assignmentSaveTimers = useRef<number[]>([]);
+  const workspaceLoadTimer = useRef<number | null>(null);
 
   useEffect(() => () => {
     assignmentSaveTimers.current.forEach((timer) => window.clearTimeout(timer));
     assignmentSaveTimers.current = [];
+    if (workspaceLoadTimer.current) window.clearTimeout(workspaceLoadTimer.current);
   }, []);
 
   const taskColumns = useMemo<InlineTableColumn<TaskDraft>[]>(() => [
@@ -378,8 +442,106 @@ export default function InlineTableFormsDemoPage() {
       ),
     },
   ], []);
+  const workspaceColumns = useMemo<InlineTableColumn<WorkspaceDraft>[]>(() => [
+    {
+      key: "name",
+      header: "Workspace",
+      width: { flex: 1.6, min: 220 },
+      renderRead: ({ row }) => <ReadText value={row.draft.name} />,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineTextField
+          value={row.draft.name}
+          disabled={disabled}
+          ariaLabel="Workspace name"
+          onChange={(name) => update({ name })}
+        />
+      ),
+    },
+    {
+      key: "owner",
+      header: "Owner",
+      width: { min: 145 },
+      renderRead: ({ row }) => <ReadText value={row.draft.owner} />,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineTextField
+          value={row.draft.owner}
+          disabled={disabled}
+          ariaLabel="Workspace owner"
+          onChange={(owner) => update({ owner })}
+        />
+      ),
+    },
+    {
+      key: "region",
+      header: "Region",
+      width: { min: 120 },
+      renderRead: ({ row }) => <ReadText value={row.draft.region} />,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineTextField
+          value={row.draft.region}
+          disabled={disabled}
+          ariaLabel="Workspace region"
+          onChange={(region) => update({ region })}
+        />
+      ),
+    },
+    {
+      key: "cap",
+      header: "Cap",
+      width: { px: 112 },
+      align: "end",
+      renderRead: ({ row }) => <ReadText value={row.draft.cap} />,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineNumberField
+          value={row.draft.cap}
+          min={0}
+          step={25}
+          disabled={disabled}
+          ariaLabel="Workspace cap"
+          onChange={(cap) => update({ cap })}
+        />
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      width: { min: 120 },
+      renderRead: ({ row }) => <span className={`chip chip--${row.draft.status === "paused" ? "rust" : "ghost"} chip--sm`}>{row.draft.status}</span>,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineSelectField
+          value={row.draft.status}
+          options={workspaceStatuses}
+          disabled={disabled}
+          ariaLabel="Workspace status"
+          onChange={(status) => update({ status })}
+        />
+      ),
+    },
+  ], []);
+  const workspaceData = useMemo(() => ({ pages: workspacePages }), [workspacePages]);
+  const workspaceRows = useInlineTableInfiniteRows({
+    data: workspaceData,
+    getRowId: (workspace) => workspace.id,
+    mapRow: workspaceRecordToRow,
+  });
   const searchedTasks = useMemo(() => filterTaskRows(tasks, taskSearch), [tasks, taskSearch]);
   const emptySearchRows = useMemo(() => filterDefaultRows(defaultRows, emptySearch), [defaultRows, emptySearch]);
+  const loadMoreWorkspaces = () => {
+    if (workspaceLoading || !workspaceRows.hasMore) return;
+    setWorkspaceLoading(true);
+    workspaceLoadTimer.current = window.setTimeout(() => {
+      const nextCursor = workspaceRows.nextCursor;
+      const nextPage = workspaceCursorPages.find((page) => page.cursor === nextCursor);
+      if (!nextPage) {
+        setWorkspaceLoadError("The next cursor did not resolve.");
+        setWorkspaceLoading(false);
+        return;
+      }
+      setWorkspacePages((pages) => [...pages, nextPage]);
+      setWorkspaceLoadError(null);
+      setWorkspaceLoading(false);
+    }, 260);
+  };
 
   return (
     <main className="inline-table-demo">
@@ -475,6 +637,47 @@ export default function InlineTableFormsDemoPage() {
           />
         </DemoPanel>
 
+        <DemoPanel title="Cursor-backed workspaces" copy="Standard data/next_cursor/has_more pages, local row draft preservation, keyboard-loadable footer states." tag="cursor">
+          <InlineTableForm
+            compact
+            ariaLabel="Cursor-backed workspace inline table"
+            columns={workspaceColumns}
+            rows={workspaceRows.rows}
+            saveMode="batch"
+            onDraftChange={workspaceRows.patchRowDraft}
+            onEdit={(id) => workspaceRows.updateRow(id, (row) => ({ ...row, editing: true }))}
+            onCancel={workspaceRows.resetRow}
+            onSave={(id) => workspaceRows.updateRow(id, (row) => ({
+              ...row,
+              committedDraft: row.draft,
+              dirty: false,
+              editing: false,
+            }))}
+            getRowLabel={(row) => row.draft.name}
+            loadMore={(
+              <InlineTableLoadMore
+                hasMore={workspaceRows.hasMore}
+                isFetchingMore={workspaceLoading}
+                error={workspaceLoadError}
+                loadedCount={workspaceRows.loadedRowCount}
+                onLoadMore={loadMoreWorkspaces}
+                onRetry={() => {
+                  setWorkspaceLoadError(null);
+                  loadMoreWorkspaces();
+                }}
+              />
+            )}
+            renderBatchActions={({ dirtyRows, canSubmit, discard }) => (
+              <div className="inline-table-demo__note-line">
+                <span className="chip chip--ghost chip--sm">{dirtyRows.length} draft edits</span>
+                <button type="button" className="button button--ghost button--sm" onClick={discard}>Discard</button>
+                <button type="button" className="button button--primary button--sm" disabled={!canSubmit}>Apply</button>
+              </div>
+            )}
+            onBatchCancel={workspaceRows.resetRows}
+          />
+        </DemoPanel>
+
         <DemoPanel title="Fully default table" copy="No optional presentation or interaction overrides: autosave, icon actions, single-click edit, derived labels, standard density, default widths, and factory create row." tag="defaults">
           <InlineTableForm
             ariaLabel="Fully default inline table"
@@ -551,6 +754,23 @@ function ReadText({ value, fallback }: { value: string; fallback?: string }) {
 function PriorityChip({ priority }: { priority: Priority }) {
   const tone = priority === "high" ? "rust" : priority === "low" ? "ghost" : "moss";
   return <span className={`chip chip--${tone} chip--sm`}>{labelFor(priorities, priority)}</span>;
+}
+
+function workspaceRecordToRow(workspace: WorkspaceRecord): InlineTableRow<WorkspaceDraft> {
+  const draft = {
+    name: workspace.name,
+    owner: workspace.owner,
+    region: workspace.region,
+    cap: workspace.cap,
+    status: workspace.status,
+  };
+  return {
+    id: workspace.id,
+    editing: false,
+    dirty: false,
+    draft,
+    committedDraft: draft,
+  };
 }
 
 function labelFor(options: readonly { value: string; label: string }[], value: string) {
