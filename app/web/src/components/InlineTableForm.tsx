@@ -94,6 +94,20 @@ export interface InlineTableBatchContext<TDraft> {
   discard: () => void;
 }
 
+export interface InlineTableDeleteConfirmationContext<TDraft> {
+  row: InlineTableRow<TDraft>;
+  rowIndex: number;
+  label: string;
+}
+
+export interface InlineTableDeleteConfirmationCopy {
+  title?: string;
+  eyebrow?: string;
+  confirmLabel?: string;
+  tone?: "moss" | "rust";
+  children: ReactNode;
+}
+
 export interface InlineTableSearchProps {
   value: string;
   onChange: (value: string) => void;
@@ -278,6 +292,8 @@ interface InlineTableFormBaseProps<TDraft> {
   renderDetail?: (context: InlineTableCellContext<TDraft>) => ReactNode;
   /** Improves accessible labels and delete confirmation copy when row content has a stable name. */
   getRowLabel?: (row: InlineTableRow<TDraft>, index: number) => string;
+  /** Optional caller-provided delete modal copy for domain-specific cascades or warnings. */
+  renderDeleteConfirmation?: (context: InlineTableDeleteConfirmationContext<TDraft>) => InlineTableDeleteConfirmationCopy;
   /** Use only for semantic page-level variants; prefer the default class set. */
   className?: string;
   /** Defaults to the standard density; reserve compact for secondary or very high-volume sheets. */
@@ -335,6 +351,7 @@ export function InlineTableForm<TDraft>({
   renderBatchActions,
   onBatchCancel,
   getRowLabel,
+  renderDeleteConfirmation,
   className,
   compact = false,
 }: InlineTableFormProps<TDraft>) {
@@ -570,6 +587,10 @@ export function InlineTableForm<TDraft>({
 
   const deleteFromKeyboard = (rowId: string) => {
     if (!onDelete) return;
+    if (renderDeleteConfirmation) {
+      requestDelete(rowId);
+      return;
+    }
     clearDeleteArm();
     pendingDeletedSelectionRef.current = deleteSelectionTarget(rowId);
     onDelete(rowId);
@@ -603,6 +624,13 @@ export function InlineTableForm<TDraft>({
   const deleteConfirmationLabel = deleteConfirmationRow
     ? rowLabel(deleteConfirmationRow, renderedRows.indexOf(deleteConfirmationRow), getRowLabel)
     : "this row";
+  const deleteConfirmationCopy = deleteConfirmationRow
+    ? renderDeleteConfirmation?.({
+      row: deleteConfirmationRow,
+      rowIndex: renderedRows.indexOf(deleteConfirmationRow),
+      label: deleteConfirmationLabel,
+    })
+    : undefined;
 
   return (
     <section
@@ -867,15 +895,18 @@ export function InlineTableForm<TDraft>({
       ) : null}
       <ConfirmationModal
         open={Boolean(deleteConfirmationRow)}
-        title="Delete this row?"
-        eyebrow="Confirm delete"
-        confirmLabel="Delete row"
+        title={deleteConfirmationCopy?.title ?? "Delete this row?"}
+        eyebrow={deleteConfirmationCopy?.eyebrow ?? "Confirm delete"}
+        confirmLabel={deleteConfirmationCopy?.confirmLabel ?? "Delete row"}
+        tone={deleteConfirmationCopy?.tone ?? "rust"}
         onCancel={cancelDelete}
         onConfirm={confirmDelete}
       >
-        <p>
-          Delete <strong>{deleteConfirmationLabel}</strong>? This removes the row immediately.
-        </p>
+        {deleteConfirmationCopy?.children ?? (
+          <p>
+            Delete <strong>{deleteConfirmationLabel}</strong>? This removes the row immediately.
+          </p>
+        )}
       </ConfirmationModal>
     </section>
   );

@@ -294,7 +294,7 @@ function installFetch(options: InstallFetchOptions = {}) {
         return jsonResponse(areas.find((area) => area.id === areaId));
       }
       if (method === "DELETE") {
-        areas = areas.filter((area) => area.id !== areaId);
+        areas = areas.filter((area) => area.id !== areaId && area.parent_area_id !== areaId);
         return jsonResponse(null, 204);
       }
     }
@@ -678,41 +678,54 @@ describe("<PropertyDetailPage>", () => {
       expect(screen.getByText("Terrace")).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "New area" }));
-      fireEvent.change(screen.getByLabelText("Name"), {
+      const createRow = screen.getByLabelText("New area");
+      fireEvent.change(within(createRow).getByLabelText("Name"), {
         target: { value: "Pool" },
       });
-      fireEvent.change(screen.getByLabelText("Kind"), {
+      fireEvent.change(within(createRow).getByLabelText("Kind"), {
         target: { value: "outdoor" },
       });
-      const createAreaPanel = screen.getByRole("heading", { name: "Create area" }).closest(".panel");
-      if (!createAreaPanel) throw new Error("create area panel missing");
-      await chooseSearchableOption(createAreaPanel as HTMLElement, /^Parent\b/, "Kitchen");
-      fireEvent.change(screen.getByLabelText("Order"), {
+      await chooseSearchableOption(createRow, /^Parent\b/, "Kitchen");
+      fireEvent.change(within(createRow).getByLabelText("Order"), {
         target: { value: "3" },
       });
-      fireEvent.click(screen.getByRole("button", { name: "Save area" }));
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
       expect(await screen.findByText("Pool")).toBeInTheDocument();
 
-      const poolRow = screen.getByText("Pool").closest("tr");
-      expect(poolRow).not.toBeNull();
-      fireEvent.click(within(poolRow as HTMLTableRowElement).getByRole("button", { name: "Edit" }));
-      fireEvent.change(screen.getByLabelText("Name"), {
+      const poolRow = screen.getByLabelText("Pool");
+      fireEvent.click(within(poolRow).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(poolRow).getByLabelText("Name"), {
         target: { value: "Pool deck" },
       });
-      fireEvent.change(screen.getByLabelText("Notes"), {
+      fireEvent.change(within(poolRow).getByLabelText("Order"), {
+        target: { value: "-5" },
+      });
+      fireEvent.change(within(poolRow).getByLabelText("Notes"), {
         target: { value: "Check loungers after checkout." },
       });
-      fireEvent.click(screen.getByRole("button", { name: "Save area" }));
+      fireEvent.click(within(poolRow).getByRole("button", { name: "Save" }));
       expect(await screen.findByText("Pool deck")).toBeInTheDocument();
       expect(screen.getByText("Check loungers after checkout.")).toBeInTheDocument();
 
-      const deckRow = screen.getByText("Pool deck").closest("tr");
-      expect(deckRow).not.toBeNull();
-      fireEvent.click(within(deckRow as HTMLTableRowElement).getByRole("button", { name: "Edit" }));
-      fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-      expect(screen.getByRole("alert")).toHaveTextContent("Delete Pool deck? This cannot be undone.");
+      const kitchenRow = screen.getByLabelText("Kitchen");
+      fireEvent.click(within(kitchenRow).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(kitchenRow).getByRole("combobox", { name: /^Parent\b/ }), {
+        target: { value: "Terrace" },
+      });
+      expect(await within(kitchenRow).findByText("No parent areas")).toBeInTheDocument();
+      fireEvent.click(within(kitchenRow).getByRole("button", { name: "Cancel" }));
+
+      fireEvent.click(within(kitchenRow).getByRole("button", { name: "Delete" }));
+      const parentDeleteDialog = screen.getByRole("alertdialog", { name: "Delete area?" });
+      expect(parentDeleteDialog).toHaveTextContent("Delete Kitchen? This will also delete 1 child area.");
+      fireEvent.click(within(parentDeleteDialog).getByRole("button", { name: "Cancel" }));
+
+      const deckRow = screen.getByLabelText("Pool deck");
+      fireEvent.click(within(deckRow).getByRole("button", { name: "Delete" }));
+      const childDeleteDialog = screen.getByRole("alertdialog", { name: "Delete area?" });
+      expect(childDeleteDialog).toHaveTextContent("Delete Pool deck? This cannot be undone.");
       expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/areas/area_3" && call.method === "DELETE")).toBe(false);
-      fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
+      fireEvent.click(within(childDeleteDialog).getByRole("button", { name: "Delete area" }));
       await waitFor(() => {
         expect(screen.queryByText("Pool deck")).not.toBeInTheDocument();
       });
@@ -720,7 +733,10 @@ describe("<PropertyDetailPage>", () => {
       expect(fake.calls.find((call) => call.url === "/w/acme/api/v1/properties/prop_1/areas" && call.method === "POST")?.body).toMatchObject({
         parent_area_id: "area_1",
       });
-      expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/areas/area_3" && call.method === "PATCH")).toBe(true);
+      expect(fake.calls.find((call) => call.url === "/w/acme/api/v1/areas/area_3" && call.method === "PATCH")?.body).toMatchObject({
+        order_hint: 0,
+        notes_md: "Check loungers after checkout.",
+      });
       expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/areas/area_3" && call.method === "DELETE")).toBe(true);
     } finally {
       fake.restore();
@@ -817,14 +833,15 @@ describe("<PropertyDetailPage>", () => {
       fireEvent.click(screen.getByRole("tab", { name: "Areas" }));
       expect(await screen.findByText("Kitchen")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "New area" }));
-      fireEvent.change(screen.getByLabelText("Name"), {
+      const createRow = screen.getByLabelText("New area");
+      fireEvent.change(within(createRow).getByLabelText("Name"), {
         target: { value: "Pool" },
       });
-      fireEvent.click(screen.getByRole("button", { name: "Save area" }));
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
 
-      expect(await screen.findByRole("alert")).toHaveTextContent("name must be a non-blank string");
-      expect(screen.getByRole("button", { name: "Save area" })).toBeInTheDocument();
-      expect(screen.queryByText("Pool")).not.toBeInTheDocument();
+      expect(await screen.findByText("name must be a non-blank string")).toBeInTheDocument();
+      expect(within(createRow).getByRole("button", { name: "Save" })).toBeInTheDocument();
+      expect(screen.getByLabelText("Pool")).toBeInTheDocument();
     } finally {
       saveFailure.restore();
     }

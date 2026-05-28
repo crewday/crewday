@@ -1,12 +1,21 @@
-import { useState, type FormEvent } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { MapPinned } from "lucide-react";
+import {
+  InlineNoteField,
+  InlineNumberField,
+  InlineSearchableSelectField,
+  InlineSelectField,
+  InlineTableForm,
+  InlineTextField,
+  type InlineTableColumn,
+  type InlineTableRow,
+} from "@/components/InlineTableForm";
+import { EmptyState, Loading } from "@/components/common";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
-import AutoGrowTextarea from "@/components/AutoGrowTextarea";
-import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
-import { EmptyState, Loading } from "@/components/common";
+import type { SearchableSelectOption } from "@/components/SearchableSelect";
 
 type AreaKind = "indoor_room" | "outdoor" | "service";
 
@@ -40,7 +49,14 @@ interface AreaWriteBody {
   notes_md: string;
 }
 
+interface AreaSaveVariables {
+  rowId: string;
+  draft: AreaDraft;
+}
+
+const CREATE_ROW_ID = "__new_area__";
 const AREA_KINDS: readonly AreaKind[] = ["indoor_room", "outdoor", "service"];
+const AREA_KIND_OPTIONS = AREA_KINDS.map((kind) => ({ value: kind, label: kind }));
 
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
@@ -98,12 +114,13 @@ async function invalidatePropertyAreaViews(
 }
 
 export default function AreasPanel({ propertyId }: { propertyId: string }) {
-  // code-health: ignore[ccn nloc] Areas editor keeps table, draft form, and delete confirmation coupled to one property query.
   const queryClient = useQueryClient();
-  const [draft, setDraft] = useState<AreaDraft>(() => emptyAreaDraft());
-  const [formOpen, setFormOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [deleteConfirmationId, setDeleteConfirmationId] = useState<string | null>(null);
+  const [editedDrafts, setEditedDrafts] = useState<ReadonlyMap<string, AreaDraft>>(() => new Map());
+  const [rowErrors, setRowErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createDraft, setCreateDraft] = useState<AreaDraft>(() => emptyAreaDraft());
+  const [createDirty, setCreateDirty] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const areasQ = useQuery({
     queryKey: qk.propertyAreas(propertyId),
@@ -112,10 +129,10 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
   });
 
   const saveArea = useMutation({
-    mutationFn: (nextDraft: AreaDraft) => {
-      const body = bodyFromDraft(nextDraft);
-      if (nextDraft.id) {
-        return fetchJson<Area>("/api/v1/areas/" + nextDraft.id, {
+    mutationFn: ({ draft }: AreaSaveVariables) => {
+      const body = bodyFromDraft(draft);
+      if (draft.id) {
+        return fetchJson<Area>("/api/v1/areas/" + draft.id, {
           method: "PATCH",
           body,
         });
@@ -125,75 +142,146 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
         body,
       });
     },
-    onSuccess: async () => {
-      setError(null);
-      setDeleteConfirmationId(null);
-      setDraft(emptyAreaDraft());
-      setFormOpen(false);
+    onSuccess: async (_area, variables) => {
+      setRowErrors((current) => clearMapValue(current, variables.rowId));
+      if (variables.rowId === CREATE_ROW_ID) {
+        setCreateDraft(emptyAreaDraft());
+        setCreateDirty(false);
+        setCreateError(null);
+        setCreateOpen(false);
+      } else {
+        setEditedDrafts((current) => clearMapValue(current, variables.rowId));
+      }
       await invalidatePropertyAreaViews(queryClient, propertyId);
     },
-    onError: (err) => {
-      setError(errorMessage(err, "Area could not be saved."));
+    onError: (err, variables) => {
+      const message = errorMessage(err, "Area could not be saved.");
+      if (variables.rowId === CREATE_ROW_ID) {
+        setCreateError(message);
+        return;
+      }
+      setRowErrors((current) => setMapValue(current, variables.rowId, message));
     },
   });
 
   const deleteArea = useMutation({
     mutationFn: (areaId: string) =>
       fetchJson<null>("/api/v1/areas/" + areaId, { method: "DELETE" }),
-    onSuccess: async () => {
-      setError(null);
-      setDeleteConfirmationId(null);
-      setDraft(emptyAreaDraft());
-      setFormOpen(false);
+    onSuccess: async (_result, areaId) => {
+      setEditedDrafts((current) => clearMapValue(current, areaId));
+      setRowErrors((current) => clearMapValue(current, areaId));
       await invalidatePropertyAreaViews(queryClient, propertyId);
     },
-    onError: (err) => {
-      setError(errorMessage(err, "Area could not be deleted."));
+    onError: (err, areaId) => {
+      setRowErrors((current) => setMapValue(current, areaId, errorMessage(err, "Area could not be deleted.")));
     },
   });
 
   const areas = areasQ.data ?? [];
-  const parentOptions = areas.filter((area) => area.parent_area_id === null && area.id !== draft.id);
-  const childDeleteCount = draft.id
-    ? areas.filter((area) => area.parent_area_id === draft.id).length
-    : 0;
-  const confirmingDelete = draft.id !== null && deleteConfirmationId === draft.id;
-  const deleteWarning = childDeleteCount > 0
-    ? "Delete " + draft.name + "? This will also delete " + childDeleteCount + " child " +
-      (childDeleteCount === 1 ? "area." : "areas.")
-    : "Delete " + draft.name + "? This cannot be undone.";
+  const areasById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
   const busy = saveArea.isPending || deleteArea.isPending;
-
-  function openCreate() {
-    setDraft(emptyAreaDraft());
-    setError(null);
-    setDeleteConfirmationId(null);
-    setFormOpen(true);
-  }
-
-  function openEdit(area: Area) {
-    setDraft(draftFromArea(area));
-    setError(null);
-    setDeleteConfirmationId(null);
-    setFormOpen(true);
-  }
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setDeleteConfirmationId(null);
-    saveArea.mutate(draft);
-  }
-
-  function requestDelete() {
-    if (!draft.id) return;
-    if (!confirmingDelete) {
-      setError(null);
-      setDeleteConfirmationId(draft.id);
-      return;
+  const rows = useMemo(
+    () => areas.map((area): InlineTableRow<AreaDraft> => {
+      const editedDraft = editedDrafts.get(area.id);
+      const savingThisRow = saveArea.isPending && saveArea.variables?.rowId === area.id;
+      return {
+        id: area.id,
+        label: area.name,
+        draft: editedDraft ?? draftFromArea(area),
+        committedDraft: draftFromArea(area),
+        editing: editedDraft !== undefined,
+        dirty: editedDraft !== undefined,
+        saving: savingThisRow,
+        disabled: busy && !savingThisRow,
+        error: rowErrors.get(area.id),
+      };
+    }),
+    [areas, busy, editedDrafts, rowErrors, saveArea.isPending, saveArea.variables],
+  );
+  const trailingCreateRow: InlineTableRow<AreaDraft> | undefined = createOpen
+    ? {
+      id: CREATE_ROW_ID,
+      label: "New area",
+      draft: createDraft,
+      editing: true,
+      dirty: createDirty,
+      isNew: true,
+      saving: saveArea.isPending && saveArea.variables?.rowId === CREATE_ROW_ID,
+      disabled: busy && saveArea.variables?.rowId !== CREATE_ROW_ID,
+      error: createError,
     }
-    deleteArea.mutate(draft.id);
-  }
+    : undefined;
+
+  const columns = useMemo(
+    (): InlineTableColumn<AreaDraft>[] => [
+      {
+        key: "name",
+        header: "Name",
+        width: { flex: 1.45, min: 160 },
+        renderRead: ({ row }) => <strong>{row.draft.name}</strong>,
+        renderEdit: ({ row, update, disabled }) => (
+          <InlineTextField
+            value={row.draft.name}
+            onChange={(name) => update({ name })}
+            disabled={disabled}
+            ariaLabel="Name"
+          />
+        ),
+      },
+      {
+        key: "kind",
+        header: "Kind",
+        width: { flex: 0.9, min: 132 },
+        renderRead: ({ row }) => row.draft.kind,
+        renderEdit: ({ row, update, disabled }) => (
+          <InlineSelectField
+            value={row.draft.kind}
+            options={AREA_KIND_OPTIONS}
+            onChange={(kind) => update({ kind: kind as AreaKind })}
+            disabled={disabled}
+            ariaLabel="Kind"
+          />
+        ),
+      },
+      {
+        key: "parent",
+        header: "Parent",
+        width: { flex: 1.1, min: 170 },
+        renderRead: ({ row }) => parentAreaName(areasById, row.draft.parent_area_id),
+        renderEdit: ({ row, update, disabled }) => (
+          <InlineSearchableSelectField
+            value={row.draft.parent_area_id}
+            options={parentOptions(areas, row.draft).map(areaSelectOption)}
+            blankOption={{ label: "Property-level" }}
+            noResultsLabel="No parent areas"
+            renderOptionSecondaryText={() => null}
+            onChange={(parent_area_id) => update({ parent_area_id })}
+            disabled={disabled}
+            label="Parent"
+          />
+        ),
+      },
+      {
+        key: "order",
+        header: "Order",
+        width: { px: 96 },
+        className: "mono",
+        align: "end",
+        renderRead: ({ row }) => row.draft.order_hint,
+        renderEdit: ({ row, update, disabled }) => (
+          <InlineNumberField
+            value={row.draft.order_hint}
+            min={0}
+            step={1}
+            onChange={(order_hint) => update({ order_hint })}
+            disabled={disabled}
+            ariaLabel="Order"
+          />
+        ),
+      },
+    ],
+    [areas, areasById],
+  );
 
   if (areasQ.isPending) return <Loading />;
   if (areasQ.isError || !areasQ.data) {
@@ -205,155 +293,145 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
   }
 
   return (
-    <>
-      <div className="panel">
-        <header className="panel__head">
-          <div className="panel__head-stack">
-            <h2>Areas</h2>
-            <p className="panel__sub">Rooms and shared spaces used by tasks, instructions, and inventory.</p>
-          </div>
-          <button type="button" className="btn btn--moss" onClick={openCreate}>
+    <div className="panel">
+      <header className="panel__head">
+        <div className="panel__head-stack">
+          <h2>Areas</h2>
+          <p className="panel__sub">Rooms and shared spaces used by tasks, instructions, and inventory.</p>
+        </div>
+      </header>
+      <InlineTableForm
+        ariaLabel="Property areas"
+        columns={columns}
+        rows={rows}
+        saveMode="explicit"
+        onDraftChange={(rowId, patch) => {
+          if (rowId === CREATE_ROW_ID) {
+            setCreateDraft((current) => ({ ...current, ...patch }));
+            setCreateDirty(true);
+            setCreateError(null);
+            return;
+          }
+          setEditedDrafts((current) => {
+            const area = areasById.get(rowId);
+            if (!area) return current;
+            const draft = current.get(rowId) ?? draftFromArea(area);
+            return setMapValue(current, rowId, { ...draft, ...patch });
+          });
+          setRowErrors((current) => clearMapValue(current, rowId));
+        }}
+        onEdit={(rowId) => {
+          const area = areasById.get(rowId);
+          if (!area) return;
+          setEditedDrafts((current) => setMapValue(current, rowId, draftFromArea(area)));
+          setRowErrors((current) => clearMapValue(current, rowId));
+        }}
+        onSave={(rowId) => {
+          if (rowId === CREATE_ROW_ID) {
+            saveArea.mutate({ rowId, draft: createDraft });
+            return;
+          }
+          const draft = editedDrafts.get(rowId);
+          if (draft) saveArea.mutate({ rowId, draft });
+        }}
+        onCancel={(rowId) => {
+          if (rowId === CREATE_ROW_ID) {
+            setCreateDraft(emptyAreaDraft());
+            setCreateDirty(false);
+            setCreateError(null);
+            setCreateOpen(false);
+            return;
+          }
+          setEditedDrafts((current) => clearMapValue(current, rowId));
+          setRowErrors((current) => clearMapValue(current, rowId));
+        }}
+        onDelete={(rowId) => deleteArea.mutate(rowId)}
+        trailingCreateRow={trailingCreateRow}
+        addRow={createOpen ? null : (
+          <button
+            type="button"
+            className="btn btn--moss"
+            onClick={() => {
+              setCreateDraft(emptyAreaDraft());
+              setCreateDirty(false);
+              setCreateError(null);
+              setCreateOpen(true);
+            }}
+          >
             New area
           </button>
-        </header>
-        <table className="table table--roomy">
-          <thead>
-            <tr><th>Name</th><th>Kind</th><th>Parent</th><th>Order</th><th></th></tr>
-          </thead>
-          <tbody>
-            {areas.length === 0 ? (
-              <tr>
-                <td colSpan={5}>
-                  <EmptyState
-                    icon={MapPinned}
-                    title="No areas yet"
-                    copy="Rooms and shared spaces will appear here once they are added."
-                    variant="quiet"
-                  />
-                </td>
-              </tr>
-            ) : (
-              areas.map((area) => {
-                const parentName = areas.find((candidate) => candidate.id === area.parent_area_id)?.name;
-                return (
-                  <tr key={area.id}>
-                    <td>
-                      <strong>{area.name}</strong>
-                      {area.notes_md && <div className="table__sub">{area.notes_md}</div>}
-                    </td>
-                    <td>{area.kind}</td>
-                    <td>{parentName ?? "Property-level"}</td>
-                    <td className="mono">{area.order_hint}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btn--sm btn--ghost"
-                        onClick={() => openEdit(area)}
-                      >
-                        Edit
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {formOpen && (
-        <div className="panel">
-          <header className="panel__head">
-            <div className="panel__head-stack">
-              <h2>{draft.id ? "Edit area" : "Create area"}</h2>
-              <p className="panel__sub">Area nesting is limited to one level.</p>
-            </div>
-          </header>
-          <form className="form" onSubmit={submit}>
-            <div className="form-grid form-grid--two">
-              <label className="field">
-                <span>Name</span>
-                <input
-                  value={draft.name}
-                  onChange={(event) => setDraft({ ...draft, name: event.currentTarget.value })}
-                  required
-                />
-              </label>
-              <label className="field">
-                <span>Kind</span>
-                <select
-                  value={draft.kind}
-                  onChange={(event) => setDraft({ ...draft, kind: event.currentTarget.value as AreaKind })}
-                >
-                  {AREA_KINDS.map((kind) => (
-                    <option key={kind} value={kind}>{kind}</option>
-                  ))}
-                </select>
-              </label>
-              <SearchableSelect
-                label="Parent"
-                requirement="optional"
-                value={draft.parent_area_id}
-                options={parentOptions.map(areaSelectOption)}
-                blankOption={{ label: "Property-level" }}
-                renderOptionSecondaryText={() => null}
-                onChange={(value) => setDraft({ ...draft, parent_area_id: value })}
+        )}
+        emptyState={(
+          <EmptyState
+            icon={MapPinned}
+            title="No areas yet"
+            copy="Rooms and shared spaces will appear here once they are added."
+            variant="quiet"
+          />
+        )}
+        getRowLabel={(row) => row.draft.name || row.label || "New area"}
+        renderDetail={({ row, update, disabled }) => {
+          if (row.editing) {
+            return (
+              <InlineNoteField
+                value={row.draft.notes_md}
+                onChange={(notes_md) => update({ notes_md })}
+                disabled={disabled}
+                ariaLabel="Notes"
+                placeholder="Notes"
               />
-              <label className="field">
-                <span>Order</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={draft.order_hint}
-                  onChange={(event) => setDraft({ ...draft, order_hint: event.currentTarget.value })}
-                />
-              </label>
-            </div>
-            <label className="field">
-              <span>Notes</span>
-              <AutoGrowTextarea
-                value={draft.notes_md}
-                onChange={(event) => setDraft({ ...draft, notes_md: event.currentTarget.value })}
-                rows={3}
-              />
-            </label>
-            {error && <p className="form-error" role="alert">{error}</p>}
-            {confirmingDelete && (
-              <p id="area-delete-warning" className="form-error" role="alert">
-                {deleteWarning}
+            );
+          }
+          return row.draft.notes_md ? <p>{row.draft.notes_md}</p> : null;
+        }}
+        renderDeleteConfirmation={({ row, label }) => {
+          const childCount = childAreaCount(areas, row.id);
+          return {
+            title: "Delete area?",
+            confirmLabel: "Delete area",
+            children: (
+              <p>
+                Delete <strong>{label}</strong>? {childCount > 0
+                  ? "This will also delete " + childCount + " child " + (childCount === 1 ? "area." : "areas.")
+                  : "This cannot be undone."}
               </p>
-            )}
-            <div className="inline-actions">
-              {draft.id && (
-                <button
-                  type="button"
-                  className="btn btn--rust"
-                  disabled={busy}
-                  aria-describedby={confirmingDelete ? "area-delete-warning" : undefined}
-                  onClick={requestDelete}
-                >
-                  {confirmingDelete ? "Confirm delete" : "Delete"}
-                </button>
-              )}
-              <button
-                type="button"
-                className="btn btn--ghost"
-                disabled={busy}
-                onClick={() => {
-                  setDraft(emptyAreaDraft());
-                  setDeleteConfirmationId(null);
-                  setFormOpen(false);
-                }}
-              >
-                Cancel
-              </button>
-              <button type="submit" className="btn btn--moss" disabled={busy}>
-                {saveArea.isPending ? "Saving..." : "Save area"}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-    </>
+            ),
+          };
+        }}
+      />
+    </div>
   );
+}
+
+function parentAreaName(areasById: ReadonlyMap<string, Area>, parentAreaId: string): string {
+  return areasById.get(parentAreaId)?.name ?? "Property-level";
+}
+
+function parentOptions(areas: readonly Area[], draft: AreaDraft): Area[] {
+  if (draft.id && childAreaCount(areas, draft.id) > 0) return [];
+  return areas.filter((area) => area.parent_area_id === null && area.id !== draft.id);
+}
+
+function childAreaCount(areas: readonly Area[], areaId: string): number {
+  return areas.filter((area) => area.parent_area_id === areaId).length;
+}
+
+function setMapValue<TValue>(
+  current: ReadonlyMap<string, TValue>,
+  key: string,
+  value: TValue,
+): ReadonlyMap<string, TValue> {
+  const next = new Map(current);
+  next.set(key, value);
+  return next;
+}
+
+function clearMapValue<TValue>(
+  current: ReadonlyMap<string, TValue>,
+  key: string,
+): ReadonlyMap<string, TValue> {
+  if (!current.has(key)) return current;
+  const next = new Map(current);
+  next.delete(key);
+  return next;
 }

@@ -685,6 +685,72 @@ describe("InlineTableForm", () => {
     expect(onDelete).toHaveBeenCalledWith("r-1");
   });
 
+  it("lets callers provide delete confirmation copy", () => {
+    const onDelete = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Custom delete table"
+        columns={columns}
+        rows={[{ ...editableRow(), editing: false, dirty: false }]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        onDelete={onDelete}
+        renderDeleteConfirmation={({ label }) => ({
+          title: "Delete area?",
+          confirmLabel: "Delete area",
+          children: (
+            <p>
+              Delete <strong>{label}</strong>? This will also delete 2 child areas.
+            </p>
+          ),
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Delete area?" });
+
+    expect(dialog).toHaveTextContent("This will also delete 2 child areas.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete area" }));
+    expect(onDelete).toHaveBeenCalledWith("r-1");
+  });
+
+  it("routes keyboard delete through caller-provided confirmation copy", () => {
+    const onDelete = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Keyboard custom delete table"
+        columns={columns}
+        rows={[{ ...editableRow(), editing: false, dirty: false }]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        onDelete={onDelete}
+        onEdit={vi.fn()}
+        activationMode="doubleClick"
+        renderDeleteConfirmation={({ label }) => ({
+          title: "Delete area?",
+          confirmLabel: "Delete area",
+          children: <p>Delete {label}? This will also delete child areas.</p>,
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("maria"));
+    const rowGroup = screen.getByLabelText("Confirm linen");
+    fireEvent.keyDown(rowGroup, { key: "d" });
+    fireEvent.keyDown(rowGroup, { key: "d" });
+
+    const dialog = screen.getByRole("alertdialog", { name: "Delete area?" });
+    expect(dialog).toHaveTextContent("This will also delete child areas.");
+    expect(onDelete).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete area" }));
+    expect(onDelete).toHaveBeenCalledWith("r-1");
+  });
+
   it("does not render reorder controls or draggable rows by default", () => {
     render(
       <InlineTableForm
