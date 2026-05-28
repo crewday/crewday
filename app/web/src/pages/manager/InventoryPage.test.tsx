@@ -76,6 +76,30 @@ const ITEMS = [
   },
 ];
 
+const SECOND_ITEM = {
+  ...ITEMS[0]!,
+  id: "item_2",
+  name: "Dish soap",
+  sku: "DS-1",
+  on_hand: 3,
+  unit: "bottles",
+  reorder_point: 4,
+  reorder_target: 8,
+  tags: ["Kitchen"],
+};
+
+const THIRD_ITEM = {
+  ...ITEMS[0]!,
+  id: "item_3",
+  name: "Laundry pods",
+  sku: "LP-3",
+  on_hand: 18,
+  unit: "pods",
+  reorder_point: 10,
+  reorder_target: 30,
+  tags: ["Laundry"],
+};
+
 const MOVEMENTS = [
   {
     id: "move_1",
@@ -97,7 +121,12 @@ const MOVEMENTS = [
 function installFetch(
   items = ITEMS,
   properties: Property[] = PROPERTIES,
-  options: { createStatus?: number; createBody?: unknown } = {},
+  options: {
+    createStatus?: number;
+    createBody?: unknown;
+    commitStatus?: number;
+    commitBody?: unknown;
+  } = {},
 ) {
   // code-health: ignore[nloc] Inventory route fixture keeps property, item, adjustment, and create endpoints explicit.
   const secondPropertyItems: typeof ITEMS = [];
@@ -187,9 +216,22 @@ function installFetch(
       respond: { body: { stocktake_id: "stock_1", item_id: "item_1" } },
     },
     {
+      path: "/w/acme/api/v1/stocktakes/stock_1/lines/item_2",
+      method: "PATCH",
+      respond: { body: { stocktake_id: "stock_1", item_id: "item_2" } },
+    },
+    {
+      path: "/w/acme/api/v1/stocktakes/stock_1/lines/item_3",
+      method: "PATCH",
+      respond: { body: { stocktake_id: "stock_1", item_id: "item_3" } },
+    },
+    {
       path: "/w/acme/api/v1/stocktakes/stock_1/commit",
       method: "POST",
-      respond: { body: { stocktake: { id: "stock_1" }, movements: [] } },
+      respond: {
+        status: options.commitStatus ?? 200,
+        body: options.commitBody ?? { stocktake: { id: "stock_1" }, movements: [] },
+      },
     },
   ]);
   return {
@@ -684,23 +726,48 @@ describe("<InventoryPage>", () => {
     }
   });
 
-  it("opens, saves changed lines, and commits a stocktake", async () => {
-    const fake = installFetch();
+  it("edits multiple stocktake rows, excludes unchanged rows, and commits once", async () => {
+    const fake = installFetch([ITEMS[0]!, SECOND_ITEM, THIRD_ITEM]);
     try {
       render(<Harness />);
       await screen.findByText("Paper towels");
 
       fireEvent.click(screen.getByRole("button", { name: "Start stocktake" }));
-      expect(await screen.findByText("Stocktake — Villa Rosa")).toBeInTheDocument();
-      fireEvent.change(screen.getByDisplayValue("10"), {
+      const title = await screen.findByText("Stocktake — Villa Rosa");
+      const dialog = title.closest("dialog")!;
+      const paperReason = within(dialog).getByLabelText("Paper towels reason");
+      expect(paperReason).toBeDisabled();
+      expect(
+        within(dialog).getByRole("button", { name: "No changes to commit" }),
+      ).toBeDisabled();
+
+      fireEvent.change(within(dialog).getByLabelText("Paper towels observed count"), {
         target: { value: "8" },
       });
-      fireEvent.change(screen.getByRole("combobox"), {
+      expect(paperReason).toBeEnabled();
+      fireEvent.change(paperReason, {
         target: { value: "loss" },
       });
-      fireEvent.click(
-        await screen.findByRole("button", { name: "Commit 1 change" }),
-      );
+      fireEvent.change(within(dialog).getByLabelText("Paper towels note"), {
+        target: { value: "Shelf count from utility closet." },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Dish soap observed count"), {
+        target: { value: "5" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Dish soap reason"), {
+        target: { value: "found" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Dish soap note"), {
+        target: { value: "Two bottles under sink." },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Laundry pods note"), {
+        target: { value: "Checked laundry cabinet; no drift." },
+      });
+      expect(
+        within(dialog).getByRole("button", { name: "Commit 2 changes" }),
+      ).toBeEnabled();
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Commit 2 changes" }));
 
       await waitFor(() => {
         expect(
@@ -720,8 +787,26 @@ describe("<InventoryPage>", () => {
       ).toEqual({
         observed_on_hand: 8,
         reason: "loss",
-        note: "",
+        note: "Shelf count from utility closet.",
       });
+      expect(
+        fake.requests.find(
+          (r) =>
+            r.method === "PATCH" &&
+            r.url === "/w/acme/api/v1/stocktakes/stock_1/lines/item_2",
+        )?.body,
+      ).toEqual({
+        observed_on_hand: 5,
+        reason: "found",
+        note: "Two bottles under sink.",
+      });
+      expect(
+        fake.requests.some(
+          (r) =>
+            r.method === "PATCH" &&
+            r.url === "/w/acme/api/v1/stocktakes/stock_1/lines/item_3",
+        ),
+      ).toBe(false);
       expect(
         fake.requests.find(
           (r) =>
@@ -734,6 +819,74 @@ describe("<InventoryPage>", () => {
     }
   });
 
+  it("blocks invalid stocktake observed counts and discards the draft", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+      await screen.findByText("Paper towels");
+
+      fireEvent.click(screen.getByRole("button", { name: "Start stocktake" }));
+      const title = await screen.findByText("Stocktake — Villa Rosa");
+      const dialog = title.closest("dialog")!;
+      fireEvent.change(within(dialog).getByLabelText("Paper towels observed count"), {
+        target: { value: "-1" },
+      });
+
+      expect(
+        within(dialog).getByText("Observed count must be 0 or more."),
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).getByRole("button", { name: "No changes to commit" }),
+      ).toBeDisabled();
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Discard changes" }));
+
+      expect(within(dialog).getByDisplayValue("10")).toBeInTheDocument();
+      expect(
+        within(dialog).queryByText("Observed count must be 0 or more."),
+      ).not.toBeInTheDocument();
+      expect(
+        fake.requests.some(
+          (r) =>
+            r.method === "POST" &&
+            r.url === "/w/acme/api/v1/properties/prop_1/stocktakes",
+        ),
+      ).toBe(false);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("keeps the stocktake sheet open and reports commit failures", async () => {
+    const fake = installFetch(ITEMS.map((item) => ({ ...item })), PROPERTIES, {
+      commitStatus: 500,
+      commitBody: { detail: "Commit failed" },
+    });
+    try {
+      render(<Harness />);
+      await screen.findByText("Paper towels");
+
+      fireEvent.click(screen.getByRole("button", { name: "Start stocktake" }));
+      const title = await screen.findByText("Stocktake — Villa Rosa");
+      const dialog = title.closest("dialog")!;
+      fireEvent.change(within(dialog).getByLabelText("Paper towels observed count"), {
+        target: { value: "8" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Commit 1 change" }));
+
+      expect(await within(dialog).findByText("Commit failed")).toBeInTheDocument();
+      expect(within(dialog).getByText("Stocktake — Villa Rosa")).toBeInTheDocument();
+      expect(within(dialog).getByDisplayValue("8")).toBeInTheDocument();
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Discard changes" }));
+
+      expect(within(dialog).queryByText("Commit failed")).not.toBeInTheDocument();
+      expect(within(dialog).getByDisplayValue("10")).toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("keeps the stocktake sheet stable when inventory refetch adds an item", async () => {
     const liveItems = [...ITEMS];
     const fake = installFetch(liveItems);
@@ -741,17 +894,7 @@ describe("<InventoryPage>", () => {
       render(<Harness />);
       await screen.findByText("Paper towels");
 
-      const baseItem = ITEMS[0]!;
-      liveItems.push({
-        ...baseItem,
-        id: "item_2",
-        name: "Dish soap",
-        sku: "DS-1",
-        on_hand: 3,
-        reorder_point: 4,
-        reorder_target: 8,
-        tags: ["Kitchen"],
-      });
+      liveItems.push(SECOND_ITEM);
       fireEvent.click(screen.getByRole("button", { name: "Start stocktake" }));
 
       const sheet = await screen.findByText("Stocktake — Villa Rosa");

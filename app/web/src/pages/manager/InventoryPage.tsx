@@ -17,6 +17,14 @@ import FormModal, {
   FormModalField,
   FormModalGrid,
 } from "@/components/FormModal";
+import {
+  InlineNoteField,
+  InlineNumberField,
+  InlineSelectField,
+  InlineTableForm,
+  type InlineTableColumn,
+  type InlineTableRow,
+} from "@/components/InlineTableForm";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { Chip, Loading } from "@/components/common";
 import type { Property } from "@/types/api";
@@ -1152,6 +1160,47 @@ function initialStocktakeLines(items: InventoryItem[]): Record<string, Stocktake
   );
 }
 
+function parseStocktakeObserved(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const observedNum = Number(trimmed);
+  return Number.isFinite(observedNum) ? observedNum : null;
+}
+
+function stocktakeObservedValidation(line: StocktakeLine): string | null {
+  if (!line.observed.trim()) return null;
+  const observedNum = parseStocktakeObserved(line.observed);
+  if (observedNum === null) return "Enter a valid observed count.";
+  if (observedNum < 0) return "Observed count must be 0 or more.";
+  return null;
+}
+
+function stocktakeLineDelta(
+  line: StocktakeLine,
+  item: InventoryItem,
+): number | null {
+  const observedNum = parseStocktakeObserved(line.observed);
+  return observedNum !== null && observedNum >= 0
+    ? roundedStockDelta(observedNum, item.on_hand)
+    : null;
+}
+
+function stocktakeLineChanged(line: StocktakeLine, item: InventoryItem): boolean {
+  const initial = initialStocktakeLine(item);
+  return line.observed !== initial.observed
+    || line.reason !== initial.reason
+    || line.note !== initial.note;
+}
+
+function isStocktakeCommitCandidate(
+  line: StocktakeLine,
+  item: InventoryItem,
+): boolean {
+  if (stocktakeObservedValidation(line)) return false;
+  const delta = stocktakeLineDelta(line, item);
+  return delta !== null && Math.abs(delta) > 1e-9;
+}
+
 function StocktakeSheet({
   propertyId,
   propertyName,
@@ -1164,8 +1213,6 @@ function StocktakeSheet({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  // Native <dialog> handles Escape via the browser's close event;
-  // the hook stays no-op here but keeps the pattern consistent.
 
   const [lines, setLines] = useState<Record<string, StocktakeLine>>(() =>
     initialStocktakeLines(items),
@@ -1206,15 +1253,150 @@ function StocktakeSheet({
     },
   });
 
-  const dirty = useMemo(
+  const itemById = useMemo(
+    () => new Map(items.map((item) => [item.id, item])),
+    [items],
+  );
+  const commitCandidates = useMemo(
     () =>
       items.filter((i) => {
         const l = lines[i.id];
         if (!l) return false;
-        const n = Number.parseFloat(l.observed);
-        return Number.isFinite(n) && Math.abs(n - i.on_hand) > 1e-9;
+        return isStocktakeCommitCandidate(l, i);
       }),
     [items, lines],
+  );
+  const stocktakeRows = useMemo<InlineTableRow<StocktakeLine>[]>(
+    () =>
+      items.map((item) => {
+        const draft = lines[item.id] ?? initialStocktakeLine(item);
+        return {
+          id: item.id,
+          label: item.name,
+          draft,
+          editing: true,
+          dirty: stocktakeLineChanged(draft, item),
+          validation: stocktakeObservedValidation(draft),
+          meta: (
+            <span className="stocktake__row-meta">
+              <span className="muted mono">{item.sku}</span>
+              <span className="muted">{item.area}</span>
+            </span>
+          ),
+        };
+      }),
+    [items, lines],
+  );
+  const stocktakeColumns = useMemo<InlineTableColumn<StocktakeLine>[]>(
+    () => [
+      {
+        key: "item",
+        header: "Item",
+        width: { flex: 1.5, min: 180 },
+        renderRead: ({ row }) => {
+          const item = itemById.get(row.id);
+          return item ? <strong>{item.name}</strong> : row.label;
+        },
+        renderEdit: ({ row }) => {
+          const item = itemById.get(row.id);
+          return (
+            <span className="stocktake__item-cell">
+              <strong>{item?.name ?? row.label}</strong>
+              {item ? (
+                <span className="muted mono">{item.sku}</span>
+              ) : null}
+            </span>
+          );
+        },
+      },
+      {
+        key: "current",
+        header: "Current",
+        mobileLabel: "On hand / par",
+        align: "end",
+        width: { px: 126 },
+        renderRead: ({ row }) => {
+          const item = itemById.get(row.id);
+          return item ? (
+            <span className="stocktake__read-num mono">
+              {fmtQty(item.on_hand)} / {fmtQty(item.par)}
+            </span>
+          ) : null;
+        },
+        renderEdit: ({ row }) => {
+          const item = itemById.get(row.id);
+          return item ? (
+            <span className="stocktake__read-num mono">
+              <strong>{fmtQty(item.on_hand)}</strong>
+              <span className="muted"> / {fmtQty(item.par)}</span>
+              <span className="unit"> {item.unit}</span>
+            </span>
+          ) : null;
+        },
+      },
+      {
+        key: "observed",
+        header: "Observed",
+        align: "end",
+        width: { px: 112 },
+        renderRead: ({ row }) => row.draft.observed,
+        renderEdit: ({ row, update, disabled }) => {
+          const item = itemById.get(row.id);
+          return (
+            <InlineNumberField
+              value={row.draft.observed}
+              min={0}
+              step="0.01"
+              disabled={disabled}
+              ariaLabel={`${item?.name ?? row.label} observed count`}
+              onChange={(observed) => update({ observed })}
+            />
+          );
+        },
+      },
+      {
+        key: "reason",
+        header: "Reason",
+        width: { flex: 1, min: 170 },
+        renderRead: ({ row }) =>
+          ADJUST_REASONS.find((reason) => reason.value === row.draft.reason)?.label ??
+          row.draft.reason,
+        renderEdit: ({ row, update, disabled }) => {
+          const item = itemById.get(row.id);
+          const delta = item ? stocktakeLineDelta(row.draft, item) : null;
+          return (
+            <InlineSelectField
+              value={row.draft.reason}
+              options={ADJUST_REASONS}
+              disabled={disabled || delta === null || delta === 0}
+              ariaLabel={`${item?.name ?? row.label} reason`}
+              onChange={(reason) =>
+                update({ reason: reason as InventoryMovementReason })
+              }
+            />
+          );
+        },
+      },
+      {
+        key: "delta",
+        header: "Delta",
+        align: "end",
+        width: { px: 82 },
+        renderRead: ({ row }) => {
+          const item = itemById.get(row.id);
+          if (!item) return null;
+          const delta = stocktakeLineDelta(row.draft, item);
+          return <StocktakeDelta delta={delta} />;
+        },
+        renderEdit: ({ row }) => {
+          const item = itemById.get(row.id);
+          if (!item) return null;
+          const delta = stocktakeLineDelta(row.draft, item);
+          return <StocktakeDelta delta={delta} />;
+        },
+      },
+    ],
+    [itemById],
   );
 
   async function submit() {
@@ -1222,16 +1404,18 @@ function StocktakeSheet({
     try {
       const session = await open.mutateAsync();
       const payload = {
-        lines: dirty.flatMap((i) => {
-          // ``dirty`` is already filtered to items whose ``lines[i.id]``
-          // is defined; re-narrow here for the type-checker since
-          // ``lines`` is a Record (open index signature).
+        lines: commitCandidates.flatMap((i) => {
+          // ``commitCandidates`` is filtered to items whose line exists;
+          // re-narrow here because ``lines`` is an open Record.
           const l = lines[i.id];
           if (!l) return [];
+          if (!isStocktakeCommitCandidate(l, i)) return [];
+          const observed_on_hand = parseStocktakeObserved(l.observed);
+          if (observed_on_hand === null) return [];
           return [
             {
               item_id: i.id,
-              observed_on_hand: Number.parseFloat(l.observed),
+              observed_on_hand,
               reason: l.reason,
               note: l.note,
             },
@@ -1274,87 +1458,90 @@ function StocktakeSheet({
         together.
       </p>
 
-      <ul className="stocktake__list">
-        {items.map((i) => {
-          const l = lines[i.id] ?? initialStocktakeLine(i);
-          const observedNum = Number.parseFloat(l.observed);
-          const delta = Number.isFinite(observedNum)
-            ? roundedStockDelta(observedNum, i.on_hand)
-            : null;
+      <InlineTableForm
+        compact
+        className="stocktake__table"
+        ariaLabel={`Stocktake rows for ${propertyName}`}
+        columns={stocktakeColumns}
+        rows={stocktakeRows}
+        saveMode="batch"
+        onDraftChange={(rowId, patch) => {
+          const item = itemById.get(rowId);
+          if (!item) return;
+          setErr(null);
+          setLines((prev) => ({
+            ...prev,
+            [rowId]: {
+              ...(prev[rowId] ?? initialStocktakeLine(item)),
+              ...patch,
+            },
+          }));
+        }}
+        onBatchCancel={() => {
+          setErr(null);
+          setLines(initialStocktakeLines(items));
+        }}
+        getRowLabel={(row) => row.label ?? row.id}
+        renderDetail={({ row, update, disabled }) => {
+          const item = itemById.get(row.id);
           return (
-            <li key={i.id} className="stocktake__row">
-              <div className="stocktake__item">
-                <strong>{i.name}</strong>
-                <span className="muted mono">{i.sku}</span>
-                <span className="muted">
-                  on hand {fmtQty(i.on_hand)} {i.unit}
-                </span>
-              </div>
-              <input
-                className="input--inline mono stocktake__observed"
-                type="number"
-                step="0.01"
-                min="0"
-                value={l.observed}
-                onChange={(e) =>
-                  setLines((prev) => ({
-                    ...prev,
-                    [i.id]: {
-                      ...(prev[i.id] ?? initialStocktakeLine(i)),
-                      observed: e.target.value,
-                    },
-                  }))
-                }
-              />
-              <select
-                className="input--inline"
-                value={l.reason}
-                onChange={(e) =>
-                  setLines((prev) => ({
-                    ...prev,
-                    [i.id]: {
-                      ...(prev[i.id] ?? initialStocktakeLine(i)),
-                      reason: e.target.value as InventoryMovementReason,
-                    },
-                  }))
-                }
-                disabled={delta === null || delta === 0}
-              >
-                {ADJUST_REASONS.map((r) => (
-                  <option key={r.value} value={r.value}>{r.label}</option>
-                ))}
-              </select>
-              <div className="stocktake__delta mono">
-                {delta === null || delta === 0 ? (
-                  <span className="muted">—</span>
-                ) : (
-                  <span className={delta > 0 ? "delta-pos" : "delta-neg"}>
-                    {delta > 0 ? "+" : ""}
-                    {fmtQty(delta)}
-                  </span>
-                )}
-              </div>
-            </li>
+            <InlineNoteField
+              value={row.draft.note}
+              disabled={disabled}
+              ariaLabel={`${item?.name ?? row.label} note`}
+              placeholder="Note for this line"
+              onChange={(note) => update({ note })}
+            />
           );
-        })}
-      </ul>
-
-      {err && <p className="form-error">{err}</p>}
-
-      <div className="modal__actions">
-        <button type="button" className="btn btn--ghost" onClick={onClose}>
-          Cancel
-        </button>
-        <button
-          type="submit"
-          className="btn btn--moss"
-          disabled={dirty.length === 0 || open.isPending || commit.isPending}
-        >
-          {dirty.length === 0
-            ? "No changes to commit"
-            : `Commit ${dirty.length} change${dirty.length === 1 ? "" : "s"}`}
-        </button>
-      </div>
+        }}
+        renderBatchActions={({ canDiscard, canSubmit, discard }) => (
+          <div className="stocktake__batch">
+            {err && <p className="form-error">{err}</p>}
+            <div className="modal__actions">
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={canDiscard ? discard : onClose}
+                disabled={open.isPending || commit.isPending}
+              >
+                {canDiscard ? "Discard changes" : "Cancel"}
+              </button>
+              <button
+                type="submit"
+                className="btn btn--moss"
+                disabled={
+                  commitCandidates.length === 0
+                    || !canSubmit
+                    || open.isPending
+                    || commit.isPending
+                }
+              >
+                {commitCandidates.length === 0
+                  ? "No changes to commit"
+                  : `Commit ${commitCandidates.length} change${commitCandidates.length === 1 ? "" : "s"}`}
+              </button>
+            </div>
+          </div>
+        )}
+      />
     </form>
+  );
+}
+
+function StocktakeDelta({ delta }: { delta: number | null }) {
+  if (delta === null || delta === 0) {
+    return <span className="stocktake__delta mono muted">-</span>;
+  }
+  return (
+    <span
+      className={[
+        "stocktake__delta",
+        "mono",
+        delta > 0 ? "delta-pos" : "delta-neg",
+      ].join(" ")}
+    >
+      {delta > 0 ? "+" : ""}
+      {fmtQty(delta)}
+    </span>
   );
 }

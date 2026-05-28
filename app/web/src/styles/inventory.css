@@ -531,43 +531,33 @@
   max-height: 92vh;
   overflow-y: auto;
 }
-.stocktake__list {
-  list-style: none;
-  padding: 0;
-  margin: 12px 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.stocktake__table {
+  margin: 12px 0 0;
 }
-.stocktake__row {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) 96px minmax(0, 1fr) 60px;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 0;
-  border-bottom: 1px dashed var(--line);
-}
-.stocktake__row:last-child { border-bottom: none; }
-.stocktake__item {
+.stocktake__item-cell,
+.stocktake__row-meta {
   display: flex;
   flex-direction: column;
   gap: 1px;
   min-width: 0;
 }
-.stocktake__item strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.stocktake__observed { text-align: right; }
-.stocktake__delta { text-align: right; font-size: 14px; }
-
-@media (max-width: 720px) {
-  .stocktake__row {
-    grid-template-columns: 1fr 90px;
-    grid-template-areas:
-      "item item"
-      "observed delta"
-      "reason reason";
-  }
-  .stocktake__item { grid-area: item; }
-  .stocktake__observed { grid-area: observed; }
-  .stocktake__delta { grid-area: delta; }
-  .stocktake__row > select { grid-area: reason; }
+.stocktake__item-cell strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stocktake__read-num,
+.stocktake__delta {
+  display: block;
+  text-align: right;
+  font-size: 14px;
+}
+.stocktake__batch {
+  width: 100%;
+}
+.stocktake__batch .form-error {
+  margin: 0 0 10px;
+}
+.stocktake__batch .modal__actions {
+  margin-top: 0;
 }
