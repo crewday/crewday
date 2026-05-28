@@ -111,14 +111,24 @@ export interface TaskTemplate {
 
 export interface Schedule {
   id: string;
+  workspace_id: string;
   name: string;
   template_id: string;
   property_id: string | null;
-  rrule_human: string;
+  area_id: string | null;
   default_assignee_id: string | null;
   backup_assignee_user_ids: string[];
+  rrule: string;
+  rrule_human: string;
+  dtstart_local: string;
   duration_minutes: number | null;
+  rdate_local: string;
+  exdate_local: string;
   active_from: string | null;
+  active_until: string | null;
+  paused_at: string | null;
+  created_at: string;
+  deleted_at: string | null;
   paused: boolean;
 }
 

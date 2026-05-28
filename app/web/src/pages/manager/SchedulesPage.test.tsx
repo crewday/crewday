@@ -79,14 +79,24 @@ const EMPLOYEE: Employee = {
 
 const SCHEDULE: Schedule = {
   id: "sch_1",
+  workspace_id: "ws_1",
   name: "Existing turnover",
   template_id: TEMPLATE.id,
   property_id: PROPERTY.id,
-  rrule_human: "Every Monday at 09:00",
+  area_id: null,
   default_assignee_id: EMPLOYEE.id,
   backup_assignee_user_ids: [],
+  rrule: "RRULE:FREQ=WEEKLY;BYDAY=MO",
+  rrule_human: "Every Monday at 09:00",
+  dtstart_local: "2026-04-20T09:00:00",
   duration_minutes: 45,
+  rdate_local: "",
+  exdate_local: "",
   active_from: "2026-04-20",
+  active_until: null,
+  paused_at: null,
+  created_at: "2026-04-01T00:00:00Z",
+  deleted_at: null,
   paused: false,
 };
 
@@ -110,10 +120,16 @@ function installSchedulesFetch(opts: {
   schedules?: Schedule[];
   templates?: TaskTemplate[];
   postRequests?: FetchRouteRequest[];
+  patchRequests?: FetchRouteRequest[];
+  pauseRequests?: FetchRouteRequest[];
+  resumeRequests?: FetchRouteRequest[];
 } = {}) {
   const schedules = opts.schedules ?? [SCHEDULE];
   const templates = opts.templates ?? [TEMPLATE];
   const postRequests = opts.postRequests ?? [];
+  const patchRequests = opts.patchRequests ?? [];
+  const pauseRequests = opts.pauseRequests ?? [];
+  const resumeRequests = opts.resumeRequests ?? [];
   return installFetchRouteHandlers([
     {
       path: "/w/acme/api/v1/tasks/schedules",
@@ -153,6 +169,35 @@ function installSchedulesFetch(opts: {
         };
       },
     },
+    {
+      path: "/w/acme/api/v1/tasks/schedules/sch_1",
+      method: "PATCH",
+      respond: (request) => {
+        patchRequests.push(request);
+        return {
+          body: {
+            ...SCHEDULE,
+            ...(request.body as Record<string, unknown>),
+          },
+        };
+      },
+    },
+    {
+      path: "/w/acme/api/v1/tasks/schedules/sch_1/pause",
+      method: "POST",
+      respond: (request) => {
+        pauseRequests.push(request);
+        return { body: { ...SCHEDULE, paused: true, paused_at: "2026-05-08T10:30:00Z" } };
+      },
+    },
+    {
+      path: "/w/acme/api/v1/tasks/schedules/sch_1/resume",
+      method: "POST",
+      respond: (request) => {
+        resumeRequests.push(request);
+        return { body: { ...SCHEDULE, paused: false, paused_at: null } };
+      },
+    },
   ]);
 }
 
@@ -169,8 +214,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("<SchedulesPage> New schedule action", () => {
-  it("opens the schedule creation workflow", async () => {
+describe("<SchedulesPage> inline schedules table", () => {
+  it("renders a trailing inline create row without opening a modal", async () => {
     const harness = installSchedulesFetch();
     try {
       render(<Harness client={makeClient()} />);
@@ -180,11 +225,12 @@ describe("<SchedulesPage> New schedule action", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "+ New schedule" }));
 
-      const dialog = screen.getByRole("dialog", { name: "New schedule" });
-      expect(within(dialog).getByRole("combobox", { name: /^Template\b/ })).toHaveValue(TEMPLATE.name);
-      expect(within(dialog).getByRole("combobox", { name: /^Property\b/ })).toHaveValue("Any property");
-      expect(within(dialog).getByRole("combobox", { name: /^Default assignee\b/ })).toHaveValue("Unassigned");
-      expect(within(dialog).getByRole("button", { name: "Create schedule" })).toBeEnabled();
+      const createRow = screen.getByLabelText("New schedule");
+      expect(within(createRow).getByLabelText("Name")).toBeInTheDocument();
+      expect(within(createRow).getByRole("combobox", { name: /^Template\b/ })).toHaveValue("");
+      expect(within(createRow).getByRole("combobox", { name: /^Property\b/ })).toHaveValue("Any property");
+      expect(within(createRow).getByRole("combobox", { name: /^Default assignee\b/ })).toHaveValue("Unassigned");
+      expect(screen.queryByRole("dialog", { name: "New schedule" })).not.toBeInTheDocument();
     } finally {
       harness.restore();
     }
@@ -198,13 +244,9 @@ describe("<SchedulesPage> New schedule action", () => {
         expect(screen.getAllByText("Existing turnover").length).toBeGreaterThan(0);
       });
 
-      fireEvent.click(screen.getByRole("button", { name: "+ New schedule" }));
-
-      const dialog = screen.getByRole("dialog", { name: "New schedule" });
-      expect(within(dialog).getByRole("status")).toHaveTextContent(
-        "Create a task template before adding schedules.",
-      );
-      expect(within(dialog).getByRole("button", { name: "Create schedule" })).toBeDisabled();
+      const createRow = screen.getByLabelText("New schedule");
+      expect(createRow).toHaveTextContent("Create a task template before adding schedules.");
+      expect(within(createRow).getByRole("button", { name: "Save" })).toBeDisabled();
     } finally {
       harness.restore();
     }
@@ -247,19 +289,20 @@ describe("<SchedulesPage> New schedule action", () => {
       });
       fireEvent.click(screen.getByRole("button", { name: "+ New schedule" }));
 
-      const dialog = screen.getByRole("dialog", { name: "New schedule" });
-      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
+      const createRow = screen.getByLabelText("New schedule");
+      fireEvent.change(within(createRow).getByLabelText(/^Name\b/), {
         target: { value: "Friday turnover" },
       });
-      await chooseSearchableOption(dialog, /^Property\b/, /Casa Verde/i);
-      await chooseSearchableOption(dialog, /^Default assignee\b/, /Mina Silva/i);
-      fireEvent.change(within(dialog).getByLabelText(/^Starts on\b/), {
+      await chooseSearchableOption(createRow, /^Template\b/, /Turnover clean/i);
+      await chooseSearchableOption(createRow, /^Property\b/, /Casa Verde/i);
+      await chooseSearchableOption(createRow, /^Default assignee\b/, /Mina Silva/i);
+      fireEvent.change(within(createRow).getByLabelText(/^Starts on\b/), {
         target: { value: "2026-05-08" },
       });
-      fireEvent.change(within(dialog).getByLabelText(/^Start time\b/), {
+      fireEvent.change(within(createRow).getByLabelText(/^Start time\b/), {
         target: { value: "10:30" },
       });
-      fireEvent.click(within(dialog).getByRole("button", { name: "Create schedule" }));
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(postRequests).toHaveLength(1);
@@ -269,13 +312,16 @@ describe("<SchedulesPage> New schedule action", () => {
         template_id: TEMPLATE.id,
         property_id: PROPERTY.id,
         default_assignee: EMPLOYEE.id,
+        backup_assignee_user_ids: [],
         rrule: "RRULE:FREQ=WEEKLY;BYDAY=FR",
         dtstart_local: "2026-05-08T10:30:00",
+        duration_minutes: TEMPLATE.duration_minutes,
+        rdate_local: "",
+        exdate_local: "",
         active_from: "2026-05-08",
+        active_until: null,
       });
-      await waitFor(() => {
-        expect(screen.queryByRole("dialog", { name: "New schedule" })).not.toBeInTheDocument();
-      });
+      expect(screen.queryByRole("dialog", { name: "New schedule" })).not.toBeInTheDocument();
     } finally {
       harness.restore();
     }
@@ -289,18 +335,17 @@ describe("<SchedulesPage> New schedule action", () => {
       await waitFor(() => {
         expect(screen.getAllByText("Existing turnover").length).toBeGreaterThan(0);
       });
-      fireEvent.click(screen.getByRole("button", { name: "+ New schedule" }));
-
-      const dialog = screen.getByRole("dialog", { name: "New schedule" });
-      expect(within(dialog).getByRole("combobox", { name: /^Property\b/ })).toHaveValue("Any property");
-      expect(within(dialog).getByRole("combobox", { name: /^Default assignee\b/ })).toHaveValue("Unassigned");
-      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
+      const createRow = screen.getByLabelText("New schedule");
+      expect(within(createRow).getByRole("combobox", { name: /^Property\b/ })).toHaveValue("Any property");
+      expect(within(createRow).getByRole("combobox", { name: /^Default assignee\b/ })).toHaveValue("Unassigned");
+      fireEvent.change(within(createRow).getByLabelText(/^Name\b/), {
         target: { value: "Workspace-wide schedule" },
       });
-      fireEvent.change(within(dialog).getByLabelText(/^Starts on\b/), {
+      await chooseSearchableOption(createRow, /^Template\b/, /Turnover clean/i);
+      fireEvent.change(within(createRow).getByLabelText(/^Starts on\b/), {
         target: { value: "2026-05-08" },
       });
-      fireEvent.click(within(dialog).getByRole("button", { name: "Create schedule" }));
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(postRequests).toHaveLength(1);
@@ -308,16 +353,21 @@ describe("<SchedulesPage> New schedule action", () => {
       expect(postRequests[0]?.body).toEqual({
         name: "Workspace-wide schedule",
         template_id: TEMPLATE.id,
+        backup_assignee_user_ids: [],
         rrule: "RRULE:FREQ=WEEKLY;BYDAY=FR",
         dtstart_local: "2026-05-08T09:00:00",
+        duration_minutes: TEMPLATE.duration_minutes,
+        rdate_local: "",
+        exdate_local: "",
         active_from: "2026-05-08",
+        active_until: null,
       });
     } finally {
       harness.restore();
     }
   });
 
-  it("shows a validation message instead of silently returning on invalid submit state", async () => {
+  it("shows required validation in the inline create row", async () => {
     const postRequests: FetchRouteRequest[] = [];
     const harness = installSchedulesFetch({ postRequests });
     try {
@@ -327,19 +377,230 @@ describe("<SchedulesPage> New schedule action", () => {
       });
       fireEvent.click(screen.getByRole("button", { name: "+ New schedule" }));
 
-      const dialog = screen.getByRole("dialog", { name: "New schedule" });
-      const startsOn = within(dialog).getByLabelText(/^Starts on\b/);
-      const form = startsOn.closest("form");
-      if (!form) throw new Error("Schedule form was not rendered");
-      fireEvent.change(startsOn, { target: { value: "" } });
-      fireEvent.submit(form);
+      const createRow = screen.getByLabelText("New schedule");
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
+      expect(createRow).toHaveTextContent("Name is required.");
 
-      expect(within(dialog).getByRole("alert")).toHaveTextContent(
-        "Name is required.",
-      );
+      fireEvent.change(within(createRow).getByLabelText(/^Name\b/), {
+        target: { value: "Friday turnover" },
+      });
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
+      expect(createRow).toHaveTextContent("Template is required.");
+
+      await chooseSearchableOption(createRow, /^Template\b/, /Turnover clean/i);
+      fireEvent.change(within(createRow).getByLabelText(/^Starts on\b/), {
+        target: { value: "" },
+      });
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
+      expect(createRow).toHaveTextContent("Start date is required.");
+
+      fireEvent.change(within(createRow).getByLabelText(/^Starts on\b/), {
+        target: { value: "2026-05-08" },
+      });
+      fireEvent.change(within(createRow).getByLabelText(/^Start time\b/), {
+        target: { value: "" },
+      });
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
+      expect(createRow).toHaveTextContent("Start time is required.");
       expect(postRequests).toHaveLength(0);
     } finally {
       harness.restore();
+    }
+  });
+
+  it("preserves the existing schedule list and preview while editing inline", async () => {
+    const harness = installSchedulesFetch();
+    try {
+      render(<Harness client={makeClient()} />);
+      await waitFor(() => {
+        expect(screen.getAllByText("Existing turnover").length).toBeGreaterThan(0);
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New schedule" }));
+
+      expect(screen.getByRole("table", { name: "Schedules" })).toBeInTheDocument();
+      expect(screen.getByText("Preview — next 7 days")).toBeInTheDocument();
+      expect(screen.getAllByText("Every Monday at 09:00").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Casa Verde").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("45m").length).toBeGreaterThan(0);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("updates an existing schedule through the inline row", async () => {
+    const patchRequests: FetchRouteRequest[] = [];
+    const scheduleWithHiddenFields: Schedule = {
+      ...SCHEDULE,
+      area_id: "area_hidden",
+      backup_assignee_user_ids: ["emp_backup"],
+      rdate_local: "RDATE:20260509T081500",
+      exdate_local: "EXDATE:20260513T081500",
+      active_until: "2026-08-31",
+    };
+    const harness = installSchedulesFetch({ schedules: [scheduleWithHiddenFields], patchRequests });
+    try {
+      render(<Harness client={makeClient()} />);
+      await waitFor(() => {
+        expect(screen.getAllByText("Existing turnover").length).toBeGreaterThan(0);
+      });
+
+      const scheduleRow = screen.getByLabelText("Existing turnover");
+      fireEvent.click(within(scheduleRow).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(scheduleRow).getByLabelText(/^Name\b/), {
+        target: { value: "Updated turnover" },
+      });
+      fireEvent.change(within(scheduleRow).getByLabelText(/^Starts on\b/), {
+        target: { value: "2026-05-06" },
+      });
+      fireEvent.change(within(scheduleRow).getByLabelText(/^Start time\b/), {
+        target: { value: "08:15" },
+      });
+      fireEvent.click(within(scheduleRow).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(patchRequests).toHaveLength(1);
+      });
+      expect(patchRequests[0]?.body).toEqual({
+        name: "Updated turnover",
+        template_id: TEMPLATE.id,
+        property_id: PROPERTY.id,
+        area_id: "area_hidden",
+        default_assignee: EMPLOYEE.id,
+        backup_assignee_user_ids: ["emp_backup"],
+        rrule: "RRULE:FREQ=WEEKLY;BYDAY=WE",
+        dtstart_local: "2026-05-06T08:15:00",
+        duration_minutes: TEMPLATE.duration_minutes,
+        rdate_local: "RDATE:20260509T081500",
+        exdate_local: "EXDATE:20260513T081500",
+        active_from: "2026-05-06",
+        active_until: "2026-08-31",
+      });
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("preserves hidden recurrence and nullable duration when updating a visible field", async () => {
+    const patchRequests: FetchRouteRequest[] = [];
+    const scheduleWithAdvancedFields: Schedule = {
+      ...SCHEDULE,
+      area_id: "area_hidden",
+      backup_assignee_user_ids: ["emp_backup"],
+      rrule: "RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE",
+      duration_minutes: null,
+      rdate_local: "RDATE:20260509T081500",
+      exdate_local: "EXDATE:20260513T081500",
+      active_until: "2026-08-31",
+    };
+    const harness = installSchedulesFetch({ schedules: [scheduleWithAdvancedFields], patchRequests });
+    try {
+      render(<Harness client={makeClient()} />);
+      await waitFor(() => {
+        expect(screen.getAllByText("Existing turnover").length).toBeGreaterThan(0);
+      });
+
+      const scheduleRow = screen.getByLabelText("Existing turnover");
+      fireEvent.click(within(scheduleRow).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(scheduleRow).getByLabelText(/^Name\b/), {
+        target: { value: "Advanced turnover" },
+      });
+      fireEvent.click(within(scheduleRow).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(patchRequests).toHaveLength(1);
+      });
+      expect(patchRequests[0]?.body).toEqual({
+        name: "Advanced turnover",
+        template_id: TEMPLATE.id,
+        property_id: PROPERTY.id,
+        area_id: "area_hidden",
+        default_assignee: EMPLOYEE.id,
+        backup_assignee_user_ids: ["emp_backup"],
+        rrule: "RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE",
+        dtstart_local: "2026-04-20T09:00:00",
+        duration_minutes: null,
+        rdate_local: "RDATE:20260509T081500",
+        exdate_local: "EXDATE:20260513T081500",
+        active_from: "2026-04-20",
+        active_until: "2026-08-31",
+      });
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("keeps existing schedule editing usable when only sidecar templates are available", async () => {
+    const patchRequests: FetchRouteRequest[] = [];
+    const harness = installSchedulesFetch({ templates: [], patchRequests });
+    try {
+      render(<Harness client={makeClient()} />);
+      await waitFor(() => {
+        expect(screen.getAllByText("Existing turnover").length).toBeGreaterThan(0);
+      });
+
+      const createRow = screen.getByLabelText("New schedule");
+      expect(createRow).toHaveTextContent("Create a task template before adding schedules.");
+      expect(within(createRow).getByRole("button", { name: "Save" })).toBeDisabled();
+
+      const scheduleRow = screen.getByLabelText("Existing turnover");
+      fireEvent.click(within(scheduleRow).getByRole("button", { name: "Edit" }));
+      expect(within(scheduleRow).getByRole("combobox", { name: /^Template\b/ })).toHaveValue(TEMPLATE.name);
+      fireEvent.change(within(scheduleRow).getByLabelText(/^Name\b/), {
+        target: { value: "Sidecar turnover" },
+      });
+      fireEvent.click(within(scheduleRow).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(patchRequests).toHaveLength(1);
+      });
+      expect(patchRequests[0]?.body).toMatchObject({
+        name: "Sidecar turnover",
+        template_id: TEMPLATE.id,
+      });
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("pauses and resumes existing schedules from the inline row", async () => {
+    const pauseRequests: FetchRouteRequest[] = [];
+    const resumeRequests: FetchRouteRequest[] = [];
+    const harness = installSchedulesFetch({
+      schedules: [{ ...SCHEDULE, paused: true, paused_at: "2026-05-08T10:30:00Z" }],
+      pauseRequests,
+      resumeRequests,
+    });
+    try {
+      render(<Harness client={makeClient()} />);
+      await waitFor(() => {
+        expect(screen.getAllByText("Existing turnover").length).toBeGreaterThan(0);
+      });
+
+      const scheduleRow = screen.getByLabelText("Existing turnover");
+      fireEvent.click(within(scheduleRow).getByRole("button", { name: "Resume" }));
+      await waitFor(() => {
+        expect(resumeRequests).toHaveLength(1);
+      });
+    } finally {
+      harness.restore();
+    }
+    cleanup();
+
+    const pauseHarness = installSchedulesFetch({ pauseRequests, resumeRequests });
+    try {
+      render(<Harness client={makeClient()} />);
+      await waitFor(() => {
+        expect(screen.getAllByText("Existing turnover").length).toBeGreaterThan(0);
+      });
+
+      const scheduleRow = screen.getByLabelText("Existing turnover");
+      fireEvent.click(within(scheduleRow).getByRole("button", { name: "Pause" }));
+      await waitFor(() => {
+        expect(pauseRequests).toHaveLength(1);
+      });
+    } finally {
+      pauseHarness.restore();
     }
   });
 });
