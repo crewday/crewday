@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import AgentSidebar from "@/components/AgentSidebar";
 import {
   __resetApiProvidersForTests,
@@ -64,6 +64,128 @@ describe("AgentSidebar", () => {
         "https://example.com",
       );
       expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    } finally {
+      env.restore();
+    }
+  });
+
+  it("renders safe agent navigation links in sidebar messages", async () => {
+    const env = installFetchRouteHandlers([
+      {
+        path: "/w/crewday/api/v1/agent/employee/log",
+        respond: {
+          body: [
+            {
+              at: "2026-05-10T10:00:00Z",
+              kind: "agent",
+              body: "I created Oak House.",
+              agent_links: {
+                links: [
+                  {
+                    rel: "detail",
+                    label: "Open property",
+                    route: "property.detail",
+                    href: "/w/crewday/property/prop_1",
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    try {
+      renderWithProviders(
+        <MemoryRouter initialEntries={["/w/crewday/today"]}>
+          <AgentSidebar role="employee" />
+          <LocationProbe />
+        </MemoryRouter>,
+        { queryClient: makeTestQueryClient() },
+      );
+
+      const link = await screen.findByRole("link", { name: "Open property" });
+      expect(link).toHaveAttribute("href", "/w/crewday/property/prop_1");
+
+      fireEvent.click(link);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("location-probe")).toHaveTextContent(
+          "/w/crewday/property/prop_1",
+        );
+      });
+    } finally {
+      env.restore();
+    }
+  });
+
+  it("keeps manager approval cards as action buttons", async () => {
+    const env = installFetchRouteHandlers([
+      {
+        path: "/w/crewday/api/v1/agent/manager/log",
+        respond: {
+          body: [
+            {
+              at: "2026-05-10T10:00:00Z",
+              kind: "agent",
+              body: "One approval needs review.",
+              links: [
+                {
+                  label: "Open approvals",
+                  route: "approvals.index",
+                  href: "/w/crewday/approvals",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        path: "/w/crewday/api/v1/approvals",
+        respond: {
+          body: {
+            data: [
+              {
+                id: "appr_1",
+                workspace_id: "ws_1",
+                requester_actor_id: null,
+                for_user_id: "u_1",
+                inline_channel: "web_owner_sidebar",
+                resolved_user_mode: "strict",
+                status: "pending",
+                decided_by: null,
+                decided_at: null,
+                decision_note_md: null,
+                expires_at: null,
+                created_at: "2026-05-10T10:00:00Z",
+                action_json: {
+                  tool_name: "properties.create",
+                  card_summary: "Create Oak House?",
+                  card_risk: "medium",
+                },
+                result_json: null,
+              },
+            ],
+            next_cursor: null,
+            has_more: false,
+          },
+        },
+      },
+    ]);
+
+    try {
+      renderWithProviders(
+        <MemoryRouter initialEntries={["/w/crewday/dashboard"]}>
+          <AgentSidebar role="manager" />
+        </MemoryRouter>,
+        { queryClient: makeTestQueryClient() },
+      );
+
+      expect(await screen.findByRole("link", { name: "Open approvals" })).toBeInTheDocument();
+      expect(await screen.findByText("Pending approvals")).toBeInTheDocument();
+      expect(screen.getAllByText("Create Oak House?")).toHaveLength(2);
+      expect(screen.getByRole("button", { name: "Confirm" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Reject" })).toBeInTheDocument();
     } finally {
       env.restore();
     }
@@ -561,3 +683,8 @@ describe("AgentSidebar", () => {
     }
   });
 });
+
+function LocationProbe() {
+  const location = useLocation();
+  return <span data-testid="location-probe">{location.pathname}</span>;
+}

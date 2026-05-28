@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef } from "react";
 import DateTime from "@/components/DateTime";
+import AgentMessageLinks from "@/components/chat/AgentMessageLinks";
 import ChatMessageBody from "@/components/chat/ChatMessageBody";
 import type { AgentActivityState } from "@/lib/sse";
 import type { AgentMessage } from "@/types/api";
@@ -91,7 +92,10 @@ export default function ChatLog(props: ChatLogProps) {
             )}
             <div className={"chat-msg chat-msg--" + m.kind}>
               {m.kind === "agent" ? (
-                <ChatMessageBody body={m.body} className="chat-msg__body" />
+                <>
+                  <ChatMessageBody body={m.body} className="chat-msg__body" />
+                  <AgentMessageLinks message={m} />
+                </>
               ) : (
                 <span className="chat-msg__body">{m.body}</span>
               )}

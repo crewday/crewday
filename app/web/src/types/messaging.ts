@@ -3,12 +3,34 @@
 
 export type ChatChannelKind = "offapp_whatsapp" | "offapp_telegram";
 
+export interface AgentNavigationLink {
+  rel?: string;
+  label: string;
+  route: string;
+  href: string;
+}
+
+export interface AgentLinksPayload {
+  links?: AgentNavigationLink[];
+  items?: Array<{
+    index?: number;
+    links?: AgentNavigationLink[];
+  }>;
+  warnings?: Array<{
+    rel?: string;
+    reason: string;
+  }>;
+}
+
 export interface AgentMessage {
   at: string;
   kind: "agent" | "user" | "action";
   body: string;
   /** §23 chat gateway — channel the turn traversed; null/undefined = web. */
   channel_kind?: ChatChannelKind | null;
+  /** §11 agent handoff links — GET-only navigation affordances. */
+  links?: AgentNavigationLink[] | null;
+  agent_links?: AgentNavigationLink[] | AgentLinksPayload | null;
 }
 
 export interface ChatChannelBinding {

@@ -7,6 +7,7 @@ import { fetchApprovals } from "@/lib/approvals";
 import { qk } from "@/lib/queryKeys";
 import { initialAgentCollapsed, persistAgentCollapsed } from "@/lib/preferences";
 import { useAgentActivity } from "@/lib/agentTyping";
+import AgentMessageLinks from "@/components/chat/AgentMessageLinks";
 import ChatComposer from "@/components/chat/ChatComposer";
 import ChatMessageBody from "@/components/chat/ChatMessageBody";
 import DateTime from "@/components/DateTime";
@@ -191,7 +192,10 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
                 )}
                 <div className={"agent-msg agent-msg--" + msg.kind}>
                   {msg.kind === "agent" ? (
-                    <ChatMessageBody body={msg.body} className="agent-msg__body" />
+                    <>
+                      <ChatMessageBody body={msg.body} className="agent-msg__body" />
+                      <AgentMessageLinks message={msg} />
+                    </>
                   ) : (
                     <span className="agent-msg__body">{msg.body}</span>
                   )}

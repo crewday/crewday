@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import ChatLog from "@/components/chat/ChatLog";
 
@@ -72,6 +73,149 @@ describe("ChatLog", () => {
     expect(mailLink).toHaveAttribute("href", "mailto:ops@example.com");
     expect(mailLink).not.toHaveAttribute("target");
     expect(mailLink).not.toHaveAttribute("rel");
+  });
+
+  it("renders safe agent navigation links and navigates after click", async () => {
+    render(
+      <MemoryRouter initialEntries={["/w/crewday/chat"]}>
+        <ChatLog
+          messages={[
+            {
+              at: "2026-05-10T10:00:00Z",
+              kind: "agent",
+              body: "I created Oak House.",
+              links: [
+                {
+                  rel: "detail",
+                  label: "Open property",
+                  route: "property.detail",
+                  href: "/w/crewday/property/prop_1",
+                },
+              ],
+              agent_links: {
+                links: [],
+                items: [
+                  {
+                    index: 0,
+                    links: [
+                      {
+                        rel: "item.self",
+                        label: "Open listed property",
+                        route: "property.detail",
+                        href: "/w/crewday/property/prop_2",
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          ]}
+        />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    const link = screen.getByRole("link", { name: "Open property" });
+    expect(link).toHaveAttribute("href", "/w/crewday/property/prop_1");
+    expect(screen.getByRole("link", { name: "Open listed property" })).toHaveAttribute(
+      "href",
+      "/w/crewday/property/prop_2",
+    );
+
+    fireEvent.click(link);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location-probe")).toHaveTextContent(
+        "/w/crewday/property/prop_1",
+      );
+    });
+  });
+
+  it("rejects unsafe agent navigation links without hiding the message body", () => {
+    render(
+      <MemoryRouter>
+        <ChatLog
+          messages={[
+            {
+              at: "2026-05-10T10:00:00Z",
+              kind: "agent",
+              body: "The message still renders.",
+              links: [
+                { label: "Script", route: "property.detail", href: "javascript:alert(1)" },
+                {
+                  label: "External",
+                  route: "property.detail",
+                  href: "https://example.com/w/crewday/tasks",
+                },
+                {
+                  label: "Protocol relative",
+                  route: "property.detail",
+                  href: "//example.com/w/crewday/tasks",
+                },
+                {
+                  label: "API",
+                  route: "property.detail",
+                  href: "/w/crewday/api/v1/properties",
+                },
+                { label: "Bare API", route: "property.detail", href: "/api/v1/properties" },
+                { label: "No slash", route: "property.detail", href: "property/prop_1" },
+                {
+                  label: "Unknown route",
+                  route: "property.unknown",
+                  href: "/w/crewday/property/prop_1",
+                },
+                {
+                  label: "Mismatched route",
+                  route: "employee.detail",
+                  href: "/w/crewday/property/prop_1",
+                },
+                {
+                  label: "Bad percent",
+                  route: "property.detail",
+                  href: "/w/crewday/property/%",
+                },
+                { label: "   ", route: "property.detail", href: "/w/crewday/property/prop_1" },
+              ],
+            },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("The message still renders.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Script" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "External" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "API" })).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Agent suggested links" })).toBeNull();
+  });
+
+  it("keeps approval actions separate from navigation links", () => {
+    const decisions: Array<[number, "approve" | "details"]> = [];
+    render(
+      <ChatLog
+        messages={[
+          {
+            at: "2026-05-10T10:00:00Z",
+            kind: "action",
+            body: "Create stay at Oak House?",
+            links: [
+              {
+                label: "Open property",
+                route: "property.detail",
+                href: "/w/crewday/property/prop_1",
+              },
+            ],
+          },
+        ]}
+        onDecideAction={(idx, decision) => decisions.push([idx, decision])}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+
+    expect(decisions).toEqual([[0, "approve"]]);
+    expect(screen.getByRole("button", { name: "Details" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open property" })).toBeNull();
   });
 
   it("does not inject raw HTML from agent messages", () => {
@@ -151,3 +295,8 @@ describe("ChatLog", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 });
+
+function LocationProbe() {
+  const location = useLocation();
+  return <span data-testid="location-probe">{location.pathname}</span>;
+}

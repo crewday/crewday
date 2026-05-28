@@ -149,6 +149,15 @@ AgentTurnOutcome = Literal["replied", "action", "error", "timeout"]
 AgentToolStatus = Literal["completed", "approval_required", "blocked", "error"]
 
 
+class AgentNavigationLinkPayload(BaseModel):
+    """GET-only app navigation affordance attached to an agent message."""
+
+    rel: str | None = None
+    label: str
+    route: str
+    href: str
+
+
 class AgentMessagePayload(BaseModel):
     """Rendered chat-message shape pushed to web agent logs."""
 
@@ -156,6 +165,8 @@ class AgentMessagePayload(BaseModel):
     kind: Literal["agent", "user", "action"]
     body: str
     channel_kind: str | None = None
+    links: list[AgentNavigationLinkPayload] | None = None
+    agent_links: list[AgentNavigationLinkPayload] | dict[str, object] | None = None
 
     @field_validator("at")
     @classmethod

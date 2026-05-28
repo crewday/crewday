@@ -139,6 +139,8 @@ class AdminAgentMessage(BaseModel):
     kind: Literal["agent", "user", "action"]
     body: str
     channel_kind: None = None
+    links: list[dict[str, object]] | None = None
+    agent_links: list[dict[str, object]] | dict[str, object] | None = None
 
 
 class AdminAgentAction(BaseModel):

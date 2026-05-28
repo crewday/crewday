@@ -633,15 +633,25 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
 
   it("agent.message.appended appends to the scope's chat log", () => {
     const qc = makeClient();
+    const links = [
+      {
+        rel: "detail",
+        label: "Open property",
+        route: "property.detail",
+        href: "/w/acme/property/prop_1",
+      },
+    ];
     INVALIDATIONS["agent.message.appended"](
       makeEvent("agent.message.appended", {
         scope: "manager",
-        message: { id: "m1", body: "hi", kind: "agent" },
+        message: { id: "m1", body: "hi", kind: "agent", links },
       }),
       qc,
     );
-    const log = qc.getQueryData<{ id: string }[]>(qk.agentManagerLog());
-    expect(log).toEqual([{ id: "m1", body: "hi", kind: "agent" }]);
+    const log = qc.getQueryData<Array<{ id: string; links?: typeof links }>>(
+      qk.agentManagerLog(),
+    );
+    expect(log).toEqual([{ id: "m1", body: "hi", kind: "agent", links }]);
   });
 
   it("agent.message.appended invalidates instead of appending user echoes", () => {

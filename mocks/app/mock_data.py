@@ -4374,6 +4374,8 @@ class AgentMessage:
     channel_kind: Literal[
         "offapp_whatsapp", "offapp_telegram"
     ] | None = None
+    links: list[dict[str, object]] | None = None
+    agent_links: list[dict[str, object]] | dict[str, object] | None = None
 
 
 @dataclass
