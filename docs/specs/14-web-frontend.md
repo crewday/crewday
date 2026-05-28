@@ -182,6 +182,25 @@ non-admin drops the `next` and falls back to the role landing
 rather than bouncing the user onto a surface they didn't ask
 to see (cd-28s7).
 
+`/admin/agent-docs` uses the standard `InlineTableForm` pattern rather
+than a modal editor. The table lists `slug`, `title`, `summary`, role
+tags, version/customised state, and approximate token count. `slug`,
+`title`, `summary`, and `capabilities` render as read-only values in
+this slice. The inline editable controls are the role tag picker
+(`manager`, `employee`, `admin`; at least one required) and the row
+detail editor for the Markdown body/prompt plus operator change note.
+The body/prompt editor is adapted from `InlineNoteField` behavior in
+the row detail/note area: expand the row, edit the Markdown body and
+note in place, save/cancel inline, and never open a separate modal.
+Above the body editor, show the exact safety banner from §11:
+"Body is sent to every chat agent that loads this doc. Do not paste
+workspace secrets, customer data, or live API keys." The token count
+label must say it is approximate and use the REST
+`approx_token_count` value (§12). Revisions and reset-to-default are
+row actions wired to the REST/CLI contract in §12/§13; reset restores
+both the code-default body and code-default editable metadata,
+including roles.
+
 ### Per-workspace public
 
 ```

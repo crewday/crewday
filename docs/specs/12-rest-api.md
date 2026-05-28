@@ -1375,10 +1375,106 @@ table.
 
 # Agent docs — system-side virtual files for the chat agents (§02 agent_doc, §11).
 GET    /admin/api/v1/agent_docs                      # one row per active slug, with is_customised flag
-GET    /admin/api/v1/agent_docs/{slug}               # full body + default_hash + roles + capabilities
-PUT    /admin/api/v1/agent_docs/{slug}               # snapshot old body → revision; bump version
+GET    /admin/api/v1/agent_docs/{slug}               # full body + hashes + roles + capabilities
+PUT    /admin/api/v1/agent_docs/{slug}               # snapshot old body/roles → revision; bump version
 GET    /admin/api/v1/agent_docs/{slug}/revisions     # full edit history
 POST   /admin/api/v1/agent_docs/{slug}/reset-to-default  # write a revision containing the current code default
+
+Agent-doc responses use this shared shape unless noted:
+
+```json
+{
+  "slug": "crewday_overview",
+  "title": "Crewday overview",
+  "summary": "Short code-authored summary from front-matter.",
+  "body_md": "# Crewday overview\n...",
+  "roles": ["manager", "employee"],
+  "capabilities": ["chat.manager", "chat.employee", "chat.admin"],
+  "version": 3,
+  "default_hash": "f00dbabe12345678",
+  "metadata_default_hash": "abcddcba12345678",
+  "is_customised": true,
+  "notes": "Clarified mobile handoff",
+  "approx_token_count": 412,
+  "updated_at": "2026-05-28T12:00:00Z"
+}
+```
+
+`GET /admin/api/v1/agent_docs` returns `{"data": [AgentDocListItem]}`.
+List items omit `body_md` but include `slug`, `title`, `summary`,
+`roles`, `capabilities`, `version`, `default_hash`,
+`metadata_default_hash`, `is_customised`, `approx_token_count`, and
+`updated_at`. `approx_token_count` is computed from the active body even
+when the body is omitted from the list response.
+
+For agent docs, `is_customised` is true when either the active body hash
+differs from `default_hash` or the normalized active editable metadata
+hash differs from `metadata_default_hash`; edited roles therefore count
+as customisation even when the body still matches the code default.
+
+`GET /admin/api/v1/agent_docs/{slug}` returns the full shape above.
+
+`PUT /admin/api/v1/agent_docs/{slug}` accepts only the editable fields
+for this slice:
+
+```json
+{
+  "body_md": "# Crewday overview\n...",
+  "roles": ["employee", "manager"],
+  "notes": "Why the operator changed it"
+}
+```
+
+`body_md` and `roles` are required on update so the save is a complete
+replacement, not a patch. `notes` is optional and may be `null` or
+blank. `slug`, `title`, `summary`, and `capabilities` are read-only;
+including them in the request returns `422`. Valid roles are exactly
+`manager`, `employee`, and `admin`; at least one is required; successful
+responses return them in stable order `manager`, `employee`, `admin`.
+The response is the full updated agent-doc shape. The server snapshots
+the previous `body_md` and `roles` into a revision before saving,
+increments `version`, and keeps `default_hash` /
+`metadata_default_hash` as the current code baselines.
+
+`GET /admin/api/v1/agent_docs/{slug}/revisions` returns:
+
+```json
+{
+  "data": [
+    {
+      "version": 2,
+      "body_md": "# Previous body\n...",
+      "roles": ["manager"],
+      "notes": "Previous change note",
+      "approx_token_count": 318,
+      "created_at": "2026-05-28T11:00:00Z",
+      "created_by_user_id": "usr_..."
+    }
+  ]
+}
+```
+
+Revision `approx_token_count` is computed from that revision's
+`body_md`, not from the current body.
+
+`POST /admin/api/v1/agent_docs/{slug}/reset-to-default` accepts an
+optional body:
+
+```json
+{"notes": "Reset after reviewing upstream default"}
+```
+
+It snapshots the previous `body_md` and `roles`, writes the current
+code-default `body_md` plus current code-default roles, bumps
+`version`, clears operator customisation for both body and editable
+metadata, stores the supplied note on the new save, and returns the full
+updated agent-doc shape. It is the only reset operation; `DELETE` is not
+offered.
+
+For every agent-doc response, `approx_token_count` is deterministic and
+model-agnostic: trim the body string, return `0` for blank content, and
+otherwise return `ceil(trimmed_character_count / 4)`. User-facing copy
+must call it approximate.
 
 # Call feed — unchanged shape; writes from the new pipeline.
 GET    /admin/api/v1/llm/calls                       # deployment-wide call feed (ndjson + --follow)

@@ -476,11 +476,11 @@ crewday deploy                          # HTTP-backed deployment-admin group
   llm prompt revisions <id>
   llm prompt reset-to-default <id>
   # Agent docs (system-side virtual files; §11 "Agent knowledge tools")
-  agent-docs list                       # slug, title, roles, version, customised? y/n
-  agent-docs show <slug>                # body + default_hash + roles + capabilities
-  agent-docs edit <slug> --body @doc.md [--note "..."]
-  agent-docs revisions <slug>
-  agent-docs reset-to-default <slug>
+  agent-docs list                       # slug, title, roles, version, customised? y/n, approximate tokens
+  agent-docs show <slug>                # body + hashes + roles + capabilities + approximate tokens
+  agent-docs edit <slug> --body @doc.md --roles manager,employee [--note "..."]
+  agent-docs revisions <slug>           # body + roles + note + approximate tokens per revision
+  agent-docs reset-to-default <slug> [--note "..."]
   # Pricing
   llm sync-pricing [--provider-model <id> ...] [--dry-run]
                                            # triggers OpenRouter pricing sync on demand
@@ -564,6 +564,20 @@ crewday admin
 crewday surface
   --json                            # dump _surface.json for programmatic discovery
 ```
+
+`agent-docs` commands are generated from the deployment-admin REST
+surface (§12) and share its request/response contract. `agent-docs edit`
+is a complete replacement for the editable slice: `--body @file` and
+`--roles <csv>` are both required, `--note` is optional, and the only
+accepted roles are `manager`, `employee`, and `admin`. The client sends
+roles as JSON array values; the server normalizes them into stable order.
+`slug`, `title`, `summary`, and `capabilities` are read-only and are not
+CLI flags in this slice. `agent-docs list`, `show`, and `revisions`
+include `approx_token_count` in JSON/YAML output; table output labels it
+as approximate. `agent-docs reset-to-default` maps to
+`POST /admin/api/v1/agent_docs/{slug}/reset-to-default`, accepts only an
+optional `--note`, and restores both the code-default body and the
+code-default editable metadata, including roles.
 
 ### `crewday admin` vs `crewday deploy` vs `crewday workspace-admin`
 

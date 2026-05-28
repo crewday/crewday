@@ -1360,11 +1360,12 @@ subsection); seeds from `app/agent_docs/*.md` on boot.
 | title           | text      |                                                                                 |
 | summary         | text?     | one-sentence summary surfaced in `list_system_docs` so the model can pick what to read without fetching the body |
 | body_md         | text      | full Markdown                                                                   |
-| roles           | text[]    | subset of `{owner, manager, employee, admin}`; the doc is offered to the agent only when at least one matches a role grant the delegating user holds in the turn |
+| roles           | text[]    | subset of `{manager, employee, admin}`; at least one required; stored in that stable order; the doc is offered to the agent only when at least one matches a role grant the delegating user holds in the turn |
 | capabilities    | text[]    | optional further allow-list; defaults to `{chat.manager, chat.employee, chat.admin}` |
 | version         | int       | auto-incremented per slug                                                       |
 | is_active       | bool      |                                                                                 |
 | default_hash    | text(16)  | sha256[:16] of the code default at the time of the last seed                    |
+| metadata_default_hash | text(16) | sha256[:16] of the normalized code-default editable metadata at the time of the last seed; v1 covers `roles` only |
 | notes           | text?     | operator-facing change note                                                     |
 | created_at      | tstz      |                                                                                 |
 | updated_at      | tstz      |                                                                                 |
@@ -1373,6 +1374,21 @@ Primary key on `id`; unique `(slug)` while `is_active = true`.
 Deployment-scope: there is no `workspace_id` — system docs apply to
 every workspace served by the deployment, just like the prompt
 library and the LLM registry.
+
+Agent-doc seed sync treats Markdown body and editable metadata as two
+separate hash-self-seeded values. `default_hash` protects `body_md`;
+`metadata_default_hash` protects normalized editable metadata, currently
+only `roles` serialized as stable JSON after validation and ordering.
+When a code seed changes roles, rows whose normalized stored roles hash
+to the stored `metadata_default_hash` auto-upgrade to the new code roles.
+Rows whose roles were changed by an operator preserve those roles and
+only advance `metadata_default_hash` to the new code baseline. A row is
+customised when either the stored body hashes differently from
+`default_hash` or the normalized stored editable metadata hashes
+differently from `metadata_default_hash`. In this slice, `slug`, `title`,
+`summary`, and `capabilities` are read-only in the admin editor; `title`,
+`summary`, and `capabilities` continue to follow the code front-matter on
+seed sync.
 
 ### `agent_doc_revision`
 
@@ -1387,6 +1403,7 @@ hash-self-seeded tables contract. Mirrors
 | doc_id             | ULID FK   | `agent_doc.id`                                          |
 | version            | int       | snapshot                                                |
 | body_md            | text      | snapshot at save time                                   |
+| roles              | text[]    | role snapshot at save time, ordered `manager`, `employee`, `admin` |
 | notes              | text?     |                                                         |
 | created_at         | tstz      |                                                         |
 | created_by_user_id | ULID FK?  | acting user; null for code-default upgrades             |

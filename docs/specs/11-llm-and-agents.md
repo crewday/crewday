@@ -2228,10 +2228,31 @@ that the agent itself reads.
   edits.
 - Operators edit per-deployment overrides at `/admin/agent-docs`
   (a sibling route in the admin LLM sidebar group, mirroring the prompt
-  library) or via `crewday admin agent-docs edit <slug>`.
-- Reset-to-default and revision history follow the shared
-  hash-self-seeded admin contract (§02). Retention follows
+  library) or via `crewday deploy agent-docs edit <slug>`.
+- The web surface is an inline editor: the list uses the
+  `InlineTableForm` pattern, and each expanded row edits the Markdown
+  body/prompt plus change note in the row detail/note area adapted from
+  `InlineNoteField`. It does not open a separate edit modal.
+- Editable fields in this slice are `body_md`, `roles`, and the
+  operator change note (`notes`). `slug` is always read-only. `title`,
+  `summary`, and `capabilities` are also read-only here; they are shown
+  for context and continue to come from code front-matter.
+- Role tags are exactly `manager`, `employee`, and `admin`. At least
+  one role is required. The API normalizes successful saves into the
+  stable order `manager`, `employee`, `admin` regardless of input order.
+- Role metadata survives future code seed syncs through
+  `metadata_default_hash` (§02), analogous to the body `default_hash`.
+  Code-default role changes auto-upgrade rows whose roles are still
+  unmodified, while operator-edited roles are preserved across deploys.
+- Reset-to-default writes a new revision containing the current code
+  `body_md` and code-default editable metadata, including roles, then
+  bumps `version`. Revision history returns raw bodies and the role
+  snapshot for each save; retention follows
   `retention.template_revisions_days` (§02).
+- The admin UI and API expose `approx_token_count` as deterministic,
+  model-agnostic metadata for the active body and revision bodies:
+  trim the body, return `0` when blank, otherwise
+  `ceil(character_count / 4)`. UI copy must call it approximate.
 
 The two tools exposed to the agent:
 
