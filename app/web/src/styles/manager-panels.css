@@ -245,8 +245,16 @@
 }
 
 /* ── Calendars ──────────────────────────────────────────── */
-.mini-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-.mini-cal--wide { grid-template-columns: repeat(10, 1fr); }
+.mini-cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.mini-cal--wide { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.mini-cal__weekday {
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  text-transform: uppercase;
+}
+.mini-cal__blank { min-height: 52px; }
 .mini-cal__day { background: var(--paper-2); border-radius: 6px; padding: 6px 8px; min-height: 52px; font-size: 12px; position: relative; }
 .mini-cal__day--today { outline: 2px solid var(--moss); }
 .mini-cal__day--closed { background: var(--paper-3); }

@@ -33,12 +33,55 @@ interface ClosurePayload {
   source_ical_feed_id?: string | null;
 }
 
+interface CalendarDay {
+  day: number;
+  iso: string;
+}
+
+const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
 function fmtDayMon(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 }
 
 function dateOnly(iso: string): string {
   return iso.slice(0, 10);
+}
+
+function buildMonthCalendar(anchorIso: string): {
+  days: CalendarDay[];
+  label: string;
+  leadingBlanks: number;
+} {
+  const year = Number(anchorIso.slice(0, 4));
+  const month = Number(anchorIso.slice(5, 7));
+  const firstOfMonth = new Date(Date.UTC(year, month - 1, 1));
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const leadingBlanks = (firstOfMonth.getUTCDay() + 6) % 7;
+  const days = Array.from({ length: daysInMonth }, (_, index) => {
+    const day = index + 1;
+    return {
+      day,
+      iso: `${anchorIso.slice(0, 8)}${String(day).padStart(2, "0")}`,
+    };
+  });
+  return {
+    days,
+    label: firstOfMonth.toLocaleDateString("en-GB", {
+      month: "long",
+      timeZone: "UTC",
+      year: "numeric",
+    }),
+    leadingBlanks,
+  };
+}
+
+function closureCoversDate(closure: PropertyClosure, iso: string): boolean {
+  return closure.starts_on <= iso && iso <= closure.ends_on;
+}
+
+function stayCoversDate(stay: Stay, iso: string): boolean {
+  return dateOnly(stay.check_in) <= iso && iso <= dateOnly(stay.check_out);
 }
 
 function inclusiveDateToExclusiveEndAt(isoDate: string): string {
@@ -205,12 +248,8 @@ export default function PropertyClosuresPage() {
   }
 
   const { property, closures, stays } = dataQ.data;
-  const today = new Date(meQ.data.today);
-  const todayDay = today.getDate();
   const todayIso = dateOnly(meQ.data.today);
-
-  const days: number[] = [];
-  for (let d = 1; d <= 30; d += 1) days.push(d);
+  const calendar = buildMonthCalendar(todayIso);
 
   return (
     <DeskPage
@@ -298,30 +337,36 @@ export default function PropertyClosuresPage() {
       <div className="panel">
         <header className="panel__head">
           <h2>Calendar view</h2>
-          <span className="muted">April 2026</span>
+          <span className="muted">{calendar.label}</span>
         </header>
-        <div className="mini-cal mini-cal--wide">
-          {days.map((d) => {
-            let closed = false;
+        <div className="mini-cal" role="grid" aria-label={calendar.label + " property calendar"}>
+          {WEEKDAY_LABELS.map((weekday) => (
+            <div key={weekday} className="mini-cal__weekday" role="columnheader">
+              {weekday}
+            </div>
+          ))}
+          {Array.from({ length: calendar.leadingBlanks }, (_, index) => (
+            <div key={"blank-" + index} className="mini-cal__blank" aria-hidden="true" />
+          ))}
+          {calendar.days.map((day) => {
             let reason: PropertyClosure["reason"] | null = null;
             for (const c of closures) {
-              const cs = new Date(c.starts_on).getDate();
-              const ce = new Date(c.ends_on).getDate();
-              if (cs <= d && d <= ce) {
-                closed = true;
+              if (closureCoversDate(c, day.iso)) {
                 reason = c.reason;
+                break;
               }
             }
+            const closed = reason !== null;
             const cls = [
               "mini-cal__day",
               closed ? "mini-cal__day--closed" : "",
-              d === todayDay ? "mini-cal__day--today" : "",
+              day.iso === todayIso ? "mini-cal__day--today" : "",
             ]
               .filter(Boolean)
               .join(" ");
             return (
-              <div key={d} className={cls}>
-                <span className="mini-cal__num">{d}</span>
+              <div key={day.iso} className={cls} role="gridcell" aria-label={day.iso}>
+                <span className="mini-cal__num">{day.day}</span>
                 {closed && (
                   <span
                     className="mini-cal__bar mini-cal__bar--closed"
@@ -329,9 +374,7 @@ export default function PropertyClosuresPage() {
                   />
                 )}
                 {stays.map((s) => {
-                  const ci = new Date(s.check_in).getDate();
-                  const co = new Date(s.check_out).getDate();
-                  if (ci <= d && d <= co) {
+                  if (stayCoversDate(s, day.iso)) {
                     return (
                       <span
                         key={s.id}

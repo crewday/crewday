@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
@@ -206,8 +206,12 @@ beforeEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("acme");
-  HTMLDialogElement.prototype.showModal = vi.fn();
-  HTMLDialogElement.prototype.close = vi.fn();
+  HTMLDialogElement.prototype.showModal = vi.fn(function showModal(this: HTMLDialogElement) {
+    this.setAttribute("open", "");
+  });
+  HTMLDialogElement.prototype.close = vi.fn(function close(this: HTMLDialogElement) {
+    this.removeAttribute("open");
+  });
 });
 
 afterEach(() => {
@@ -231,6 +235,21 @@ describe("<PropertyClosuresPage>", () => {
       expect(screen.getByText("Airbnb / VRBO")).toBeInTheDocument();
       expect(screen.getByText("Read-only — edit in Airbnb / VRBO")).toBeInTheDocument();
       expect(screen.getByText("Calendar view")).toBeInTheDocument();
+      const calendar = screen.getByRole("grid", { name: "April 2026 property calendar" });
+      expect(Array.from(calendar.children).slice(0, 10).map((el) => el.textContent)).toEqual([
+        "Mon",
+        "Tue",
+        "Wed",
+        "Thu",
+        "Fri",
+        "Sat",
+        "Sun",
+        "",
+        "",
+        "1",
+      ]);
+      expect(calendar.querySelectorAll(".mini-cal__blank")).toHaveLength(2);
+      expect(within(calendar).getByRole("gridcell", { name: "2026-04-16" })).toHaveClass("mini-cal__day--today");
       expect(fake.calls).toContain("/w/acme/api/v1/property_closures?property_id=prop_1&limit=100");
       expect(fake.calls).toContain("/w/acme/api/v1/stays/reservations?property_id=prop_1&limit=100");
     } finally {
@@ -269,9 +288,9 @@ describe("<PropertyClosuresPage>", () => {
       render(<Harness />);
 
       fireEvent.click(await screen.findByRole("button", { name: "+ Add closure" }));
-      fireEvent.change(screen.getByLabelText("Start"), { target: { value: "2026-04-16" } });
-      fireEvent.change(screen.getByLabelText("End"), { target: { value: "2026-04-18" } });
-      fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "seasonal" } });
+      fireEvent.change(await screen.findByLabelText(/Start/), { target: { value: "2026-04-16" } });
+      fireEvent.change(screen.getByLabelText(/End/), { target: { value: "2026-04-18" } });
+      fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: "seasonal" } });
       fireEvent.click(hiddenButton("Save"));
 
       await waitFor(() => {
@@ -297,8 +316,8 @@ describe("<PropertyClosuresPage>", () => {
       render(<Harness />);
 
       fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-      fireEvent.change(screen.getByLabelText("Start"), { target: { value: "2026-04-11" } });
-      fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "owner_stay" } });
+      fireEvent.change(await screen.findByLabelText(/Start/), { target: { value: "2026-04-11" } });
+      fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: "owner_stay" } });
       fireEvent.click(hiddenButton("Save"));
 
       await waitFor(() => {
