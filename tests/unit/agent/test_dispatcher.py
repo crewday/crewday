@@ -882,6 +882,99 @@ def test_dispatch_rejects_known_bare_host_tool() -> None:
     assert result.mutated is False
 
 
+def test_dispatch_property_create_returns_detail_and_stays_handoff_links() -> None:
+    app = _build_app()
+    router = APIRouter()
+
+    @router.post(
+        "/w/{slug}/api/v1/properties",
+        openapi_extra={
+            "x-cli": _x_cli("properties", "create"),
+            "x-agent-confirm": {"summary": "Create property?"},
+        },
+    )
+    def create_property(slug: str, body: dict[str, Any]) -> dict[str, Any]:
+        return {"id": "prop_1", "slug": slug, "name": body["name"]}
+
+    app.include_router(router)
+    schema = _schema_with(
+        {
+            "path": "/w/{slug}/api/v1/properties",
+            "method": "post",
+            "operationId": "properties.create",
+            "x-cli": _x_cli("properties", "create"),
+            "x-agent-links": {
+                "policy": "links",
+                "links": [
+                    {
+                        "rel": "self",
+                        "label": "Open property",
+                        "route": "property.detail",
+                        "params": {"pid": "$response.id"},
+                        "query": {},
+                    },
+                    {
+                        "rel": "related.list",
+                        "label": "View stays for property",
+                        "route": "stays.index",
+                        "params": {},
+                        "query": {"property_id": "$response.id"},
+                    },
+                    {
+                        "rel": "unsafe.create",
+                        "label": "Create stay now",
+                        "route": "stays.index",
+                        "params": {},
+                        "query": {"property_id": "$response.id"},
+                        "href": "/w/acme/api/v1/stays",
+                        "method": "POST",
+                    },
+                ],
+            },
+        }
+    )
+    disp = OpenAPIToolDispatcher(app=app, openapi=schema, workspace_slug="acme")
+
+    result = disp.dispatch(
+        ToolCall(
+            id="c-property-create",
+            name="properties.create",
+            input={"name": "Oak House"},
+        ),
+        token=_token(),
+        headers={},
+    )
+
+    assert result.status_code == 200
+    assert result.mutated is True
+    assert result.agent_links == {
+        "links": [
+            {
+                "rel": "self",
+                "label": "Open property",
+                "route": "property.detail",
+                "href": "/w/acme/property/prop_1",
+            },
+            {
+                "rel": "related.list",
+                "label": "View stays for property",
+                "route": "stays.index",
+                "href": "/w/acme/stays?property_id=prop_1",
+            },
+        ],
+        "warnings": [
+            {
+                "rel": "unsafe.create",
+                "reason": "link contains forbidden field 'href'",
+            }
+        ],
+    }
+    assert all(
+        "/api/" not in link["href"]
+        for link in cast(list[dict[str, str]], result.agent_links["links"])
+    )
+
+
 def test_dispatch_returns_structured_agent_links_for_list_items() -> None:
     app = _build_app()
     router = APIRouter()
@@ -909,7 +1002,16 @@ def test_dispatch_returns_structured_agent_links_for_list_items() -> None:
                         "route": "property.detail",
                         "params": {"pid": "$item.id"},
                         "query": {},
-                    }
+                    },
+                    {
+                        "rel": "item.unsafe",
+                        "label": "Update property",
+                        "route": "property.detail",
+                        "params": {"pid": "$item.id"},
+                        "query": {},
+                        "href": "/w/acme/api/v1/properties/$item.id",
+                        "method": "PATCH",
+                    },
                 ],
             },
         }
@@ -936,6 +1038,12 @@ def test_dispatch_returns_structured_agent_links_for_list_items() -> None:
                         "href": "/w/acme/property/prop_1",
                     }
                 ],
+            }
+        ],
+        "warnings": [
+            {
+                "rel": "item.unsafe",
+                "reason": "link contains forbidden field 'href'",
             }
         ],
     }

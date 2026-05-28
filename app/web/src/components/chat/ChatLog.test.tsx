@@ -75,7 +75,7 @@ describe("ChatLog", () => {
     expect(mailLink).not.toHaveAttribute("rel");
   });
 
-  it("renders safe agent navigation links and navigates after click", async () => {
+  it("renders property handoff links and navigates only after click", async () => {
     render(
       <MemoryRouter initialEntries={["/w/crewday/chat"]}>
         <ChatLog
@@ -90,6 +90,18 @@ describe("ChatLog", () => {
                   label: "Open property",
                   route: "property.detail",
                   href: "/w/crewday/property/prop_1",
+                },
+                {
+                  rel: "related.list",
+                  label: "View stays for property",
+                  route: "stays.index",
+                  href: "/w/crewday/stays?property_id=prop_1",
+                },
+                {
+                  rel: "unsafe.create",
+                  label: "Create stay now",
+                  route: "stays.index",
+                  href: "/w/crewday/api/v1/stays",
                 },
               ],
               agent_links: {
@@ -116,17 +128,29 @@ describe("ChatLog", () => {
     );
 
     const link = screen.getByRole("link", { name: "Open property" });
+    const staysLink = screen.getByRole("link", { name: "View stays for property" });
     expect(link).toHaveAttribute("href", "/w/crewday/property/prop_1");
+    expect(staysLink).toHaveAttribute("href", "/w/crewday/stays?property_id=prop_1");
     expect(screen.getByRole("link", { name: "Open listed property" })).toHaveAttribute(
       "href",
       "/w/crewday/property/prop_2",
     );
+    expect(screen.queryByRole("link", { name: "Create stay now" })).toBeNull();
+    expect(screen.getByTestId("location-probe")).toHaveTextContent("/w/crewday/chat");
 
     fireEvent.click(link);
 
     await waitFor(() => {
       expect(screen.getByTestId("location-probe")).toHaveTextContent(
         "/w/crewday/property/prop_1",
+      );
+    });
+
+    fireEvent.click(staysLink);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location-probe")).toHaveTextContent(
+        "/w/crewday/stays?property_id=prop_1",
       );
     });
   });
@@ -298,5 +322,5 @@ describe("ChatLog", () => {
 
 function LocationProbe() {
   const location = useLocation();
-  return <span data-testid="location-probe">{location.pathname}</span>;
+  return <span data-testid="location-probe">{location.pathname + location.search}</span>;
 }

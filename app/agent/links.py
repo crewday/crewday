@@ -36,6 +36,7 @@ _ROUTE_ARRAY_FIELD_RE: Final = re.compile(
     re.DOTALL,
 )
 _ROUTE_ARRAY_VALUE_RE: Final = re.compile(r'"(?P<value>[^"]*)"')
+_FORBIDDEN_LINK_FIELDS: Final = frozenset({"href", "url", "method", "body"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -270,6 +271,10 @@ def _resolve_one_link(
     route_map: AgentLinkRoutes,
     context: _ResolveContext | _ItemResolveContext,
 ) -> dict[str, object] | str | None:
+    forbidden_fields = sorted(_FORBIDDEN_LINK_FIELDS.intersection(link))
+    if forbidden_fields:
+        return f"link contains forbidden field {forbidden_fields[0]!r}"
+
     route_name = link.get("route")
     rel = link.get("rel")
     label = link.get("label")

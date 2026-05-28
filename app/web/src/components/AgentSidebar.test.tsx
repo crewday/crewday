@@ -69,10 +69,10 @@ describe("AgentSidebar", () => {
     }
   });
 
-  it("renders safe agent navigation links in sidebar messages", async () => {
+  it("renders property handoff links in sidebar messages without auto-navigation", async () => {
     const env = installFetchRouteHandlers([
       {
-        path: "/w/crewday/api/v1/agent/employee/log",
+        path: "/w/crewday/api/v1/agent/manager/log",
         respond: {
           body: [
             {
@@ -87,31 +87,59 @@ describe("AgentSidebar", () => {
                     route: "property.detail",
                     href: "/w/crewday/property/prop_1",
                   },
+                  {
+                    rel: "related.list",
+                    label: "View stays for property",
+                    route: "stays.index",
+                    href: "/w/crewday/stays?property_id=prop_1",
+                  },
+                  {
+                    rel: "unsafe.create",
+                    label: "Create stay now",
+                    route: "stays.index",
+                    href: "/w/crewday/api/v1/stays",
+                  },
                 ],
               },
             },
           ],
         },
       },
+      {
+        path: "/w/crewday/api/v1/approvals",
+        respond: { body: { data: [], next_cursor: null, has_more: false } },
+      },
     ]);
 
     try {
       renderWithProviders(
         <MemoryRouter initialEntries={["/w/crewday/today"]}>
-          <AgentSidebar role="employee" />
+          <AgentSidebar role="manager" />
           <LocationProbe />
         </MemoryRouter>,
         { queryClient: makeTestQueryClient() },
       );
 
       const link = await screen.findByRole("link", { name: "Open property" });
+      const staysLink = screen.getByRole("link", { name: "View stays for property" });
       expect(link).toHaveAttribute("href", "/w/crewday/property/prop_1");
+      expect(staysLink).toHaveAttribute("href", "/w/crewday/stays?property_id=prop_1");
+      expect(screen.queryByRole("link", { name: "Create stay now" })).toBeNull();
+      expect(screen.getByTestId("location-probe")).toHaveTextContent("/w/crewday/today");
 
       fireEvent.click(link);
 
       await waitFor(() => {
         expect(screen.getByTestId("location-probe")).toHaveTextContent(
           "/w/crewday/property/prop_1",
+        );
+      });
+
+      fireEvent.click(staysLink);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("location-probe")).toHaveTextContent(
+          "/w/crewday/stays?property_id=prop_1",
         );
       });
     } finally {
@@ -686,5 +714,5 @@ describe("AgentSidebar", () => {
 
 function LocationProbe() {
   const location = useLocation();
-  return <span data-testid="location-probe">{location.pathname}</span>;
+  return <span data-testid="location-probe">{location.pathname + location.search}</span>;
 }
