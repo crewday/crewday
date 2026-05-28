@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { type ReactElement } from "react";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { RoleProvider } from "@/context/RoleContext";
@@ -27,7 +27,9 @@ const mockRenders = vi.hoisted(() => ({
   employeeLayout: vi.fn(),
   agentFetches: false,
   agentSidebar: vi.fn(),
+  agentSidebarMount: vi.fn(),
   managerLayout: vi.fn(),
+  managerLayoutMount: vi.fn(),
   chatPage: vi.fn(),
   dashboardPage: vi.fn(),
   schedulerPage: vi.fn(),
@@ -53,6 +55,7 @@ vi.mock("@/layouts/EmployeeLayout", async () => {
   function MockAgentSidebar({ role }: { role: "employee" | "manager" }): ReactElement {
     mockRenders.agentSidebar(role);
     useEffect(() => {
+      mockRenders.agentSidebarMount(role);
       if (!mockRenders.agentFetches) return;
       void fetch(`/w/ws_1/api/v1/agent/${role}/log`);
     }, [role]);
@@ -79,6 +82,9 @@ vi.mock("@/layouts/ManagerLayout", async () => {
   function MockAgentSidebar({ role }: { role: "employee" | "manager" }): ReactElement {
     mockRenders.agentSidebar(role);
     useEffect(() => {
+      mockRenders.agentSidebarMount(role);
+    }, [role]);
+    useEffect(() => {
       if (!mockRenders.agentFetches) return;
       void fetch(`/w/ws_1/api/v1/agent/${role}/log`);
     }, [role]);
@@ -87,6 +93,9 @@ vi.mock("@/layouts/ManagerLayout", async () => {
   return {
     default: function MockManagerLayout(): ReactElement {
       mockRenders.managerLayout();
+      useEffect(() => {
+        mockRenders.managerLayoutMount();
+      }, []);
       return (
         <div data-testid="manager-layout">
           <MockAgentSidebar role="manager" />
@@ -409,6 +418,16 @@ function LocationProbe(): ReactElement {
   return <span data-testid="location">{location.pathname + location.search + location.hash}</span>;
 }
 
+function NavigationProbe(): ReactElement {
+  const navigate = useNavigate();
+  return (
+    <div>
+      <button type="button" onClick={() => navigate("/w/ws_1/today")}>Go today</button>
+      <button type="button" onClick={() => navigate("/w/ws_1/dashboard")}>Go dashboard</button>
+    </div>
+  );
+}
+
 function renderAppAt(path: string, role: AppRole, grantRole?: WorkspaceGrantRole): void {
   vi.spyOn(preferences, "readRoleCookie").mockReturnValue(role);
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("ws_1");
@@ -424,6 +443,7 @@ function renderAppAt(path: string, role: AppRole, grantRole?: WorkspaceGrantRole
         <RoleProvider>
           <WorkspaceProvider>
             <LocationProbe />
+            <NavigationProbe />
             <App />
           </WorkspaceProvider>
         </RoleProvider>
@@ -454,6 +474,7 @@ function renderAppWithUser(
         <RoleProvider>
           <WorkspaceProvider>
             <LocationProbe />
+            <NavigationProbe />
             <App />
           </WorkspaceProvider>
         </RoleProvider>
@@ -575,6 +596,27 @@ describe("App public root and protected deep links", () => {
       expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_1/dashboard?tab=ops#x");
     });
     expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
+  });
+
+  it("keeps the manager shell mounted across manager workspace navigation", async () => {
+    installPermissionAllowFetch();
+    renderAppAt("/w/ws_1/dashboard", "manager");
+
+    expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
+    expect(mockRenders.managerLayoutMount).toHaveBeenCalledTimes(1);
+    expect(mockRenders.agentSidebarMount).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Go today" }));
+
+    expect(await screen.findByTestId("today-page")).toBeInTheDocument();
+    expect(mockRenders.managerLayoutMount).toHaveBeenCalledTimes(1);
+    expect(mockRenders.agentSidebarMount).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Go dashboard" }));
+
+    expect(await screen.findByTestId("manager-dashboard")).toBeInTheDocument();
+    expect(mockRenders.managerLayoutMount).toHaveBeenCalledTimes(1);
+    expect(mockRenders.agentSidebarMount).toHaveBeenCalledTimes(1);
   });
 
   it("redirects authenticated bare client role home to the active workspace prefix", async () => {

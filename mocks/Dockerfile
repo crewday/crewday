@@ -8,12 +8,12 @@
 FROM node:24-alpine AS web-build
 
 WORKDIR /web
-COPY web/package.json web/package-lock.json* ./
+COPY web/package.json web/package-lock.json ./
 # ``--legacy-peer-deps`` lets npm resolve the dep graph when a peer
 # constraint conflicts (mocks/web pins ``vite-plugin-pwa@^1.2.0`` whose
 # peer is ``vite@^7`` but the devDep is ``vite@^8``). The mocks stack
 # is dev-only so an optimistic resolution is fine.
-RUN npm install --no-audit --no-fund --legacy-peer-deps
+RUN npm ci --no-audit --no-fund --legacy-peer-deps --min-release-age=7
 
 COPY web/ ./
 RUN npm run build

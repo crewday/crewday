@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo } from "react";
+import { lazy, Suspense, useEffect, useMemo, type ReactNode } from "react";
 import { Navigate, Outlet, Route, Routes, useLocation, useParams } from "react-router-dom";
 import PreviewShell from "@/layouts/PreviewShell";
 import EmployeeLayout from "@/layouts/EmployeeLayout";
@@ -194,6 +194,152 @@ function WorkspacePickerRoute() {
   );
 }
 
+function PermissionPage({ actionKey, children }: { actionKey: string; children: ReactNode }) {
+  return <RequirePermission actionKey={actionKey}>{children}</RequirePermission>;
+}
+
+function sharedWorkspaceRoutes(isManagerSurface: boolean) {
+  return (
+    <>
+      <Route path="today" element={<TodayPage />} />
+      <Route path="schedule" element={<SchedulePage />} />
+      {/* Legacy URLs — spec §14 collapses Week and /me/schedule
+          into /schedule. Keep redirects so deep-links, CLI
+          output, and agent tool refs continue to land on the
+          right page. */}
+      <Route path="week" element={<LegacyWorkspaceRedirect to="/schedule" />} />
+      <Route path="me/schedule" element={<LegacyWorkspaceRedirect to="/schedule" />} />
+      <Route path="task/:tid" element={<TaskDetailPage />} />
+      <Route path="my/expenses" element={<MyExpensesPage />} />
+      <Route path="me" element={<MePage />} />
+      <Route path="chat" element={<ChatPage />} />
+      <Route path="scheduler" element={<SchedulerPage />} />
+      {/* Legacy /bookings and /shifts URLs — spec §14 collapses
+          the standalone bookings page into the /schedule day
+          drawer (§09 bookings render alongside rota / tasks /
+          leaves). Redirect for bookmarks and agent tool refs. */}
+      <Route path="bookings" element={<LegacyWorkspaceRedirect to="/schedule" />} />
+      <Route path="shifts" element={<LegacyWorkspaceRedirect to="/schedule" />} />
+      <Route path="history" element={<HistoryPage />} />
+      <Route path="issues/new" element={<IssueNewPage />} />
+      {isManagerSurface ? null : (
+        <Route path="asset/:aid" element={<EmployeeAssetPage />} />
+      )}
+    </>
+  );
+}
+
+function managerWorkspaceRoutes(isManagerSurface: boolean) {
+  return (
+    <>
+      {sharedWorkspaceRoutes(isManagerSurface)}
+
+      <Route
+        path="approvals"
+        element={<PermissionPage actionKey="approvals.read"><ApprovalsPage /></PermissionPage>}
+      />
+
+      <Route
+        path="dashboard"
+        element={<PermissionPage actionKey="employees.read"><DashboardPage /></PermissionPage>}
+      />
+
+      <Route
+        path="leaves"
+        element={<PermissionPage actionKey="leaves.view_others"><LeavesInboxPage /></PermissionPage>}
+      />
+      <Route element={<RequirePermission actionKey="leaves.view_others" />}>
+        <Route element={<RequirePermission actionKey="employees.read" />}>
+          <Route path="employee/:eid/leaves" element={<EmployeeLeavesPage />} />
+          <Route path="user/:eid/leaves" element={<EmployeeLeavesPage />} />
+        </Route>
+      </Route>
+
+      <Route element={<RequirePermission actionKey="scope.edit_settings" />}>
+        <Route path="settings" element={<SettingsPage />} />
+        <Route path="webhooks" element={<WebhooksPage />} />
+      </Route>
+
+      <Route element={<RequirePermission actionKey="chat_gateway.read" />}>
+        <Route path="chat/channels" element={<ChatChannelsPage />} />
+      </Route>
+
+      <Route element={<RequirePermission actionKey="payroll.view_other" />}>
+        <Route path="pay" element={<PayPage />} />
+      </Route>
+
+      <Route element={<RequirePermission actionKey="stays.read" />}>
+        <Route path="stays" element={<StaysPage />} />
+      </Route>
+
+      <Route element={<RequirePermission actionKey="instructions.edit" />}>
+        <Route path="instructions" element={<InstructionsPage />} />
+        <Route path="instructions/:iid" element={<InstructionDetailPage />} />
+      </Route>
+
+      <Route element={<RequirePermission actionKey="properties.read" />}>
+        <Route path="properties" element={<PropertiesPage />} />
+        <Route path="property/:pid" element={<PropertyDetailPage />} />
+        <Route path="property/:pid/closures" element={<PropertyClosuresPage />} />
+      </Route>
+
+      <Route element={<RequirePermission actionKey="assets.manage_documents" />}>
+        <Route path="documents" element={<DocumentsPage />} />
+      </Route>
+
+      {isManagerSurface ? (
+        <Route element={<RequirePermission actionKey="scope.view" />}>
+          <Route path="asset/:aid" element={<AssetDetailPage />} />
+        </Route>
+      ) : null}
+
+      <Route element={<RequirePermission actionKey="scope.view" />}>
+        <Route path="assets" element={<AssetsPage />} />
+        <Route path="inventory" element={<InventoryPage />} />
+        <Route path="asset_types" element={<AssetTypesPage />} />
+        <Route path="organizations" element={<OrganizationsPage />} />
+      </Route>
+
+      <Route element={<RequirePermission actionKey="employees.read" />}>
+        <Route path="employees" element={<EmployeesPage />} />
+        <Route path="employee/:eid" element={<EmployeeDetailPage />} />
+        <Route path="users" element={<EmployeesPage />} />
+        <Route path="user/:eid" element={<EmployeeDetailPage />} />
+      </Route>
+
+      <Route element={<RequirePermission actionKey="expenses.approve" />}>
+        <Route
+          path="expenses"
+          element={
+            isManagerSurface ? <ExpensesApprovalsPage /> : <LegacyWorkspaceRedirect to="/my/expenses" />
+          }
+        />
+      </Route>
+
+      <Route element={<RequirePermission actionKey="tasks.create" />}>
+        <Route path="templates" element={<TemplatesPage />} />
+      </Route>
+
+      <Route element={<RequirePermission actionKey="availability_overrides.view_others" />}>
+        <Route path="schedules" element={<SchedulesPage />} />
+      </Route>
+
+      <Route element={<RequirePermission actionKey="permissions.edit_rules" />}>
+        <Route path="permissions" element={<PermissionsPage />} />
+      </Route>
+
+      <Route element={<RequirePermission actionKey="api_tokens.manage" />}>
+        <Route path="tokens" element={<ApiTokensPage />} />
+        <Route path="api-tokens" element={<ApiTokensPage />} />
+      </Route>
+
+      <Route element={<RequirePermission actionKey="audit_log.view" />}>
+        <Route path="audit" element={<AuditPage />} />
+      </Route>
+    </>
+  );
+}
+
 function workspaceRoutes({
   grantRole,
   isManagerSurface,
@@ -206,33 +352,15 @@ function workspaceRoutes({
     <>
       <Route index element={<RoleHome />} />
 
-      {/* Shared routes — any role. Shell picks the right layout. */}
-      <Route element={<Shell />}>
-        <Route path="today" element={<TodayPage />} />
-        <Route path="schedule" element={<SchedulePage />} />
-        {/* Legacy URLs — spec §14 collapses Week and /me/schedule
-            into /schedule. Keep redirects so deep-links, CLI
-            output, and agent tool refs continue to land on the
-            right page. */}
-        <Route path="week" element={<LegacyWorkspaceRedirect to="/schedule" />} />
-        <Route path="me/schedule" element={<LegacyWorkspaceRedirect to="/schedule" />} />
-        <Route path="task/:tid" element={<TaskDetailPage />} />
-        <Route path="my/expenses" element={<MyExpensesPage />} />
-        <Route path="me" element={<MePage />} />
-        <Route path="chat" element={<ChatPage />} />
-        <Route path="scheduler" element={<SchedulerPage />} />
-        {/* Legacy /bookings and /shifts URLs — spec §14 collapses
-            the standalone bookings page into the /schedule day
-            drawer (§09 bookings render alongside rota / tasks /
-            leaves). Redirect for bookmarks and agent tool refs. */}
-        <Route path="bookings" element={<LegacyWorkspaceRedirect to="/schedule" />} />
-        <Route path="shifts" element={<LegacyWorkspaceRedirect to="/schedule" />} />
-        <Route path="history" element={<HistoryPage />} />
-        <Route path="issues/new" element={<IssueNewPage />} />
-        {isManagerSurface ? null : (
-          <Route path="asset/:aid" element={<EmployeeAssetPage />} />
-        )}
-      </Route>
+      {isManagerSurface ? (
+        <Route element={<ManagerLayout />}>
+          {managerWorkspaceRoutes(isManagerSurface)}
+        </Route>
+      ) : (
+        <Route element={<Shell />}>
+          {sharedWorkspaceRoutes(isManagerSurface)}
+        </Route>
+      )}
 
       {grantRole === "worker" ? (
         <Route element={<EmployeeLayout />}>
@@ -245,144 +373,6 @@ function workspaceRoutes({
           <Route path="asset/scan/:token" element={<RoleHome />} />
         </>
       )}
-
-      <Route element={<RequirePermission actionKey="approvals.read" />}>
-        <Route element={<ManagerLayout />}>
-          <Route path="approvals" element={<ApprovalsPage />} />
-        </Route>
-      </Route>
-
-      <Route element={<RequirePermission actionKey="employees.read" />}>
-        <Route element={<ManagerLayout />}>
-          <Route path="dashboard" element={<DashboardPage />} />
-        </Route>
-      </Route>
-
-      <Route element={<RequirePermission actionKey="leaves.view_others" />}>
-        <Route element={<ManagerLayout />}>
-          <Route path="leaves" element={<LeavesInboxPage />} />
-        </Route>
-        <Route element={<RequirePermission actionKey="employees.read" />}>
-          <Route element={<ManagerLayout />}>
-            <Route path="employee/:eid/leaves" element={<EmployeeLeavesPage />} />
-            <Route path="user/:eid/leaves" element={<EmployeeLeavesPage />} />
-          </Route>
-        </Route>
-      </Route>
-
-      <Route element={<RequirePermission actionKey="scope.edit_settings" />}>
-        <Route element={<ManagerLayout />}>
-          <Route path="settings" element={<SettingsPage />} />
-          <Route path="webhooks" element={<WebhooksPage />} />
-        </Route>
-      </Route>
-
-      <Route element={<RequirePermission actionKey="chat_gateway.read" />}>
-        <Route element={<ManagerLayout />}>
-          <Route path="chat/channels" element={<ChatChannelsPage />} />
-        </Route>
-      </Route>
-
-      <Route element={<RequirePermission actionKey="payroll.view_other" />}>
-        <Route element={<ManagerLayout />}>
-          <Route path="pay" element={<PayPage />} />
-        </Route>
-      </Route>
-
-      <Route element={<RequirePermission actionKey="stays.read" />}>
-        <Route element={<ManagerLayout />}>
-          <Route path="stays" element={<StaysPage />} />
-        </Route>
-      </Route>
-
-      <Route element={<RequirePermission actionKey="instructions.edit" />}>
-        <Route element={<ManagerLayout />}>
-          <Route path="instructions" element={<InstructionsPage />} />
-          <Route path="instructions/:iid" element={<InstructionDetailPage />} />
-        </Route>
-      </Route>
-
-      <Route element={<RequirePermission actionKey="properties.read" />}>
-        <Route element={<ManagerLayout />}>
-          <Route path="properties" element={<PropertiesPage />} />
-          <Route path="property/:pid" element={<PropertyDetailPage />} />
-          <Route path="property/:pid/closures" element={<PropertyClosuresPage />} />
-        </Route>
-      </Route>
-
-      <Route element={<RequirePermission actionKey="assets.manage_documents" />}>
-        <Route element={<ManagerLayout />}>
-          <Route path="documents" element={<DocumentsPage />} />
-        </Route>
-      </Route>
-
-      {isManagerSurface ? (
-        <Route element={<RequirePermission actionKey="scope.view" />}>
-          <Route element={<ManagerLayout />}>
-            <Route path="asset/:aid" element={<AssetDetailPage />} />
-          </Route>
-        </Route>
-      ) : null}
-
-      <Route element={<RequirePermission actionKey="scope.view" />}>
-        <Route element={<ManagerLayout />}>
-          <Route path="assets" element={<AssetsPage />} />
-          <Route path="inventory" element={<InventoryPage />} />
-          <Route path="asset_types" element={<AssetTypesPage />} />
-          <Route path="organizations" element={<OrganizationsPage />} />
-        </Route>
-      </Route>
-
-      <Route element={<RequirePermission actionKey="employees.read" />}>
-        <Route element={<ManagerLayout />}>
-          <Route path="employees" element={<EmployeesPage />} />
-          <Route path="employee/:eid" element={<EmployeeDetailPage />} />
-          <Route path="users" element={<EmployeesPage />} />
-          <Route path="user/:eid" element={<EmployeeDetailPage />} />
-        </Route>
-      </Route>
-
-      <Route element={<RequirePermission actionKey="expenses.approve" />}>
-        <Route element={<ManagerLayout />}>
-          <Route
-            path="expenses"
-            element={
-              isManagerSurface ? <ExpensesApprovalsPage /> : <LegacyWorkspaceRedirect to="/my/expenses" />
-            }
-          />
-        </Route>
-      </Route>
-
-      <Route element={<RequirePermission actionKey="tasks.create" />}>
-        <Route element={<ManagerLayout />}>
-          <Route path="templates" element={<TemplatesPage />} />
-        </Route>
-      </Route>
-
-      <Route element={<RequirePermission actionKey="availability_overrides.view_others" />}>
-        <Route element={<ManagerLayout />}>
-          <Route path="schedules" element={<SchedulesPage />} />
-        </Route>
-      </Route>
-
-      <Route element={<RequirePermission actionKey="permissions.edit_rules" />}>
-        <Route element={<ManagerLayout />}>
-          <Route path="permissions" element={<PermissionsPage />} />
-        </Route>
-      </Route>
-
-      <Route element={<RequirePermission actionKey="api_tokens.manage" />}>
-        <Route element={<ManagerLayout />}>
-          <Route path="tokens" element={<ApiTokensPage />} />
-          <Route path="api-tokens" element={<ApiTokensPage />} />
-        </Route>
-      </Route>
-
-      <Route element={<RequirePermission actionKey="audit_log.view" />}>
-        <Route element={<ManagerLayout />}>
-          <Route path="audit" element={<AuditPage />} />
-        </Route>
-      </Route>
 
       <Route element={<ClientPortalGuard />}>
         <Route path="portfolio" element={<ClientPortfolioPage />} />
