@@ -27,18 +27,22 @@ button, that cannot also be driven by the CLI (§13) or by an agent
 holding a delegated token from the calling user. Concretely:
 
 - Every form in §14 posts to an endpoint documented in §12.
-- Every endpoint in §12 has a matching CLI command in §13. This
-  mapping is enforced structurally: each API route carries an `x-cli`
-  OpenAPI extension that defines its CLI command, and a CI parity gate
-  (§17) fails the build if any endpoint lacks a CLI mapping. See §13
-  "CLI generation from OpenAPI" for the mechanism.
+- Every workspace endpoint in §12 has a matching CLI command in §13
+  unless it has a reviewed exclusion. This mapping is enforced
+  structurally: each workspace route carries an `x-cli` OpenAPI
+  extension that defines its CLI command, or is listed in
+  `cli/crewday/_exclusions.yaml` with a reason; the CI parity gate
+  (§17) fails the build if a route lacks both. See §13 "CLI generation
+  from OpenAPI" for the mechanism.
 - Every operation visible to the CLI or an embedded agent also declares
   its post-result navigation affordances with `x-agent-links`
   (§ "Agent handoff links annotation") or explicitly opts out with
   `policy: none`; omissions fail the `openapi-agent-links` gate (§17).
-- Every action in §13 is reachable as a tool call from one of the
-  two embedded chat agents described below, using a delegated token
-  that inherits the calling user's full permissions (§03).
+- Every classified workspace action in §13 is reachable as a tool call
+  from one of the two embedded chat agents described below, using a
+  delegated token that inherits the calling user's permissions (§03),
+  unless the route is explicitly classified `x-agent-forbidden` or
+  `x-interactive-only`.
 - Dangerous actions are not hidden from agents; they are **gated**
   by §11's approval pipeline, by the "interactive-session-only
   endpoints" list, or by the "host-CLI-only" fence — categories
@@ -50,32 +54,34 @@ embedded agents below can drive the product end-to-end.
 
 ## Agent authority boundary
 
-The agent-first invariant stops at three lines. Every route in §12
-falls into exactly one of the columns below; the approval pipeline,
-the interactive-session-only list, and the host-CLI-only fence are
-the three concrete enforcement mechanisms behind them.
+The agent-first invariant stops at explicit security boundaries. Every
+workspace route in §12 falls into exactly one of the columns below; the
+approval pipeline, the interactive-session-only list, and the
+host-CLI-only fence are the concrete enforcement mechanisms behind
+them.
 
-| (a) Available to delegated tokens | (b) Gated by approval always | (c) Forbidden to delegated tokens entirely |
-|-----------------------------------|-------------------------------|---------------------------------------------|
+| (a) Available to delegated tokens | (b) Reachable, but approval-gated by policy or user mode | (c) Forbidden to delegated tokens entirely |
+|-----------------------------------|---------------------------------------------------------|---------------------------------------------|
 | Read queries across every resource the delegating user can already read. | Payroll run / issue / pay (`payroll.issue`, `payroll.pay`, §09). | `crewday admin *` — host-CLI-only verbs (§13, "Host-CLI-only administrative commands"). |
-| Draft and create writes (tasks, expenses, issues, stays, schedules, messaging) subject to §11 approval and §12 idempotency. | Payout-detail reads (interactive-session-only — see § "Interactive-session-only endpoints" and §09). | `settings.signup_enabled` toggle — flipping self-serve provisioning is deployment-scope. |
-| Edits to the delegating user's own preferences, drafts, and self-service rows (leave, availability overrides, personal task lists). | Expense approval above the workspace's configured threshold (`expenses.approve`, §09). | Root-key / envelope-key rotation (`crewday admin rotate-root-key`, §15). |
+| Draft and create writes (tasks, expenses, issues, stays, schedules, messaging) subject to §11 approval and §12 idempotency. | Expense approval above the workspace's configured threshold (`expenses.approve`, §09). | `settings.signup_enabled` toggle — flipping self-serve provisioning is deployment-scope. |
+| Edits to the delegating user's own preferences, drafts, and self-service rows (leave, availability overrides, personal task lists). | User-mode `strict` can add a generic inline card to any bare `x-agent-confirm: true` mutation. | Root-key / envelope-key rotation (`crewday admin rotate-root-key`, §15). |
 | `--dry-run` / `--explain` for any endpoint (§13), regardless of whether the underlying verb is in column (b) or (c). | Work-order accept-quote and vendor-invoice approve/mark-paid (§22). | Direct DB operations of any kind — there is no HTTP or CLI surface agents can invoke. |
 | Voice transcription for the agent's own chat turn (`voice.*`), when the corresponding capability is on. | Workspace setting changes that move money routing or quotas (default-pay-destination, engagement-kind boundary crossings, §05, §09, §22). | Backup restore (`crewday admin restore`, §16). |
 | | Permission-group membership changes (`permission_group.*`) and role-grant edits (§05). | Workspace archive / unarchive and hard-delete purges (`crewday admin workspace archive`, `crewday admin purge`, §02, §15). |
 | | Token mint, rotate, and scope grants (`auth.tokens.*`, §03). | `POST /payslips/{id}/payout_manifest` and every other endpoint tagged interactive-session-only — delegated tokens receive `403 session_only_endpoint` regardless of scope (§12). |
 | | Bulk destructives above the §11 row threshold (`*.delete` > 10 rows, bulk schedule changes > 50 future tasks). | Deployment-wide settings (`/admin/*` verbs guarded by `deployment.*` grants) — admins reach these through the `/admin` shell agent (§11 "Admin-side agent"), not from a workspace-scoped delegated token. |
 
-The openapi.json annotations are the single source of truth: column
-(b) routes carry `x-agent-confirm` (§ "Action confirmation
-annotation") **or** a workspace-policy always-gated entry;
-column (c) routes carry `x-agent-forbidden: true` (delegated-token
-requests reject at the auth middleware before reaching the handler)
-or `x-interactive-only: true` (the interactive-session gate in § "Interactive-session-only endpoints").
-A CI lint (§17 "CLI parity") fails the build when a new mutating
-route is added without either `x-agent-confirm`, `x-agent-forbidden`,
-or `x-interactive-only` — there is no "silent" category. See §12 for
-the annotation shape and §17 for the enforcement gate.
+The openapi.json annotations are the single source of truth. Every
+mutating workspace route carries exactly one agent classification:
+`x-agent-confirm` for delegated-token reachability through the approval
+pipeline, `x-agent-forbidden: true` for routes that reject delegated
+tokens before handler dispatch, or `x-interactive-only: true` for
+passkey-session-only routes. Workspace-policy always-gated entries add
+committee approval on top of `x-agent-confirm`; they do not replace the
+route classification. A CI lint (§17 "CLI parity") fails the build when
+a new mutating workspace route is added without exactly one of these
+three annotations — there is no "silent" category. See §12 for the
+annotation shape and §17 for the enforcement gate.
 
 ## Embedded agents
 
@@ -1806,10 +1812,11 @@ Two independent layers of gating protect agent-initiated writes:
 
 The two layers are complementary: an action in the workspace
 always-gated list always goes to `/approvals` regardless of the
-user's mode; an action that only carries an `x-agent-confirm`
-annotation goes to the user's chat channel when their mode is
-`auto` or `strict`; an action with neither still surfaces in chat
-under `strict`. Reads are never gated by either layer.
+user's mode; an action that carries an `x-agent-confirm`
+classification goes to the user's chat channel when their mode is
+`auto` or `strict`; routes classified `x-agent-forbidden` or
+`x-interactive-only` reject delegated tokens before any inline approval
+can be created. Reads are never gated by either layer.
 
 All gates — workspace and self — produce the same `agent_action`
 rows. They appear together in the `/approvals` desk for
@@ -1877,8 +1884,10 @@ attempted closed-loop bypass surfaces in the Agent Activity view
 ### Action confirmation annotation
 
 Instead of maintaining a separate "approvable actions" list per
-surface, every mutating route in §12 may carry an OpenAPI
-extension declaring its inline-confirmation copy and metadata:
+surface, every mutating workspace route in §12 carries exactly one
+agent classification. Routes reachable by workspace agents use the
+`x-agent-confirm` OpenAPI extension to declare their inline-confirmation
+copy and metadata:
 
 ```yaml
 # e.g. POST /api/v1/expenses
@@ -1902,10 +1911,14 @@ x-agent-confirm:
 - `verb` — short label for logs and audit, defaults to the
   operation's `summary` when absent.
 
-An endpoint that omits `x-agent-confirm` is considered not to
-need inline confirmation. It executes silently under `auto` and
-surfaces a generic "Run `{operation_id}` with these fields?" card
-only under `strict`.
+`x-agent-confirm: true` is allowed for low-risk routes that need only
+the generic strict-mode card; a mapping is required when `auto` mode
+should show author-maintained copy. A mutating workspace route that
+omits `x-agent-confirm` must instead carry exactly one of
+`x-agent-forbidden` or `x-interactive-only`; unclassified mutating
+workspace routes fail the OpenAPI parity gate (§12, §17). Missing
+`x-cli` or missing `x-agent-confirm` is never a supported way to keep a
+route away from agents.
 
 The annotation is the **single source of truth** for confirmation
 copy. The CLI `_surface.json` exposes it alongside `x-cli`
@@ -2006,9 +2019,10 @@ A small starter list of routes that carry
 | `POST /stays`                                 | "Create stay at {property_id|property:name} {check_in}–{check_out}?" |
 | `POST /messaging/broadcast` (single-recipient path) | "Send broadcast *{subject}*?" |
 
-Routes not in this starter list (and not in the workspace policy
-lists) execute silently in `auto` mode; the list grows
-surgically per surface, not at the annotation layer.
+Routes that carry bare `x-agent-confirm: true` (and are not in the
+workspace policy lists) execute silently in `auto` mode and use a
+generic card in `strict` mode; the routes with custom confirmation copy
+grow surgically per surface, not at the annotation layer.
 
 ### Per-user agent approval mode
 
@@ -2018,9 +2032,9 @@ embedded chat agent (§ "Embedded agents") pauses for an inline
 confirmation card before executing a **mutating** delegated-token
 request.
 
-| mode     | `x-agent-confirm` on the route? | no annotation, mutating |
-|----------|---------------------------------|--------------------------|
-| `bypass` | execute silently                | execute silently         |
+| mode     | `x-agent-confirm` mapping | bare `x-agent-confirm: true` |
+|----------|---------------------------|------------------------------|
+| `bypass` | execute silently          | execute silently             |
 | `auto`   | show inline confirmation card using the annotation's `summary` / `fields_to_show` / `risk` | execute silently |
 | `strict` | show inline confirmation card using the annotation | show generic card (`verb` + full payload) |
 
@@ -2107,6 +2121,12 @@ v1 members of the list:
 
 - `POST /payslips/{id}/payout_manifest` — full decrypted account
   numbers for treasury use (§09).
+- Passkey ceremonies and passkey management:
+  `POST /api/v1/auth/passkey/login/{start,finish}`,
+  `POST /w/{slug}/api/v1/auth/passkey/register/{start,finish}`,
+  `DELETE /w/{slug}/api/v1/auth/passkey/{credential_id}`,
+  `POST /api/v1/invite/passkey/{start,finish}`, and
+  `DELETE /w/{slug}/api/v1/admin/users/{user_id}/passkeys/{credential_id}`.
 - `PUT /admin/api/v1/llm/providers/{provider_id}/key` — set or rotate
   an LLM provider API key. Body is `{ "api_key": <non-blank secret
   string> }`; response is `LlmProviderResponse` with
@@ -2121,6 +2141,18 @@ passkey session that also satisfies the route's normal role/scope
 check, not any bearer token. The idempotency cache (§12) explicitly
 does **not** persist their responses — a replay re-executes against the
 current secret store and re-audits, rather than serving a cached body.
+
+Other security-sensitive routes are not silently hidden from agents.
+Workspace token mint/revoke/rotate and scope-grant operations are
+classified `x-agent-confirm` and may additionally land in the
+workspace policy queue; payout manifests and classified passkey
+login/register/invite ceremonies plus passkey management are
+`x-interactive-only`; owner-issued magic links, passkey reset
+initiation, workspace lifecycle danger-zone operations, webhooks, and
+approval-decision endpoints are `x-agent-forbidden`; deployment-admin
+agent self endpoints are excluded from the admin tool catalog with
+reviewed reasons. Ordinary workspace routes inherit the delegating
+user's credentials and permissions when called by an embedded agent.
 
 ### Host-CLI-only administrative commands
 
@@ -2149,6 +2181,8 @@ command writes directly, and deployment-level controls on who can
 
 1. Agent calls the endpoint normally.
 2. Middleware resolves whether to gate, in order:
+   - route carries `x-agent-forbidden` or `x-interactive-only` →
+     reject before handler dispatch, with no `agent_action` row;
    - action in the workspace **always-gated** list → gate, source
      `workspace_always`, destination `/approvals` desk;
    - action in the workspace **configurable** list → gate, source
@@ -2156,11 +2190,12 @@ command writes directly, and deployment-level controls on who can
    - token is delegated AND user mode is `auto` AND the route
      carries `x-agent-confirm` → gate, source
      `user_auto_annotation`, destination user's inline chat;
-   - token is delegated AND user mode is `strict` AND the action
-     is mutating → gate, source `user_strict_mutation`,
-     destination user's inline chat (the card uses
-     `x-agent-confirm` when present, falls back to a generic
-     `{verb} with these fields?` template otherwise);
+   - token is delegated AND user mode is `strict` AND the route
+     carries `x-agent-confirm` → gate, source `user_strict_mutation`,
+     destination user's inline chat (the card uses a mapped
+     `x-agent-confirm` template when available, and falls back to a
+     generic `{verb} with these fields?` template for bare
+     `x-agent-confirm: true`);
    - otherwise → execute.
 3. On gate, the middleware writes an `agent_action` row with the
    fully-resolved request payload (including idempotency key),

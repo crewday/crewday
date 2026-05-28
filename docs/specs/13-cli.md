@@ -12,8 +12,14 @@ owner/manager- or worker-facing verb in §14 that cannot be invoked
 from this CLI (or its underlying REST endpoint in §12). The
 owner/manager-side and worker-side embedded chat agents in §11
 expose the CLI + REST surface as their tool set — so anything a
-human can do in the UI, an agent can do from chat, subject to the
-approval gates in §11.
+human can do in the UI, an agent can do from chat with the
+delegating user's credentials, subject to the user's permissions, the
+approval gates in §11, and the explicit forbidden / interactive-only
+exceptions below. Passkey ceremonies and passkey-management actions,
+payout manifests, deployment-admin secrets, host-only deployment
+operations, and passkey-session-only approval decisions are not hidden
+by omitting CLI metadata; they are classified or excluded with a
+reviewed reason.
 
 See §11 "The agent-first invariant" for the broader principle and
 §14 for how each UI surface maps back to a command.
@@ -65,7 +71,10 @@ request/response models, and `x-cli` extension (§12) — is the
 canonical CLI definition. The CLI does not maintain a parallel command
 list. Adding an endpoint with its `x-cli` metadata is sufficient to
 make it appear in the CLI; no hand-written click command is needed for
-standard CRUD.
+standard CRUD. Conversely, omitting `x-cli` is not a valid way to hide
+a workspace route from agents or from the CLI. Every workspace route
+needs valid `x-cli` metadata or a reviewed exclusion in
+`cli/crewday/_exclusions.yaml`.
 
 ### Surface descriptor (`_surface.json` + `_surface_admin.json`)
 
@@ -138,7 +147,12 @@ mandatory reason. Canonical list:
 - `healthz`, `readyz`, `version.get` — no-auth infrastructure probes;
   `crewday admin version` covers the operational use case.
 
-Adding an exclusion without a reason fails CI lint.
+Adding an exclusion without a reason fails CI lint. Exclusions are for
+non-command surfaces and reviewed security boundaries, not for access
+control by silence. An ordinary workspace route that a human can invoke
+should be CLI-backed and visible to embedded agents; permissions,
+approval mode, `x-agent-forbidden`, and `x-interactive-only` decide
+whether a specific agent request may run.
 For the deployment-admin surface, any `/admin/api/v1/*` operation
 marked `x-agent-forbidden` or `x-interactive-only` must also be
 listed here with a reviewed reason so the shared `deploy` /
@@ -164,15 +178,19 @@ An agent can explore the full CLI surface with:
 
 ### Confirmation cards (`x-agent-confirm`)
 
-For every mutating operation, `_surface.json` carries the
-`x-agent-confirm` extension from §12 when present. This is the
-**single source of truth** for the confirmation card that surfaces
-in the user's chat when their agent approval mode asks for it
-(§11 "Per-user agent approval mode"). The CLI itself does not
-prompt — delegated-token requests are gated by the REST
-middleware, which reads the same annotation. Re-declaring
-per-command confirmation copy in the CLI is explicitly avoided:
-authors maintain one template per route, used everywhere.
+Every mutating workspace operation carries exactly one agent
+classification in OpenAPI (§12): `x-agent-confirm`,
+`x-agent-forbidden`, or `x-interactive-only`. `_surface.json` carries
+the `x-agent-confirm` value when present, because that annotation is
+the **single source of truth** for the confirmation card that surfaces
+in the user's chat when their agent approval mode asks for it (§11
+"Per-user agent approval mode"). `x-agent-forbidden` and
+`x-interactive-only` remain OpenAPI route metadata enforced by the REST
+middleware and agent dispatcher. The CLI itself does not prompt —
+delegated-token requests are gated by the REST middleware, which reads
+the same route metadata. Re-declaring per-command confirmation copy in
+the CLI is explicitly avoided: authors maintain one template per route,
+used everywhere.
 
 Non-delegated callers (human running `crewday` with a scoped
 token or a passkey session) never see these cards; they are not
@@ -709,21 +727,29 @@ important to keep separate:
    surface, but they refuse all bearer tokens (scoped and delegated)
    unconditionally. Approval does not help, because the approval
    pipeline would persist the decrypted response in
-   `agent_action.result_json`. v1 member:
+   `agent_action.result_json` or allow an agent to complete a
+   browser-bound credential ceremony. v1 members include:
 
    - `POST /payslips/{id}/payout_manifest` — full decrypted
      account numbers for treasury use (§09).
+   - Passkey login/register start+finish and passkey credential
+     revocation routes, including workspace-admin passkey revocation.
+   - Deployment-admin LLM provider key set/clear routes; they are also
+     excluded from the deploy/admin-agent descriptor with reviewed
+     reasons.
 
    The CLI exposes the endpoint (a manager can still curl/CLI it
-   from their workstation with a passkey session), but bearer tokens
-   — including delegated agent tokens — are refused. See §11
+   from their workstation with a passkey session) when a command surface
+   is useful; browser-only ceremonies and deployment-admin secret writes
+   stay out of generated descriptors through reviewed exclusions. Bearer
+   tokens — including delegated agent tokens — are refused. See §11
    "Interactive-session-only endpoints" for the canonical list and
    rationale.
 
-These two classes together form the **short-list of verbs that
-require direct human presence** — everything else is reachable
-by agents via delegated tokens, subject to the approval gates in
-§11.
+Together with routes classified `x-agent-forbidden`, these two classes
+form the **short-list of verbs that require direct human presence or no
+agent access**. Other classified workspace routes are reachable by
+agents via delegated tokens, subject to the approval gates in §11.
 
 ## Streaming and piping
 

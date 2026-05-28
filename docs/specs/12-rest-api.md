@@ -78,10 +78,17 @@ Nested groups use dots: `auth.tokens.create`, `pay.rules.set`.
 
 ### CLI surface extensions (`x-cli`)
 
-Every non-hidden route must carry
-`openapi_extra={"x-cli": {...}}` in its FastAPI decorator. This
+Every workspace route must either carry valid
+`openapi_extra={"x-cli": {...}}` in its FastAPI decorator or appear
+in `cli/crewday/_exclusions.yaml` with a reviewed reason. This
 extension is the single source of truth for CLI command generation
-(see §13 "CLI generation from OpenAPI").
+(see §13 "CLI generation from OpenAPI"). Omitting `x-cli` is not an
+access-control mechanism: ordinary workspace routes are CLI-backed
+and agent-callable, subject to the caller's normal permissions and the
+agent approval / classification rules below. Browser-only ceremonies,
+binary/blob transports, SSE streams, compatibility aliases, and other
+non-command surfaces are excluded explicitly so future authors can
+review the reason.
 
 Extension schema:
 
@@ -98,10 +105,10 @@ Extension schema:
 | `never_agent` | no     | `true` for endpoints that agents should never call (informational only) |
 | `mutates`   | no       | `true` (default) if the route commits state; `false` for read-only endpoints (`list`, `show`, resolvers, previews). Consumed by §11 "Per-user agent approval mode" — read-only endpoints always execute silently regardless of user mode. HTTP method is the fallback when this flag is absent: `GET` / `HEAD` / `OPTIONS` = read, others = mutating. |
 
-CI fails any route that lacks an `operation_id` or an `x-cli`
-extension, unless the route is explicitly listed in
-`cli/crewday/_exclusions.yaml` (see §13). The parity gate in §17
-enforces each independently.
+CI fails any route that lacks an `operation_id` or valid `x-cli`
+metadata, unless the route is explicitly listed in
+`cli/crewday/_exclusions.yaml` (see §13). Hidden routes still need a
+reviewed exclusion. The parity gate in §17 enforces each independently.
 
 **Workspace slug in the CLI.** Workspace-scoped routes carry
 `/w/<slug>/` in their path. The CLI generator does not emit
@@ -115,10 +122,11 @@ health) ignore the flag.
 
 ### Agent confirmation extension (`x-agent-confirm`)
 
-Optional per-route OpenAPI extension declaring the inline
-confirmation card shown when a delegated-token agent calls the
-route and the delegating user's mode asks for confirmation. Full
-semantics and starter list are in §11; the schema fields are:
+Per-route OpenAPI extension declaring delegated-token reachability for
+mutating workspace routes. It may be either `true` for the generic
+strict-mode confirmation card, or a mapping that provides custom inline
+confirmation copy when the delegating user's mode asks for it. Full
+semantics and starter list are in §11; mapping fields are:
 
 | field            | required | description                                                                 |
 |------------------|----------|-----------------------------------------------------------------------------|
@@ -142,20 +150,15 @@ cannot reach the route. The auth middleware short-circuits with
 never even dispatched for a delegated caller; scoped tokens with
 no `x-agent-forbidden` annotation follow the usual scope rules.
 
-Applied to:
-
-- every endpoint corresponding to a `crewday admin *` CLI verb
-  (listed for symmetry; the CLI has no HTTP surface, so the
-  route itself does not exist in v1, but if/when one is added
-  the annotation fails closed);
-- workspace archive / unarchive (`POST
-  /workspaces/{id}/archive`, `POST /workspaces/{id}/unarchive`);
-- root-key rotation endpoints (reserved; no HTTP surface in v1);
-- settings writes that move money routing
-  (`PATCH /pay/rules/*`, `PATCH
-  /work_engagements/{id}/default_destination`);
-- every route also carrying `x-interactive-only: true` (see
-  below) — the two extensions compose, not conflict.
+Applied to workspace routes that delegated agents must not invoke at
+all, including workspace archive / delete / export, owner-issued magic
+links, passkey reset initiation, webhook management and secret
+rotation, and approval-decision endpoints that must be decided through
+a human session or a PAT with the explicit `approvals:act` scope (§11).
+Deployment-admin routes may also use this classification for
+admin-agent self endpoints and other operations that must not be in the
+admin agent's tool catalog; those exclusions are reviewed in
+`cli/crewday/_exclusions.yaml`.
 
 ### Interactive-only extension (`x-interactive-only`)
 
@@ -172,12 +175,16 @@ Applied to:
   (`GET /pay/destinations/{id}/reveal`);
 - one-time-secret views (receipts issued under §11's
   "one-shot secret" flow);
+- classified passkey ceremonies and passkey-management routes,
+  including login/register start+finish, credential revocation, and
+  workspace-admin passkey revocation;
 - demo cookie mint (§24).
 
 ### Rule for mutating routes
 
-Every mutating route (`x-cli.mutates = true` or implied by a
-non-`GET`/`HEAD`/`OPTIONS` method) MUST carry **exactly one** of:
+Every mutating workspace route (`x-cli.mutates = true` or implied by a
+non-`GET`/`HEAD`/`OPTIONS` method) MUST carry **exactly one** agent
+classification:
 
 - `x-agent-confirm` — route is reachable by delegated tokens,
   subject to the confirmation pipeline;
@@ -185,9 +192,20 @@ non-`GET`/`HEAD`/`OPTIONS` method) MUST carry **exactly one** of:
 - `x-interactive-only` — route refuses every token (delegated or
   scoped) and requires a passkey session.
 
-CI fails any new mutating route added without one of the three.
+CI fails any new mutating workspace route added without exactly one of
+the three. Do not leave a route unclassified to make it less visible to
+agents; use one of these annotations, or add a reviewed CLI exclusion
+when the route is not a generated command surface.
 The gate is named **`openapi-agent-annotations`** in §17 and
 runs on the generated OpenAPI document on every PR.
+
+Security-sensitive workspace routes are still classified rather than
+hidden. Token mint, revoke, rotate, and scope-grant paths carry
+`x-agent-confirm`; classified passkey login/register/invite ceremonies
+and passkey management carry `x-interactive-only`; payout manifests
+carry `x-interactive-only`; deployment/admin-only operations either
+live under the deployment surface or have no HTTP surface as
+host-CLI-only commands.
 
 **Relationship to the §11 "Agent authority boundary" table.**
 The three extensions **are the implementation** of the three
@@ -1024,13 +1042,10 @@ GET    /w/<slug>/api/v1/auth/tokens/{token_id}/audit    # per-token timeline, ne
                                                  #     stays "no events yet" so the SPA can pre-render the panel
                                                  #     without branching on 404.
 
-# Additional passkeys (§03 "Additional passkeys"). Authenticated (any
-# principal that resolves a WorkspaceContext — session cookie or API
-# token scoped to the workspace); CSRF-guarded via the global middleware
-# on the write routes (same posture as every other mutating route on
-# the workspace surface). These are NOT `x-interactive-only`: the
-# hard-lockout ceremonies (last-credential gate + `/recover` break-glass)
-# live in the domain service, not the auth gate.
+# Additional passkeys (§03 "Additional passkeys"). Passkey-session-only
+# (`x-interactive-only`): neither scoped tokens nor delegated agent tokens
+# can mint registration challenges, finish WebAuthn registration, or revoke
+# passkey credentials. CSRF still applies through the global middleware.
 POST   /w/<slug>/api/v1/auth/passkey/register/start   # mint a registration challenge for the caller
 POST   /w/<slug>/api/v1/auth/passkey/register/finish  # verify + persist the attestation; invalidates every session for the user — including the caller's own (cause `passkey_registered`, see §15 "Session-invalidation causes"); SPA re-auths after the ceremony
 DELETE /w/<slug>/api/v1/auth/passkey/{credential_id}  # revoke one of the caller's own passkeys
