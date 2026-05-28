@@ -1,27 +1,68 @@
-import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type InfiniteData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
 import { formatInteger } from "@/lib/numberFormat";
 import DeskPage from "@/components/DeskPage";
+import {
+  InlineNumberField,
+  InlineTableForm,
+  InlineTableLoadMore,
+  inlineTableNextCursor,
+  useInlineTableInfiniteRows,
+  type InlineTableColumn,
+  type InlineTableRow,
+} from "@/components/InlineTableForm";
 import { Chip, Loading, ProgressBar, StatCard } from "@/components/common";
 import type {
   AdminUsageSummary,
+  AdminUsageWorkspaceRow,
   AdminUsageWorkspacesResponse,
-  AdminWorkspacesResponse,
 } from "@/types/api";
+
+const WORKSPACE_PAGE_SIZE = 25;
+const WORKSPACE_SEARCH_DEBOUNCE_MS = 250;
+const WORKSPACE_CAP_MAX_CENTS = 1_000_000;
 
 interface UsageCapResponse {
   workspace_id: string;
   cap_cents_30d: number;
 }
 
+interface UsageWorkspaceDraft {
+  name: string;
+  slug: string;
+  spentCents30d: number;
+  capDollars: string;
+  percent: number;
+  paused: boolean;
+}
+
+type UsageWorkspacesCache =
+  | AdminUsageWorkspacesResponse
+  | InfiniteData<AdminUsageWorkspacesResponse>;
+
+interface UsageCapMutationContext {
+  previous: Array<[readonly unknown[], UsageWorkspacesCache | undefined]>;
+}
+
 function dollarsToCents(value: string): number | null {
-  if (value.trim() === "") return null;
-  const dollars = Number(value);
-  if (!Number.isFinite(dollars) || dollars < 0) return null;
-  return Math.round(dollars * 100);
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+  const match = trimmed.match(/^(\d+)(?:\.(\d{0,2}))?$|^\.(\d{1,2})$/);
+  if (!match) return null;
+  const dollars = Number(match[1] ?? "0");
+  const centsPart = (match[2] ?? match[3] ?? "").padEnd(2, "0");
+  const cents = dollars * 100 + Number(centsPart);
+  if (cents > WORKSPACE_CAP_MAX_CENTS) return null;
+  return cents;
 }
 
 function centsToDollars(value: number): string {
@@ -34,27 +75,254 @@ function usagePercent(spentCents: number, capCents: number): number {
   return Math.min(100, Math.floor((spentCents * 100) / capCents));
 }
 
+function usageWorkspacesUrl(search: string, cursor: string | null): string {
+  const params = new URLSearchParams({ limit: String(WORKSPACE_PAGE_SIZE) });
+  const trimmed = search.trim();
+  if (trimmed) params.set("q", trimmed);
+  if (cursor) params.set("cursor", cursor);
+  return "/admin/api/v1/usage/workspaces?" + params.toString();
+}
+
+function useDebouncedValue(value: string, delayMs: number): string {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timeout);
+  }, [delayMs, value]);
+
+  return debounced;
+}
+
+function normalizeUsageWorkspacesResponse(
+  response: AdminUsageWorkspacesResponse,
+): AdminUsageWorkspacesResponse {
+  return {
+    ...response,
+    data: response.data ?? response.workspaces,
+    next_cursor: response.next_cursor ?? null,
+    has_more: response.has_more ?? false,
+  };
+}
+
+function usageWorkspaceToInlineRow(
+  workspace: AdminUsageWorkspaceRow,
+): InlineTableRow<UsageWorkspaceDraft> {
+  const draft = {
+    name: workspace.name,
+    slug: workspace.slug,
+    spentCents30d: workspace.spent_cents_30d,
+    capDollars: centsToDollars(workspace.cap_cents_30d),
+    percent: workspace.percent,
+    paused: workspace.paused,
+  };
+  return {
+    id: workspace.workspace_id,
+    draft,
+    committedDraft: draft,
+    label: workspace.name,
+  };
+}
+
+function updateUsageWorkspaceCap(
+  workspace: AdminUsageWorkspaceRow,
+  workspaceId: string,
+  capCents: number,
+): AdminUsageWorkspaceRow {
+  if (workspace.workspace_id !== workspaceId) return workspace;
+  return {
+    ...workspace,
+    cap_cents_30d: capCents,
+    percent: usagePercent(workspace.spent_cents_30d, capCents),
+    paused: capCents === 0 || workspace.spent_cents_30d >= capCents,
+  };
+}
+
+function updateUsageWorkspacesPage(
+  page: AdminUsageWorkspacesResponse,
+  workspaceId: string,
+  capCents: number,
+): AdminUsageWorkspacesResponse {
+  const workspaces = page.workspaces.map((workspace) =>
+    updateUsageWorkspaceCap(workspace, workspaceId, capCents),
+  );
+  return {
+    ...page,
+    workspaces,
+    data: (page.data ?? page.workspaces).map((workspace) =>
+      updateUsageWorkspaceCap(workspace, workspaceId, capCents),
+    ),
+  };
+}
+
+function isInfiniteUsageCache(
+  cache: UsageWorkspacesCache,
+): cache is InfiniteData<AdminUsageWorkspacesResponse> {
+  return "pages" in cache;
+}
+
+function updateUsageWorkspacesCache(
+  cache: UsageWorkspacesCache | undefined,
+  workspaceId: string,
+  capCents: number,
+): UsageWorkspacesCache | undefined {
+  if (!cache) return cache;
+  if (isInfiniteUsageCache(cache)) {
+    return {
+      ...cache,
+      pages: cache.pages.map((page) =>
+        updateUsageWorkspacesPage(page, workspaceId, capCents),
+      ),
+    };
+  }
+  return updateUsageWorkspacesPage(cache, workspaceId, capCents);
+}
+
 export default function AdminUsagePage() {
   // code-health: ignore[nloc] Usage route keeps query orchestration and the single cap-editing table in one place.
   const qc = useQueryClient();
-  const [editing, setEditing] = useState<string | null>(null);
-  const [draftCap, setDraftCap] = useState<string>("");
+  const [workspaceSearch, setWorkspaceSearch] = useState("");
+  const debouncedWorkspaceSearch = useDebouncedValue(
+    workspaceSearch.trim(),
+    WORKSPACE_SEARCH_DEBOUNCE_MS,
+  );
 
   const summaryQ = useQuery({
     queryKey: qk.adminUsageSummary(),
     queryFn: () => fetchJson<AdminUsageSummary>("/admin/api/v1/usage/summary"),
   });
-  const rowsQ = useQuery({
-    queryKey: qk.adminUsageWorkspaces(),
-    queryFn: () =>
-      fetchJson<AdminUsageWorkspacesResponse>("/admin/api/v1/usage/workspaces"),
-  });
-  const workspaceMetaQ = useQuery({
-    queryKey: qk.adminWorkspaces(),
-    queryFn: () => fetchJson<AdminWorkspacesResponse>("/admin/api/v1/workspaces"),
+
+  const rowsQ = useInfiniteQuery<
+    AdminUsageWorkspacesResponse,
+    Error,
+    InfiniteData<AdminUsageWorkspacesResponse>,
+    readonly ["admin", "usage", "workspaces", { readonly q: string }],
+    string | null
+  >({
+    queryKey: [...qk.adminUsageWorkspaces(), { q: debouncedWorkspaceSearch }],
+    initialPageParam: null,
+    queryFn: ({ pageParam, queryKey }) =>
+      fetchJson<AdminUsageWorkspacesResponse>(
+        usageWorkspacesUrl(queryKey[3].q, pageParam),
+      ).then(normalizeUsageWorkspacesResponse),
+    getNextPageParam: inlineTableNextCursor,
   });
 
-  const setCap = useMutation({
+  const workspaceColumns = useMemo<InlineTableColumn<UsageWorkspaceDraft>[]>(
+    () => [
+      {
+        key: "workspace",
+        header: "Workspace",
+        width: { flex: 1.4, min: 220 },
+        renderRead: ({ row }) => (
+          <>
+            {row.draft.name}
+            <div className="table__sub">{row.draft.slug}</div>
+          </>
+        ),
+        renderEdit: ({ row }) => (
+          <>
+            {row.draft.name}
+            <div className="table__sub">{row.draft.slug}</div>
+          </>
+        ),
+      },
+      {
+        key: "spend",
+        header: "30d spend",
+        align: "end",
+        width: { px: 130 },
+        renderRead: ({ row }) => (
+          <span className="mono">
+            {formatMoney(row.draft.spentCents30d, "USD")}
+          </span>
+        ),
+        renderEdit: ({ row }) => (
+          <span className="mono">
+            {formatMoney(row.draft.spentCents30d, "USD")}
+          </span>
+        ),
+      },
+      {
+        key: "cap",
+        header: "Cap",
+        align: "end",
+        width: { px: 150 },
+        renderRead: ({ row }) => (
+          <span className="mono">
+            {formatMoney(dollarsToCents(row.draft.capDollars) ?? 0, "USD")}
+          </span>
+        ),
+        renderEdit: ({ row, update, disabled }) => (
+          <InlineNumberField
+            value={row.draft.capDollars}
+            min={0}
+            max={WORKSPACE_CAP_MAX_CENTS / 100}
+            step="0.01"
+            placeholder="0.00"
+            disabled={disabled}
+            ariaLabel="30 day cap dollars"
+            onChange={(capDollars) => update({ capDollars })}
+          />
+        ),
+      },
+      {
+        key: "usage",
+        header: "Usage",
+        width: { px: 150 },
+        renderRead: ({ row }) => (
+          <>
+            <ProgressBar value={row.draft.percent} slim />
+            <span className="muted"> {row.draft.percent}%</span>
+          </>
+        ),
+        renderEdit: ({ row }) => (
+          <>
+            <ProgressBar value={row.draft.percent} slim />
+            <span className="muted"> {row.draft.percent}%</span>
+          </>
+        ),
+      },
+      {
+        key: "state",
+        header: "State",
+        width: { px: 116 },
+        renderRead: ({ row }) =>
+          row.draft.paused ? (
+            <Chip tone="rust" size="sm">paused</Chip>
+          ) : (
+            <Chip tone="moss" size="sm">active</Chip>
+          ),
+        renderEdit: ({ row }) =>
+          row.draft.paused ? (
+            <Chip tone="rust" size="sm">paused</Chip>
+          ) : (
+            <Chip tone="moss" size="sm">active</Chip>
+          ),
+      },
+    ],
+    [],
+  );
+
+  const mapUsageRow = useCallback(
+    (workspace: AdminUsageWorkspaceRow) => usageWorkspaceToInlineRow(workspace),
+    [],
+  );
+  const workspaceRows = useInlineTableInfiniteRows<
+    AdminUsageWorkspaceRow,
+    UsageWorkspaceDraft
+  >({
+    data: rowsQ.data,
+    getRowId: (workspace) => workspace.workspace_id,
+    mapRow: mapUsageRow,
+  });
+
+  const setCap = useMutation<
+    UsageCapResponse,
+    Error,
+    { id: string; capCents: number },
+    UsageCapMutationContext
+  >({
     mutationFn: ({ id, capCents }: { id: string; capCents: number }) =>
       fetchJson<UsageCapResponse>(`/admin/api/v1/usage/workspaces/${id}/cap`, {
         method: "PUT",
@@ -62,37 +330,27 @@ export default function AdminUsagePage() {
       }),
     onMutate: async ({ id, capCents }) => {
       await qc.cancelQueries({ queryKey: qk.adminUsageWorkspaces() });
-      const previous = qc.getQueryData<AdminUsageWorkspacesResponse>(
-        qk.adminUsageWorkspaces(),
-      );
-      qc.setQueryData<AdminUsageWorkspacesResponse>(
-        qk.adminUsageWorkspaces(),
-        (current) => {
-          if (!current) return current;
-          return {
-            workspaces: current.workspaces.map((w) =>
-              w.workspace_id === id
-                ? {
-                    ...w,
-                    cap_cents_30d: capCents,
-                    percent: usagePercent(w.spent_cents_30d, capCents),
-                    paused: capCents === 0 || w.spent_cents_30d >= capCents,
-                  }
-                : w,
-            ),
-          };
-        },
+      const previous = qc.getQueriesData<UsageWorkspacesCache>({
+        queryKey: qk.adminUsageWorkspaces(),
+      });
+      qc.setQueriesData<UsageWorkspacesCache>(
+        { queryKey: qk.adminUsageWorkspaces() },
+        (current) => updateUsageWorkspacesCache(current, id, capCents),
       );
       return { previous };
     },
-    onError: (_err, _vars, context) => {
-      if (context?.previous) {
-        qc.setQueryData(qk.adminUsageWorkspaces(), context.previous);
+    onError: (_err, vars, context) => {
+      for (const [key, value] of context?.previous ?? []) {
+        qc.setQueryData(key, value);
       }
+      workspaceRows.updateRow(vars.id, (row) => ({
+        ...row,
+        saving: false,
+        error: "Could not save cap. Try again.",
+      }));
     },
-    onSuccess: () => {
-      setEditing(null);
-      setDraftCap("");
+    onSuccess: (_data, vars) => {
+      workspaceRows.resetRow(vars.id);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: qk.adminUsageWorkspaces() });
@@ -104,20 +362,45 @@ export default function AdminUsagePage() {
   const sub =
     "Rolling-30-day LLM spend per workspace. Adjust a workspace's cap to raise or tighten its envelope.";
 
-  if (summaryQ.isPending || rowsQ.isPending || workspaceMetaQ.isPending) {
+  if (summaryQ.isPending) {
     return <DeskPage title="Usage" sub={sub}><Loading /></DeskPage>;
   }
-  if (!summaryQ.data || !rowsQ.data || !workspaceMetaQ.data) {
+  if (!summaryQ.data) {
     return <DeskPage title="Usage" sub={sub}>Failed to load.</DeskPage>;
   }
 
   const sum = summaryQ.data;
-  const rows = rowsQ.data.workspaces;
-  const workspaceMeta = new Map(
-    workspaceMetaQ.data.workspaces.map((w) => [w.id, w]),
-  );
   const topCapability = sum.per_capability[0];
-  const capCents = editing ? dollarsToCents(draftCap) : null;
+  const workspaceLoadError = rowsQ.error
+    ? rowsQ.data
+      ? "Could not load more workspace rows."
+      : "Could not load workspace rows."
+    : null;
+  const workspaceResultSummary = rowsQ.isFetching && !rowsQ.isFetchingNextPage
+    ? "Loading workspace rows"
+    : workspaceSearch.trim()
+      ? workspaceRows.loadedRowCount + " matching workspaces loaded"
+      : workspaceRows.loadedRowCount + " workspaces loaded";
+  const saveWorkspaceCap = (rowId: string) => {
+    const row = workspaceRows.rows.find((candidate) => candidate.id === rowId);
+    if (!row) return;
+    const capCents = dollarsToCents(row.draft.capDollars);
+    if (capCents === null) {
+      workspaceRows.updateRow(rowId, (current) => ({
+        ...current,
+        dirty: true,
+        validation: "Enter a dollar amount from 0.00 to 10000.00.",
+      }));
+      return;
+    }
+    workspaceRows.updateRow(rowId, (current) => ({
+      ...current,
+      saving: true,
+      error: undefined,
+      validation: undefined,
+    }));
+    setCap.mutate({ id: rowId, capCents });
+  };
 
   return (
     <DeskPage title="Usage" sub={sub}>
@@ -150,110 +433,54 @@ export default function AdminUsagePage() {
 
       <div className="panel">
         <header className="panel__head"><h2>Per workspace</h2></header>
-        <table className="table table--roomy">
-          <thead>
-            <tr>
-              <th>Workspace</th>
-              <th>Plan</th>
-              <th>Verification</th>
-              <th>30d spend</th>
-              <th>Cap</th>
-              <th>Usage</th>
-              <th>State</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((w) => {
-              // code-health: ignore[ccn nloc] Workspace usage row has inline edit/save states that should remain beside the table cells.
-              const meta = workspaceMeta.get(w.workspace_id);
-              const plan = meta?.plan ?? "free";
-              return (
-                <tr key={w.workspace_id}>
-                  <td>
-                    {meta?.name ?? w.name}
-                    <div className="table__sub">{meta?.slug ?? w.slug}</div>
-                  </td>
-                  <td>
-                    <Chip tone={plan === "free" ? "ghost" : "sky"} size="sm">
-                      {plan}
-                    </Chip>
-                  </td>
-                  <td className="muted">{meta?.verification_state ?? "—"}</td>
-                  <td className="mono">
-                    {formatMoney(w.spent_cents_30d, "USD")}
-                  </td>
-                  <td>
-                    {editing === w.workspace_id ? (
-                      <input
-                        className="input input--inline"
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        max="10000"
-                        value={draftCap}
-                        onChange={(e) => setDraftCap(e.target.value)}
-                        autoFocus
-                      />
-                    ) : (
-                      <span className="mono">
-                        {formatMoney(w.cap_cents_30d, "USD")}
-                      </span>
-                    )}
-                  </td>
-                  <td>
-                    <ProgressBar value={w.percent} slim />
-                    <span className="muted"> {w.percent}%</span>
-                  </td>
-                  <td>
-                    {w.paused
-                      ? <Chip tone="rust" size="sm">paused</Chip>
-                      : <Chip tone="moss" size="sm">active</Chip>}
-                  </td>
-                  <td>
-                    {editing === w.workspace_id ? (
-                      <div className="inline-actions">
-                        <button
-                          type="button"
-                          className="btn btn--moss btn--sm"
-                          disabled={setCap.isPending || capCents === null}
-                          onClick={() => {
-                            if (capCents !== null) {
-                              setCap.mutate({ id: w.workspace_id, capCents });
-                            }
-                          }}
-                        >
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn--ghost btn--sm"
-                          onClick={() => {
-                            setEditing(null);
-                            setDraftCap("");
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        className="btn btn--ghost btn--sm"
-                        onClick={() => {
-                          setEditing(w.workspace_id);
-                          setDraftCap(centsToDollars(w.cap_cents_30d));
-                        }}
-                      >
-                        Edit cap
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <InlineTableForm
+          compact
+          ariaLabel="Workspace usage caps"
+          columns={workspaceColumns}
+          rows={workspaceRows.rows}
+          saveMode="explicit"
+          search={{
+            value: workspaceSearch,
+            onChange: setWorkspaceSearch,
+            label: "Search workspaces",
+            placeholder: "Name or slug",
+            clearLabel: "Clear workspace search",
+            resultSummary: workspaceResultSummary,
+            noResultsState: "No workspaces match this search.",
+          }}
+          loadMore={(
+            <InlineTableLoadMore
+              hasMore={rowsQ.hasNextPage}
+              isInitialLoading={rowsQ.isPending}
+              isFetchingMore={rowsQ.isFetchingNextPage}
+              error={workspaceLoadError}
+              loadedCount={workspaceRows.loadedRowCount}
+              onLoadMore={() => {
+                void rowsQ.fetchNextPage();
+              }}
+              onRetry={() => {
+                if (rowsQ.data) {
+                  void rowsQ.fetchNextPage();
+                  return;
+                }
+                void rowsQ.refetch();
+              }}
+              allLoadedLabel="All workspace rows loaded"
+            />
+          )}
+          onDraftChange={workspaceRows.patchRowDraft}
+          onEdit={(rowId) => {
+            workspaceRows.updateRow(rowId, (row) => ({
+              ...row,
+              editing: true,
+              error: undefined,
+              validation: undefined,
+            }));
+          }}
+          onCancel={workspaceRows.resetRow}
+          onSave={saveWorkspaceCap}
+          getRowLabel={(row) => row.draft.name}
+        />
       </div>
 
       <div className="panel">

@@ -52,10 +52,12 @@ function updateWorkspace(
   update: (workspace: AdminWorkspaceRow) => AdminWorkspaceRow,
 ): AdminWorkspacesResponse | undefined {
   if (!current) return current;
+  const updateRow = (workspace: AdminWorkspaceRow) =>
+    workspace.id === id ? update(workspace) : workspace;
   return {
-    workspaces: current.workspaces.map((workspace) =>
-      workspace.id === id ? update(workspace) : workspace,
-    ),
+    ...current,
+    workspaces: current.workspaces.map(updateRow),
+    data: (current.data ?? current.workspaces).map(updateRow),
   };
 }
 

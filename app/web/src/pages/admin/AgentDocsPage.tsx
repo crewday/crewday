@@ -601,7 +601,7 @@ function approxTokenCount(body: string): number {
 }
 
 function tokenCountForDraft(draft: AgentDocDraft): number | null {
-  return draft.body_md ? approxTokenCount(draft.body_md) : draft.approx_token_count;
+  return draft.body_md ? approxTokenCount(draft.body_md) : draft.approx_token_count ?? null;
 }
 
 function tokenLabel(count: number | null | undefined): string {

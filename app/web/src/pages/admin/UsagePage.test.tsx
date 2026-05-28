@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactElement } from "react";
@@ -82,55 +82,31 @@ function summary(overrides: Record<string, unknown> = {}): unknown {
 }
 
 function workspaces(overrides: Record<string, unknown> = {}): unknown {
+  const rows = (overrides.workspaces as unknown[] | undefined) ?? [
+    {
+      workspace_id: "ws_1",
+      slug: "smoke",
+      name: "Smoke House",
+      cap_cents_30d: 1000,
+      spent_cents_30d: 600,
+      percent: 60,
+      paused: false,
+    },
+    {
+      workspace_id: "ws_2",
+      slug: "paused",
+      name: "Paused House",
+      cap_cents_30d: 500,
+      spent_cents_30d: 750,
+      percent: 100,
+      paused: true,
+    },
+  ];
   return {
-    workspaces: [
-      {
-        workspace_id: "ws_1",
-        slug: "smoke",
-        name: "Smoke House",
-        cap_cents_30d: 1000,
-        spent_cents_30d: 600,
-        percent: 60,
-        paused: false,
-      },
-      {
-        workspace_id: "ws_2",
-        slug: "paused",
-        name: "Paused House",
-        cap_cents_30d: 500,
-        spent_cents_30d: 750,
-        percent: 100,
-        paused: true,
-      },
-    ],
-    ...overrides,
-  };
-}
-
-function workspaceMeta(overrides: Record<string, unknown> = {}): unknown {
-  return {
-    workspaces: [
-      {
-        id: "ws_1",
-        slug: "smoke",
-        name: "Smoke House",
-        plan: "free",
-        verification_state: "trusted",
-        members_count: 4,
-        archived_at: null,
-        created_at: "2026-04-01T00:00:00+00:00",
-      },
-      {
-        id: "ws_2",
-        slug: "paused",
-        name: "Paused House",
-        plan: "trial",
-        verification_state: "human_verified",
-        members_count: 2,
-        archived_at: null,
-        created_at: "2026-04-01T00:00:00+00:00",
-      },
-    ],
+    workspaces: rows,
+    data: rows,
+    next_cursor: null,
+    has_more: false,
     ...overrides,
   };
 }
@@ -139,19 +115,32 @@ function installPageFetch(extra: Record<string, FakeResponse[]> = {}) {
   return installFetch({
     "/admin/api/v1/usage/summary": [{ body: summary() }],
     "/admin/api/v1/usage/workspaces": [{ body: workspaces() }],
-    "/admin/api/v1/workspaces": [{ body: workspaceMeta() }],
     ...extra,
   });
 }
 
-function rowFor(text: string): HTMLTableRowElement {
-  const row = screen.getByText(text).closest("tr");
-  if (!(row instanceof HTMLTableRowElement)) throw new Error(`No row for ${text}`);
+function rowFor(text: string): HTMLElement {
+  const row = screen.getByText(text).closest("[data-inline-table-row-group]");
+  if (!(row instanceof HTMLElement)) throw new Error(`No row for ${text}`);
   return row;
 }
 
 function jsonBody(call: FetchCall): unknown {
   return JSON.parse(String(call.init.body));
+}
+
+function workspaceRowsCallWithParam(
+  calls: FetchCall[],
+  param: string,
+  value: string,
+): FetchCall | undefined {
+  return calls.find((call) => {
+    const url = new URL(call.url, "http://crewday.test");
+    return (
+      url.pathname === "/admin/api/v1/usage/workspaces" &&
+      url.searchParams.get(param) === value
+    );
+  });
 }
 
 afterEach(() => {
@@ -174,10 +163,205 @@ describe("Admin UsagePage", () => {
       expect(screen.getAllByText("paused").length).toBeGreaterThan(0);
 
       const row = rowFor("Smoke House");
-      expect(within(row).getByText("trusted")).toBeInTheDocument();
       expect(within(row).getByText("$6.00")).toBeInTheDocument();
       expect(within(row).getByText("$10.00")).toBeInTheDocument();
       expect(within(row).getByText("60%")).toBeInTheDocument();
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("searches workspace usage through the server-backed table toolbar", async () => {
+    const fetcher = installPageFetch({
+      "/admin/api/v1/usage/workspaces": [
+        { body: workspaces() },
+        {
+          body: workspaces({
+            workspaces: [
+              {
+                workspace_id: "ws_2",
+                slug: "paused",
+                name: "Paused House",
+                cap_cents_30d: 500,
+                spent_cents_30d: 750,
+                percent: 100,
+                paused: true,
+              },
+            ],
+          }),
+        },
+      ],
+    });
+    try {
+      render(<Harness />);
+      await screen.findByText("Smoke House");
+
+      fireEvent.change(screen.getByRole("searchbox", { name: "Search workspaces" }), {
+        target: { value: "paused" },
+      });
+
+      expect(await screen.findByText("Paused House")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(workspaceRowsCallWithParam(fetcher.calls, "q", "paused")).toBeDefined();
+      });
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("debounces workspace usage search while keeping the input controlled", async () => {
+    const fetcher = installPageFetch({
+      "/admin/api/v1/usage/workspaces": [
+        { body: workspaces() },
+        {
+          body: workspaces({
+            workspaces: [
+              {
+                workspace_id: "ws_2",
+                slug: "paused",
+                name: "Paused House",
+                cap_cents_30d: 500,
+                spent_cents_30d: 750,
+                percent: 100,
+                paused: true,
+              },
+            ],
+          }),
+        },
+      ],
+    });
+    try {
+      render(<Harness />);
+      await screen.findByText("Smoke House");
+
+      vi.useFakeTimers();
+      const search = screen.getByRole("searchbox", { name: "Search workspaces" });
+      fireEvent.change(search, { target: { value: "paused" } });
+
+      expect(search).toHaveValue("paused");
+      expect(workspaceRowsCallWithParam(fetcher.calls, "q", "paused")).toBeUndefined();
+
+      await act(async () => {
+        vi.advanceTimersByTime(249);
+      });
+      expect(workspaceRowsCallWithParam(fetcher.calls, "q", "paused")).toBeUndefined();
+
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      vi.useRealTimers();
+
+      await waitFor(() => {
+        expect(workspaceRowsCallWithParam(fetcher.calls, "q", "paused")).toBeDefined();
+      });
+    } finally {
+      vi.useRealTimers();
+      fetcher.restore();
+    }
+  });
+
+  it("loads the next workspace usage page through the cursor footer", async () => {
+    const fetcher = installPageFetch({
+      "/admin/api/v1/usage/workspaces": [
+        {
+          body: workspaces({
+            workspaces: [
+              {
+                workspace_id: "ws_1",
+                slug: "smoke",
+                name: "Smoke House",
+                cap_cents_30d: 1000,
+                spent_cents_30d: 600,
+                percent: 60,
+                paused: false,
+              },
+            ],
+            next_cursor: "cursor_2",
+            has_more: true,
+          }),
+        },
+        {
+          body: workspaces({
+            workspaces: [
+              {
+                workspace_id: "ws_2",
+                slug: "paused",
+                name: "Paused House",
+                cap_cents_30d: 500,
+                spent_cents_30d: 750,
+                percent: 100,
+                paused: true,
+              },
+            ],
+          }),
+        },
+      ],
+    });
+    try {
+      render(<Harness />);
+      expect(await screen.findByText("Smoke House")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Load more rows" }));
+
+      expect(await screen.findByText("Paused House")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(workspaceRowsCallWithParam(fetcher.calls, "cursor", "cursor_2")).toBeDefined();
+      });
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("appends cursor-loaded workspace rows without dropping an edit draft", async () => {
+    const fetcher = installPageFetch({
+      "/admin/api/v1/usage/workspaces": [
+        {
+          body: workspaces({
+            workspaces: [
+              {
+                workspace_id: "ws_1",
+                slug: "smoke",
+                name: "Smoke House",
+                cap_cents_30d: 1000,
+                spent_cents_30d: 600,
+                percent: 60,
+                paused: false,
+              },
+            ],
+            next_cursor: "cursor_2",
+            has_more: true,
+          }),
+        },
+        {
+          body: workspaces({
+            workspaces: [
+              {
+                workspace_id: "ws_2",
+                slug: "paused",
+                name: "Paused House",
+                cap_cents_30d: 500,
+                spent_cents_30d: 750,
+                percent: 100,
+                paused: true,
+              },
+            ],
+          }),
+        },
+      ],
+    });
+    try {
+      render(<Harness />);
+      await screen.findByText("Smoke House");
+
+      const row = rowFor("Smoke House");
+      fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(row).getByLabelText("30 day cap dollars"), {
+        target: { value: "12.34" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Load more rows" }));
+
+      expect(await screen.findByText("Paused House")).toBeInTheDocument();
+      expect(within(row).getByLabelText("30 day cap dollars")).toHaveValue("12.34");
     } finally {
       fetcher.restore();
     }
@@ -207,18 +391,15 @@ describe("Admin UsagePage", () => {
         },
       ],
       "/admin/api/v1/usage/summary": [{ body: summary() }, { body: summary() }],
-      "/admin/api/v1/workspaces": [{ body: workspaceMeta() }, { body: workspaceMeta() }],
     });
     try {
       render(<Harness />);
       await screen.findByText("Smoke House");
 
       const row = rowFor("Smoke House");
-      fireEvent.click(within(row).getByRole("button", { name: "Edit cap" }));
-      const input = within(row).getByDisplayValue("10.00");
+      fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+      const input = within(row).getByLabelText("30 day cap dollars");
       const save = within(row).getByRole("button", { name: "Save" });
-      fireEvent.change(input, { target: { value: "" } });
-      expect(save).toBeDisabled();
       fireEvent.change(input, {
         target: { value: "15.00" },
       });
@@ -233,6 +414,107 @@ describe("Admin UsagePage", () => {
         expect(jsonBody(put!)).toEqual({ cap_cents_30d: 1500 });
       });
       expect(await within(row).findByText("$15.00")).toBeInTheDocument();
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("cancels cap edits without sending a mutation", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+      await screen.findByText("Smoke House");
+
+      let row = rowFor("Smoke House");
+      fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(row).getByLabelText("30 day cap dollars"), {
+        target: { value: "20.00" },
+      });
+      fireEvent.click(within(row).getByRole("button", { name: "Cancel" }));
+
+      row = rowFor("Smoke House");
+      expect(within(row).getByText("$10.00")).toBeInTheDocument();
+      expect(fetcher.calls.some((call) => call.url.includes("/cap"))).toBe(false);
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("keeps invalid cap drafts local and shows validation", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+      await screen.findByText("Smoke House");
+
+      const row = rowFor("Smoke House");
+      fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(row).getByLabelText("30 day cap dollars"), {
+        target: { value: "" },
+      });
+      fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+
+      expect(
+        await within(row).findByText("Enter a dollar amount from 0.00 to 10000.00."),
+      ).toBeInTheDocument();
+      expect(fetcher.calls.some((call) => call.url.includes("/cap"))).toBe(false);
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("rejects cap drafts with unsupported decimal precision or values above the field max", async () => {
+    const fetcher = installPageFetch();
+    try {
+      render(<Harness />);
+      await screen.findByText("Smoke House");
+
+      const row = rowFor("Smoke House");
+      fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+      const input = within(row).getByLabelText("30 day cap dollars");
+      fireEvent.change(input, { target: { value: "10000.001" } });
+      fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+
+      expect(
+        await within(row).findByText("Enter a dollar amount from 0.00 to 10000.00."),
+      ).toBeInTheDocument();
+      expect(fetcher.calls.some((call) => call.url.includes("/cap"))).toBe(false);
+
+      fireEvent.change(input, { target: { value: "10000.01" } });
+      fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+
+      expect(fetcher.calls.some((call) => call.url.includes("/cap"))).toBe(false);
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  it("rolls back optimistic cap cache updates when the mutation fails", async () => {
+    const fetcher = installPageFetch({
+      "/admin/api/v1/usage/workspaces/ws_1/cap": [
+        { status: 500, body: { detail: "boom" } },
+      ],
+      "/admin/api/v1/usage/workspaces": [
+        { body: workspaces() },
+        { body: workspaces() },
+      ],
+      "/admin/api/v1/usage/summary": [{ body: summary() }, { body: summary() }],
+    });
+    try {
+      render(<Harness />);
+      await screen.findByText("Smoke House");
+
+      let row = rowFor("Smoke House");
+      fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(row).getByLabelText("30 day cap dollars"), {
+        target: { value: "15.00" },
+      });
+      fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+
+      expect(await within(row).findByText("Could not save cap. Try again.")).toBeInTheDocument();
+      fireEvent.click(within(row).getByRole("button", { name: "Cancel" }));
+
+      row = rowFor("Smoke House");
+      expect(await within(row).findByText("$10.00")).toBeInTheDocument();
     } finally {
       fetcher.restore();
     }
