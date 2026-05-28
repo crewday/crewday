@@ -10,10 +10,16 @@ import PropertyClosuresPage from "./PropertyClosuresPage";
 import { installFetchRouteHandlers } from "@/test/helpers";
 
 function installFetch({
+  emptyClosures = false,
+  failCreate = false,
   failClosures = false,
+  failUpdate = false,
   missingProperty = false,
 }: {
+  emptyClosures?: boolean;
+  failCreate?: boolean;
   failClosures?: boolean;
+  failUpdate?: boolean;
   missingProperty?: boolean;
 } = {}) {
   // code-health: ignore[nloc] Route fixtures stay local; shared fetch mechanics live in test/helpers.
@@ -21,39 +27,57 @@ function installFetch({
     {
       path: "/w/acme/api/v1/property_closures",
       method: "POST",
-      respond: {
-        status: 201,
-        body: {
-          id: "closure_new",
-          property_id: "prop_1",
-          unit_id: null,
-          starts_at: "2026-04-16T00:00:00Z",
-          ends_at: "2026-04-18T00:00:00Z",
-          reason: "seasonal",
-          source_ical_feed_id: null,
-          created_by_user_id: "user_1",
-          created_at: "2026-04-16T12:00:00Z",
-          deleted_at: null,
+      respond: failCreate
+        ? {
+          status: 422,
+          body: {
+            type: "validation",
+            title: "Validation failed",
+            user_message: "Date range overlaps another closure.",
+          },
+        }
+        : {
+          status: 201,
+          body: {
+            id: "closure_new",
+            property_id: "prop_1",
+            unit_id: null,
+            starts_at: "2026-04-16T00:00:00Z",
+            ends_at: "2026-04-18T00:00:00Z",
+            reason: "seasonal",
+            source_ical_feed_id: null,
+            created_by_user_id: "user_1",
+            created_at: "2026-04-16T12:00:00Z",
+            deleted_at: null,
+          },
         },
-      },
     },
     {
       path: "/w/acme/api/v1/property_closures/closure_1",
       method: "PATCH",
-      respond: {
-        body: {
-          id: "closure_1",
-          property_id: "prop_1",
-          unit_id: null,
-          starts_at: "2026-04-11T00:00:00Z",
-          ends_at: "2026-04-12T00:00:00Z",
-          reason: "owner_stay",
-          source_ical_feed_id: null,
-          created_by_user_id: "user_1",
-          created_at: "2026-04-10T12:00:00Z",
-          deleted_at: null,
+      respond: failUpdate
+        ? {
+          status: 422,
+          body: {
+            type: "validation",
+            title: "Validation failed",
+            user_message: "Date range overlaps another closure.",
+          },
+        }
+        : {
+          body: {
+            id: "closure_1",
+            property_id: "prop_1",
+            unit_id: null,
+            starts_at: "2026-04-11T00:00:00Z",
+            ends_at: "2026-04-12T00:00:00Z",
+            reason: "owner_stay",
+            source_ical_feed_id: null,
+            created_by_user_id: "user_1",
+            created_at: "2026-04-10T12:00:00Z",
+            deleted_at: null,
+          },
         },
-      },
     },
     {
       path: "/w/acme/api/v1/property_closures/closure_1",
@@ -102,20 +126,20 @@ function installFetch({
         ? { status: 500, body: { type: "server_error", title: "Server error" } }
         : {
           body: {
-            data: [{
-            id: "closure_1",
-            property_id: "prop_1",
-            starts_at: "2026-04-10T00:00:00Z",
-            ends_at: "2026-04-13T00:00:00Z",
-            reason: "renovation",
-          },
-          {
-            id: "closure_2",
-            property_id: "prop_1",
-            starts_at: "2026-04-20T00:00:00Z",
-            ends_at: "2026-04-22T00:00:00Z",
-            reason: "ical_unavailable",
-          }],
+            data: emptyClosures ? [] : [{
+              id: "closure_1",
+              property_id: "prop_1",
+              starts_at: "2026-04-10T00:00:00Z",
+              ends_at: "2026-04-13T00:00:00Z",
+              reason: "renovation",
+            },
+            {
+              id: "closure_2",
+              property_id: "prop_1",
+              starts_at: "2026-04-20T00:00:00Z",
+              ends_at: "2026-04-22T00:00:00Z",
+              reason: "ical_unavailable",
+            }],
             next_cursor: null,
             has_more: false,
           },
@@ -196,12 +220,6 @@ function Harness() {
   );
 }
 
-function hiddenButton(name: string): HTMLElement {
-  const button = screen.getAllByRole("button", { name, hidden: true })[0];
-  if (!button) throw new Error(`Missing button: ${name}`);
-  return button;
-}
-
 beforeEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
@@ -230,10 +248,14 @@ describe("<PropertyClosuresPage>", () => {
       expect(await screen.findByRole("heading", { name: "Villa Rosa — closures" })).toBeInTheDocument();
       expect(screen.getByRole("link", { name: /Back to property/ })).toHaveAttribute("href", "/w/acme/property/prop_1");
       expect(screen.getByRole("button", { name: "+ Add closure" })).toBeInTheDocument();
-      expect(screen.getByText("10 Apr → 12 Apr")).toBeInTheDocument();
+      expect(screen.getByRole("table", { name: "Property closures" })).toBeInTheDocument();
+      expect(screen.getByLabelText("renovation closure from 10 Apr to 12 Apr")).toBeInTheDocument();
       expect(screen.getAllByText("renovation").length).toBeGreaterThan(0);
-      expect(screen.getByText("Airbnb / VRBO")).toBeInTheDocument();
-      expect(screen.getByText("Read-only — edit in Airbnb / VRBO")).toBeInTheDocument();
+      expect(screen.getByText("Airbnb / VRBO iCal")).toBeInTheDocument();
+      expect(screen.getByText("Imported iCal unavailable date. Edit or remove it in Airbnb / VRBO.")).toBeInTheDocument();
+      const importedRow = screen.getByLabelText("iCal unavailable closure from 20 Apr to 21 Apr");
+      expect(within(importedRow).getByRole("button", { name: "Edit" })).toBeDisabled();
+      expect(within(importedRow).getByRole("button", { name: "Delete" })).toBeDisabled();
       expect(screen.getByText("Calendar view")).toBeInTheDocument();
       const calendar = screen.getByRole("grid", { name: "April 2026 property calendar" });
       expect(Array.from(calendar.children).slice(0, 10).map((el) => el.textContent)).toEqual([
@@ -288,10 +310,13 @@ describe("<PropertyClosuresPage>", () => {
       render(<Harness />);
 
       fireEvent.click(await screen.findByRole("button", { name: "+ Add closure" }));
-      fireEvent.change(await screen.findByLabelText(/Start/), { target: { value: "2026-04-16" } });
-      fireEvent.change(screen.getByLabelText(/End/), { target: { value: "2026-04-18" } });
-      fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: "seasonal" } });
-      fireEvent.click(hiddenButton("Save"));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      const createRow = await screen.findByLabelText("New closure");
+      expect(within(createRow).getByRole("button", { name: "Save" })).toBeEnabled();
+      fireEvent.change(within(createRow).getByLabelText("Start date"), { target: { value: "2026-04-16" } });
+      fireEvent.change(within(createRow).getByLabelText("End date"), { target: { value: "2026-04-18" } });
+      fireEvent.change(within(createRow).getByLabelText("Reason"), { target: { value: "seasonal" } });
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(fake.requests.some((request) => request.url === "/w/acme/api/v1/property_closures" && request.init?.method === "POST")).toBe(true);
@@ -310,15 +335,37 @@ describe("<PropertyClosuresPage>", () => {
     }
   });
 
+  it("keeps create-row API errors and drafts inside the inline table", async () => {
+    const fake = installFetch({ failCreate: true });
+    try {
+      render(<Harness />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "+ Add closure" }));
+      const createRow = await screen.findByLabelText("New closure");
+      fireEvent.change(within(createRow).getByLabelText("Start date"), { target: { value: "2026-04-16" } });
+      fireEvent.change(within(createRow).getByLabelText("End date"), { target: { value: "2026-04-18" } });
+      fireEvent.change(within(createRow).getByLabelText("Reason"), { target: { value: "seasonal" } });
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
+
+      expect(await within(createRow).findByText("Date range overlaps another closure.")).toBeInTheDocument();
+      expect(within(createRow).getByLabelText("Start date")).toHaveValue("2026-04-16");
+      expect(within(createRow).getByLabelText("End date")).toHaveValue("2026-04-18");
+      expect(within(createRow).getByLabelText("Reason")).toHaveValue("seasonal");
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("patches and deletes an existing manual closure", async () => {
     const fake = installFetch();
     try {
       render(<Harness />);
 
-      fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-      fireEvent.change(await screen.findByLabelText(/Start/), { target: { value: "2026-04-11" } });
-      fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: "owner_stay" } });
-      fireEvent.click(hiddenButton("Save"));
+      const manualRow = await screen.findByLabelText("renovation closure from 10 Apr to 12 Apr");
+      fireEvent.click(within(manualRow).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(manualRow).getByLabelText("Start date"), { target: { value: "2026-04-11" } });
+      fireEvent.change(within(manualRow).getByLabelText("Reason"), { target: { value: "owner_stay" } });
+      fireEvent.click(within(manualRow).getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(fake.requests.some((request) => request.url === "/w/acme/api/v1/property_closures/closure_1" && request.init?.method === "PATCH")).toBe(true);
@@ -332,12 +379,68 @@ describe("<PropertyClosuresPage>", () => {
         source_ical_feed_id: null,
       });
 
-      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-      fireEvent.click(hiddenButton("Delete"));
+      const refreshedManualRow = await screen.findByLabelText("renovation closure from 10 Apr to 12 Apr");
+      fireEvent.click(within(refreshedManualRow).getByRole("button", { name: "Delete" }));
+      fireEvent.click(screen.getByRole("button", { name: "Delete row" }));
 
       await waitFor(() => {
         expect(fake.requests.some((request) => request.url === "/w/acme/api/v1/property_closures/closure_1" && request.init?.method === "DELETE")).toBe(true);
       });
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("keeps manual-row API errors and drafts inside the inline table", async () => {
+    const fake = installFetch({ failUpdate: true });
+    try {
+      render(<Harness />);
+
+      const manualRow = await screen.findByLabelText("renovation closure from 10 Apr to 12 Apr");
+      fireEvent.click(within(manualRow).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(manualRow).getByLabelText("Start date"), { target: { value: "2026-04-11" } });
+      fireEvent.change(within(manualRow).getByLabelText("Reason"), { target: { value: "owner_stay" } });
+      fireEvent.click(within(manualRow).getByRole("button", { name: "Save" }));
+
+      expect(await within(manualRow).findByText("Date range overlaps another closure.")).toBeInTheDocument();
+      expect(within(manualRow).getByLabelText("Start date")).toHaveValue("2026-04-11");
+      expect(within(manualRow).getByLabelText("Reason")).toHaveValue("owner_stay");
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("cancels manual closure edits without patching", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      const manualRow = await screen.findByLabelText("renovation closure from 10 Apr to 12 Apr");
+      fireEvent.click(within(manualRow).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(manualRow).getByLabelText("Reason"), { target: { value: "owner_stay" } });
+      fireEvent.click(within(manualRow).getByRole("button", { name: "Cancel" }));
+
+      expect(screen.getByLabelText("renovation closure from 10 Apr to 12 Apr")).toBeInTheDocument();
+      expect(screen.queryByLabelText("owner stay closure from 10 Apr to 12 Apr")).toBeNull();
+      expect(fake.requests.some((request) => request.url === "/w/acme/api/v1/property_closures/closure_1" && request.init?.method === "PATCH")).toBe(false);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("shows empty and validation states inside the inline table", async () => {
+    const fake = installFetch({ emptyClosures: true });
+    try {
+      render(<Harness />);
+
+      const createRow = await screen.findByLabelText("New closure");
+      expect(within(createRow).getByRole("heading", { name: "No closures scheduled" })).toBeInTheDocument();
+
+      fireEvent.change(within(createRow).getByLabelText("End date"), { target: { value: "2026-04-15" } });
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
+
+      expect(within(createRow).getByText("End date must be on or after the start date.")).toBeInTheDocument();
+      expect(fake.requests.some((request) => request.url === "/w/acme/api/v1/property_closures" && request.init?.method === "POST")).toBe(false);
     } finally {
       fake.restore();
     }

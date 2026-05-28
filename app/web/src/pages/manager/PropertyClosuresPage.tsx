@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { CalendarX } from "lucide-react";
@@ -7,8 +7,13 @@ import { type ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
-import FormField from "@/components/FormField";
-import FormModal, { FormModalGrid } from "@/components/FormModal";
+import {
+  InlineDateField,
+  InlineSelectField,
+  InlineTableForm,
+  type InlineTableColumn,
+  type InlineTableRow,
+} from "@/components/InlineTableForm";
 import { Chip, EmptyState, Loading } from "@/components/common";
 import type { Me, Property, PropertyClosure, Stay } from "@/types/api";
 import {
@@ -122,21 +127,28 @@ function isPropertyDetailRow(value: unknown): value is PropertyDetailRow {
   );
 }
 
-interface ClosureFormState {
+interface ClosureDraft {
   id: string | null;
   starts_on: string;
   ends_on: string;
   reason: PropertyClosure["reason"];
 }
 
-const REASONS: readonly PropertyClosure["reason"][] = [
+type ManualClosureReason = Exclude<PropertyClosure["reason"], "ical_unavailable">;
+
+const REASONS: readonly ManualClosureReason[] = [
   "renovation",
   "owner_stay",
   "seasonal",
   "other",
 ];
 
-function emptyForm(todayIso: string): ClosureFormState {
+const REASON_OPTIONS = REASONS.map((reason) => ({
+  value: reason,
+  label: reasonLabel(reason),
+}));
+
+function emptyDraft(todayIso: string): ClosureDraft {
   return {
     id: null,
     starts_on: todayIso,
@@ -145,7 +157,28 @@ function emptyForm(todayIso: string): ClosureFormState {
   };
 }
 
-function closureBody(form: ClosureFormState, propertyId: string) {
+function draftFromClosure(closure: PropertyClosure): ClosureDraft {
+  return {
+    id: closure.id,
+    starts_on: closure.starts_on,
+    ends_on: closure.ends_on,
+    reason: closure.reason,
+  };
+}
+
+function makeCreateRow(todayIso: string): InlineTableRow<ClosureDraft> {
+  return {
+    id: "closure-create",
+    isNew: true,
+    editing: true,
+    dirty: false,
+    draft: emptyDraft(todayIso),
+    committedDraft: emptyDraft(todayIso),
+    label: "New closure",
+  };
+}
+
+function closureBody(form: ClosureDraft, propertyId: string) {
   return {
     property_id: propertyId,
     unit_id: null,
@@ -154,6 +187,37 @@ function closureBody(form: ClosureFormState, propertyId: string) {
     reason: form.reason,
     source_ical_feed_id: null,
   };
+}
+
+function reasonLabel(reason: PropertyClosure["reason"]): string {
+  if (reason === "ical_unavailable") return "iCal unavailable";
+  return reason.replace("_", " ");
+}
+
+function isImportedClosure(closure: PropertyClosure): boolean {
+  return closure.reason === "ical_unavailable";
+}
+
+function validateClosureDraft(draft: ClosureDraft): string | null {
+  if (!draft.starts_on || !draft.ends_on) return "Start and end dates are required.";
+  if (draft.ends_on < draft.starts_on) return "End date must be on or after the start date.";
+  return null;
+}
+
+function sourceCell(draft: ClosureDraft) {
+  if (draft.reason === "ical_unavailable") {
+    return <Chip tone="sky" size="sm">Airbnb / VRBO iCal</Chip>;
+  }
+  return <Chip tone="ghost" size="sm">manual</Chip>;
+}
+
+function closureRowLabel(row: InlineTableRow<ClosureDraft>): string {
+  if (row.isNew) return "New closure";
+  return `${reasonLabel(row.draft.reason)} closure from ${fmtDayMon(row.draft.starts_on)} to ${fmtDayMon(row.draft.ends_on)}`;
+}
+
+function pickReason(value: string): ManualClosureReason {
+  return REASONS.find((reason) => reason === value) ?? "other";
 }
 
 async function fetchClosuresPayload(pid: string): Promise<ClosuresPayload> {
@@ -177,22 +241,44 @@ async function fetchClosuresPayload(pid: string): Promise<ClosuresPayload> {
 }
 
 export default function PropertyClosuresPage() {
-  // code-health: ignore[nloc] Closure page keeps filter state, create form, and table actions on one promoted route.
+  // code-health: ignore[nloc] Closure page keeps inline row state, mutations, and calendar composition on one promoted route.
   const { pid = "" } = useParams<{ pid: string }>();
   const { pathname } = useLocation();
   const queryClient = useQueryClient();
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState<ClosureFormState>(() => emptyForm("2026-04-01"));
-  const [formError, setFormError] = useState<string | null>(null);
+  const tableShellRef = useRef<HTMLDivElement | null>(null);
+  const [rowEdits, setRowEdits] = useState<ReadonlyMap<string, InlineTableRow<ClosureDraft>>>(() => new Map());
+  const [createRow, setCreateRow] = useState<InlineTableRow<ClosureDraft>>(() => makeCreateRow("2026-04-01"));
   const dataQ = useQuery({
     queryKey: qk.propertyClosures(pid),
     queryFn: () => fetchClosuresPayload(pid),
     enabled: pid !== "",
   });
   const meQ = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
+  const closures = dataQ.data?.closures ?? [];
+  const closureById = useMemo(() => new Map(closures.map((closure) => [closure.id, closure])), [closures]);
+
+  useEffect(() => {
+    setRowEdits((current) => {
+      const next = new Map<string, InlineTableRow<ClosureDraft>>();
+      for (const [rowId, row] of current) {
+        if (closureById.has(rowId)) next.set(rowId, row);
+      }
+      return next.size === current.size ? current : next;
+    });
+  }, [closureById]);
+
+  useEffect(() => {
+    if (!meQ.data) return;
+    const todayIso = dateOnly(meQ.data.today);
+    setCreateRow((row) => row.dirty ? row : {
+      ...row,
+      draft: emptyDraft(todayIso),
+      committedDraft: emptyDraft(todayIso),
+    });
+  }, [meQ.data]);
 
   const saveClosure = useMutation({
-    mutationFn: (next: ClosureFormState) => {
+    mutationFn: (next: ClosureDraft) => {
       const body = closureBody(next, pid);
       if (next.id) {
         return fetchJson<ClosurePayload>("/api/v1/property_closures/" + next.id, {
@@ -211,33 +297,266 @@ export default function PropertyClosuresPage() {
         body,
       });
     },
-    onSuccess: async () => {
-      setFormError(null);
-      setDialogOpen(false);
+    onSuccess: async (_saved, variables) => {
+      if (variables.id) {
+        setRowEdits((current) => {
+          const next = new Map(current);
+          next.delete(variables.id ?? "");
+          return next;
+        });
+      } else {
+        setCreateRow(makeCreateRow(dateOnly(meQ.data?.today ?? "2026-04-01")));
+      }
       await queryClient.invalidateQueries({ queryKey: qk.propertyClosures(pid) });
     },
-    onError: (err) => {
-      setFormError(err instanceof Error ? err.message : "Failed to save closure.");
+    onError: (err, variables) => {
+      const message = err instanceof Error ? err.message : "Failed to save closure.";
+      if (variables.id) {
+        setRowEdits((current) => {
+          const row = current.get(variables.id ?? "");
+          if (!row) return current;
+          const next = new Map(current);
+          next.set(row.id, { ...row, error: message });
+          return next;
+        });
+        return;
+      }
+      setCreateRow((row) => ({ ...row, error: message }));
     },
   });
 
   const deleteClosure = useMutation({
     mutationFn: (id: string) =>
       fetchJson<null>("/api/v1/property_closures/" + id, { method: "DELETE" }),
-    onSuccess: async () => {
-      setFormError(null);
-      setDialogOpen(false);
+    onSuccess: async (_saved, id) => {
+      setRowEdits((current) => {
+        const next = new Map(current);
+        next.delete(id);
+        return next;
+      });
       await queryClient.invalidateQueries({ queryKey: qk.propertyClosures(pid) });
     },
-    onError: (err) => {
-      setFormError(err instanceof Error ? err.message : "Failed to delete closure.");
+    onError: (err, id) => {
+      const message = err instanceof Error ? err.message : "Failed to delete closure.";
+      setRowEdits((current) => {
+        const existing = current.get(id);
+        const closure = closureById.get(id);
+        const row = existing ?? (closure ? {
+          id,
+          draft: draftFromClosure(closure),
+          committedDraft: draftFromClosure(closure),
+        } : null);
+        if (!row) return current;
+        const next = new Map(current);
+        next.set(id, { ...row, error: message });
+        return next;
+      });
     },
   });
 
-  function openForm(next: ClosureFormState) {
-    setForm(next);
-    setFormError(null);
-    setDialogOpen(true);
+  const closureColumns = useMemo<InlineTableColumn<ClosureDraft>[]>(() => [
+    {
+      key: "starts_on",
+      header: "Start",
+      width: { px: 132 },
+      renderRead: ({ row }) => <span className="mono">{fmtDayMon(row.draft.starts_on)}</span>,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineDateField
+          value={row.draft.starts_on}
+          disabled={disabled}
+          ariaLabel="Start date"
+          onChange={(starts_on) => update({ starts_on })}
+        />
+      ),
+    },
+    {
+      key: "ends_on",
+      header: "End",
+      width: { px: 132 },
+      renderRead: ({ row }) => <span className="mono">{fmtDayMon(row.draft.ends_on)}</span>,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineDateField
+          value={row.draft.ends_on}
+          disabled={disabled}
+          ariaLabel="End date"
+          onChange={(ends_on) => update({ ends_on })}
+        />
+      ),
+    },
+    {
+      key: "reason",
+      header: "Reason",
+      width: { min: 180 },
+      renderRead: ({ row }) => (
+        <Chip tone={row.draft.reason === "ical_unavailable" ? "sky" : "ghost"} size="sm">
+          {reasonLabel(row.draft.reason)}
+        </Chip>
+      ),
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineSelectField
+          value={row.draft.reason === "ical_unavailable" ? "other" : row.draft.reason}
+          options={REASON_OPTIONS}
+          disabled={disabled}
+          ariaLabel="Reason"
+          onChange={(reason) => update({ reason: pickReason(reason) })}
+        />
+      ),
+    },
+    {
+      key: "source",
+      header: "Source",
+      width: { min: 184 },
+      renderRead: ({ row }) => sourceCell(row.draft),
+      renderEdit: ({ row }) => sourceCell(row.draft),
+    },
+  ], []);
+
+  const rows = useMemo<InlineTableRow<ClosureDraft>[]>(() => closures.map((closure) => {
+    const imported = isImportedClosure(closure);
+    const baseDraft = draftFromClosure(closure);
+    const localRow = rowEdits.get(closure.id);
+    return {
+      id: closure.id,
+      draft: localRow?.draft ?? baseDraft,
+      committedDraft: baseDraft,
+      editing: localRow?.editing ?? false,
+      dirty: localRow?.dirty ?? false,
+      disabled: imported,
+      saving: (saveClosure.isPending && saveClosure.variables?.id === closure.id)
+        || (deleteClosure.isPending && deleteClosure.variables === closure.id),
+      error: localRow?.error,
+      validation: localRow?.validation,
+      meta: imported ? (
+        <span>Imported iCal unavailable date. Edit or remove it in Airbnb / VRBO.</span>
+      ) : undefined,
+    };
+  }), [
+    closures,
+    deleteClosure.isPending,
+    deleteClosure.variables,
+    rowEdits,
+    saveClosure.isPending,
+    saveClosure.variables,
+  ]);
+
+  const activeCreateRow = useMemo<InlineTableRow<ClosureDraft>>(() => ({
+    ...createRow,
+    saving: saveClosure.isPending && saveClosure.variables?.id === null,
+    meta: closures.length === 0 && !createRow.dirty ? (
+      <EmptyState
+        icon={CalendarX}
+        title="No closures scheduled"
+        copy="Blocked dates and owner stays will appear here."
+        variant="compact"
+      />
+    ) : createRow.meta,
+  }), [closures.length, createRow, saveClosure.isPending, saveClosure.variables]);
+
+  function patchRow(rowId: string, patch: Partial<ClosureDraft>) {
+    if (rowId === createRow.id) {
+      setCreateRow((row) => ({
+        ...row,
+        draft: { ...row.draft, ...patch },
+        dirty: true,
+        validation: undefined,
+        error: undefined,
+        meta: undefined,
+      }));
+      return;
+    }
+
+    const closure = closureById.get(rowId);
+    if (!closure || isImportedClosure(closure)) return;
+    setRowEdits((current) => {
+      const existing = current.get(rowId);
+      const committedDraft = existing?.committedDraft ?? draftFromClosure(closure);
+      const draft = { ...(existing?.draft ?? committedDraft), ...patch };
+      const next = new Map(current);
+      next.set(rowId, {
+        id: rowId,
+        draft,
+        committedDraft,
+        editing: true,
+        dirty: true,
+        validation: undefined,
+        error: undefined,
+      });
+      return next;
+    });
+  }
+
+  function editRow(rowId: string) {
+    const closure = closureById.get(rowId);
+    if (!closure || isImportedClosure(closure)) return;
+    setRowEdits((current) => {
+      const existing = current.get(rowId);
+      const draft = existing?.draft ?? draftFromClosure(closure);
+      const next = new Map(current);
+      next.set(rowId, {
+        id: rowId,
+        draft,
+        committedDraft: draftFromClosure(closure),
+        editing: true,
+        dirty: existing?.dirty ?? false,
+        validation: existing?.validation,
+        error: existing?.error,
+      });
+      return next;
+    });
+  }
+
+  function cancelRow(rowId: string) {
+    if (rowId === createRow.id) {
+      setCreateRow(makeCreateRow(dateOnly(meQ.data?.today ?? "2026-04-01")));
+      return;
+    }
+    setRowEdits((current) => {
+      const next = new Map(current);
+      next.delete(rowId);
+      return next;
+    });
+  }
+
+  function saveRow(rowId: string) {
+    const row = rowId === createRow.id ? createRow : rowEdits.get(rowId);
+    if (!row) return;
+    const validation = validateClosureDraft(row.draft);
+    if (validation) {
+      if (rowId === createRow.id) {
+        setCreateRow((current) => ({ ...current, dirty: true, validation }));
+        return;
+      }
+      setRowEdits((current) => {
+        const existing = current.get(rowId);
+        if (!existing) return current;
+        const next = new Map(current);
+        next.set(rowId, { ...existing, validation });
+        return next;
+      });
+      return;
+    }
+    saveClosure.mutate(row.draft);
+  }
+
+  function deleteRow(rowId: string) {
+    const closure = closureById.get(rowId);
+    if (!closure || isImportedClosure(closure)) return;
+    deleteClosure.mutate(rowId);
+  }
+
+  function focusCreateRow() {
+    setCreateRow((row) => ({
+      ...row,
+      dirty: true,
+      validation: undefined,
+      error: undefined,
+      meta: undefined,
+    }));
+    const row = tableShellRef.current?.querySelector<HTMLElement>(
+      `[data-inline-table-row-group="${createRow.id}"]`,
+    );
+    row?.scrollIntoView?.({ block: "nearest" });
+    row?.querySelector<HTMLElement>("input, select, button")?.focus();
   }
 
   if (dataQ.isPending || meQ.isPending) {
@@ -247,7 +566,7 @@ export default function PropertyClosuresPage() {
     return <DeskPage title="Closures">Failed to load.</DeskPage>;
   }
 
-  const { property, closures, stays } = dataQ.data;
+  const { property, stays } = dataQ.data;
   const todayIso = dateOnly(meQ.data.today);
   const calendar = buildMonthCalendar(todayIso);
 
@@ -264,74 +583,34 @@ export default function PropertyClosuresPage() {
         <button
           type="button"
           className="btn btn--moss"
-          onClick={() => openForm(emptyForm(todayIso))}
+          onClick={focusCreateRow}
         >
           + Add closure
         </button>
       }
     >
-      <div className="panel">
-        <table className="table table--roomy">
-          <thead>
-            <tr><th>Dates</th><th>Reason</th><th>Note</th><th>Source</th><th></th></tr>
-          </thead>
-          <tbody>
-            {closures.length === 0 ? (
-              <tr>
-                <td colSpan={5}>
-                  <EmptyState
-                    icon={CalendarX}
-                    title="No closures scheduled"
-                    copy="Blocked dates and owner stays will appear here."
-                    variant="quiet"
-                  />
-                </td>
-              </tr>
-            ) : (
-              closures.map((c) => {
-                const ical = c.reason === "ical_unavailable";
-                return (
-                  <tr key={c.id}>
-                    <td className="mono">
-                      {fmtDayMon(c.starts_on)} → {fmtDayMon(c.ends_on)}
-                    </td>
-                    <td>
-                      <Chip tone={ical ? "sky" : "ghost"} size="sm">{c.reason}</Chip>
-                    </td>
-                    <td className="table__sub">{c.note}</td>
-                    <td>
-                      {ical ? (
-                        <Chip tone="sky" size="sm">Airbnb / VRBO</Chip>
-                      ) : (
-                        <Chip tone="ghost" size="sm">manual</Chip>
-                      )}
-                    </td>
-                    <td>
-                      {ical ? (
-                        <span className="muted">Read-only — edit in Airbnb / VRBO</span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="btn btn--sm btn--ghost"
-                          onClick={() =>
-                            openForm({
-                              id: c.id,
-                              starts_on: c.starts_on,
-                              ends_on: c.ends_on,
-                              reason: c.reason,
-                            })
-                          }
-                        >
-                          Edit
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+      <div className="panel" ref={tableShellRef}>
+        <InlineTableForm
+          ariaLabel="Property closures"
+          columns={closureColumns}
+          rows={rows}
+          trailingCreateRow={activeCreateRow}
+          saveMode="explicit"
+          onDraftChange={patchRow}
+          onEdit={editRow}
+          onDelete={deleteRow}
+          onCancel={cancelRow}
+          onSave={saveRow}
+          getRowLabel={closureRowLabel}
+          emptyState={(
+            <EmptyState
+              icon={CalendarX}
+              title="No closures scheduled"
+              copy="Blocked dates and owner stays will appear here."
+              variant="compact"
+            />
+          )}
+        />
       </div>
 
       <div className="panel">
@@ -391,79 +670,6 @@ export default function PropertyClosuresPage() {
         </div>
       </div>
 
-      <FormModal
-        open={dialogOpen}
-        title={form.id ? "Edit closure" : "Add closure"}
-        eyebrow="Property calendar"
-        formClassName="property-closure-form"
-        onClose={() => {
-          setDialogOpen(false);
-          setFormError(null);
-        }}
-        onSubmit={(event) => {
-          event.preventDefault();
-          saveClosure.mutate(form);
-        }}
-        actions={
-          <>
-            {form.id && (
-              <button
-                type="button"
-                className="btn btn--rust"
-                disabled={deleteClosure.isPending || saveClosure.isPending}
-                onClick={() => deleteClosure.mutate(form.id ?? "")}
-              >
-                Delete
-              </button>
-            )}
-            <button type="button" className="btn btn--ghost" onClick={() => setDialogOpen(false)}>
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn--moss"
-              disabled={saveClosure.isPending || deleteClosure.isPending}
-            >
-              Save
-            </button>
-          </>
-        }
-      >
-          <FormModalGrid className="property-closure-form__grid">
-          <FormField label="Start" requirement="required" className="property-closure-form__field sheet-form__field">
-            <input
-              type="date"
-              value={form.starts_on}
-              onChange={(event) => setForm((prev) => ({ ...prev, starts_on: event.target.value }))}
-              required
-            />
-          </FormField>
-          <FormField label="End" requirement="required" className="property-closure-form__field sheet-form__field">
-            <input
-              type="date"
-              value={form.ends_on}
-              onChange={(event) => setForm((prev) => ({ ...prev, ends_on: event.target.value }))}
-              required
-            />
-          </FormField>
-          </FormModalGrid>
-          <FormField label="Reason" requirement="required" className="property-closure-form__field sheet-form__field">
-            <select
-              value={form.reason}
-              onChange={(event) =>
-                setForm((prev) => ({
-                  ...prev,
-                  reason: event.target.value as PropertyClosure["reason"],
-                }))
-              }
-            >
-              {REASONS.map((reason) => (
-                <option key={reason} value={reason}>{reason}</option>
-              ))}
-            </select>
-          </FormField>
-          {formError && <p className="form-error">{formError}</p>}
-      </FormModal>
     </DeskPage>
   );
 }
