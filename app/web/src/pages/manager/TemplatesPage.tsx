@@ -1,15 +1,22 @@
 import type { FormEvent, ReactElement } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Camera, Globe, GripVertical, Hash, Map as MapIcon, Sparkles, Timer } from "lucide-react";
+import { Camera, Globe, Hash, Map as MapIcon, Sparkles, Timer } from "lucide-react";
 
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import { Chip, Loading } from "@/components/common";
 import DeskPage from "@/components/DeskPage";
 import FormField from "@/components/FormField";
 import FormModal, { FormModalGrid } from "@/components/FormModal";
+import {
+  InlineCheckboxField,
+  InlineTableForm,
+  InlineTextField,
+  type InlineTableColumn,
+  type InlineTableReorder,
+  type InlineTableRow,
+} from "@/components/InlineTableForm";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
-import { useReorderableList } from "@/components/useReorderableList";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 import { formatDecimal } from "@/lib/numberFormat";
@@ -474,27 +481,20 @@ function templateUpdateBody(tpl: TaskTemplate): Record<string, unknown> {
   };
 }
 
-function reorder<T>(items: readonly T[], from: number, to: number): T[] {
-  if (from === to) return [...items];
-  const next = [...items];
-  const [moved] = next.splice(from, 1);
-  if (moved === undefined) return next;
-  next.splice(to, 0, moved);
-  return next;
-}
-
 interface ChecklistEditorProps {
   template: TaskTemplate;
 }
+
+type ChecklistEditorRow = InlineTableRow<ChecklistTemplateItem>;
 
 // Drag-to-reorder + keyboard "move up/down" for a template's checklist
 // steps. Keeps a local-state copy so the row stays stable across the
 // PATCH round-trip; the source of truth is still the React Query cache
 // (we mirror back from props on incoming refetches that aren't ours).
-function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement | null {
+function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement {
   const queryClient = useQueryClient();
-  const [items, setItems] = useState<ChecklistTemplateItem[]>(
-    template.checklist_template_json,
+  const [rows, setRows] = useState<ChecklistEditorRow[]>(
+    checklistRows(template.checklist_template_json),
   );
   const [announcement, setAnnouncement] = useState<string>("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -513,7 +513,12 @@ function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement | nul
   // in flight, so the user's in-progress reorder isn't clobbered.
   useEffect(() => {
     if (pendingRef.current !== null) return;
-    setItems(template.checklist_template_json);
+    setRows((current) =>
+      mergeChecklistRowsWithLocalDrafts(
+        checklistRows(template.checklist_template_json),
+        current,
+      ),
+    );
   }, [template.checklist_template_json]);
 
   useEffect(() => {
@@ -531,7 +536,7 @@ function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement | nul
     };
   }, []);
 
-  const reorderMu = useMutation<
+  const checklistPatch = useMutation<
     TaskTemplate,
     Error,
     {
@@ -558,7 +563,7 @@ function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement | nul
       if (ctx?.previous) {
         queryClient.setQueryData(qk.taskTemplates(), ctx.previous);
         const original = ctx.previous.data.find((t) => t.id === template.id);
-        if (original) setItems(original.checklist_template_json);
+        if (original) setRows(checklistRows(original.checklist_template_json));
       }
     },
     onSettled: () => {
@@ -591,23 +596,28 @@ function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement | nul
     // signal that a *newer* burst was queued during the round-trip
     // and the rollback should be skipped.
     pendingRef.current = null;
-    reorderMu.mutate({
+    checklistPatch.mutate({
       next: queued,
       previous: snapshotRef.current ?? undefined,
     });
   }
 
-  function commitReorder(next: ChecklistTemplateItem[]): void {
-    // First move of a burst: snapshot the cache so we can roll back if
-    // the eventual PATCH fails. Subsequent moves in the same burst
-    // reuse that snapshot — the optimistic cache + local state are
+  function commitChecklist(
+    next: ChecklistTemplateItem[],
+    committedRowIds: readonly string[] = [],
+  ): void {
+    // First change of a burst: snapshot the cache so we can roll back if
+    // the eventual PATCH fails. Subsequent changes in the same burst
+    // reuse that snapshot; the optimistic cache + local state are
     // already mid-flight.
     if (snapshotRef.current === null) {
       snapshotRef.current =
         queryClient.getQueryData<ListEnvelope<TaskTemplate>>(qk.taskTemplates()) ??
         null;
     }
-    setItems(next);
+    setRows((current) =>
+      mergeChecklistRowsWithLocalDrafts(checklistRows(next), current, committedRowIds),
+    );
     writeOrderToCache(next);
     pendingRef.current = next;
     if (debounceRef.current !== null) clearTimeout(debounceRef.current);
@@ -620,101 +630,140 @@ function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement | nul
     flushRef.current = fireQueuedPatch;
   }
 
-  function move(from: number, to: number): void {
-    if (to < 0 || to >= items.length || from === to) return;
-    const moved = items[from];
-    const next = reorder(items, from, to);
-    commitReorder(next);
-    // Polite announcement so screen reader users (the explicit reason
-    // the move-up/down buttons exist) hear that their action took
-    // effect. The text-only label keeps the message short.
+  function updateRowDraft(rowId: string, patch: Partial<ChecklistTemplateItem>): void {
+    setRows((current) =>
+      current.map((row) =>
+        row.id === rowId
+          ? {
+            ...row,
+            committedDraft: row.committedDraft ?? row.draft,
+            draft: { ...row.draft, ...patch },
+            dirty: true,
+            validation: undefined,
+            error: undefined,
+          }
+          : row,
+      ),
+    );
+  }
+
+  function editRow(rowId: string): void {
+    setRows((current) =>
+      current.map((row) =>
+        row.id === rowId
+          ? { ...row, editing: true, committedDraft: row.committedDraft ?? row.draft }
+          : row,
+      ),
+    );
+  }
+
+  function cancelRow(rowId: string): void {
+    setRows((current) =>
+      current.map((row) =>
+        row.id === rowId
+          ? {
+            ...row,
+            draft: row.committedDraft ?? row.draft,
+            committedDraft: undefined,
+            editing: false,
+            dirty: false,
+            validation: undefined,
+            error: undefined,
+          }
+          : row,
+      ),
+    );
+  }
+
+  function saveRow(rowId: string): void {
+    const row = rows.find((candidate) => candidate.id === rowId);
+    if (!row) return;
+    const nextItem = normalizeChecklistItemDraft(row.draft);
+    if (!nextItem.text) {
+      setRows((current) =>
+        current.map((candidate) =>
+          candidate.id === rowId
+            ? { ...candidate, dirty: true, validation: "Item text is required." }
+            : candidate,
+        ),
+      );
+      return;
+    }
+    const next = rows.map((candidate) =>
+      candidate.id === rowId
+        ? nextItem
+        : committedChecklistItem(candidate),
+    );
+    commitChecklist(next, [rowId]);
+  }
+
+  function deleteRow(rowId: string): void {
+    const next = rows
+      .filter((row) => row.id !== rowId)
+      .map((row) => committedChecklistItem(row));
+    commitChecklist(next);
+  }
+
+  function createRow(draft: ChecklistTemplateItem): false | void {
+    const text = draft.text.trim();
+    if (!text) return false;
+    const nextItem = normalizeChecklistItemDraft({
+      ...draft,
+      key: uniqueChecklistKey(text, rows.map((row) => row.id)),
+    });
+    commitChecklist([...rows.map(committedChecklistItem), nextItem]);
+  }
+
+  function validateCreate(draft: ChecklistTemplateItem): string | null {
+    return draft.text.trim() ? null : "Item text is required.";
+  }
+
+  function handleReorder(reordered: InlineTableReorder<ChecklistTemplateItem>): void {
+    const moved = rows.find((row) => row.id === reordered.rowId)?.draft;
+    const next = reordered.orderedRows.map(committedChecklistItem);
+    commitChecklist(next);
     if (moved) {
       setAnnouncement(
-        `Moved “${renderChecklistLabel(moved)}” to position ${to + 1} of ${next.length}.`,
+        `Moved "${renderChecklistLabel(moved)}" to position ${reordered.toIndex + 1} of ${next.length}.`,
       );
     }
   }
 
-  function moveByKey(key: string, to: number): void {
-    const from = items.findIndex((item) => item.key === key);
-    if (from >= 0) move(from, to);
-  }
-
-  const reorderable = useReorderableList({
-    items,
-    getId: (item) => item.key,
-    onMove: moveByKey,
-  });
-  const listProps = reorderable.getListProps();
-
-  if (items.length === 0) return null;
+  const columns = useMemo<InlineTableColumn<ChecklistTemplateItem>[]>(
+    () => checklistColumns(),
+    [],
+  );
 
   return (
     <>
-      <ul
-        className="tpl-card__checklist tpl-card__checklist--editable"
-        onDragLeave={listProps.onDragLeave}
-        onDrop={listProps.onDrop}
-      >
-      {items.map((c, idx) => {
-        const itemProps = reorderable.getItemProps(idx);
-        const isDragging = reorderable.draggedId === c.key;
-        const dropPosition =
-          reorderable.dropTarget?.id === c.key ? reorderable.dropTarget.position : null;
-        const className = [
-          "tpl-card__step",
-          isDragging ? "tpl-card__step--dragging" : "",
-          dropPosition ? `tpl-card__step--drop-${dropPosition}` : "",
-        ]
-          .filter(Boolean)
-          .join(" ");
-        return (
-          <li
-            key={c.key}
-            className={className}
-            draggable={itemProps.draggable}
-            onDragStart={itemProps.onDragStart}
-            onDragOver={itemProps.onDragOver}
-            onDragLeave={itemProps.onDragLeave}
-            onDrop={itemProps.onDrop}
-            onDragEnd={itemProps.onDragEnd}
-          >
-            <span
-              className="tpl-card__step-handle"
-              aria-hidden="true"
-              title="Drag to reorder"
-            >
-              <GripVertical size={14} strokeWidth={1.75} />
-            </span>
-            <span className="checklist__box" aria-hidden="true" />
-            <span className="tpl-card__step-body">{renderChecklistLabel(c)}</span>
-            {c.required && <Chip tone="rust" size="sm">required</Chip>}
-            {c.guest_visible && <Chip tone="moss" size="sm">guest-visible</Chip>}
-            {c.rrule && <Chip tone="sand" size="sm">RRULE</Chip>}
-            <span className="tpl-card__step-actions">
-              <button
-                type="button"
-                className="tpl-card__step-btn"
-                aria-label={`Move "${renderChecklistLabel(c)}" up`}
-                disabled={idx === 0}
-                onClick={() => move(idx, idx - 1)}
-              >
-                <ArrowUp size={12} strokeWidth={1.75} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="tpl-card__step-btn"
-                aria-label={`Move "${renderChecklistLabel(c)}" down`}
-                disabled={idx === items.length - 1}
-                onClick={() => move(idx, idx + 1)}
-              >
-                <ArrowDown size={12} strokeWidth={1.75} aria-hidden="true" />
-              </button>
-            </span>
-          </li>
-        );
-      })}
-      </ul>
+      <InlineTableForm
+        compact
+        ariaLabel={`${template.name} checklist`}
+        className="tpl-card__checklist-editor"
+        columns={columns}
+        rows={rows}
+        saveMode="explicit"
+        onDraftChange={updateRowDraft}
+        onEdit={editRow}
+        onCancel={cancelRow}
+        onSave={saveRow}
+        onDelete={deleteRow}
+        onReorder={handleReorder}
+        createEmptyDraft={() => ({
+          key: "new_item",
+          text: "",
+          required: false,
+          guest_visible: false,
+          rrule: null,
+          dtstart_local: null,
+        })}
+        onCreate={createRow}
+        validateCreate={validateCreate}
+        createRowLabel="New checklist item"
+        getRowLabel={(row) => renderChecklistLabel(row.draft)}
+        deleteActionLabel="Delete"
+        emptyState="No checklist items yet."
+      />
       <span
         role="status"
         aria-live="polite"
@@ -725,6 +774,153 @@ function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement | nul
       </span>
     </>
   );
+}
+
+function checklistRows(items: readonly ChecklistTemplateItem[]): ChecklistEditorRow[] {
+  return items.map((item) => ({
+    id: item.key,
+    label: renderChecklistLabel(item),
+    draft: item,
+    committedDraft: item,
+  }));
+}
+
+function mergeChecklistRowsWithLocalDrafts(
+  rows: ChecklistEditorRow[],
+  localRows: readonly ChecklistEditorRow[],
+  committedRowIds: readonly string[] = [],
+): ChecklistEditorRow[] {
+  if (localRows.length === 0) return rows;
+  const committedIds = new Set(committedRowIds);
+  const localById = new Map(localRows.map((row) => [row.id, row]));
+  return rows.map((row) => {
+    const local = localById.get(row.id);
+    if (!local?.dirty || committedIds.has(row.id)) return row;
+    return {
+      ...row,
+      draft: local.draft,
+      committedDraft: row.draft,
+      editing: local.editing,
+      dirty: local.dirty,
+      validation: local.validation,
+      error: local.error,
+    };
+  });
+}
+
+function committedChecklistItem(row: ChecklistEditorRow): ChecklistTemplateItem {
+  return normalizeChecklistItemDraft(row.committedDraft ?? row.draft);
+}
+
+function checklistColumns(): InlineTableColumn<ChecklistTemplateItem>[] {
+  return [
+    {
+      key: "text",
+      header: "Item",
+      width: { flex: 1.8, min: 180 },
+      renderRead: ({ row }) => <ReadText value={renderChecklistLabel(row.draft)} fallback="Untitled item" />,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineTextField
+          value={row.draft.text}
+          disabled={disabled}
+          ariaLabel="Checklist item text"
+          placeholder="Checklist item"
+          onChange={(text) => update({ text })}
+        />
+      ),
+    },
+    {
+      key: "required",
+      header: "Required",
+      width: { px: 118 },
+      align: "center",
+      renderRead: ({ row }) => row.draft.required
+        ? <Chip tone="rust" size="sm">required</Chip>
+        : <ReadText value="" fallback="Optional" />,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineCheckboxField
+          checked={row.draft.required}
+          disabled={disabled}
+          label="Required"
+          onChange={(required) => update({ required })}
+        />
+      ),
+    },
+    {
+      key: "guest_visible",
+      header: "Guest",
+      width: { px: 128 },
+      align: "center",
+      renderRead: ({ row }) => row.draft.guest_visible
+        ? <Chip tone="moss" size="sm">guest-visible</Chip>
+        : <ReadText value="" fallback="Staff" />,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineCheckboxField
+          checked={Boolean(row.draft.guest_visible)}
+          disabled={disabled}
+          label="Guest-visible"
+          onChange={(guest_visible) => update({ guest_visible })}
+        />
+      ),
+    },
+    {
+      key: "rrule",
+      header: "Recurrence",
+      width: { flex: 1.1, min: 150 },
+      renderRead: ({ row }) => row.draft.rrule
+        ? <ReadText value={row.draft.rrule} />
+        : <ReadText value="" fallback="Every task" />,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineTextField
+          value={row.draft.rrule ?? ""}
+          disabled={disabled}
+          ariaLabel="Checklist item recurrence"
+          placeholder="FREQ=MONTHLY"
+          onChange={(rrule) => update({ rrule })}
+        />
+      ),
+    },
+  ];
+}
+
+function ReadText({ value, fallback }: { value: string; fallback?: string }) {
+  return (
+    <span className={value ? "inline-table-form__read" : "inline-table-form__read inline-table-form__read--muted"}>
+      {value || fallback || "None"}
+    </span>
+  );
+}
+
+function normalizeChecklistItemDraft(draft: ChecklistTemplateItem): ChecklistTemplateItem {
+  const rrule = draft.rrule?.trim() || null;
+  return {
+    ...draft,
+    text: draft.text.trim(),
+    required: Boolean(draft.required),
+    guest_visible: Boolean(draft.guest_visible),
+    rrule,
+  };
+}
+
+function uniqueChecklistKey(text: string, existingKeys: readonly string[]): string {
+  const base = slugChecklistKey(text) || "checklist_item";
+  const existing = new Set(existingKeys);
+  if (!existing.has(base)) return base;
+  for (let suffix = 2; ; suffix += 1) {
+    const suffixText = `_${suffix}`;
+    const candidateBase = base.slice(0, 64 - suffixText.length).replace(/_+$/g, "");
+    const candidate = `${candidateBase || "item"}${suffixText}`;
+    if (!existing.has(candidate)) return candidate;
+  }
+}
+
+function slugChecklistKey(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 64)
+    .replace(/_+$/g, "");
 }
 
 function renderChecklistLabel(item: ChecklistTemplateItem): string {

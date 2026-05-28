@@ -79,6 +79,7 @@ function installFetch(opts: {
 } = {}): FetchHarness {
   // code-health: ignore[nloc] Route fixtures stay local; shared fetch mechanics live in test/helpers.
   const initial = opts.initialTemplate ?? makeTemplate();
+  let current = initial;
   const listQueue: FakeResponse[] = [
     { body: { data: [initial], next_cursor: null, has_more: false } },
   ];
@@ -89,7 +90,7 @@ function installFetch(opts: {
       path: TASK_TEMPLATES_API_PATH,
       respond: () => {
         const next = listQueue.shift();
-        return next ?? { body: { data: [initial], next_cursor: null, has_more: false } };
+        return next ?? { body: { data: [current], next_cursor: null, has_more: false } };
       },
     },
     {
@@ -109,7 +110,9 @@ function installFetch(opts: {
       method: "PATCH",
       respond: (request) => {
         const next = patchQueue.shift();
-        return next ?? { body: { ...initial, ...(request.body as Record<string, unknown>) } };
+        if (next) return next;
+        current = { ...current, ...(request.body as Partial<TaskTemplate>) };
+        return { body: current };
       },
     },
   ]);
@@ -153,8 +156,31 @@ function patchedChecklistKeys(call: FetchCall): string[] {
   return body.checklist_template_json.map((c) => c.key);
 }
 
+function patchedChecklist(call: FetchCall): TaskTemplate["checklist_template_json"] {
+  const body = JSON.parse(String(call.init.body)) as {
+    checklist_template_json: TaskTemplate["checklist_template_json"];
+  };
+  return body.checklist_template_json;
+}
+
 function callPath(call: FetchCall): string {
   return new URL(call.url, "http://crewday.test").pathname;
+}
+
+function checklistRow(label: string): HTMLElement {
+  const row = screen.getByText(label).closest("[data-inline-table-row-group]");
+  if (!(row instanceof HTMLElement)) {
+    throw new Error(`Checklist row not found for ${label}`);
+  }
+  return row;
+}
+
+function createChecklistRow(): HTMLElement {
+  const row = document.querySelector("[data-inline-table-row-group^='inline-create']");
+  if (!(row instanceof HTMLElement)) {
+    throw new Error("Checklist create row not found");
+  }
+  return row;
 }
 
 function dataTransfer(): DataTransfer {
@@ -227,6 +253,7 @@ describe("<TemplatesPage> checklist reorder", () => {
       render(<Harness client={client} />);
       await screen.findByText("First step");
 
+      expect(screen.getByRole("table", { name: "Daily clean checklist" })).toBeInTheDocument();
       expect(harness.calls.some((c) => callPath(c) === TASK_TEMPLATES_API_PATH)).toBe(
         true,
       );
@@ -242,8 +269,7 @@ describe("<TemplatesPage> checklist reorder", () => {
       render(<Harness client={client} />);
       await screen.findByText("First step");
 
-      const items = screen.getAllByRole("listitem");
-      await fireDrop(items[0]!, items[2]!);
+      await fireDrop(checklistRow("First step"), checklistRow("Third step"));
 
       const cached = client.getQueryData<{ data: TaskTemplate[] }>(
         qk.taskTemplates(),
@@ -269,9 +295,10 @@ describe("<TemplatesPage> checklist reorder", () => {
       render(<Harness client={client} />);
       await screen.findByText("First step");
 
-      const items = screen.getAllByRole("listitem");
       const transfer = dataTransfer();
-      vi.spyOn(items[1]!, "getBoundingClientRect").mockReturnValue({
+      const first = checklistRow("First step");
+      const second = checklistRow("Second step");
+      vi.spyOn(second, "getBoundingClientRect").mockReturnValue({
         x: 0,
         y: 0,
         width: 240,
@@ -283,12 +310,12 @@ describe("<TemplatesPage> checklist reorder", () => {
         toJSON: () => ({}),
       });
 
-      fireEvent.dragStart(items[0]!, { dataTransfer: transfer });
-      fireEvent.dragOver(items[1]!, { dataTransfer: transfer, clientY: 130 });
-      expect(items[1]!).toHaveClass("tpl-card__step--drop-after");
+      fireEvent.dragStart(first, { dataTransfer: transfer });
+      fireEvent.dragOver(second, { dataTransfer: transfer, clientY: 130 });
+      expect(second).toHaveClass("inline-table-form__group--drop-after");
 
-      fireEvent.drop(items[1]!, { dataTransfer: transfer, clientY: 130 });
-      expect(items[1]!).not.toHaveClass("tpl-card__step--drop-after");
+      fireEvent.drop(second, { dataTransfer: transfer, clientY: 130 });
+      expect(second).not.toHaveClass("inline-table-form__group--drop-after");
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(500);
@@ -305,10 +332,8 @@ describe("<TemplatesPage> checklist reorder", () => {
       render(<Harness client={client} />);
       await screen.findByText("First step");
 
-      let items = screen.getAllByRole("listitem");
-      await fireDrop(items[0]!, items[2]!);
-      items = screen.getAllByRole("listitem");
-      await fireDrop(items[0]!, items[2]!);
+      await fireDrop(checklistRow("First step"), checklistRow("Third step"));
+      await fireDrop(checklistRow("Second step"), checklistRow("First step"));
 
       expect(patchCalls(harness.calls)).toHaveLength(0);
 
@@ -337,8 +362,7 @@ describe("<TemplatesPage> checklist reorder", () => {
       render(<Harness client={client} />);
       await screen.findByText("First step");
 
-      const items = screen.getAllByRole("listitem");
-      await fireDrop(items[0]!, items[2]!);
+      await fireDrop(checklistRow("First step"), checklistRow("Third step"));
 
       expect(
         client
@@ -373,7 +397,7 @@ describe("<TemplatesPage> checklist reorder", () => {
       await screen.findByText("First step");
 
       const moveDown = screen.getByRole("button", {
-        name: 'Move "First step" down',
+        name: "Move First step down",
       });
       fireEvent.click(moveDown);
 
@@ -394,6 +418,127 @@ describe("<TemplatesPage> checklist reorder", () => {
         "first",
         "third",
       ]);
+      expect(screen.getByRole("status")).toHaveTextContent(
+        'Moved "First step" to position 2 of 3.',
+      );
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("edits checklist item text, flags, and recurrence inline", async () => {
+    const harness = installFetch();
+    const client = makeClient();
+    try {
+      render(<Harness client={client} />);
+      await screen.findByText("First step");
+
+      const row = checklistRow("First step");
+      fireEvent.click(within(row).getByText("First step"));
+      const text = await within(row).findByLabelText("Checklist item text");
+      fireEvent.change(text, { target: { value: "Inspect kitchen" } });
+      fireEvent.click(within(row).getByRole("checkbox", { name: "Required" }));
+      fireEvent.click(within(row).getByRole("checkbox", { name: "Guest-visible" }));
+      fireEvent.change(within(row).getByLabelText("Checklist item recurrence"), {
+        target: { value: "FREQ=WEEKLY" },
+      });
+      fireEvent.keyDown(text, { key: "Enter" });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      await waitFor(() => {
+        expect(patchCalls(harness.calls)).toHaveLength(1);
+      });
+      const first = patchedChecklist(patchCalls(harness.calls)[0]!)[0]!;
+      expect(first).toMatchObject({
+        key: "first",
+        text: "Inspect kitchen",
+        required: true,
+        guest_visible: true,
+        rrule: "FREQ=WEEKLY",
+      });
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("creates and deletes checklist items through the replacement payload", async () => {
+    const harness = installFetch();
+    const client = makeClient();
+    try {
+      render(<Harness client={client} />);
+      await screen.findByText("First step");
+
+      const createRow = createChecklistRow();
+      const text = within(createRow).getByLabelText("Checklist item text");
+      fireEvent.change(text, { target: { value: "Restock coffee" } });
+      fireEvent.keyDown(text, { key: "Enter" });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      await waitFor(() => {
+        expect(patchCalls(harness.calls)).toHaveLength(1);
+      });
+      expect(patchedChecklist(patchCalls(harness.calls)[0]!).at(-1)).toMatchObject({
+        key: "restock_coffee",
+        text: "Restock coffee",
+        required: false,
+        guest_visible: false,
+      });
+
+      const createdRow = checklistRow("Restock coffee");
+      fireEvent.click(within(createdRow).getByRole("button", { name: "Delete" }));
+      const dialog = await screen.findByRole("alertdialog", { name: "Delete this row?" });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Delete row" }));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      await waitFor(() => {
+        expect(patchCalls(harness.calls)).toHaveLength(2);
+      });
+      expect(patchedChecklistKeys(patchCalls(harness.calls)[1]!)).toEqual([
+        "first",
+        "second",
+        "third",
+      ]);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("does not persist another row's unsaved draft in replacement payloads", async () => {
+    const harness = installFetch();
+    const client = makeClient();
+    try {
+      render(<Harness client={client} />);
+      await screen.findByText("First step");
+
+      const firstRow = checklistRow("First step");
+      fireEvent.click(within(firstRow).getByText("First step"));
+      const firstText = await within(firstRow).findByLabelText("Checklist item text");
+      fireEvent.change(firstText, { target: { value: "Draft first step" } });
+
+      const createRow = createChecklistRow();
+      const createText = within(createRow).getByLabelText("Checklist item text");
+      fireEvent.change(createText, { target: { value: "Restock coffee" } });
+      fireEvent.keyDown(createText, { key: "Enter" });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      await waitFor(() => {
+        expect(patchCalls(harness.calls)).toHaveLength(1);
+      });
+      const sent = patchedChecklist(patchCalls(harness.calls)[0]!);
+      expect(sent[0]).toMatchObject({ key: "first", text: "First step" });
+      expect(sent.at(-1)).toMatchObject({
+        key: "restock_coffee",
+        text: "Restock coffee",
+      });
+      expect(firstText).toHaveValue("Draft first step");
     } finally {
       harness.restore();
     }
