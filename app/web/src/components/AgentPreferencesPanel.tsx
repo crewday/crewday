@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import { estimateAgentPreferenceTokens } from "@/lib/agentPreferenceTokens";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import DateTime from "@/components/DateTime";
 import type {
@@ -9,33 +10,8 @@ import type {
   AgentPreferenceScope,
 } from "@/types/api";
 
-// gpt-tokenizer/model/gpt-4o — o200k_base BPE. Gemma uses a different
-// SentencePiece tokenizer, but on typical prose (mixed English + French)
-// the two agree to within a few percent. Good enough for a UI counter;
-// the server's count stays authoritative for hard-cap enforcement.
-// Lazy-loaded so the ~2 MB merge table stays out of the main bundle.
-let tokenizerLoad: Promise<(s: string) => number> | null = null;
-function loadTokenizer(): Promise<(s: string) => number> {
-  if (!tokenizerLoad) {
-    tokenizerLoad = import("gpt-tokenizer/model/gpt-4o").then(
-      (m) => (s: string) => m.encode(s).length,
-    );
-  }
-  return tokenizerLoad;
-}
-
-function useTokenCount(text: string): { count: number; ready: boolean } {
-  const [tok, setTok] = useState<((s: string) => number) | null>(null);
-  useEffect(() => {
-    let alive = true;
-    void loadTokenizer().then((fn) => { if (alive) setTok(() => fn); });
-    return () => { alive = false; };
-  }, []);
-  const count = useMemo(
-    () => (tok ? tok(text) : Math.ceil(text.length / 3.8)),
-    [tok, text],
-  );
-  return { count, ready: tok !== null };
+function useTokenCount(text: string): number {
+  return useMemo(() => estimateAgentPreferenceTokens(text), [text]);
 }
 
 // §11 — CLAUDE.md-style free-form guidance stacked into the LLM
@@ -120,7 +96,7 @@ export default function AgentPreferencesPanel({
   });
 
   const pref = q.data;
-  const { count: draftTokens, ready: tokReady } = useTokenCount(draft);
+  const draftTokens = useTokenCount(draft);
   const dirty = pref ? draft !== pref.body_md : false;
 
   const wrapperClass =
@@ -190,7 +166,7 @@ export default function AgentPreferencesPanel({
           <div className={`agent-prefs__meta agent-prefs__meta--${counterTone}`}>
             <span>
               {draftTokens} / {pref.soft_cap} tokens
-              {tokReady ? "" : " (estimate)"}
+              {" (estimate)"}
               {hardOver ? " — over hard cap" : softOver ? " — over soft cap" : ""}
             </span>
             <span className="muted">
