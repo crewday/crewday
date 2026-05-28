@@ -119,6 +119,28 @@ the bare host. React Router mounts the full tree below under
 `/w/:slug/*` so `useParams()` in `<Shell />` resolves the active
 workspace once and the rest of the tree is unaware of the prefix.
 
+Agent handoff links are generated from OpenAPI `x-agent-links` metadata
+(§11, §13) and resolve through stable frontend route names, not
+free-form `href` strings embedded in OpenAPI. The frontend route
+manifest is the only resolver allowed to turn `route` + `params` +
+`query` into a URL. Resolved links are GET-only same-origin relative
+navigations under the route prefixes in this contract; the renderer
+rejects external origins, custom schemes, protocol-relative URLs,
+`javascript:`, and unregistered route names.
+
+The route manifest records each agent-addressable destination as a
+stable name plus its URL template, route scope (`public`, `workspace`,
+or `admin`), required path parameters, and allowed query keys. OpenAPI
+`x-agent-links[*].route` values MUST match those names exactly; authors
+do not invent ad-hoc route strings in endpoint annotations.
+
+Following an agent handoff link is navigation only. It may open a detail
+page, filtered list, review page, or prefilled form, but it never submits
+a mutation. Chat surfaces render returned handoff links as user-selectable
+controls; an agent message or model tool result cannot cause navigation
+until the user explicitly chooses the link or otherwise expresses that
+intent.
+
 ### Public (bare host, no workspace prefix)
 
 ```

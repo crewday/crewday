@@ -185,6 +185,32 @@ gated. When a route carries `x-agent-confirm`, that card copy wins;
 otherwise the admin agent shows the generic mutation-confirmation
 card from §11 before replaying the HTTP call.
 
+### Agent handoff links (`x-agent-links`)
+
+Every operation in `_surface.json` and `_surface_admin.json` carries the
+OpenAPI `x-agent-links` extension from §11. There is no implicit
+default: each agent/CLI-visible operation declares either
+`policy: links` with at least one link entry or `policy: none` with a
+non-empty `reason`. The descriptor preserves `rel`, `label`, `route`,
+`params`, and `query` so CLI output and embedded agents can present the
+same affordances without maintaining a second route map.
+
+The CLI treats these entries as display metadata, not commands. A JSON
+result may include the resolved handoff links alongside the operation
+payload; human-readable output may print labeled "Open in web" style
+rows. Rendered links are GET-only same-origin navigations. The CLI MUST
+NOT convert a handoff link into a follow-up mutating request. If a
+mutating operation wants to suggest the next action, it links to a GET
+page such as a prefilled create form, never to the POST or PATCH
+endpoint itself.
+
+OpenAPI authors reference frontend destinations by stable route name,
+not by arbitrary `href`. Codegen resolves only named §14 routes with
+declared parameter and query bindings, producing same-origin relative
+paths under approved app prefixes. External origins, custom schemes,
+protocol-relative URLs, and `javascript:` are invalid before a descriptor
+is generated.
+
 ## Global flags
 
 | flag                | meaning                                            |

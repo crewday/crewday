@@ -32,6 +32,10 @@ holding a delegated token from the calling user. Concretely:
   OpenAPI extension that defines its CLI command, and a CI parity gate
   (§17) fails the build if any endpoint lacks a CLI mapping. See §13
   "CLI generation from OpenAPI" for the mechanism.
+- Every operation visible to the CLI or an embedded agent also declares
+  its post-result navigation affordances with `x-agent-links`
+  (§ "Agent handoff links annotation") or explicitly opts out with
+  `policy: none`; omissions fail the `openapi-agent-links` gate (§17).
 - Every action in §13 is reachable as a tool call from one of the
   two embedded chat agents described below, using a delegated token
   that inherits the calling user's full permissions (§03).
@@ -1910,6 +1914,82 @@ renders the same summary without a second copy of the strings.
 A CI lint (§17) flags any mutating route whose `x-agent-confirm`
 references a payload key that does not exist on the route's
 request model, so the cards never show blank values.
+
+### Agent handoff links annotation
+
+Tool results may include navigation affordances so a human can continue
+from an agent or CLI result in the web app without granting the agent a
+browser-click capability. The OpenAPI operation is the source of truth:
+every operation visible to the CLI or to an embedded agent MUST declare
+exactly one `x-agent-links` policy.
+
+```yaml
+# e.g. POST /api/v1/stays
+x-agent-links:
+  policy: links
+  links:
+    - rel: detail
+      label: "Open stay"
+      route: stay.detail
+      params:
+        stay_id: "$response.id"
+      query: {}
+    - rel: related.create
+      label: "Add task for this stay"
+      route: task.new
+      params: {}
+      query:
+        stay_id: "$response.id"
+```
+
+```yaml
+# e.g. POST /api/v1/auth/passkey/login/start
+x-agent-links:
+  policy: none
+  reason: "Browser-only passkey ceremony; no useful post-result web handoff."
+```
+
+- `policy` — required; exactly one of `links` or `none`.
+- `links` — required and non-empty when `policy: links`; forbidden
+  when `policy: none`. Each entry is a navigation affordance the server
+  or CLI may attach to a tool result.
+- `reason` — required and non-empty when `policy: none`; forbidden when
+  `policy: links` unless a future spec adds per-link suppression.
+- Each link entry MUST contain exactly the `rel`, `label`, `route`,
+  `params`, and `query` fields below. It MUST NOT contain `href`,
+  `url`, `method`, `body`, or any other field that could bypass the
+  named-route resolver or imply a mutating request.
+- `rel` — stable machine-readable relationship such as `detail`,
+  `list`, `edit`, `related.create`, or `approval.review`.
+- `label` — short human label rendered in chat and CLI output. It is
+  author-maintained OpenAPI metadata, not model-authored copy.
+- `route` — stable frontend route name from §14's route manifest, never
+  a free-form `href` string.
+- `params` — object binding route parameters to request, path, query,
+  response, or server-resolved values. Bindings are data references such
+  as `$path.id`, `$request.property_id`, `$response.id`, or
+  `$resolved.workspace_slug`; they are not URL fragments.
+- `query` — object binding optional query-string keys the same way as
+  `params`. Empty `{}` is allowed when no query is needed.
+
+Rendered handoff links are **GET-only** same-origin navigations. The
+renderer resolves `route` + `params` + `query` through the approved
+frontend route manifest and may only emit relative paths under the app's
+approved prefixes (`/w/<slug>/...`, `/admin/...`, or the named public
+auth routes in §14). It MUST reject external origins, custom schemes,
+absolute URLs, protocol-relative URLs, `javascript:`, and any path that
+does not resolve through a named route.
+
+Following an agent handoff link never performs a mutation. Mutating
+operations may return links, but those links open a GET page where the
+human can inspect the result or intentionally start the next action. For
+example, after creating a property or stay, the operation may return an
+`Add stay` or `Add task` link to a prefilled form route; it MUST NOT
+return a POST URL or any shortcut that submits the create action.
+
+The model may mention or propose links that a tool result returned, but
+the frontend navigates only after explicit user selection or equivalent
+user intent. Agents cannot auto-follow their own handoff links.
 
 A small starter list of routes that carry
 `x-agent-confirm` in v1:

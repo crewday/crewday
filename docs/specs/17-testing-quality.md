@@ -291,6 +291,18 @@ comment).
   carrying zero, or two or more, fails the gate. The check runs
   against the committed `docs/api/openapi.json` so reviewers see
   the annotation in the PR diff.
+- `openapi-agent-links` — every operation exposed through
+  `_surface.json` or `_surface_admin.json` MUST carry exactly one
+  `x-agent-links` policy (§11 "Agent handoff links annotation").
+  `policy: links` requires at least one link with `rel`, `label`,
+  `route`, `params`, and `query`; `policy: none` requires a non-empty
+  `reason`. The gate rejects free-form `href` values, unregistered
+  frontend route names, external/custom-scheme URLs, and any generated
+  path outside the approved same-origin GET route prefixes in §14. The
+  gate name is `openapi-agent-links`: locally it is exposed as
+  `make openapi-agent-links`, and CI runs the same target in an
+  `openapi-agent-links` job alongside `cli-parity` so missing or unsafe
+  agent handoff links fail before merge.
 - Coverage threshold: 85% domain, 70% overall; tracked via codecov.
 
 ## Release gates
