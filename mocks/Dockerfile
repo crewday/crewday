@@ -5,7 +5,7 @@
 # Node is *not* present at runtime; the runtime image stays slim.
 
 # ── Stage 1: build the SPA ────────────────────────────────────────────
-FROM node:24-alpine AS web-build
+FROM node:26-alpine AS web-build
 
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
@@ -19,7 +19,7 @@ COPY web/ ./
 RUN npm run build
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────
-FROM python:3.14-slim
+FROM python:3.14.5-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 
