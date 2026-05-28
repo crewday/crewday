@@ -190,6 +190,37 @@ function renderInlineTable({
   return { onSave, onCancel, onDraftChange };
 }
 
+function SearchableInlineTable() {
+  const allRows = [
+    rowWithTitle("r-1", "Confirm linen"),
+    rowWithTitle("r-2", "Restock coffee"),
+  ];
+  const [query, setQuery] = useState("linen");
+  const visibleRows = allRows.filter((row) => (
+    row.draft.title.toLowerCase().includes(query.trim().toLowerCase())
+  ));
+
+  return (
+    <InlineTableForm
+      ariaLabel="Searchable rows"
+      columns={columns}
+      rows={visibleRows}
+      search={{
+        value: query,
+        onChange: setQuery,
+        label: "Search rows",
+        placeholder: "Search titles",
+        clearLabel: "Clear row search",
+        resultSummary: `${visibleRows.length} of ${allRows.length} rows`,
+        filters: <button type="button">Open only</button>,
+      }}
+      onDraftChange={vi.fn()}
+      onSave={vi.fn()}
+      onCancel={vi.fn()}
+    />
+  );
+}
+
 describe("InlineTableForm", () => {
   it("renders number fields with numeric attributes and disabled state", () => {
     render(
@@ -1340,6 +1371,89 @@ describe("InlineTableForm", () => {
 
     expect(screen.queryByRole("heading", { name: "No rows yet" })).toBeNull();
     expect(screen.getByLabelText("New row")).toBeInTheDocument();
+  });
+
+  it("does not render search chrome unless search props are provided", () => {
+    renderInlineTable();
+
+    expect(screen.queryByRole("search")).toBeNull();
+    expect(screen.queryByLabelText("Search rows")).toBeNull();
+  });
+
+  it("supports controlled search changes, clear, summaries, and filter actions", () => {
+    render(<SearchableInlineTable />);
+
+    const toolbar = screen.getByRole("search", { name: "Searchable rows search and filters" });
+    const input = within(toolbar).getByLabelText("Search rows");
+    expect(input).toHaveAttribute("placeholder", "Search titles");
+    expect((input as HTMLInputElement).value).toBe("linen");
+    expect(within(toolbar).getByText("1 of 2 rows")).toBeInTheDocument();
+    expect(screen.getByText("Confirm linen")).toBeInTheDocument();
+    expect(screen.queryByText("Restock coffee")).toBeNull();
+    expect(within(toolbar).getByRole("button", { name: "Open only" })).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "coffee" } });
+    expect((input as HTMLInputElement).value).toBe("coffee");
+    expect(within(toolbar).getByText("1 of 2 rows")).toBeInTheDocument();
+    expect(screen.getByText("Restock coffee")).toBeInTheDocument();
+    expect(screen.queryByText("Confirm linen")).toBeNull();
+
+    const clearButton = within(toolbar).getByRole("button", { name: "Clear row search" });
+    clearButton.focus();
+    fireEvent.click(clearButton);
+    expect((input as HTMLInputElement).value).toBe("");
+    expect(input).toHaveFocus();
+    expect(within(toolbar).getByText("2 of 2 rows")).toBeInTheDocument();
+    expect(screen.getByText("Confirm linen")).toBeInTheDocument();
+    expect(screen.getByText("Restock coffee")).toBeInTheDocument();
+  });
+
+  it("renders a search-specific no-results state", () => {
+    render(
+      <InlineTableForm
+        ariaLabel="Filtered empty rows"
+        columns={columns}
+        rows={[]}
+        search={{
+          value: "missing",
+          onChange: vi.fn(),
+          label: "Search rows",
+          resultSummary: 0,
+        }}
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "No matching rows" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("0");
+    expect(screen.queryByRole("heading", { name: "No rows yet" })).toBeNull();
+  });
+
+  it("uses caller-owned filtered empty states and custom summaries", () => {
+    render(
+      <InlineTableForm
+        ariaLabel="Filtered action rows"
+        columns={columns}
+        rows={[]}
+        search={{
+          value: "",
+          onChange: vi.fn(),
+          label: "Search rows",
+          resultSummary: <strong>0 matching open rows</strong>,
+          isFiltered: true,
+          noResultsState: <p>No open rows match filters.</p>,
+        }}
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("0 matching open rows");
+    expect(screen.getByText("No open rows match filters.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "No rows yet" })).toBeNull();
   });
 
   it("uses structured column widths with flex defaults and fixed pixel columns", () => {

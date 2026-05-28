@@ -90,6 +90,8 @@ export default function InlineTableFormsDemoPage() {
   const [checklist, setChecklist] = useState<InlineTableRow<ChecklistDraft>[]>(initialChecklist);
   const [assignments, setAssignments] = useState<InlineTableRow<AssignmentDraft>[]>(initialAssignments);
   const [defaultRows, setDefaultRows] = useState<InlineTableRow<DefaultDraft>[]>(initialDefaultRows);
+  const [taskSearch, setTaskSearch] = useState("linen");
+  const [emptySearch, setEmptySearch] = useState("no match");
   const assignmentSaveTimers = useRef<number[]>([]);
 
   useEffect(() => () => {
@@ -376,6 +378,8 @@ export default function InlineTableFormsDemoPage() {
       ),
     },
   ], []);
+  const searchedTasks = useMemo(() => filterTaskRows(tasks, taskSearch), [tasks, taskSearch]);
+  const emptySearchRows = useMemo(() => filterDefaultRows(defaultRows, emptySearch), [defaultRows, emptySearch]);
 
   return (
     <main className="inline-table-demo">
@@ -393,8 +397,21 @@ export default function InlineTableFormsDemoPage() {
           <InlineTableForm
             ariaLabel="Task quick-entry inline table"
             columns={taskColumns}
-            rows={tasks}
+            rows={searchedTasks}
             saveMode="explicit"
+            search={{
+              value: taskSearch,
+              onChange: setTaskSearch,
+              label: "Search task rows",
+              placeholder: "Search tasks, assignees, properties",
+              resultSummary: `${searchedTasks.length} of ${tasks.length} tasks`,
+              filters: (
+                <>
+                  <span className="chip chip--rust chip--sm">High priority</span>
+                  <span className="chip chip--ghost chip--sm">Open rows</span>
+                </>
+              ),
+            }}
             createEmptyDraft={blankTaskDraft}
             createRowLabel="New task"
             validateCreate={(draft) => draft.title.trim() ? null : "Title is required before the row can be saved."}
@@ -472,6 +489,27 @@ export default function InlineTableFormsDemoPage() {
             onSave={(id) => saveSimple(setDefaultRows, id)}
           />
         </DemoPanel>
+
+        <DemoPanel title="No-results search" copy="Filtered rows keep the same table frame and show a search-specific empty state." tag="search">
+          <InlineTableForm
+            ariaLabel="No-results inline table"
+            columns={defaultColumns}
+            rows={emptySearchRows}
+            search={{
+              value: emptySearch,
+              onChange: setEmptySearch,
+              label: "Search default rows",
+              placeholder: "Search default rows",
+              resultSummary: `${emptySearchRows.length} of ${defaultRows.length} rows`,
+              filters: <span className="chip chip--ghost chip--sm">Client-side filter</span>,
+            }}
+            onDraftChange={(id, patch) => patchRows(setDefaultRows, id, patch)}
+            onEdit={(id) => setRowsEditing(setDefaultRows, id, true)}
+            onDelete={(id) => deleteRow(setDefaultRows, id)}
+            onCancel={(id) => cancelSimple(setDefaultRows, id)}
+            onSave={(id) => saveSimple(setDefaultRows, id)}
+          />
+        </DemoPanel>
       </div>
     </main>
   );
@@ -517,6 +555,31 @@ function PriorityChip({ priority }: { priority: Priority }) {
 
 function labelFor(options: readonly { value: string; label: string }[], value: string) {
   return options.find((option) => option.value === value)?.label ?? value;
+}
+
+function filterTaskRows(rows: readonly InlineTableRow<TaskDraft>[], query: string) {
+  return rows.filter((row) => matchesQuery([
+    row.draft.title,
+    labelFor(assignees, row.draft.assignee),
+    labelFor(properties, row.draft.property),
+    labelFor(priorities, row.draft.priority),
+    row.draft.note,
+  ], query));
+}
+
+function filterDefaultRows(rows: readonly InlineTableRow<DefaultDraft>[], query: string) {
+  return rows.filter((row) => matchesQuery([
+    row.draft.item,
+    labelFor(assignees, row.draft.owner),
+    row.draft.due,
+    labelFor(defaultStates, row.draft.state),
+  ], query));
+}
+
+function matchesQuery(values: readonly string[], query: string) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return values.some((value) => value.toLowerCase().includes(needle));
 }
 
 function patchRows<TDraft>(

@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ArrowDown, ArrowUp, Check, GripVertical, Pencil, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, GripVertical, Pencil, Search, Trash2, X } from "lucide-react";
 import ConfirmationModal from "@/components/ConfirmationModal";
 import IconSelector from "@/components/IconSelector";
 import { EmptyState } from "@/components/common";
@@ -90,6 +90,19 @@ export interface InlineTableBatchContext<TDraft> {
   discard: () => void;
 }
 
+export interface InlineTableSearchProps {
+  value: string;
+  onChange: (value: string) => void;
+  label: string;
+  placeholder?: string;
+  clearLabel?: string;
+  resultSummary?: ReactNode;
+  filters?: ReactNode;
+  /** Set when non-search filters are active so empty rows read as filtered results, not missing data. */
+  isFiltered?: boolean;
+  noResultsState?: ReactNode;
+}
+
 /**
  * Reusable inline table editor for dense operational forms.
  *
@@ -125,6 +138,8 @@ interface InlineTableFormBaseProps<TDraft> {
   trailingCreateRow?: InlineTableRow<TDraft>;
   /** Shown only when there are no rows and no trailing create row. */
   emptyState?: ReactNode;
+  /** Optional caller-controlled search/filter chrome. Filtering remains caller-owned. */
+  search?: InlineTableSearchProps;
   /** Optional full-width detail line for notes, validation help, subtasks, or row metadata. */
   renderDetail?: (context: InlineTableCellContext<TDraft>) => ReactNode;
   /** Improves accessible labels and delete confirmation copy when row content has a stable name. */
@@ -180,6 +195,7 @@ export function InlineTableForm<TDraft>({
   createRowLabel = "New row",
   trailingCreateRow,
   emptyState,
+  search,
   renderDetail,
   renderBatchActions,
   onBatchCancel,
@@ -214,6 +230,7 @@ export function InlineTableForm<TDraft>({
   ].filter(Boolean).join(" ");
   const activeTrailingCreateRow = trailingCreateRow ?? factoryCreateRow ?? undefined;
   const renderedRows = activeTrailingCreateRow ? [...rows, activeTrailingCreateRow] : rows;
+  const hasActiveSearch = search ? search.value.trim().length > 0 || Boolean(search.isFiltered) : false;
   const batchActions = saveMode === "batch" && renderBatchActions
     ? renderBatchActions(makeBatchContext(rows, onBatchCancel))
     : null;
@@ -459,6 +476,12 @@ export function InlineTableForm<TDraft>({
       style={{ "--inline-table-columns": templateColumns } as CSSProperties}
       aria-label={ariaLabel}
     >
+      {search ? (
+        <InlineTableSearchToolbar
+          tableLabel={ariaLabel}
+          search={search}
+        />
+      ) : null}
       <div className="inline-table-form__table" role="table" aria-label={ariaLabel}>
         <div className="inline-table-form__head" role="rowgroup">
           <div className="inline-table-form__row inline-table-form__row--head" role="row">
@@ -485,7 +508,13 @@ export function InlineTableForm<TDraft>({
         >
           {renderedRows.length === 0 ? (
             <div className="inline-table-form__empty">
-              {emptyState ?? (
+              {hasActiveSearch ? search?.noResultsState ?? (
+                <EmptyState
+                  variant="compact"
+                  title="No matching rows"
+                  copy="Clear search or adjust filters to see rows."
+                />
+              ) : emptyState ?? (
                 <EmptyState
                   variant="compact"
                   title="No rows yet"
@@ -814,6 +843,63 @@ function InlineTableActions({
           onClick={onSave}
           onPointerDown={onActionPointerDown}
         />
+      ) : null}
+    </div>
+  );
+}
+
+function InlineTableSearchToolbar({
+  tableLabel,
+  search,
+}: {
+  tableLabel: string;
+  search: InlineTableSearchProps;
+}) {
+  const inputId = useId();
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const clearLabel = search.clearLabel ?? "Clear search";
+  const clearSearch = () => {
+    search.onChange("");
+    inputRef.current?.focus();
+  };
+
+  return (
+    <div className="inline-table-form__toolbar" role="search" aria-label={`${tableLabel} search and filters`}>
+      <div className="inline-table-form__search-field">
+        <label className="inline-table-form__search-label" htmlFor={inputId}>
+          {search.label}
+        </label>
+        <Search className="inline-table-form__search-icon" size={15} aria-hidden="true" />
+        <input
+          id={inputId}
+          ref={inputRef}
+          className="inline-table-form__search-input"
+          type="search"
+          value={search.value}
+          placeholder={search.placeholder}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => search.onChange(event.target.value)}
+        />
+        {search.value ? (
+          <button
+            type="button"
+            className="inline-table-form__search-clear"
+            aria-label={clearLabel}
+            title={clearLabel}
+            onClick={clearSearch}
+          >
+            <X size={14} aria-hidden="true" />
+          </button>
+        ) : null}
+      </div>
+      {search.resultSummary !== undefined && search.resultSummary !== null ? (
+        <span className="inline-table-form__search-summary" role="status" aria-live="polite">
+          {search.resultSummary}
+        </span>
+      ) : null}
+      {search.filters ? (
+        <div className="inline-table-form__toolbar-filters">
+          {search.filters}
+        </div>
       ) : null}
     </div>
   );
