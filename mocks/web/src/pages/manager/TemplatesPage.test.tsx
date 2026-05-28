@@ -146,21 +146,85 @@ function patchedChecklistKeys(call: FetchCall): string[] {
   return body.checklist_template_json.map((c) => c.key);
 }
 
-function dataTransfer(): DataTransfer {
-  return {
-    data: {} as Record<string, string>,
-    effectAllowed: "move",
-    dropEffect: "move",
-    setData(format: string, value: string) {
-      this.data[format] = value;
-    },
-    getData(format: string) {
-      return this.data[format] ?? "";
-    },
-  } as DataTransfer;
+class EmptyFileList implements FileList {
+  readonly length = 0;
+
+  [index: number]: File;
+
+  item(_index: number): File | null {
+    return null;
+  }
+
+  [Symbol.iterator](): ArrayIterator<File> {
+    const files: File[] = [];
+    return files[Symbol.iterator]();
+  }
 }
 
-async function fireDrop(from: HTMLElement, to: HTMLElement): Promise<void> {
+class EmptyDataTransferItemList implements DataTransferItemList {
+  readonly length = 0;
+
+  [index: number]: DataTransferItem;
+
+  add(_data: string, _type: string): DataTransferItem | null;
+  add(_data: File): DataTransferItem | null;
+  add(_data: string | File, _type?: string): DataTransferItem | null {
+    return null;
+  }
+
+  clear(): void {}
+
+  remove(_index: number): void {}
+
+  [Symbol.iterator](): ArrayIterator<DataTransferItem> {
+    const items: DataTransferItem[] = [];
+    return items[Symbol.iterator]();
+  }
+}
+
+class TestDataTransfer implements DataTransfer {
+  dropEffect: DataTransfer["dropEffect"] = "move";
+  effectAllowed: DataTransfer["effectAllowed"] = "move";
+  readonly files: FileList = new EmptyFileList();
+  readonly items: DataTransferItemList = new EmptyDataTransferItemList();
+  private readonly payload = new Map<string, string>();
+
+  get types(): readonly string[] {
+    return Array.from(this.payload.keys());
+  }
+
+  clearData(format?: string): void {
+    if (format === undefined) {
+      this.payload.clear();
+      return;
+    }
+    this.payload.delete(format);
+  }
+
+  getData(format: string): string {
+    return this.payload.get(format) ?? "";
+  }
+
+  recordedData(format: string): string | undefined {
+    return this.payload.get(format);
+  }
+
+  setData(format: string, data: string): void {
+    this.payload.set(format, data);
+  }
+
+  setDragImage(_image: Element, _x: number, _y: number): void {}
+}
+
+function dataTransfer(): TestDataTransfer {
+  return new TestDataTransfer();
+}
+
+async function fireDrop(
+  from: HTMLElement,
+  to: HTMLElement,
+  expectedPayload: string,
+): Promise<void> {
   // Native HTML5 drag-and-drop is six events: dragstart on source,
   // dragover + drop on the target, dragend on the source. We fire the
   // minimal sequence the implementation actually listens for.
@@ -168,6 +232,7 @@ async function fireDrop(from: HTMLElement, to: HTMLElement): Promise<void> {
   await act(async () => {
     fireEvent.dragStart(from, { dataTransfer: transfer });
   });
+  expect(transfer.recordedData("text/plain")).toBe(expectedPayload);
   await act(async () => {
     fireEvent.dragOver(to, { dataTransfer: transfer });
   });
@@ -200,7 +265,7 @@ describe("TemplatesPage checklist reorder", () => {
       const items = screen.getAllByRole("listitem");
       // Drop "First step" onto "Third step" — expected order is now
       // [Second, Third, First].
-      await fireDrop(items[0]!, items[2]!);
+      await fireDrop(items[0]!, items[2]!, "first");
 
       const cached = client.getQueryData<{ data: TaskTemplate[] }>(
         qk.taskTemplates(),
@@ -242,6 +307,7 @@ describe("TemplatesPage checklist reorder", () => {
       });
 
       fireEvent.dragStart(items[0]!, { dataTransfer: transfer });
+      expect(transfer.recordedData("text/plain")).toBe("first");
       fireEvent.dragOver(items[1]!, { dataTransfer: transfer, clientY: 130 });
       expect(items[1]!).toHaveClass("tpl-card__step--drop-after");
 
@@ -264,11 +330,11 @@ describe("TemplatesPage checklist reorder", () => {
       await screen.findByText("First step");
 
       let items = screen.getAllByRole("listitem");
-      await fireDrop(items[0]!, items[2]!);
+      await fireDrop(items[0]!, items[2]!, "first");
       // Re-resolve after the optimistic re-render so the second drop
       // operates on the new order.
       items = screen.getAllByRole("listitem");
-      await fireDrop(items[0]!, items[2]!);
+      await fireDrop(items[0]!, items[2]!, "second");
 
       expect(patchCalls(harness.calls)).toHaveLength(0);
 
@@ -299,7 +365,7 @@ describe("TemplatesPage checklist reorder", () => {
       await screen.findByText("First step");
 
       const items = screen.getAllByRole("listitem");
-      await fireDrop(items[0]!, items[2]!);
+      await fireDrop(items[0]!, items[2]!, "first");
 
       // Optimistic order is the new one before the PATCH lands.
       expect(
