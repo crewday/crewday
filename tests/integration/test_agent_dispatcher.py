@@ -483,6 +483,32 @@ def _test_settings(database_url: str) -> Settings:
     )
 
 
+def _catalog_app_settings() -> Settings:
+    return Settings.model_construct(
+        database_url="sqlite:///:memory:",
+        root_key=SecretStr("agent-dispatcher-root-key"),
+        bind_host="127.0.0.1",
+        bind_port=8000,
+        allow_public_bind=False,
+        worker="internal",
+        smtp_host=None,
+        smtp_port=587,
+        smtp_from=None,
+        smtp_use_tls=True,
+        log_level="INFO",
+        cors_allow_origins=[],
+        profile="prod",
+        vite_dev_url="http://127.0.0.1:5173",
+        demo_mode=False,
+        public_url=None,
+        demo_db_denylist=[],
+    )
+
+
+def _build_catalog_app() -> FastAPI:
+    return create_app(settings=_catalog_app_settings())
+
+
 def _new_delegated_tokens(
     token_rows: list[ApiToken],
     *,
@@ -799,27 +825,11 @@ def test_manager_catalog_includes_representative_ordinary_workspace_tools(
         audit_correlation_id=new_ulid(),
     )
     set_current(ctx)
-    app = create_app(
-        settings=Settings.model_construct(
-            database_url="sqlite:///:memory:",
-            root_key=SecretStr("agent-dispatcher-root-key"),
-            bind_host="127.0.0.1",
-            bind_port=8000,
-            allow_public_bind=False,
-            worker="internal",
-            smtp_host=None,
-            smtp_port=587,
-            smtp_from=None,
-            smtp_use_tls=True,
-            log_level="INFO",
-            cors_allow_origins=[],
-            profile="prod",
-            vite_dev_url="http://127.0.0.1:5173",
-            demo_mode=False,
-            public_url=None,
-            demo_db_denylist=[],
-        )
-    )
+    app = _build_catalog_app()
+    classified_tool_names = make_default_dispatcher(
+        app,
+        workspace_slug=workspace.slug,
+    ).operation_ids
     dispatcher = make_default_dispatcher(
         app,
         workspace_slug=workspace.slug,
@@ -832,6 +842,13 @@ def test_manager_catalog_includes_representative_ordinary_workspace_tools(
         "areas.create",
         "assets.create",
         "billing.organizations.create",
+        "billing.quotes.create",
+        "billing.quotes.list",
+        "billing.rate_cards.list",
+        "billing.vendor_invoices.create",
+        "billing.vendor_invoices.list",
+        "billing.work_orders.create",
+        "billing.work_orders.list",
         "create_expense_claim",
         "create_schedule",
         "create_task",
@@ -848,6 +865,7 @@ def test_manager_catalog_includes_representative_ordinary_workspace_tools(
         "work_engagements.list",
         "work_roles.create",
     }
+    assert expected <= classified_tool_names
     assert expected <= tool_names
     assert {
         "auth.passkey.register_start",
@@ -856,34 +874,102 @@ def test_manager_catalog_includes_representative_ordinary_workspace_tools(
         "users.reset_passkey",
         "webhooks.create",
         "workspace_admin.workspace.delete",
-    }.isdisjoint(tool_names)
+    }.isdisjoint(classified_tool_names)
 
 
-def test_security_sensitive_workspace_routes_have_agent_classifications(
+def test_worker_catalog_uses_real_grants_and_filters_manager_only_tools(
     db_session: Session,
 ) -> None:
-    workspace, _manager = _seed_workspace_and_user(db_session)
-    app = create_app(
-        settings=Settings.model_construct(
-            database_url="sqlite:///:memory:",
-            root_key=SecretStr("agent-dispatcher-root-key"),
-            bind_host="127.0.0.1",
-            bind_port=8000,
-            allow_public_bind=False,
-            worker="internal",
-            smtp_host=None,
-            smtp_port=587,
-            smtp_from=None,
-            smtp_use_tls=True,
-            log_level="INFO",
-            cors_allow_origins=[],
-            profile="prod",
-            vite_dev_url="http://127.0.0.1:5173",
-            demo_mode=False,
-            public_url=None,
-            demo_db_denylist=[],
-        )
+    workspace, worker = _seed_workspace_and_user_with_role(
+        db_session,
+        grant_role="worker",
     )
+    _seed_property(db_session, workspace_id=workspace.id)
+    ctx = WorkspaceContext(
+        workspace_id=workspace.id,
+        workspace_slug=workspace.slug,
+        actor_id=worker.id,
+        actor_kind="user",
+        actor_grant_role="worker",
+        actor_was_owner_member=False,
+        audit_correlation_id=new_ulid(),
+    )
+    set_current(ctx)
+    app = _build_catalog_app()
+
+    @app.get(
+        "/w/{slug}/api/v1/worker-catalog-probe",
+        operation_id="worker_catalog_probe.list",
+        openapi_extra={
+            "x-cli": {
+                "group": "worker-catalog-probe",
+                "verb": "list",
+                "summary": "List worker catalog probe rows",
+                "mutates": False,
+            }
+        },
+        dependencies=[Depends(Permission("scope.view", scope_kind="workspace"))],
+    )
+    def worker_catalog_probe() -> dict[str, bool]:
+        return {"ok": True}
+
+    classified_tool_names = make_default_dispatcher(
+        app,
+        workspace_slug=workspace.slug,
+    ).operation_ids
+    dispatcher = make_default_dispatcher(
+        app,
+        workspace_slug=workspace.slug,
+        session=db_session,
+        ctx=ctx,
+    )
+
+    tool_names = dispatcher.operation_ids
+    worker_expected = {
+        "assets.actions.list",
+        "assets.actions.record",
+        "create_expense_claim",
+        "create_task",
+        "list_expense_claims",
+        "list_tasks",
+        "messaging.chat_messages.send",
+        "properties.list",
+        "time.close_shift",
+        "time.create_my_leave",
+        "time.list_my_leaves",
+        "time.open_shift",
+        "worker_catalog_probe.list",
+        "work_engagements.list",
+    }
+    manager_only = {
+        "areas.create",
+        "assets.create",
+        "billing.organizations.create",
+        "permissions.resolved",
+        "settings.workspace.patch",
+        "user_work_roles.create",
+        "users.list",
+        "work_roles.create",
+    }
+    excluded_by_agent_boundary = {
+        "agent.message.create",
+        "auth.passkey.register_start",
+        "auth.passkey.register_finish",
+        "payroll.payslips.payout_manifest",
+        "users.reset_passkey",
+        "webhooks.create",
+        "workspace_admin.workspace.delete",
+    }
+
+    assert worker_expected <= classified_tool_names
+    assert worker_expected <= tool_names
+    assert manager_only <= classified_tool_names
+    assert manager_only.isdisjoint(tool_names), manager_only & tool_names
+    assert excluded_by_agent_boundary.isdisjoint(classified_tool_names)
+
+
+def test_security_sensitive_workspace_routes_have_agent_classifications() -> None:
+    app = _build_catalog_app()
     paths = app.openapi()["paths"]
 
     def op(operation_id: str) -> dict[str, Any]:
@@ -940,35 +1026,11 @@ def test_security_sensitive_workspace_routes_have_agent_classifications(
         "webhooks.secret.rotate",
     ):
         assert op(operation_id)["x-agent-forbidden"] is True
-    assert workspace.slug
 
 
-def test_dispatcher_rejects_classified_security_routes_deterministically(
-    db_session: Session,
-) -> None:
-    workspace, _manager = _seed_workspace_and_user(db_session)
-    app = create_app(
-        settings=Settings.model_construct(
-            database_url="sqlite:///:memory:",
-            root_key=SecretStr("agent-dispatcher-root-key"),
-            bind_host="127.0.0.1",
-            bind_port=8000,
-            allow_public_bind=False,
-            worker="internal",
-            smtp_host=None,
-            smtp_port=587,
-            smtp_from=None,
-            smtp_use_tls=True,
-            log_level="INFO",
-            cors_allow_origins=[],
-            profile="prod",
-            vite_dev_url="http://127.0.0.1:5173",
-            demo_mode=False,
-            public_url=None,
-            demo_db_denylist=[],
-        )
-    )
-    dispatcher = make_default_dispatcher(app, workspace_slug=workspace.slug)
+def test_dispatcher_rejects_classified_security_routes_deterministically() -> None:
+    app = _build_catalog_app()
+    dispatcher = make_default_dispatcher(app, workspace_slug="dispatcher-review")
 
     interactive = dispatcher.dispatch(
         ToolCall(
