@@ -153,6 +153,8 @@ def _entry(
     body_schema_ref: str | None = None,
     response_schema_ref: str | None = None,
     x_cli: dict[str, Any] | None = None,
+    x_agent_links: dict[str, Any] | None = None,
+    agent_link_routes: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one synthetic surface entry — exactly the codegen shape."""
     return {
@@ -168,6 +170,8 @@ def _entry(
         "response_schema_ref": response_schema_ref,
         "x_cli": x_cli,
         "x_agent_confirm": None,
+        "x_agent_links": x_agent_links,
+        "agent_link_routes": agent_link_routes or {},
     }
 
 
@@ -926,6 +930,70 @@ def test_no_all_flag_returns_single_page(tmp_path: pathlib.Path) -> None:
     assert payload["data"] == [{"id": 1}, {"id": 2}]
     assert payload["next_cursor"] == "p2"
     assert payload["has_more"] is True
+
+
+def test_json_output_includes_resolved_agent_links(tmp_path: pathlib.Path) -> None:
+    workspace_path, admin_path = _write_surface(
+        tmp_path,
+        workspace=[
+            _entry(
+                name="list",
+                group="properties",
+                path="/w/{slug}/api/v1/properties",
+                operation_id="properties.list",
+                x_agent_links={
+                    "policy": "links",
+                    "links": [
+                        {
+                            "rel": "item.self",
+                            "label": "Open property",
+                            "route": "property.detail",
+                            "params": {"pid": "$item.id"},
+                            "query": {},
+                        }
+                    ],
+                },
+                agent_link_routes={
+                    "property.detail": {
+                        "name": "property.detail",
+                        "scope": "workspace",
+                        "template": "/property/:pid",
+                        "params": [{"name": "pid", "required": True}],
+                        "query": [],
+                    }
+                },
+            )
+        ],
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"id": "prop_1"}]})
+
+    test_root = _build_root(
+        handler, workspace_path=workspace_path, admin_path=admin_path
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(test_root, ["--workspace", "acme", "properties", "list"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["agent_links"] == {
+        "links": [],
+        "items": [
+            {
+                "index": 0,
+                "links": [
+                    {
+                        "rel": "item.self",
+                        "label": "Open property",
+                        "route": "property.detail",
+                        "href": "/w/acme/property/prop_1",
+                    }
+                ],
+            }
+        ],
+    }
 
 
 def test_generated_command_honours_yaml_output(tmp_path: pathlib.Path) -> None:

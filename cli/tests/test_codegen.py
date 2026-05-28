@@ -526,6 +526,7 @@ def test_entry_shape_is_exhaustive() -> None:
     surfaces = generate_surfaces(schema=schema)
     entry = next(e for e in surfaces["workspace"] if e["operation_id"] == "tasks.list")
     assert set(entry.keys()) == {
+        "agent_link_routes",
         "group",
         "name",
         "operation_id",
@@ -538,6 +539,7 @@ def test_entry_shape_is_exhaustive() -> None:
         "idempotent",
         "x_cli",
         "x_agent_confirm",
+        "x_agent_links",
     }
     assert entry["idempotent"] is True  # GET
     assert entry["response_schema_ref"] == "#/components/schemas/TaskList"
@@ -801,6 +803,53 @@ def test_x_agent_confirm_copied_verbatim() -> None:
         "summary": "Approve expense {id}?",
         "risk": "medium",
     }
+
+
+def test_x_agent_links_copied_with_referenced_routes() -> None:
+    schema = {
+        "paths": {
+            "/w/{slug}/api/v1/properties": {
+                "get": {
+                    "operationId": "properties.list",
+                    "tags": ["properties"],
+                    "responses": {"200": {}},
+                    "x-agent-links": {
+                        "policy": "links",
+                        "links": [
+                            {
+                                "rel": "item.self",
+                                "label": "Open property",
+                                "route": "property.detail",
+                                "params": {"pid": "$item.id"},
+                                "query": {},
+                            }
+                        ],
+                    },
+                }
+            }
+        }
+    }
+    surfaces = generate_surfaces(schema=schema)
+    entry = surfaces["workspace"][0]
+    assert (
+        entry["x_agent_links"]
+        == schema["paths"]["/w/{slug}/api/v1/properties"]["get"]["x-agent-links"]
+    )
+    assert entry["agent_link_routes"]["property.detail"]["template"] == "/property/:pid"
+
+
+def test_route_manifest_loads_from_committed_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_json_loader(path: Path) -> dict[str, dict[str, Any]]:
+        raise AssertionError(f"unexpected dist route manifest read: {path}")
+
+    monkeypatch.setattr(_codegen, "_load_route_manifest_json", fail_json_loader)
+
+    routes = _codegen._load_route_manifest()
+
+    assert routes["property.detail"]["template"] == "/property/:pid"
+    assert "asset.scanToken" not in routes
 
 
 # ---------------------------------------------------------------------------

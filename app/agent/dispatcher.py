@@ -55,6 +55,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.adapters.llm.ports import Tool
+from app.agent.links import resolve_agent_links
 from app.authz import (
     ApprovalRequired,
     InvalidScope,
@@ -877,11 +878,20 @@ class OpenAPIToolDispatcher:
         )
         body_obj = _coerce_body(response.content, response.headers.get("content-type"))
         mutated = entry.method in _MUTATING_METHODS and response.status_code < 400
+        agent_links = resolve_agent_links(
+            entry.operation.get("x-agent-links"),
+            workspace_slug=self._workspace_slug,
+            path_vars=path_vars,
+            query=query,
+            request_body=body,
+            response_body=body_obj,
+        )
         return ToolResult(
             call_id=call.id,
             status_code=response.status_code,
             body=body_obj,
             mutated=mutated,
+            agent_links=agent_links,
         )
 
     def activity_label_for(self, call: ToolCall) -> str:

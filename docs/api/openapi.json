@@ -30039,6 +30039,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.admins.list yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -30618,6 +30622,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.admins.grant yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": true,
@@ -31189,6 +31197,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.admins.groups.list yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -31770,6 +31782,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.admins.groups.owners.add yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": true,
@@ -32350,6 +32366,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.admins.groups.owners.revoke yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": true,
@@ -32930,6 +32950,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.admins.revoke yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": true,
@@ -36401,6 +36425,18 @@
           "admin",
           "agent_docs"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open agent docs",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.agentDocs"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -36981,6 +37017,18 @@
           "admin",
           "agent_docs"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open agent docs",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.agentDocs"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -37569,6 +37617,18 @@
           "admin",
           "agent_docs"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open agent docs",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.agentDocs"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "admin",
           "mutates": true,
@@ -38166,6 +38226,18 @@
           "admin",
           "agent_docs"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open agent docs",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.agentDocs"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "admin",
           "mutates": true,
@@ -38750,6 +38822,18 @@
           "admin",
           "agent_docs"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open agent docs",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.agentDocs"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -39442,6 +39526,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.audit.list yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -40132,6 +40220,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.audit.tail yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -40703,6 +40795,10 @@
           "admin",
           "chat_gateway"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.chat.health.get yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -41279,6 +41375,10 @@
           "admin",
           "chat_gateway"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.chat.overrides.list yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -41854,6 +41954,10 @@
           "admin",
           "chat_gateway"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.chat.providers.list yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -42429,6 +42533,10 @@
           "admin",
           "chat_gateway"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.chat.templates.list yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -43010,6 +43118,10 @@
           "admin",
           "chat_gateway"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.chat.test_inbound yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": true,
@@ -43585,6 +43697,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": false,
@@ -44164,6 +44288,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -44753,6 +44889,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -45326,6 +45474,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -45904,6 +46064,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": false,
@@ -46492,6 +46664,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -47143,6 +47327,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": false,
@@ -47714,6 +47910,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": false,
@@ -48289,6 +48497,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": false,
@@ -48868,6 +49088,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -49441,6 +49673,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -50029,6 +50273,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -50604,6 +50860,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": false,
@@ -51183,6 +51451,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -51764,6 +52044,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -52337,6 +52629,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -52915,6 +53219,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": false,
@@ -53503,6 +53819,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -54078,6 +54406,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": false,
@@ -54658,6 +54998,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": false,
@@ -55246,6 +55598,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -55826,6 +56190,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -56410,6 +56786,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": false,
@@ -57017,6 +57405,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": false,
@@ -57596,6 +57996,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -58169,6 +58581,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -58747,6 +59171,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": false,
@@ -59335,6 +59771,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -59925,6 +60373,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -60722,6 +61182,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -61302,6 +61774,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -61877,6 +62361,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": false,
@@ -62456,6 +62952,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -63029,6 +63537,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -63607,6 +64127,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": false,
@@ -64195,6 +64727,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -64776,6 +65320,18 @@
           "llm"
         ],
         "x-agent-forbidden": true,
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -65366,6 +65922,18 @@
           "llm"
         ],
         "x-agent-forbidden": true,
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -65955,6 +66523,18 @@
           "admin",
           "llm"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open LLM graph",
+              "params": {},
+              "query": {},
+              "rel": "admin.review",
+              "route": "admin.llm.graph"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "llm",
           "mutates": true,
@@ -66526,6 +67106,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.me.read yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -67097,6 +67681,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.me.admins.list yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -67668,6 +68256,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.settings.list yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -68278,6 +68870,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.settings.update yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": true,
@@ -68849,6 +69445,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.signup.settings.read yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -69428,6 +70028,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.signup.settings.update yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": true,
@@ -70039,6 +70643,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.signups.list yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -70713,6 +71321,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.usage.list yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -71284,6 +71896,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.usage.summary yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -71855,6 +72471,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.usage.workspaces yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -72445,6 +73065,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.usage.workspaces.cap yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": true,
@@ -73016,6 +73640,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.workspaces.list yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -73596,6 +74224,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.workspaces.get yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": false,
@@ -74176,6 +74808,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.workspaces.archive yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": true,
@@ -74756,6 +75392,10 @@
           "admin",
           "admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.workspaces.trust yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": true,
@@ -75367,6 +76007,10 @@
           "identity",
           "auth"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.email.revert yet."
+        },
         "x-cli": {
           "group": "auth-email",
           "mutates": true,
@@ -75948,6 +76592,10 @@
           "identity",
           "auth"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.email.verify yet."
+        },
         "x-cli": {
           "group": "auth-email",
           "mutates": true,
@@ -78170,6 +78818,10 @@
           "identity",
           "auth"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.me.get yet."
+        },
         "x-cli": {
           "group": "auth",
           "mutates": false,
@@ -79826,6 +80478,10 @@
           "auth",
           "invite"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.invite.accept yet."
+        },
         "x-cli": {
           "group": "invite",
           "verb": "accept"
@@ -82607,6 +83263,10 @@
           "auth",
           "invite"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.invites.accept yet."
+        },
         "x-cli": {
           "group": "invite",
           "verb": "accept-token"
@@ -83748,6 +84408,10 @@
           "me"
         ],
         "x-agent-confirm": true,
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.me.avatar.clear yet."
+        },
         "x-cli": {
           "group": "me",
           "mutates": true,
@@ -84910,6 +85574,10 @@
           "identity",
           "auth"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.me.email.change_request yet."
+        },
         "x-cli": {
           "group": "auth-email",
           "mutates": true,
@@ -85481,6 +86149,10 @@
           "me",
           "privacy"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for me.export.request yet."
+        },
         "x-cli": {
           "group": "me",
           "summary": "Request my privacy export",
@@ -86060,6 +86732,10 @@
           "me",
           "privacy"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for me.export.get yet."
+        },
         "x-cli": {
           "group": "me",
           "summary": "Poll my privacy export",
@@ -86634,6 +87310,10 @@
           "identity",
           "push-tokens"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.me.push_tokens.list yet."
+        },
         "x-cli": {
           "group": "me-push-tokens",
           "mutates": false,
@@ -87213,6 +87893,10 @@
           "identity",
           "push-tokens"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.me.push_tokens.register yet."
+        },
         "x-cli": {
           "group": "me-push-tokens",
           "mutates": true,
@@ -87786,6 +88470,10 @@
           "identity",
           "push-tokens"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.me.push_tokens.unregister yet."
+        },
         "x-cli": {
           "group": "me-push-tokens",
           "mutates": true,
@@ -88374,6 +89062,10 @@
           "identity",
           "push-tokens"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.me.push_tokens.refresh yet."
+        },
         "x-cli": {
           "group": "me-push-tokens",
           "mutates": true,
@@ -88950,6 +89642,10 @@
           "auth",
           "tokens"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.me.tokens.list yet."
+        },
         "x-cli": {
           "group": "me-tokens",
           "mutates": false,
@@ -89530,6 +90226,10 @@
           "auth",
           "tokens"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.me.tokens.mint yet."
+        },
         "x-cli": {
           "group": "me-tokens",
           "mutates": true,
@@ -90104,6 +90804,10 @@
           "auth",
           "tokens"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.me.tokens.revoke yet."
+        },
         "x-cli": {
           "group": "me-tokens",
           "mutates": true,
@@ -90689,6 +91393,10 @@
           "auth",
           "tokens"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.me.tokens.audit yet."
+        },
         "x-cli": {
           "group": "me-tokens",
           "mutates": false,
@@ -91263,6 +91971,10 @@
           "auth",
           "tokens"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.me.tokens.revoke_post yet."
+        },
         "x-cli": {
           "group": "me-tokens",
           "mutates": true,
@@ -91844,6 +92556,10 @@
           "auth",
           "tokens"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.me.tokens.rotate yet."
+        },
         "x-cli": {
           "group": "me-tokens",
           "mutates": true,
@@ -92420,6 +93136,10 @@
           "auth",
           "workspaces"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.me.workspaces.list yet."
+        },
         "x-cli": {
           "group": "auth",
           "mutates": false,
@@ -92999,6 +93719,10 @@
           "auth",
           "workspaces"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.me.workspaces.create yet."
+        },
         "x-cli": {
           "group": "auth",
           "mutates": true,
@@ -99224,6 +99948,10 @@
         "tags": [
           "workspace_admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for admin.users.passkeys.revoke yet."
+        },
         "x-cli": {
           "group": "admin",
           "mutates": true,
@@ -99786,6 +100514,10 @@
         "tags": [
           "workspace_admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for workspace_admin.workspace.archive yet."
+        },
         "x-cli": {
           "group": "workspace-admin",
           "mutates": true,
@@ -100335,6 +101067,10 @@
         "tags": [
           "workspace_admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for workspace_admin.workspace.delete yet."
+        },
         "x-cli": {
           "group": "workspace-admin",
           "mutates": true,
@@ -100885,6 +101621,10 @@
         "tags": [
           "workspace_admin"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for workspace_admin.workspace.export yet."
+        },
         "x-cli": {
           "group": "workspace-admin",
           "mutates": false,
@@ -101005,6 +101745,10 @@
         "tags": [
           "agent"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for agent.relay.request yet."
+        },
         "x-agent-scopes": [
           "manager"
         ],
@@ -101122,6 +101866,10 @@
         "tags": [
           "agent"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for agent.log.list yet."
+        },
         "x-cli": {
           "group": "agent",
           "scope_arg": "scope",
@@ -101267,6 +102015,10 @@
         "tags": [
           "agent"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for agent.message.create yet."
+        },
         "x-cli": {
           "body": "body",
           "group": "agent",
@@ -101803,6 +102555,10 @@
         "tags": [
           "llm"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for workspace.llm.agent_preferences.me.get yet."
+        },
         "x-cli": {
           "group": "agent-prefs",
           "mutates": false,
@@ -102365,6 +103121,10 @@
           "summary": "Update your agent preferences?",
           "verb": "Update my agent preferences"
         },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for workspace.llm.agent_preferences.me.put yet."
+        },
         "x-cli": {
           "group": "agent-prefs",
           "mutates": true,
@@ -102911,6 +103671,10 @@
         "tags": [
           "llm"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for workspace.llm.agent_preferences.property.get yet."
+        },
         "x-cli": {
           "group": "agent-prefs",
           "mutates": false,
@@ -103487,6 +104251,10 @@
           "summary": "Update property agent preferences?",
           "verb": "Update property agent preferences"
         },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for workspace.llm.agent_preferences.property.put yet."
+        },
         "x-cli": {
           "group": "agent-prefs",
           "mutates": true,
@@ -104022,6 +104790,10 @@
         "tags": [
           "llm"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for workspace.llm.agent_preferences.workspace.get yet."
+        },
         "x-cli": {
           "group": "agent-prefs",
           "mutates": false,
@@ -104587,6 +105359,10 @@
           "summary": "Update workspace agent preferences?",
           "verb": "Update agent preferences"
         },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for workspace.llm.agent_preferences.workspace.put yet."
+        },
         "x-cli": {
           "group": "agent-prefs",
           "mutates": true,
@@ -105122,6 +105898,10 @@
         "tags": [
           "llm"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for workspace.llm.agent_preferences.workspace.upstream_pii_consent.get yet."
+        },
         "x-cli": {
           "group": "agent-prefs",
           "mutates": false,
@@ -105685,6 +106465,10 @@
           "risk": "high",
           "summary": "Update upstream PII consent?",
           "verb": "Update upstream PII consent"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for workspace.llm.agent_preferences.workspace.upstream_pii_consent.put yet."
         },
         "x-cli": {
           "group": "agent-prefs",
@@ -109365,7 +110149,21 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open asset",
+              "params": {
+                "aid": "$item.id"
+              },
+              "query": {},
+              "rel": "item.self",
+              "route": "asset.detail"
+            }
+          ],
+          "policy": "links"
+        }
       },
       "parameters": [
         {
@@ -109716,7 +110514,21 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open asset",
+              "params": {
+                "aid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "asset.detail"
+            }
+          ],
+          "policy": "links"
+        }
       }
     },
     "/w/{slug}/api/v1/assets/actions/{action_id}": {
@@ -113023,7 +113835,21 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open asset",
+              "params": {
+                "aid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "asset.detail"
+            }
+          ],
+          "policy": "links"
+        }
       },
       "parameters": [
         {
@@ -113719,7 +114545,21 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open asset",
+              "params": {
+                "aid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "asset.detail"
+            }
+          ],
+          "policy": "links"
+        }
       },
       "parameters": [
         {
@@ -114081,7 +114921,21 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open asset",
+              "params": {
+                "aid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "asset.detail"
+            }
+          ],
+          "policy": "links"
+        }
       }
     },
     "/w/{slug}/api/v1/assets/{asset_id}/actions": {
@@ -116661,7 +117515,21 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open asset",
+              "params": {
+                "aid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "asset.detail"
+            }
+          ],
+          "policy": "links"
+        }
       }
     },
     "/w/{slug}/api/v1/assets/{asset_id}/qr.png": {
@@ -117727,7 +118595,21 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open asset",
+              "params": {
+                "aid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "asset.detail"
+            }
+          ],
+          "policy": "links"
+        }
       }
     },
     "/w/{slug}/api/v1/audit": {
@@ -117984,6 +118866,10 @@
         "tags": [
           "audit"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for audit.list yet."
+        },
         "x-cli": {
           "group": "audit",
           "mutates": false,
@@ -118257,6 +119143,10 @@
         "tags": [
           "audit"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for audit.tail yet."
+        },
         "x-cli": {
           "group": "audit",
           "mutates": false,
@@ -119925,6 +120815,10 @@
           "identity",
           "auth"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.passkey.revoke yet."
+        },
         "x-cli": {
           "group": "auth",
           "mutates": true,
@@ -120512,6 +121406,10 @@
           "auth",
           "tokens"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for tokens.list yet."
+        },
         "x-cli": {
           "group": "tokens",
           "mutates": false,
@@ -121071,6 +121969,10 @@
           "auth",
           "tokens"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for tokens.mint yet."
+        },
         "x-cli": {
           "group": "tokens",
           "mutates": true,
@@ -121613,6 +122515,10 @@
           "auth",
           "tokens"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for tokens.revoke yet."
+        },
         "x-cli": {
           "group": "tokens",
           "mutates": true,
@@ -122179,6 +123085,10 @@
           "auth",
           "tokens"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.tokens.audit yet."
+        },
         "x-cli": {
           "group": "tokens",
           "mutates": false,
@@ -122747,6 +123657,10 @@
           "auth",
           "tokens"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.tokens.revoke_post yet."
+        },
         "x-cli": {
           "group": "tokens",
           "mutates": true,
@@ -123309,6 +124223,10 @@
           "auth",
           "tokens"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for auth.tokens.rotate yet."
+        },
         "x-cli": {
           "group": "tokens",
           "mutates": true,
@@ -127909,6 +128827,10 @@
           "payroll",
           "bookings"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for bookings.list yet."
+        },
         "x-cli": {
           "group": "bookings",
           "mutates": false,
@@ -129513,6 +130435,10 @@
           "assets",
           "assets"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for documents.list yet."
+        },
         "x-cli": {
           "group": "documents",
           "verb": "list"
@@ -131489,6 +132415,10 @@
           "identity",
           "employees"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for employees.list yet."
+        },
         "x-cli": {
           "group": "employees",
           "mutates": false,
@@ -133804,6 +134734,10 @@
         "tags": [
           "expenses"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for list_expense_claims yet."
+        },
         "x-cli": {
           "group": "expenses",
           "verb": "list"
@@ -134975,6 +135909,10 @@
         "tags": [
           "expenses"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for list_pending_expense_claims yet."
+        },
         "x-cli": {
           "group": "expenses",
           "verb": "list-pending"
@@ -135532,6 +136470,10 @@
         "tags": [
           "expenses"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for get_pending_reimbursement yet."
+        },
         "x-cli": {
           "group": "expenses",
           "verb": "pending-reimbursement"
@@ -136636,6 +137578,10 @@
         "tags": [
           "expenses"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for cancel_expense_claim yet."
+        },
         "x-cli": {
           "group": "expenses",
           "verb": "cancel"
@@ -138853,6 +139799,10 @@
         "tags": [
           "expenses"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for list_expense_attachments yet."
+        },
         "x-cli": {
           "group": "expenses",
           "verb": "list-attachments"
@@ -139962,6 +140912,10 @@
         "tags": [
           "expenses"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for detach_expense_receipt yet."
+        },
         "x-cli": {
           "group": "expenses",
           "verb": "detach-receipt"
@@ -142245,6 +143199,10 @@
           "identity",
           "me"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for me.history.get yet."
+        },
         "x-cli": {
           "group": "me",
           "verb": "history"
@@ -142396,6 +143354,20 @@
         "tags": [
           "instructions"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open instruction",
+              "params": {
+                "iid": "$item.id"
+              },
+              "query": {},
+              "rel": "item.self",
+              "route": "instruction.detail"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "instructions",
           "mutates": false,
@@ -142522,6 +143494,20 @@
           "summary": "Create instruction {title}?",
           "verb": "Create instruction"
         },
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open instruction",
+              "params": {
+                "iid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "instruction.detail"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "instructions",
           "summary": "Create an instruction",
@@ -142627,6 +143613,20 @@
         "tags": [
           "instructions"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open instruction",
+              "params": {
+                "iid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "instruction.detail"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "instructions",
           "mutates": false,
@@ -142764,6 +143764,20 @@
           "summary": "Update instruction?",
           "verb": "Update instruction"
         },
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open instruction",
+              "params": {
+                "iid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "instruction.detail"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "instructions",
           "summary": "Patch instruction metadata or body",
@@ -142886,6 +143900,20 @@
           "risk": "medium",
           "summary": "Archive instruction?",
           "verb": "Archive instruction"
+        },
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open instruction",
+              "params": {
+                "iid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "instruction.detail"
+            }
+          ],
+          "policy": "links"
         },
         "x-cli": {
           "group": "instructions",
@@ -143025,6 +144053,10 @@
         "tags": [
           "instructions"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for instructions.versions.list yet."
+        },
         "x-cli": {
           "group": "instructions",
           "mutates": false,
@@ -143154,6 +144186,10 @@
         "tags": [
           "instructions"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for instructions.versions.get yet."
+        },
         "x-cli": {
           "group": "instructions",
           "mutates": false,
@@ -143366,6 +144402,10 @@
         "tags": [
           "instructions"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for instructions.scope yet."
+        },
         "x-cli": {
           "group": "instructions",
           "mutates": false,
@@ -143610,6 +144650,10 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.items.list yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "list"
@@ -143892,6 +144936,10 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.items.create yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "add"
@@ -144095,6 +145143,10 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.items.get_by_barcode yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "get-by-barcode"
@@ -144311,6 +145363,10 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.items.get_by_sku yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "get-by-sku"
@@ -144520,6 +145576,10 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.items.delete yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "delete"
@@ -144794,6 +145854,10 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.items.update yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "update"
@@ -145077,6 +146141,10 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.items.restore yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "restore"
@@ -145279,6 +146347,10 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.reports.low_stock yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "low-stock"
@@ -145506,6 +146578,10 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.reports.production_rate yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "production-rate"
@@ -145733,6 +146809,10 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.reports.shrinkage yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "shrinkage"
@@ -145962,6 +147042,10 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.reports.stocktakes yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "stocktakes"
@@ -146312,6 +147396,10 @@
         "x-agent-confirm": {
           "message": "Record an inventory adjustment for this item?"
         },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.adjust yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "adjust"
@@ -146537,6 +147625,10 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.movements.list yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "movements-list"
@@ -146869,6 +147961,10 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.movements.create yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "movement-create"
@@ -148193,6 +149289,10 @@
         "tags": [
           "llm"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for llm.agent_preferences.me.get yet."
+        },
         "x-cli": {
           "group": "agent-prefs",
           "mutates": false,
@@ -148755,6 +149855,10 @@
           "summary": "Update your agent preferences?",
           "verb": "Update my agent preferences"
         },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for llm.agent_preferences.me.put yet."
+        },
         "x-cli": {
           "group": "agent-prefs",
           "mutates": true,
@@ -149301,6 +150405,10 @@
         "tags": [
           "llm"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for llm.agent_preferences.property.get yet."
+        },
         "x-cli": {
           "group": "agent-prefs",
           "mutates": false,
@@ -149877,6 +150985,10 @@
           "summary": "Update property agent preferences?",
           "verb": "Update property agent preferences"
         },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for llm.agent_preferences.property.put yet."
+        },
         "x-cli": {
           "group": "agent-prefs",
           "mutates": true,
@@ -150412,6 +151524,10 @@
         "tags": [
           "llm"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for llm.agent_preferences.workspace.get yet."
+        },
         "x-cli": {
           "group": "agent-prefs",
           "mutates": false,
@@ -150977,6 +152093,10 @@
           "summary": "Update workspace agent preferences?",
           "verb": "Update agent preferences"
         },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for llm.agent_preferences.workspace.put yet."
+        },
         "x-cli": {
           "group": "agent-prefs",
           "mutates": true,
@@ -151512,6 +152632,10 @@
         "tags": [
           "llm"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for llm.agent_preferences.workspace.upstream_pii_consent.get yet."
+        },
         "x-cli": {
           "group": "agent-prefs",
           "mutates": false,
@@ -152076,6 +153200,10 @@
           "summary": "Update upstream PII consent?",
           "verb": "Update upstream PII consent"
         },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for llm.agent_preferences.workspace.upstream_pii_consent.put yet."
+        },
         "x-cli": {
           "group": "agent-prefs",
           "mutates": true,
@@ -152611,6 +153739,10 @@
         "tags": [
           "llm"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for llm.agent_approval_mode.me.get yet."
+        },
         "x-cli": {
           "group": "agent",
           "mutates": false,
@@ -153175,6 +154307,10 @@
           "summary": "Update your agent approval mode?",
           "verb": "Update agent approval mode"
         },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for llm.agent_approval_mode.me.put yet."
+        },
         "x-cli": {
           "group": "agent",
           "mutates": true,
@@ -153710,6 +154846,10 @@
         "tags": [
           "llm"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for llm.workspace.usage.get yet."
+        },
         "x-cli": {
           "group": "agent",
           "mutates": false,
@@ -154842,6 +155982,10 @@
         "tags": [
           "llm"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for workspace.llm.agent_approval_mode.me.get yet."
+        },
         "x-cli": {
           "group": "agent",
           "mutates": false,
@@ -155405,6 +156549,10 @@
           "risk": "medium",
           "summary": "Update your agent approval mode?",
           "verb": "Update agent approval mode"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for workspace.llm.agent_approval_mode.me.put yet."
         },
         "x-cli": {
           "group": "agent",
@@ -156034,6 +157182,10 @@
           "identity",
           "me"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for me.availability_overrides.list yet."
+        },
         "x-cli": {
           "group": "me",
           "verb": "availability-list"
@@ -157690,6 +158842,10 @@
           "identity",
           "me"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for me.schedule.get yet."
+        },
         "x-cli": {
           "group": "me",
           "verb": "schedule"
@@ -158269,6 +159425,10 @@
           "summary": "Send broadcast *{subject}*?",
           "verb": "Send broadcast message"
         },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for messaging.broadcast.send yet."
+        },
         "x-cli": {
           "group": "messaging",
           "verb": "broadcast-send"
@@ -158802,6 +159962,10 @@
         "tags": [
           "messaging"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for messaging.broadcast.recipients yet."
+        },
         "x-cli": {
           "group": "messaging",
           "verb": "broadcast-recipients"
@@ -180160,6 +181324,10 @@
           "authz",
           "permission_groups"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for permission_groups.list yet."
+        },
         "x-cli": {
           "group": "permission-groups",
           "mutates": false,
@@ -180719,6 +181887,10 @@
           "authz",
           "permission_groups"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for permission_groups.create yet."
+        },
         "x-cli": {
           "group": "permission-groups",
           "mutates": true,
@@ -181261,6 +182433,10 @@
           "authz",
           "permission_groups"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for permission_groups.delete yet."
+        },
         "x-cli": {
           "group": "permission-groups",
           "mutates": true,
@@ -181808,6 +182984,10 @@
           "authz",
           "permission_groups"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for permission_groups.read yet."
+        },
         "x-cli": {
           "group": "permission-groups",
           "mutates": false,
@@ -182378,6 +183558,10 @@
           "authz",
           "permission_groups"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for permission_groups.update yet."
+        },
         "x-cli": {
           "group": "permission-groups",
           "mutates": true,
@@ -182960,6 +184144,10 @@
           "authz",
           "permission_groups"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for permission_groups.members.list yet."
+        },
         "x-cli": {
           "group": "permission-groups",
           "mutates": false,
@@ -183530,6 +184718,10 @@
           "authz",
           "permission_groups"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for permission_groups.members.add yet."
+        },
         "x-cli": {
           "group": "permission-groups",
           "mutates": true,
@@ -184081,6 +185273,10 @@
           "authz",
           "permission_groups"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for permission_groups.members.remove yet."
+        },
         "x-cli": {
           "group": "permission-groups",
           "mutates": true,
@@ -184729,6 +185925,10 @@
           "authz",
           "permission_rules"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for permission_rules.list yet."
+        },
         "x-cli": {
           "group": "permission-rules",
           "mutates": false,
@@ -185338,6 +186538,10 @@
           "authz",
           "permission_rules"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for permission_rules.create yet."
+        },
         "x-cli": {
           "group": "permission-rules",
           "mutates": true,
@@ -185930,6 +187134,10 @@
           "authz",
           "permission_rules"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for permission_rules.revoke yet."
+        },
         "x-cli": {
           "group": "permission-rules",
           "mutates": true,
@@ -186481,6 +187689,10 @@
           "authz",
           "permissions"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for permissions.action_catalog yet."
+        },
         "x-cli": {
           "group": "permissions",
           "mutates": false,
@@ -187090,6 +188302,10 @@
           "authz",
           "permissions"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for permissions.resolved yet."
+        },
         "x-cli": {
           "group": "permissions",
           "mutates": false,
@@ -188234,6 +189450,20 @@
           "places",
           "properties"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open property",
+              "params": {
+                "pid": "$item.id"
+              },
+              "query": {},
+              "rel": "item.self",
+              "route": "property.detail"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "properties",
           "mutates": false,
@@ -188790,7 +190020,30 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open property",
+              "params": {
+                "pid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "property.detail"
+            },
+            {
+              "label": "View stays for property",
+              "params": {},
+              "query": {
+                "property_id": "$response.id"
+              },
+              "rel": "related.list",
+              "route": "stays.index"
+            }
+          ],
+          "policy": "links"
+        }
       }
     },
     "/w/{slug}/api/v1/properties/{property_id}": {
@@ -189863,7 +191116,30 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open property",
+              "params": {
+                "pid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "property.detail"
+            },
+            {
+              "label": "View stays for property",
+              "params": {},
+              "query": {
+                "property_id": "$response.id"
+              },
+              "rel": "related.list",
+              "route": "stays.index"
+            }
+          ],
+          "policy": "links"
+        }
       },
       "parameters": [
         {
@@ -190425,7 +191701,30 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open property",
+              "params": {
+                "pid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "property.detail"
+            },
+            {
+              "label": "View stays for property",
+              "params": {},
+              "query": {
+                "property_id": "$response.id"
+              },
+              "rel": "related.list",
+              "route": "stays.index"
+            }
+          ],
+          "policy": "links"
+        }
       }
     },
     "/w/{slug}/api/v1/properties/{property_id}/areas": {
@@ -194068,6 +195367,10 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.stocktakes.list yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "stocktake-list"
@@ -194400,6 +195703,10 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.stocktakes.create yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "stocktake-open"
@@ -203422,6 +204729,10 @@
           "authz",
           "role_grants"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for role_grants.create yet."
+        },
         "x-cli": {
           "group": "role-grants",
           "mutates": true,
@@ -203964,6 +205275,10 @@
           "authz",
           "role_grants"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for role_grants.revoke yet."
+        },
         "x-cli": {
           "group": "role-grants",
           "mutates": true,
@@ -204534,6 +205849,10 @@
           "authz",
           "role_grants"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for role_grants.update yet."
+        },
         "x-cli": {
           "group": "role-grants",
           "mutates": true,
@@ -206305,7 +207624,21 @@
         "summary": "Create Stay",
         "tags": [
           "stays"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open stays for property",
+              "params": {},
+              "query": {
+                "property_id": "$response.property_id"
+              },
+              "rel": "related.list",
+              "route": "stays.index"
+            }
+          ],
+          "policy": "links"
+        }
       }
     },
     "/w/{slug}/api/v1/stays/guest-links/{link_id}": {
@@ -211340,7 +212673,19 @@
         "summary": "List Reservations",
         "tags": [
           "stays"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open stays",
+              "params": {},
+              "query": {},
+              "rel": "list",
+              "route": "stays.index"
+            }
+          ],
+          "policy": "links"
+        }
       },
       "parameters": [
         {
@@ -214420,6 +215765,10 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.stocktakes.get yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "stocktake-get"
@@ -214754,6 +216103,10 @@
         "x-agent-confirm": {
           "message": "Commit this inventory stocktake?"
         },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.stocktakes.commit yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "stocktake-commit"
@@ -215080,6 +216433,10 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for inventory.stocktakes.lines.update yet."
+        },
         "x-cli": {
           "group": "inventory",
           "verb": "stocktake-line"
@@ -215842,6 +217199,20 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open task",
+              "params": {
+                "tid": "$item.id"
+              },
+              "query": {},
+              "rel": "item.self",
+              "route": "task.detail"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "list"
@@ -216517,6 +217888,20 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open task",
+              "params": {
+                "tid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "task.detail"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "create"
@@ -218542,6 +219927,18 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open schedules",
+              "params": {},
+              "query": {},
+              "rel": "list",
+              "route": "schedules.index"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "schedules-list"
@@ -219196,7 +220593,19 @@
         "summary": "Create a schedule",
         "tags": [
           "tasks"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open schedules",
+              "params": {},
+              "query": {},
+              "rel": "list",
+              "route": "schedules.index"
+            }
+          ],
+          "policy": "links"
+        }
       }
     },
     "/w/{slug}/api/v1/tasks/schedules/{schedule_id}": {
@@ -219838,6 +221247,18 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open schedules",
+              "params": {},
+              "query": {},
+              "rel": "list",
+              "route": "schedules.index"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "schedule-delete"
@@ -220481,6 +221902,18 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open schedules",
+              "params": {},
+              "query": {},
+              "rel": "list",
+              "route": "schedules.index"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "schedule-show"
@@ -221157,6 +222590,18 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open schedules",
+              "params": {},
+              "query": {},
+              "rel": "list",
+              "route": "schedules.index"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "schedule-update"
@@ -221814,7 +223259,19 @@
         "summary": "Pause a schedule without cancelling materialised tasks",
         "tags": [
           "tasks"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open schedules",
+              "params": {},
+              "query": {},
+              "rel": "list",
+              "route": "schedules.index"
+            }
+          ],
+          "policy": "links"
+        }
       }
     },
     "/w/{slug}/api/v1/tasks/schedules/{schedule_id}/preview": {
@@ -222487,6 +223944,18 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open schedules",
+              "params": {},
+              "query": {},
+              "rel": "list",
+              "route": "schedules.index"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "schedule-preview"
@@ -223157,7 +224626,19 @@
         "summary": "Resume a paused schedule",
         "tags": [
           "tasks"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open schedules",
+              "params": {},
+              "query": {},
+              "rel": "list",
+              "route": "schedules.index"
+            }
+          ],
+          "policy": "links"
+        }
       }
     },
     "/w/{slug}/api/v1/tasks/task_templates": {
@@ -223857,6 +225338,10 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for list_task_templates yet."
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "templates-list"
@@ -225153,6 +226638,10 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for delete_task_template yet."
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "template-delete"
@@ -225796,6 +227285,10 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for get_task_template yet."
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "template-show"
@@ -226462,6 +227955,10 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for update_task_template yet."
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "template-update"
@@ -227107,6 +228604,20 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open task",
+              "params": {
+                "tid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "task.detail"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "show"
@@ -227773,6 +229284,20 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open task",
+              "params": {
+                "tid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "task.detail"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "update"
@@ -228460,7 +229985,21 @@
         "summary": "Assign a task to a specific user",
         "tags": [
           "tasks"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open task",
+              "params": {
+                "tid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "task.detail"
+            }
+          ],
+          "policy": "links"
+        }
       }
     },
     "/w/{slug}/api/v1/tasks/{task_id}/cancel": {
@@ -229144,7 +230683,21 @@
         "summary": "Cancel a task with a reason (manager / owner only)",
         "tags": [
           "tasks"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open task",
+              "params": {
+                "tid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "task.detail"
+            }
+          ],
+          "policy": "links"
+        }
       }
     },
     "/w/{slug}/api/v1/tasks/{task_id}/checklist/{item_id}": {
@@ -229818,6 +231371,10 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for patch_task_checklist_item yet."
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "checklist"
@@ -230495,6 +232052,10 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for attach_task_checklist_evidence yet."
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "checklist-evidence"
@@ -231173,6 +232734,10 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for list_task_comments yet."
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "comments-list"
@@ -232489,6 +234054,10 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for delete_task_comment yet."
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "comment-delete"
@@ -233164,6 +234733,10 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for patch_task_comment yet."
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "comment-update"
@@ -233831,7 +235404,21 @@
         "summary": "Mark a task completed \u2014 gated by evidence + checklist policy",
         "tags": [
           "tasks"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open task",
+              "params": {
+                "tid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "task.detail"
+            }
+          ],
+          "policy": "links"
+        }
       }
     },
     "/w/{slug}/api/v1/tasks/{task_id}/detail": {
@@ -234473,6 +236060,20 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open task",
+              "params": {
+                "tid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "task.detail"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "detail"
@@ -235164,6 +236765,10 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for list_task_evidence yet."
+        },
         "x-cli": {
           "group": "tasks",
           "verb": "evidence-list"
@@ -236493,7 +238098,21 @@
         "summary": "Skip a task with a reason",
         "tags": [
           "tasks"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open task",
+              "params": {
+                "tid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "task.detail"
+            }
+          ],
+          "policy": "links"
+        }
       }
     },
     "/w/{slug}/api/v1/tasks/{task_id}/start": {
@@ -237147,7 +238766,21 @@
         "summary": "Drive a task from pending to in_progress",
         "tags": [
           "tasks"
-        ]
+        ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open task",
+              "params": {
+                "tid": "$response.id"
+              },
+              "query": {},
+              "rel": "self",
+              "route": "task.detail"
+            }
+          ],
+          "policy": "links"
+        }
       }
     },
     "/w/{slug}/api/v1/time/leaves": {
@@ -237752,6 +239385,10 @@
         "tags": [
           "time"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for time.list_leaves yet."
+        },
         "x-cli": {
           "group": "time",
           "verb": "leaves-list"
@@ -238310,6 +239947,10 @@
         "tags": [
           "time"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for time.cancel_leave yet."
+        },
         "x-cli": {
           "group": "time",
           "verb": "leave-cancel"
@@ -238853,6 +240494,10 @@
         "tags": [
           "time"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for time.get_leave yet."
+        },
         "x-cli": {
           "group": "time",
           "verb": "leave-show"
@@ -239411,6 +241056,10 @@
         "tags": [
           "time"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for time.get_leave_conflicts yet."
+        },
         "x-cli": {
           "group": "time",
           "verb": "leave-conflicts"
@@ -239992,6 +241641,10 @@
         "tags": [
           "time"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for time.decide_leave yet."
+        },
         "x-cli": {
           "group": "time",
           "verb": "leave-decide"
@@ -240583,6 +242236,10 @@
         "tags": [
           "time"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for time.list_my_leaves yet."
+        },
         "x-cli": {
           "group": "time",
           "verb": "my-leaves-list"
@@ -241679,6 +243336,10 @@
         "tags": [
           "time"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for time.cancel_my_leave yet."
+        },
         "x-cli": {
           "group": "time",
           "verb": "my-leave-cancel"
@@ -242245,6 +243906,10 @@
         "tags": [
           "time"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for time.update_my_leave_dates yet."
+        },
         "x-cli": {
           "group": "time",
           "verb": "my-leave-update"
@@ -242791,6 +244456,10 @@
         "tags": [
           "time"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for time.delete_geofence_setting yet."
+        },
         "x-cli": {
           "group": "time",
           "verb": "geofence-setting-delete"
@@ -243335,6 +245004,10 @@
         "tags": [
           "time"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for time.get_geofence_setting yet."
+        },
         "x-cli": {
           "group": "time",
           "verb": "geofence-setting-show"
@@ -243902,6 +245575,10 @@
         "tags": [
           "time"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for time.upsert_geofence_setting yet."
+        },
         "x-cli": {
           "group": "time",
           "verb": "geofence-setting-upsert"
@@ -244532,6 +246209,10 @@
         "tags": [
           "time"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for time.list_shifts yet."
+        },
         "x-cli": {
           "group": "time",
           "verb": "shifts-list"
@@ -245643,6 +247324,10 @@
         "tags": [
           "time"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for time.get_shift yet."
+        },
         "x-cli": {
           "group": "time",
           "verb": "shift-show"
@@ -246209,6 +247894,10 @@
         "tags": [
           "time"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for time.edit_shift yet."
+        },
         "x-cli": {
           "group": "time",
           "verb": "shift-update"
@@ -257441,6 +259130,20 @@
           "identity",
           "users"
         ],
+        "x-agent-links": {
+          "links": [
+            {
+              "label": "Open employee",
+              "params": {
+                "eid": "$item.id"
+              },
+              "query": {},
+              "rel": "item.self",
+              "route": "employee.detail"
+            }
+          ],
+          "policy": "links"
+        },
         "x-cli": {
           "group": "users",
           "mutates": false,
@@ -262521,6 +264224,10 @@
           "authz",
           "role_grants"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for role_grants.list_by_user yet."
+        },
         "x-cli": {
           "group": "role-grants",
           "mutates": false,
@@ -263211,6 +264918,10 @@
         "tags": [
           "webhooks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for webhooks.list yet."
+        },
         "x-cli": {
           "group": "webhooks",
           "mutates": false,
@@ -263327,6 +265038,10 @@
         "tags": [
           "webhooks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for webhooks.create yet."
+        },
         "x-cli": {
           "group": "webhooks",
           "mutates": true,
@@ -263426,6 +265141,10 @@
         "tags": [
           "webhooks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for webhooks.delete yet."
+        },
         "x-cli": {
           "group": "webhooks",
           "mutates": true,
@@ -263530,6 +265249,10 @@
         "tags": [
           "webhooks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for webhooks.read yet."
+        },
         "x-cli": {
           "group": "webhooks",
           "mutates": false,
@@ -263657,6 +265380,10 @@
         "tags": [
           "webhooks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for webhooks.update yet."
+        },
         "x-cli": {
           "group": "webhooks",
           "mutates": true,
@@ -263767,6 +265494,10 @@
         "tags": [
           "webhooks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for webhooks.deliveries.list yet."
+        },
         "x-cli": {
           "group": "webhooks",
           "mutates": false,
@@ -263899,6 +265630,10 @@
         "tags": [
           "webhooks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for webhooks.enable yet."
+        },
         "x-cli": {
           "group": "webhooks",
           "mutates": true,
@@ -264018,6 +265753,10 @@
         "tags": [
           "webhooks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for webhooks.secret.rotate yet."
+        },
         "x-cli": {
           "group": "webhooks",
           "mutates": true,
@@ -264154,6 +265893,10 @@
         "tags": [
           "webhooks"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for webhooks.test yet."
+        },
         "x-cli": {
           "group": "webhooks",
           "mutates": true,
@@ -269740,6 +271483,10 @@
         "tags": [
           "llm"
         ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for workspace.llm.usage.get yet."
+        },
         "x-cli": {
           "group": "agent",
           "mutates": false,

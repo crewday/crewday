@@ -68,6 +68,7 @@ import json
 import logging
 import re
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -102,6 +103,19 @@ DEFAULT_SURFACE_PATH: Final[Path] = _PACKAGE_DIR / "_surface.json"
 DEFAULT_SURFACE_ADMIN_PATH: Final[Path] = _PACKAGE_DIR / "_surface_admin.json"
 DEFAULT_EXCLUSIONS_PATH: Final[Path] = _PACKAGE_DIR / "_exclusions.yaml"
 DEFAULT_OPENAPI_PATH: Final[Path] = _REPO_ROOT / "docs" / "api" / "openapi.json"
+DEFAULT_ROUTE_MANIFEST_PATH: Final[Path] = (
+    _REPO_ROOT / "app" / "web" / "dist" / "_routes.json"
+)
+DEFAULT_ROUTE_MANIFEST_SOURCE_PATH: Final[Path] = (
+    _REPO_ROOT / "app" / "web" / "src" / "routes" / "_manifest.ts"
+)
+_ROUTE_BLOCK_RE: Final = re.compile(r"route\(\{(?P<body>.*?)\}\)", re.DOTALL)
+_ROUTE_STRING_FIELD_RE: Final = re.compile(r'\b(?P<key>\w+):\s*"(?P<value>[^"]*)"')
+_ROUTE_ARRAY_FIELD_RE: Final = re.compile(
+    r"\b(?P<key>params|query):\s*\[(?P<value>[^\]]*)\]",
+    re.DOTALL,
+)
+_ROUTE_ARRAY_VALUE_RE: Final = re.compile(r'"(?P<value>[^"]*)"')
 
 
 # Idempotent HTTP verbs per RFC 9110. ``POST`` and ``PATCH`` are
@@ -591,11 +605,129 @@ def _response_schema_ref(operation: dict[str, Any]) -> str | None:
     return None
 
 
+def _load_route_manifest(
+    path: Path = DEFAULT_ROUTE_MANIFEST_PATH,
+) -> dict[str, dict[str, Any]]:
+    """Return agent-linkable frontend routes keyed by stable route name."""
+    if path == DEFAULT_ROUTE_MANIFEST_PATH:
+        source_routes = _load_route_manifest_source(DEFAULT_ROUTE_MANIFEST_SOURCE_PATH)
+        if source_routes:
+            return source_routes
+    return _load_route_manifest_json(path)
+
+
+def _load_route_manifest_json(path: Path) -> dict[str, dict[str, Any]]:
+    if not path.is_file():
+        return {}
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, Mapping):
+        return {}
+    routes = loaded.get("routes")
+    if not isinstance(routes, list):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for raw in routes:
+        if not isinstance(raw, Mapping) or raw.get("agentLinkable") is not True:
+            continue
+        name = raw.get("name")
+        scope = raw.get("scope")
+        template = raw.get("template")
+        if not (
+            isinstance(name, str)
+            and name
+            and isinstance(scope, str)
+            and scope in {"workspace", "admin", "public"}
+            and isinstance(template, str)
+            and template.startswith("/")
+        ):
+            continue
+        out[name] = {
+            "name": name,
+            "scope": scope,
+            "template": template,
+            "params": raw.get("params") if isinstance(raw.get("params"), list) else [],
+            "query": raw.get("query") if isinstance(raw.get("query"), list) else [],
+        }
+    return out
+
+
+def _load_route_manifest_source(path: Path) -> dict[str, dict[str, Any]]:
+    if not path.is_file():
+        return {}
+    routes: dict[str, dict[str, Any]] = {}
+    for match in _ROUTE_BLOCK_RE.finditer(path.read_text(encoding="utf-8")):
+        route = _coerce_source_route(match.group("body"))
+        if route is not None:
+            routes[route["name"]] = route
+    return routes
+
+
+def _coerce_source_route(body: str) -> dict[str, Any] | None:
+    fields = {
+        match.group("key"): match.group("value")
+        for match in _ROUTE_STRING_FIELD_RE.finditer(body)
+    }
+    name = fields.get("name")
+    scope = fields.get("scope")
+    template = fields.get("template")
+    if not (
+        isinstance(name, str)
+        and name
+        and isinstance(scope, str)
+        and scope in {"workspace", "admin", "public"}
+        and isinstance(template, str)
+        and template.startswith("/")
+    ):
+        return None
+    if re.search(r"\bagentLinkable:\s*false\b", body):
+        return None
+    arrays = {
+        match.group("key"): [
+            {"name": value.group("value"), "required": match.group("key") == "params"}
+            | ({"source": "path"} if match.group("key") == "params" else {})
+            for value in _ROUTE_ARRAY_VALUE_RE.finditer(match.group("value"))
+        ]
+        for match in _ROUTE_ARRAY_FIELD_RE.finditer(body)
+    }
+    return {
+        "name": name,
+        "scope": scope,
+        "template": template,
+        "params": arrays.get("params", []),
+        "query": arrays.get("query", []),
+    }
+
+
+def _agent_link_routes(
+    operation: Mapping[str, Any],
+    route_manifest: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Mapping[str, Any]]:
+    """Project only the frontend routes an operation's links reference."""
+    policy = operation.get("x-agent-links")
+    if not isinstance(policy, Mapping) or policy.get("policy") != "links":
+        return {}
+    links = policy.get("links")
+    if not isinstance(links, list):
+        return {}
+    routes: dict[str, Mapping[str, Any]] = {}
+    for raw_link in links:
+        if not isinstance(raw_link, Mapping):
+            continue
+        route_name = raw_link.get("route")
+        if not isinstance(route_name, str) or route_name in routes:
+            continue
+        route = route_manifest.get(route_name)
+        if route is not None:
+            routes[route_name] = route
+    return routes
+
+
 def _build_entry(
     *,
     path: str,
     method: str,
     operation: dict[str, Any],
+    route_manifest: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Build the committed descriptor entry for one operation.
 
@@ -626,6 +758,8 @@ def _build_entry(
         "idempotent": method_upper in _IDEMPOTENT_METHODS,
         "x_cli": operation.get("x-cli"),
         "x_agent_confirm": operation.get("x-agent-confirm"),
+        "x_agent_links": operation.get("x-agent-links"),
+        "agent_link_routes": _agent_link_routes(operation, route_manifest),
     }
 
 
@@ -656,6 +790,7 @@ def generate_surfaces(
         "workspace": [],
         "admin": [],
     }
+    route_manifest = _load_route_manifest()
 
     paths = schema.get("paths") or {}
     if not isinstance(paths, dict):
@@ -679,7 +814,12 @@ def generate_surfaces(
             if _is_hidden(operation):
                 continue
 
-            entry = _build_entry(path=path, method=method, operation=operation)
+            entry = _build_entry(
+                path=path,
+                method=method,
+                operation=operation,
+                route_manifest=route_manifest,
+            )
             surface = classify_surface(path)
             surfaces[surface].append(entry)
 

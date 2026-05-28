@@ -183,6 +183,7 @@ export const FRONTEND_ROUTES = [
     name: "stays.index",
     scope: "workspace",
     template: "/stays",
+    query: ["property_id"],
     authenticatedSurface: true,
   }),
   route({

@@ -114,6 +114,7 @@ def _schema_with(*entries: dict[str, Any]) -> dict[str, Any]:
             "x-agent-forbidden",
             "x-interactive-only",
             "x-agent-scopes",
+            "x-agent-links",
         ):
             if entry.get(key) is not None:
                 op[key] = entry[key]
@@ -859,6 +860,65 @@ def test_dispatch_rejects_known_bare_host_tool() -> None:
     assert result.status_code == 403
     assert result.body == {"detail": "tool is outside the workspace agent surface"}
     assert result.mutated is False
+
+
+def test_dispatch_returns_structured_agent_links_for_list_items() -> None:
+    app = _build_app()
+    router = APIRouter()
+
+    @router.get(
+        "/w/{slug}/api/v1/properties",
+        openapi_extra={"x-cli": _x_cli("properties", "list")},
+    )
+    def list_properties(slug: str) -> dict[str, Any]:
+        return {"data": [{"id": "prop_1"}]}
+
+    app.include_router(router)
+    schema = _schema_with(
+        {
+            "path": "/w/{slug}/api/v1/properties",
+            "method": "get",
+            "operationId": "properties.list",
+            "x-cli": _x_cli("properties", "list"),
+            "x-agent-links": {
+                "policy": "links",
+                "links": [
+                    {
+                        "rel": "item.self",
+                        "label": "Open property",
+                        "route": "property.detail",
+                        "params": {"pid": "$item.id"},
+                        "query": {},
+                    }
+                ],
+            },
+        }
+    )
+    disp = OpenAPIToolDispatcher(app=app, openapi=schema, workspace_slug="acme")
+
+    result = disp.dispatch(
+        ToolCall(id="c-links", name="properties.list", input={}),
+        token=_token(),
+        headers={},
+    )
+
+    assert result.status_code == 200
+    assert result.agent_links == {
+        "links": [],
+        "items": [
+            {
+                "index": 0,
+                "links": [
+                    {
+                        "rel": "item.self",
+                        "label": "Open property",
+                        "route": "property.detail",
+                        "href": "/w/acme/property/prop_1",
+                    }
+                ],
+            }
+        ],
+    }
 
 
 def test_dispatch_get_routes_query_params_through() -> None:

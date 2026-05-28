@@ -94,6 +94,8 @@ class ParityReport:
     admin_hidden_without_reviewed_exclusion: tuple[str, ...]
     admin_unavailable_without_reviewed_exclusion: tuple[str, ...]
     admin_mutation_confirmation_missing: tuple[str, ...]
+    missing_agent_links: tuple[str, ...]
+    invalid_agent_links: tuple[str, ...]
     removed_from_openapi: tuple[str, ...]
     invalid_operation_ids: tuple[str, ...]
 
@@ -112,6 +114,8 @@ class ParityReport:
             or self.admin_hidden_without_reviewed_exclusion
             or self.admin_unavailable_without_reviewed_exclusion
             or self.admin_mutation_confirmation_missing
+            or self.missing_agent_links
+            or self.invalid_agent_links
             or self.removed_from_openapi
             or self.invalid_operation_ids
         )
@@ -442,6 +446,103 @@ def _admin_mutation_confirmation_missing(
     )
 
 
+def _agent_link_policy_problem(
+    operation: Mapping[str, Any],
+    route_manifest: Mapping[str, Mapping[str, Any]],
+) -> str | None:
+    raw = operation.get("x-agent-links")
+    if not isinstance(raw, Mapping):
+        return "missing x-agent-links"
+    policy = raw.get("policy")
+    if policy == "none":
+        reason = raw.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            return "policy none requires a non-empty reason"
+        if "links" in raw:
+            return "policy none must not include links"
+        return None
+    if policy != "links":
+        return "policy must be 'links' or 'none'"
+    if "reason" in raw:
+        return "policy links must not include reason"
+    links = raw.get("links")
+    if not isinstance(links, list) or not links:
+        return "policy links requires a non-empty links list"
+    for index, item in enumerate(links):
+        problem = _agent_link_entry_problem(item, route_manifest=route_manifest)
+        if problem is not None:
+            return f"links[{index}]: {problem}"
+    return None
+
+
+def _agent_link_entry_problem(
+    item: object,
+    *,
+    route_manifest: Mapping[str, Mapping[str, Any]],
+) -> str | None:
+    if not isinstance(item, Mapping):
+        return "entry must be an object"
+    expected = {"rel", "label", "route", "params", "query"}
+    keys = {str(key) for key in item}
+    if keys != expected:
+        return f"entry keys must be {sorted(expected)}"
+    for key in ("rel", "label", "route"):
+        value = item.get(key)
+        if not isinstance(value, str) or not value:
+            return f"{key} must be a non-empty string"
+    params = item.get("params")
+    query = item.get("query")
+    if not isinstance(params, Mapping):
+        return "params must be an object"
+    if not isinstance(query, Mapping):
+        return "query must be an object"
+    route_name = item["route"]
+    route = route_manifest.get(route_name)
+    if route is None:
+        return f"route {route_name!r} is not in the agent-linkable manifest"
+    required_params = _route_field_names(route.get("params"))
+    if set(params) != required_params:
+        return f"params must bind route params {sorted(required_params)}"
+    allowed_query = _route_field_names(route.get("query"))
+    extra_query = set(query) - allowed_query
+    if extra_query:
+        return f"query keys are not allowed by route manifest: {sorted(extra_query)}"
+    return None
+
+
+def _route_field_names(raw: object) -> set[str]:
+    if not isinstance(raw, list):
+        return set()
+    names: set[str] = set()
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        name = item.get("name")
+        if isinstance(name, str) and name:
+            names.add(name)
+    return names
+
+
+def _agent_link_policy_violations(
+    operations: Sequence[OpenApiOperation],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    route_manifest = _codegen._load_route_manifest()
+    missing: list[str] = []
+    invalid: list[str] = []
+    for operation in operations:
+        problem = _agent_link_policy_problem(
+            operation.operation,
+            route_manifest=route_manifest,
+        )
+        if problem is None:
+            continue
+        if problem == "missing x-agent-links":
+            missing.append(operation.operation_id)
+        else:
+            invalid.append(f"{operation.operation_id}: {problem}")
+    return tuple(sorted(missing)), tuple(sorted(invalid))
+
+
 def _operation_ids_from_surface(entries: Sequence[SurfaceEntry]) -> set[str]:
     return {
         entry.operation_id
@@ -510,6 +611,9 @@ def build_report(
     workspace_unexcluded = _workspace_unexcluded_operations(operations, excluded)
     admin_eligible = _admin_eligible_operations(operations, excluded)
     admin_surface_ids = _operation_ids_from_surface_file(surface_admin_path)
+    missing_agent_links, invalid_agent_links = _agent_link_policy_violations(
+        cli_operations
+    )
 
     return ParityReport(
         help_tree_missing=missing,
@@ -541,6 +645,8 @@ def build_report(
         admin_mutation_confirmation_missing=_admin_mutation_confirmation_missing(
             admin_eligible
         ),
+        missing_agent_links=missing_agent_links,
+        invalid_agent_links=invalid_agent_links,
         removed_from_openapi=tuple(sorted(cli_ids - openapi_ids)),
         invalid_operation_ids=_invalid_operation_ids(operations),
     )
@@ -603,6 +709,14 @@ def print_report(report: ParityReport) -> None:
     _print_block(
         "Admin mutating operations missing confirmation coverage:",
         report.admin_mutation_confirmation_missing,
+    )
+    _print_block(
+        "CLI/agent operations missing x-agent-links policy:",
+        report.missing_agent_links,
+    )
+    _print_block(
+        "CLI/agent operations with invalid x-agent-links policy:",
+        report.invalid_agent_links,
     )
     _print_block(
         "CLI surface operations removed from OpenAPI:",

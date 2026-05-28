@@ -373,6 +373,7 @@ class ToolResult:
     status_code: int
     body: object
     mutated: bool
+    agent_links: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1777,15 +1778,15 @@ def _append_tool_result_to_history(
     distinguishable to the model without inventing a second
     convention.
     """
-    rendered = json.dumps(
-        {
-            "tool_call_id": result.call_id,
-            "name": call.name,
-            "status": result.status_code,
-            "body": result.body,
-        },
-        default=str,
-    )
+    payload: dict[str, object] = {
+        "tool_call_id": result.call_id,
+        "name": call.name,
+        "status": result.status_code,
+        "body": result.body,
+    }
+    if result.agent_links is not None:
+        payload["agent_links"] = result.agent_links
+    rendered = json.dumps(payload, default=str)
     return [*history, {"role": "assistant", "content": rendered}]
 
 

@@ -52,6 +52,12 @@ import click
 import httpx
 
 from crewday import _config
+from crewday._agent_links import (
+    AgentLinkRoutes,
+    RouteDefinition,
+    coerce_route_definition,
+    resolve_agent_links,
+)
 from crewday._client import ApiError, CrewdayClient
 from crewday._globals import CrewdayContext
 from crewday._main import ConfigError
@@ -135,6 +141,8 @@ class SurfaceEntry:
     response_schema_ref: str | None
     x_cli: Mapping[str, Any] | None
     x_agent_confirm: Mapping[str, Any] | None
+    x_agent_links: Mapping[str, Any] | None
+    agent_link_routes: AgentLinkRoutes
 
     @property
     def cli_group(self) -> str:
@@ -244,6 +252,12 @@ def _coerce_entry(raw: Mapping[str, Any]) -> SurfaceEntry:
             if isinstance(raw.get("x_agent_confirm"), Mapping)
             else None
         ),
+        x_agent_links=(
+            raw.get("x_agent_links")
+            if isinstance(raw.get("x_agent_links"), Mapping)
+            else None
+        ),
+        agent_link_routes=_coerce_agent_link_routes(raw.get("agent_link_routes")),
     )
 
 
@@ -252,6 +266,20 @@ def _optional_str(value: object) -> str | None:
     if isinstance(value, str) and value:
         return value
     return None
+
+
+def _coerce_agent_link_routes(value: object) -> AgentLinkRoutes:
+    """Promote descriptor route metadata into resolver definitions."""
+    if not isinstance(value, Mapping):
+        return {}
+    routes: dict[str, RouteDefinition] = {}
+    for key, raw in value.items():
+        if not isinstance(key, str):
+            continue
+        route = coerce_route_definition(raw)
+        if route is not None:
+            routes[key] = route
+    return routes
 
 
 def _read_surface_file(path: pathlib.Path) -> list[Mapping[str, Any]]:
@@ -808,7 +836,15 @@ def _make_callback(
                 )
             except ApiError as exc:
                 _emit_api_error(exc, ctx=resolved_ctx)
-            _emit_response(response, ctx=resolved_ctx, schema_hint=entry.x_cli)
+            _emit_response(
+                response,
+                ctx=resolved_ctx,
+                entry=entry,
+                path_values=path_values,
+                query_values=params,
+                request_body=body,
+                schema_hint=entry.x_cli,
+            )
 
     return callback
 
@@ -817,6 +853,10 @@ def _emit_response(
     response: httpx.Response,
     *,
     ctx: CrewdayContext,
+    entry: SurfaceEntry,
+    path_values: Mapping[str, object],
+    query_values: Mapping[str, object],
+    request_body: object,
     schema_hint: Mapping[str, Any] | None,
 ) -> None:
     """Pretty-print a response body, tolerating empty or non-JSON payloads.
@@ -829,14 +869,49 @@ def _emit_response(
     """
     text = response.text
     if not text:
-        _emit(None, ctx=ctx, schema_hint=schema_hint)
+        _emit(_with_agent_links(None, None, ctx=ctx), ctx=ctx, schema_hint=schema_hint)
         return
     try:
         payload = response.json()
     except ValueError:
-        _emit({"raw": text}, ctx=ctx, schema_hint=schema_hint)
+        payload = {"raw": text}
+        _emit(
+            _with_agent_links(payload, None, ctx=ctx), ctx=ctx, schema_hint=schema_hint
+        )
         return
-    _emit(payload, ctx=ctx, schema_hint=schema_hint)
+    link_path_values: dict[str, object] = dict(path_values)
+    if ctx.workspace is not None:
+        link_path_values.setdefault("slug", ctx.workspace)
+    agent_links = resolve_agent_links(
+        entry.x_agent_links,
+        routes=entry.agent_link_routes,
+        workspace_slug=ctx.workspace,
+        path_vars=link_path_values,
+        query=query_values,
+        request_body=request_body,
+        response_body=payload,
+    )
+    _emit(
+        _with_agent_links(payload, agent_links, ctx=ctx),
+        ctx=ctx,
+        schema_hint=schema_hint,
+    )
+
+
+def _with_agent_links(
+    payload: object,
+    agent_links: Mapping[str, object] | None,
+    *,
+    ctx: CrewdayContext,
+) -> object:
+    """Attach resolved links to structured CLI output without changing tables."""
+    if agent_links is None or ctx.output == "table":
+        return payload
+    if isinstance(payload, Mapping):
+        enriched = {str(key): value for key, value in payload.items()}
+        enriched["agent_links"] = agent_links
+        return enriched
+    return {"data": payload, "agent_links": agent_links}
 
 
 def _run_paginated(

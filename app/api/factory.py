@@ -52,7 +52,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 from contextlib import (
     AbstractAsyncContextManager,
     AbstractContextManager,
@@ -1319,10 +1319,210 @@ def _build_custom_openapi(app: FastAPI) -> dict[str, Any]:
             merged_tags.append(tag)
     schema["tags"] = merged_tags
     _declare_workspace_slug_path_parameters(schema)
+    _declare_agent_links(schema)
     _declare_rate_limit_responses(schema)
     _declare_problem_json_required_fields(schema)
     _sort_set_arrays(schema)
     return schema
+
+
+def _agent_link(
+    *,
+    rel: str,
+    label: str,
+    route: str,
+    params: Mapping[str, str] | None = None,
+    query: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "rel": rel,
+        "label": label,
+        "route": route,
+        "params": dict(params or {}),
+        "query": dict(query or {}),
+    }
+
+
+_PROPERTY_DETAIL_LINK: Final = _agent_link(
+    rel="self",
+    label="Open property",
+    route="property.detail",
+    params={"pid": "$response.id"},
+)
+_PROPERTY_ITEM_LINK: Final = _agent_link(
+    rel="item.self",
+    label="Open property",
+    route="property.detail",
+    params={"pid": "$item.id"},
+)
+_PROPERTY_STAYS_LINK: Final = _agent_link(
+    rel="related.list",
+    label="View stays for property",
+    route="stays.index",
+    query={"property_id": "$response.id"},
+)
+_TASK_DETAIL_LINK: Final = _agent_link(
+    rel="self",
+    label="Open task",
+    route="task.detail",
+    params={"tid": "$response.id"},
+)
+_TASK_ITEM_LINK: Final = _agent_link(
+    rel="item.self",
+    label="Open task",
+    route="task.detail",
+    params={"tid": "$item.id"},
+)
+_ASSET_DETAIL_LINK: Final = _agent_link(
+    rel="self",
+    label="Open asset",
+    route="asset.detail",
+    params={"aid": "$response.id"},
+)
+_ASSET_ITEM_LINK: Final = _agent_link(
+    rel="item.self",
+    label="Open asset",
+    route="asset.detail",
+    params={"aid": "$item.id"},
+)
+_INSTRUCTION_DETAIL_LINK: Final = _agent_link(
+    rel="self",
+    label="Open instruction",
+    route="instruction.detail",
+    params={"iid": "$response.id"},
+)
+_INSTRUCTION_ITEM_LINK: Final = _agent_link(
+    rel="item.self",
+    label="Open instruction",
+    route="instruction.detail",
+    params={"iid": "$item.id"},
+)
+_EMPLOYEE_ITEM_LINK: Final = _agent_link(
+    rel="item.self",
+    label="Open employee",
+    route="employee.detail",
+    params={"eid": "$item.id"},
+)
+_STAYS_INDEX_LINK: Final = _agent_link(
+    rel="list",
+    label="Open stays",
+    route="stays.index",
+)
+_SCHEDULES_INDEX_LINK: Final = _agent_link(
+    rel="list",
+    label="Open schedules",
+    route="schedules.index",
+)
+_APPROVALS_INDEX_LINK: Final = _agent_link(
+    rel="list",
+    label="Open approvals",
+    route="approvals.index",
+)
+_ADMIN_LLM_GRAPH_LINK: Final = _agent_link(
+    rel="admin.review",
+    label="Open LLM graph",
+    route="admin.llm.graph",
+)
+_ADMIN_AGENT_DOCS_LINK: Final = _agent_link(
+    rel="admin.review",
+    label="Open agent docs",
+    route="admin.agentDocs",
+)
+
+
+_AGENT_LINKS_BY_OPERATION_ID: Final[Mapping[str, Sequence[Mapping[str, Any]]]] = {
+    "properties.create": (_PROPERTY_DETAIL_LINK, _PROPERTY_STAYS_LINK),
+    "properties.get": (_PROPERTY_DETAIL_LINK, _PROPERTY_STAYS_LINK),
+    "properties.update": (_PROPERTY_DETAIL_LINK, _PROPERTY_STAYS_LINK),
+    "properties.list": (_PROPERTY_ITEM_LINK,),
+    "stays.create": (
+        _agent_link(
+            rel="related.list",
+            label="Open stays for property",
+            route="stays.index",
+            query={"property_id": "$response.property_id"},
+        ),
+    ),
+    "stays.reservations.list": (_STAYS_INDEX_LINK,),
+    "create_task": (_TASK_DETAIL_LINK,),
+    "get_task": (_TASK_DETAIL_LINK,),
+    "get_task_detail": (_TASK_DETAIL_LINK,),
+    "patch_task": (_TASK_DETAIL_LINK,),
+    "assign_task": (_TASK_DETAIL_LINK,),
+    "start_task": (_TASK_DETAIL_LINK,),
+    "complete_task": (_TASK_DETAIL_LINK,),
+    "skip_task": (_TASK_DETAIL_LINK,),
+    "cancel_task": (_TASK_DETAIL_LINK,),
+    "list_tasks": (_TASK_ITEM_LINK,),
+    "assets.create": (_ASSET_DETAIL_LINK,),
+    "assets.get": (_ASSET_DETAIL_LINK,),
+    "assets.update": (_ASSET_DETAIL_LINK,),
+    "assets.move": (_ASSET_DETAIL_LINK,),
+    "assets.restore": (_ASSET_DETAIL_LINK,),
+    "assets.scan": (_ASSET_DETAIL_LINK,),
+    "assets.list": (_ASSET_ITEM_LINK,),
+    "instructions.create": (_INSTRUCTION_DETAIL_LINK,),
+    "instructions.get": (_INSTRUCTION_DETAIL_LINK,),
+    "instructions.patch": (_INSTRUCTION_DETAIL_LINK,),
+    "instructions.archive": (_INSTRUCTION_DETAIL_LINK,),
+    "instructions.list": (_INSTRUCTION_ITEM_LINK,),
+    "users.list": (_EMPLOYEE_ITEM_LINK,),
+    "list_schedules": (_SCHEDULES_INDEX_LINK,),
+    "create_schedule": (_SCHEDULES_INDEX_LINK,),
+    "get_schedule": (_SCHEDULES_INDEX_LINK,),
+    "update_schedule": (_SCHEDULES_INDEX_LINK,),
+    "delete_schedule": (_SCHEDULES_INDEX_LINK,),
+    "preview_schedule": (_SCHEDULES_INDEX_LINK,),
+    "pause_schedule": (_SCHEDULES_INDEX_LINK,),
+    "resume_schedule": (_SCHEDULES_INDEX_LINK,),
+}
+
+
+def _declare_agent_links(schema: dict[str, Any]) -> None:
+    """Stamp explicit post-result navigation policies onto CLI-visible ops."""
+    paths = schema.get("paths")
+    if not isinstance(paths, dict):
+        return
+    for path_item in paths.values():
+        if not isinstance(path_item, dict):
+            continue
+        for operation in path_item.values():
+            if not isinstance(operation, dict):
+                continue
+            if "x-agent-links" in operation:
+                continue
+            operation_id = operation.get("operationId")
+            if not isinstance(operation_id, str):
+                continue
+            links = _links_for_operation_id(operation_id)
+            if links:
+                operation["x-agent-links"] = {
+                    "policy": "links",
+                    "links": [dict(link) for link in links],
+                }
+            elif _is_cli_visible_operation(operation):
+                operation["x-agent-links"] = {
+                    "policy": "none",
+                    "reason": (
+                        f"No safe, specific web handoff is registered for "
+                        f"{operation_id} yet."
+                    ),
+                }
+
+
+def _is_cli_visible_operation(operation: Mapping[str, Any]) -> bool:
+    x_cli = operation.get("x-cli")
+    return isinstance(x_cli, Mapping) and x_cli.get("hidden") is not True
+
+
+def _links_for_operation_id(operation_id: str) -> Sequence[Mapping[str, Any]]:
+    if operation_id.startswith("admin.llm."):
+        return (_ADMIN_LLM_GRAPH_LINK,)
+    if operation_id.startswith("admin.agent_docs."):
+        return (_ADMIN_AGENT_DOCS_LINK,)
+    if operation_id.startswith("approvals."):
+        return (_APPROVALS_INDEX_LINK,)
+    return _AGENT_LINKS_BY_OPERATION_ID.get(operation_id, ())
 
 
 _SET_ARRAY_KEYS: Final = frozenset({"required", "enum"})

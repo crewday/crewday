@@ -27,6 +27,11 @@ def _entry(
         "response_schema_ref": None,
         "summary": f"{operation_id} summary",
         "x_agent_confirm": None,
+        "x_agent_links": {
+            "policy": "none",
+            "reason": "No post-result web handoff for this test operation.",
+        },
+        "agent_link_routes": {},
         "x_cli": {"group": group, "verb": name, "mutates": method != "GET"},
     }
 
@@ -41,6 +46,10 @@ def _schema(*operation_ids: str, include_x_cli: bool = True) -> dict[str, object
         operation: dict[str, object] = {
             "operationId": operation_id,
             "responses": {"200": {"description": "ok"}},
+            "x-agent-links": {
+                "policy": "none",
+                "reason": "No post-result web handoff for this test operation.",
+            },
         }
         if include_x_cli:
             operation["x-cli"] = {"group": "demo", "verb": f"list-{index}"}
@@ -61,6 +70,10 @@ def _admin_schema(
     operation: dict[str, object] = {
         "operationId": operation_id,
         "responses": {"200": {"description": "ok"}},
+        "x-agent-links": {
+            "policy": "none",
+            "reason": "No post-result web handoff for this test operation.",
+        },
     }
     if include_x_cli:
         operation["x-cli"] = {
@@ -454,6 +467,12 @@ def test_report_accepts_workspace_mutation_with_single_confirmation(
                         "operationId": "demo.create",
                         "responses": {"200": {"description": "ok"}},
                         "x-agent-confirm": {"summary": "Create demo?"},
+                        "x-agent-links": {
+                            "policy": "none",
+                            "reason": (
+                                "No post-result web handoff for this test operation."
+                            ),
+                        },
                         "x-cli": {
                             "group": "demo",
                             "verb": "create",
@@ -475,6 +494,81 @@ def test_report_accepts_workspace_mutation_with_single_confirmation(
 
     assert report.workspace_mutation_classification_invalid == ()
     assert report.ok
+
+
+def test_report_requires_agent_link_policy(tmp_path: Path) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [_entry(operation_id="demo.list")])
+    _write_json(
+        schema,
+        {
+            "openapi": "3.1.0",
+            "paths": {
+                "/w/{slug}/api/v1/demo": {
+                    "get": {
+                        "operationId": "demo.list",
+                        "responses": {"200": {"description": "ok"}},
+                        "x-cli": {"group": "demo", "verb": "list"},
+                    }
+                }
+            },
+        },
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.missing_agent_links == ("demo.list",)
+    assert not report.ok
+
+
+def test_report_validates_agent_link_routes(tmp_path: Path) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [_entry(operation_id="demo.list")])
+    _write_json(
+        schema,
+        {
+            "openapi": "3.1.0",
+            "paths": {
+                "/w/{slug}/api/v1/demo": {
+                    "get": {
+                        "operationId": "demo.list",
+                        "responses": {"200": {"description": "ok"}},
+                        "x-cli": {"group": "demo", "verb": "list"},
+                        "x-agent-links": {
+                            "policy": "links",
+                            "links": [
+                                {
+                                    "rel": "item.self",
+                                    "label": "Open demo",
+                                    "route": "missing.route",
+                                    "params": {},
+                                    "query": {},
+                                }
+                            ],
+                        },
+                    }
+                }
+            },
+        },
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.invalid_agent_links == (
+        "demo.list: links[0]: route 'missing.route' is not in the "
+        "agent-linkable manifest",
+    )
+    assert not report.ok
 
 
 def test_report_requires_reviewed_exclusion_for_hidden_workspace_operation(

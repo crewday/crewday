@@ -1,5 +1,6 @@
 [
   {
+    "agent_link_routes": {},
     "body_schema_ref": "#/components/schemas/AdminGrantRequest",
     "group": "admin",
     "http": {
@@ -14,6 +15,10 @@
     "response_schema_ref": "#/components/schemas/AdminGrantResponse",
     "summary": "Grant deployment-admin to a user",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.admins.grant yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": true,
@@ -22,6 +27,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -36,6 +42,10 @@
     "response_schema_ref": "#/components/schemas/GroupsListResponse",
     "summary": "List the deployment owners + managers groups",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.admins.groups.list yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -44,6 +54,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -58,6 +69,10 @@
     "response_schema_ref": "#/components/schemas/AdminTeamResponse",
     "summary": "List every active deployment admin grant",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.me.admins.list yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -66,6 +81,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -80,6 +96,10 @@
     "response_schema_ref": "#/components/schemas/AdminListResponse",
     "summary": "List every deployment admin",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.admins.list yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -88,6 +108,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": "#/components/schemas/GroupMemberRequest",
     "group": "admin",
     "http": {
@@ -102,6 +123,10 @@
     "response_schema_ref": "#/components/schemas/OwnersGroupResponse",
     "summary": "Add a user to the deployment owners group (owners-only)",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.admins.groups.owners.add yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": true,
@@ -110,6 +135,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -133,6 +159,10 @@
     "response_schema_ref": "#/components/schemas/OwnersGroupResponse",
     "summary": "Remove a user from the deployment owners group (owners-only)",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.admins.groups.owners.revoke yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": true,
@@ -141,6 +171,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -164,6 +195,10 @@
     "response_schema_ref": "#/components/schemas/AdminRevokeResponse",
     "summary": "Revoke a deployment-admin grant",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.admins.revoke yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": true,
@@ -172,6 +207,67 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.agentDocs": {
+        "name": "admin.agentDocs",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/agent-docs"
+      }
+    },
+    "body_schema_ref": "#/components/schemas/AdminAgentDocUpdate",
+    "group": "admin",
+    "http": {
+      "method": "PUT",
+      "path": "/admin/api/v1/agent_docs/{slug}"
+    },
+    "idempotent": true,
+    "name": "agent-docs-edit",
+    "operation_id": "admin.agent_docs.update",
+    "path_params": [
+      {
+        "name": "slug",
+        "required": true,
+        "schema": {
+          "title": "Slug",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AdminAgentDoc",
+    "summary": "Update a deployment agent system doc",
+    "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open agent docs",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.agentDocs"
+        }
+      ],
+      "policy": "links"
+    },
+    "x_cli": {
+      "group": "admin",
+      "mutates": true,
+      "summary": "Update an agent system doc",
+      "verb": "agent-docs-edit"
+    }
+  },
+  {
+    "agent_link_routes": {
+      "admin.agentDocs": {
+        "name": "admin.agentDocs",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/agent-docs"
+      }
+    },
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -186,6 +282,18 @@
     "response_schema_ref": null,
     "summary": "List deployment agent system docs",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open agent docs",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.agentDocs"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -194,6 +302,119 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.agentDocs": {
+        "name": "admin.agentDocs",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/agent-docs"
+      }
+    },
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/agent_docs/{slug}/reset-to-default"
+    },
+    "idempotent": false,
+    "name": "agent-docs-reset-to-default",
+    "operation_id": "admin.agent_docs.reset",
+    "path_params": [
+      {
+        "name": "slug",
+        "required": true,
+        "schema": {
+          "title": "Slug",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AdminAgentDoc",
+    "summary": "Reset a deployment agent system doc to its code default",
+    "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open agent docs",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.agentDocs"
+        }
+      ],
+      "policy": "links"
+    },
+    "x_cli": {
+      "group": "admin",
+      "mutates": true,
+      "summary": "Reset an agent system doc to its default",
+      "verb": "agent-docs-reset-to-default"
+    }
+  },
+  {
+    "agent_link_routes": {
+      "admin.agentDocs": {
+        "name": "admin.agentDocs",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/agent-docs"
+      }
+    },
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/agent_docs/{slug}/revisions"
+    },
+    "idempotent": true,
+    "name": "agent-docs-revisions",
+    "operation_id": "admin.agent_docs.revisions",
+    "path_params": [
+      {
+        "name": "slug",
+        "required": true,
+        "schema": {
+          "title": "Slug",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List deployment agent system doc revisions",
+    "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open agent docs",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.agentDocs"
+        }
+      ],
+      "policy": "links"
+    },
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "List agent system doc revisions",
+      "verb": "agent-docs-revisions"
+    }
+  },
+  {
+    "agent_link_routes": {
+      "admin.agentDocs": {
+        "name": "admin.agentDocs",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/agent-docs"
+      }
+    },
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -217,6 +438,18 @@
     "response_schema_ref": "#/components/schemas/AdminAgentDoc",
     "summary": "Show a deployment agent system doc",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open agent docs",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.agentDocs"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -225,6 +458,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -353,6 +587,10 @@
     "response_schema_ref": "#/components/schemas/app__api__admin__audit__AuditListResponse",
     "summary": "Page through deployment-scope audit rows",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.audit.list yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -361,6 +599,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -484,6 +723,10 @@
     "response_schema_ref": null,
     "summary": "NDJSON projection of the deployment audit feed",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.audit.tail yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -492,6 +735,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -506,6 +750,10 @@
     "response_schema_ref": "#/components/schemas/AdminChatHealthResponse",
     "summary": "Read chat gateway provider health",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.chat.health.get yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -514,6 +762,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -528,6 +777,10 @@
     "response_schema_ref": null,
     "summary": "List workspaces using custom chat gateway providers",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.chat.overrides.list yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -536,6 +789,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -550,6 +804,10 @@
     "response_schema_ref": null,
     "summary": "List deployment-default chat gateway providers",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.chat.providers.list yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -558,6 +816,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -572,6 +831,10 @@
     "response_schema_ref": null,
     "summary": "List chat gateway template sync state",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.chat.templates.list yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -580,6 +843,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": "#/components/schemas/AdminChatTestInboundRequest",
     "group": "admin",
     "http": {
@@ -594,6 +858,10 @@
     "response_schema_ref": "#/components/schemas/AdminChatTestInboundResponse",
     "summary": "Send a synthetic inbound chat gateway message",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.chat.test_inbound yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": true,
@@ -602,6 +870,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -616,6 +885,10 @@
     "response_schema_ref": "#/components/schemas/DeploymentSettingsResponse",
     "summary": "List every deployment setting + its current resolved value",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.settings.list yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -624,6 +897,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": "#/components/schemas/DeploymentSettingPayload",
     "group": "admin",
     "http": {
@@ -667,6 +941,10 @@
     "response_schema_ref": "#/components/schemas/DeploymentSettingResponse",
     "summary": "Write a single deployment setting",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.settings.update yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": true,
@@ -675,6 +953,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -689,6 +968,10 @@
     "response_schema_ref": "#/components/schemas/SignupSettingsResponse",
     "summary": "Read self-serve signup settings",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.signup.settings.read yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -697,6 +980,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": "#/components/schemas/SignupSettingsPayload",
     "group": "admin",
     "http": {
@@ -711,6 +995,10 @@
     "response_schema_ref": "#/components/schemas/SignupSettingsResponse",
     "summary": "Update self-serve signup settings",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.signup.settings.update yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": true,
@@ -719,6 +1007,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -771,6 +1060,10 @@
     "response_schema_ref": "#/components/schemas/SignupsListResponse",
     "summary": "List deployment signup abuse signals",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.signups.list yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -779,6 +1072,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": "#/components/schemas/UsageCapPayload",
     "group": "admin",
     "http": {
@@ -802,6 +1096,10 @@
     "response_schema_ref": "#/components/schemas/UsageCapResponse",
     "summary": "Raise or lower a workspace's LLM budget cap",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.usage.workspaces.cap yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": true,
@@ -810,6 +1108,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -921,6 +1220,10 @@
     "response_schema_ref": "#/components/schemas/UsageListResponse",
     "summary": "Page through raw LLM usage rows with cd-wjpl telemetry",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.usage.list yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -929,6 +1232,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -943,6 +1247,10 @@
     "response_schema_ref": "#/components/schemas/UsageSummaryResponse",
     "summary": "Deployment-wide rolling 30-day usage summary",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.usage.summary yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -951,6 +1259,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -965,6 +1274,10 @@
     "response_schema_ref": "#/components/schemas/UsageWorkspacesResponse",
     "summary": "Per-workspace cap / spent / paused table",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.usage.workspaces yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -973,6 +1286,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -987,6 +1301,10 @@
     "response_schema_ref": "#/components/schemas/AdminMeResponse",
     "summary": "Return the deployment-admin caller's identity + capabilities",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.me.read yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -995,6 +1313,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -1018,6 +1337,10 @@
     "response_schema_ref": "#/components/schemas/app__api__admin__workspaces__WorkspaceArchiveResponse",
     "summary": "Soft-archive a workspace (deployment owners only)",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.workspaces.archive yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": true,
@@ -1026,6 +1349,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -1049,6 +1373,10 @@
     "response_schema_ref": "#/components/schemas/WorkspaceSummaryResponse",
     "summary": "Return one workspace's detail card",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.workspaces.get yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -1057,6 +1385,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -1071,6 +1400,10 @@
     "response_schema_ref": "#/components/schemas/WorkspaceListResponse",
     "summary": "List every workspace on the deployment",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.workspaces.list yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": false,
@@ -1079,6 +1412,7 @@
     }
   },
   {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "admin",
     "http": {
@@ -1102,6 +1436,10 @@
     "response_schema_ref": "#/components/schemas/WorkspaceTrustResponse",
     "summary": "Promote a workspace to verification_state=\"trusted\"",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for admin.workspaces.trust yet."
+    },
     "x_cli": {
       "group": "admin",
       "mutates": true,
@@ -1110,6 +1448,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": "#/components/schemas/AssignmentPayload-Input",
     "group": "llm",
     "http": {
@@ -1124,6 +1471,18 @@
     "response_schema_ref": "#/components/schemas/LlmAssignmentResponse",
     "summary": "Create Assignment",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -1132,6 +1491,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1155,6 +1523,18 @@
     "response_schema_ref": null,
     "summary": "Delete Assignment",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -1163,6 +1543,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1177,6 +1566,18 @@
     "response_schema_ref": null,
     "summary": "List Assignments",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": false,
@@ -1185,6 +1586,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1199,6 +1609,18 @@
     "response_schema_ref": null,
     "summary": "Reorder Assignments",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -1207,6 +1629,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": "#/components/schemas/AssignmentUpdatePayload",
     "group": "llm",
     "http": {
@@ -1230,6 +1661,18 @@
     "response_schema_ref": "#/components/schemas/LlmAssignmentResponse",
     "summary": "Update Assignment",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -1238,6 +1681,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1261,6 +1713,18 @@
     "response_schema_ref": "#/components/schemas/LlmAssignmentResponse",
     "summary": "Get Assignment",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": false,
@@ -1269,6 +1733,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1355,6 +1828,18 @@
     "response_schema_ref": null,
     "summary": "List Calls",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": false,
@@ -1363,6 +1848,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": "#/components/schemas/LlmProviderModelEmbeddingSmokeRequest",
     "group": "llm",
     "http": {
@@ -1386,6 +1880,18 @@
     "response_schema_ref": "#/components/schemas/LlmProviderModelEmbeddingSmokeResponse",
     "summary": "Provider Model Embedding Smoke",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -1394,6 +1900,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1408,6 +1923,18 @@
     "response_schema_ref": "#/components/schemas/LlmGraphPayload",
     "summary": "Graph",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": false,
@@ -1416,6 +1943,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": "#/components/schemas/CapabilityInheritancePayload",
     "group": "llm",
     "http": {
@@ -1430,6 +1966,18 @@
     "response_schema_ref": "#/components/schemas/LlmCapabilityInheritanceResponse",
     "summary": "Create Inheritance",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -1438,6 +1986,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1461,6 +2018,18 @@
     "response_schema_ref": null,
     "summary": "Delete Inheritance",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -1469,6 +2038,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1483,6 +2061,18 @@
     "response_schema_ref": null,
     "summary": "List Inheritance",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": false,
@@ -1491,6 +2081,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": "#/components/schemas/CapabilityInheritanceUpdatePayload",
     "group": "llm",
     "http": {
@@ -1514,6 +2113,18 @@
     "response_schema_ref": "#/components/schemas/LlmCapabilityInheritanceResponse",
     "summary": "Update Inheritance",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -1522,6 +2133,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": "#/components/schemas/ModelPayload",
     "group": "llm",
     "http": {
@@ -1536,6 +2156,18 @@
     "response_schema_ref": "#/components/schemas/LlmModelResponse",
     "summary": "Create Model",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -1544,6 +2176,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1567,6 +2208,18 @@
     "response_schema_ref": null,
     "summary": "Delete Model",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -1575,6 +2228,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1589,6 +2251,18 @@
     "response_schema_ref": null,
     "summary": "List Models",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": false,
@@ -1597,6 +2271,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": "#/components/schemas/ModelPayload",
     "group": "llm",
     "http": {
@@ -1620,6 +2303,18 @@
     "response_schema_ref": "#/components/schemas/LlmModelResponse",
     "summary": "Update Model",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -1628,6 +2323,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1651,6 +2355,18 @@
     "response_schema_ref": "#/components/schemas/LlmModelResponse",
     "summary": "Get Model",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": false,
@@ -1659,6 +2375,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": "#/components/schemas/OpenRouterModelPreviewRequest",
     "group": "llm",
     "http": {
@@ -1673,6 +2398,18 @@
     "response_schema_ref": "#/components/schemas/OpenRouterModelPreviewResponse",
     "summary": "Openrouter Model Preview",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -1681,6 +2418,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1704,6 +2450,18 @@
     "response_schema_ref": "#/components/schemas/LlmProviderModelPlaygroundResponse",
     "summary": "Provider Model Playground",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -1712,6 +2470,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1726,6 +2493,18 @@
     "response_schema_ref": null,
     "summary": "List Prompts",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": false,
@@ -1734,6 +2513,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": "#/components/schemas/PromptUpdatePayload",
     "group": "llm",
     "http": {
@@ -1757,6 +2545,18 @@
     "response_schema_ref": "#/components/schemas/LlmPromptTemplateDetail",
     "summary": "Update Prompt",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -1765,6 +2565,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1788,6 +2597,18 @@
     "response_schema_ref": null,
     "summary": "Prompt Revisions",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": false,
@@ -1796,6 +2617,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1819,6 +2649,18 @@
     "response_schema_ref": "#/components/schemas/LlmPromptTemplateDetail",
     "summary": "Get Prompt",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": false,
@@ -1827,6 +2669,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": "#/components/schemas/ProviderModelPayload",
     "group": "llm",
     "http": {
@@ -1841,6 +2692,18 @@
     "response_schema_ref": "#/components/schemas/LlmProviderModelResponse",
     "summary": "Create Provider Model",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -1849,6 +2712,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1872,6 +2744,18 @@
     "response_schema_ref": null,
     "summary": "Delete Provider Model",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -1880,6 +2764,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1925,6 +2818,18 @@
     "response_schema_ref": null,
     "summary": "List Provider Models",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": false,
@@ -1933,6 +2838,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": "#/components/schemas/ProviderModelPayload",
     "group": "llm",
     "http": {
@@ -1956,6 +2870,18 @@
     "response_schema_ref": "#/components/schemas/LlmProviderModelResponse",
     "summary": "Update Provider Model",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -1964,6 +2890,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -1987,6 +2922,18 @@
     "response_schema_ref": "#/components/schemas/LlmProviderModelResponse",
     "summary": "Get Provider Model",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": false,
@@ -1995,6 +2942,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -2018,6 +2974,18 @@
     "response_schema_ref": "#/components/schemas/LlmProviderModelSyncPricingResponse",
     "summary": "Sync Provider Model Pricing",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -2026,6 +2994,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": "#/components/schemas/ProviderPayload",
     "group": "llm",
     "http": {
@@ -2040,6 +3017,18 @@
     "response_schema_ref": "#/components/schemas/LlmProviderResponse",
     "summary": "Create Provider",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -2048,6 +3037,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -2071,6 +3069,18 @@
     "response_schema_ref": null,
     "summary": "Delete Provider",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -2079,6 +3089,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -2093,6 +3112,18 @@
     "response_schema_ref": null,
     "summary": "List Providers",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": false,
@@ -2101,6 +3132,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": "#/components/schemas/ProviderPayload",
     "group": "llm",
     "http": {
@@ -2124,6 +3164,18 @@
     "response_schema_ref": "#/components/schemas/LlmProviderResponse",
     "summary": "Update Provider",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -2132,6 +3184,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -2155,6 +3216,18 @@
     "response_schema_ref": "#/components/schemas/LlmProviderResponse",
     "summary": "Get Provider",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": false,
@@ -2163,6 +3236,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -2186,6 +3268,18 @@
     "response_schema_ref": "#/components/schemas/LlmPromptTemplateDetail",
     "summary": "Reset Prompt",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,
@@ -2194,6 +3288,15 @@
     }
   },
   {
+    "agent_link_routes": {
+      "admin.llm.graph": {
+        "name": "admin.llm.graph",
+        "params": [],
+        "query": [],
+        "scope": "admin",
+        "template": "/admin/llm/graph"
+      }
+    },
     "body_schema_ref": null,
     "group": "llm",
     "http": {
@@ -2208,6 +3311,18 @@
     "response_schema_ref": "#/components/schemas/LlmSyncPricingResult",
     "summary": "Sync Pricing",
     "x_agent_confirm": null,
+    "x_agent_links": {
+      "links": [
+        {
+          "label": "Open LLM graph",
+          "params": {},
+          "query": {},
+          "rel": "admin.review",
+          "route": "admin.llm.graph"
+        }
+      ],
+      "policy": "links"
+    },
     "x_cli": {
       "group": "llm",
       "mutates": true,

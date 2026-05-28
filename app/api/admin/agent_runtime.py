@@ -37,6 +37,7 @@ from app.agent.dispatcher import (
     _tool_description,
     _tool_input_schema,
 )
+from app.agent.links import resolve_agent_links
 from app.api.admin._workspace_state import load_workspace
 from app.api.admin.agent import (
     _ADMIN_AGENT_CHANNEL,
@@ -484,11 +485,21 @@ class DeploymentAdminToolDispatcher(ToolDispatcher):
             json=body if entry.method in _BODY_METHODS else None,
             headers=_admin_request_headers(token, headers, has_body=body is not None),
         )
+        body_obj = _coerce_body(response.content, response.headers.get("content-type"))
+        agent_links = resolve_agent_links(
+            entry.operation.get("x-agent-links"),
+            workspace_slug=None,
+            path_vars=path_vars,
+            query=query,
+            request_body=body,
+            response_body=body_obj,
+        )
         return ToolResult(
             call_id=call.id,
             status_code=response.status_code,
-            body=_coerce_body(response.content, response.headers.get("content-type")),
+            body=body_obj,
             mutated=entry.method in _MUTATING_METHODS and response.status_code < 400,
+            agent_links=agent_links,
         )
 
     def _get_client(self) -> TestClient:
@@ -728,15 +739,15 @@ def _append_tool_result_to_history(
     call: ToolCall,
     result: ToolResult,
 ) -> list[ChatMessage]:
-    rendered = json.dumps(
-        {
-            "tool_call_id": result.call_id,
-            "name": call.name,
-            "status": result.status_code,
-            "body": result.body,
-        },
-        default=str,
-    )
+    payload: dict[str, object] = {
+        "tool_call_id": result.call_id,
+        "name": call.name,
+        "status": result.status_code,
+        "body": result.body,
+    }
+    if result.agent_links is not None:
+        payload["agent_links"] = result.agent_links
+    rendered = json.dumps(payload, default=str)
     return [*history, {"role": "assistant", "content": rendered}]
 
 
