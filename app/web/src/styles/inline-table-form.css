@@ -244,6 +244,84 @@
   cursor: not-allowed;
 }
 
+.inline-table-form__tag-picker {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.inline-table-form__tag-picker-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.inline-table-form__tag-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.inline-table-form__tag-option {
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  cursor: pointer;
+  font-family: "Inter Tight", sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.inline-table-form__tag-option:hover {
+  border-color: var(--line-strong);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.inline-table-form__tag-option:focus-visible {
+  outline: 2px solid var(--moss);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--moss-soft);
+}
+
+.inline-table-form__tag-option.is-selected {
+  border-color: color-mix(in srgb, var(--moss) 42%, var(--line-strong));
+  background: var(--moss-soft);
+  color: var(--moss);
+}
+
+.inline-table-form__tag-option.is-selected:hover {
+  background: color-mix(in srgb, var(--moss-soft) 76%, var(--card));
+  color: var(--moss-2);
+}
+
+.inline-table-form__tag-option:disabled,
+.inline-table-form__tag-option:disabled:hover {
+  border-color: transparent;
+  background: var(--paper-2);
+  color: var(--ink-3);
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 .inline-table-form__searchable-select {
   width: 100%;
   min-width: 0;
@@ -687,6 +765,7 @@
   }
 
   .inline-table-form__control,
+  .inline-table-form__tag-option,
   .inline-table-form__icon-btn {
     min-height: 44px;
   }

@@ -1075,6 +1075,91 @@ export function InlineSelectField({
   );
 }
 
+export interface InlineTagPickerOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+}
+
+export interface InlineTagPickerFieldProps {
+  value: readonly string[];
+  options: readonly InlineTagPickerOption[];
+  onChange: (value: string[]) => void;
+  label?: string;
+  ariaLabel?: string;
+  disabled?: boolean;
+}
+
+export function InlineTagPickerField({
+  value,
+  options,
+  onChange,
+  label,
+  ariaLabel,
+  disabled = false,
+}: InlineTagPickerFieldProps) {
+  const labelId = useId();
+  const uniqueOptions = uniqueTagPickerOptions(options);
+  const selectedValues = normalizeTagPickerValue(value, uniqueOptions);
+  const selected = new Set(selectedValues);
+  const resolvedLabel = ariaLabel ?? label ?? "Tag options";
+
+  const toggleOption = (option: InlineTagPickerOption) => {
+    if (disabled || option.disabled) return;
+    const nextSelected = new Set(selectedValues);
+    if (nextSelected.has(option.value)) {
+      nextSelected.delete(option.value);
+    } else {
+      nextSelected.add(option.value);
+    }
+    onChange(orderedTagPickerValues(uniqueOptions, nextSelected));
+  };
+
+  return (
+    <div
+      className={[
+        "inline-table-form__tag-picker",
+        disabled ? "inline-table-form__tag-picker--disabled" : null,
+      ].filter(Boolean).join(" ")}
+      role="group"
+      aria-label={label ? undefined : resolvedLabel}
+      aria-labelledby={label ? labelId : undefined}
+      aria-disabled={disabled || undefined}
+      data-inline-table-enter-save="false"
+    >
+      {label ? (
+        <span id={labelId} className="inline-table-form__tag-picker-label">
+          {label}
+        </span>
+      ) : null}
+      <div className="inline-table-form__tag-options">
+        {uniqueOptions.map((option) => {
+          const isSelected = selected.has(option.value);
+          const optionDisabled = disabled || option.disabled;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={[
+                "inline-table-form__tag-option",
+                isSelected ? "is-selected" : null,
+              ].filter(Boolean).join(" ")}
+              aria-pressed={isSelected}
+              disabled={optionDisabled}
+              onClick={() => toggleOption(option)}
+              onKeyDown={(event) => (
+                handleTagOptionKeyDown(event, () => toggleOption(option), optionDisabled)
+              )}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export interface InlineSearchableSelectBlankOption {
   label: string;
   secondaryText?: string;
@@ -1283,6 +1368,48 @@ function statusLabel(status: InlineTableRowStatus) {
   if (status === "error") return "Needs review";
   if (status === "disabled") return "Locked";
   return "";
+}
+
+function normalizeTagPickerValue(
+  value: readonly string[],
+  options: readonly InlineTagPickerOption[],
+) {
+  return orderedTagPickerValues(options, new Set(value));
+}
+
+function uniqueTagPickerOptions(options: readonly InlineTagPickerOption[]) {
+  const seen = new Set<string>();
+  return options.filter((option) => {
+    if (seen.has(option.value)) return false;
+    seen.add(option.value);
+    return true;
+  });
+}
+
+function orderedTagPickerValues(
+  options: readonly InlineTagPickerOption[],
+  selected: ReadonlySet<string>,
+) {
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const option of options) {
+    if (!selected.has(option.value) || seen.has(option.value)) continue;
+    seen.add(option.value);
+    next.push(option.value);
+  }
+  return next;
+}
+
+function handleTagOptionKeyDown(
+  event: KeyboardEvent<HTMLButtonElement>,
+  toggle: () => void,
+  disabled?: boolean,
+) {
+  if (disabled) return;
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  event.stopPropagation();
+  toggle();
 }
 
 function cellClasses<TDraft>(column: InlineTableColumn<TDraft>, base: string) {

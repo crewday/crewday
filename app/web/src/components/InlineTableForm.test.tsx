@@ -7,6 +7,7 @@ import {
   InlineNoteField,
   InlineSearchableSelectField,
   InlineSelectField,
+  InlineTagPickerField,
   InlineTableForm,
   type InlineTableColumn,
   type InlineTableRow,
@@ -29,6 +30,10 @@ interface IconDraft {
   iconName: string;
 }
 
+interface RoleDraft {
+  roles: string[];
+}
+
 const ownerOptions = [
   { value: "maria", label: "Maria" },
   { value: "enzo", label: "Enzo" },
@@ -38,6 +43,12 @@ const searchableOwnerOptions = [
   { value: "maria", label: "Maria", secondaryText: "Lead" },
   { value: "enzo", label: "Enzo", secondaryText: "Backup" },
   { value: "sora", label: "Sora", secondaryText: "Float" },
+];
+
+const roleOptions = [
+  { value: "manager", label: "Manager" },
+  { value: "employee", label: "Employee" },
+  { value: "admin", label: "Admin" },
 ];
 
 const columns: InlineTableColumn<Draft>[] = [
@@ -122,6 +133,23 @@ const iconColumns: InlineTableColumn<IconDraft>[] = [
         value={row.draft.iconName}
         disabled={disabled}
         onChange={(iconName) => update({ iconName })}
+      />
+    ),
+  },
+];
+
+const tagColumns: InlineTableColumn<RoleDraft>[] = [
+  {
+    key: "roles",
+    header: "Roles",
+    renderRead: ({ row }) => <span>{row.draft.roles.join(", ")}</span>,
+    renderEdit: ({ row, update, disabled }) => (
+      <InlineTagPickerField
+        value={row.draft.roles}
+        options={roleOptions}
+        disabled={disabled}
+        ariaLabel="Document roles"
+        onChange={(roles) => update({ roles })}
       />
     ),
   },
@@ -222,6 +250,128 @@ describe("InlineTableForm", () => {
     expect(input).toHaveAttribute("step", "900");
     expect(input).toBeDisabled();
     expect((input as HTMLInputElement).value).toBe("09:30");
+  });
+
+  it("toggles fixed tag options and normalizes duplicate unknown values into option order", () => {
+    const onChange = vi.fn();
+    render(
+      <InlineTagPickerField
+        value={["admin", "manager", "manager", "legacy"]}
+        options={[roleOptions[0]!, roleOptions[0]!, roleOptions[1]!, roleOptions[2]!]}
+        ariaLabel="Agent doc roles"
+        onChange={onChange}
+      />,
+    );
+
+    const group = screen.getByRole("group", { name: "Agent doc roles" });
+    const buttons = within(group).getAllByRole("button");
+    expect(buttons.map((button) => button.textContent)).toEqual(["Manager", "Employee", "Admin"]);
+    expect(within(group).getByRole("button", { name: "Manager" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(group).getByRole("button", { name: "Admin" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(within(group).getByRole("button", { name: "Employee" }));
+    expect(onChange).toHaveBeenLastCalledWith(["manager", "employee", "admin"]);
+
+    fireEvent.click(within(group).getByRole("button", { name: "Admin" }));
+    expect(onChange).toHaveBeenLastCalledWith(["manager"]);
+  });
+
+  it("keeps tag picker row shortcuts scoped without blocking Escape cancel", () => {
+    const onDraftChange = vi.fn();
+    const onSave = vi.fn();
+    const onCancel = vi.fn();
+    const onDelete = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Role rows"
+        columns={tagColumns}
+        rows={[
+          {
+            id: "role-1",
+            editing: true,
+            dirty: true,
+            draft: { roles: ["employee"] },
+            label: "Agent roles",
+          },
+        ]}
+        saveMode="explicit"
+        onDraftChange={onDraftChange}
+        onSave={onSave}
+        onCancel={onCancel}
+        onDelete={onDelete}
+      />,
+    );
+
+    const rowGroup = screen.getByLabelText("Agent roles");
+    const manager = within(rowGroup).getByRole("button", { name: "Manager" });
+    fireEvent.keyDown(manager, { key: "Enter" });
+    fireEvent.keyDown(manager, { key: "d" });
+
+    expect(onDraftChange).toHaveBeenCalledWith("role-1", { roles: ["manager", "employee"] });
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onDelete).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(manager, { key: "Escape" });
+
+    expect(onCancel).toHaveBeenCalledWith("role-1");
+  });
+
+  it("supports tag picker labels and keyboard toggling", () => {
+    const onChange = vi.fn();
+    render(
+      <InlineTagPickerField
+        value={["employee"]}
+        options={roleOptions}
+        label="Document roles"
+        onChange={onChange}
+      />,
+    );
+
+    const group = screen.getByRole("group", { name: "Document roles" });
+    fireEvent.keyDown(within(group).getByRole("button", { name: "Manager" }), { key: "Enter" });
+    expect(onChange).toHaveBeenLastCalledWith(["manager", "employee"]);
+
+    fireEvent.keyDown(within(group).getByRole("button", { name: "Employee" }), { key: " " });
+    expect(onChange).toHaveBeenLastCalledWith([]);
+  });
+
+  it("prevents disabled tag picker changes", () => {
+    const onChange = vi.fn();
+    const options = [
+      roleOptions[0]!,
+      { ...roleOptions[1]!, disabled: true },
+      roleOptions[2]!,
+    ];
+    const { rerender } = render(
+      <InlineTagPickerField
+        value={[]}
+        options={options}
+        ariaLabel="Editable roles"
+        onChange={onChange}
+      />,
+    );
+
+    const disabledOption = screen.getByRole("button", { name: "Employee" });
+    expect(disabledOption).toBeDisabled();
+    fireEvent.click(disabledOption);
+    fireEvent.keyDown(disabledOption, { key: "Enter" });
+    expect(onChange).not.toHaveBeenCalled();
+
+    rerender(
+      <InlineTagPickerField
+        value={["manager"]}
+        options={roleOptions}
+        ariaLabel="Editable roles"
+        disabled
+        onChange={onChange}
+      />,
+    );
+
+    expect(screen.getByRole("group", { name: "Editable roles" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Manager" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Admin" }));
+
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it("updates row drafts from searchable select option selection", () => {
@@ -1554,6 +1704,12 @@ describe("InlineTableForm", () => {
     expect(inlineTableCss).toContain(".inline-table-form__group.is-selected:focus-visible");
     expect(inlineTableCss).toContain(".inline-table-form__group.is-delete-armed:focus-visible");
     expect(inlineTableCss).toContain(".inline-table-form__icon-selector .icon-selector__selected:disabled:hover");
+    expect(inlineTableCss).toMatch(
+      /\.inline-table-form__tag-options\s*{[\s\S]*flex-wrap: wrap;/m,
+    );
+    expect(inlineTableCss).toMatch(
+      /\.inline-table-form__tag-option\s*{[\s\S]*min-width: 0;[\s\S]*max-width: 100%;/m,
+    );
     expect(inlineTableCss).toMatch(
       /@media \(max-width: 720px\)\s*{[\s\S]*\.inline-table-form__head\s*{\s*display: none;/m,
     );
