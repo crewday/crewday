@@ -33,6 +33,9 @@ export interface AdminWorkspaceRow {
 
 export interface AdminWorkspacesResponse {
   workspaces: AdminWorkspaceRow[];
+  data: AdminWorkspaceRow[];
+  next_cursor: string | null;
+  has_more: boolean;
 }
 
 export interface AdminUsageWorkspaceRow {
@@ -47,6 +50,9 @@ export interface AdminUsageWorkspaceRow {
 
 export interface AdminUsageWorkspacesResponse {
   workspaces: AdminUsageWorkspaceRow[];
+  data: AdminUsageWorkspaceRow[];
+  next_cursor: string | null;
+  has_more: boolean;
 }
 
 export interface AdminUsageSummary {

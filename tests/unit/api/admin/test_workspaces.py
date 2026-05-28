@@ -187,6 +187,9 @@ class TestListWorkspaces:
         body = resp.json()
         ids = [row["id"] for row in body["workspaces"]]
         assert ids == [ws_old, ws_new]
+        assert [row["id"] for row in body["data"]] == ids
+        assert body["has_more"] is False
+        assert body["next_cursor"] is None
         # Default verification state surfaces when no key written.
         assert body["workspaces"][0]["verification_state"] == "unverified"
         assert body["workspaces"][0]["properties_count"] == 1
@@ -210,6 +213,162 @@ class TestListWorkspaces:
         resp = client.get("/admin/api/v1/workspaces")
         assert resp.status_code == 404
         assert resp.json().get("error") == "not_found"
+
+    def test_paginates_workspace_list_oldest_first(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        with session_factory() as s:
+            ids = [
+                seed_workspace(
+                    s,
+                    slug=f"page-{index}",
+                    created_at=PINNED + timedelta(minutes=index),
+                )
+                for index in range(3)
+            ]
+            s.commit()
+        _user, cookie = _admin_cookie(session_factory, settings)
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+        first = client.get("/admin/api/v1/workspaces", params={"limit": 2}).json()
+        assert [row["id"] for row in first["workspaces"]] == ids[:2]
+        assert first["has_more"] is True
+        assert first["next_cursor"] is not None
+
+        second = client.get(
+            "/admin/api/v1/workspaces",
+            params={"limit": 2, "cursor": first["next_cursor"]},
+        ).json()
+        assert [row["id"] for row in second["workspaces"]] == ids[2:]
+        assert second["has_more"] is False
+        assert second["next_cursor"] is None
+
+    def test_search_matches_workspace_name_and_slug(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        with session_factory() as s:
+            by_name = seed_workspace(s, slug="alpha", name="North House")
+            by_slug = seed_workspace(
+                s,
+                slug="north-annex",
+                name="Annex",
+                created_at=PINNED + timedelta(minutes=1),
+            )
+            seed_workspace(
+                s,
+                slug="south",
+                name="South House",
+                created_at=PINNED + timedelta(minutes=2),
+            )
+            s.commit()
+        _user, cookie = _admin_cookie(session_factory, settings)
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+        body = client.get("/admin/api/v1/workspaces", params={"q": "north"}).json()
+        assert [row["id"] for row in body["workspaces"]] == [by_name, by_slug]
+        assert body["has_more"] is False
+        assert body["next_cursor"] is None
+
+    def test_search_no_match_returns_empty_page(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        with session_factory() as s:
+            seed_workspace(s, slug="alpha", name="Alpha")
+            s.commit()
+        _user, cookie = _admin_cookie(session_factory, settings)
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+        body = client.get("/admin/api/v1/workspaces", params={"q": "missing"}).json()
+        assert body["workspaces"] == []
+        assert body["data"] == []
+        assert body["has_more"] is False
+        assert body["next_cursor"] is None
+
+    def test_invalid_cursor_returns_422(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        _user, cookie = _admin_cookie(session_factory, settings)
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+        resp = client.get("/admin/api/v1/workspaces", params={"cursor": "not-a-cursor"})
+        assert resp.status_code == 422
+        assert resp.json()["type"].endswith("/invalid_cursor")
+
+    @pytest.mark.parametrize("limit", [0, 501])
+    def test_invalid_limit_returns_422(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        limit: int,
+    ) -> None:
+        _user, cookie = _admin_cookie(session_factory, settings)
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+        resp = client.get("/admin/api/v1/workspaces", params={"limit": limit})
+        assert resp.status_code == 422
+
+    def test_stale_cursor_returns_empty_page(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        with session_factory() as s:
+            stale_id = seed_workspace(s, slug="stale", created_at=PINNED)
+            seed_workspace(s, slug="next", created_at=PINNED + timedelta(minutes=1))
+            s.commit()
+        _user, cookie = _admin_cookie(session_factory, settings)
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+        first = client.get("/admin/api/v1/workspaces", params={"limit": 1}).json()
+        assert first["workspaces"][0]["id"] == stale_id
+        with session_factory() as s, tenant_agnostic():
+            workspace = s.get(Workspace, stale_id)
+            assert workspace is not None
+            s.delete(workspace)
+            s.commit()
+
+        body = client.get(
+            "/admin/api/v1/workspaces",
+            params={"limit": 1, "cursor": first["next_cursor"]},
+        ).json()
+        assert body["workspaces"] == []
+        assert body["has_more"] is False
+        assert body["next_cursor"] is None
+
+    def test_cursor_from_different_search_scope_returns_empty_page(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        with session_factory() as s:
+            seed_workspace(s, slug="alpha-beta", created_at=PINNED)
+            seed_workspace(s, slug="beta", created_at=PINNED + timedelta(minutes=1))
+            s.commit()
+        _user, cookie = _admin_cookie(session_factory, settings)
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+        first = client.get("/admin/api/v1/workspaces", params={"limit": 1}).json()
+
+        body = client.get(
+            "/admin/api/v1/workspaces",
+            params={"limit": 1, "cursor": first["next_cursor"], "q": "beta"},
+        ).json()
+        assert body["workspaces"] == []
+        assert body["has_more"] is False
+        assert body["next_cursor"] is None
 
 
 class TestGetWorkspace:

@@ -25364,6 +25364,28 @@
       "UsageWorkspacesResponse": {
         "description": "Body of ``GET /admin/api/v1/usage/workspaces``.",
         "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/UsageWorkspaceRow"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
           "workspaces": {
             "items": {
               "$ref": "#/components/schemas/UsageWorkspaceRow"
@@ -25373,6 +25395,9 @@
           }
         },
         "required": [
+          "data",
+          "has_more",
+          "next_cursor",
           "workspaces"
         ],
         "title": "UsageWorkspacesResponse",
@@ -28099,8 +28124,30 @@
         "type": "object"
       },
       "WorkspaceListResponse": {
-        "description": "Body of ``GET /admin/api/v1/workspaces``.\n\nReturned as ``{workspaces: [...]}`` rather than a bare array\nso the response is forward-compatible with the cursor envelope\nthe wider \u00a712 pagination contract uses (``data + next_cursor +\nhas_more``). The cd-jlms slice ships every row in one page;\nthe cursor envelope lands when the deployment grows past a\npractical fit-in-memory bound.",
+        "description": "Body of ``GET /admin/api/v1/workspaces``.\n\nPreserves the legacy ``workspaces`` key while also exposing\nthe standard \u00a712 cursor envelope fields for infinite-loading\nclients. ``data`` mirrors ``workspaces`` so generic paginated\nclients can consume this endpoint without a one-off adapter.",
         "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceListItem"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
           "workspaces": {
             "items": {
               "$ref": "#/components/schemas/WorkspaceListItem"
@@ -28110,6 +28157,9 @@
           }
         },
         "required": [
+          "data",
+          "has_more",
+          "next_cursor",
           "workspaces"
         ],
         "title": "WorkspaceListResponse",
@@ -71978,9 +72028,59 @@
     },
     "/admin/api/v1/usage/workspaces": {
       "get": {
-        "description": "Return the per-workspace usage table.\n\nWalks every workspace once, joins the rolling-window\naggregate, and resolves each workspace's cap against the\ndeployment default. The SPA's :file:`UsagePage` paginates\nclient-side; the cd-jlms slice ships every row in one\npage (the table is small and bounded for v1 deployments).",
+        "description": "Return the per-workspace usage table.\n\nWalks every workspace once, joins the rolling-window\naggregate, and resolves each workspace's cap against the\ndeployment default. The response preserves the legacy\n``workspaces`` key and mirrors those rows under ``data``\nfor standard cursor-envelope clients.",
         "operationId": "admin.usage.workspaces",
         "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
           {
             "in": "cookie",
             "name": "__Host-crewday_session",
@@ -73147,9 +73247,59 @@
     },
     "/admin/api/v1/workspaces": {
       "get": {
-        "description": "Return every :class:`Workspace` row, ordered oldest-first.\n\nMatches the SPA's ``WorkspacesPage`` chronological roster.\nArchived workspaces stay in the list \u2014 the admin's\n\"what does the deployment look like?\" view must surface\nevery tenant, not just the live ones; the\n:attr:`WorkspaceListItem.archived_at` cell tells the row\napart visually.",
+        "description": "Return a cursor-paginated :class:`Workspace` page, oldest-first.\n\nMatches the SPA's ``WorkspacesPage`` chronological roster.\nArchived workspaces stay in the list \u2014 the admin's\n\"what does the deployment look like?\" view must surface\nevery tenant, not just the live ones; the\n:attr:`WorkspaceListItem.archived_at` cell tells the row\napart visually.",
         "operationId": "admin.workspaces.list",
         "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
           {
             "in": "cookie",
             "name": "__Host-crewday_session",

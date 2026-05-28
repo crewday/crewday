@@ -31,7 +31,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Final
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -47,6 +47,7 @@ from app.api.admin._usage_helpers import (
     _resolved_cap,
     _window,
 )
+from app.api.admin._workspace_pages import list_workspace_page
 from app.api.admin._workspace_state import (
     archive_workspace_if_needed,
     format_archived_at,
@@ -56,6 +57,7 @@ from app.api.admin._workspace_state import (
 )
 from app.api.admin.deps import current_deployment_admin_principal
 from app.api.deps import db_session
+from app.api.pagination import DEFAULT_LIMIT, LimitQuery, PageCursorQuery
 from app.api.transport import admin_sse
 from app.domain.errors import NotFound
 from app.tenancy import DeploymentContext, tenant_agnostic
@@ -111,15 +113,16 @@ class WorkspaceListItem(BaseModel):
 class WorkspaceListResponse(BaseModel):
     """Body of ``GET /admin/api/v1/workspaces``.
 
-    Returned as ``{workspaces: [...]}`` rather than a bare array
-    so the response is forward-compatible with the cursor envelope
-    the wider §12 pagination contract uses (``data + next_cursor +
-    has_more``). The cd-jlms slice ships every row in one page;
-    the cursor envelope lands when the deployment grows past a
-    practical fit-in-memory bound.
+    Preserves the legacy ``workspaces`` key while also exposing
+    the standard §12 cursor envelope fields for infinite-loading
+    clients. ``data`` mirrors ``workspaces`` so generic paginated
+    clients can consume this endpoint without a one-off adapter.
     """
 
     workspaces: list[WorkspaceListItem]
+    data: list[WorkspaceListItem]
+    next_cursor: str | None
+    has_more: bool
 
 
 class WorkspaceSummaryResponse(BaseModel):
@@ -320,8 +323,11 @@ def build_admin_workspaces_router() -> APIRouter:
         _ctx: Annotated[DeploymentContext, Depends(current_deployment_admin_principal)],
         session: _Db,
         request: Request,
+        q: Annotated[str | None, Query(max_length=200)] = None,
+        cursor: PageCursorQuery = None,
+        limit: LimitQuery = DEFAULT_LIMIT,
     ) -> WorkspaceListResponse:
-        """Return every :class:`Workspace` row, ordered oldest-first.
+        """Return a cursor-paginated :class:`Workspace` page, oldest-first.
 
         Matches the SPA's ``WorkspacesPage`` chronological roster.
         Archived workspaces stay in the list — the admin's
@@ -330,16 +336,7 @@ def build_admin_workspaces_router() -> APIRouter:
         :attr:`WorkspaceListItem.archived_at` cell tells the row
         apart visually.
         """
-        with tenant_agnostic():
-            rows = (
-                session.execute(
-                    select(Workspace).order_by(
-                        Workspace.created_at.asc(), Workspace.id.asc()
-                    )
-                )
-                .scalars()
-                .all()
-            )
+        page = list_workspace_page(session, q=q, cursor=cursor, limit=limit)
         cutoff = _window(datetime.now(UTC))
         usage = _list_workspace_aggregates(session, cutoff=cutoff)
         property_counts = _property_counts(session)
@@ -352,9 +349,14 @@ def build_admin_workspaces_router() -> APIRouter:
                 spent_cents_30d=usage.get(row.id, (0, 0))[1],
                 cap_cents_30d=_resolved_cap(row, deployment_default=deployment_default),
             )
-            for row in rows
+            for row in page.items
         ]
-        return WorkspaceListResponse(workspaces=items)
+        return WorkspaceListResponse(
+            workspaces=items,
+            data=items,
+            next_cursor=page.next_cursor,
+            has_more=page.has_more,
+        )
 
     @router.get(
         "/workspaces/{id}",

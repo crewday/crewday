@@ -1508,11 +1508,15 @@ POST   /admin/api/v1/chat/test-inbound               # persist a synthetic inbou
 
 # Usage aggregates
 GET    /admin/api/v1/usage/summary                   # rolling 30d spend, per capability & per workspace
-GET    /admin/api/v1/usage/workspaces                # table: workspace → cap / spent / % / paused
+GET    /admin/api/v1/usage/workspaces                # cursor-paginated; ?q= matches workspace name/slug.
+                                                     # returns {workspaces, data, next_cursor, has_more}
+                                                     # rows: workspace → cap / spent / % / paused
 PUT    /admin/api/v1/usage/workspaces/{id}/cap       # raise or lower workspace budget cap
 
 # Workspace lifecycle
-GET    /admin/api/v1/workspaces                      # list all workspaces (id, slug, plan, verification, size)
+GET    /admin/api/v1/workspaces                      # cursor-paginated; ?q= matches workspace name/slug.
+                                                     # returns {workspaces, data, next_cursor, has_more}
+                                                     # rows: id, slug, plan, verification, size
 POST   /admin/api/v1/workspaces/{id}/trust           # promote to verification_state='trusted'
 POST   /admin/api/v1/workspaces/{id}/archive         # archive; owners-group only
 GET    /admin/api/v1/workspaces/{id}                 # summary card: counts, usage, most recent activity

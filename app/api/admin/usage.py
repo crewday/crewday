@@ -53,9 +53,11 @@ from app.api.admin._usage_helpers import (
     _resolved_cap,
     _window,
 )
+from app.api.admin._workspace_pages import list_workspace_page
 from app.api.admin._workspace_state import load_workspace
 from app.api.admin.deps import current_deployment_admin_principal
 from app.api.deps import db_session
+from app.api.pagination import DEFAULT_LIMIT, LimitQuery, PageCursorQuery
 from app.api.transport import admin_sse
 from app.domain.errors import NotFound, Validation
 from app.tenancy import DeploymentContext, tenant_agnostic
@@ -149,6 +151,9 @@ class UsageWorkspacesResponse(BaseModel):
     """Body of ``GET /admin/api/v1/usage/workspaces``."""
 
     workspaces: list[UsageWorkspaceRow]
+    data: list[UsageWorkspaceRow]
+    next_cursor: str | None
+    has_more: bool
 
 
 class UsageCapPayload(BaseModel):
@@ -593,22 +598,25 @@ def build_admin_usage_router() -> APIRouter:
         _ctx: Annotated[DeploymentContext, Depends(current_deployment_admin_principal)],
         session: _Db,
         request: Request,
+        q: Annotated[str | None, Query(max_length=200)] = None,
+        cursor: PageCursorQuery = None,
+        limit: LimitQuery = DEFAULT_LIMIT,
     ) -> UsageWorkspacesResponse:
         """Return the per-workspace usage table.
 
         Walks every workspace once, joins the rolling-window
         aggregate, and resolves each workspace's cap against the
-        deployment default. The SPA's :file:`UsagePage` paginates
-        client-side; the cd-jlms slice ships every row in one
-        page (the table is small and bounded for v1 deployments).
+        deployment default. The response preserves the legacy
+        ``workspaces`` key and mirrors those rows under ``data``
+        for standard cursor-envelope clients.
         """
         now = datetime.now(UTC)
         cutoff = _window(now)
-        workspaces = _list_workspaces(session)
+        page = list_workspace_page(session, q=q, cursor=cursor, limit=limit)
         per_workspace = _list_workspace_aggregates(session, cutoff=cutoff)
         deployment_default = _deployment_default_cap(request)
         rows: list[UsageWorkspaceRow] = []
-        for workspace in workspaces:
+        for workspace in page.items:
             spent = per_workspace.get(workspace.id, (0, 0))[1]
             cap = _resolved_cap(workspace, deployment_default=deployment_default)
             rows.append(
@@ -622,7 +630,12 @@ def build_admin_usage_router() -> APIRouter:
                     paused=cap == 0 or spent >= cap,
                 )
             )
-        return UsageWorkspacesResponse(workspaces=rows)
+        return UsageWorkspacesResponse(
+            workspaces=rows,
+            data=rows,
+            next_cursor=page.next_cursor,
+            has_more=page.has_more,
+        )
 
     @router.put(
         "/usage/workspaces/{id}/cap",
