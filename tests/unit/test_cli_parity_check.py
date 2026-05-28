@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from scripts import cli_parity_check
 
 
@@ -59,6 +61,33 @@ def _schema(*operation_ids: str, include_x_cli: bool = True) -> dict[str, object
             }
         }
     return {"openapi": "3.1.0", "paths": paths}
+
+
+def _linked_schema(
+    x_agent_links: dict[str, object],
+    *,
+    response_schema: dict[str, object] | None = None,
+) -> dict[str, object]:
+    response: dict[str, object] = {"description": "ok"}
+    if response_schema is not None:
+        response["content"] = {
+            "application/json": {
+                "schema": response_schema,
+            },
+        }
+    return {
+        "openapi": "3.1.0",
+        "paths": {
+            "/w/{slug}/api/v1/demo": {
+                "get": {
+                    "operationId": "demo.list",
+                    "responses": {"200": response},
+                    "x-cli": {"group": "demo", "verb": "list"},
+                    "x-agent-links": x_agent_links,
+                }
+            }
+        },
+    }
 
 
 def _admin_schema(
@@ -526,6 +555,47 @@ def test_report_requires_agent_link_policy(tmp_path: Path) -> None:
     assert not report.ok
 
 
+def test_report_accepts_agent_link_policy_none_with_reason(tmp_path: Path) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [_entry(operation_id="demo.list")])
+    _write_json(
+        schema,
+        _linked_schema(
+            {
+                "policy": "none",
+                "reason": "No post-result web handoff for this test operation.",
+            }
+        ),
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.ok
+
+
+def test_report_requires_agent_link_policy_none_reason(tmp_path: Path) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [_entry(operation_id="demo.list")])
+    _write_json(schema, _linked_schema({"policy": "none", "reason": " "}))
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.invalid_agent_links == (
+        "demo.list: policy none requires a non-empty reason",
+    )
+    assert not report.ok
+
+
 def test_report_validates_agent_link_routes(tmp_path: Path) -> None:
     surface, surface_admin, exclusions, schema = _paths(tmp_path)
     _write_json(surface, [_entry(operation_id="demo.list")])
@@ -567,6 +637,338 @@ def test_report_validates_agent_link_routes(tmp_path: Path) -> None:
     assert report.invalid_agent_links == (
         "demo.list: links[0]: route 'missing.route' is not in the "
         "agent-linkable manifest",
+    )
+    assert not report.ok
+
+
+def test_report_requires_agent_link_route_params(tmp_path: Path) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [_entry(operation_id="demo.list")])
+    _write_json(
+        schema,
+        _linked_schema(
+            {
+                "policy": "links",
+                "links": [
+                    {
+                        "rel": "self",
+                        "label": "Open property",
+                        "route": "property.detail",
+                        "params": {},
+                        "query": {},
+                    }
+                ],
+            },
+        ),
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.invalid_agent_links == (
+        "demo.list: links[0]: params must bind route params ['pid']",
+    )
+    assert not report.ok
+
+
+def test_report_rejects_agent_link_query_keys_not_allowed_by_route(
+    tmp_path: Path,
+) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [_entry(operation_id="demo.list")])
+    _write_json(
+        schema,
+        _linked_schema(
+            {
+                "policy": "links",
+                "links": [
+                    {
+                        "rel": "list",
+                        "label": "Open today",
+                        "route": "today",
+                        "params": {},
+                        "query": {"tab": "$query.tab"},
+                    }
+                ],
+            },
+        ),
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.invalid_agent_links == (
+        "demo.list: links[0]: query keys are not allowed by route manifest: ['tab']",
+    )
+    assert not report.ok
+
+
+def test_report_rejects_agent_link_non_get_semantics(tmp_path: Path) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [_entry(operation_id="demo.list")])
+    _write_json(
+        schema,
+        _linked_schema(
+            {
+                "policy": "links",
+                "links": [
+                    {
+                        "rel": "list",
+                        "label": "Open today",
+                        "route": "today",
+                        "params": {},
+                        "query": {},
+                        "method": "POST",
+                    }
+                ],
+            },
+        ),
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.invalid_agent_links == (
+        "demo.list: links[0]: entry keys must be "
+        "['label', 'params', 'query', 'rel', 'route']",
+    )
+    assert not report.ok
+
+
+@pytest.mark.parametrize(
+    ("template", "expected"),
+    [
+        ("https://example.test/tasks", "same-origin relative path"),
+        ("crewday://tasks", "same-origin relative path"),
+        ("javascript:alert(1)", "same-origin relative path"),
+        ("//example.test/tasks", "same-origin relative path"),
+        ("/api/v1/tasks", "must not resolve to an API path"),
+    ],
+)
+def test_report_rejects_unsafe_agent_link_route_templates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    template: str,
+    expected: str,
+) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [_entry(operation_id="demo.list")])
+    _write_json(
+        schema,
+        _linked_schema(
+            {
+                "policy": "links",
+                "links": [
+                    {
+                        "rel": "list",
+                        "label": "Open unsafe route",
+                        "route": "unsafe.route",
+                        "params": {},
+                        "query": {},
+                    }
+                ],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        cli_parity_check._codegen,
+        "_load_route_manifest",
+        lambda: {
+            "unsafe.route": {
+                "name": "unsafe.route",
+                "scope": "workspace",
+                "template": template,
+                "params": [],
+                "query": [],
+            }
+        },
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert len(report.invalid_agent_links) == 1
+    assert expected in report.invalid_agent_links[0]
+    assert not report.ok
+
+
+def test_report_validates_agent_link_response_bindings(tmp_path: Path) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [_entry(operation_id="demo.list")])
+    _write_json(
+        schema,
+        _linked_schema(
+            {
+                "policy": "links",
+                "links": [
+                    {
+                        "rel": "self",
+                        "label": "Open property",
+                        "route": "property.detail",
+                        "params": {"pid": "$response.missing_id"},
+                        "query": {},
+                    }
+                ],
+            },
+            response_schema={
+                "type": "object",
+                "properties": {"id": {"type": "string"}},
+            },
+        ),
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.invalid_agent_links == (
+        "demo.list: links[0]: binding '$response.missing_id' is not present in "
+        "the declared response schema",
+    )
+    assert not report.ok
+
+
+def test_report_accepts_agent_link_route_with_valid_response_binding(
+    tmp_path: Path,
+) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [_entry(operation_id="demo.list")])
+    _write_json(
+        schema,
+        _linked_schema(
+            {
+                "policy": "links",
+                "links": [
+                    {
+                        "rel": "self",
+                        "label": "Open property",
+                        "route": "property.detail",
+                        "params": {"pid": "$response.id"},
+                        "query": {},
+                    }
+                ],
+            },
+            response_schema={
+                "type": "object",
+                "properties": {"id": {"type": "string"}},
+            },
+        ),
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.ok
+
+
+def test_report_does_not_reject_response_binding_on_open_object_schema(
+    tmp_path: Path,
+) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [_entry(operation_id="demo.list")])
+    _write_json(
+        schema,
+        _linked_schema(
+            {
+                "policy": "links",
+                "links": [
+                    {
+                        "rel": "self",
+                        "label": "Open property",
+                        "route": "property.detail",
+                        "params": {"pid": "$response.extra_id"},
+                        "query": {},
+                    }
+                ],
+            },
+            response_schema={
+                "additionalProperties": True,
+                "type": "object",
+                "properties": {"id": {"type": "string"}},
+            },
+        ),
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.ok
+
+
+def test_report_validates_agent_link_response_bindings_through_anyof(
+    tmp_path: Path,
+) -> None:
+    surface, surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(surface, [_entry(operation_id="demo.list")])
+    _write_json(
+        schema,
+        _linked_schema(
+            {
+                "policy": "links",
+                "links": [
+                    {
+                        "rel": "self",
+                        "label": "Open property",
+                        "route": "property.detail",
+                        "params": {"pid": "$response.property.missing_id"},
+                        "query": {},
+                    }
+                ],
+            },
+            response_schema={
+                "type": "object",
+                "properties": {
+                    "property": {
+                        "anyOf": [
+                            {
+                                "type": "object",
+                                "properties": {"id": {"type": "string"}},
+                            },
+                            {"type": "null"},
+                        ]
+                    }
+                },
+            },
+        ),
+    )
+
+    report = cli_parity_check.build_report(
+        surface_path=surface,
+        surface_admin_path=surface_admin,
+        exclusions_path=exclusions,
+        schema_path=schema,
+    )
+
+    assert report.invalid_agent_links == (
+        "demo.list: links[0]: binding '$response.property.missing_id' is not "
+        "present in the declared response schema",
     )
     assert not report.ok
 
@@ -681,6 +1083,43 @@ def test_main_prints_report_when_codegen_check_fails(
     assert "crewday codegen: committed surface out of date" in captured.err
     assert "Workspace operations missing valid x-cli metadata" in captured.err
     assert "demo.not_agent" in captured.err
+
+
+def test_main_agent_links_only_reports_missing_policy(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    _surface, _surface_admin, exclusions, schema = _paths(tmp_path)
+    _write_json(
+        schema,
+        {
+            "openapi": "3.1.0",
+            "paths": {
+                "/w/{slug}/api/v1/demo": {
+                    "get": {
+                        "operationId": "demo.list",
+                        "responses": {"200": {"description": "ok"}},
+                        "x-cli": {"group": "demo", "verb": "list"},
+                    }
+                }
+            },
+        },
+    )
+
+    status = cli_parity_check.main(
+        [
+            "--agent-links-only",
+            "--exclusions",
+            str(exclusions),
+            "--schema",
+            str(schema),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert status == 1
+    assert "crewday openapi-agent-links: invalid" in captured.err
+    assert "demo.list" in captured.err
 
 
 def test_report_names_surface_operations_removed_from_openapi(tmp_path: Path) -> None:

@@ -163,6 +163,22 @@ jobs:
       - name: CLI parity
         run: uv run python scripts/cli_parity_check.py
 
+  openapi-agent-links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install deps
+        run: uv sync --group dev
+      - name: OpenAPI agent links
+        run: make openapi-agent-links
+
   boundaries:
     # Blocking check as of cd-ev0. Contracts live in pyproject.toml
     # under [tool.importlinter]; see docs/specs/01-architecture.md

@@ -1,4 +1,4 @@
-.PHONY: lint fmt type test coverage schemathesis i18n-extract i18n-check openapi openapi-check codegen codegen-check deps-lock deps-sync
+.PHONY: lint fmt type test coverage schemathesis i18n-extract i18n-check openapi openapi-check openapi-agent-links codegen codegen-check deps-lock deps-sync
 
 lint:
 	uv run ruff check .
@@ -31,6 +31,9 @@ openapi:
 openapi-check:
 	uv run python -m scripts.regen_openapi --check
 
+openapi-agent-links:
+	uv run python scripts/cli_parity_check.py --agent-links-only
+
 # Regenerate ``cli/crewday/_surface.json`` + ``_surface_admin.json``
 # from ``docs/api/openapi.json``. The codegen is a transform-only
 # step (cd-uky5) — run ``make openapi`` first if the FastAPI surface
@@ -39,7 +42,7 @@ openapi-check:
 codegen: openapi
 	uv run python -m crewday._codegen
 
-codegen-check:
+codegen-check: openapi-agent-links
 	uv run python -m crewday._codegen --check
 
 # API contract sweep (cd-3j25).

@@ -1560,6 +1560,18 @@ _TASK_DETAIL_LINK: Final = _agent_link(
     route="task.detail",
     params={"tid": "$response.id"},
 )
+_TASK_DETAIL_TASK_ID_LINK: Final = _agent_link(
+    rel="self",
+    label="Open task",
+    route="task.detail",
+    params={"tid": "$response.task_id"},
+)
+_TASK_DETAIL_WRAPPED_LINK: Final = _agent_link(
+    rel="self",
+    label="Open task",
+    route="task.detail",
+    params={"tid": "$response.task.id"},
+)
 _TASK_ITEM_LINK: Final = _agent_link(
     rel="item.self",
     label="Open task",
@@ -1572,6 +1584,12 @@ _ASSET_DETAIL_LINK: Final = _agent_link(
     route="asset.detail",
     params={"aid": "$response.id"},
 )
+_ASSET_DETAIL_WRAPPED_LINK: Final = _agent_link(
+    rel="self",
+    label="Open asset",
+    route="asset.detail",
+    params={"aid": "$response.asset.id"},
+)
 _ASSET_ITEM_LINK: Final = _agent_link(
     rel="item.self",
     label="Open asset",
@@ -1583,6 +1601,12 @@ _INSTRUCTION_DETAIL_LINK: Final = _agent_link(
     label="Open instruction",
     route="instruction.detail",
     params={"iid": "$response.id"},
+)
+_INSTRUCTION_DETAIL_WRAPPED_LINK: Final = _agent_link(
+    rel="self",
+    label="Open instruction",
+    route="instruction.detail",
+    params={"iid": "$response.instruction.id"},
 )
 _INSTRUCTION_ITEM_LINK: Final = _agent_link(
     rel="item.self",
@@ -1639,24 +1663,24 @@ _AGENT_LINKS_BY_OPERATION_ID: Final[Mapping[str, Sequence[Mapping[str, Any]]]] =
     "stays.reservations.list": (_STAYS_INDEX_LINK,),
     "create_task": (_TASK_DETAIL_LINK,),
     "get_task": (_TASK_DETAIL_LINK,),
-    "get_task_detail": (_TASK_DETAIL_LINK,),
+    "get_task_detail": (_TASK_DETAIL_WRAPPED_LINK,),
     "patch_task": (_TASK_DETAIL_LINK,),
-    "assign_task": (_TASK_DETAIL_LINK,),
-    "start_task": (_TASK_DETAIL_LINK,),
-    "complete_task": (_TASK_DETAIL_LINK,),
-    "skip_task": (_TASK_DETAIL_LINK,),
-    "cancel_task": (_TASK_DETAIL_LINK,),
+    "assign_task": (_TASK_DETAIL_TASK_ID_LINK,),
+    "start_task": (_TASK_DETAIL_TASK_ID_LINK,),
+    "complete_task": (_TASK_DETAIL_TASK_ID_LINK,),
+    "skip_task": (_TASK_DETAIL_TASK_ID_LINK,),
+    "cancel_task": (_TASK_DETAIL_TASK_ID_LINK,),
     "list_tasks": (_TASK_ITEM_LINK,),
     "assets.create": (_ASSET_DETAIL_LINK,),
-    "assets.get": (_ASSET_DETAIL_LINK,),
+    "assets.get": (_ASSET_DETAIL_WRAPPED_LINK,),
     "assets.update": (_ASSET_DETAIL_LINK,),
     "assets.move": (_ASSET_DETAIL_LINK,),
     "assets.restore": (_ASSET_DETAIL_LINK,),
     "assets.scan": (_ASSET_DETAIL_LINK,),
     "assets.list": (_ASSET_ITEM_LINK,),
-    "instructions.create": (_INSTRUCTION_DETAIL_LINK,),
-    "instructions.get": (_INSTRUCTION_DETAIL_LINK,),
-    "instructions.patch": (_INSTRUCTION_DETAIL_LINK,),
+    "instructions.create": (_INSTRUCTION_DETAIL_WRAPPED_LINK,),
+    "instructions.get": (_INSTRUCTION_DETAIL_WRAPPED_LINK,),
+    "instructions.patch": (_INSTRUCTION_DETAIL_WRAPPED_LINK,),
     "instructions.archive": (_INSTRUCTION_DETAIL_LINK,),
     "instructions.list": (_INSTRUCTION_ITEM_LINK,),
     "users.list": (_EMPLOYEE_ITEM_LINK,),

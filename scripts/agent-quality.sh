@@ -13,7 +13,8 @@
 #   4. ruff format --check .  (catch any remaining formatting drift)
 #   5. bind-mount visibility (dev-stack containers can read source files)
 #   6. mypy app              (strict type check; CI parity)
-#   7. pytest --testmon-forceselect
+#   7. make openapi-agent-links
+#   8. pytest --testmon-forceselect
 #
 # Exit 0 only when every gate is clean. Non-zero exit means there is
 # something the agent must fix by hand — the unfixable items are
@@ -71,6 +72,7 @@ ruff_check_status=0
 ruff_fmt_status=0
 bind_mount_visibility_status=0
 mypy_status=0
+openapi_agent_links_status=0
 pytest_status=0
 
 section() {
@@ -225,6 +227,9 @@ check_bind_mount_visibility || bind_mount_visibility_status=$?
 section "mypy --strict app (no autofix)"
 uv run mypy app || mypy_status=$?
 
+section "openapi-agent-links"
+make openapi-agent-links || openapi_agent_links_status=$?
+
 case "$test_mode" in
   testmon)
     section "pytest --testmon-forceselect (affected tests)"
@@ -270,6 +275,12 @@ if [[ $mypy_status -eq 0 ]]; then
   echo "mypy --strict app:  ok"
 else
   echo "mypy --strict app:  FAILED — fix the type errors printed above"
+  overall=1
+fi
+if [[ $openapi_agent_links_status -eq 0 ]]; then
+  echo "openapi links:      ok"
+else
+  echo "openapi links:      FAILED — fix x-agent-links issues printed above"
   overall=1
 fi
 case "$test_mode" in

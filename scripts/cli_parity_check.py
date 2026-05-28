@@ -33,6 +33,13 @@ _MUTATING_METHODS: Final[frozenset[str]] = frozenset({"post", "put", "patch", "d
 _ADMIN_API_PREFIX: Final[str] = "/admin/api/v1"
 _WORKSPACE_API_PREFIX: Final[str] = "/w/{slug}/api/v1"
 _OPERATION_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_.-]+$")
+_AGENT_LINK_REL_RE: Final[re.Pattern[str]] = re.compile(
+    r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+)
+_ROUTE_TEMPLATE_PARAM_RE: Final[re.Pattern[str]] = re.compile(
+    r":([A-Za-z_][A-Za-z0-9_]*)"
+)
+_SCHEME_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
 
 @dataclass(frozen=True, slots=True)
@@ -449,6 +456,8 @@ def _admin_mutation_confirmation_missing(
 def _agent_link_policy_problem(
     operation: Mapping[str, Any],
     route_manifest: Mapping[str, Mapping[str, Any]],
+    *,
+    schema: Mapping[str, Any],
 ) -> str | None:
     raw = operation.get("x-agent-links")
     if not isinstance(raw, Mapping):
@@ -468,8 +477,16 @@ def _agent_link_policy_problem(
     links = raw.get("links")
     if not isinstance(links, list) or not links:
         return "policy links requires a non-empty links list"
+    response_schema = _json_response_schema(operation, schema=schema)
+    item_schema = _json_response_item_schema(response_schema, schema=schema)
     for index, item in enumerate(links):
-        problem = _agent_link_entry_problem(item, route_manifest=route_manifest)
+        problem = _agent_link_entry_problem(
+            item,
+            route_manifest=route_manifest,
+            schema=schema,
+            response_schema=response_schema,
+            item_schema=item_schema,
+        )
         if problem is not None:
             return f"links[{index}]: {problem}"
     return None
@@ -479,6 +496,9 @@ def _agent_link_entry_problem(
     item: object,
     *,
     route_manifest: Mapping[str, Mapping[str, Any]],
+    schema: Mapping[str, Any],
+    response_schema: Mapping[str, Any] | None,
+    item_schema: Mapping[str, Any] | None,
 ) -> str | None:
     if not isinstance(item, Mapping):
         return "entry must be an object"
@@ -486,20 +506,29 @@ def _agent_link_entry_problem(
     keys = {str(key) for key in item}
     if keys != expected:
         return f"entry keys must be {sorted(expected)}"
-    for key in ("rel", "label", "route"):
-        value = item.get(key)
-        if not isinstance(value, str) or not value:
-            return f"{key} must be a non-empty string"
+    rel = item.get("rel")
+    if not isinstance(rel, str) or not rel:
+        return "rel must be a non-empty string"
+    if _AGENT_LINK_REL_RE.fullmatch(rel) is None:
+        return "rel must be stable machine-readable text"
+    label = item.get("label")
+    if not isinstance(label, str) or not label.strip():
+        return "label must be a non-empty string"
+    route_name = item.get("route")
+    if not isinstance(route_name, str) or not route_name:
+        return "route must be a non-empty string"
     params = item.get("params")
     query = item.get("query")
     if not isinstance(params, Mapping):
         return "params must be an object"
     if not isinstance(query, Mapping):
         return "query must be an object"
-    route_name = item["route"]
     route = route_manifest.get(route_name)
     if route is None:
         return f"route {route_name!r} is not in the agent-linkable manifest"
+    route_problem = _agent_link_route_problem(route)
+    if route_problem is not None:
+        return f"route {route_name!r}: {route_problem}"
     required_params = _route_field_names(route.get("params"))
     if set(params) != required_params:
         return f"params must bind route params {sorted(required_params)}"
@@ -507,7 +536,249 @@ def _agent_link_entry_problem(
     extra_query = set(query) - allowed_query
     if extra_query:
         return f"query keys are not allowed by route manifest: {sorted(extra_query)}"
+    for name, binding in sorted(params.items()):
+        problem = _agent_link_binding_problem(
+            name,
+            binding,
+            schema=schema,
+            response_schema=response_schema,
+            item_schema=item_schema,
+        )
+        if problem is not None:
+            return problem
+    for name, binding in sorted(query.items()):
+        problem = _agent_link_binding_problem(
+            name,
+            binding,
+            schema=schema,
+            response_schema=response_schema,
+            item_schema=item_schema,
+        )
+        if problem is not None:
+            return problem
     return None
+
+
+def _agent_link_route_problem(route: Mapping[str, Any]) -> str | None:
+    scope = route.get("scope")
+    template = route.get("template")
+    if not isinstance(scope, str) or scope not in {"workspace", "admin", "public"}:
+        return "scope must be workspace, admin, or public"
+    if not isinstance(template, str) or not template:
+        return "template must be a non-empty string"
+    stripped_template = template.strip()
+    lowered = stripped_template.lower()
+    if (
+        stripped_template.startswith("//")
+        or _SCHEME_RE.match(stripped_template) is not None
+        or lowered.startswith("javascript:")
+    ):
+        return "template must be a same-origin relative path"
+    if not stripped_template.startswith("/"):
+        return "template must start with '/'"
+
+    params = _route_field_names(route.get("params"))
+    path = stripped_template
+    for name in params:
+        path = path.replace(f":{name}", "x")
+    if _ROUTE_TEMPLATE_PARAM_RE.search(path) is not None:
+        return "template contains route params not declared in the manifest"
+    if scope == "workspace":
+        path = f"/w/workspace{path}"
+    if not path.startswith("/") or path.startswith("//"):
+        return "template must generate a same-origin relative href"
+    if path == "/api" or path.startswith("/api/") or "/api/" in path:
+        return "template must not resolve to an API path"
+    if path == "/admin/api" or path.startswith("/admin/api/"):
+        return "template must not resolve to an admin API path"
+    return None
+
+
+def _agent_link_binding_problem(
+    name: object,
+    binding: object,
+    *,
+    schema: Mapping[str, Any],
+    response_schema: Mapping[str, Any] | None,
+    item_schema: Mapping[str, Any] | None,
+) -> str | None:
+    if not isinstance(name, str) or not name:
+        return "binding keys must be non-empty strings"
+    if not isinstance(binding, str) or not binding.startswith("$"):
+        return f"binding for {name!r} must be a data reference string"
+    source, _, tail = binding[1:].partition(".")
+    if source == "resolved":
+        if tail != "workspace_slug":
+            return f"binding {binding!r} references an unknown resolved value"
+        return None
+    if source in {"path", "query", "request"}:
+        if not tail:
+            return f"binding {binding!r} must include a field path"
+        return None
+    if source == "response":
+        return _schema_binding_problem(
+            binding,
+            tail=tail,
+            binding_schema=response_schema,
+            root_schema=schema,
+        )
+    if source == "item":
+        return _schema_binding_problem(
+            binding,
+            tail=tail,
+            binding_schema=item_schema,
+            root_schema=schema,
+        )
+    return f"binding {binding!r} uses an unknown source"
+
+
+def _schema_binding_problem(
+    binding: str,
+    *,
+    tail: str,
+    binding_schema: Mapping[str, Any] | None,
+    root_schema: Mapping[str, Any],
+) -> str | None:
+    if not tail:
+        return f"binding {binding!r} must include a field path"
+    if binding_schema is None:
+        return None
+    known = _schema_has_path(binding_schema, tail, root_schema=root_schema)
+    if known is False:
+        return f"binding {binding!r} is not present in the declared response schema"
+    return None
+
+
+def _json_response_schema(
+    operation: Mapping[str, Any],
+    *,
+    schema: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    responses = operation.get("responses")
+    if not isinstance(responses, Mapping):
+        return None
+    for code in sorted(str(key) for key in responses if str(key).startswith("2")):
+        response = responses.get(code)
+        if not isinstance(response, Mapping):
+            continue
+        content = response.get("content")
+        if not isinstance(content, Mapping):
+            continue
+        json_content = content.get("application/json")
+        if not isinstance(json_content, Mapping):
+            continue
+        raw_schema = json_content.get("schema")
+        resolved = _resolve_schema(raw_schema, root_schema=schema)
+        if resolved is not None:
+            return resolved
+    return None
+
+
+def _json_response_item_schema(
+    response_schema: Mapping[str, Any] | None,
+    *,
+    schema: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    response_schema = _resolve_schema(response_schema, root_schema=schema)
+    if response_schema is None:
+        return None
+    if response_schema.get("type") == "array":
+        return _resolve_schema(response_schema.get("items"), root_schema=schema)
+    properties = response_schema.get("properties")
+    if isinstance(properties, Mapping):
+        data = _resolve_schema(properties.get("data"), root_schema=schema)
+        if isinstance(data, Mapping) and data.get("type") == "array":
+            return _resolve_schema(data.get("items"), root_schema=schema)
+    return None
+
+
+def _schema_has_path(
+    raw_schema: Mapping[str, Any],
+    dotted: str,
+    *,
+    root_schema: Mapping[str, Any],
+) -> bool | None:
+    current: Mapping[str, Any] | None = raw_schema
+    for part in dotted.split("."):
+        if not part:
+            return None
+        current = _schema_property_schema(current, part, root_schema=root_schema)
+        if current is None:
+            return None
+        if current == {}:
+            return False
+    return True
+
+
+def _schema_property_schema(
+    raw_schema: Mapping[str, Any] | None,
+    part: str,
+    *,
+    root_schema: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    current = _resolve_schema(raw_schema, root_schema=root_schema)
+    if current is None:
+        return None
+    for variant_key in ("allOf", "anyOf", "oneOf"):
+        variants = current.get(variant_key)
+        if isinstance(variants, list):
+            saw_known_object = False
+            saw_open_object = False
+            for variant in variants:
+                variant_schema = _resolve_schema(variant, root_schema=root_schema)
+                if variant_schema is None:
+                    continue
+                properties = variant_schema.get("properties")
+                if not isinstance(properties, Mapping):
+                    continue
+                prop = _resolve_schema(properties.get(part), root_schema=root_schema)
+                if prop is not None:
+                    return prop
+                if _schema_allows_additional_properties(variant_schema):
+                    saw_open_object = True
+                else:
+                    saw_known_object = True
+            if saw_open_object:
+                return None
+            return {} if saw_known_object else None
+    if current.get("type") == "array":
+        return _schema_property_schema(
+            _resolve_schema(current.get("items"), root_schema=root_schema),
+            part,
+            root_schema=root_schema,
+        )
+    properties = current.get("properties")
+    if not isinstance(properties, Mapping):
+        return None
+    prop = _resolve_schema(properties.get(part), root_schema=root_schema)
+    if prop is None and _schema_allows_additional_properties(current):
+        return None
+    return prop if prop is not None else {}
+
+
+def _schema_allows_additional_properties(schema: Mapping[str, Any]) -> bool:
+    additional = schema.get("additionalProperties")
+    return additional is not None and additional is not False
+
+
+def _resolve_schema(
+    raw_schema: object,
+    *,
+    root_schema: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    if not isinstance(raw_schema, Mapping):
+        return None
+    ref = raw_schema.get("$ref")
+    if not isinstance(ref, str):
+        return raw_schema
+    if not ref.startswith("#/"):
+        return None
+    current: object = root_schema
+    for part in ref[2:].split("/"):
+        if not isinstance(current, Mapping):
+            return None
+        current = current.get(part.replace("~1", "/").replace("~0", "~"))
+    return current if isinstance(current, Mapping) else None
 
 
 def _route_field_names(raw: object) -> set[str]:
@@ -525,6 +796,8 @@ def _route_field_names(raw: object) -> set[str]:
 
 def _agent_link_policy_violations(
     operations: Sequence[OpenApiOperation],
+    *,
+    schema: Mapping[str, Any],
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     route_manifest = _codegen._load_route_manifest()
     missing: list[str] = []
@@ -533,6 +806,7 @@ def _agent_link_policy_violations(
         problem = _agent_link_policy_problem(
             operation.operation,
             route_manifest=route_manifest,
+            schema=schema,
         )
         if problem is None:
             continue
@@ -541,6 +815,23 @@ def _agent_link_policy_violations(
         else:
             invalid.append(f"{operation.operation_id}: {problem}")
     return tuple(sorted(missing)), tuple(sorted(invalid))
+
+
+def build_agent_links_report(
+    *,
+    exclusions_path: Path = _codegen.DEFAULT_EXCLUSIONS_PATH,
+    schema_path: Path | None = None,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    schema = _load_schema(schema_path)
+    operations = tuple(_iter_openapi_operations(schema))
+    exclusions = _codegen.load_exclusions(exclusions_path)
+    excluded = _excluded_operation_ids(operations, exclusions)
+    cli_operations = tuple(
+        operation
+        for operation in operations
+        if _is_cli_candidate(operation) and operation.operation_id not in excluded
+    )
+    return _agent_link_policy_violations(cli_operations, schema=schema)
 
 
 def _operation_ids_from_surface(entries: Sequence[SurfaceEntry]) -> set[str]:
@@ -612,7 +903,8 @@ def build_report(
     admin_eligible = _admin_eligible_operations(operations, excluded)
     admin_surface_ids = _operation_ids_from_surface_file(surface_admin_path)
     missing_agent_links, invalid_agent_links = _agent_link_policy_violations(
-        cli_operations
+        cli_operations,
+        schema=schema,
     )
 
     return ParityReport(
@@ -747,12 +1039,36 @@ def _build_parser() -> argparse.ArgumentParser:
             "defaults to docs/api/openapi.json (regenerate via 'make openapi')."
         ),
     )
+    parser.add_argument(
+        "--agent-links-only",
+        action="store_true",
+        help="Run only the openapi-agent-links gate.",
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if args.agent_links_only:
+        missing_agent_links, invalid_agent_links = build_agent_links_report(
+            exclusions_path=args.exclusions,
+            schema_path=args.schema,
+        )
+        if not missing_agent_links and not invalid_agent_links:
+            sys.stdout.write("crewday openapi-agent-links: ok\n")
+            return 0
+        sys.stderr.write("crewday openapi-agent-links: invalid\n")
+        _print_block(
+            "CLI/agent operations missing x-agent-links policy:",
+            missing_agent_links,
+        )
+        _print_block(
+            "CLI/agent operations with invalid x-agent-links policy:",
+            invalid_agent_links,
+        )
+        return 1
+
     codegen_argv = [
         "--check",
         "--surface",

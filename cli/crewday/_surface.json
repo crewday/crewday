@@ -1741,7 +1741,7 @@
         {
           "label": "Open asset",
           "params": {
-            "aid": "$response.id"
+            "aid": "$response.asset.id"
           },
           "query": {},
           "rel": "self",
@@ -6029,7 +6029,7 @@
         {
           "label": "Open instruction",
           "params": {
-            "iid": "$response.id"
+            "iid": "$response.instruction.id"
           },
           "query": {},
           "rel": "self",
@@ -6088,7 +6088,7 @@
         {
           "label": "Open instruction",
           "params": {
-            "iid": "$response.id"
+            "iid": "$response.instruction.id"
           },
           "query": {},
           "rel": "self",
@@ -6247,7 +6247,7 @@
         {
           "label": "Open instruction",
           "params": {
-            "iid": "$response.id"
+            "iid": "$response.instruction.id"
           },
           "query": {},
           "rel": "self",
@@ -13431,7 +13431,7 @@
         {
           "label": "Open task",
           "params": {
-            "tid": "$response.id"
+            "tid": "$response.task_id"
           },
           "query": {},
           "rel": "self",
@@ -13495,7 +13495,7 @@
         {
           "label": "Open task",
           "params": {
-            "tid": "$response.id"
+            "tid": "$response.task_id"
           },
           "query": {},
           "rel": "self",
@@ -13878,7 +13878,7 @@
         {
           "label": "Open task",
           "params": {
-            "tid": "$response.id"
+            "tid": "$response.task_id"
           },
           "query": {},
           "rel": "self",
@@ -13991,7 +13991,7 @@
         {
           "label": "Open task",
           "params": {
-            "tid": "$response.id"
+            "tid": "$response.task.id"
           },
           "query": {},
           "rel": "self",
@@ -14937,7 +14937,7 @@
         {
           "label": "Open task",
           "params": {
-            "tid": "$response.id"
+            "tid": "$response.task_id"
           },
           "query": {},
           "rel": "self",
@@ -15001,7 +15001,7 @@
         {
           "label": "Open task",
           "params": {
-            "tid": "$response.id"
+            "tid": "$response.task_id"
           },
           "query": {},
           "rel": "self",
