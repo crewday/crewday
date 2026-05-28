@@ -89,6 +89,39 @@ __all__ = [
 # (the runtime then skips the audit row, matching the §11 contract:
 # audit rides on observable mutations only).
 _MUTATING_METHODS: Final[frozenset[str]] = frozenset({"POST", "PATCH", "PUT", "DELETE"})
+_SECURITY_CLASSIFICATION_PENDING_OPERATION_IDS: Final[frozenset[str]] = frozenset(
+    {
+        "approve_approval_w__slug__api_v1_approvals__approval_request_id__approve_post",
+        "auth.tokens.revoke_post",
+        "auth.tokens.rotate",
+        "delete_grants_w__slug__api_v1_users__user_id__grants_delete",
+        "payroll.payslips.payout_manifest",
+        "permission_groups.create",
+        "permission_groups.delete",
+        "permission_groups.members.add",
+        "permission_groups.members.remove",
+        "permission_groups.update",
+        "permission_rules.create",
+        "permission_rules.revoke",
+        "reject_approval_w__slug__api_v1_approvals__approval_request_id__reject_post",
+        "role_grants.create",
+        "role_grants.revoke",
+        "role_grants.update",
+        "tokens.mint",
+        "tokens.revoke",
+        "users.magic_link.issue",
+        "users.reset_passkey",
+        "webhooks.create",
+        "webhooks.delete",
+        "webhooks.enable",
+        "webhooks.secret.rotate",
+        "webhooks.test",
+        "webhooks.update",
+        "workspace_admin.workspace.archive",
+        "workspace_admin.workspace.delete",
+        "workspace_admin.workspace.export",
+    }
+)
 
 # Methods whose body the dispatcher serialises as the JSON request
 # payload. ``GET``/``DELETE`` send their non-path inputs as query
@@ -239,6 +272,32 @@ def _is_valid_x_cli_metadata(operation: Mapping[str, Any]) -> bool:
     )
 
 
+def _has_agent_confirmation(operation: Mapping[str, Any]) -> bool:
+    raw = operation.get("x-agent-confirm")
+    return raw is True or isinstance(raw, Mapping)
+
+
+def _agent_classification_count(operation: Mapping[str, Any]) -> int:
+    return sum(
+        (
+            _has_agent_confirmation(operation),
+            operation.get("x-agent-forbidden") is True,
+            operation.get("x-interactive-only") is True,
+        )
+    )
+
+
+def _mutating_classification_rejection(entry: _OperationEntry) -> str | None:
+    if entry.method not in _MUTATING_METHODS:
+        return None
+    operation_id = entry.operation.get("operationId")
+    if operation_id not in _SECURITY_CLASSIFICATION_PENDING_OPERATION_IDS:
+        return None
+    if _agent_classification_count(entry.operation) == 1:
+        return None
+    return "mutating tool is missing exactly one agent classification"
+
+
 def _is_workspace_agent_tool(entry: _OperationEntry) -> bool:
     """Return ``True`` when an operation may be advertised to workspace agents."""
     if not _is_workspace_api_path(entry.path):
@@ -247,14 +306,10 @@ def _is_workspace_agent_tool(entry: _OperationEntry) -> bool:
         return False
     if entry.operation.get("x-interactive-only") is True:
         return False
-    return _is_valid_x_cli_metadata(entry.operation)
-
-
-def _agent_scopes_for_operation(operation: Mapping[str, Any]) -> frozenset[str]:
-    raw = operation.get("x-agent-scopes")
-    if not isinstance(raw, list):
-        return frozenset()
-    return frozenset(item for item in raw if isinstance(item, str) and item)
+    return (
+        _is_valid_x_cli_metadata(entry.operation)
+        and _mutating_classification_rejection(entry) is None
+    )
 
 
 def _workspace_agent_rejection(entry: _OperationEntry) -> str | None:
@@ -267,6 +322,9 @@ def _workspace_agent_rejection(entry: _OperationEntry) -> str | None:
         return "tool requires an interactive session"
     if not _is_valid_x_cli_metadata(entry.operation):
         return "tool is not backed by CLI metadata"
+    classification_rejection = _mutating_classification_rejection(entry)
+    if classification_rejection is not None:
+        return classification_rejection
     return None
 
 
@@ -912,16 +970,6 @@ class OpenAPIToolDispatcher:
         domain-level checks remain authoritative.
         """
         requirements = self._permission_index.get(op_id, ())
-        scopes = _agent_scopes_for_operation(self._index[op_id].operation)
-        if scopes and self._ctx is not None:
-            if self._ctx.actor_grant_role == "worker":
-                actor_scope = "employee"
-            elif self._ctx.actor_grant_role == "manager":
-                actor_scope = "manager"
-            else:
-                actor_scope = self._ctx.actor_grant_role
-            if actor_scope not in scopes:
-                return False
         if not requirements:
             return True
         return all(

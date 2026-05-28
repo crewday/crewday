@@ -134,6 +134,17 @@ exclusions:
   - operation_id: "asset.scan"
     reason: "singular asset scan alias; canonical CLI route is assets.scan"
 
+  # Web composites remain mounted for SPA round-trips, but the CLI can
+  # compose their canonical resource commands directly.
+  - operation_id: "employees.detail"
+    reason: "manager employee-detail composite; CLI composes employees/list, leaves, tasks, expenses, and payslips commands"
+  - operation_id: "employees.settings.read"
+    reason: "employee settings composite for the SPA; CLI uses settings catalog/read/update commands"
+  - operation_id: "employees.leaves.list"
+    reason: "employee profile leave composite; canonical CLI route is user_leaves.list"
+  - operation_id: "me.profile.scoped.get"
+    reason: "SPA profile composite; CLI uses auth.me.get plus workspace-scoped resource commands"
+
   # Flat aliases for assets / asset_types share their handlers with the
   # canonical workspace routes (``/assets/`` and ``/assets/asset_types``).
   # The aliases exist for SPA convenience; the CLI uses the canonical

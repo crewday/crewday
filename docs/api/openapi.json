@@ -101745,6 +101745,11 @@
         "tags": [
           "agent"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Ask a visible worker through their embedded agent?",
+          "verb": "Ask a visible worker through their embedded agent"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for agent.relay.request yet."
@@ -106600,7 +106605,17 @@
         "summary": "List pending approvals",
         "tags": [
           "approvals"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for list_approvals_w__slug__api_v1_approvals_get yet."
+        },
+        "x-cli": {
+          "group": "approvals",
+          "mutates": false,
+          "summary": "List pending approvals",
+          "verb": "list"
+        }
       },
       "parameters": [
         {
@@ -106714,7 +106729,17 @@
         "summary": "Get one approval by id",
         "tags": [
           "approvals"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for get_approval_w__slug__api_v1_approvals__approval_request_id__get yet."
+        },
+        "x-cli": {
+          "group": "approvals",
+          "mutates": false,
+          "summary": "Get one approval by id",
+          "verb": "show"
+        }
       },
       "parameters": [
         {
@@ -106858,7 +106883,17 @@
         "summary": "Approve a pending action and replay it",
         "tags": [
           "approvals"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for approve_approval_w__slug__api_v1_approvals__approval_request_id__approve_post yet."
+        },
+        "x-cli": {
+          "group": "approvals",
+          "mutates": true,
+          "summary": "Approve a pending action and replay it",
+          "verb": "approve"
+        }
       }
     },
     "/w/{slug}/api/v1/approvals/{approval_request_id}/reject": {
@@ -106989,7 +107024,17 @@
         "summary": "Reject a pending action",
         "tags": [
           "approvals"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for reject_approval_w__slug__api_v1_approvals__approval_request_id__reject_post yet."
+        },
+        "x-cli": {
+          "group": "approvals",
+          "mutates": true,
+          "summary": "Reject a pending action",
+          "verb": "reject"
+        }
       }
     },
     "/w/{slug}/api/v1/areas/{area_id}": {
@@ -107523,7 +107568,22 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Soft-delete one area?",
+          "verb": "Soft-delete one area"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for areas.delete yet."
+        },
+        "x-cli": {
+          "group": "areas",
+          "mutates": true,
+          "summary": "Soft-delete one area",
+          "verb": "delete"
+        }
       },
       "get": {
         "operationId": "areas.get",
@@ -108062,7 +108122,17 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for areas.get yet."
+        },
+        "x-cli": {
+          "group": "areas",
+          "mutates": false,
+          "summary": "Read one area",
+          "verb": "get"
+        }
       },
       "parameters": [
         {
@@ -108624,7 +108694,22 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Update one area?",
+          "verb": "Update one area"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for areas.update yet."
+        },
+        "x-cli": {
+          "group": "areas",
+          "mutates": true,
+          "summary": "Update one area",
+          "verb": "update"
+        }
       }
     },
     "/w/{slug}/api/v1/asset/scan/{qr_token}": {
@@ -108965,7 +109050,17 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for asset.scan yet."
+        },
+        "x-cli": {
+          "group": "asset",
+          "mutates": false,
+          "summary": "Resolve an asset QR token",
+          "verb": "scan"
+        }
       },
       "parameters": [
         {
@@ -109181,7 +109276,17 @@
           "asset_types",
           "assets",
           "asset_types"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for asset_types.list_flat yet."
+        },
+        "x-cli": {
+          "group": "asset_types",
+          "mutates": false,
+          "summary": "List asset types visible to the caller's workspace",
+          "verb": "list-flat"
+        }
       },
       "parameters": [
         {
@@ -109665,7 +109770,17 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for assets.list_flat yet."
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": false,
+          "summary": "List tracked assets",
+          "verb": "list-flat"
+        }
       },
       "parameters": [
         {
@@ -110163,6 +110278,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": false,
+          "summary": "List tracked assets",
+          "verb": "list"
         }
       },
       "parameters": [
@@ -110515,6 +110636,11 @@
           "assets",
           "assets"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a tracked asset?",
+          "verb": "Create a tracked asset"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -110528,6 +110654,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": true,
+          "summary": "Create a tracked asset",
+          "verb": "create"
         }
       }
     },
@@ -110862,7 +110994,22 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Delete an asset action?",
+          "verb": "Delete an asset action"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for assets.actions.delete yet."
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": true,
+          "summary": "Delete an asset action",
+          "verb": "actions-delete"
+        }
       },
       "parameters": [
         {
@@ -111224,7 +111371,22 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Update an asset action?",
+          "verb": "Update an asset action"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for assets.actions.update yet."
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": true,
+          "summary": "Update an asset action",
+          "verb": "actions-update"
+        }
       }
     },
     "/w/{slug}/api/v1/assets/asset_types": {
@@ -111576,7 +111738,17 @@
           "assets",
           "assets",
           "asset_types"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for asset_types.list yet."
+        },
+        "x-cli": {
+          "group": "asset_types",
+          "mutates": false,
+          "summary": "List asset types visible to the caller's workspace",
+          "verb": "list"
+        }
       },
       "parameters": [
         {
@@ -111878,7 +112050,22 @@
           "assets",
           "assets",
           "asset_types"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a workspace-custom asset type?",
+          "verb": "Create a workspace-custom asset type"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for asset_types.create yet."
+        },
+        "x-cli": {
+          "group": "asset_types",
+          "mutates": true,
+          "summary": "Create a workspace-custom asset type",
+          "verb": "create"
+        }
       }
     },
     "/w/{slug}/api/v1/assets/asset_types/{type_id}": {
@@ -112163,7 +112350,22 @@
           "assets",
           "assets",
           "asset_types"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Delete or archive a workspace-custom asset type?",
+          "verb": "Delete or archive a workspace-custom asset type"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for asset_types.delete yet."
+        },
+        "x-cli": {
+          "group": "asset_types",
+          "mutates": true,
+          "summary": "Delete or archive a workspace-custom asset type",
+          "verb": "delete"
+        }
       },
       "get": {
         "operationId": "asset_types.get",
@@ -112453,7 +112655,17 @@
           "assets",
           "assets",
           "asset_types"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for asset_types.get yet."
+        },
+        "x-cli": {
+          "group": "asset_types",
+          "mutates": false,
+          "summary": "Get one asset type",
+          "verb": "get"
+        }
       },
       "parameters": [
         {
@@ -112766,7 +112978,22 @@
           "assets",
           "assets",
           "asset_types"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Update a workspace-custom asset type?",
+          "verb": "Update a workspace-custom asset type"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for asset_types.update yet."
+        },
+        "x-cli": {
+          "group": "asset_types",
+          "mutates": true,
+          "summary": "Update a workspace-custom asset type",
+          "verb": "update"
+        }
       }
     },
     "/w/{slug}/api/v1/assets/documents/{document_id}": {
@@ -113100,7 +113327,22 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Delete an asset document?",
+          "verb": "Delete an asset document"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for assets.documents.delete yet."
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": true,
+          "summary": "Delete an asset document",
+          "verb": "documents-delete"
+        }
       },
       "parameters": [
         {
@@ -113481,7 +113723,17 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for assets.qr_sheet yet."
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": false,
+          "summary": "Render asset QR labels as a print-ready PDF",
+          "verb": "qr-sheet"
+        }
       },
       "parameters": [
         {
@@ -113849,6 +114101,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": false,
+          "summary": "Resolve an asset QR token",
+          "verb": "scan"
         }
       },
       "parameters": [
@@ -114196,7 +114454,22 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Archive a tracked asset?",
+          "verb": "Archive a tracked asset"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for assets.delete yet."
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": true,
+          "summary": "Archive a tracked asset",
+          "verb": "delete"
+        }
       },
       "get": {
         "operationId": "assets.get",
@@ -114559,6 +114832,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": false,
+          "summary": "Get one tracked asset",
+          "verb": "get"
         }
       },
       "parameters": [
@@ -114922,6 +115201,11 @@
           "assets",
           "assets"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Update a tracked asset?",
+          "verb": "Update a tracked asset"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -114935,6 +115219,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": true,
+          "summary": "Update a tracked asset",
+          "verb": "update"
         }
       }
     },
@@ -115333,7 +115623,17 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for assets.actions.list yet."
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": false,
+          "summary": "List asset actions",
+          "verb": "actions-list"
+        }
       },
       "parameters": [
         {
@@ -115695,7 +115995,22 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Record an asset action?",
+          "verb": "Record an asset action"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for assets.actions.record yet."
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": true,
+          "summary": "Record an asset action",
+          "verb": "actions-record"
+        }
       }
     },
     "/w/{slug}/api/v1/assets/{asset_id}/actions/next_due": {
@@ -116044,7 +116359,17 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for assets.actions.next_due yet."
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": false,
+          "summary": "Return the next due asset action",
+          "verb": "actions-next-due"
+        }
       },
       "parameters": [
         {
@@ -116420,7 +116745,22 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Mark an asset action as done?",
+          "verb": "Mark an asset action as done"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for assets.actions.complete yet."
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": true,
+          "summary": "Mark an asset action as done",
+          "verb": "actions-complete"
+        }
       }
     },
     "/w/{slug}/api/v1/assets/{asset_id}/documents": {
@@ -116789,7 +117129,17 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for assets.documents.list yet."
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": false,
+          "summary": "List asset documents",
+          "verb": "documents-list"
+        }
       },
       "parameters": [
         {
@@ -117151,7 +117501,22 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Upload an asset document?",
+          "verb": "Upload an asset document"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for assets.documents.upload yet."
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": true,
+          "summary": "Upload an asset document",
+          "verb": "documents-upload"
+        }
       }
     },
     "/w/{slug}/api/v1/assets/{asset_id}/move": {
@@ -117516,6 +117881,11 @@
           "assets",
           "assets"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Move an asset to a property or area?",
+          "verb": "Move an asset to a property or area"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -117529,6 +117899,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": true,
+          "summary": "Move an asset to a property or area",
+          "verb": "move"
         }
       }
     },
@@ -117874,7 +118250,17 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for assets.qr_png yet."
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": false,
+          "summary": "Render an asset QR code as PNG",
+          "verb": "qr-png"
+        }
       },
       "parameters": [
         {
@@ -118241,7 +118627,22 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Regenerate an asset QR token?",
+          "verb": "Regenerate an asset QR token"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for assets.regenerate_qr yet."
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": true,
+          "summary": "Regenerate an asset QR token",
+          "verb": "regenerate-qr"
+        }
       }
     },
     "/w/{slug}/api/v1/assets/{asset_id}/restore": {
@@ -118596,6 +118997,11 @@
           "assets",
           "assets"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Restore an archived asset?",
+          "verb": "Restore an archived asset"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -118609,6 +119015,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "assets",
+          "mutates": true,
+          "summary": "Restore an archived asset",
+          "verb": "restore"
         }
       }
     },
@@ -124372,7 +124784,17 @@
           "billing",
           "billing",
           "organizations"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.organizations.list yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": false,
+          "summary": "List billing organizations",
+          "verb": "organizations-list"
+        }
       },
       "parameters": [
         {
@@ -124484,7 +124906,22 @@
           "billing",
           "billing",
           "organizations"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a billing organization?",
+          "verb": "Create a billing organization"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.organizations.create yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Create a billing organization",
+          "verb": "organizations-create"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/organizations/{organization_id}": {
@@ -124596,7 +125033,17 @@
           "billing",
           "billing",
           "organizations"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.organizations.get yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": false,
+          "summary": "Get a billing organization",
+          "verb": "organizations-get"
+        }
       },
       "parameters": [
         {
@@ -124719,7 +125166,22 @@
           "billing",
           "billing",
           "organizations"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Update a billing organization?",
+          "verb": "Update a billing organization"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.organizations.update yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Update a billing organization",
+          "verb": "organizations-update"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/organizations/{organization_id}/archive": {
@@ -124834,7 +125296,22 @@
           "billing",
           "billing",
           "organizations"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Archive a billing organization?",
+          "verb": "Archive a billing organization"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.organizations.archive yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Archive a billing organization",
+          "verb": "organizations-archive"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/organizations/{organization_id}/rate-cards": {
@@ -124936,7 +125413,17 @@
           "billing",
           "billing",
           "rate-cards"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.rate_cards.list yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": false,
+          "summary": "List billing rate cards for an organization",
+          "verb": "rate-cards-list"
+        }
       },
       "parameters": [
         {
@@ -125059,7 +125546,22 @@
           "billing",
           "billing",
           "rate-cards"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a billing rate card?",
+          "verb": "Create a billing rate card"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.rate_cards.create yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Create a billing rate card",
+          "verb": "rate-cards-create"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/organizations/{organization_id}/rate-cards/{rate_card_id}": {
@@ -125170,7 +125672,17 @@
           "billing",
           "billing",
           "rate-cards"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.rate_cards.get yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": false,
+          "summary": "Get a billing rate card",
+          "verb": "rate-cards-get"
+        }
       },
       "parameters": [
         {
@@ -125302,7 +125814,22 @@
           "billing",
           "billing",
           "rate-cards"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Update a billing rate card?",
+          "verb": "Update a billing rate card"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.rate_cards.update yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Update a billing rate card",
+          "verb": "rate-cards-update"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/quotes": {
@@ -125450,7 +125977,17 @@
           "billing",
           "billing",
           "quotes"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.quotes.list yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": false,
+          "summary": "List Quotes",
+          "verb": "quotes-list"
+        }
       },
       "parameters": [
         {
@@ -125562,7 +126099,22 @@
           "billing",
           "billing",
           "quotes"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create Quote?",
+          "verb": "Create Quote"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.quotes.create yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Create Quote",
+          "verb": "quotes-create"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/quotes/{quote_id}": {
@@ -125664,7 +126216,17 @@
           "billing",
           "billing",
           "quotes"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.quotes.get yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": false,
+          "summary": "Get Quote",
+          "verb": "quotes-get"
+        }
       },
       "parameters": [
         {
@@ -125787,7 +126349,22 @@
           "billing",
           "billing",
           "quotes"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Patch Quote?",
+          "verb": "Patch Quote"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.quotes.update yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Patch Quote",
+          "verb": "quotes-update"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/quotes/{quote_id}/accept": {
@@ -125902,7 +126479,22 @@
           "billing",
           "billing",
           "quotes"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Accept Quote?",
+          "verb": "Accept Quote"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.quotes.accept yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Accept Quote",
+          "verb": "quotes-accept"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/quotes/{quote_id}/decision": {
@@ -126027,7 +126619,22 @@
           "billing",
           "billing",
           "quotes"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Decide Quote?",
+          "verb": "Decide Quote"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.quotes.decision yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Decide Quote",
+          "verb": "quotes-decision"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/quotes/{quote_id}/reject": {
@@ -126159,7 +126766,22 @@
           "billing",
           "billing",
           "quotes"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Reject Quote?",
+          "verb": "Reject Quote"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.quotes.reject yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Reject Quote",
+          "verb": "quotes-reject"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/quotes/{quote_id}/send": {
@@ -126284,7 +126906,22 @@
           "billing",
           "billing",
           "quotes"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Send Quote?",
+          "verb": "Send Quote"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.quotes.send yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Send Quote",
+          "verb": "quotes-send"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/quotes/{quote_id}/supersede": {
@@ -126416,7 +127053,22 @@
           "billing",
           "billing",
           "quotes"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Supersede Quote?",
+          "verb": "Supersede Quote"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.quotes.supersede yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Supersede Quote",
+          "verb": "quotes-supersede"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/vendor-invoices": {
@@ -126547,7 +127199,17 @@
           "billing",
           "billing",
           "vendor-invoices"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.vendor_invoices.list yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": false,
+          "summary": "List vendor invoices",
+          "verb": "vendor-invoices-list"
+        }
       },
       "parameters": [
         {
@@ -126659,7 +127321,22 @@
           "billing",
           "billing",
           "vendor-invoices"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a vendor invoice?",
+          "verb": "Create a vendor invoice"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.vendor_invoices.create yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Create a vendor invoice",
+          "verb": "vendor-invoices-create"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/vendor-invoices/{invoice_id}": {
@@ -126761,7 +127438,17 @@
           "billing",
           "billing",
           "vendor-invoices"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.vendor_invoices.get yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": false,
+          "summary": "Get a vendor invoice",
+          "verb": "vendor-invoices-get"
+        }
       },
       "parameters": [
         {
@@ -126889,7 +127576,22 @@
           "billing",
           "billing",
           "vendor-invoices"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Approve a vendor invoice?",
+          "verb": "Approve a vendor invoice"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.vendor_invoices.approve yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Approve a vendor invoice",
+          "verb": "vendor-invoices-approve"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/vendor-invoices/{invoice_id}/dispute": {
@@ -127004,7 +127706,22 @@
           "billing",
           "billing",
           "vendor-invoices"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Dispute a vendor invoice?",
+          "verb": "Dispute a vendor invoice"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.vendor_invoices.dispute yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Dispute a vendor invoice",
+          "verb": "vendor-invoices-dispute"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/vendor-invoices/{invoice_id}/paid": {
@@ -127129,7 +127846,22 @@
           "billing",
           "billing",
           "vendor-invoices"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Mark a vendor invoice paid?",
+          "verb": "Mark a vendor invoice paid"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.vendor_invoices.mark_paid yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Mark a vendor invoice paid",
+          "verb": "vendor-invoices-mark-paid"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/vendor-invoices/{invoice_id}/pdf": {
@@ -127253,7 +127985,22 @@
           "billing",
           "billing",
           "vendor-invoices"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Attach a PDF to a vendor invoice?",
+          "verb": "Attach a PDF to a vendor invoice"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.vendor_invoices.attach_pdf yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Attach a PDF to a vendor invoice",
+          "verb": "vendor-invoices-attach-pdf"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/vendor-invoices/{invoice_id}/proof": {
@@ -127380,6 +128127,16 @@
         ],
         "x-agent-confirm": {
           "message": "Upload proof of payment for this vendor invoice?"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.vendor_invoices.upload_proof yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Upload proof of payment for a vendor invoice",
+          "verb": "vendor-invoices-upload-proof"
         }
       }
     },
@@ -127528,7 +128285,17 @@
           "billing",
           "billing",
           "work-orders"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.work_orders.list yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": false,
+          "summary": "List billing work orders",
+          "verb": "work-orders-list"
+        }
       },
       "parameters": [
         {
@@ -127640,7 +128407,22 @@
           "billing",
           "billing",
           "work-orders"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a billing work order?",
+          "verb": "Create a billing work order"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.work_orders.create yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Create a billing work order",
+          "verb": "work-orders-create"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/work-orders/{work_order_id}": {
@@ -127742,7 +128524,17 @@
           "billing",
           "billing",
           "work-orders"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.work_orders.get yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": false,
+          "summary": "Get a billing work order",
+          "verb": "work-orders-get"
+        }
       },
       "parameters": [
         {
@@ -127865,7 +128657,22 @@
           "billing",
           "billing",
           "work-orders"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Update a billing work order?",
+          "verb": "Update a billing work order"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.work_orders.update yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Update a billing work order",
+          "verb": "work-orders-update"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/work-orders/{work_order_id}/complete": {
@@ -127980,7 +128787,22 @@
           "billing",
           "billing",
           "work-orders"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Complete a billing work order?",
+          "verb": "Complete a billing work order"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.work_orders.complete yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Complete a billing work order",
+          "verb": "work-orders-complete"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/work-orders/{work_order_id}/in-progress": {
@@ -128095,7 +128917,22 @@
           "billing",
           "billing",
           "work-orders"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Move a billing work order into progress?",
+          "verb": "Move a billing work order into progress"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.work_orders.mark_in_progress yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Move a billing work order into progress",
+          "verb": "work-orders-mark-in-progress"
+        }
       }
     },
     "/w/{slug}/api/v1/billing/work-orders/{work_order_id}/invoice": {
@@ -128210,7 +129047,22 @@
           "billing",
           "billing",
           "work-orders"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Invoice a completed billing work order?",
+          "verb": "Invoice a completed billing work order"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for billing.work_orders.invoice yet."
+        },
+        "x-cli": {
+          "group": "billing",
+          "mutates": true,
+          "summary": "Invoice a completed billing work order",
+          "verb": "work-orders-invoice"
+        }
       }
     },
     "/w/{slug}/api/v1/bookings": {
@@ -128932,7 +129784,17 @@
         "summary": "List linked off-app chat channels",
         "tags": [
           "chat_gateway"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for chat.channel_bindings.list yet."
+        },
+        "x-cli": {
+          "group": "chat",
+          "mutates": false,
+          "summary": "List linked off-app chat channels",
+          "verb": "channel-bindings-list"
+        }
       },
       "parameters": [
         {
@@ -129057,7 +129919,22 @@
         "summary": "Start an off-app chat-channel link ceremony",
         "tags": [
           "chat_gateway"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Start an off-app chat-channel link ceremony?",
+          "verb": "Start an off-app chat-channel link ceremony"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for chat.channel_bindings.link_start yet."
+        },
+        "x-cli": {
+          "group": "chat",
+          "mutates": true,
+          "summary": "Start an off-app chat-channel link ceremony",
+          "verb": "channel-bindings-link-start"
+        }
       }
     },
     "/w/{slug}/api/v1/chat/channels/link/verify": {
@@ -129169,7 +130046,22 @@
         "summary": "Verify an off-app chat-channel link code; dev code is 424242",
         "tags": [
           "chat_gateway"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Verify an off-app chat-channel link code; dev code is 424242?",
+          "verb": "Verify an off-app chat-channel link code; dev code is 424242"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for chat.channel_bindings.link_verify yet."
+        },
+        "x-cli": {
+          "group": "chat",
+          "mutates": true,
+          "summary": "Verify an off-app chat-channel link code; dev code is 424242",
+          "verb": "channel-bindings-link-verify"
+        }
       }
     },
     "/w/{slug}/api/v1/chat/channels/providers": {
@@ -129252,7 +130144,17 @@
         "summary": "List chat gateway provider status for this workspace",
         "tags": [
           "chat_gateway"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for chat.channel_bindings.providers yet."
+        },
+        "x-cli": {
+          "group": "chat",
+          "mutates": false,
+          "summary": "List chat gateway provider status for this workspace",
+          "verb": "channel-bindings-providers"
+        }
       },
       "parameters": [
         {
@@ -129381,6 +130283,16 @@
         ],
         "x-agent-confirm": {
           "message": "Unlink this chat channel?"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for chat.channel_bindings.unlink yet."
+        },
+        "x-cli": {
+          "group": "chat",
+          "mutates": true,
+          "summary": "Unlink an off-app chat-channel binding",
+          "verb": "channel-bindings-unlink"
         }
       }
     },
@@ -129506,7 +130418,17 @@
         "tags": [
           "client",
           "billing"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for client.billable_hours.list yet."
+        },
+        "x-cli": {
+          "group": "client",
+          "mutates": false,
+          "summary": "List client billable hours",
+          "verb": "billable-hours-list"
+        }
       },
       "parameters": [
         {
@@ -129644,7 +130566,17 @@
         "tags": [
           "client",
           "billing"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for client.invoices.list yet."
+        },
+        "x-cli": {
+          "group": "client",
+          "mutates": false,
+          "summary": "List client invoices",
+          "verb": "invoices-list"
+        }
       },
       "parameters": [
         {
@@ -129782,7 +130714,17 @@
         "tags": [
           "client",
           "billing"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for client.portfolio.list yet."
+        },
+        "x-cli": {
+          "group": "client",
+          "mutates": false,
+          "summary": "List client-owned properties",
+          "verb": "portfolio-list"
+        }
       },
       "parameters": [
         {
@@ -129920,7 +130862,17 @@
         "tags": [
           "client",
           "billing"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for client.quotes.list yet."
+        },
+        "x-cli": {
+          "group": "client",
+          "mutates": false,
+          "summary": "List client quotes",
+          "verb": "quotes-list"
+        }
       },
       "parameters": [
         {
@@ -130012,7 +130964,17 @@
         "summary": "Read the manager dashboard aggregate",
         "tags": [
           "dashboard"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for dashboard.get yet."
+        },
+        "x-cli": {
+          "group": "dashboard",
+          "mutates": false,
+          "summary": "Read the manager dashboard aggregate",
+          "verb": "get"
+        }
       },
       "parameters": [
         {
@@ -130796,7 +131758,17 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for documents.get yet."
+        },
+        "x-cli": {
+          "group": "documents",
+          "mutates": false,
+          "summary": "Get one workspace document",
+          "verb": "get"
+        }
       },
       "parameters": [
         {
@@ -131150,7 +132122,17 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for documents.extraction.get yet."
+        },
+        "x-cli": {
+          "group": "documents",
+          "mutates": false,
+          "summary": "Get document extraction status",
+          "verb": "extraction-get"
+        }
       },
       "parameters": [
         {
@@ -131514,7 +132496,17 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for documents.extraction.page yet."
+        },
+        "x-cli": {
+          "group": "documents",
+          "mutates": false,
+          "summary": "Get one document extraction page",
+          "verb": "extraction-page"
+        }
       },
       "parameters": [
         {
@@ -131879,7 +132871,22 @@
         "tags": [
           "assets",
           "assets"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Retry document extraction?",
+          "verb": "Retry document extraction"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for documents.extraction.retry yet."
+        },
+        "x-cli": {
+          "group": "documents",
+          "mutates": true,
+          "summary": "Retry document extraction",
+          "verb": "extraction-retry"
+        }
       }
     },
     "/w/{slug}/api/v1/employees": {
@@ -135292,7 +136299,22 @@
         "summary": "Create a draft expense claim",
         "tags": [
           "expenses"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a draft expense claim?",
+          "verb": "Create a draft expense claim"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for create_expense_claim yet."
+        },
+        "x-cli": {
+          "group": "expenses",
+          "mutates": true,
+          "summary": "Create a draft expense claim",
+          "verb": "create"
+        }
       }
     },
     "/w/{slug}/api/v1/expenses/pending": {
@@ -137043,7 +138065,22 @@
         "summary": "Scan a receipt image and return autofill suggestions",
         "tags": [
           "expenses"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Scan a receipt image and return autofill suggestions?",
+          "verb": "Scan a receipt image and return autofill suggestions"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for scan_expense_receipt yet."
+        },
+        "x-cli": {
+          "group": "expenses",
+          "mutates": true,
+          "summary": "Scan a receipt image and return autofill suggestions",
+          "verb": "scan"
+        }
       }
     },
     "/w/{slug}/api/v1/expenses/{claim_id}": {
@@ -137578,6 +138615,11 @@
         "tags": [
           "expenses"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Cancel a claim (soft-delete draft, reject submitted)?",
+          "verb": "Cancel a claim (soft-delete draft, reject submitted)"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for cancel_expense_claim yet."
@@ -138124,7 +139166,17 @@
         "summary": "Read a single expense claim",
         "tags": [
           "expenses"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for get_expense_claim yet."
+        },
+        "x-cli": {
+          "group": "expenses",
+          "mutates": false,
+          "summary": "Read a single expense claim",
+          "verb": "show"
+        }
       },
       "parameters": [
         {
@@ -138686,7 +139738,22 @@
         "summary": "Partial update of a draft expense claim",
         "tags": [
           "expenses"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Partial update of a draft expense claim?",
+          "verb": "Partial update of a draft expense claim"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for patch_expense_claim yet."
+        },
+        "x-cli": {
+          "group": "expenses",
+          "mutates": true,
+          "summary": "Partial update of a draft expense claim",
+          "verb": "update"
+        }
       }
     },
     "/w/{slug}/api/v1/expenses/{claim_id}/approve": {
@@ -139257,7 +140324,22 @@
         "summary": "Approve a submitted claim (optional inline edits)",
         "tags": [
           "expenses"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Approve a submitted claim (optional inline edits)?",
+          "verb": "Approve a submitted claim (optional inline edits)"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for approve_expense_claim yet."
+        },
+        "x-cli": {
+          "group": "expenses",
+          "mutates": true,
+          "summary": "Approve a submitted claim (optional inline edits)",
+          "verb": "approve"
+        }
       }
     },
     "/w/{slug}/api/v1/expenses/{claim_id}/attachments": {
@@ -140368,7 +141450,22 @@
         "summary": "Register a previously-uploaded blob as a receipt",
         "tags": [
           "expenses"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Register a previously-uploaded blob as a receipt?",
+          "verb": "Register a previously-uploaded blob as a receipt"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for attach_expense_receipt yet."
+        },
+        "x-cli": {
+          "group": "expenses",
+          "mutates": true,
+          "summary": "Register a previously-uploaded blob as a receipt",
+          "verb": "attachments"
+        }
       }
     },
     "/w/{slug}/api/v1/expenses/{claim_id}/attachments/{attachment_id}": {
@@ -140912,6 +142009,11 @@
         "tags": [
           "expenses"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Remove an attachment from a draft claim?",
+          "verb": "Remove an attachment from a draft claim"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for detach_expense_receipt yet."
@@ -141496,7 +142598,22 @@
         "summary": "Mark an approved claim as reimbursed",
         "tags": [
           "expenses"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Mark an approved claim as reimbursed?",
+          "verb": "Mark an approved claim as reimbursed"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for reimburse_expense_claim yet."
+        },
+        "x-cli": {
+          "group": "expenses",
+          "mutates": true,
+          "summary": "Mark an approved claim as reimbursed",
+          "verb": "reimburse"
+        }
       }
     },
     "/w/{slug}/api/v1/expenses/{claim_id}/reject": {
@@ -142060,7 +143177,22 @@
         "summary": "Reject a submitted claim with a non-empty reason",
         "tags": [
           "expenses"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Reject a submitted claim with a non-empty reason?",
+          "verb": "Reject a submitted claim with a non-empty reason"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for reject_expense_claim yet."
+        },
+        "x-cli": {
+          "group": "expenses",
+          "mutates": true,
+          "summary": "Reject a submitted claim with a non-empty reason",
+          "verb": "reject"
+        }
       }
     },
     "/w/{slug}/api/v1/expenses/{claim_id}/submit": {
@@ -142614,7 +143746,22 @@
         "summary": "Transition a draft claim to submitted",
         "tags": [
           "expenses"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Transition a draft claim to submitted?",
+          "verb": "Transition a draft claim to submitted"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for submit_expense_claim yet."
+        },
+        "x-cli": {
+          "group": "expenses",
+          "mutates": true,
+          "summary": "Transition a draft claim to submitted",
+          "verb": "submit"
+        }
       }
     },
     "/w/{slug}/api/v1/history": {
@@ -144936,6 +146083,11 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create Item?",
+          "verb": "Create Item"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for inventory.items.create yet."
@@ -145576,6 +146728,11 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Archive Item?",
+          "verb": "Archive Item"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for inventory.items.delete yet."
@@ -145854,6 +147011,11 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Update Item?",
+          "verb": "Update Item"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for inventory.items.update yet."
@@ -146141,6 +147303,11 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Restore Item?",
+          "verb": "Restore Item"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for inventory.items.restore yet."
@@ -147961,6 +149128,11 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create Movement?",
+          "verb": "Create Movement"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for inventory.movements.create yet."
@@ -148097,7 +149269,17 @@
         "summary": "List workspace issues",
         "tags": [
           "issues"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for issues.list yet."
+        },
+        "x-cli": {
+          "group": "issues",
+          "mutates": false,
+          "summary": "List workspace issues",
+          "verb": "list"
+        }
       },
       "parameters": [
         {
@@ -148207,7 +149389,22 @@
         "summary": "Report a property issue",
         "tags": [
           "issues"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Report a property issue?",
+          "verb": "Report a property issue"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for issues.create yet."
+        },
+        "x-cli": {
+          "group": "issues",
+          "mutates": true,
+          "summary": "Report a property issue",
+          "verb": "create"
+        }
       }
     },
     "/w/{slug}/api/v1/issues/{issue_id}": {
@@ -148330,7 +149527,22 @@
         "summary": "Update a property issue",
         "tags": [
           "issues"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Update a property issue?",
+          "verb": "Update a property issue"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for issues.update yet."
+        },
+        "x-cli": {
+          "group": "issues",
+          "mutates": true,
+          "summary": "Update a property issue",
+          "verb": "update"
+        }
       }
     },
     "/w/{slug}/api/v1/issues/{issue_id}/convert_to_task": {
@@ -148441,7 +149653,22 @@
         "summary": "Convert an issue to a task",
         "tags": [
           "issues"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Convert an issue to a task?",
+          "verb": "Convert an issue to a task"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for issues.convert_to_task yet."
+        },
+        "x-cli": {
+          "group": "issues",
+          "mutates": true,
+          "summary": "Convert an issue to a task",
+          "verb": "convert-to-task"
+        }
       }
     },
     "/w/{slug}/api/v1/leaves": {
@@ -148520,7 +149747,17 @@
         "summary": "Read the manager leave inbox aggregate",
         "tags": [
           "dashboard"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for dashboard.leaves.list yet."
+        },
+        "x-cli": {
+          "group": "dashboard",
+          "mutates": false,
+          "summary": "Read the manager leave inbox aggregate",
+          "verb": "leaves-list"
+        }
       },
       "parameters": [
         {
@@ -148646,7 +149883,22 @@
         "summary": "Approve a pending leave from manager dashboard",
         "tags": [
           "dashboard"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Approve a pending leave from manager dashboard?",
+          "verb": "Approve a pending leave from manager dashboard"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for dashboard.leaves.approve yet."
+        },
+        "x-cli": {
+          "group": "dashboard",
+          "mutates": true,
+          "summary": "Approve a pending leave from manager dashboard",
+          "verb": "leaves-approve"
+        }
       }
     },
     "/w/{slug}/api/v1/leaves/{leave_id}/reject": {
@@ -148759,7 +150011,22 @@
         "summary": "Reject a pending leave from manager dashboard",
         "tags": [
           "dashboard"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Reject a pending leave from manager dashboard?",
+          "verb": "Reject a pending leave from manager dashboard"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for dashboard.leaves.reject yet."
+        },
+        "x-cli": {
+          "group": "dashboard",
+          "mutates": true,
+          "summary": "Reject a pending leave from manager dashboard",
+          "verb": "leaves-reject"
+        }
       }
     },
     "/w/{slug}/api/v1/llm/agent_preferences/me": {
@@ -157716,7 +158983,22 @@
         "tags": [
           "identity",
           "me"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create an availability override for the caller (always self-target)?",
+          "verb": "Create an availability override for the caller (always self-target)"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for me.availability_overrides.create yet."
+        },
+        "x-cli": {
+          "group": "me",
+          "mutates": true,
+          "summary": "Create an availability override for the caller (always self-target)",
+          "verb": "availability-overrides-create"
+        }
       }
     },
     "/w/{slug}/api/v1/me/leaves": {
@@ -158270,7 +159552,22 @@
         "tags": [
           "identity",
           "me"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a leave for the caller (always self-target)?",
+          "verb": "Create a leave for the caller (always self-target)"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for me.leaves.create yet."
+        },
+        "x-cli": {
+          "group": "me",
+          "mutates": true,
+          "summary": "Create a leave for the caller (always self-target)",
+          "verb": "leaves-create"
+        }
       }
     },
     "/w/{slug}/api/v1/me/schedule": {
@@ -160558,7 +161855,17 @@
           "messaging",
           "messaging",
           "chat"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for messaging.chat_channels.list yet."
+        },
+        "x-cli": {
+          "group": "messaging",
+          "mutates": false,
+          "summary": "List visible chat channels in the caller's workspace",
+          "verb": "chat-channels-list"
+        }
       },
       "parameters": [
         {
@@ -161126,7 +162433,22 @@
           "messaging",
           "messaging",
           "chat"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a chat channel?",
+          "verb": "Create a chat channel"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for messaging.chat_channels.create yet."
+        },
+        "x-cli": {
+          "group": "messaging",
+          "mutates": true,
+          "summary": "Create a chat channel",
+          "verb": "chat-channels-create"
+        }
       }
     },
     "/w/{slug}/api/v1/messaging/chat/channels/{channel_id}": {
@@ -161691,7 +163013,22 @@
           "messaging",
           "messaging",
           "chat"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Rename or archive a chat channel?",
+          "verb": "Rename or archive a chat channel"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for messaging.chat_channels.update yet."
+        },
+        "x-cli": {
+          "group": "messaging",
+          "mutates": true,
+          "summary": "Rename or archive a chat channel",
+          "verb": "chat-channels-update"
+        }
       }
     },
     "/w/{slug}/api/v1/messaging/chat/channels/{channel_id}/messages": {
@@ -162266,7 +163603,17 @@
           "messaging",
           "messaging",
           "chat"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for messaging.chat_messages.list yet."
+        },
+        "x-cli": {
+          "group": "messaging",
+          "mutates": false,
+          "summary": "List chat messages in a channel",
+          "verb": "chat-messages-list"
+        }
       },
       "parameters": [
         {
@@ -162829,7 +164176,22 @@
           "messaging",
           "messaging",
           "chat"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Send a chat message?",
+          "verb": "Send a chat message"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for messaging.chat_messages.send yet."
+        },
+        "x-cli": {
+          "group": "messaging",
+          "mutates": true,
+          "summary": "Send a chat message",
+          "verb": "chat-messages-send"
+        }
       }
     },
     "/w/{slug}/api/v1/messaging/notifications": {
@@ -163398,7 +164760,17 @@
         "summary": "List the caller's notifications",
         "tags": [
           "messaging"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for messaging.notifications.list yet."
+        },
+        "x-cli": {
+          "group": "messaging",
+          "mutates": false,
+          "summary": "List the caller's notifications",
+          "verb": "notifications-list"
+        }
       },
       "parameters": [
         {
@@ -163964,7 +165336,22 @@
         "summary": "Register (or refresh) the caller's web-push subscription",
         "tags": [
           "messaging"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Register (or refresh) the caller's web-push subscription?",
+          "verb": "Register (or refresh) the caller's web-push subscription"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for messaging.register_push_subscription yet."
+        },
+        "x-cli": {
+          "group": "messaging",
+          "mutates": true,
+          "summary": "Register (or refresh) the caller's web-push subscription",
+          "verb": "register-push-subscription"
+        }
       }
     },
     "/w/{slug}/api/v1/messaging/notifications/push/tokens": {
@@ -164497,7 +165884,17 @@
         "summary": "List the caller's registered web-push tokens",
         "tags": [
           "messaging"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for messaging.push_tokens.list yet."
+        },
+        "x-cli": {
+          "group": "messaging",
+          "mutates": false,
+          "summary": "List the caller's registered web-push tokens",
+          "verb": "push-tokens-list"
+        }
       },
       "parameters": [
         {
@@ -165087,7 +166484,22 @@
         "summary": "Reserved native-app push token registration surface",
         "tags": [
           "messaging"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Reserved native-app push token registration surface?",
+          "verb": "Reserved native-app push token registration surface"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for messaging.push_tokens.register_native_unavailable yet."
+        },
+        "x-cli": {
+          "group": "messaging",
+          "mutates": true,
+          "summary": "Reserved native-app push token registration surface",
+          "verb": "push-tokens-register-native-unavailable"
+        }
       }
     },
     "/w/{slug}/api/v1/messaging/notifications/push/tokens/{token_id}": {
@@ -165621,7 +167033,22 @@
         "summary": "Delete one of the caller's web-push tokens",
         "tags": [
           "messaging"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Delete one of the caller's web-push tokens?",
+          "verb": "Delete one of the caller's web-push tokens"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for messaging.push_tokens.delete yet."
+        },
+        "x-cli": {
+          "group": "messaging",
+          "mutates": true,
+          "summary": "Delete one of the caller's web-push tokens",
+          "verb": "push-tokens-delete"
+        }
       },
       "parameters": [
         {
@@ -166180,7 +167607,22 @@
         "summary": "Remove the caller's web-push subscription for a given endpoint",
         "tags": [
           "messaging"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Remove the caller's web-push subscription for a given endpoint?",
+          "verb": "Remove the caller's web-push subscription for a given endpoint"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for messaging.unregister_push_subscription yet."
+        },
+        "x-cli": {
+          "group": "messaging",
+          "mutates": true,
+          "summary": "Remove the caller's web-push subscription for a given endpoint",
+          "verb": "unregister-push-subscription"
+        }
       }
     },
     "/w/{slug}/api/v1/messaging/notifications/push/vapid-key": {
@@ -166760,7 +168202,17 @@
         "summary": "Get the web-push VAPID public key for the workspace",
         "tags": [
           "messaging"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for messaging.get_vapid_public_key yet."
+        },
+        "x-cli": {
+          "group": "messaging",
+          "mutates": false,
+          "summary": "Get the web-push VAPID public key for the workspace",
+          "verb": "get-vapid-public-key"
+        }
       },
       "parameters": [
         {
@@ -167314,7 +168766,17 @@
         "summary": "Get one notification",
         "tags": [
           "messaging"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for messaging.notifications.get yet."
+        },
+        "x-cli": {
+          "group": "messaging",
+          "mutates": false,
+          "summary": "Get one notification",
+          "verb": "notifications-get"
+        }
       },
       "parameters": [
         {
@@ -167876,7 +169338,22 @@
         "summary": "Mark a notification read or unread",
         "tags": [
           "messaging"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Mark a notification read or unread?",
+          "verb": "Mark a notification read or unread"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for messaging.notifications.update yet."
+        },
+        "x-cli": {
+          "group": "messaging",
+          "mutates": true,
+          "summary": "Mark a notification read or unread",
+          "verb": "notifications-update"
+        }
       }
     },
     "/w/{slug}/api/v1/messaging/notifications:mark-read": {
@@ -168428,7 +169905,22 @@
         "summary": "Bulk-mark notifications as read",
         "tags": [
           "messaging"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Bulk-mark notifications as read?",
+          "verb": "Bulk-mark notifications as read"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for messaging.notifications.mark_read yet."
+        },
+        "x-cli": {
+          "group": "messaging",
+          "mutates": true,
+          "summary": "Bulk-mark notifications as read",
+          "verb": "notifications-mark-read"
+        }
       }
     },
     "/w/{slug}/api/v1/payroll/exports/{kind}.csv": {
@@ -169052,7 +170544,17 @@
         "summary": "Stream a payroll CSV export",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.exports.csv yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": false,
+          "summary": "Stream a payroll CSV export",
+          "verb": "exports-csv"
+        }
       },
       "parameters": [
         {
@@ -169594,7 +171096,17 @@
         "summary": "List pay periods",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.pay_periods.list yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": false,
+          "summary": "List pay periods",
+          "verb": "pay-periods-list"
+        }
       },
       "parameters": [
         {
@@ -170144,7 +171656,22 @@
         "summary": "Create a pay period",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a pay period?",
+          "verb": "Create a pay period"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.pay_periods.create yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": true,
+          "summary": "Create a pay period",
+          "verb": "pay-periods-create"
+        }
       }
     },
     "/w/{slug}/api/v1/payroll/pay-periods/{period_id}": {
@@ -170681,7 +172208,22 @@
         "summary": "Delete an open pay period",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Delete an open pay period?",
+          "verb": "Delete an open pay period"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.pay_periods.delete yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": true,
+          "summary": "Delete an open pay period",
+          "verb": "pay-periods-delete"
+        }
       },
       "get": {
         "operationId": "payroll.pay_periods.get",
@@ -171223,7 +172765,17 @@
         "summary": "Read a pay period",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.pay_periods.get yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": false,
+          "summary": "Read a pay period",
+          "verb": "pay-periods-get"
+        }
       },
       "parameters": [
         {
@@ -171788,7 +173340,22 @@
         "summary": "Update an open pay period window",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Update an open pay period window?",
+          "verb": "Update an open pay period window"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.pay_periods.update yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": true,
+          "summary": "Update an open pay period window",
+          "verb": "pay-periods-update"
+        }
       }
     },
     "/w/{slug}/api/v1/payroll/pay-periods/{period_id}/exports": {
@@ -172345,7 +173912,22 @@
         "summary": "Create a payroll export job for a pay period",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a payroll export job for a pay period?",
+          "verb": "Create a payroll export job for a pay period"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.pay_periods.export yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": true,
+          "summary": "Create a payroll export job for a pay period",
+          "verb": "pay-periods-export"
+        }
       }
     },
     "/w/{slug}/api/v1/payroll/pay-periods/{period_id}/lock": {
@@ -172902,7 +174484,22 @@
         "summary": "Lock a pay period and compute draft payslips",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Lock a pay period and compute draft payslips?",
+          "verb": "Lock a pay period and compute draft payslips"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.pay_periods.lock yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": true,
+          "summary": "Lock a pay period and compute draft payslips",
+          "verb": "pay-periods-lock"
+        }
       }
     },
     "/w/{slug}/api/v1/payroll/pay-periods/{period_id}/reopen": {
@@ -173459,7 +175056,22 @@
         "summary": "Reopen a locked pay period",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Reopen a locked pay period?",
+          "verb": "Reopen a locked pay period"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.pay_periods.reopen yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": true,
+          "summary": "Reopen a locked pay period",
+          "verb": "pay-periods-reopen"
+        }
       }
     },
     "/w/{slug}/api/v1/payroll/pay-rules/{rule_id}": {
@@ -173997,7 +175609,22 @@
         "summary": "Soft-retire a pay rule (stamp effective_to = now)",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Soft-retire a pay rule (stamp effective_to = now)?",
+          "verb": "Soft-retire a pay rule (stamp effective_to = now)"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.pay_rules.delete yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": true,
+          "summary": "Soft-retire a pay rule (stamp effective_to = now)",
+          "verb": "pay-rules-delete"
+        }
       },
       "get": {
         "operationId": "payroll.pay_rules.get",
@@ -174539,7 +176166,17 @@
         "summary": "Read a single pay rule",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.pay_rules.get yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": false,
+          "summary": "Read a single pay rule",
+          "verb": "pay-rules-get"
+        }
       },
       "parameters": [
         {
@@ -175105,7 +176742,22 @@
         "summary": "Replace the mutable body of a pay rule",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Replace the mutable body of a pay rule?",
+          "verb": "Replace the mutable body of a pay rule"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.pay_rules.update yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": true,
+          "summary": "Replace the mutable body of a pay rule",
+          "verb": "pay-rules-update"
+        }
       }
     },
     "/w/{slug}/api/v1/payroll/payslips": {
@@ -175669,7 +177321,17 @@
         "summary": "List payslips visible to the caller",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.payslips.list yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": false,
+          "summary": "List payslips visible to the caller",
+          "verb": "payslips-list"
+        }
       },
       "parameters": [
         {
@@ -176226,7 +177888,17 @@
         "summary": "Read a payslip visible to the caller",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.payslips.get yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": false,
+          "summary": "Read a payslip visible to the caller",
+          "verb": "payslips-get"
+        }
       },
       "parameters": [
         {
@@ -176796,7 +178468,22 @@
         "summary": "Issue a draft payslip",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Issue a draft payslip?",
+          "verb": "Issue a draft payslip"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.payslips.issue yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": true,
+          "summary": "Issue a draft payslip",
+          "verb": "payslips-issue"
+        }
       }
     },
     "/w/{slug}/api/v1/payroll/payslips/{payslip_id}/mark_paid": {
@@ -177353,7 +179040,22 @@
         "summary": "Mark an issued payslip paid",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Mark an issued payslip paid?",
+          "verb": "Mark an issued payslip paid"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.payslips.mark_paid yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": true,
+          "summary": "Mark an issued payslip paid",
+          "verb": "payslips-mark-paid"
+        }
       }
     },
     "/w/{slug}/api/v1/payroll/payslips/{payslip_id}/payout_manifest": {
@@ -177910,7 +179612,17 @@
         "summary": "Stream the payout manifest for a payslip",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.payslips.payout_manifest yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": true,
+          "summary": "Stream the payout manifest for a payslip",
+          "verb": "payslips-payout-manifest"
+        }
       }
     },
     "/w/{slug}/api/v1/payroll/payslips/{payslip_id}/pdf": {
@@ -178447,7 +180159,17 @@
         "summary": "Fetch a payslip PDF visible to the caller",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.payslips.pdf yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": false,
+          "summary": "Fetch a payslip PDF visible to the caller",
+          "verb": "payslips-pdf"
+        }
       },
       "parameters": [
         {
@@ -179014,7 +180736,22 @@
         "summary": "Render or regenerate a payslip PDF",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Render or regenerate a payslip PDF?",
+          "verb": "Render or regenerate a payslip PDF"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.payslips.pdf.render yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": true,
+          "summary": "Render or regenerate a payslip PDF",
+          "verb": "payslips-pdf-render"
+        }
       }
     },
     "/w/{slug}/api/v1/payroll/payslips/{payslip_id}/void": {
@@ -179571,7 +181308,22 @@
         "summary": "Void a draft or issued payslip",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Void a draft or issued payslip?",
+          "verb": "Void a draft or issued payslip"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.payslips.void yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": true,
+          "summary": "Void a draft or issued payslip",
+          "verb": "payslips-void"
+        }
       }
     },
     "/w/{slug}/api/v1/payroll/users/{user_id}/pay-rules": {
@@ -180149,7 +181901,17 @@
         "summary": "List a user's pay rules \u2014 newest effective_from first",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.pay_rules.list yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": false,
+          "summary": "List a user's pay rules \u2014 newest effective_from first",
+          "verb": "pay-rules-list"
+        }
       },
       "parameters": [
         {
@@ -180715,7 +182477,22 @@
         "summary": "Create a pay rule for a user",
         "tags": [
           "payroll"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a pay rule for a user?",
+          "verb": "Create a pay rule for a user"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for payroll.pay_rules.create yet."
+        },
+        "x-cli": {
+          "group": "payroll",
+          "mutates": true,
+          "summary": "Create a pay rule for a user",
+          "verb": "pay-rules-create"
+        }
       }
     },
     "/w/{slug}/api/v1/permission_groups": {
@@ -188901,7 +190678,17 @@
           "identity",
           "authz",
           "permissions"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for permissions.resolved_self yet."
+        },
+        "x-cli": {
+          "group": "permissions",
+          "mutates": false,
+          "summary": "\"Would the current actor be allowed action A on scope S?\"",
+          "verb": "resolved-self"
+        }
       },
       "parameters": [
         {
@@ -190021,6 +191808,11 @@
           "places",
           "properties"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a property in the caller's workspace?",
+          "verb": "Create a property in the caller's workspace"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -190043,6 +191835,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "properties",
+          "mutates": true,
+          "summary": "Create a property in the caller's workspace",
+          "verb": "create"
         }
       }
     },
@@ -190577,7 +192375,22 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Soft-delete one property?",
+          "verb": "Soft-delete one property"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for properties.delete yet."
+        },
+        "x-cli": {
+          "group": "properties",
+          "mutates": true,
+          "summary": "Soft-delete one property",
+          "verb": "delete"
+        }
       },
       "get": {
         "operationId": "properties.get",
@@ -191139,6 +192952,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "properties",
+          "mutates": false,
+          "summary": "Read one property",
+          "verb": "get"
         }
       },
       "parameters": [
@@ -191702,6 +193521,11 @@
           "places",
           "properties"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Update one property?",
+          "verb": "Update one property"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -191724,6 +193548,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "properties",
+          "mutates": true,
+          "summary": "Update one property",
+          "verb": "update"
         }
       }
     },
@@ -192304,7 +194134,17 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for areas.list yet."
+        },
+        "x-cli": {
+          "group": "areas",
+          "mutates": false,
+          "summary": "List areas for a property",
+          "verb": "list"
+        }
       },
       "parameters": [
         {
@@ -192866,7 +194706,22 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create an area for a property?",
+          "verb": "Create an area for a property"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for areas.create yet."
+        },
+        "x-cli": {
+          "group": "areas",
+          "mutates": true,
+          "summary": "Create an area for a property",
+          "verb": "create"
+        }
       }
     },
     "/w/{slug}/api/v1/properties/{property_id}/share": {
@@ -193436,7 +195291,17 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for property_workspace.list yet."
+        },
+        "x-cli": {
+          "group": "property_workspace",
+          "mutates": false,
+          "summary": "List property workspace memberships",
+          "verb": "list"
+        }
       },
       "parameters": [
         {
@@ -193998,7 +195863,22 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Share a property with another workspace?",
+          "verb": "Share a property with another workspace"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for property_workspace.share yet."
+        },
+        "x-cli": {
+          "group": "property_workspace",
+          "mutates": true,
+          "summary": "Share a property with another workspace",
+          "verb": "share"
+        }
       }
     },
     "/w/{slug}/api/v1/properties/{property_id}/share/{workspace_slug}": {
@@ -194541,7 +196421,22 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Revoke a property share?",
+          "verb": "Revoke a property share"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for property_workspace.revoke yet."
+        },
+        "x-cli": {
+          "group": "property_workspace",
+          "mutates": true,
+          "summary": "Revoke a property share",
+          "verb": "revoke"
+        }
       },
       "parameters": [
         {
@@ -195112,7 +197007,22 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Update a property share?",
+          "verb": "Update a property share"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for property_workspace.update yet."
+        },
+        "x-cli": {
+          "group": "property_workspace",
+          "mutates": true,
+          "summary": "Update a property share",
+          "verb": "update"
+        }
       }
     },
     "/w/{slug}/api/v1/properties/{property_id}/stocktakes": {
@@ -195703,6 +197613,11 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Open Stocktake?",
+          "verb": "Open Stocktake"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for inventory.stocktakes.create yet."
@@ -196290,7 +198205,17 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for units.list yet."
+        },
+        "x-cli": {
+          "group": "units",
+          "mutates": false,
+          "summary": "List units for a property",
+          "verb": "list"
+        }
       },
       "parameters": [
         {
@@ -196852,7 +198777,22 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a unit for a property?",
+          "verb": "Create a unit for a property"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for units.create yet."
+        },
+        "x-cli": {
+          "group": "units",
+          "mutates": true,
+          "summary": "Create a unit for a property",
+          "verb": "create"
+        }
       }
     },
     "/w/{slug}/api/v1/property_closures": {
@@ -197472,7 +199412,17 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for property_closures.list yet."
+        },
+        "x-cli": {
+          "group": "property_closures",
+          "mutates": false,
+          "summary": "List property closures",
+          "verb": "list"
+        }
       },
       "parameters": [
         {
@@ -198035,7 +199985,22 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a property closure?",
+          "verb": "Create a property closure"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for property_closures.create yet."
+        },
+        "x-cli": {
+          "group": "property_closures",
+          "mutates": true,
+          "summary": "Create a property closure",
+          "verb": "create"
+        }
       }
     },
     "/w/{slug}/api/v1/property_closures/{closure_id}": {
@@ -198569,7 +200534,22 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Delete a property closure?",
+          "verb": "Delete a property closure"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for property_closures.delete yet."
+        },
+        "x-cli": {
+          "group": "property_closures",
+          "mutates": true,
+          "summary": "Delete a property closure",
+          "verb": "delete"
+        }
       },
       "parameters": [
         {
@@ -199141,7 +201121,22 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Update a property closure?",
+          "verb": "Update a property closure"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for property_closures.update yet."
+        },
+        "x-cli": {
+          "group": "property_closures",
+          "mutates": true,
+          "summary": "Update a property closure",
+          "verb": "update"
+        }
       }
     },
     "/w/{slug}/api/v1/property_work_role_assignments": {
@@ -199745,7 +201740,17 @@
         "tags": [
           "identity",
           "property_work_role_assignments"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for property_work_role_assignments.list yet."
+        },
+        "x-cli": {
+          "group": "property_work_role_assignments",
+          "mutates": false,
+          "summary": "List property-work-role assignments in the caller's workspace",
+          "verb": "list"
+        }
       },
       "parameters": [
         {
@@ -200297,7 +202302,22 @@
         "tags": [
           "identity",
           "property_work_role_assignments"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Pin a user_work_role to a property?",
+          "verb": "Pin a user_work_role to a property"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for property_work_role_assignments.create yet."
+        },
+        "x-cli": {
+          "group": "property_work_role_assignments",
+          "mutates": true,
+          "summary": "Pin a user_work_role to a property",
+          "verb": "create"
+        }
       }
     },
     "/w/{slug}/api/v1/property_work_role_assignments/{assignment_id}": {
@@ -200832,7 +202852,22 @@
         "tags": [
           "identity",
           "property_work_role_assignments"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Soft-delete a property_work_role_assignment?",
+          "verb": "Soft-delete a property_work_role_assignment"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for property_work_role_assignments.delete yet."
+        },
+        "x-cli": {
+          "group": "property_work_role_assignments",
+          "mutates": true,
+          "summary": "Soft-delete a property_work_role_assignment",
+          "verb": "delete"
+        }
       },
       "parameters": [
         {
@@ -201395,7 +203430,22 @@
         "tags": [
           "identity",
           "property_work_role_assignments"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Partial update of a property_work_role_assignment?",
+          "verb": "Partial update of a property_work_role_assignment"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for property_work_role_assignments.update yet."
+        },
+        "x-cli": {
+          "group": "property_work_role_assignments",
+          "mutates": true,
+          "summary": "Partial update of a property_work_role_assignment",
+          "verb": "update"
+        }
       }
     },
     "/w/{slug}/api/v1/public_holidays": {
@@ -202012,7 +204062,17 @@
         "tags": [
           "identity",
           "public_holidays"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for public_holidays.list yet."
+        },
+        "x-cli": {
+          "group": "public_holidays",
+          "mutates": false,
+          "summary": "List public holidays in the caller's workspace",
+          "verb": "list"
+        }
       },
       "parameters": [
         {
@@ -202563,7 +204623,22 @@
         "tags": [
           "identity",
           "public_holidays"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a public holiday?",
+          "verb": "Create a public holiday"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for public_holidays.create yet."
+        },
+        "x-cli": {
+          "group": "public_holidays",
+          "mutates": true,
+          "summary": "Create a public holiday",
+          "verb": "create"
+        }
       }
     },
     "/w/{slug}/api/v1/public_holidays/{public_holiday_id}": {
@@ -203097,7 +205172,22 @@
         "tags": [
           "identity",
           "public_holidays"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Soft-delete a public holiday?",
+          "verb": "Soft-delete a public holiday"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for public_holidays.delete yet."
+        },
+        "x-cli": {
+          "group": "public_holidays",
+          "mutates": true,
+          "summary": "Soft-delete a public holiday",
+          "verb": "delete"
+        }
       },
       "get": {
         "operationId": "public_holidays.read",
@@ -203636,7 +205726,17 @@
         "tags": [
           "identity",
           "public_holidays"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for public_holidays.read yet."
+        },
+        "x-cli": {
+          "group": "public_holidays",
+          "mutates": false,
+          "summary": "Read a public holiday",
+          "verb": "read"
+        }
       },
       "parameters": [
         {
@@ -204198,7 +206298,22 @@
         "tags": [
           "identity",
           "public_holidays"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Update a public holiday?",
+          "verb": "Update a public holiday"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for public_holidays.update yet."
+        },
+        "x-cli": {
+          "group": "public_holidays",
+          "mutates": true,
+          "summary": "Update a public holiday",
+          "verb": "update"
+        }
       }
     },
     "/w/{slug}/api/v1/role_grants": {
@@ -206458,7 +208573,17 @@
         "tags": [
           "tasks",
           "scheduler"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for scheduler.calendar.get yet."
+        },
+        "x-cli": {
+          "group": "scheduler",
+          "mutates": false,
+          "summary": "Who is booked where calendar feed",
+          "verb": "calendar-get"
+        }
       },
       "parameters": [
         {
@@ -206550,7 +208675,17 @@
         "summary": "Read workspace settings",
         "tags": [
           "settings"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for settings.workspace.read yet."
+        },
+        "x-cli": {
+          "group": "settings",
+          "mutates": false,
+          "summary": "Read workspace settings",
+          "verb": "workspace-read"
+        }
       },
       "parameters": [
         {
@@ -206660,7 +208795,22 @@
         "summary": "Patch workspace settings",
         "tags": [
           "settings"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Patch workspace settings?",
+          "verb": "Patch workspace settings"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for settings.workspace.patch yet."
+        },
+        "x-cli": {
+          "group": "settings",
+          "mutates": true,
+          "summary": "Patch workspace settings",
+          "verb": "workspace-patch"
+        }
       }
     },
     "/w/{slug}/api/v1/settings/basics": {
@@ -206772,7 +208922,22 @@
         "summary": "Patch workspace basics",
         "tags": [
           "settings"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Patch workspace basics?",
+          "verb": "Patch workspace basics"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for settings.workspace.basics.patch yet."
+        },
+        "x-cli": {
+          "group": "settings",
+          "mutates": true,
+          "summary": "Patch workspace basics",
+          "verb": "workspace-basics-patch"
+        }
       }
     },
     "/w/{slug}/api/v1/settings/catalog": {
@@ -206855,7 +209020,17 @@
         "summary": "List workspace settings catalog",
         "tags": [
           "settings"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for settings.catalog yet."
+        },
+        "x-cli": {
+          "group": "settings",
+          "mutates": false,
+          "summary": "List workspace settings catalog",
+          "verb": "catalog"
+        }
       },
       "parameters": [
         {
@@ -206960,7 +209135,22 @@
         "summary": "Mail workspace ownership verification link",
         "tags": [
           "settings"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Mail workspace ownership verification link?",
+          "verb": "Mail workspace ownership verification link"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for settings.workspace.verify_ownership.request yet."
+        },
+        "x-cli": {
+          "group": "settings",
+          "mutates": true,
+          "summary": "Mail workspace ownership verification link",
+          "verb": "workspace-verify-ownership-request"
+        }
       }
     },
     "/w/{slug}/api/v1/settings/verify-ownership/consume": {
@@ -207072,7 +209262,22 @@
         "summary": "Consume workspace ownership verification link",
         "tags": [
           "settings"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Consume workspace ownership verification link?",
+          "verb": "Consume workspace ownership verification link"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for settings.workspace.verify_ownership.consume yet."
+        },
+        "x-cli": {
+          "group": "settings",
+          "mutates": true,
+          "summary": "Consume workspace ownership verification link",
+          "verb": "workspace-verify-ownership-consume"
+        }
       }
     },
     "/w/{slug}/api/v1/stays": {
@@ -207625,6 +209830,11 @@
         "tags": [
           "stays"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create Stay?",
+          "verb": "Create Stay"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -207638,6 +209848,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "stays",
+          "mutates": true,
+          "summary": "Create Stay",
+          "verb": "create"
         }
       }
     },
@@ -208180,7 +210396,22 @@
         "summary": "Revoke Guest Link",
         "tags": [
           "stays"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Revoke Guest Link?",
+          "verb": "Revoke Guest Link"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for stays.guest_links.revoke yet."
+        },
+        "x-cli": {
+          "group": "stays",
+          "mutates": true,
+          "summary": "Revoke Guest Link",
+          "verb": "guest-links-revoke"
+        }
       },
       "parameters": [
         {
@@ -208745,7 +210976,17 @@
         "summary": "List Ical Feeds",
         "tags": [
           "stays"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for stays.ical_feeds.list yet."
+        },
+        "x-cli": {
+          "group": "stays",
+          "mutates": false,
+          "summary": "List Ical Feeds",
+          "verb": "ical-feeds-list"
+        }
       },
       "parameters": [
         {
@@ -209295,7 +211536,22 @@
         "summary": "Create Ical Feed",
         "tags": [
           "stays"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create Ical Feed?",
+          "verb": "Create Ical Feed"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for stays.ical_feeds.create yet."
+        },
+        "x-cli": {
+          "group": "stays",
+          "mutates": true,
+          "summary": "Create Ical Feed",
+          "verb": "ical-feeds-create"
+        }
       }
     },
     "/w/{slug}/api/v1/stays/ical-feeds/{feed_id}": {
@@ -209830,7 +212086,22 @@
         "summary": "Delete Ical Feed",
         "tags": [
           "stays"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Delete Ical Feed?",
+          "verb": "Delete Ical Feed"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for stays.ical_feeds.delete yet."
+        },
+        "x-cli": {
+          "group": "stays",
+          "mutates": true,
+          "summary": "Delete Ical Feed",
+          "verb": "ical-feeds-delete"
+        }
       },
       "parameters": [
         {
@@ -210393,7 +212664,22 @@
         "summary": "Patch Ical Feed",
         "tags": [
           "stays"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Patch Ical Feed?",
+          "verb": "Patch Ical Feed"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for stays.ical_feeds.update yet."
+        },
+        "x-cli": {
+          "group": "stays",
+          "mutates": true,
+          "summary": "Patch Ical Feed",
+          "verb": "ical-feeds-update"
+        }
       }
     },
     "/w/{slug}/api/v1/stays/ical-feeds/{feed_id}/disable": {
@@ -210948,7 +213234,22 @@
         "summary": "Disable Ical Feed",
         "tags": [
           "stays"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Disable Ical Feed?",
+          "verb": "Disable Ical Feed"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for stays.ical_feeds.disable yet."
+        },
+        "x-cli": {
+          "group": "stays",
+          "mutates": true,
+          "summary": "Disable Ical Feed",
+          "verb": "ical-feeds-disable"
+        }
       }
     },
     "/w/{slug}/api/v1/stays/ical-feeds/{feed_id}/poll": {
@@ -211503,7 +213804,22 @@
         "summary": "Poll Ical Feed",
         "tags": [
           "stays"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Poll Ical Feed?",
+          "verb": "Poll Ical Feed"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for stays.ical_feeds.poll yet."
+        },
+        "x-cli": {
+          "group": "stays",
+          "mutates": true,
+          "summary": "Poll Ical Feed",
+          "verb": "ical-feeds-poll"
+        }
       }
     },
     "/w/{slug}/api/v1/stays/ical-feeds/{feed_id}/poll-once": {
@@ -212058,7 +214374,22 @@
         "summary": "Poll Once Ical Feed",
         "tags": [
           "stays"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Poll Once Ical Feed?",
+          "verb": "Poll Once Ical Feed"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for stays.ical_feeds.poll_once yet."
+        },
+        "x-cli": {
+          "group": "stays",
+          "mutates": true,
+          "summary": "Poll Once Ical Feed",
+          "verb": "ical-feeds-poll-once"
+        }
       }
     },
     "/w/{slug}/api/v1/stays/reservations": {
@@ -212685,6 +215016,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "stays",
+          "mutates": false,
+          "summary": "List Reservations",
+          "verb": "reservations-list"
         }
       },
       "parameters": [
@@ -213296,7 +215633,17 @@
         "summary": "List Stay Bundles",
         "tags": [
           "stays"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for stays.stay_bundles.list yet."
+        },
+        "x-cli": {
+          "group": "stays",
+          "mutates": false,
+          "summary": "List Stay Bundles",
+          "verb": "stay-bundles-list"
+        }
       },
       "parameters": [
         {
@@ -213851,7 +216198,17 @@
         "summary": "Get Stay Bundle",
         "tags": [
           "stays"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for stays.stay_bundles.get yet."
+        },
+        "x-cli": {
+          "group": "stays",
+          "mutates": false,
+          "summary": "Get Stay Bundle",
+          "verb": "stay-bundles-get"
+        }
       },
       "parameters": [
         {
@@ -214419,7 +216776,22 @@
         "summary": "Regenerate Stay Bundle",
         "tags": [
           "stays"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Regenerate Stay Bundle?",
+          "verb": "Regenerate Stay Bundle"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for stays.stay_bundles.regenerate yet."
+        },
+        "x-cli": {
+          "group": "stays",
+          "mutates": true,
+          "summary": "Regenerate Stay Bundle",
+          "verb": "stay-bundles-regenerate"
+        }
       }
     },
     "/w/{slug}/api/v1/stays/stays/{stay_id}/welcome-link": {
@@ -214961,7 +217333,22 @@
         "summary": "Revoke Active Guest Link",
         "tags": [
           "stays"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Revoke Active Guest Link?",
+          "verb": "Revoke Active Guest Link"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for stays.guest_links.revoke_active yet."
+        },
+        "x-cli": {
+          "group": "stays",
+          "mutates": true,
+          "summary": "Revoke Active Guest Link",
+          "verb": "guest-links-revoke-active"
+        }
       },
       "parameters": [
         {
@@ -215524,7 +217911,22 @@
         "summary": "Issue Guest Link",
         "tags": [
           "stays"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Issue Guest Link?",
+          "verb": "Issue Guest Link"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for stays.guest_links.issue yet."
+        },
+        "x-cli": {
+          "group": "stays",
+          "mutates": true,
+          "summary": "Issue Guest Link",
+          "verb": "guest-links-issue"
+        }
       }
     },
     "/w/{slug}/api/v1/stocktakes/{stocktake_id}": {
@@ -216433,6 +218835,11 @@
         "tags": [
           "inventory"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Save Stocktake Line?",
+          "verb": "Save Stocktake Line"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for inventory.stocktakes.lines.update yet."
@@ -217888,6 +220295,11 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a one-off task?",
+          "verb": "Create a one-off task"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -218558,7 +220970,22 @@
         "summary": "Draft a task schedule from natural language",
         "tags": [
           "tasks"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Draft a task schedule from natural language?",
+          "verb": "Draft a task schedule from natural language"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for draft_task_from_nl yet."
+        },
+        "x-cli": {
+          "group": "tasks",
+          "mutates": true,
+          "summary": "Draft a task schedule from natural language",
+          "verb": "from_nl"
+        }
       }
     },
     "/w/{slug}/api/v1/tasks/from_nl/commit": {
@@ -219211,7 +221638,22 @@
         "summary": "Commit a natural-language task preview",
         "tags": [
           "tasks"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Commit a natural-language task preview?",
+          "verb": "Commit a natural-language task preview"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for commit_task_from_nl yet."
+        },
+        "x-cli": {
+          "group": "tasks",
+          "mutates": true,
+          "summary": "Commit a natural-language task preview",
+          "verb": "commit"
+        }
       }
     },
     "/w/{slug}/api/v1/tasks/schedules": {
@@ -220594,6 +223036,11 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a schedule?",
+          "verb": "Create a schedule"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -220605,6 +223052,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "tasks",
+          "mutates": true,
+          "summary": "Create a schedule",
+          "verb": "schedules"
         }
       }
     },
@@ -221247,6 +223700,11 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Soft-delete a schedule and cancel scheduled occurrences?",
+          "verb": "Soft-delete a schedule and cancel scheduled occurrences"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -222590,6 +225048,11 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Replace the mutable body of a schedule?",
+          "verb": "Replace the mutable body of a schedule"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -223260,6 +225723,11 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Pause a schedule without cancelling materialised tasks?",
+          "verb": "Pause a schedule without cancelling materialised tasks"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -223271,6 +225739,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "tasks",
+          "mutates": true,
+          "summary": "Pause a schedule without cancelling materialised tasks",
+          "verb": "pause"
         }
       }
     },
@@ -224627,6 +227101,11 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Resume a paused schedule?",
+          "verb": "Resume a paused schedule"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -224638,6 +227117,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "tasks",
+          "mutates": true,
+          "summary": "Resume a paused schedule",
+          "verb": "resume"
         }
       }
     },
@@ -225996,7 +228481,22 @@
         "summary": "Create a task template",
         "tags": [
           "tasks"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a task template?",
+          "verb": "Create a task template"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for create_task_template yet."
+        },
+        "x-cli": {
+          "group": "tasks",
+          "mutates": true,
+          "summary": "Create a task template",
+          "verb": "task_templates"
+        }
       }
     },
     "/w/{slug}/api/v1/tasks/task_templates/{template_id}": {
@@ -226638,6 +229138,11 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Soft-delete a task template?",
+          "verb": "Soft-delete a task template"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for delete_task_template yet."
@@ -227955,6 +230460,11 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Replace the mutable body of a task template?",
+          "verb": "Replace the mutable body of a task template"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for update_task_template yet."
@@ -229284,6 +231794,11 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Partial update of a task (full \u00a706 mutable set)?",
+          "verb": "Partial update of a task (full \u00a706 mutable set)"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -229986,6 +232501,11 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Assign a task to a specific user?",
+          "verb": "Assign a task to a specific user"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -229999,6 +232519,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "tasks",
+          "mutates": true,
+          "summary": "Assign a task to a specific user",
+          "verb": "assign"
         }
       }
     },
@@ -230684,6 +233210,11 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Cancel a task with a reason (manager / owner only)?",
+          "verb": "Cancel a task with a reason (manager / owner only)"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -230697,6 +233228,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "tasks",
+          "mutates": true,
+          "summary": "Cancel a task with a reason (manager / owner only)",
+          "verb": "cancel"
         }
       }
     },
@@ -231371,6 +233908,11 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Idempotently tick or untick a task checklist item?",
+          "verb": "Idempotently tick or untick a task checklist item"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for patch_task_checklist_item yet."
@@ -232052,6 +234594,11 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Attach a photo blob to a checklist item?",
+          "verb": "Attach a photo blob to a checklist item"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for attach_task_checklist_evidence yet."
@@ -233403,7 +235950,22 @@
         "summary": "Append a comment to a task's agent thread",
         "tags": [
           "tasks"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Append a comment to a task's agent thread?",
+          "verb": "Append a comment to a task's agent thread"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for post_task_comment yet."
+        },
+        "x-cli": {
+          "group": "tasks",
+          "mutates": true,
+          "summary": "Append a comment to a task's agent thread",
+          "verb": "comments"
+        }
       }
     },
     "/w/{slug}/api/v1/tasks/{task_id}/comments/{comment_id}": {
@@ -234054,6 +236616,11 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Soft-delete a comment?",
+          "verb": "Soft-delete a comment"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for delete_task_comment yet."
@@ -234733,6 +237300,11 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Edit a comment within the author grace window?",
+          "verb": "Edit a comment within the author grace window"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for patch_task_comment yet."
@@ -235405,6 +237977,11 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Mark a task completed \u2014 gated by evidence + checklist policy?",
+          "verb": "Mark a task completed \u2014 gated by evidence + checklist policy"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -235418,6 +237995,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "tasks",
+          "mutates": true,
+          "summary": "Mark a task completed \u2014 gated by evidence + checklist policy",
+          "verb": "complete"
         }
       }
     },
@@ -237434,7 +240017,22 @@
         "summary": "Attach evidence to a task",
         "tags": [
           "tasks"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Attach evidence to a task?",
+          "verb": "Attach evidence to a task"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for upload_task_evidence yet."
+        },
+        "x-cli": {
+          "group": "tasks",
+          "mutates": true,
+          "summary": "Attach evidence to a task",
+          "verb": "evidence"
+        }
       }
     },
     "/w/{slug}/api/v1/tasks/{task_id}/skip": {
@@ -238099,6 +240697,11 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Skip a task with a reason?",
+          "verb": "Skip a task with a reason"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -238112,6 +240715,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "tasks",
+          "mutates": true,
+          "summary": "Skip a task with a reason",
+          "verb": "skip"
         }
       }
     },
@@ -238767,6 +241376,11 @@
         "tags": [
           "tasks"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Drive a task from pending to in_progress?",
+          "verb": "Drive a task from pending to in_progress"
+        },
         "x-agent-links": {
           "links": [
             {
@@ -238780,6 +241394,12 @@
             }
           ],
           "policy": "links"
+        },
+        "x-cli": {
+          "group": "tasks",
+          "mutates": true,
+          "summary": "Drive a task from pending to in_progress",
+          "verb": "start"
         }
       }
     },
@@ -239947,6 +242567,11 @@
         "tags": [
           "time"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Cancel a leave (manager path)?",
+          "verb": "Cancel a leave (manager path)"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for time.cancel_leave yet."
@@ -241641,6 +244266,11 @@
         "tags": [
           "time"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Approve or reject a pending leave?",
+          "verb": "Approve or reject a pending leave"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for time.decide_leave yet."
@@ -242794,7 +245424,22 @@
         "summary": "Create a pending leave request for the caller",
         "tags": [
           "time"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a pending leave request for the caller?",
+          "verb": "Create a pending leave request for the caller"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for time.create_my_leave yet."
+        },
+        "x-cli": {
+          "group": "time",
+          "mutates": true,
+          "summary": "Create a pending leave request for the caller",
+          "verb": "create-my-leave"
+        }
       }
     },
     "/w/{slug}/api/v1/time/me/leaves/{leave_id}": {
@@ -243336,6 +245981,11 @@
         "tags": [
           "time"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Cancel a pending or upcoming leave the caller owns?",
+          "verb": "Cancel a pending or upcoming leave the caller owns"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for time.cancel_my_leave yet."
@@ -243906,6 +246556,11 @@
         "tags": [
           "time"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Rewrite dates on a pending leave the caller owns?",
+          "verb": "Rewrite dates on a pending leave the caller owns"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for time.update_my_leave_dates yet."
@@ -244456,6 +247111,11 @@
         "tags": [
           "time"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Delete one property's geofence setting?",
+          "verb": "Delete one property's geofence setting"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for time.delete_geofence_setting yet."
@@ -245575,6 +248235,11 @@
         "tags": [
           "time"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create or replace one property's geofence setting?",
+          "verb": "Create or replace one property's geofence setting"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for time.upsert_geofence_setting yet."
@@ -246782,7 +249447,22 @@
         "summary": "Open (clock-in) a shift",
         "tags": [
           "time"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Open (clock-in) a shift?",
+          "verb": "Open (clock-in) a shift"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for time.open_shift yet."
+        },
+        "x-cli": {
+          "group": "time",
+          "mutates": true,
+          "summary": "Open (clock-in) a shift",
+          "verb": "open-shift"
+        }
       }
     },
     "/w/{slug}/api/v1/time/shifts/{shift_id}": {
@@ -247894,6 +250574,11 @@
         "tags": [
           "time"
         ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Manager edit of a shift?",
+          "verb": "Manager edit of a shift"
+        },
         "x-agent-links": {
           "policy": "none",
           "reason": "No safe, specific web handoff is registered for time.edit_shift yet."
@@ -248465,7 +251150,22 @@
         "summary": "Close (clock-out) a shift",
         "tags": [
           "time"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Close (clock-out) a shift?",
+          "verb": "Close (clock-out) a shift"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for time.close_shift yet."
+        },
+        "x-cli": {
+          "group": "time",
+          "mutates": true,
+          "summary": "Close (clock-out) a shift",
+          "verb": "close-shift"
+        }
       }
     },
     "/w/{slug}/api/v1/units/{unit_id}": {
@@ -248999,7 +251699,22 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Soft-delete one unit?",
+          "verb": "Soft-delete one unit"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for units.delete yet."
+        },
+        "x-cli": {
+          "group": "units",
+          "mutates": true,
+          "summary": "Soft-delete one unit",
+          "verb": "delete"
+        }
       },
       "get": {
         "operationId": "units.get",
@@ -249538,7 +252253,17 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for units.get yet."
+        },
+        "x-cli": {
+          "group": "units",
+          "mutates": false,
+          "summary": "Read one unit",
+          "verb": "get"
+        }
       },
       "parameters": [
         {
@@ -250100,7 +252825,22 @@
         "tags": [
           "places",
           "properties"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Update one unit?",
+          "verb": "Update one unit"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for units.update yet."
+        },
+        "x-cli": {
+          "group": "units",
+          "mutates": true,
+          "summary": "Update one unit",
+          "verb": "update"
+        }
       }
     },
     "/w/{slug}/api/v1/user_availability_overrides": {
@@ -250741,7 +253481,17 @@
         "tags": [
           "identity",
           "user_availability_overrides"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for user_availability_overrides.list yet."
+        },
+        "x-cli": {
+          "group": "user_availability_overrides",
+          "mutates": false,
+          "summary": "List user_availability_override rows in the caller's workspace",
+          "verb": "list"
+        }
       },
       "parameters": [
         {
@@ -251268,7 +254018,22 @@
         "tags": [
           "identity",
           "user_availability_overrides"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a user_availability_override row?",
+          "verb": "Create a user_availability_override row"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for user_availability_overrides.create yet."
+        },
+        "x-cli": {
+          "group": "user_availability_overrides",
+          "mutates": true,
+          "summary": "Create a user_availability_override row",
+          "verb": "create"
+        }
       }
     },
     "/w/{slug}/api/v1/user_availability_overrides/{override_id}": {
@@ -251803,7 +254568,22 @@
         "tags": [
           "identity",
           "user_availability_overrides"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Soft-delete a user_availability_override row (worker withdraw / manager revoke)?",
+          "verb": "Soft-delete a user_availability_override row (worker withdraw / manager revoke)"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for user_availability_overrides.delete yet."
+        },
+        "x-cli": {
+          "group": "user_availability_overrides",
+          "mutates": true,
+          "summary": "Soft-delete a user_availability_override row (worker withdraw / manager revoke)",
+          "verb": "delete"
+        }
       },
       "parameters": [
         {
@@ -252366,7 +255146,22 @@
         "tags": [
           "identity",
           "user_availability_overrides"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Partial update of a pending user_availability_override row?",
+          "verb": "Partial update of a pending user_availability_override row"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for user_availability_overrides.update yet."
+        },
+        "x-cli": {
+          "group": "user_availability_overrides",
+          "mutates": true,
+          "summary": "Partial update of a pending user_availability_override row",
+          "verb": "update"
+        }
       }
     },
     "/w/{slug}/api/v1/user_availability_overrides/{override_id}/approve": {
@@ -252921,7 +255716,22 @@
         "tags": [
           "identity",
           "user_availability_overrides"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Approve a pending user_availability_override row?",
+          "verb": "Approve a pending user_availability_override row"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for user_availability_overrides.approve yet."
+        },
+        "x-cli": {
+          "group": "user_availability_overrides",
+          "mutates": true,
+          "summary": "Approve a pending user_availability_override row",
+          "verb": "approve"
+        }
       }
     },
     "/w/{slug}/api/v1/user_availability_overrides/{override_id}/reject": {
@@ -253493,7 +256303,22 @@
         "tags": [
           "identity",
           "user_availability_overrides"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Reject (soft-delete) a pending user_availability_override row?",
+          "verb": "Reject (soft-delete) a pending user_availability_override row"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for user_availability_overrides.reject yet."
+        },
+        "x-cli": {
+          "group": "user_availability_overrides",
+          "mutates": true,
+          "summary": "Reject (soft-delete) a pending user_availability_override row",
+          "verb": "reject"
+        }
       }
     },
     "/w/{slug}/api/v1/user_leaves": {
@@ -254134,7 +256959,17 @@
         "tags": [
           "identity",
           "user_leaves"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for user_leaves.list yet."
+        },
+        "x-cli": {
+          "group": "user_leaves",
+          "mutates": false,
+          "summary": "List user_leave rows in the caller's workspace",
+          "verb": "list"
+        }
       },
       "parameters": [
         {
@@ -254686,7 +257521,22 @@
         "tags": [
           "identity",
           "user_leaves"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a user_leave row?",
+          "verb": "Create a user_leave row"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for user_leaves.create yet."
+        },
+        "x-cli": {
+          "group": "user_leaves",
+          "mutates": true,
+          "summary": "Create a user_leave row",
+          "verb": "create"
+        }
       }
     },
     "/w/{slug}/api/v1/user_leaves/{leave_id}": {
@@ -255221,7 +258071,22 @@
         "tags": [
           "identity",
           "user_leaves"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Soft-delete a user_leave row (worker withdraw / manager revoke)?",
+          "verb": "Soft-delete a user_leave row (worker withdraw / manager revoke)"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for user_leaves.delete yet."
+        },
+        "x-cli": {
+          "group": "user_leaves",
+          "mutates": true,
+          "summary": "Soft-delete a user_leave row (worker withdraw / manager revoke)",
+          "verb": "delete"
+        }
       },
       "parameters": [
         {
@@ -255784,7 +258649,22 @@
         "tags": [
           "identity",
           "user_leaves"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Partial update of a pending user_leave row?",
+          "verb": "Partial update of a pending user_leave row"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for user_leaves.update yet."
+        },
+        "x-cli": {
+          "group": "user_leaves",
+          "mutates": true,
+          "summary": "Partial update of a pending user_leave row",
+          "verb": "update"
+        }
       }
     },
     "/w/{slug}/api/v1/user_leaves/{leave_id}/approve": {
@@ -256339,7 +259219,22 @@
         "tags": [
           "identity",
           "user_leaves"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Approve a pending user_leave row?",
+          "verb": "Approve a pending user_leave row"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for user_leaves.approve yet."
+        },
+        "x-cli": {
+          "group": "user_leaves",
+          "mutates": true,
+          "summary": "Approve a pending user_leave row",
+          "verb": "approve"
+        }
       }
     },
     "/w/{slug}/api/v1/user_leaves/{leave_id}/reject": {
@@ -256911,7 +259806,22 @@
         "tags": [
           "identity",
           "user_leaves"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Reject (soft-delete) a pending user_leave row?",
+          "verb": "Reject (soft-delete) a pending user_leave row"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for user_leaves.reject yet."
+        },
+        "x-cli": {
+          "group": "user_leaves",
+          "mutates": true,
+          "summary": "Reject (soft-delete) a pending user_leave row",
+          "verb": "reject"
+        }
       }
     },
     "/w/{slug}/api/v1/user_work_roles": {
@@ -257465,7 +260375,22 @@
         "tags": [
           "identity",
           "user_work_roles"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Link a user to a work role inside the caller's workspace?",
+          "verb": "Link a user to a work role inside the caller's workspace"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for user_work_roles.create yet."
+        },
+        "x-cli": {
+          "group": "user_work_roles",
+          "mutates": true,
+          "summary": "Link a user to a work role inside the caller's workspace",
+          "verb": "create"
+        }
       }
     },
     "/w/{slug}/api/v1/user_work_roles/{user_work_role_id}": {
@@ -258000,7 +260925,22 @@
         "tags": [
           "identity",
           "user_work_roles"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Soft-delete a user_work_role link \u2014 idempotent?",
+          "verb": "Soft-delete a user_work_role link \u2014 idempotent"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for user_work_roles.delete yet."
+        },
+        "x-cli": {
+          "group": "user_work_roles",
+          "mutates": true,
+          "summary": "Soft-delete a user_work_role link \u2014 idempotent",
+          "verb": "delete"
+        }
       },
       "parameters": [
         {
@@ -258563,7 +261503,22 @@
         "tags": [
           "identity",
           "user_work_roles"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Partial update of a user_work_role link?",
+          "verb": "Partial update of a user_work_role link"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for user_work_roles.update yet."
+        },
+        "x-cli": {
+          "group": "user_work_roles",
+          "mutates": true,
+          "summary": "Partial update of a user_work_role link",
+          "verb": "update"
+        }
       }
     },
     "/w/{slug}/api/v1/users": {
@@ -259716,7 +262671,22 @@
         "tags": [
           "identity",
           "users"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Invite a user to the caller's workspace?",
+          "verb": "Invite a user to the caller's workspace"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for post_invite_w__slug__api_v1_users_invite_post yet."
+        },
+        "x-cli": {
+          "group": "users",
+          "mutates": true,
+          "summary": "Invite a user to the caller's workspace",
+          "verb": "invite"
+        }
       }
     },
     "/w/{slug}/api/v1/users/{user_id}": {
@@ -260258,7 +263228,17 @@
         "tags": [
           "identity",
           "users"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for get_user_w__slug__api_v1_users__user_id__get yet."
+        },
+        "x-cli": {
+          "group": "users",
+          "mutates": false,
+          "summary": "Read a user's workspace-scoped profile",
+          "verb": "show"
+        }
       },
       "parameters": [
         {
@@ -260821,7 +263801,22 @@
         "tags": [
           "identity",
           "users"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Update the profile of a user in the caller's workspace?",
+          "verb": "Update the profile of a user in the caller's workspace"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for patch_user_w__slug__api_v1_users__user_id__patch yet."
+        },
+        "x-cli": {
+          "group": "users",
+          "mutates": true,
+          "summary": "Update the profile of a user in the caller's workspace",
+          "verb": "update"
+        }
       }
     },
     "/w/{slug}/api/v1/users/{user_id}/archive": {
@@ -261376,7 +264371,22 @@
         "tags": [
           "identity",
           "users"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Archive a user's engagement + work roles in this workspace?",
+          "verb": "Archive a user's engagement + work roles in this workspace"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for post_archive_w__slug__api_v1_users__user_id__archive_post yet."
+        },
+        "x-cli": {
+          "group": "users",
+          "mutates": true,
+          "summary": "Archive a user's engagement + work roles in this workspace",
+          "verb": "archive"
+        }
       }
     },
     "/w/{slug}/api/v1/users/{user_id}/grants": {
@@ -261918,7 +264928,17 @@
         "tags": [
           "identity",
           "users"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for delete_grants_w__slug__api_v1_users__user_id__grants_delete yet."
+        },
+        "x-cli": {
+          "group": "users",
+          "mutates": true,
+          "summary": "Remove a user's grants + sessions in the caller's workspace",
+          "verb": "grants-delete"
+        }
       },
       "parameters": [
         {
@@ -262504,7 +265524,17 @@
         "tags": [
           "identity",
           "users"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for users.magic_link.issue yet."
+        },
+        "x-cli": {
+          "group": "users",
+          "mutates": true,
+          "summary": "Re-mail a recovery magic link to a user (manager+)",
+          "verb": "magic-link-issue"
+        }
       }
     },
     "/w/{slug}/api/v1/users/{user_id}/reinstate": {
@@ -263073,7 +266103,22 @@
         "tags": [
           "identity",
           "users"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Reinstate a user's engagement + work roles?",
+          "verb": "Reinstate a user's engagement + work roles"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for post_reinstate_w__slug__api_v1_users__user_id__reinstate_post yet."
+        },
+        "x-cli": {
+          "group": "users",
+          "mutates": true,
+          "summary": "Reinstate a user's engagement + work roles",
+          "verb": "reinstate"
+        }
       }
     },
     "/w/{slug}/api/v1/users/{user_id}/reset_passkey": {
@@ -263628,7 +266673,17 @@
         "tags": [
           "identity",
           "users"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for users.reset_passkey yet."
+        },
+        "x-cli": {
+          "group": "users",
+          "mutates": true,
+          "summary": "Owner-initiated worker passkey reset (owners only)",
+          "verb": "reset-passkey"
+        }
       }
     },
     "/w/{slug}/api/v1/users/{user_id}/role_grants": {
@@ -264821,7 +267876,17 @@
         "tags": [
           "identity",
           "user_work_roles"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for user_work_roles.list_by_user yet."
+        },
+        "x-cli": {
+          "group": "user_work_roles",
+          "mutates": false,
+          "summary": "List a user's work-role links in the caller's workspace",
+          "verb": "list-by-user"
+        }
       },
       "parameters": [
         {
@@ -266509,7 +269574,17 @@
         "tags": [
           "identity",
           "work_engagements"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for work_engagements.list yet."
+        },
+        "x-cli": {
+          "group": "work_engagements",
+          "mutates": false,
+          "summary": "List work engagements in the caller's workspace",
+          "verb": "list"
+        }
       },
       "parameters": [
         {
@@ -267064,7 +270139,17 @@
         "tags": [
           "identity",
           "work_engagements"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for work_engagements.read yet."
+        },
+        "x-cli": {
+          "group": "work_engagements",
+          "mutates": false,
+          "summary": "Read a work engagement by id",
+          "verb": "read"
+        }
       },
       "parameters": [
         {
@@ -267627,7 +270712,22 @@
         "tags": [
           "identity",
           "work_engagements"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Partial update of a work engagement?",
+          "verb": "Partial update of a work engagement"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for work_engagements.update yet."
+        },
+        "x-cli": {
+          "group": "work_engagements",
+          "mutates": true,
+          "summary": "Partial update of a work engagement",
+          "verb": "update"
+        }
       }
     },
     "/w/{slug}/api/v1/work_engagements/{engagement_id}/archive": {
@@ -268182,7 +271282,22 @@
         "tags": [
           "identity",
           "work_engagements"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Archive a single engagement \u2014 idempotent?",
+          "verb": "Archive a single engagement \u2014 idempotent"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for work_engagements.archive yet."
+        },
+        "x-cli": {
+          "group": "work_engagements",
+          "mutates": true,
+          "summary": "Archive a single engagement \u2014 idempotent",
+          "verb": "archive"
+        }
       }
     },
     "/w/{slug}/api/v1/work_engagements/{engagement_id}/reinstate": {
@@ -268737,7 +271852,22 @@
         "tags": [
           "identity",
           "work_engagements"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Reverse archive on a single engagement \u2014 idempotent?",
+          "verb": "Reverse archive on a single engagement \u2014 idempotent"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for work_engagements.reinstate yet."
+        },
+        "x-cli": {
+          "group": "work_engagements",
+          "mutates": true,
+          "summary": "Reverse archive on a single engagement \u2014 idempotent",
+          "verb": "reinstate"
+        }
       }
     },
     "/w/{slug}/api/v1/work_roles": {
@@ -269303,7 +272433,17 @@
         "tags": [
           "identity",
           "work_roles"
-        ]
+        ],
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for work_roles.list yet."
+        },
+        "x-cli": {
+          "group": "work_roles",
+          "mutates": false,
+          "summary": "List work roles in the caller's workspace",
+          "verb": "list"
+        }
       },
       "parameters": [
         {
@@ -269855,7 +272995,22 @@
         "tags": [
           "identity",
           "work_roles"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Create a new work role?",
+          "verb": "Create a new work role"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for work_roles.create yet."
+        },
+        "x-cli": {
+          "group": "work_roles",
+          "mutates": true,
+          "summary": "Create a new work role",
+          "verb": "create"
+        }
       }
     },
     "/w/{slug}/api/v1/work_roles/{work_role_id}": {
@@ -270390,7 +273545,22 @@
         "tags": [
           "identity",
           "work_roles"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Soft-delete a work role?",
+          "verb": "Soft-delete a work role"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for work_roles.delete yet."
+        },
+        "x-cli": {
+          "group": "work_roles",
+          "mutates": true,
+          "summary": "Soft-delete a work role",
+          "verb": "delete"
+        }
       },
       "parameters": [
         {
@@ -270953,7 +274123,22 @@
         "tags": [
           "identity",
           "work_roles"
-        ]
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Partial update of a work role?",
+          "verb": "Partial update of a work role"
+        },
+        "x-agent-links": {
+          "policy": "none",
+          "reason": "No safe, specific web handoff is registered for work_roles.update yet."
+        },
+        "x-cli": {
+          "group": "work_roles",
+          "mutates": true,
+          "summary": "Partial update of a work role",
+          "verb": "update"
+        }
       }
     },
     "/w/{slug}/api/v1/workspace/usage": {

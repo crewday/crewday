@@ -1262,7 +1262,13 @@ def _build_custom_openapi(app: FastAPI) -> dict[str, Any]:
        not auto-populate ``tags[]`` from operation-level tag lists,
        so without this seed the Swagger UI would render the section
        with no description.
-    4. Declare the workspace ``slug`` path parameter once at the path
+    4. Backfill CLI metadata for ordinary workspace routes that do
+       not yet carry explicit ``x-cli`` in their decorators. The
+       route declarations remain the preferred home for custom help,
+       hidden aliases, and command overrides; this pass keeps the
+       generated OpenAPI/agent surface broad while older routers are
+       annotated incrementally.
+    5. Declare the workspace ``slug`` path parameter once at the path
        level for every path containing ``{slug}``. FastAPI's
        router-prefix placeholder is consumed by tenancy middleware
        rather than handler signatures, so the default schema omits it.
@@ -1318,6 +1324,8 @@ def _build_custom_openapi(app: FastAPI) -> dict[str, Any]:
         if name not in seen and name is not None:
             merged_tags.append(tag)
     schema["tags"] = merged_tags
+    _declare_cli_metadata(schema)
+    _declare_agent_confirmations(schema)
     _declare_workspace_slug_path_parameters(schema)
     _declare_agent_links(schema)
     _declare_rate_limit_responses(schema)
@@ -1341,6 +1349,228 @@ def _agent_link(
         "params": dict(params or {}),
         "query": dict(query or {}),
     }
+
+
+_CLI_METHODS: Final[frozenset[str]] = frozenset(
+    {"get", "post", "put", "patch", "delete", "head"}
+)
+_MUTATING_METHODS: Final[frozenset[str]] = frozenset({"post", "put", "patch", "delete"})
+_PATH_PARAM_RE: Final[re.Pattern[str]] = re.compile(r"\{[^}]+\}")
+
+_SECURITY_CLASSIFICATION_PENDING_OPERATION_IDS: Final[frozenset[str]] = frozenset(
+    {
+        "approve_approval_w__slug__api_v1_approvals__approval_request_id__approve_post",
+        "auth.tokens.revoke_post",
+        "auth.tokens.rotate",
+        "delete_grants_w__slug__api_v1_users__user_id__grants_delete",
+        "payroll.payslips.payout_manifest",
+        "permission_groups.create",
+        "permission_groups.delete",
+        "permission_groups.members.add",
+        "permission_groups.members.remove",
+        "permission_groups.update",
+        "permission_rules.create",
+        "permission_rules.revoke",
+        "reject_approval_w__slug__api_v1_approvals__approval_request_id__reject_post",
+        "role_grants.create",
+        "role_grants.revoke",
+        "role_grants.update",
+        "tokens.mint",
+        "tokens.revoke",
+        "users.magic_link.issue",
+        "users.reset_passkey",
+        "webhooks.create",
+        "webhooks.delete",
+        "webhooks.enable",
+        "webhooks.secret.rotate",
+        "webhooks.test",
+        "webhooks.update",
+        "workspace_admin.workspace.archive",
+        "workspace_admin.workspace.delete",
+        "workspace_admin.workspace.export",
+    }
+)
+
+
+def _declare_cli_metadata(schema: dict[str, Any]) -> None:
+    """Stamp valid default ``x-cli`` metadata onto CLI-eligible operations."""
+    paths = schema.get("paths")
+    if not isinstance(paths, dict):
+        return
+    for path, path_item in paths.items():
+        if not isinstance(path, str) or not isinstance(path_item, dict):
+            continue
+        for method, operation in path_item.items():
+            if (
+                not isinstance(method, str)
+                or method.lower() not in _CLI_METHODS
+                or not isinstance(operation, dict)
+                or not _is_workspace_api_path(path)
+            ):
+                continue
+            x_cli = operation.get("x-cli")
+            if isinstance(x_cli, Mapping):
+                continue
+            group, verb = _derive_cli_group_verb(
+                method=method,
+                path=path,
+                operation=operation,
+            )
+            operation["x-cli"] = {
+                "group": group,
+                "verb": verb,
+                "summary": _cli_summary(operation),
+                "mutates": method.lower() in _MUTATING_METHODS,
+            }
+
+
+def _declare_agent_confirmations(schema: dict[str, Any]) -> None:
+    """Gate ordinary mutating workspace tools while security routes await audit."""
+    paths = schema.get("paths")
+    if not isinstance(paths, dict):
+        return
+    for path, path_item in paths.items():
+        if (
+            not isinstance(path, str)
+            or not _is_workspace_api_path(path)
+            or not isinstance(path_item, dict)
+        ):
+            continue
+        for method, operation in path_item.items():
+            if (
+                not isinstance(method, str)
+                or method.lower() not in _MUTATING_METHODS
+                or not isinstance(operation, dict)
+                or _has_agent_classification(operation)
+            ):
+                continue
+            operation_id = operation.get("operationId")
+            if (
+                not isinstance(operation_id, str)
+                or operation_id in _SECURITY_CLASSIFICATION_PENDING_OPERATION_IDS
+            ):
+                continue
+            if not _is_cli_visible_operation(operation):
+                continue
+            summary = _cli_summary(operation)
+            operation["x-agent-confirm"] = {
+                "summary": f"{summary}?",
+                "verb": summary,
+                "risk": "medium",
+            }
+
+
+def _has_agent_classification(operation: Mapping[str, Any]) -> bool:
+    return (
+        operation.get("x-agent-confirm") is not None
+        or operation.get("x-agent-forbidden") is True
+        or operation.get("x-interactive-only") is True
+    )
+
+
+def _is_workspace_api_path(path: str) -> bool:
+    return path == "/w/{slug}/api/v1" or path.startswith("/w/{slug}/api/v1/")
+
+
+def _cli_summary(operation: Mapping[str, Any]) -> str:
+    raw = operation.get("summary") or operation.get("operationId")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip().rstrip(".")
+    return "Run workspace operation"
+
+
+def _derive_cli_group_verb(
+    *,
+    method: str,
+    path: str,
+    operation: Mapping[str, Any],
+) -> tuple[str, str]:
+    operation_id = operation.get("operationId")
+    if isinstance(operation_id, str) and "." in operation_id:
+        head, tail = operation_id.split(".", 1)
+        if head and tail:
+            return head, tail.replace("_", "-").replace(".", "-")
+    group = _derive_cli_group(path, operation)
+    return group, _derive_cli_verb(method=method, path=path, group=group)
+
+
+def _derive_cli_group(path: str, operation: Mapping[str, Any]) -> str:
+    tags = operation.get("tags")
+    if isinstance(tags, list) and tags:
+        last_tag = tags[-1]
+        if isinstance(last_tag, str) and last_tag:
+            return last_tag
+
+    segments = _path_segments(path)
+    if "api" in segments:
+        segments = segments[segments.index("api") + 1 :]
+    if segments and segments[0].startswith("v") and segments[0][1:].isdigit():
+        segments = segments[1:]
+    return segments[0] if segments else "misc"
+
+
+def _derive_cli_verb(*, method: str, path: str, group: str) -> str:
+    method_upper = method.upper()
+    segments = [segment for segment in path.split("/") if segment]
+    raw_last = segments[-1] if segments else ""
+    last_is_param = raw_last.startswith("{") and raw_last.endswith("}")
+    ends_param = _path_ends_in_parameter(path)
+
+    if method_upper == "POST":
+        if last_is_param:
+            return "create"
+        if len(segments) >= 2:
+            prev = segments[-2]
+            if prev.startswith("{") and prev.endswith("}"):
+                return raw_last
+        non_param_segments = _path_segments(path)
+        if len(non_param_segments) >= 2 and raw_last != group:
+            return raw_last
+        return "create"
+    if method_upper == "GET":
+        base = "show" if ends_param else "list"
+        suffix = _path_resource_suffix(path, group)
+        return f"{suffix}-{base}" if suffix else base
+    if method_upper == "PATCH":
+        suffix = _path_resource_suffix(path, group)
+        return f"{suffix}-update" if suffix else "update"
+    if method_upper == "PUT":
+        suffix = _path_resource_suffix(path, group)
+        return f"{suffix}-replace" if suffix else "replace"
+    if method_upper == "DELETE":
+        suffix = _path_resource_suffix(path, group)
+        return f"{suffix}-delete" if suffix else "delete"
+    if method_upper == "HEAD":
+        return "head"
+    return method_upper.lower()
+
+
+def _path_segments(path: str) -> list[str]:
+    return [
+        segment.replace("-", "_")
+        for segment in path.split("/")
+        if segment and not segment.startswith("{")
+    ]
+
+
+def _path_ends_in_parameter(path: str) -> bool:
+    segments = [segment for segment in path.split("/") if segment]
+    return bool(segments and _PATH_PARAM_RE.fullmatch(segments[-1]))
+
+
+def _path_resource_suffix(path: str, group: str) -> str | None:
+    normalized_group = group.replace("-", "_")
+    normalized = [
+        segment
+        for segment in _path_segments(path)
+        if segment not in {"w", "api", "v1", "v2"} and segment != normalized_group
+    ]
+    if _path_ends_in_parameter(path):
+        normalized = normalized[:-1]
+    if not normalized:
+        return None
+    suffix = normalized[1:] if normalized[0] == normalized_group else normalized
+    return "-".join(suffix) if suffix else None
 
 
 _PROPERTY_DETAIL_LINK: Final = _agent_link(

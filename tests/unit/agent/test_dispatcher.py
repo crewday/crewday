@@ -38,21 +38,30 @@ def _build_app() -> FastAPI:
 
     @router.post(
         "/w/{slug}/api/v1/things",
-        openapi_extra={"x-cli": {"group": "things", "verb": "create"}},
+        openapi_extra={
+            "x-cli": {"group": "things", "verb": "create"},
+            "x-agent-confirm": {"summary": "Create thing?"},
+        },
     )
     def create_thing(slug: str, body: dict[str, Any]) -> dict[str, Any]:
         return {"slug": slug, "received": body, "id": "thing_001"}
 
     @router.post(
         "/w/{slug}/api/v1/batches",
-        openapi_extra={"x-cli": {"group": "batches", "verb": "create"}},
+        openapi_extra={
+            "x-cli": {"group": "batches", "verb": "create"},
+            "x-agent-confirm": {"summary": "Create batch?"},
+        },
     )
     def create_batch(slug: str, body: Annotated[list[str], Body()]) -> dict[str, Any]:
         return {"slug": slug, "received": body}
 
     @router.delete(
         "/w/{slug}/api/v1/things/{thing_id}",
-        openapi_extra={"x-cli": {"group": "things", "verb": "delete"}},
+        openapi_extra={
+            "x-cli": {"group": "things", "verb": "delete"},
+            "x-agent-confirm": {"summary": "Delete thing?"},
+        },
     )
     def delete_thing(slug: str, thing_id: str) -> dict[str, Any]:
         if thing_id == "missing":
@@ -495,6 +504,12 @@ def test_tools_catalog_only_advertises_workspace_cli_agent_operations() -> None:
             "x-agent-forbidden": True,
         },
         {
+            "path": "/w/{slug}/api/v1/security/tokens",
+            "method": "post",
+            "operationId": "tokens.mint",
+            "x-cli": _x_cli("tokens", "create"),
+        },
+        {
             "path": "/api/v1/auth/me",
             "method": "get",
             "operationId": "auth.me.get",
@@ -513,7 +528,7 @@ def test_tools_catalog_only_advertises_workspace_cli_agent_operations() -> None:
     assert [tool["name"] for tool in disp.tools] == ["properties.list"]
 
 
-def test_relay_tool_catalog_hides_manager_scoped_tool_from_worker() -> None:
+def test_tool_catalog_ignores_legacy_agent_scopes_without_route_permission() -> None:
     schema = _schema_with(
         {
             "path": "/w/{slug}/api/v1/agent/manager/relay/request",
@@ -571,9 +586,7 @@ def test_relay_tool_catalog_hides_manager_scoped_tool_from_worker() -> None:
         ctx=manager_ctx,
     )
 
-    assert "agent.relay.request" not in {
-        tool["name"] for tool in worker_dispatcher.tools
-    }
+    assert "agent.relay.request" in {tool["name"] for tool in worker_dispatcher.tools}
     assert "agent.relay.request" in {tool["name"] for tool in manager_dispatcher.tools}
 
 
@@ -667,7 +680,10 @@ def test_policy_resolver_maps_live_authz_actions_to_mutating_tools() -> None:
         "/w/{slug}/api/v1/billing/vendor-invoices/{invoice_id}/paid",
         dependencies=[pay_gate],
         operation_id="billing.vendor_invoices.mark_paid",
-        openapi_extra={"x-cli": _x_cli("vendor-invoices", "mark-paid")},
+        openapi_extra={
+            "x-cli": _x_cli("vendor-invoices", "mark-paid"),
+            "x-agent-confirm": {"summary": "Mark vendor invoice paid?"},
+        },
     )
     def mark_paid(slug: str, invoice_id: str) -> dict[str, str]:
         return {"slug": slug, "invoice_id": invoice_id}
@@ -713,7 +729,10 @@ def test_policy_resolver_does_not_gate_unknown_policy_aliases() -> None:
     @router.post(
         "/w/{slug}/api/v1/invoices/{invoice_id}/paid",
         operation_id="billing.vendor_invoices.mark_paid_typo",
-        openapi_extra={"x-cli": _x_cli("vendor-invoices", "mark-paid")},
+        openapi_extra={
+            "x-cli": _x_cli("vendor-invoices", "mark-paid"),
+            "x-agent-confirm": {"summary": "Mark vendor invoice paid?"},
+        },
     )
     def typo(slug: str, invoice_id: str) -> dict[str, str]:
         return {"slug": slug, "invoice_id": invoice_id}
@@ -812,6 +831,31 @@ def test_dispatch_rejects_known_hidden_cli_tool() -> None:
 
     assert result.status_code == 403
     assert result.body == {"detail": "tool is not backed by CLI metadata"}
+    assert result.mutated is False
+
+
+def test_dispatch_rejects_pending_security_tool_without_agent_classification() -> None:
+    app = _build_app()
+    schema = _schema_with(
+        {
+            "path": "/w/{slug}/api/v1/auth/tokens",
+            "method": "post",
+            "operationId": "tokens.mint",
+            "x-cli": _x_cli("tokens", "create"),
+        }
+    )
+    disp = OpenAPIToolDispatcher(app=app, openapi=schema, workspace_slug="ws-test")
+
+    result = disp.dispatch(
+        ToolCall(id="c-denied", name="tokens.mint", input={}),
+        token=_token(),
+        headers={},
+    )
+
+    assert result.status_code == 403
+    assert result.body == {
+        "detail": "mutating tool is missing exactly one agent classification"
+    }
     assert result.mutated is False
 
 

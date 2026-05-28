@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import Engine, delete, select
@@ -61,6 +61,7 @@ from app.api.v1.places import build_properties_router
 from app.api.v1.tasks import router as tasks_router
 from app.auth import tokens as tokens_module
 from app.auth.session import SESSION_COOKIE_NAME, issue
+from app.authz.dep import Permission
 from app.config import Settings
 from app.domain.agent.runtime import (
     DelegatedToken,
@@ -72,6 +73,7 @@ from app.domain.llm.router import resolve_primary
 from app.events.bus import EventBus
 from app.events.types import AgentMessageAppended, AgentTurnFinished, AgentTurnStarted
 from app.fixtures.llm import seed_default_registry
+from app.main import create_app
 from app.tenancy import WorkspaceContext, registry, tenant_agnostic
 from app.tenancy.current import reset_current, set_current
 from app.tenancy.middleware import WorkspaceContextMiddleware
@@ -689,7 +691,6 @@ def test_dispatcher_tools_catalog_filters_by_current_authorization(
     db_session: Session,
 ) -> None:
     workspace, manager = _seed_workspace_and_user(db_session)
-    property_id = _seed_property(db_session, workspace_id=workspace.id)
     manager_ctx = WorkspaceContext(
         workspace_id=workspace.id,
         workspace_slug=workspace.slug,
@@ -701,6 +702,24 @@ def test_dispatcher_tools_catalog_filters_by_current_authorization(
     )
     set_current(manager_ctx)
     app = _build_properties_app(db_session, manager_ctx)
+
+    @app.get(
+        "/w/{slug}/api/v1/worker-visible",
+        operation_id="worker_visible.list",
+        openapi_extra={
+            "x-cli": {
+                "group": "worker-visible",
+                "verb": "list",
+                "summary": "List worker-visible rows",
+                "mutates": False,
+            },
+            "x-agent-scopes": ["manager"],
+        },
+        dependencies=[Depends(Permission("scope.view", scope_kind="workspace"))],
+    )
+    def worker_visible() -> dict[str, bool]:
+        return {"ok": True}
+
     manager_dispatcher = make_default_dispatcher(
         app,
         workspace_slug=workspace.slug,
@@ -711,6 +730,7 @@ def test_dispatcher_tools_catalog_filters_by_current_authorization(
     manager_tool_names = {tool["name"] for tool in manager_dispatcher.tools}
     assert "properties.list" in manager_tool_names
     assert "permissions.resolved" in manager_tool_names
+    assert "worker_visible.list" in manager_tool_names
 
     worker = User(
         id=new_ulid(),
@@ -735,7 +755,7 @@ def test_dispatcher_tools_catalog_filters_by_current_authorization(
                 workspace_id=workspace.id,
                 user_id=worker.id,
                 grant_role="worker",
-                scope_property_id=property_id,
+                scope_property_id=None,
                 created_at=_PINNED,
                 created_by_user_id=manager.id,
             )
@@ -760,7 +780,78 @@ def test_dispatcher_tools_catalog_filters_by_current_authorization(
 
     worker_tool_names = {tool["name"] for tool in worker_dispatcher.tools}
     assert "properties.list" in worker_tool_names
+    assert "worker_visible.list" in worker_tool_names
     assert "permissions.resolved" not in worker_tool_names
+
+
+def test_manager_catalog_includes_representative_ordinary_workspace_tools(
+    db_session: Session,
+) -> None:
+    workspace, manager = _seed_workspace_and_user(db_session)
+    _seed_property(db_session, workspace_id=workspace.id)
+    ctx = WorkspaceContext(
+        workspace_id=workspace.id,
+        workspace_slug=workspace.slug,
+        actor_id=manager.id,
+        actor_kind="user",
+        actor_grant_role="manager",
+        actor_was_owner_member=True,
+        audit_correlation_id=new_ulid(),
+    )
+    set_current(ctx)
+    app = create_app(
+        settings=Settings.model_construct(
+            database_url="sqlite:///:memory:",
+            root_key=SecretStr("agent-dispatcher-root-key"),
+            bind_host="127.0.0.1",
+            bind_port=8000,
+            allow_public_bind=False,
+            worker="internal",
+            smtp_host=None,
+            smtp_port=587,
+            smtp_from=None,
+            smtp_use_tls=True,
+            log_level="INFO",
+            cors_allow_origins=[],
+            profile="prod",
+            vite_dev_url="http://127.0.0.1:5173",
+            demo_mode=False,
+            public_url=None,
+            demo_db_denylist=[],
+        )
+    )
+    dispatcher = make_default_dispatcher(
+        app,
+        workspace_slug=workspace.slug,
+        session=db_session,
+        ctx=ctx,
+    )
+
+    tool_names = {tool["name"] for tool in dispatcher.tools}
+    expected = {
+        "areas.create",
+        "assets.create",
+        "billing.organizations.create",
+        "create_expense_claim",
+        "create_schedule",
+        "create_task",
+        "issues.create",
+        "messaging.chat_messages.send",
+        "settings.workspace.read",
+        "stays.create",
+        "user_leaves.list",
+        "user_work_roles.create",
+        "users.list",
+        "work_engagements.list",
+        "work_roles.create",
+    }
+    assert expected <= tool_names
+    assert {
+        "tokens.mint",
+        "tokens.revoke",
+        "users.reset_passkey",
+        "workspace_admin.workspace.delete",
+    }.isdisjoint(tool_names)
 
 
 def test_dispatcher_tools_catalog_recomputes_authorization_from_current_grants(

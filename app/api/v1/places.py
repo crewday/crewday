@@ -1299,6 +1299,14 @@ def build_properties_router() -> APIRouter:
         operation_id="areas.list",
         summary="List areas for a property",
         dependencies=[read_gate],
+        openapi_extra={
+            "x-cli": {
+                "group": "areas",
+                "verb": "list",
+                "summary": "List areas for a property",
+                "mutates": False,
+            },
+        },
     )
     def list_areas(
         property_id: str,
@@ -1330,6 +1338,19 @@ def build_properties_router() -> APIRouter:
         operation_id="areas.create",
         summary="Create an area for a property",
         dependencies=[edit_gate],
+        openapi_extra={
+            "x-cli": {
+                "group": "areas",
+                "verb": "create",
+                "summary": "Create an area for a property",
+                "mutates": True,
+            },
+            "x-agent-confirm": {
+                "summary": "Create an area for a property?",
+                "verb": "Create an area for a property",
+                "risk": "medium",
+            },
+        },
     )
     def create_area(
         property_id: str,
@@ -1372,6 +1393,19 @@ def build_properties_router() -> APIRouter:
         operation_id="areas.update",
         summary="Update one area",
         dependencies=[edit_gate],
+        openapi_extra={
+            "x-cli": {
+                "group": "areas",
+                "verb": "update",
+                "summary": "Update one area",
+                "mutates": True,
+            },
+            "x-agent-confirm": {
+                "summary": "Update one area?",
+                "verb": "Update one area",
+                "risk": "medium",
+            },
+        },
     )
     def update_area(
         area_id: str,
@@ -1393,6 +1427,19 @@ def build_properties_router() -> APIRouter:
         operation_id="areas.delete",
         summary="Soft-delete one area",
         dependencies=[edit_gate],
+        openapi_extra={
+            "x-cli": {
+                "group": "areas",
+                "verb": "delete",
+                "summary": "Soft-delete one area",
+                "mutates": True,
+            },
+            "x-agent-confirm": {
+                "summary": "Soft-delete one area?",
+                "verb": "Soft-delete one area",
+                "risk": "medium",
+            },
+        },
     )
     def delete_area(
         area_id: str,
