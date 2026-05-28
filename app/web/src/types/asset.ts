@@ -149,14 +149,27 @@ export interface AgentDocSummary {
   summary: string;
   roles: string[];
   updated_at: string;
+  version: number;
+  is_customised: boolean;
+  default_hash: string;
+  metadata_default_hash?: string;
+  approx_token_count?: number;
 }
 
 export interface AgentDoc extends AgentDocSummary {
   body_md: string;
   capabilities: string[];
+  notes: string | null;
+}
+
+export interface AgentDocRevision {
   version: number;
-  is_customised: boolean;
-  default_hash: string;
+  body_md: string;
+  roles: string[];
+  notes: string | null;
+  approx_token_count: number;
+  created_at: string;
+  created_by_user_id: string | null;
 }
 
 export interface AssetDetailPayload {

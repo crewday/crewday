@@ -261,4 +261,5 @@ export const qk = {
   kbSystemDoc: (slug: string) => [...ws(), "kb", "system_docs", slug] as const,
   adminAgentDocs: () => ["admin", "agent_docs"] as const,
   adminAgentDoc: (slug: string) => ["admin", "agent_docs", slug] as const,
+  adminAgentDocRevisions: (slug: string) => ["admin", "agent_docs", slug, "revisions"] as const,
 } as const;

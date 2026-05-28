@@ -96,6 +96,7 @@ describe("qk — admin keys", () => {
     expect(qk.agentTyping("admin")).toEqual(["admin", "agent", "typing"]);
     expect(qk.adminAgentDocs()).toEqual(["admin", "agent_docs"]);
     expect(qk.adminAgentDoc("slug-x")).toEqual(["admin", "agent_docs", "slug-x"]);
+    expect(qk.adminAgentDocRevisions("slug-x")).toEqual(["admin", "agent_docs", "slug-x", "revisions"]);
   });
 
   it("adminAudit() returns the bare prefix when no filter is supplied or the filter is empty", () => {
