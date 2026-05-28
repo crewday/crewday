@@ -274,6 +274,35 @@ describe("InlineTableForm", () => {
     expect(onChange).toHaveBeenCalledWith("-");
   });
 
+  it("passes accessibility error state through text and note fields", () => {
+    render(
+      <>
+        <InlineTextField
+          value="Night Manager"
+          ariaLabel="Role key"
+          ariaInvalid
+          ariaDescribedBy="role-key-error"
+          onChange={vi.fn()}
+        />
+        <InlineNoteField
+          value="Too long"
+          ariaLabel="Role description"
+          ariaInvalid
+          ariaDescribedBy="role-description-error"
+          onChange={vi.fn()}
+        />
+      </>,
+    );
+
+    expect(screen.getByLabelText("Role key")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Role key")).toHaveAttribute("aria-describedby", "role-key-error");
+    expect(screen.getByLabelText("Role description")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Role description")).toHaveAttribute(
+      "aria-describedby",
+      "role-description-error",
+    );
+  });
+
   it("renders time fields with time attributes and disabled state", () => {
     render(
       <InlineTimeField
@@ -1423,6 +1452,33 @@ describe("InlineTableForm", () => {
     expect(screen.getByLabelText("New row")).toHaveClass("is-editing");
   });
 
+  it("keeps externally controlled create rows cancellable before edits", () => {
+    const onCancel = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="External create rows"
+        columns={columns}
+        rows={[]}
+        saveMode="explicit"
+        trailingCreateRow={{
+          id: "external-create",
+          label: "New row",
+          isNew: true,
+          editing: true,
+          dirty: false,
+          draft: { title: "", owner: "maria", note: "" },
+        }}
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={onCancel}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onCancel).toHaveBeenCalledWith("external-create");
+  });
+
   it("renders the shared empty state by default only when no create row exists", () => {
     const { rerender } = render(
       <InlineTableForm
@@ -1865,7 +1921,7 @@ describe("InlineTableForm", () => {
     expect(createGroup).toHaveClass("is-editing");
     expect(within(createGroup).getByLabelText("Title")).not.toHaveFocus();
     expect(within(createGroup).queryByRole("button", { name: "Delete" })).toBeNull();
-    expect(within(createGroup).queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(within(createGroup).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
 
     within(createGroup).getByLabelText("Title").focus();
     expect(createGroup).not.toHaveClass("is-selected");

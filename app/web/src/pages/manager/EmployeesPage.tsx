@@ -1,17 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useRef, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { BriefcaseBusiness, Pencil, Plus, Trash2 } from "lucide-react";
+import { BriefcaseBusiness, Plus } from "lucide-react";
 import { ApiError, fetchJson } from "@/lib/api";
 import { fetchAllList } from "@/lib/fetchAllList";
 import { qk } from "@/lib/queryKeys";
-import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
 import FormModal from "@/components/FormModal";
 import { AssetIcon, isAssetIconName } from "@/components/AssetIcon";
-import IconSelector from "@/components/IconSelector";
+import {
+  InlineIconField,
+  InlineNoteField,
+  InlineTableForm,
+  InlineTextField,
+  type InlineTableColumn,
+  type InlineTableRow,
+} from "@/components/InlineTableForm";
 import { Avatar, Chip, EmptyState, Loading } from "@/components/common";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { Booking, Employee, Me, Property, WorkRole } from "@/types/api";
@@ -52,6 +58,7 @@ const EMPTY_WORK_ROLE_FORM: WorkRoleFormState = {
   description_md: "",
   icon_name: "",
 };
+const CREATE_WORK_ROLE_ROW_ID = "__new_work_role__";
 
 function workRoleInitials(name: string): string {
   const initials = name
@@ -170,19 +177,23 @@ export default function EmployeesPage() {
 }
 
 function WorkRoleCatalogManager() {
-  const deleteDialogRef = useRef<HTMLDialogElement>(null);
   const queryClient = useQueryClient();
   const rolesQ = useQuery({
     queryKey: qk.workRoles(),
     queryFn: () => fetchAllList<WorkRole>("/api/v1/work_roles"),
   });
-  const [editingRole, setEditingRole] = useState<WorkRole | null>(null);
-  const [roleDialogOpen, setRoleDialogOpen] = useState(false);
-  const [roleToDelete, setRoleToDelete] = useState<WorkRole | null>(null);
-  const [form, setForm] = useState<WorkRoleFormState>(EMPTY_WORK_ROLE_FORM);
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<WorkRoleField, string>>>({});
-  const [formError, setFormError] = useState<string | null>(null);
+  const [editedDrafts, setEditedDrafts] = useState<ReadonlyMap<string, WorkRoleFormState>>(() => new Map());
+  const [rowFieldErrors, setRowFieldErrors] = useState<ReadonlyMap<string, Partial<Record<WorkRoleField, string>>>>(
+    () => new Map(),
+  );
+  const [rowErrors, setRowErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createDraft, setCreateDraft] = useState<WorkRoleFormState>(EMPTY_WORK_ROLE_FORM);
+  const [createDirty, setCreateDirty] = useState(false);
+  const [createFieldErrors, setCreateFieldErrors] = useState<Partial<Record<WorkRoleField, string>>>({});
+  const [createError, setCreateError] = useState<string | null>(null);
   const roles = rolesQ.data ?? [];
+  const rolesById = useMemo(() => new Map(roles.map((role) => [role.id, role])), [roles]);
 
   const invalidateRoleDependents = () =>
     Promise.all([
@@ -197,9 +208,10 @@ function WorkRoleCatalogManager() {
     ]);
 
   const saveRole = useMutation({
-    mutationFn: (payload: WorkRoleWriteRequest) => {
-      if (editingRole) {
-        return fetchJson<WorkRole>("/api/v1/work_roles/" + encodeURIComponent(editingRole.id), {
+    mutationFn: ({ rowId, draft }: { rowId: string; draft: WorkRoleFormState }) => {
+      const payload = workRoleWritePayload(draft);
+      if (rowId !== CREATE_WORK_ROLE_ROW_ID) {
+        return fetchJson<WorkRole>("/api/v1/work_roles/" + encodeURIComponent(rowId), {
           method: "PATCH",
           body: payload,
         });
@@ -209,82 +221,222 @@ function WorkRoleCatalogManager() {
         body: { ...payload, default_settings_json: {} },
       });
     },
-    onSuccess: async () => {
+    onSuccess: async (_role, variables) => {
       await invalidateRoleDependents();
-      setRoleDialogOpen(false);
+      if (variables.rowId === CREATE_WORK_ROLE_ROW_ID) {
+        resetCreateRow();
+        return;
+      }
+      setEditedDrafts((current) => clearMapValue(current, variables.rowId));
+      setRowFieldErrors((current) => clearMapValue(current, variables.rowId));
+      setRowErrors((current) => clearMapValue(current, variables.rowId));
     },
-    onError: (error) => {
+    onError: (error, variables) => {
       const nextFieldErrors = workRoleFieldErrors(error);
-      setFieldErrors(nextFieldErrors);
-      setFormError(workRoleErrorMessage(error, nextFieldErrors));
+      const message = workRoleErrorMessage(error, nextFieldErrors);
+      if (variables.rowId === CREATE_WORK_ROLE_ROW_ID) {
+        setCreateFieldErrors(nextFieldErrors);
+        setCreateError(message);
+        return;
+      }
+      setRowFieldErrors((current) => setMapValue(current, variables.rowId, nextFieldErrors));
+      setRowErrors((current) => setMapValue(current, variables.rowId, message));
     },
   });
 
   const deleteRole = useMutation({
-    mutationFn: (role: WorkRole) =>
-      fetchJson<void>("/api/v1/work_roles/" + encodeURIComponent(role.id), {
+    mutationFn: (roleId: string) =>
+      fetchJson<void>("/api/v1/work_roles/" + encodeURIComponent(roleId), {
         method: "DELETE",
       }),
+    onMutate: (roleId) => {
+      setRowErrors((current) => clearMapValue(current, roleId));
+    },
     onSuccess: async () => {
       await invalidateRoleDependents();
-      deleteDialogRef.current?.close();
+    },
+    onError: (error, roleId) => {
+      setRowErrors((current) => setMapValue(current, roleId, workRoleErrorMessage(error, {})));
     },
   });
 
-  function openCreateDialog(): void {
-    setEditingRole(null);
-    setForm(EMPTY_WORK_ROLE_FORM);
-    setFieldErrors({});
-    setFormError(null);
+  const busy = saveRole.isPending || deleteRole.isPending;
+  const rows = useMemo(
+    () => roles.map((role): InlineTableRow<WorkRoleFormState> => {
+      const draft = editedDrafts.get(role.id);
+      const savingThisRow = saveRole.isPending && saveRole.variables?.rowId === role.id;
+      const deletingThisRow = deleteRole.isPending && deleteRole.variables === role.id;
+      return {
+        id: role.id,
+        label: role.name,
+        draft: draft ?? draftFromWorkRole(role),
+        committedDraft: draftFromWorkRole(role),
+        editing: draft !== undefined,
+        dirty: draft !== undefined,
+        saving: savingThisRow || deletingThisRow,
+        disabled: busy && !savingThisRow && !deletingThisRow,
+        error: rowErrors.get(role.id) ? <span role="alert">{rowErrors.get(role.id)}</span> : undefined,
+      };
+    }),
+    [busy, deleteRole.isPending, deleteRole.variables, editedDrafts, roles, rowErrors, saveRole.isPending, saveRole.variables],
+  );
+  const trailingCreateRow: InlineTableRow<WorkRoleFormState> | undefined = createOpen
+    ? {
+      id: CREATE_WORK_ROLE_ROW_ID,
+      label: "New work role",
+      draft: createDraft,
+      editing: true,
+      dirty: createDirty,
+      isNew: true,
+      saving: saveRole.isPending && saveRole.variables?.rowId === CREATE_WORK_ROLE_ROW_ID,
+      disabled: busy && saveRole.variables?.rowId !== CREATE_WORK_ROLE_ROW_ID,
+      error: createError ? <span role="alert">{createError}</span> : undefined,
+    }
+    : undefined;
+  const columns = useMemo(
+    (): InlineTableColumn<WorkRoleFormState>[] => [
+      {
+        key: "icon",
+        header: "Icon",
+        width: { px: 112 },
+        renderRead: ({ row }) => (
+          <span className="work-role-row__mark" aria-hidden="true">
+            {row.draft.icon_name ? (
+              <AssetIcon name={row.draft.icon_name} size={18} className="work-role-row__icon" />
+            ) : (
+              workRoleInitials(row.draft.name)
+            )}
+          </span>
+        ),
+        renderEdit: ({ row, update, disabled }) => {
+          const fieldErrors = fieldErrorsForRoleRow(row.id, rowFieldErrors, createFieldErrors);
+          return (
+            <InlineIconField
+              label="Icon"
+              value={row.draft.icon_name}
+              onChange={(icon_name) => update({ icon_name })}
+              disabled={disabled}
+              allowEmpty
+              error={fieldErrors.icon_name}
+              errorId={workRoleFieldErrorId(row.id, "icon_name")}
+            />
+          );
+        },
+      },
+      {
+        key: "name",
+        header: "Name",
+        width: { flex: 1.2, min: 180 },
+        renderRead: ({ row }) => <strong>{row.draft.name}</strong>,
+        renderEdit: ({ row, update, disabled }) => {
+          const fieldErrors = fieldErrorsForRoleRow(row.id, rowFieldErrors, createFieldErrors);
+          return (
+            <span className="work-role-inline-field">
+              <InlineTextField
+                value={row.draft.name}
+                onChange={(name) => update({ name })}
+                disabled={disabled}
+                ariaLabel="Name"
+                placeholder="e.g. Housekeeper"
+                ariaInvalid={Boolean(fieldErrors.name)}
+                ariaDescribedBy={fieldErrors.name ? workRoleFieldErrorId(row.id, "name") : undefined}
+              />
+              {fieldErrors.name ? (
+                <span id={workRoleFieldErrorId(row.id, "name")} className="form-field-error">
+                  {fieldErrors.name}
+                </span>
+              ) : null}
+            </span>
+          );
+        },
+      },
+      {
+        key: "key",
+        header: "Key",
+        width: { flex: 1, min: 160 },
+        className: "mono",
+        renderRead: ({ row }) => <span className="work-role-inline-key">{row.draft.key}</span>,
+        renderEdit: ({ row, update, disabled }) => {
+          const fieldErrors = fieldErrorsForRoleRow(row.id, rowFieldErrors, createFieldErrors);
+          return (
+            <span className="work-role-inline-field">
+              <InlineTextField
+                value={row.draft.key}
+                onChange={(key) => update({ key })}
+                disabled={disabled}
+                ariaLabel="Key"
+                placeholder="e.g. housekeeper"
+                ariaInvalid={Boolean(fieldErrors.key)}
+                ariaDescribedBy={fieldErrors.key ? workRoleFieldErrorId(row.id, "key") : undefined}
+              />
+              {fieldErrors.key ? (
+                <span id={workRoleFieldErrorId(row.id, "key")} className="form-field-error">
+                  {fieldErrors.key}
+                </span>
+              ) : null}
+            </span>
+          );
+        },
+      },
+    ],
+    [createFieldErrors, rowFieldErrors],
+  );
+
+  function openCreateRow(): void {
+    resetCreateRow();
     saveRole.reset();
-    setRoleDialogOpen(true);
+    setCreateOpen(true);
   }
 
-  function openEditDialog(role: WorkRole): void {
-    setEditingRole(role);
-    setForm({
-      name: role.name,
-      key: role.key,
-      description_md: role.description_md,
-      icon_name: role.icon_name,
-    });
-    setFieldErrors({});
-    setFormError(null);
-    saveRole.reset();
-    setRoleDialogOpen(true);
+  function resetCreateRow(): void {
+    setCreateDraft(EMPTY_WORK_ROLE_FORM);
+    setCreateDirty(false);
+    setCreateFieldErrors({});
+    setCreateError(null);
+    setCreateOpen(false);
   }
 
-  function openDeleteDialog(role: WorkRole): void {
-    setRoleToDelete(role);
-    deleteRole.reset();
-    deleteDialogRef.current?.showModal();
-  }
-
-  function setField(field: WorkRoleField, value: string): void {
-    setForm((prev) => ({ ...prev, [field]: value }));
-    setFieldErrors((prev) => ({ ...prev, [field]: undefined }));
-    setFormError(null);
-  }
-
-  function submitForm(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault();
-    const payload: WorkRoleWriteRequest = {
-      name: form.name.trim(),
-      key: form.key.trim(),
-      description_md: form.description_md.trim(),
-      icon_name: workRoleIconNameForSubmit(form.icon_name),
-    };
-    const nextErrors: Partial<Record<WorkRoleField, string>> = {};
-    if (!payload.name) nextErrors.name = "Enter a role name.";
-    if (!payload.key) nextErrors.key = "Enter a role key.";
+  function saveRow(rowId: string): void {
+    const draft = rowId === CREATE_WORK_ROLE_ROW_ID ? createDraft : editedDrafts.get(rowId);
+    if (!draft) return;
+    const nextErrors = validateWorkRoleDraft(draft);
     if (Object.keys(nextErrors).length > 0) {
-      setFieldErrors(nextErrors);
-      setFormError("Fix the highlighted fields before saving.");
+      if (rowId === CREATE_WORK_ROLE_ROW_ID) {
+        setCreateFieldErrors(nextErrors);
+        setCreateError("Fix the highlighted fields before saving.");
+        return;
+      }
+      setRowFieldErrors((current) => setMapValue(current, rowId, nextErrors));
+      setRowErrors((current) => setMapValue(current, rowId, "Fix the highlighted fields before saving."));
       return;
     }
-    setFieldErrors({});
-    setFormError(null);
-    saveRole.mutate(payload);
+    if (rowId === CREATE_WORK_ROLE_ROW_ID) {
+      setCreateFieldErrors({});
+      setCreateError(null);
+    } else {
+      setRowFieldErrors((current) => clearMapValue(current, rowId));
+      setRowErrors((current) => clearMapValue(current, rowId));
+    }
+    saveRole.mutate({ rowId, draft });
+  }
+
+  function cancelRow(rowId: string): void {
+    if (rowId === CREATE_WORK_ROLE_ROW_ID) {
+      resetCreateRow();
+      return;
+    }
+    setEditedDrafts((current) => clearMapValue(current, rowId));
+    setRowFieldErrors((current) => clearMapValue(current, rowId));
+    setRowErrors((current) => clearMapValue(current, rowId));
+  }
+
+  function editRow(rowId: string): void {
+    const role = rolesById.get(rowId);
+    if (!role) return;
+    setEditedDrafts((current) => setMapValue(current, rowId, draftFromWorkRole(role)));
+    setRowFieldErrors((current) => clearMapValue(current, rowId));
+    setRowErrors((current) => clearMapValue(current, rowId));
+    saveRole.reset();
   }
 
   return (
@@ -296,7 +448,7 @@ function WorkRoleCatalogManager() {
             Workspace job definitions available for employee assignment.
           </p>
         </div>
-        <button type="button" className="btn btn--moss" onClick={openCreateDialog}>
+        <button type="button" className="btn btn--moss" onClick={openCreateRow} disabled={createOpen}>
           <Plus size={16} aria-hidden="true" />
           Add role
         </button>
@@ -308,13 +460,13 @@ function WorkRoleCatalogManager() {
         <p className="form-error" role="alert">
           Work roles could not be loaded.
         </p>
-      ) : roles.length === 0 ? (
+      ) : roles.length === 0 && !createOpen ? (
         <EmptyState
           icon={BriefcaseBusiness}
           title="No work roles yet"
           copy="Create the first role before assigning employees to jobs."
           action={
-            <button type="button" className="btn btn--moss" onClick={openCreateDialog}>
+            <button type="button" className="btn btn--moss" onClick={openCreateRow} disabled={createOpen}>
               <Plus size={16} aria-hidden="true" />
               Add role
             </button>
@@ -322,187 +474,99 @@ function WorkRoleCatalogManager() {
           variant="quiet"
         />
       ) : (
-        <ul className="work-role-list">
-          {roles.map((role) => (
-            <li key={role.id} className="work-role-row">
-              <div className="work-role-row__mark" aria-hidden="true">
-                {role.icon_name ? (
-                  <AssetIcon name={role.icon_name} size={18} className="work-role-row__icon" />
-                ) : (
-                  workRoleInitials(role.name)
-                )}
-              </div>
-              <div className="work-role-row__main">
-                <strong>{role.name}</strong>
-                {role.description_md ? (
-                  <p className="work-role-row__description">{role.description_md}</p>
-                ) : null}
-              </div>
-              <div className="work-role-row__actions">
-                <button
-                  type="button"
-                  className="btn btn--ghost btn--sm work-role-row__action"
-                  aria-label="Edit"
-                  onClick={() => openEditDialog(role)}
-                >
-                  <Pencil size={14} aria-hidden="true" />
-                  <span className="work-role-row__action-label">Edit</span>
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--ghost btn--sm work-role-row__action"
-                  aria-label="Remove"
-                  onClick={() => openDeleteDialog(role)}
-                >
-                  <Trash2 size={14} aria-hidden="true" />
-                  <span className="work-role-row__action-label">Remove</span>
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <InlineTableForm
+          compact
+          ariaLabel="Work role catalog"
+          className="work-role-catalog__table"
+          columns={columns}
+          rows={rows}
+          saveMode="explicit"
+          onDraftChange={(rowId, patch) => {
+            if (rowId === CREATE_WORK_ROLE_ROW_ID) {
+              setCreateDraft((current) => ({ ...current, ...patch }));
+              setCreateDirty(true);
+              setCreateFieldErrors((current) => clearPatchedWorkRoleFieldErrors(current, patch));
+              setCreateError(null);
+              return;
+            }
+            setEditedDrafts((current) => {
+              const role = rolesById.get(rowId);
+              if (!role) return current;
+              const draft = current.get(rowId) ?? draftFromWorkRole(role);
+              return setMapValue(current, rowId, { ...draft, ...patch });
+            });
+            setRowFieldErrors((current) => {
+              const nextErrors = clearPatchedWorkRoleFieldErrors(current.get(rowId) ?? {}, patch);
+              return Object.keys(nextErrors).length > 0
+                ? setMapValue(current, rowId, nextErrors)
+                : clearMapValue(current, rowId);
+            });
+            setRowErrors((current) => clearMapValue(current, rowId));
+          }}
+          onEdit={editRow}
+          onSave={saveRow}
+          onCancel={cancelRow}
+          onDelete={(rowId) => deleteRole.mutate(rowId)}
+          deleteActionLabel="Remove"
+          trailingCreateRow={trailingCreateRow}
+          addRow={createOpen ? null : (
+            <button type="button" className="btn btn--moss" onClick={openCreateRow}>
+              <Plus size={16} aria-hidden="true" />
+              Add role
+            </button>
+          )}
+          emptyState={(
+            <EmptyState
+              icon={BriefcaseBusiness}
+              title="No work roles yet"
+              copy="Create the first role before assigning employees to jobs."
+              variant="quiet"
+            />
+          )}
+          getRowLabel={(row) => row.draft.name || row.label || "New work role"}
+          renderDetail={({ row, update, disabled }) => {
+            const fieldErrors = fieldErrorsForRoleRow(row.id, rowFieldErrors, createFieldErrors);
+            if (row.editing) {
+              return (
+                <span className="work-role-inline-detail">
+                  <InlineNoteField
+                    value={row.draft.description_md}
+                    onChange={(description_md) => update({ description_md })}
+                    disabled={disabled}
+                    ariaLabel="Description"
+                    placeholder="What this role covers in this workspace."
+                    ariaInvalid={Boolean(fieldErrors.description_md)}
+                    ariaDescribedBy={
+                      fieldErrors.description_md
+                        ? workRoleFieldErrorId(row.id, "description_md")
+                        : undefined
+                    }
+                  />
+                  {fieldErrors.description_md ? (
+                    <span
+                      id={workRoleFieldErrorId(row.id, "description_md")}
+                      className="form-field-error"
+                    >
+                      {fieldErrors.description_md}
+                    </span>
+                  ) : null}
+                </span>
+              );
+            }
+            return row.draft.description_md ? <p>{row.draft.description_md}</p> : null;
+          }}
+          renderDeleteConfirmation={({ label }) => ({
+            title: "Remove work role?",
+            confirmLabel: "Remove role",
+            children: (
+              <p>
+                This soft-retires <strong>{label}</strong> and removes it from future employee assignment lists.
+                Historical work remains attached to its original role record.
+              </p>
+            ),
+          })}
+        />
       )}
-
-      <FormModal
-        open={roleDialogOpen}
-        title={editingRole ? "Edit work role" : "Add work role"}
-        titleId="work-role-dialog-title"
-        eyebrow="Work role"
-        subtitle="Keys are stable slugs used by assignments and integrations. Rename with care."
-        formClassName="work-role-form"
-        onClose={() => {
-          if (saveRole.isPending) return;
-          setRoleDialogOpen(false);
-          setEditingRole(null);
-          setForm(EMPTY_WORK_ROLE_FORM);
-          setFieldErrors({});
-          setFormError(null);
-          saveRole.reset();
-        }}
-        onSubmit={submitForm}
-        noValidate
-        closeDisabled={saveRole.isPending}
-        onCancel={(event) => {
-          if (saveRole.isPending) event.preventDefault();
-        }}
-        actions={
-          <>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              disabled={saveRole.isPending}
-              onClick={() => setRoleDialogOpen(false)}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn--moss"
-              disabled={saveRole.isPending || !form.name.trim() || !form.key.trim()}
-            >
-              {saveRole.isPending ? "Saving..." : "Save role"}
-            </button>
-          </>
-        }
-      >
-          <FormField label="Name" requirement="required" className="work-role-form__field sheet-form__field">
-            <input
-              autoFocus
-              required
-              value={form.name}
-              aria-invalid={fieldErrors.name ? "true" : undefined}
-              aria-describedby={fieldErrors.name ? "work-role-name-error" : undefined}
-              onChange={(event) => setField("name", event.currentTarget.value)}
-              placeholder="e.g. Housekeeper"
-            />
-            {fieldErrors.name ? <span id="work-role-name-error" className="form-field-error">{fieldErrors.name}</span> : null}
-          </FormField>
-
-          <FormField label="Key" requirement="required" className="work-role-form__field sheet-form__field">
-            <input
-              required
-              value={form.key}
-              aria-invalid={fieldErrors.key ? "true" : undefined}
-              aria-describedby={fieldErrors.key ? "work-role-key-error" : undefined}
-              onChange={(event) => setField("key", event.currentTarget.value)}
-              placeholder="e.g. housekeeper"
-            />
-            {fieldErrors.key ? <span id="work-role-key-error" className="form-field-error">{fieldErrors.key}</span> : null}
-          </FormField>
-
-          <IconSelector
-            label="Icon"
-            value={form.icon_name}
-            onChange={(value) => setField("icon_name", value)}
-            className="work-role-form__field sheet-form__field"
-            error={fieldErrors.icon_name}
-            errorId="work-role-icon-error"
-          />
-
-          <FormField label="Description" requirement="optional" className="work-role-form__field sheet-form__field">
-            <AutoGrowTextarea
-              rows={4}
-              value={form.description_md}
-              aria-invalid={fieldErrors.description_md ? "true" : undefined}
-              aria-describedby={fieldErrors.description_md ? "work-role-description-error" : undefined}
-              onChange={(event) => setField("description_md", event.currentTarget.value)}
-              placeholder="What this role covers in this workspace."
-            />
-            {fieldErrors.description_md ? (
-              <span id="work-role-description-error" className="form-field-error">{fieldErrors.description_md}</span>
-            ) : null}
-          </FormField>
-
-          {formError ? <p className="form-error" role="alert">{formError}</p> : null}
-      </FormModal>
-
-      <dialog
-        // Exemption: confirmation-only delete dialog; it has no structured data-entry fields.
-        className="modal"
-        ref={deleteDialogRef}
-        aria-labelledby="work-role-delete-title"
-        onCancel={(event) => {
-          if (deleteRole.isPending) event.preventDefault();
-        }}
-        onClose={() => {
-          if (deleteRole.isPending) return;
-          setRoleToDelete(null);
-          deleteRole.reset();
-        }}
-      >
-        <div className="modal__body">
-          <h3 id="work-role-delete-title" className="modal__title">Remove work role?</h3>
-          <p className="modal__sub">
-            This soft-retires {roleToDelete ? roleToDelete.name : "the role"} and removes it from future
-            employee assignment lists. Historical work remains attached to its original role record.
-          </p>
-          {deleteRole.isError ? (
-            <p className="form-error" role="alert">
-              {workRoleErrorMessage(deleteRole.error, {})}
-            </p>
-          ) : null}
-          <div className="modal__actions">
-            <button
-              type="button"
-              className="btn btn--ghost"
-              disabled={deleteRole.isPending}
-              onClick={() => deleteDialogRef.current?.close()}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn btn--rust"
-              disabled={deleteRole.isPending || !roleToDelete}
-              onClick={() => {
-                if (roleToDelete) deleteRole.mutate(roleToDelete);
-              }}
-            >
-              {deleteRole.isPending ? "Removing..." : "Remove role"}
-            </button>
-          </div>
-        </div>
-      </dialog>
     </section>
   );
 }
@@ -706,6 +770,74 @@ function inviteFieldLabel(loc: readonly (string | number)[] | undefined): string
   if (field === "display_name") return "Full name";
   if (field === "grants") return "Role";
   return null;
+}
+
+function draftFromWorkRole(role: WorkRole): WorkRoleFormState {
+  return {
+    name: role.name,
+    key: role.key,
+    description_md: role.description_md,
+    icon_name: role.icon_name,
+  };
+}
+
+function workRoleWritePayload(draft: WorkRoleFormState): WorkRoleWriteRequest {
+  return {
+    name: draft.name.trim(),
+    key: draft.key.trim(),
+    description_md: draft.description_md.trim(),
+    icon_name: workRoleIconNameForSubmit(draft.icon_name),
+  };
+}
+
+function validateWorkRoleDraft(draft: WorkRoleFormState): Partial<Record<WorkRoleField, string>> {
+  const errors: Partial<Record<WorkRoleField, string>> = {};
+  if (!draft.name.trim()) errors.name = "Enter a role name.";
+  if (!draft.key.trim()) errors.key = "Enter a role key.";
+  return errors;
+}
+
+function fieldErrorsForRoleRow(
+  rowId: string,
+  rowFieldErrors: ReadonlyMap<string, Partial<Record<WorkRoleField, string>>>,
+  createFieldErrors: Partial<Record<WorkRoleField, string>>,
+): Partial<Record<WorkRoleField, string>> {
+  return rowId === CREATE_WORK_ROLE_ROW_ID ? createFieldErrors : rowFieldErrors.get(rowId) ?? {};
+}
+
+function clearPatchedWorkRoleFieldErrors(
+  fieldErrors: Partial<Record<WorkRoleField, string>>,
+  patch: Partial<WorkRoleFormState>,
+): Partial<Record<WorkRoleField, string>> {
+  const next = { ...fieldErrors };
+  for (const field of Object.keys(patch) as WorkRoleField[]) {
+    delete next[field];
+  }
+  return next;
+}
+
+function workRoleFieldErrorId(rowId: string, field: WorkRoleField): string {
+  return "work-role-" + rowId.replace(/[^a-zA-Z0-9_-]/g, "-") + "-" + field.replaceAll("_", "-") + "-error";
+}
+
+function setMapValue<TValue>(
+  current: ReadonlyMap<string, TValue>,
+  key: string,
+  value: TValue,
+): ReadonlyMap<string, TValue> {
+  const next = new Map(current);
+  next.set(key, value);
+  return next;
+}
+
+function clearMapValue<TValue>(
+  current: ReadonlyMap<string, TValue>,
+  key: string,
+): ReadonlyMap<string, TValue> {
+  if (!current.has(key)) return current;
+  const next = new Map(current);
+  next.delete(key);
+  return next;
 }
 
 function workRoleErrorMessage(

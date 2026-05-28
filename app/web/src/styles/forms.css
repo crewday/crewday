@@ -737,27 +737,10 @@
   font-size: 13px;
   line-height: 1.45;
 }
-.work-role-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: grid;
-  gap: 10px;
-}
-.work-role-row {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--card);
-}
 .work-role-row__mark {
   width: 36px;
   height: 36px;
-  border-radius: 9px;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -771,45 +754,17 @@
 .work-role-row__icon {
   color: currentColor;
 }
-.work-role-row__main {
+.work-role-inline-field,
+.work-role-inline-detail {
+  display: grid;
+  gap: 6px;
   min-width: 0;
 }
-.work-role-row__main strong {
-  display: block;
-  line-height: 1.3;
+.work-role-inline-detail {
+  width: min(100%, 720px);
 }
-.work-role-row__actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.work-role-row__description {
-  margin: 3px 0 0;
-  color: var(--ink-2);
-  font-size: 13px;
-  line-height: 1.35;
+.work-role-inline-key {
   overflow-wrap: anywhere;
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.work-role-row__actions {
-  justify-content: flex-end;
-  flex-wrap: nowrap;
-}
-.work-role-row__action {
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  justify-content: center;
-}
-.work-role-row__action-label {
-  display: none;
-}
-.work-role-form .field textarea {
-  min-height: 104px;
 }
 .form-field-error {
   color: var(--rust);
@@ -817,61 +772,17 @@
   line-height: 1.4;
 }
 
-@media (min-width: 720px) {
-  .work-role-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (min-width: 720px) and (max-width: 980px) {
-  .work-role-row {
-    grid-template-columns: 36px minmax(0, 1fr);
-  }
-  .work-role-row__actions {
-    grid-column: 1 / -1;
-    justify-content: stretch;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .work-role-row__action {
-    width: 100%;
-    padding: 0 12px;
-  }
-  .work-role-row__action-label {
-    display: inline;
-  }
-}
-
 @media (max-width: 560px) {
   .work-role-catalog__head {
     align-items: stretch;
     flex-direction: column;
   }
-  .work-role-catalog__head .btn,
-  .work-role-row__actions .btn {
+  .work-role-catalog__head .btn {
     width: 100%;
-  }
-  .work-role-row {
-    grid-template-columns: 34px minmax(0, 1fr);
-    align-items: flex-start;
   }
   .work-role-row__mark {
     width: 34px;
     height: 34px;
-    border-radius: 8px;
-  }
-  .work-role-row__actions {
-    grid-column: 1 / -1;
-    justify-content: stretch;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .work-role-row__action {
-    width: 100%;
-    padding: 0 12px;
-  }
-  .work-role-row__action-label {
-    display: inline;
   }
 }
 

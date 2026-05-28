@@ -300,11 +300,12 @@ describe("<EmployeesPage> work-role catalog", () => {
 
     const catalog = await screen.findByRole("region", { name: "Work roles" });
     expect(await within(catalog).findByText("Housekeeper")).toBeInTheDocument();
-    expect(within(catalog).queryByText("housekeeper")).not.toBeInTheDocument();
+    expect(within(catalog).getByRole("table", { name: "Work role catalog" })).toBeInTheDocument();
+    expect(within(catalog).getByText("housekeeper")).toBeInTheDocument();
     expect(within(catalog).queryByText("BrushCleaning")).not.toBeInTheDocument();
     expect(within(catalog).getByText("Turns guest rooms between stays.")).toBeInTheDocument();
     expect(catalog.querySelector(".work-role-row__mark svg")).toBeInTheDocument();
-    expect(within(catalog).getByRole("button", { name: "Add role" })).toBeInTheDocument();
+    expect(within(catalog).getAllByRole("button", { name: "Add role" }).length).toBeGreaterThan(0);
     expect(within(catalog).getByRole("button", { name: "Edit" })).toBeInTheDocument();
     expect(within(catalog).getByRole("button", { name: "Remove" })).toBeInTheDocument();
   });
@@ -324,9 +325,10 @@ describe("<EmployeesPage> work-role catalog", () => {
     ]);
 
     const catalog = await screen.findByRole("region", { name: "Work roles" });
-    const row = (await within(catalog).findByText("Night porter")).closest(".work-role-row");
+    await within(catalog).findByText("Night porter");
+    const row = within(catalog).getByLabelText("Night porter");
     expect(row?.querySelector(".work-role-row__mark")).toHaveTextContent("NP");
-    expect(within(catalog).queryByText("night_porter")).not.toBeInTheDocument();
+    expect(within(catalog).getByText("night_porter")).toBeInTheDocument();
   });
 
   it("falls back cleanly for unknown icon names without exposing the raw value", async () => {
@@ -344,10 +346,11 @@ describe("<EmployeesPage> work-role catalog", () => {
     ]);
 
     const catalog = await screen.findByRole("region", { name: "Work roles" });
-    const row = (await within(catalog).findByText("Legacy role")).closest(".work-role-row");
+    await within(catalog).findByText("Legacy role");
+    const row = within(catalog).getByLabelText("Legacy role");
     expect(row?.querySelector(".work-role-row__mark svg")).toBeInTheDocument();
     expect(within(catalog).queryByText("LegacyRoleIcon")).not.toBeInTheDocument();
-    expect(within(catalog).queryByText("legacy_role")).not.toBeInTheDocument();
+    expect(within(catalog).getByText("legacy_role")).toBeInTheDocument();
   });
 
   it("shows loading, error, and actionable empty states", async () => {
@@ -403,21 +406,21 @@ describe("<EmployeesPage> work-role catalog", () => {
       },
     ]);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Add role" }));
-    const dialog = screen.getByRole("dialog", { name: "Add work role" });
-    fireEvent.change(within(dialog).getByLabelText(/^Name\b/), { target: { value: "Pool technician" } });
-    fireEvent.change(within(dialog).getByLabelText(/^Key\b/), { target: { value: "pool_tech" } });
-    expect(within(dialog).queryByLabelText(/^Icon name\b/)).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Icon: No icon. Edit icon" }));
-    fireEvent.change(within(dialog).getByLabelText("Search icon choices"), { target: { value: "waves" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Select Waves icon" }));
-    fireEvent.change(within(dialog).getByLabelText(/^Description\b/), {
+    fireEvent.click((await screen.findAllByRole("button", { name: "Add role" }))[0]!);
+    const catalog = screen.getByRole("region", { name: "Work roles" });
+    fireEvent.change(within(catalog).getByLabelText("Name"), { target: { value: "Pool technician" } });
+    fireEvent.change(within(catalog).getByLabelText("Key"), { target: { value: "pool_tech" } });
+    expect(within(catalog).queryByLabelText(/^Icon name\b/)).not.toBeInTheDocument();
+    fireEvent.click(within(catalog).getByRole("button", { name: "Icon: No icon. Edit icon" }));
+    fireEvent.change(within(catalog).getByLabelText("Search icon choices"), { target: { value: "waves" } });
+    fireEvent.click(within(catalog).getByRole("button", { name: "Select Waves icon" }));
+    fireEvent.change(within(catalog).getByLabelText("Description"), {
       target: { value: "Handles weekly pool checks." },
     });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+    fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("Pool technician")).toBeInTheDocument();
-    expect(screen.queryByRole("dialog", { name: "Add work role" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
     const createRequest = requests.find((request) => request.method === "POST");
     expect(createRequest?.path).toBe("/w/acme/api/v1/work_roles");
     expect(createRequest?.body).toEqual({
@@ -441,13 +444,14 @@ describe("<EmployeesPage> work-role catalog", () => {
       },
     ]);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Add role" }));
-    const dialog = screen.getByRole("dialog", { name: "Add work role" });
-    fireEvent.change(within(dialog).getByLabelText(/^Name\b/), { target: { value: "Housekeeper" } });
-    fireEvent.change(within(dialog).getByLabelText(/^Key\b/), { target: { value: "housekeeper" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "Add role" }))[0]!);
+    const catalog = screen.getByRole("region", { name: "Work roles" });
+    fireEvent.change(within(catalog).getByLabelText("Name"), { target: { value: "Housekeeper" } });
+    fireEvent.change(within(catalog).getByLabelText("Key"), { target: { value: "housekeeper" } });
+    fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
 
-    expect(await within(dialog).findByRole("button", { name: "Saving..." })).toBeDisabled();
+    expect(await within(catalog).findByText("Saving")).toBeInTheDocument();
+    expect(within(catalog).getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("surfaces duplicate-key and validation errors from the API", async () => {
@@ -467,19 +471,19 @@ describe("<EmployeesPage> work-role catalog", () => {
       },
     ]);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Add role" }));
-    const dialog = screen.getByRole("dialog", { name: "Add work role" });
-    fireEvent.change(within(dialog).getByLabelText(/^Name\b/), { target: { value: "Housekeeper" } });
-    fireEvent.change(within(dialog).getByLabelText(/^Key\b/), { target: { value: "housekeeper" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "Add role" }))[0]!);
+    const catalog = screen.getByRole("region", { name: "Work roles" });
+    fireEvent.change(within(catalog).getByLabelText("Name"), { target: { value: "Housekeeper" } });
+    fireEvent.change(within(catalog).getByLabelText("Key"), { target: { value: "housekeeper" } });
+    fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
 
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    expect(await within(catalog).findByRole("alert")).toHaveTextContent(
       "That role key is already used",
     );
-    expect(screen.getByRole("dialog", { name: "Add work role" })).toBeInTheDocument();
+    expect(within(catalog).getByLabelText("Name")).toBeInTheDocument();
   });
 
-  it("shows API field errors next to the matching input", async () => {
+  it("shows API field errors next to matching inline controls", async () => {
     renderEmployees([
       {
         path: "/w/acme/api/v1/work_roles",
@@ -490,23 +494,40 @@ describe("<EmployeesPage> work-role catalog", () => {
             type: "https://crewday.dev/errors/validation",
             title: "Validation error",
             detail: "Request validation failed",
-            errors: [{ loc: ["body", "key"], msg: "Use lowercase letters, numbers, or underscores" }],
+            errors: [
+              { loc: ["body", "name"], msg: "Name is too short" },
+              { loc: ["body", "key"], msg: "Use lowercase letters, numbers, or underscores" },
+              { loc: ["body", "icon_name"], msg: "Choose an icon from the catalog" },
+              { loc: ["body", "description_md"], msg: "Description is too long" },
+            ],
           },
         },
       },
     ]);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Add role" }));
-    const dialog = screen.getByRole("dialog", { name: "Add work role" });
-    const keyInput = within(dialog).getByLabelText(/^Key\b/);
-    fireEvent.change(within(dialog).getByLabelText(/^Name\b/), { target: { value: "Night manager" } });
+    fireEvent.click((await screen.findAllByRole("button", { name: "Add role" }))[0]!);
+    const catalog = screen.getByRole("region", { name: "Work roles" });
+    const nameInput = within(catalog).getByLabelText("Name");
+    const keyInput = within(catalog).getByLabelText("Key");
+    const descriptionInput = within(catalog).getByLabelText("Description");
+    fireEvent.change(nameInput, { target: { value: "N" } });
     fireEvent.change(keyInput, { target: { value: "Night Manager" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+    fireEvent.change(descriptionInput, { target: { value: "x".repeat(20) } });
+    fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
 
-    expect(await within(dialog).findByText("Use lowercase letters, numbers, or underscores")).toBeInTheDocument();
+    expect(await within(catalog).findByText("Name is too short")).toBeInTheDocument();
+    expect(within(catalog).getByText("Use lowercase letters, numbers, or underscores")).toBeInTheDocument();
+    expect(within(catalog).getByText("Choose an icon from the catalog")).toBeInTheDocument();
+    expect(within(catalog).getByText("Description is too long")).toBeInTheDocument();
+    expect(nameInput).toHaveAttribute("aria-invalid", "true");
     expect(keyInput).toHaveAttribute("aria-invalid", "true");
-    expect(within(dialog).getByRole("alert")).toHaveTextContent(
-      "Could not save work role. Use lowercase letters, numbers, or underscores",
+    expect(descriptionInput).toHaveAttribute("aria-invalid", "true");
+    expect(within(catalog).getByRole("button", { name: "Icon: No icon. Edit icon" })).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    expect(within(catalog).getByRole("alert")).toHaveTextContent(
+      "Could not save work role. Name is too short",
     );
   });
 
@@ -526,13 +547,13 @@ describe("<EmployeesPage> work-role catalog", () => {
       },
     ]);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Add role" }));
-    const dialog = screen.getByRole("dialog", { name: "Add work role" });
-    fireEvent.change(within(dialog).getByLabelText(/^Name\b/), { target: { value: "Driver" } });
-    fireEvent.change(within(dialog).getByLabelText(/^Key\b/), { target: { value: "driver" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "Add role" }))[0]!);
+    const catalog = screen.getByRole("region", { name: "Work roles" });
+    fireEvent.change(within(catalog).getByLabelText("Name"), { target: { value: "Driver" } });
+    fireEvent.change(within(catalog).getByLabelText("Key"), { target: { value: "driver" } });
+    fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
 
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    expect(await within(catalog).findByRole("alert")).toHaveTextContent(
       "You do not have permission to manage work roles.",
     );
   });
@@ -555,12 +576,12 @@ describe("<EmployeesPage> work-role catalog", () => {
     ]);
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    const dialog = screen.getByRole("dialog", { name: "Edit work role" });
-    expect(within(dialog).queryByText("Selected icon")).not.toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Icon: Brush Cleaning. Edit icon" })).toBeInTheDocument();
-    fireEvent.change(within(dialog).getByLabelText(/^Name\b/), { target: { value: "Lead housekeeper" } });
-    fireEvent.change(within(dialog).getByLabelText(/^Key\b/), { target: { value: "lead_housekeeper" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+    const catalog = screen.getByRole("region", { name: "Work roles" });
+    expect(within(catalog).queryByText("Selected icon")).not.toBeInTheDocument();
+    expect(within(catalog).getByRole("button", { name: "Icon: Brush Cleaning. Edit icon" })).toBeInTheDocument();
+    fireEvent.change(within(catalog).getByLabelText("Name"), { target: { value: "Lead housekeeper" } });
+    fireEvent.change(within(catalog).getByLabelText("Key"), { target: { value: "lead_housekeeper" } });
+    fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("Lead housekeeper")).toBeInTheDocument();
     const patchRequest = requests.find((request) => request.method === "PATCH");
@@ -569,6 +590,66 @@ describe("<EmployeesPage> work-role catalog", () => {
       key: "lead_housekeeper",
       description_md: "Turns guest rooms between stays.",
       icon_name: "BrushCleaning",
+    });
+  });
+
+  it("cancels an inline edit without saving", async () => {
+    const { requests } = renderEmployees();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const catalog = screen.getByRole("region", { name: "Work roles" });
+    fireEvent.change(within(catalog).getByLabelText("Name"), { target: { value: "Lead housekeeper" } });
+    fireEvent.click(within(catalog).getByRole("button", { name: "Cancel" }));
+
+    expect(within(catalog).getByText("Housekeeper")).toBeInTheDocument();
+    expect(within(catalog).queryByText("Lead housekeeper")).not.toBeInTheDocument();
+    expect(requests.some((request) => request.method === "PATCH")).toBe(false);
+  });
+
+  it("cancels a new inline role without creating it", async () => {
+    const { requests } = renderEmployees();
+
+    fireEvent.click((await screen.findAllByRole("button", { name: "Add role" }))[0]!);
+    const catalog = screen.getByRole("region", { name: "Work roles" });
+    expect(within(catalog).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    fireEvent.change(within(catalog).getByLabelText("Name"), { target: { value: "Pool technician" } });
+    fireEvent.click(within(catalog).getByRole("button", { name: "Cancel" }));
+
+    expect(within(catalog).queryByDisplayValue("Pool technician")).not.toBeInTheDocument();
+    expect(requests.some((request) => request.method === "POST")).toBe(false);
+  });
+
+  it("changes a work role icon before submitting", async () => {
+    const roles: WorkRole[] = [{ ...WORK_ROLE }];
+    const { requests } = renderEmployees([
+      {
+        path: "/w/acme/api/v1/work_roles?limit=500",
+        respond: { body: { data: roles, next_cursor: null, has_more: false } },
+      },
+      {
+        path: "/w/acme/api/v1/work_roles/wr_housekeeper",
+        method: "PATCH",
+        respond: ({ body }) => {
+          roles[0] = { ...roles[0]!, ...(body as Partial<WorkRole>) };
+          return { body: roles[0] };
+        },
+      },
+    ]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const catalog = screen.getByRole("region", { name: "Work roles" });
+    fireEvent.click(within(catalog).getByRole("button", { name: "Icon: Brush Cleaning. Edit icon" }));
+    fireEvent.change(within(catalog).getByLabelText("Search icon choices"), { target: { value: "waves" } });
+    fireEvent.click(within(catalog).getByRole("button", { name: "Select Waves icon" }));
+    fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Housekeeper")).toBeInTheDocument();
+    const patchRequest = requests.find((request) => request.method === "PATCH");
+    expect(patchRequest?.body).toEqual({
+      name: "Housekeeper",
+      key: "housekeeper",
+      description_md: "Turns guest rooms between stays.",
+      icon_name: "Waves",
     });
   });
 
@@ -590,10 +671,10 @@ describe("<EmployeesPage> work-role catalog", () => {
     ]);
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    const dialog = screen.getByRole("dialog", { name: "Edit work role" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Icon: Brush Cleaning. Edit icon" }));
-    fireEvent.click(within(dialog).getByRole("button", { name: "No icon" }));
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+    const catalog = screen.getByRole("region", { name: "Work roles" });
+    fireEvent.click(within(catalog).getByRole("button", { name: "Icon: Brush Cleaning. Edit icon" }));
+    fireEvent.click(within(catalog).getByRole("button", { name: "No icon" }));
+    fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("Housekeeper")).toBeInTheDocument();
     const patchRequest = requests.find((request) => request.method === "PATCH");
@@ -624,9 +705,9 @@ describe("<EmployeesPage> work-role catalog", () => {
     ]);
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    const dialog = screen.getByRole("dialog", { name: "Edit work role" });
-    expect(within(dialog).getByRole("button", { name: "Icon: Unknown icon. Edit icon" })).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+    const catalog = screen.getByRole("region", { name: "Work roles" });
+    expect(within(catalog).getByRole("button", { name: "Icon: Unknown icon. Edit icon" })).toBeInTheDocument();
+    fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("Legacy role")).toBeInTheDocument();
     const patchRequest = requests.find((request) => request.method === "PATCH");
@@ -656,16 +737,16 @@ describe("<EmployeesPage> work-role catalog", () => {
     ]);
 
     fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
-    const dialog = screen.getByRole("dialog", { name: "Remove work role?" });
-    expect(within(dialog).getByText(/soft-retires Housekeeper/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/future employee assignment lists/)).toBeInTheDocument();
+    const dialog = screen.getByRole("alertdialog", { name: "Remove work role?" });
+    expect(dialog).toHaveTextContent("soft-retires Housekeeper");
+    expect(dialog).toHaveTextContent("future employee assignment lists");
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove role" }));
 
     expect(await screen.findByText("No work roles yet")).toBeInTheDocument();
     expect(requests.some((request) => request.method === "DELETE")).toBe(true);
   });
 
-  it("shows delete-in-progress while removing a role", async () => {
+  it("shows row saving state while removing a role", async () => {
     const deleteResponse = deferred<never>();
     renderEmployees([
       {
@@ -676,13 +757,13 @@ describe("<EmployeesPage> work-role catalog", () => {
     ]);
 
     fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
-    const dialog = screen.getByRole("dialog", { name: "Remove work role?" });
+    const dialog = screen.getByRole("alertdialog", { name: "Remove work role?" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove role" }));
 
-    expect(await within(dialog).findByRole("button", { name: "Removing..." })).toBeDisabled();
+    expect(await screen.findByText("Saving")).toBeInTheDocument();
   });
 
-  it("surfaces remove permission errors and leaves confirmation open", async () => {
+  it("surfaces remove permission errors without closing confirmation", async () => {
     renderEmployees([
       {
         path: "/w/acme/api/v1/work_roles/wr_housekeeper",
@@ -699,12 +780,12 @@ describe("<EmployeesPage> work-role catalog", () => {
     ]);
 
     fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
-    const dialog = screen.getByRole("dialog", { name: "Remove work role?" });
+    const dialog = screen.getByRole("alertdialog", { name: "Remove work role?" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove role" }));
 
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(
       "You do not have permission to manage work roles.",
     );
-    expect(screen.getByRole("dialog", { name: "Remove work role?" })).toBeInTheDocument();
+    expect(screen.getByRole("alertdialog", { name: "Remove work role?" })).toBeInTheDocument();
   });
 });

@@ -294,6 +294,8 @@ interface InlineTableFormBaseProps<TDraft> {
   getRowLabel?: (row: InlineTableRow<TDraft>, index: number) => string;
   /** Optional caller-provided delete modal copy for domain-specific cascades or warnings. */
   renderDeleteConfirmation?: (context: InlineTableDeleteConfirmationContext<TDraft>) => InlineTableDeleteConfirmationCopy;
+  /** Defaults to Delete; use Remove for soft-retire or unlink semantics. */
+  deleteActionLabel?: string;
   /** Use only for semantic page-level variants; prefer the default class set. */
   className?: string;
   /** Defaults to the standard density; reserve compact for secondary or very high-volume sheets. */
@@ -352,6 +354,7 @@ export function InlineTableForm<TDraft>({
   onBatchCancel,
   getRowLabel,
   renderDeleteConfirmation,
+  deleteActionLabel = "Delete",
   className,
   compact = false,
 }: InlineTableFormProps<TDraft>) {
@@ -580,7 +583,6 @@ export function InlineTableForm<TDraft>({
     const rowId = deleteConfirmationRowId;
     if (!rowId || !onDelete) return;
     suppressAutosaveBlurRef.current = null;
-    setDeleteConfirmationRowId(null);
     pendingDeletedSelectionRef.current = deleteSelectionTarget(rowId);
     onDelete(rowId);
   };
@@ -690,6 +692,7 @@ export function InlineTableForm<TDraft>({
           {renderedRows.map((row, index) => {
             const label = rowLabel(row, index, getRowLabel);
             const isTrailingCreate = activeTrailingCreateRow?.id === row.id;
+            const isFactoryCreate = factoryCreateRow?.id === row.id;
             const status = rowStatus(row);
             const editing = row.editing ?? false;
             const disabled = row.disabled || row.saving || status === "disabled";
@@ -840,6 +843,7 @@ export function InlineTableForm<TDraft>({
                       status={status}
                       onEdit={onEdit ? () => onEdit(row.id) : undefined}
                       onDelete={onDelete && !isTrailingCreate ? () => requestDelete(row.id) : undefined}
+                      deleteLabel={deleteActionLabel}
                       reorderControls={canReorderRow ? {
                         label,
                         canMoveUp: movableIndex > 0,
@@ -851,7 +855,7 @@ export function InlineTableForm<TDraft>({
                       onCancel={() => cancelRow(row)}
                       actionDisplay={actionDisplay}
                       hideRowCommit={saveMode === "batch"}
-                      hideCancel={isTrailingCreate && !row.dirty}
+                      hideCancel={isFactoryCreate && !row.dirty}
                       onActionPointerDown={() => {
                         suppressAutosaveBlurRef.current = row.id;
                       }}
@@ -901,12 +905,20 @@ export function InlineTableForm<TDraft>({
         tone={deleteConfirmationCopy?.tone ?? "rust"}
         onCancel={cancelDelete}
         onConfirm={confirmDelete}
+        pending={Boolean(deleteConfirmationRow?.saving)}
       >
-        {deleteConfirmationCopy?.children ?? (
-          <p>
-            Delete <strong>{deleteConfirmationLabel}</strong>? This removes the row immediately.
-          </p>
-        )}
+        <>
+          {deleteConfirmationCopy?.children ?? (
+            <p>
+              Delete <strong>{deleteConfirmationLabel}</strong>? This removes the row immediately.
+            </p>
+          )}
+          {deleteConfirmationRow?.error ? (
+            <div className="inline-table-form__message inline-table-form__message--error">
+              {deleteConfirmationRow.error}
+            </div>
+          ) : null}
+        </>
       </ConfirmationModal>
     </section>
   );
@@ -920,6 +932,7 @@ function InlineTableActions({
   status,
   onEdit,
   onDelete,
+  deleteLabel,
   reorderControls,
   onSave,
   onCancel,
@@ -935,6 +948,7 @@ function InlineTableActions({
   status: InlineTableRowStatus;
   onEdit?: () => void;
   onDelete?: () => void;
+  deleteLabel: string;
   reorderControls?: {
     label: string;
     canMoveUp: boolean;
@@ -963,6 +977,7 @@ function InlineTableActions({
           <InlineTableActionButton
             action="delete"
             display={actionDisplay}
+            label={deleteLabel}
             disabled={disabled}
             onClick={onDelete}
             onPointerDown={onActionPointerDown}
@@ -988,6 +1003,7 @@ function InlineTableActions({
         <InlineTableActionButton
           action="delete"
           display={actionDisplay}
+          label={deleteLabel}
           disabled={disabled}
           onClick={onDelete}
           onPointerDown={onActionPointerDown}
@@ -1211,17 +1227,19 @@ function InlineTableReorderControls({
 function InlineTableActionButton({
   action,
   display,
+  label,
   disabled,
   onClick,
   onPointerDown,
 }: {
   action: "edit" | "delete" | "cancel" | "save";
   display: InlineTableActionDisplay;
+  label?: string;
   disabled: boolean;
   onClick: () => void;
   onPointerDown: () => void;
 }) {
-  const label = actionLabel(action);
+  const resolvedLabel = label ?? actionLabel(action);
   const Icon = actionIcon(action);
   const classes = [
     "inline-table-form__icon-btn",
@@ -1234,13 +1252,13 @@ function InlineTableActionButton({
     <button
       type="button"
       className={classes}
-      aria-label={display === "icons" ? label : undefined}
-      title={display === "icons" ? label : undefined}
+      aria-label={display === "icons" ? resolvedLabel : undefined}
+      title={display === "icons" ? resolvedLabel : undefined}
       disabled={disabled}
       onPointerDown={onPointerDown}
       onClick={onClick}
     >
-      {display === "icons" ? <Icon size={15} aria-hidden="true" /> : label}
+      {display === "icons" ? <Icon size={15} aria-hidden="true" /> : resolvedLabel}
     </button>
   );
 }
@@ -1270,12 +1288,16 @@ export function InlineTextField({
   placeholder,
   disabled,
   ariaLabel,
+  ariaInvalid,
+  ariaDescribedBy,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   disabled?: boolean;
   ariaLabel?: string;
+  ariaInvalid?: boolean;
+  ariaDescribedBy?: string;
 }) {
   return (
     <input
@@ -1285,6 +1307,8 @@ export function InlineTextField({
       placeholder={placeholder}
       disabled={disabled}
       aria-label={ariaLabel}
+      aria-invalid={ariaInvalid ? "true" : undefined}
+      aria-describedby={ariaDescribedBy}
       onChange={(event) => onChange(event.currentTarget.value)}
     />
   );
@@ -1630,12 +1654,16 @@ export function InlineNoteField({
   placeholder,
   disabled,
   ariaLabel,
+  ariaInvalid,
+  ariaDescribedBy,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   disabled?: boolean;
   ariaLabel?: string;
+  ariaInvalid?: boolean;
+  ariaDescribedBy?: string;
 }) {
   return (
     <textarea
@@ -1644,6 +1672,8 @@ export function InlineNoteField({
       placeholder={placeholder}
       disabled={disabled}
       aria-label={ariaLabel}
+      aria-invalid={ariaInvalid ? "true" : undefined}
+      aria-describedby={ariaDescribedBy}
       onChange={(event) => onChange(event.currentTarget.value)}
     />
   );
