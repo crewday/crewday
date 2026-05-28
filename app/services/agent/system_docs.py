@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -9,7 +10,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, Final
 
 import yaml
 from sqlalchemy import select
@@ -20,16 +21,21 @@ from app.tenancy import tenant_agnostic
 from app.util.ulid import new_ulid
 
 __all__ = [
+    "AGENT_DOC_ROLE_ORDER",
     "DEFAULT_AGENT_DOCS_ROOT",
     "AgentDocSeed",
+    "agent_doc_metadata_hash",
     "get_agent_doc",
+    "get_agent_doc_default",
     "list_agent_docs",
     "load_agent_doc_seeds",
+    "normalize_agent_doc_roles",
     "seed_agent_docs",
 ]
 
 DEFAULT_AGENT_DOCS_ROOT = Path(__file__).resolve().parents[2] / "agent_docs"
 DEFAULT_CAPABILITIES = ("chat.manager", "chat.employee", "chat.admin")
+AGENT_DOC_ROLE_ORDER: Final[tuple[str, ...]] = ("manager", "employee", "admin")
 _log = logging.getLogger(__name__)
 _SEED_LOCK = Lock()
 
@@ -45,6 +51,7 @@ class AgentDocSeed:
     roles: tuple[str, ...]
     capabilities: tuple[str, ...]
     default_hash: str
+    metadata_default_hash: str
 
 
 def list_agent_docs(session: Session) -> list[AgentDoc]:
@@ -65,6 +72,18 @@ def get_agent_doc(session: Session, slug: str) -> AgentDoc | None:
     return session.scalar(
         select(AgentDoc).where(AgentDoc.slug == slug, AgentDoc.is_active.is_(True))
     )
+
+
+def get_agent_doc_default(
+    slug: str,
+    *,
+    root: Path = DEFAULT_AGENT_DOCS_ROOT,
+) -> AgentDocSeed | None:
+    """Return the current code-shipped default for ``slug``."""
+    for seed in load_agent_doc_seeds(root):
+        if seed.slug == slug:
+            return seed
+    return None
 
 
 def seed_agent_docs(
@@ -102,6 +121,7 @@ def seed_agent_docs(
                         version=1,
                         is_active=True,
                         default_hash=seed.default_hash,
+                        metadata_default_hash=seed.metadata_default_hash,
                         notes=None,
                         created_at=timestamp,
                         updated_at=timestamp,
@@ -137,46 +157,38 @@ def _sync_existing(
     seed: AgentDocSeed,
     now: datetime,
 ) -> None:
-    metadata_changed = (
+    row_metadata_hash = agent_doc_metadata_hash(row.roles)
+    metadata_hash_missing = row.metadata_default_hash == ""
+    stored_metadata_hash = (
+        row_metadata_hash if metadata_hash_missing else row.metadata_default_hash
+    )
+    metadata_default_changed = stored_metadata_hash != seed.metadata_default_hash
+    metadata_unmodified = row_metadata_hash == stored_metadata_hash
+    editable_metadata_changed = tuple(row.roles) != seed.roles
+    read_only_metadata_changed = (
         row.title != seed.title
         or row.summary != seed.summary
-        or tuple(row.roles) != seed.roles
         or tuple(row.capabilities) != seed.capabilities
     )
     default_changed = row.default_hash != seed.default_hash
-    if not metadata_changed and not default_changed:
+    if (
+        not metadata_hash_missing
+        and not read_only_metadata_changed
+        and not editable_metadata_changed
+        and not metadata_default_changed
+        and not default_changed
+    ):
         return
 
     row.title = seed.title
     row.summary = seed.summary
-    row.roles = list(seed.roles)
     row.capabilities = list(seed.capabilities)
 
+    body_auto_upgrade = False
     if default_changed:
         old_body_hash = _hash_body(row.body_md)
         if old_body_hash == row.default_hash:
-            session.add(
-                AgentDocRevision(
-                    id=new_ulid(),
-                    doc_id=row.id,
-                    version=row.version,
-                    body_md=row.body_md,
-                    notes="Code default auto-upgrade",
-                    created_at=now,
-                    created_by_user_id=None,
-                )
-            )
-            row.body_md = seed.body_md
-            row.version += 1
-            _log.info(
-                "agent doc auto-upgraded",
-                extra={
-                    "event": "template.auto_upgraded",
-                    "table": "agent_doc",
-                    "slug": row.slug,
-                    "version": row.version,
-                },
-            )
+            body_auto_upgrade = True
         else:
             _log.warning(
                 "agent doc customised while code default changed",
@@ -187,7 +199,57 @@ def _sync_existing(
                     "version": row.version,
                 },
             )
+
+    metadata_auto_upgrade = False
+    if not metadata_hash_missing and metadata_default_changed:
+        if metadata_unmodified:
+            metadata_auto_upgrade = True
+        else:
+            _log.warning(
+                "agent doc customised while code default metadata changed",
+                extra={
+                    "event": "template.customised_code_default_changed",
+                    "table": "agent_doc",
+                    "slug": row.slug,
+                    "version": row.version,
+                    "field": "roles",
+                },
+            )
+
+    if body_auto_upgrade or metadata_auto_upgrade:
+        session.add(
+            AgentDocRevision(
+                id=new_ulid(),
+                doc_id=row.id,
+                version=row.version,
+                body_md=row.body_md,
+                roles=list(row.roles),
+                notes="Code default auto-upgrade",
+                created_at=now,
+                created_by_user_id=None,
+            )
+        )
+        if body_auto_upgrade:
+            row.body_md = seed.body_md
+        if metadata_auto_upgrade:
+            row.roles = list(seed.roles)
+        row.version += 1
+        _log.info(
+            "agent doc auto-upgraded",
+            extra={
+                "event": "template.auto_upgraded",
+                "table": "agent_doc",
+                "slug": row.slug,
+                "version": row.version,
+            },
+        )
+
+    if metadata_hash_missing:
+        row.roles = list(seed.roles)
+    if default_changed:
         row.default_hash = seed.default_hash
+    if metadata_hash_missing or metadata_default_changed:
+        row.metadata_default_hash = seed.metadata_default_hash
 
     row.updated_at = now
 
@@ -201,7 +263,7 @@ def _parse_seed(path: Path) -> AgentDocSeed | None:
     slug = _required_string(meta, "slug", path)
     title = _required_string(meta, "title", path)
     summary = _optional_string(meta, "summary", path)
-    roles = _required_string_list(meta, "roles", path)
+    roles = normalize_agent_doc_roles(_required_string_list(meta, "roles", path))
     capabilities = (
         _optional_string_list(meta, "capabilities", path) or DEFAULT_CAPABILITIES
     )
@@ -214,6 +276,7 @@ def _parse_seed(path: Path) -> AgentDocSeed | None:
         roles=roles,
         capabilities=capabilities,
         default_hash=_hash_body(body_md),
+        metadata_default_hash=agent_doc_metadata_hash(roles),
     )
 
 
@@ -277,3 +340,26 @@ def _optional_string_list(
 
 def _hash_body(body_md: str) -> str:
     return sha256(body_md.encode("utf-8")).hexdigest()[:16]
+
+
+def normalize_agent_doc_roles(roles: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+    """Validate and return agent-doc roles in stable wire/storage order."""
+    seen: set[str] = set()
+    for role in roles:
+        if role not in AGENT_DOC_ROLE_ORDER:
+            raise ValueError(f"unknown agent doc role: {role}")
+        if role in seen:
+            raise ValueError(f"duplicate agent doc role: {role}")
+        seen.add(role)
+    if not seen:
+        raise ValueError("agent doc roles must contain at least one role")
+    return tuple(role for role in AGENT_DOC_ROLE_ORDER if role in seen)
+
+
+def agent_doc_metadata_hash(roles: list[str] | tuple[str, ...]) -> str:
+    """Return the hash for normalized editable metadata."""
+    normalized = normalize_agent_doc_roles(tuple(roles))
+    body = json.dumps(
+        {"roles": list(normalized)}, separators=(",", ":"), sort_keys=True
+    )
+    return sha256(body.encode("utf-8")).hexdigest()[:16]

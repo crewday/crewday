@@ -1147,6 +1147,7 @@ class AgentDoc(Base):
     default_hash: Mapped[str] = mapped_column(
         String(16), nullable=False
     )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
+    metadata_default_hash: Mapped[str] = mapped_column(String(16), nullable=False)
     notes: Mapped[str | None] = mapped_column(
         String, nullable=True
     )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
@@ -1182,6 +1183,7 @@ class AgentDocRevision(Base):
     body_md: Mapped[str] = mapped_column(
         String, nullable=False
     )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
+    roles: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     notes: Mapped[str | None] = mapped_column(
         String, nullable=True
     )  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
