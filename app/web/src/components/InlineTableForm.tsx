@@ -738,20 +738,26 @@ export function InlineTableForm<TDraft>({
           onDrop={reorderListProps.onDrop}
         >
           {renderedRows.length === 0 ? (
-            <div className="inline-table-form__empty">
-              {hasActiveSearch ? search?.noResultsState ?? (
-                <EmptyState
-                  variant="compact"
-                  title="No matching rows"
-                  copy="Clear search or adjust filters to see rows."
-                />
-              ) : emptyState ?? (
-                <EmptyState
-                  variant="compact"
-                  title="No rows yet"
-                  copy="Rows will appear here when there is something to edit."
-                />
-              )}
+            <div className="inline-table-form__empty" role="row">
+              <div
+                className="inline-table-form__empty-cell"
+                role="cell"
+                aria-colspan={columns.length + 1}
+              >
+                {hasActiveSearch ? search?.noResultsState ?? (
+                  <EmptyState
+                    variant="compact"
+                    title="No matching rows"
+                    copy="Clear search or adjust filters to see rows."
+                  />
+                ) : emptyState ?? (
+                  <EmptyState
+                    variant="compact"
+                    title="No rows yet"
+                    copy="Rows will appear here when there is something to edit."
+                  />
+                )}
+              </div>
             </div>
           ) : null}
 

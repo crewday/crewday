@@ -1922,6 +1922,75 @@ describe("InlineTableForm", () => {
     expect(screen.queryByRole("heading", { name: "No rows yet" })).toBeNull();
   });
 
+  it("renders empty content in a full-width table row slot", () => {
+    const { container } = render(
+      <InlineTableForm
+        ariaLabel="Empty rows"
+        columns={columns}
+        rows={[]}
+        emptyState="No scheduled rows."
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    const body = container.querySelector(".inline-table-form__body");
+    const emptyRow = container.querySelector(".inline-table-form__empty");
+    const emptyCell = container.querySelector(".inline-table-form__empty-cell");
+
+    expect(emptyRow).not.toBeNull();
+    expect(emptyRow?.parentElement).toBe(body);
+    expect(emptyRow).toHaveAttribute("role", "row");
+    expect(emptyCell).toHaveAttribute("role", "cell");
+    expect(emptyCell).toHaveAttribute("aria-colspan", String(columns.length + 1));
+    expect(emptyCell).toHaveTextContent("No scheduled rows.");
+  });
+
+  it("keeps empty rows centered and spanning the shared grid", () => {
+    expect(cssDeclarationValue(
+      inlineTableCss,
+      ".inline-table-form__empty",
+      "box-sizing",
+    )).toBe("border-box");
+    expect(cssDeclarationValue(
+      inlineTableCss,
+      ".inline-table-form__empty",
+      "justify-content",
+    )).toBe("center");
+    expect(cssDeclarationValue(
+      inlineTableCss,
+      ".inline-table-form__empty",
+      "width",
+    )).toBe("100%");
+    expect(cssDeclarationValue(
+      inlineTableCss,
+      ".inline-table-form__empty",
+      "text-align",
+    )).toBe("center");
+    expect(cssDeclarationValue(
+      inlineTableCss,
+      ".inline-table-form__empty-cell",
+      "justify-content",
+    )).toBe("center");
+    expect(cssDeclarationValue(
+      inlineTableCss,
+      ".inline-table-form__empty-cell",
+      "width",
+    )).toBe("100%");
+    expect(cssDeclarationValue(
+      inlineTableCss,
+      ".inline-table-form__empty-cell",
+      "min-width",
+    )).toBe("0");
+    expect(inlineTableCss).toMatch(
+      /@supports\s*\(grid-template-columns:\s*subgrid\)[\s\S]*\.inline-table-form__empty\s*\{[\s\S]*grid-column:\s*1\s*\/\s*-1;[\s\S]*min-width:\s*0;/,
+    );
+    expect(inlineTableCss).toMatch(
+      /@media\s*\(max-width:\s*720px\)[\s\S]*\.inline-table-form__empty\s*\{[\s\S]*min-width:\s*0;/,
+    );
+  });
+
   it("uses caller-owned filtered empty states and custom summaries", () => {
     render(
       <InlineTableForm
