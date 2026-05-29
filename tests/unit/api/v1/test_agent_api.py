@@ -1080,7 +1080,10 @@ def test_manager_log_workspace_resolution_defers_session_touch_autoflush(
             ],
         }
     )
-    middleware = WorkspaceContextMiddleware(app=FastAPI())
+    middleware = WorkspaceContextMiddleware(
+        app=FastAPI(),
+        clock=FrozenClock(_PINNED + timedelta(seconds=1)),
+    )
 
     try:
         ctx, actor, outcome = middleware._resolve_context(

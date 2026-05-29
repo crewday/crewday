@@ -62,6 +62,7 @@ from sqlalchemy.orm import Session as DbSession
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp
 
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.session import make_uow
@@ -102,6 +103,7 @@ from app.http.skip_paths import is_skip_path as _is_skip_path
 from app.tenancy.context import ActorGrantRole, PrincipalKind, WorkspaceContext
 from app.tenancy.current import reset_current, set_current, tenant_agnostic
 from app.tenancy.slug import InvalidSlug, validate_slug
+from app.util.clock import Clock
 from app.util.forwarded import parse_trusted_proxies, resolve_source_ip
 from app.util.ulid import new_ulid
 
@@ -349,6 +351,8 @@ def resolve_actor(
     request: Request,
     db_session: DbSession,
     settings: Settings,
+    *,
+    clock: Clock | None = None,
 ) -> ActorIdentity | None:
     """Resolve the caller identity from the request's auth material.
 
@@ -448,6 +452,7 @@ def resolve_actor(
                 ua=ua,
                 accept_language=accept_language,
                 settings=settings,
+                clock=clock,
             )
         except UserArchived:
             # cd-uceg / §03 "Sessions": session is otherwise live but
@@ -854,6 +859,15 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
     :func:`app.api.deps.db_session` for its own business logic.
     """
 
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        clock: Clock | None = None,
+    ) -> None:
+        super().__init__(app)
+        self._clock = clock
+
     async def dispatch(
         self,
         request: Request,
@@ -1172,7 +1186,7 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
         # ``last_used_at`` bump on a live token) actually land.
         with make_uow() as db_session:
             assert isinstance(db_session, DbSession)
-            actor = resolve_actor(request, db_session, settings)
+            actor = resolve_actor(request, db_session, settings, clock=self._clock)
             with db_session.no_autoflush:
                 ctx = resolve_workspace(
                     path,
