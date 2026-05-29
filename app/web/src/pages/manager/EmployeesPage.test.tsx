@@ -106,6 +106,12 @@ function renderEmployees(routes: FetchRoute[] = []) {
   return { ...view, ...fetchEnv };
 }
 
+async function findWorkRoleCatalog(): Promise<HTMLElement> {
+  const catalog = await screen.findByRole("region", { name: "Work roles" });
+  await within(catalog).findByRole("table", { name: "Work role catalog" });
+  return catalog;
+}
+
 function installDialogPolyfill(): void {
   HTMLDialogElement.prototype.showModal = vi.fn(function showModal(this: HTMLDialogElement) {
     this.setAttribute("open", "");
@@ -298,14 +304,15 @@ describe("<EmployeesPage> work-role catalog", () => {
   it("lists role catalog rows with edit and remove affordances", async () => {
     renderEmployees();
 
-    const catalog = await screen.findByRole("region", { name: "Work roles" });
+    const catalog = await findWorkRoleCatalog();
     expect(await within(catalog).findByText("Housekeeper")).toBeInTheDocument();
     expect(within(catalog).getByRole("table", { name: "Work role catalog" })).toBeInTheDocument();
     expect(within(catalog).getByText("housekeeper")).toBeInTheDocument();
     expect(within(catalog).queryByText("BrushCleaning")).not.toBeInTheDocument();
     expect(within(catalog).getByText("Turns guest rooms between stays.")).toBeInTheDocument();
     expect(catalog.querySelector(".work-role-row__mark svg")).toBeInTheDocument();
-    expect(within(catalog).getAllByRole("button", { name: "Add role" }).length).toBeGreaterThan(0);
+    expect(within(catalog).queryByRole("button", { name: "Add role" })).not.toBeInTheDocument();
+    expect(within(catalog).getByLabelText("New work role")).toBeInTheDocument();
     expect(within(catalog).getByRole("button", { name: "Edit" })).toBeInTheDocument();
     expect(within(catalog).getByRole("button", { name: "Remove" })).toBeInTheDocument();
   });
@@ -324,7 +331,7 @@ describe("<EmployeesPage> work-role catalog", () => {
       },
     ]);
 
-    const catalog = await screen.findByRole("region", { name: "Work roles" });
+    const catalog = await findWorkRoleCatalog();
     await within(catalog).findByText("Night porter");
     const row = within(catalog).getByLabelText("Night porter");
     expect(row?.querySelector(".work-role-row__mark")).toHaveTextContent("NP");
@@ -345,7 +352,7 @@ describe("<EmployeesPage> work-role catalog", () => {
       },
     ]);
 
-    const catalog = await screen.findByRole("region", { name: "Work roles" });
+    const catalog = await findWorkRoleCatalog();
     await within(catalog).findByText("Legacy role");
     const row = within(catalog).getByLabelText("Legacy role");
     expect(row?.querySelector(".work-role-row__mark svg")).toBeInTheDocument();
@@ -353,7 +360,7 @@ describe("<EmployeesPage> work-role catalog", () => {
     expect(within(catalog).getByText("legacy_role")).toBeInTheDocument();
   });
 
-  it("shows loading, error, and actionable empty states", async () => {
+  it("shows loading, error, and default create-row empty states", async () => {
     const rolesResponse = deferred<{ data: unknown[]; next_cursor: null; has_more: false }>();
     const { unmount } = renderEmployees([
       {
@@ -364,8 +371,9 @@ describe("<EmployeesPage> work-role catalog", () => {
 
     expect(await screen.findByText("Loading…")).toBeInTheDocument();
     rolesResponse.resolve({ data: [], next_cursor: null, has_more: false });
-    expect(await screen.findByText("No work roles yet")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Add role" }).length).toBeGreaterThan(0);
+    expect(await screen.findByRole("table", { name: "Work role catalog" })).toBeInTheDocument();
+    expect(screen.getByLabelText("New work role")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add role" })).not.toBeInTheDocument();
     unmount();
 
     renderEmployees([
@@ -406,8 +414,7 @@ describe("<EmployeesPage> work-role catalog", () => {
       },
     ]);
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Add role" }))[0]!);
-    const catalog = screen.getByRole("region", { name: "Work roles" });
+    const catalog = await findWorkRoleCatalog();
     fireEvent.change(within(catalog).getByLabelText("Name"), { target: { value: "Pool technician" } });
     fireEvent.change(within(catalog).getByLabelText("Key"), { target: { value: "pool_tech" } });
     expect(within(catalog).queryByLabelText(/^Icon name\b/)).not.toBeInTheDocument();
@@ -420,7 +427,7 @@ describe("<EmployeesPage> work-role catalog", () => {
     fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("Pool technician")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText("New work role")).getByLabelText("Name")).toHaveValue("");
     const createRequest = requests.find((request) => request.method === "POST");
     expect(createRequest?.path).toBe("/w/acme/api/v1/work_roles");
     expect(createRequest?.body).toEqual({
@@ -444,8 +451,7 @@ describe("<EmployeesPage> work-role catalog", () => {
       },
     ]);
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Add role" }))[0]!);
-    const catalog = screen.getByRole("region", { name: "Work roles" });
+    const catalog = await findWorkRoleCatalog();
     fireEvent.change(within(catalog).getByLabelText("Name"), { target: { value: "Housekeeper" } });
     fireEvent.change(within(catalog).getByLabelText("Key"), { target: { value: "housekeeper" } });
     fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
@@ -471,8 +477,7 @@ describe("<EmployeesPage> work-role catalog", () => {
       },
     ]);
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Add role" }))[0]!);
-    const catalog = screen.getByRole("region", { name: "Work roles" });
+    const catalog = await findWorkRoleCatalog();
     fireEvent.change(within(catalog).getByLabelText("Name"), { target: { value: "Housekeeper" } });
     fireEvent.change(within(catalog).getByLabelText("Key"), { target: { value: "housekeeper" } });
     fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
@@ -505,8 +510,7 @@ describe("<EmployeesPage> work-role catalog", () => {
       },
     ]);
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Add role" }))[0]!);
-    const catalog = screen.getByRole("region", { name: "Work roles" });
+    const catalog = await findWorkRoleCatalog();
     const nameInput = within(catalog).getByLabelText("Name");
     const keyInput = within(catalog).getByLabelText("Key");
     const descriptionInput = within(catalog).getByLabelText("Description");
@@ -547,8 +551,7 @@ describe("<EmployeesPage> work-role catalog", () => {
       },
     ]);
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Add role" }))[0]!);
-    const catalog = screen.getByRole("region", { name: "Work roles" });
+    const catalog = await findWorkRoleCatalog();
     fireEvent.change(within(catalog).getByLabelText("Name"), { target: { value: "Driver" } });
     fireEvent.change(within(catalog).getByLabelText("Key"), { target: { value: "driver" } });
     fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
@@ -575,19 +578,20 @@ describe("<EmployeesPage> work-role catalog", () => {
       },
     ]);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    const catalog = screen.getByRole("region", { name: "Work roles" });
-    expect(within(catalog).queryByText("Selected icon")).not.toBeInTheDocument();
-    expect(within(catalog).getByRole("button", { name: "Icon: Brush Cleaning. Edit icon" })).toBeInTheDocument();
-    expect(within(catalog).queryByText("Brush Cleaning")).not.toBeInTheDocument();
-    const descriptionInput = within(catalog).getByLabelText("Description");
+    const catalog = await findWorkRoleCatalog();
+    const roleRow = within(catalog).getByLabelText("Housekeeper");
+    fireEvent.click(within(roleRow).getByRole("button", { name: "Edit" }));
+    expect(within(roleRow).queryByText("Selected icon")).not.toBeInTheDocument();
+    expect(within(roleRow).getByRole("button", { name: "Icon: Brush Cleaning. Edit icon" })).toBeInTheDocument();
+    expect(within(roleRow).queryByText("Brush Cleaning")).not.toBeInTheDocument();
+    const descriptionInput = within(roleRow).getByLabelText("Description");
     expect(descriptionInput.tagName).toBe("INPUT");
-    expect(within(catalog).queryByRole("textbox", { name: "Description" })?.tagName).toBe("INPUT");
-    expect(catalog.querySelector("textarea")).not.toBeInTheDocument();
-    fireEvent.change(within(catalog).getByLabelText("Name"), { target: { value: "Lead housekeeper" } });
-    fireEvent.change(within(catalog).getByLabelText("Key"), { target: { value: "lead_housekeeper" } });
+    expect(within(roleRow).queryByRole("textbox", { name: "Description" })?.tagName).toBe("INPUT");
+    expect(roleRow.querySelector("textarea")).not.toBeInTheDocument();
+    fireEvent.change(within(roleRow).getByLabelText("Name"), { target: { value: "Lead housekeeper" } });
+    fireEvent.change(within(roleRow).getByLabelText("Key"), { target: { value: "lead_housekeeper" } });
     fireEvent.change(descriptionInput, { target: { value: "Runs quality checks." } });
-    fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
+    fireEvent.click(within(roleRow).getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("Lead housekeeper")).toBeInTheDocument();
     const patchRequest = requests.find((request) => request.method === "PATCH");
@@ -602,10 +606,11 @@ describe("<EmployeesPage> work-role catalog", () => {
   it("cancels an inline edit without saving", async () => {
     const { requests } = renderEmployees();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    const catalog = screen.getByRole("region", { name: "Work roles" });
-    fireEvent.change(within(catalog).getByLabelText("Name"), { target: { value: "Lead housekeeper" } });
-    fireEvent.click(within(catalog).getByRole("button", { name: "Cancel" }));
+    const catalog = await findWorkRoleCatalog();
+    const roleRow = within(catalog).getByLabelText("Housekeeper");
+    fireEvent.click(within(roleRow).getByRole("button", { name: "Edit" }));
+    fireEvent.change(within(roleRow).getByLabelText("Name"), { target: { value: "Lead housekeeper" } });
+    fireEvent.click(within(roleRow).getByRole("button", { name: "Cancel" }));
 
     expect(within(catalog).getByText("Housekeeper")).toBeInTheDocument();
     expect(within(catalog).queryByText("Lead housekeeper")).not.toBeInTheDocument();
@@ -615,8 +620,7 @@ describe("<EmployeesPage> work-role catalog", () => {
   it("cancels a new inline role without creating it", async () => {
     const { requests } = renderEmployees();
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Add role" }))[0]!);
-    const catalog = screen.getByRole("region", { name: "Work roles" });
+    const catalog = await findWorkRoleCatalog();
     expect(within(catalog).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
     fireEvent.change(within(catalog).getByLabelText("Name"), { target: { value: "Pool technician" } });
     fireEvent.click(within(catalog).getByRole("button", { name: "Cancel" }));
@@ -642,13 +646,14 @@ describe("<EmployeesPage> work-role catalog", () => {
       },
     ]);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    const catalog = screen.getByRole("region", { name: "Work roles" });
-    fireEvent.click(within(catalog).getByRole("button", { name: "Icon: Brush Cleaning. Edit icon" }));
-    expect(within(catalog).getByText("Brush Cleaning")).toBeInTheDocument();
-    fireEvent.change(within(catalog).getByLabelText("Search icon choices"), { target: { value: "waves" } });
-    fireEvent.click(within(catalog).getByRole("button", { name: "Select Waves icon" }));
-    fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
+    const catalog = await findWorkRoleCatalog();
+    const roleRow = within(catalog).getByLabelText("Housekeeper");
+    fireEvent.click(within(roleRow).getByRole("button", { name: "Edit" }));
+    fireEvent.click(within(roleRow).getByRole("button", { name: "Icon: Brush Cleaning. Edit icon" }));
+    expect(within(roleRow).getByText("Brush Cleaning")).toBeInTheDocument();
+    fireEvent.change(within(roleRow).getByLabelText("Search icon choices"), { target: { value: "waves" } });
+    fireEvent.click(within(roleRow).getByRole("button", { name: "Select Waves icon" }));
+    fireEvent.click(within(roleRow).getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("Housekeeper")).toBeInTheDocument();
     const patchRequest = requests.find((request) => request.method === "PATCH");
@@ -677,11 +682,12 @@ describe("<EmployeesPage> work-role catalog", () => {
       },
     ]);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    const catalog = screen.getByRole("region", { name: "Work roles" });
-    fireEvent.click(within(catalog).getByRole("button", { name: "Icon: Brush Cleaning. Edit icon" }));
-    fireEvent.click(within(catalog).getByRole("button", { name: "No icon" }));
-    fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
+    const catalog = await findWorkRoleCatalog();
+    const roleRow = within(catalog).getByLabelText("Housekeeper");
+    fireEvent.click(within(roleRow).getByRole("button", { name: "Edit" }));
+    fireEvent.click(within(roleRow).getByRole("button", { name: "Icon: Brush Cleaning. Edit icon" }));
+    fireEvent.click(within(roleRow).getByRole("button", { name: "No icon" }));
+    fireEvent.click(within(roleRow).getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("Housekeeper")).toBeInTheDocument();
     const patchRequest = requests.find((request) => request.method === "PATCH");
@@ -711,10 +717,11 @@ describe("<EmployeesPage> work-role catalog", () => {
       },
     ]);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    const catalog = screen.getByRole("region", { name: "Work roles" });
-    expect(within(catalog).getByRole("button", { name: "Icon: Unknown icon. Edit icon" })).toBeInTheDocument();
-    fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
+    const catalog = await findWorkRoleCatalog();
+    const roleRow = within(catalog).getByLabelText("Legacy role");
+    fireEvent.click(within(roleRow).getByRole("button", { name: "Edit" }));
+    expect(within(roleRow).getByRole("button", { name: "Icon: Unknown icon. Edit icon" })).toBeInTheDocument();
+    fireEvent.click(within(roleRow).getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("Legacy role")).toBeInTheDocument();
     const patchRequest = requests.find((request) => request.method === "PATCH");
@@ -749,7 +756,7 @@ describe("<EmployeesPage> work-role catalog", () => {
     expect(dialog).toHaveTextContent("future employee assignment lists");
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove role" }));
 
-    expect(await screen.findByText("No work roles yet")).toBeInTheDocument();
+    expect(await screen.findByLabelText("New work role")).toBeInTheDocument();
     expect(requests.some((request) => request.method === "DELETE")).toBe(true);
   });
 

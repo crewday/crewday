@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { BriefcaseBusiness, Plus } from "lucide-react";
 import { ApiError, fetchJson } from "@/lib/api";
 import { fetchAllList } from "@/lib/fetchAllList";
 import { qk } from "@/lib/queryKeys";
@@ -17,7 +16,7 @@ import {
   type InlineTableColumn,
   type InlineTableRow,
 } from "@/components/InlineTableForm";
-import { Avatar, Chip, EmptyState, Loading } from "@/components/common";
+import { Avatar, Chip, Loading } from "@/components/common";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { Booking, Employee, Me, Property, WorkRole } from "@/types/api";
 
@@ -186,7 +185,6 @@ function WorkRoleCatalogManager() {
     () => new Map(),
   );
   const [rowErrors, setRowErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
-  const [createOpen, setCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState<WorkRoleFormState>(EMPTY_WORK_ROLE_FORM);
   const [createDirty, setCreateDirty] = useState(false);
   const [createFieldErrors, setCreateFieldErrors] = useState<Partial<Record<WorkRoleField, string>>>({});
@@ -279,19 +277,17 @@ function WorkRoleCatalogManager() {
     }),
     [busy, deleteRole.isPending, deleteRole.variables, editedDrafts, roles, rowErrors, saveRole.isPending, saveRole.variables],
   );
-  const trailingCreateRow: InlineTableRow<WorkRoleFormState> | undefined = createOpen
-    ? {
-      id: CREATE_WORK_ROLE_ROW_ID,
-      label: "New work role",
-      draft: createDraft,
-      editing: true,
-      dirty: createDirty,
-      isNew: true,
-      saving: saveRole.isPending && saveRole.variables?.rowId === CREATE_WORK_ROLE_ROW_ID,
-      disabled: busy && saveRole.variables?.rowId !== CREATE_WORK_ROLE_ROW_ID,
-      error: createError ? <span role="alert">{createError}</span> : undefined,
-    }
-    : undefined;
+  const trailingCreateRow: InlineTableRow<WorkRoleFormState> = {
+    id: CREATE_WORK_ROLE_ROW_ID,
+    label: "New work role",
+    draft: createDraft,
+    editing: true,
+    dirty: createDirty,
+    isNew: true,
+    saving: saveRole.isPending && saveRole.variables?.rowId === CREATE_WORK_ROLE_ROW_ID,
+    disabled: busy && saveRole.variables?.rowId !== CREATE_WORK_ROLE_ROW_ID,
+    error: createError ? <span role="alert">{createError}</span> : undefined,
+  };
   const columns = useMemo(
     (): InlineTableColumn<WorkRoleFormState>[] => [
       {
@@ -416,18 +412,11 @@ function WorkRoleCatalogManager() {
     [createFieldErrors, rowFieldErrors],
   );
 
-  function openCreateRow(): void {
-    resetCreateRow();
-    saveRole.reset();
-    setCreateOpen(true);
-  }
-
   function resetCreateRow(): void {
     setCreateDraft(EMPTY_WORK_ROLE_FORM);
     setCreateDirty(false);
     setCreateFieldErrors({});
     setCreateError(null);
-    setCreateOpen(false);
   }
 
   function saveRow(rowId: string): void {
@@ -482,10 +471,6 @@ function WorkRoleCatalogManager() {
             Workspace job definitions available for employee assignment.
           </p>
         </div>
-        <button type="button" className="btn btn--moss" onClick={openCreateRow} disabled={createOpen}>
-          <Plus size={16} aria-hidden="true" />
-          Add role
-        </button>
       </header>
 
       {rolesQ.isPending ? (
@@ -494,19 +479,6 @@ function WorkRoleCatalogManager() {
         <p className="form-error" role="alert">
           Work roles could not be loaded.
         </p>
-      ) : roles.length === 0 && !createOpen ? (
-        <EmptyState
-          icon={BriefcaseBusiness}
-          title="No work roles yet"
-          copy="Create the first role before assigning employees to jobs."
-          action={
-            <button type="button" className="btn btn--moss" onClick={openCreateRow} disabled={createOpen}>
-              <Plus size={16} aria-hidden="true" />
-              Add role
-            </button>
-          }
-          variant="quiet"
-        />
       ) : (
         <InlineTableForm
           compact
@@ -543,20 +515,6 @@ function WorkRoleCatalogManager() {
           onDelete={(rowId) => deleteRole.mutate(rowId)}
           deleteActionLabel="Remove"
           trailingCreateRow={trailingCreateRow}
-          addRow={createOpen ? null : (
-            <button type="button" className="btn btn--moss" onClick={openCreateRow}>
-              <Plus size={16} aria-hidden="true" />
-              Add role
-            </button>
-          )}
-          emptyState={(
-            <EmptyState
-              icon={BriefcaseBusiness}
-              title="No work roles yet"
-              copy="Create the first role before assigning employees to jobs."
-              variant="quiet"
-            />
-          )}
           getRowLabel={(row) => row.draft.name || row.label || "New work role"}
           renderDeleteConfirmation={({ label }) => ({
             title: "Remove work role?",

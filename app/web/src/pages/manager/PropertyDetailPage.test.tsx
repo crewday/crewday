@@ -676,8 +676,8 @@ describe("<PropertyDetailPage>", () => {
       fireEvent.click(screen.getByRole("tab", { name: "Areas" }));
       expect(await screen.findByText("Kitchen")).toBeInTheDocument();
       expect(screen.getByText("Terrace")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "New area" })).not.toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole("button", { name: "New area" }));
       const createRow = screen.getByLabelText("New area");
       fireEvent.change(within(createRow).getByLabelText("Name"), {
         target: { value: "Pool" },
@@ -832,7 +832,6 @@ describe("<PropertyDetailPage>", () => {
       expect(await screen.findByText("Tasks for this property")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("tab", { name: "Areas" }));
       expect(await screen.findByText("Kitchen")).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "New area" }));
       const createRow = screen.getByLabelText("New area");
       fireEvent.change(within(createRow).getByLabelText("Name"), {
         target: { value: "Pool" },

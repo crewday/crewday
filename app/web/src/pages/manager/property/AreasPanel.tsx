@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { MapPinned } from "lucide-react";
 import {
   InlineNoteField,
   InlineNumberField,
@@ -11,7 +10,7 @@ import {
   type InlineTableColumn,
   type InlineTableRow,
 } from "@/components/InlineTableForm";
-import { EmptyState, Loading } from "@/components/common";
+import { Loading } from "@/components/common";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
@@ -117,7 +116,6 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
   const queryClient = useQueryClient();
   const [editedDrafts, setEditedDrafts] = useState<ReadonlyMap<string, AreaDraft>>(() => new Map());
   const [rowErrors, setRowErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
-  const [createOpen, setCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState<AreaDraft>(() => emptyAreaDraft());
   const [createDirty, setCreateDirty] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -148,7 +146,6 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
         setCreateDraft(emptyAreaDraft());
         setCreateDirty(false);
         setCreateError(null);
-        setCreateOpen(false);
       } else {
         setEditedDrafts((current) => clearMapValue(current, variables.rowId));
       }
@@ -198,19 +195,17 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
     }),
     [areas, busy, editedDrafts, rowErrors, saveArea.isPending, saveArea.variables],
   );
-  const trailingCreateRow: InlineTableRow<AreaDraft> | undefined = createOpen
-    ? {
-      id: CREATE_ROW_ID,
-      label: "New area",
-      draft: createDraft,
-      editing: true,
-      dirty: createDirty,
-      isNew: true,
-      saving: saveArea.isPending && saveArea.variables?.rowId === CREATE_ROW_ID,
-      disabled: busy && saveArea.variables?.rowId !== CREATE_ROW_ID,
-      error: createError,
-    }
-    : undefined;
+  const trailingCreateRow: InlineTableRow<AreaDraft> = {
+    id: CREATE_ROW_ID,
+    label: "New area",
+    draft: createDraft,
+    editing: true,
+    dirty: createDirty,
+    isNew: true,
+    saving: saveArea.isPending && saveArea.variables?.rowId === CREATE_ROW_ID,
+    disabled: busy && saveArea.variables?.rowId !== CREATE_ROW_ID,
+    error: createError,
+  };
 
   const columns = useMemo(
     (): InlineTableColumn<AreaDraft>[] => [
@@ -339,7 +334,6 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
             setCreateDraft(emptyAreaDraft());
             setCreateDirty(false);
             setCreateError(null);
-            setCreateOpen(false);
             return;
           }
           setEditedDrafts((current) => clearMapValue(current, rowId));
@@ -347,28 +341,6 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
         }}
         onDelete={(rowId) => deleteArea.mutate(rowId)}
         trailingCreateRow={trailingCreateRow}
-        addRow={createOpen ? null : (
-          <button
-            type="button"
-            className="btn btn--moss"
-            onClick={() => {
-              setCreateDraft(emptyAreaDraft());
-              setCreateDirty(false);
-              setCreateError(null);
-              setCreateOpen(true);
-            }}
-          >
-            New area
-          </button>
-        )}
-        emptyState={(
-          <EmptyState
-            icon={MapPinned}
-            title="No areas yet"
-            copy="Rooms and shared spaces will appear here once they are added."
-            variant="quiet"
-          />
-        )}
         getRowLabel={(row) => row.draft.name || row.label || "New area"}
         renderDetail={({ row, update, disabled }) => {
           if (row.editing) {
