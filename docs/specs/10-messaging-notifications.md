@@ -204,12 +204,26 @@ for both the agent-driven and human-driven branches.
 #### §10.5 Manager broadcast messages
 
 `GET /messaging/broadcast/recipients` returns the current workspace
-staff/user preview used by the manager dashboard compose flow:
-owners, live managers/workers, and active work-engagement users,
-excluding archived identities. `POST /messaging/broadcast` requires
-`subject`, `body_md`, `target` (`all_staff` or `selected`),
-`selected_recipient_user_ids`, and `confirmed_recipient_count`; the
-confirmed count must match the server-resolved recipient set so a
+recipient preview used by the manager dashboard compose flow:
+individual `people` plus virtual `groups`. People carry a `user:*`
+audience token, display label, and email when present. Groups carry an
+opaque token, `label`, `kind`, and `resolved_recipient_count`; v1
+groups include `group:everyone`, workspace-role groups for
+owners/admins, managers, and employees, plus active work-role groups
+from the workspace work-role catalogue. Recipient eligibility is
+owners, active managers, and active work-engagement users, excluding
+archived identities and inactive/previous employees.
+For one compatibility window, the response also includes deprecated
+`data`, an alias of `people`, so older dashboard/API clients can keep
+rendering the flat recipient list while moving to audience tokens.
+
+`POST /messaging/broadcast` requires `subject`, `body_md`,
+`audience_tokens`, and `confirmed_recipient_count`. The token list may
+mix individual people and groups. The server resolves every token
+against the current workspace preview, rejects stale or cross-workspace
+tokens with a 4xx validation error, expands groups, removes duplicates
+across overlaps, excludes archived/inactive users, and compares
+`confirmed_recipient_count` with the final deduped recipient set so a
 manager explicitly sees the fanout size before submit.
 
 Single-recipient sends execute immediately for callers allowed by

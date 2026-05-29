@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from collections.abc import Sequence
+from datetime import UTC, datetime
+
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.authz.models import (
@@ -14,7 +17,7 @@ from app.adapters.db.identity.models import User
 from app.adapters.db.llm.models import ApprovalRequest
 from app.adapters.db.messaging.audiences import list_owner_manager_user_ids
 from app.adapters.db.messaging.models import Notification
-from app.adapters.db.workspace.models import WorkEngagement
+from app.adapters.db.workspace.models import UserWorkRole, WorkEngagement, WorkRole
 from app.adapters.notifications.ports import NotificationKind
 from app.audit import write_audit
 from app.domain.agent.notifications import (
@@ -27,7 +30,13 @@ from app.domain.messaging.broadcasts import (
     BROADCAST_TOOL_NAME,
     BroadcastApprovalDraft,
     BroadcastApprovalOutcome,
+    BroadcastAudienceGroup,
+    BroadcastAudienceGroupKind,
     BroadcastRecipient,
+    audience_token_for_everyone,
+    audience_token_for_user,
+    audience_token_for_work_role,
+    audience_token_for_workspace_role,
 )
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock
@@ -50,18 +59,82 @@ class SqlAlchemyBroadcastGateway:
 
     def list_recipients(self, ctx: WorkspaceContext) -> tuple[BroadcastRecipient, ...]:
         """Return live current-workspace staff/users eligible for broadcasts."""
+        owners_admins, managers, employees = self._workspace_audience_user_ids(ctx)
+        user_ids = sorted(set(owners_admins).union(managers, employees))
+        if not user_ids:
+            return ()
+        return self._recipients_for_user_ids(user_ids)
+
+    def list_groups(self, ctx: WorkspaceContext) -> tuple[BroadcastAudienceGroup, ...]:
+        """Return virtual groups backed by live current-workspace recipients."""
+        owners_admins, managers, employees = self._workspace_audience_user_ids(ctx)
+        people = self._recipients_for_user_ids(
+            sorted(set(owners_admins + managers + employees))
+        )
+        available_ids = {person.user_id for person in people}
+        recipient_order = {person.user_id: index for index, person in enumerate(people)}
+        groups = [
+            self._group(
+                token=audience_token_for_everyone(),
+                label="Everyone",
+                kind="everyone",
+                user_ids=tuple(available_ids),
+                available_ids=available_ids,
+                recipient_order=recipient_order,
+            ),
+            self._group(
+                token=audience_token_for_workspace_role("owners_admins"),
+                label="Owners and admins",
+                kind="workspace_role",
+                user_ids=owners_admins,
+                available_ids=available_ids,
+                recipient_order=recipient_order,
+            ),
+            self._group(
+                token=audience_token_for_workspace_role("managers"),
+                label="Managers",
+                kind="workspace_role",
+                user_ids=managers,
+                available_ids=available_ids,
+                recipient_order=recipient_order,
+            ),
+            self._group(
+                token=audience_token_for_workspace_role("employees"),
+                label="Employees",
+                kind="workspace_role",
+                user_ids=employees,
+                available_ids=available_ids,
+                recipient_order=recipient_order,
+            ),
+        ]
+        groups.extend(
+            self._work_role_groups(
+                ctx,
+                available_ids=available_ids,
+                recipient_order=recipient_order,
+            )
+        )
+        return tuple(groups)
+
+    def _workspace_audience_user_ids(
+        self, ctx: WorkspaceContext
+    ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+        today = datetime.now(UTC).date()
         with tenant_agnostic():
-            role_user_ids = self._session.scalars(
+            manager_user_ids = self._session.scalars(
                 select(RoleGrant.user_id).where(
                     RoleGrant.workspace_id == ctx.workspace_id,
                     RoleGrant.scope_kind == "workspace",
-                    RoleGrant.grant_role.in_(("manager", "worker")),
+                    RoleGrant.grant_role == "manager",
                     RoleGrant.revoked_at.is_(None),
+                    or_(RoleGrant.started_on.is_(None), RoleGrant.started_on <= today),
+                    or_(RoleGrant.ended_on.is_(None), RoleGrant.ended_on >= today),
                 )
             ).all()
             engaged_user_ids = self._session.scalars(
                 select(WorkEngagement.user_id).where(
                     WorkEngagement.workspace_id == ctx.workspace_id,
+                    WorkEngagement.started_on <= today,
                     WorkEngagement.archived_on.is_(None),
                 )
             ).all()
@@ -77,23 +150,110 @@ class SqlAlchemyBroadcastGateway:
                     PermissionGroup.slug == "owners",
                 )
             ).all()
-            user_ids = sorted(
-                set(role_user_ids).union(engaged_user_ids, owner_user_ids)
-            )
-            if not user_ids:
-                return ()
+        return (
+            tuple(dict.fromkeys(owner_user_ids)),
+            tuple(dict.fromkeys(manager_user_ids)),
+            tuple(dict.fromkeys(engaged_user_ids)),
+        )
+
+    def _recipients_for_user_ids(
+        self, user_ids: Sequence[str]
+    ) -> tuple[BroadcastRecipient, ...]:
+        ids = tuple(dict.fromkeys(user_ids))
+        if not ids:
+            return ()
+        with tenant_agnostic():
             users = self._session.scalars(
                 select(User)
-                .where(User.id.in_(user_ids), User.archived_at.is_(None))
+                .where(User.id.in_(ids), User.archived_at.is_(None))
                 .order_by(User.display_name.asc(), User.id.asc())
             ).all()
         return tuple(
             BroadcastRecipient(
                 user_id=row.id,
+                token=audience_token_for_user(row.id),
                 display_name=row.display_name,
                 email=row.email,
             )
             for row in users
+        )
+
+    def _work_role_groups(
+        self,
+        ctx: WorkspaceContext,
+        *,
+        available_ids: set[str],
+        recipient_order: dict[str, int],
+    ) -> tuple[BroadcastAudienceGroup, ...]:
+        today = datetime.now(UTC).date()
+        with tenant_agnostic():
+            rows = self._session.execute(
+                select(WorkRole.id, WorkRole.name, UserWorkRole.user_id)
+                .join(UserWorkRole, UserWorkRole.work_role_id == WorkRole.id)
+                .join(
+                    WorkEngagement,
+                    (WorkEngagement.workspace_id == UserWorkRole.workspace_id)
+                    & (WorkEngagement.user_id == UserWorkRole.user_id),
+                )
+                .join(User, User.id == UserWorkRole.user_id)
+                .where(
+                    WorkRole.workspace_id == ctx.workspace_id,
+                    WorkRole.deleted_at.is_(None),
+                    UserWorkRole.workspace_id == ctx.workspace_id,
+                    UserWorkRole.deleted_at.is_(None),
+                    UserWorkRole.started_on <= today,
+                    or_(
+                        UserWorkRole.ended_on.is_(None), UserWorkRole.ended_on >= today
+                    ),
+                    WorkEngagement.workspace_id == ctx.workspace_id,
+                    WorkEngagement.started_on <= today,
+                    WorkEngagement.archived_on.is_(None),
+                    User.archived_at.is_(None),
+                )
+                .order_by(WorkRole.name.asc(), WorkRole.id.asc())
+            ).all()
+        grouped: dict[str, tuple[str, list[str]]] = {}
+        for role_id, role_name, user_id in rows:
+            if user_id not in available_ids:
+                continue
+            _, user_ids = grouped.setdefault(role_id, (role_name, []))
+            if user_id not in user_ids:
+                user_ids.append(user_id)
+        return tuple(
+            self._group(
+                token=audience_token_for_work_role(role_id),
+                label=label,
+                kind="work_role",
+                user_ids=tuple(user_ids),
+                available_ids=available_ids,
+                recipient_order=recipient_order,
+            )
+            for role_id, (label, user_ids) in grouped.items()
+            if user_ids
+        )
+
+    @staticmethod
+    def _group(
+        *,
+        token: str,
+        label: str,
+        kind: BroadcastAudienceGroupKind,
+        user_ids: Sequence[str],
+        available_ids: set[str],
+        recipient_order: dict[str, int],
+    ) -> BroadcastAudienceGroup:
+        resolved = tuple(
+            sorted(
+                {user_id for user_id in user_ids if user_id in available_ids},
+                key=lambda user_id: recipient_order[user_id],
+            )
+        )
+        return BroadcastAudienceGroup(
+            token=token,
+            label=label,
+            kind=kind,
+            resolved_recipient_count=len(resolved),
+            recipient_user_ids=resolved,
         )
 
     def existing_notification_ids_by_recipient(

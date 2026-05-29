@@ -74,3 +74,39 @@ export interface NotificationListResponse {
   has_more: boolean;
   total_estimate: number;
 }
+
+export interface BroadcastRecipientPayload {
+  user_id: string;
+  token: string;
+  display_name: string;
+  email: string | null;
+}
+
+export interface BroadcastAudienceGroupPayload {
+  token: string;
+  label: string;
+  kind: "everyone" | "workspace_role" | "work_role";
+  resolved_recipient_count: number;
+}
+
+export interface BroadcastRecipientsResponse {
+  people: BroadcastRecipientPayload[];
+  groups: BroadcastAudienceGroupPayload[];
+  data: BroadcastRecipientPayload[];
+  total: number;
+}
+
+export interface BroadcastSendRequest {
+  audience_tokens: string[];
+  confirmed_recipient_count: number;
+  subject: string;
+  body_md: string;
+}
+
+export interface BroadcastSendResponse {
+  status: "sent" | "pending_approval";
+  recipient_count: number;
+  notification_ids: string[];
+  approval_request_id: string | null;
+  expires_at: string | null;
+}

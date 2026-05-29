@@ -5643,6 +5643,42 @@
         "title": "BookingResponse",
         "type": "object"
       },
+      "BroadcastAudienceGroupKind": {
+        "enum": [
+          "everyone",
+          "work_role",
+          "workspace_role"
+        ],
+        "type": "string"
+      },
+      "BroadcastAudienceGroupPayload": {
+        "description": "One virtual audience group visible in broadcast preview.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/BroadcastAudienceGroupKind"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "resolved_recipient_count": {
+            "title": "Resolved Recipient Count",
+            "type": "integer"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "resolved_recipient_count",
+          "token"
+        ],
+        "title": "BroadcastAudienceGroupPayload",
+        "type": "object"
+      },
       "BroadcastRecipientPayload": {
         "description": "One current-workspace staff/user visible in broadcast preview.",
         "properties": {
@@ -5661,6 +5697,10 @@
             ],
             "title": "Email"
           },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
           "user_id": {
             "title": "User Id",
             "type": "string"
@@ -5669,6 +5709,7 @@
         "required": [
           "display_name",
           "email",
+          "token",
           "user_id"
         ],
         "title": "BroadcastRecipientPayload",
@@ -5678,10 +5719,25 @@
         "description": "Recipient preview envelope for dashboard broadcast compose.",
         "properties": {
           "data": {
+            "deprecated": true,
             "items": {
               "$ref": "#/components/schemas/BroadcastRecipientPayload"
             },
             "title": "Data",
+            "type": "array"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/BroadcastAudienceGroupPayload"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/BroadcastRecipientPayload"
+            },
+            "title": "People",
             "type": "array"
           },
           "total": {
@@ -5690,7 +5746,8 @@
           }
         },
         "required": [
-          "data",
+          "groups",
+          "people",
           "total"
         ],
         "title": "BroadcastRecipientsResponse",
@@ -5700,6 +5757,22 @@
         "additionalProperties": false,
         "description": "Request body for ``POST /broadcast``.",
         "properties": {
+          "audience_tokens": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 500,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audience Tokens"
+          },
           "body_md": {
             "maxLength": 20000,
             "minLength": 1,
@@ -5714,6 +5787,7 @@
             "type": "integer"
           },
           "selected_recipient_user_ids": {
+            "deprecated": true,
             "items": {
               "type": "string"
             },
@@ -5729,19 +5803,26 @@
             "type": "string"
           },
           "target": {
-            "enum": [
-              "all_staff",
-              "selected"
+            "anyOf": [
+              {
+                "enum": [
+                  "all_staff",
+                  "selected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Target",
-            "type": "string"
+            "deprecated": true,
+            "title": "Target"
           }
         },
         "required": [
           "body_md",
           "confirmed_recipient_count",
-          "subject",
-          "target"
+          "subject"
         ],
         "title": "BroadcastSendRequest",
         "type": "object"
@@ -160923,7 +161004,7 @@
         "x-agent-confirm": {
           "fields_to_show": [
             "subject",
-            "target",
+            "audience_tokens",
             "confirmed_recipient_count"
           ],
           "risk": "medium",

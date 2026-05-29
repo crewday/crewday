@@ -29,12 +29,21 @@ import type { DashboardPayload as Dashboard, Me } from "@/types/api";
 
 interface BroadcastRecipient {
   user_id: string;
+  token: string;
   display_name: string;
   email: string | null;
 }
 
+interface BroadcastAudienceGroup {
+  token: string;
+  label: string;
+  kind: "everyone" | "workspace_role" | "work_role";
+  resolved_recipient_count: number;
+}
+
 interface BroadcastRecipientsResponse {
-  data: BroadcastRecipient[];
+  people: BroadcastRecipient[];
+  groups: BroadcastAudienceGroup[];
   total: number;
 }
 
@@ -79,18 +88,22 @@ export default function DashboardPage() {
       fetchJson<BroadcastRecipientsResponse>("/api/v1/messaging/broadcast/recipients"),
     enabled: broadcastOpen,
   });
+  const allStaffGroup = broadcastRecipients.data?.groups.find((group) => group.kind === "everyone");
   const recipientCount =
     broadcastTarget === "all_staff"
-      ? (broadcastRecipients.data?.total ?? 0)
+      ? (allStaffGroup?.resolved_recipient_count ?? broadcastRecipients.data?.total ?? 0)
       : selectedRecipients.length;
   const sendBroadcast = useMutation({
     mutationFn: () =>
       fetchJson<BroadcastSendResponse>("/api/v1/messaging/broadcast", {
         method: "POST",
         body: {
-          target: broadcastTarget,
-          selected_recipient_user_ids:
-            broadcastTarget === "selected" ? selectedRecipients : [],
+          audience_tokens:
+            broadcastTarget === "selected"
+              ? selectedRecipients
+              : allStaffGroup
+                ? [allStaffGroup.token]
+                : [],
           confirmed_recipient_count: recipientCount,
           subject: broadcastSubject.trim(),
           body_md: broadcastBody.trim(),
@@ -255,15 +268,15 @@ export default function DashboardPage() {
                   variant="quiet"
                 />
               )}
-              {(broadcastRecipients.data?.data ?? []).map((recipient) => (
+              {(broadcastRecipients.data?.people ?? []).map((recipient) => (
                 <Checkbox
                   key={recipient.user_id}
-                  checked={selectedRecipients.includes(recipient.user_id)}
+                  checked={selectedRecipients.includes(recipient.token)}
                   onChange={(e) => {
                     setSelectedRecipients((prev) =>
                       e.target.checked
-                        ? [...prev, recipient.user_id]
-                        : prev.filter((id) => id !== recipient.user_id),
+                        ? [...prev, recipient.token]
+                        : prev.filter((token) => token !== recipient.token),
                     );
                   }}
                   label={recipient.display_name}

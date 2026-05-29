@@ -2752,6 +2752,10 @@ POST   /webhooks/{id}/replay
 GET    /messaging/notifications/push/vapid-key          # 200 {key}; 503 vapid_not_configured
 POST   /messaging/notifications/push/subscribe          # body: {endpoint, keys:{p256dh,auth}, ua?}; 201 PushTokenPayload; idempotent on (user_id, endpoint); 422 endpoint_not_allowed | endpoint_scheme_invalid
 POST   /messaging/notifications/push/unsubscribe        # body: {endpoint}; 204 regardless of prior row existence
+
+# Manager broadcast surface (§10.5).
+GET    /messaging/broadcast/recipients                  # 200 {people:[{user_id,token,display_name,email}], groups:[{token,label,kind,resolved_recipient_count}], data:[...] deprecated alias of people, total}
+POST   /messaging/broadcast                             # body: {audience_tokens:[...], confirmed_recipient_count, subject, body_md}; 200 sent|pending_approval; 409 recipient_count_mismatch; 422 audience_token_not_found
 ```
 
 ### Files

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -17,6 +17,7 @@ from app.adapters.db.base import Base
 from app.adapters.db.llm.models import ApprovalRequest
 from app.adapters.db.messaging.models import Notification
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
+from app.adapters.db.workspace.models import WorkEngagement
 from app.api.deps import current_workspace_context, db_session
 from app.api.errors import _handle_domain_error, add_exception_handlers
 from app.api.v1.messaging import build_messaging_router
@@ -102,6 +103,17 @@ def _seed_broadcast_workspace(
                         created_by_user_id=owner.id,
                     )
                 )
+                session.add(
+                    WorkEngagement(
+                        id=new_ulid(),
+                        workspace_id=workspace.id,
+                        user_id=worker.id,
+                        engagement_kind="payroll",
+                        started_on=date(2026, 1, 1),
+                        created_at=_PINNED,
+                        updated_at=_PINNED,
+                    )
+                )
         session.commit()
         ctx = build_workspace_context(
             workspace_id=workspace.id,
@@ -175,13 +187,19 @@ def test_broadcast_single_recipient_creates_notification_row() -> None:
 
         preview = client.get("/messaging/broadcast/recipients")
         assert preview.status_code == 200
-        assert preview.json()["total"] >= 2
+        preview_body = preview.json()
+        assert preview_body["total"] >= 2
+        assert preview_body["data"] == preview_body["people"]
+        token = next(
+            person["token"]
+            for person in preview_body["people"]
+            if person["user_id"] == worker_ids[0]
+        )
 
         resp = client.post(
             "/messaging/broadcast",
             json={
-                "target": "selected",
-                "selected_recipient_user_ids": [worker_ids[0]],
+                "audience_tokens": [token],
                 "confirmed_recipient_count": 1,
                 "subject": "Water shutoff",
                 "body_md": "Water will be off between 14:00 and 15:00.",
@@ -213,12 +231,18 @@ def test_broadcast_multi_recipient_returns_approval_without_fanout() -> None:
         factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
         ctx, worker_ids = _seed_broadcast_workspace(factory)
         client = _build_db_client(factory, ctx)
+        preview = client.get("/messaging/broadcast/recipients")
+        assert preview.status_code == 200
+        employees_token = next(
+            group["token"]
+            for group in preview.json()["groups"]
+            if group["kind"] == "workspace_role" and group["label"] == "Employees"
+        )
 
         resp = client.post(
             "/messaging/broadcast",
             json={
-                "target": "selected",
-                "selected_recipient_user_ids": list(worker_ids),
+                "audience_tokens": [employees_token],
                 "confirmed_recipient_count": 2,
                 "subject": "Storm watch",
                 "body_md": "Bring patio furniture inside before 16:00.",
@@ -243,6 +267,31 @@ def test_broadcast_multi_recipient_returns_approval_without_fanout() -> None:
             assert approval.action_json["tool_input"]["recipient_user_ids"] == list(
                 worker_ids
             )
+    finally:
+        engine.dispose()
+
+
+def test_broadcast_rejects_stale_audience_token() -> None:
+    _load_all_models()
+    engine: Engine = make_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    try:
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        ctx, _worker_ids = _seed_broadcast_workspace(factory)
+        client = _build_db_client(factory, ctx)
+
+        resp = client.post(
+            "/messaging/broadcast",
+            json={
+                "audience_tokens": ["group:work_role:role_missing"],
+                "confirmed_recipient_count": 1,
+                "subject": "Wrong audience",
+                "body_md": "This should not leave the workspace.",
+            },
+        )
+
+        assert resp.status_code == 422
+        assert resp.json()["error"] == "audience_token_not_found"
     finally:
         engine.dispose()
 

@@ -21,11 +21,20 @@ __all__ = [
     "BroadcastApprovalOutcome",
     "BroadcastApprovalQueue",
     "BroadcastAudience",
+    "BroadcastAudienceGroup",
+    "BroadcastAudienceGroupKind",
+    "BroadcastAudiencePreview",
     "BroadcastRecipient",
     "BroadcastSendOutcome",
+    "WorkspaceAudienceRole",
+    "audience_token_for_everyone",
+    "audience_token_for_user",
+    "audience_token_for_work_role",
+    "audience_token_for_workspace_role",
     "broadcast_tool_input",
     "execute_broadcast",
     "list_broadcast_recipients",
+    "preview_broadcast_audience",
     "send_or_queue_broadcast",
 ]
 
@@ -36,13 +45,52 @@ _MAX_BODY_LEN = 20_000
 _MAX_RECIPIENTS = 500
 
 type BroadcastTarget = Literal["all_staff", "selected"]
+type BroadcastAudienceGroupKind = Literal["everyone", "workspace_role", "work_role"]
+type WorkspaceAudienceRole = Literal["owners_admins", "managers", "employees"]
+
+_USER_AUDIENCE_TOKEN_PREFIX = "user:"
+_WORKSPACE_ROLE_AUDIENCE_TOKEN_PREFIX = "group:workspace_role:"
+_WORK_ROLE_AUDIENCE_TOKEN_PREFIX = "group:work_role:"
+_EVERYONE_AUDIENCE_TOKEN = "group:everyone"
+
+
+def audience_token_for_user(user_id: str) -> str:
+    return f"{_USER_AUDIENCE_TOKEN_PREFIX}{user_id}"
+
+
+def audience_token_for_everyone() -> str:
+    return _EVERYONE_AUDIENCE_TOKEN
+
+
+def audience_token_for_workspace_role(role: WorkspaceAudienceRole) -> str:
+    return f"{_WORKSPACE_ROLE_AUDIENCE_TOKEN_PREFIX}{role}"
+
+
+def audience_token_for_work_role(work_role_id: str) -> str:
+    return f"{_WORK_ROLE_AUDIENCE_TOKEN_PREFIX}{work_role_id}"
 
 
 @dataclass(frozen=True, slots=True)
 class BroadcastRecipient:
     user_id: str
+    token: str
     display_name: str
     email: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class BroadcastAudienceGroup:
+    token: str
+    label: str
+    kind: BroadcastAudienceGroupKind
+    resolved_recipient_count: int
+    recipient_user_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class BroadcastAudiencePreview:
+    people: tuple[BroadcastRecipient, ...]
+    groups: tuple[BroadcastAudienceGroup, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +127,10 @@ class BroadcastAudience(Protocol):
         """Return current-workspace staff/users eligible for broadcasts."""
         ...
 
+    def list_groups(self, ctx: WorkspaceContext) -> Sequence[BroadcastAudienceGroup]:
+        """Return virtual audience groups backed by current eligible recipients."""
+        ...
+
     def existing_notification_ids_by_recipient(
         self,
         ctx: WorkspaceContext,
@@ -111,13 +163,23 @@ def list_broadcast_recipients(
     return tuple(audience.list_recipients(ctx))
 
 
+def preview_broadcast_audience(
+    audience: BroadcastAudience,
+    ctx: WorkspaceContext,
+) -> BroadcastAudiencePreview:
+    """Return people plus virtual audience groups for broadcast compose."""
+    return BroadcastAudiencePreview(
+        people=tuple(audience.list_recipients(ctx)),
+        groups=tuple(audience.list_groups(ctx)),
+    )
+
+
 def send_or_queue_broadcast(
     session: Session,
     ctx: WorkspaceContext,
     *,
     audience: BroadcastAudience,
-    target: BroadcastTarget,
-    selected_recipient_user_ids: Sequence[str],
+    audience_tokens: Sequence[str],
     confirmed_recipient_count: int,
     subject: str,
     body_md: str,
@@ -132,8 +194,7 @@ def send_or_queue_broadcast(
     recipients = _resolve_recipients(
         audience,
         ctx,
-        target=target,
-        selected_recipient_user_ids=selected_recipient_user_ids,
+        audience_tokens=audience_tokens,
     )
     if confirmed_recipient_count != len(recipients):
         raise Conflict(
@@ -282,27 +343,40 @@ def _resolve_recipients(
     audience: BroadcastAudience,
     ctx: WorkspaceContext,
     *,
-    target: BroadcastTarget,
-    selected_recipient_user_ids: Sequence[str],
+    audience_tokens: Sequence[str],
 ) -> tuple[BroadcastRecipient, ...]:
-    available = list_broadcast_recipients(audience, ctx)
-    by_id = {recipient.user_id: recipient for recipient in available}
-    if target == "all_staff":
-        recipients = available
-    else:
-        selected = tuple(dict.fromkeys(selected_recipient_user_ids))
-        if not selected:
-            raise Validation(
-                "selected broadcasts require at least one recipient",
-                extra={"error": "no_recipients"},
-            )
-        missing = [user_id for user_id in selected if user_id not in by_id]
-        if missing:
-            raise Validation(
-                "selected_recipient_user_ids must belong to current workspace staff",
-                extra={"error": "recipient_not_in_workspace"},
-            )
-        recipients = tuple(by_id[user_id] for user_id in selected)
+    selected_tokens = tuple(dict.fromkeys(audience_tokens))
+    if not selected_tokens:
+        raise Validation(
+            "broadcast requires at least one audience token",
+            extra={"error": "no_recipients"},
+        )
+    preview = preview_broadcast_audience(audience, ctx)
+    by_user_id = {recipient.user_id: recipient for recipient in preview.people}
+    by_token = {recipient.token: recipient for recipient in preview.people}
+    by_group_token = {group.token: group for group in preview.groups}
+    missing = [
+        token
+        for token in selected_tokens
+        if token not in by_token and token not in by_group_token
+    ]
+    if missing:
+        raise Validation(
+            "audience_tokens must reference current workspace people or groups",
+            extra={"error": "audience_token_not_found", "tokens": missing},
+        )
+    recipient_by_id: dict[str, BroadcastRecipient] = {}
+    for token in selected_tokens:
+        recipient = by_token.get(token)
+        if recipient is not None:
+            recipient_by_id.setdefault(recipient.user_id, recipient)
+            continue
+        group = by_group_token[token]
+        for user_id in group.recipient_user_ids:
+            group_recipient = by_user_id.get(user_id)
+            if group_recipient is not None:
+                recipient_by_id.setdefault(user_id, group_recipient)
+    recipients = tuple(recipient_by_id.values())
     if not recipients:
         raise Validation(
             "broadcast requires at least one recipient",

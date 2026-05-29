@@ -188,16 +188,26 @@ function installFetch(dashboard: DashboardPayload = emptyDashboard()) {
       path: "/w/acme/api/v1/messaging/broadcast/recipients",
       respond: {
         body: {
-          data: [
+          people: [
             {
               user_id: "usr_worker_1",
+              token: "user:usr_worker_1",
               display_name: "Maya Santos",
               email: "maya@example.com",
             },
             {
               user_id: "usr_worker_2",
+              token: "user:usr_worker_2",
               display_name: "Ivo Costa",
               email: "ivo@example.com",
+            },
+          ],
+          groups: [
+            {
+              token: "group:everyone",
+              label: "Everyone",
+              kind: "everyone",
+              resolved_recipient_count: 2,
             },
           ],
           total: 2,
@@ -353,7 +363,7 @@ describe("<DashboardPage>", () => {
           method: "POST",
           path: "/w/acme/api/v1/messaging/broadcast",
           body: expect.objectContaining({
-            target: "all_staff",
+            audience_tokens: ["group:everyone"],
             confirmed_recipient_count: 2,
             subject: "Storm watch",
           }),

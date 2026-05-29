@@ -53,7 +53,7 @@ from fastapi import (
     Response,
     status,
 )
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -77,8 +77,12 @@ from app.domain.errors import (
     Validation,
 )
 from app.domain.messaging.broadcasts import (
+    BroadcastAudienceGroup,
+    BroadcastAudienceGroupKind,
     BroadcastRecipient,
-    list_broadcast_recipients,
+    audience_token_for_everyone,
+    audience_token_for_user,
+    preview_broadcast_audience,
     send_or_queue_broadcast,
 )
 from app.domain.messaging.notifications import NotificationService
@@ -192,11 +196,39 @@ class BroadcastSendRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    target: Literal["all_staff", "selected"]
-    selected_recipient_user_ids: list[str] = Field(default_factory=list, max_length=500)
+    audience_tokens: list[str] | None = Field(
+        default=None, min_length=1, max_length=500
+    )
+    target: Literal["all_staff", "selected"] | None = Field(
+        default=None,
+        json_schema_extra={"deprecated": True},
+    )
+    selected_recipient_user_ids: list[str] = Field(
+        default_factory=list,
+        max_length=500,
+        json_schema_extra={"deprecated": True},
+    )
     confirmed_recipient_count: int = Field(ge=1, le=500)
     subject: str = Field(min_length=1, max_length=160, pattern=r"\S")
     body_md: str = Field(min_length=1, max_length=20_000, pattern=r"\S")
+
+    @model_validator(mode="after")
+    def _require_audience(self) -> BroadcastSendRequest:
+        if self.audience_tokens is not None:
+            return self
+        if self.target is None:
+            raise ValueError("audience_tokens is required")
+        return self
+
+    def resolved_audience_tokens(self) -> list[str]:
+        if self.audience_tokens is not None:
+            return self.audience_tokens
+        if self.target == "all_staff":
+            return [audience_token_for_everyone()]
+        return [
+            audience_token_for_user(user_id)
+            for user_id in self.selected_recipient_user_ids
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -287,6 +319,7 @@ class BroadcastRecipientPayload(BaseModel):
     """One current-workspace staff/user visible in broadcast preview."""
 
     user_id: str
+    token: str
     display_name: str
     email: str | None
 
@@ -294,15 +327,39 @@ class BroadcastRecipientPayload(BaseModel):
     def from_view(cls, view: BroadcastRecipient) -> BroadcastRecipientPayload:
         return cls(
             user_id=view.user_id,
+            token=view.token,
             display_name=view.display_name,
             email=view.email,
+        )
+
+
+class BroadcastAudienceGroupPayload(BaseModel):
+    """One virtual audience group visible in broadcast preview."""
+
+    token: str
+    label: str
+    kind: BroadcastAudienceGroupKind
+    resolved_recipient_count: int
+
+    @classmethod
+    def from_view(cls, view: BroadcastAudienceGroup) -> BroadcastAudienceGroupPayload:
+        return cls(
+            token=view.token,
+            label=view.label,
+            kind=view.kind,
+            resolved_recipient_count=view.resolved_recipient_count,
         )
 
 
 class BroadcastRecipientsResponse(BaseModel):
     """Recipient preview envelope for dashboard broadcast compose."""
 
-    data: list[BroadcastRecipientPayload]
+    people: list[BroadcastRecipientPayload]
+    groups: list[BroadcastAudienceGroupPayload]
+    data: list[BroadcastRecipientPayload] = Field(
+        default_factory=list,
+        json_schema_extra={"deprecated": True},
+    )
     total: int
 
 
@@ -547,9 +604,17 @@ def build_messaging_router(
         session: _Db,
     ) -> BroadcastRecipientsResponse:
         broadcast_gateway = SqlAlchemyBroadcastGateway(session)
-        recipients = list_broadcast_recipients(broadcast_gateway, ctx)
-        data = [BroadcastRecipientPayload.from_view(view) for view in recipients]
-        return BroadcastRecipientsResponse(data=data, total=len(data))
+        preview = preview_broadcast_audience(broadcast_gateway, ctx)
+        people = [BroadcastRecipientPayload.from_view(view) for view in preview.people]
+        groups = [
+            BroadcastAudienceGroupPayload.from_view(view) for view in preview.groups
+        ]
+        return BroadcastRecipientsResponse(
+            people=people,
+            groups=groups,
+            data=people,
+            total=len(people),
+        )
 
     @r.post(
         "/broadcast",
@@ -561,7 +626,11 @@ def build_messaging_router(
             "x-agent-confirm": {
                 "summary": "Send broadcast *{subject}*?",
                 "risk": "medium",
-                "fields_to_show": ["subject", "target", "confirmed_recipient_count"],
+                "fields_to_show": [
+                    "subject",
+                    "audience_tokens",
+                    "confirmed_recipient_count",
+                ],
                 "verb": "Send broadcast message",
             },
             "x-cli": {"group": "messaging", "verb": "broadcast-send"},
@@ -587,8 +656,7 @@ def build_messaging_router(
             session,
             ctx,
             audience=broadcast_gateway,
-            target=body.target,
-            selected_recipient_user_ids=body.selected_recipient_user_ids,
+            audience_tokens=body.resolved_audience_tokens(),
             confirmed_recipient_count=body.confirmed_recipient_count,
             subject=body.subject,
             body_md=body.body_md,
