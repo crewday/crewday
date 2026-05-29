@@ -219,11 +219,11 @@ function installFetch(dashboard: DashboardPayload = emptyDashboard()) {
       method: "POST",
       respond: {
         body: {
-          status: "pending_approval",
+          status: "sent",
           recipient_count: 2,
-          notification_ids: [],
-          approval_request_id: "appr_1",
-          expires_at: "2026-05-12T12:00:00Z",
+          notification_ids: ["notif_1", "notif_2"],
+          approval_request_id: null,
+          expires_at: null,
         },
       },
     },
@@ -344,18 +344,17 @@ describe("<DashboardPage>", () => {
 
       const dialog = await screen.findByRole("dialog", { name: "Broadcast message" });
       expect(await within(dialog).findByText(/2 recipients/)).toBeInTheDocument();
+      expect(within(dialog).queryByText(/approval required/i)).not.toBeInTheDocument();
       fireEvent.change(within(dialog).getByLabelText(/^Subject\b/), {
         target: { value: "Storm watch" },
       });
       fireEvent.change(within(dialog).getByLabelText(/^Body\b/), {
         target: { value: "Bring patio furniture inside before 16:00." },
       });
-      fireEvent.click(within(dialog).getByRole("button", { name: "Request approval" }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Send" }));
 
       await waitFor(() => {
-        expect(within(dialog).getByRole("status")).toHaveTextContent(
-          "Queued for approval before sending to 2 recipients.",
-        );
+        expect(screen.queryByRole("dialog", { name: "Broadcast message" })).not.toBeInTheDocument();
       });
       expect(screen.queryByText("Broadcast messaging is not implemented yet.")).not.toBeInTheDocument();
       expect(fake.requests).toContainEqual(

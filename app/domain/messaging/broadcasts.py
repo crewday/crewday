@@ -19,6 +19,7 @@ __all__ = [
     "BROADCAST_TOOL_NAME",
     "BroadcastApprovalDraft",
     "BroadcastApprovalOutcome",
+    "BroadcastApprovalPolicy",
     "BroadcastApprovalQueue",
     "BroadcastAudience",
     "BroadcastAudienceGroup",
@@ -46,6 +47,7 @@ _MAX_RECIPIENTS = 500
 
 type BroadcastTarget = Literal["all_staff", "selected"]
 type BroadcastAudienceGroupKind = Literal["everyone", "workspace_role", "work_role"]
+type BroadcastApprovalPolicy = Literal["direct_send", "queue_multi_recipient"]
 type WorkspaceAudienceRole = Literal["owners_admins", "managers", "employees"]
 
 _USER_AUDIENCE_TOKEN_PREFIX = "user:"
@@ -185,9 +187,10 @@ def send_or_queue_broadcast(
     body_md: str,
     notification_sink: NotificationSink,
     approval_queue: BroadcastApprovalQueue | None = None,
+    approval_policy: BroadcastApprovalPolicy = "queue_multi_recipient",
     clock: Clock | None = None,
 ) -> BroadcastSendOutcome:
-    """Send a single-recipient broadcast or queue multi-recipient approval."""
+    """Send a broadcast immediately or queue multi-recipient approval."""
     # code-health: ignore[nloc,params] Broadcast command keeps approval inputs explicit.
     eff_clock = clock if clock is not None else SystemClock()
     clean_subject, clean_body = _validate_content(subject=subject, body_md=body_md)
@@ -207,21 +210,21 @@ def send_or_queue_broadcast(
         )
 
     broadcast_id = new_ulid(clock=eff_clock)
-    if len(recipients) == 1:
+    if len(recipients) == 1 or approval_policy == "direct_send":
         ids = execute_broadcast(
             session,
             ctx,
             audience=audience,
             subject=clean_subject,
             body_md=clean_body,
-            recipient_user_ids=(recipients[0].user_id,),
+            recipient_user_ids=tuple(recipient.user_id for recipient in recipients),
             notification_sink=notification_sink,
             broadcast_id=broadcast_id,
             clock=eff_clock,
         )
         return BroadcastSendOutcome(
             status="sent",
-            recipient_count=1,
+            recipient_count=len(recipients),
             notification_ids=ids,
             approval_request_id=None,
             expires_at_iso=None,

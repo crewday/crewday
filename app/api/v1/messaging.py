@@ -662,6 +662,11 @@ def build_messaging_router(
             body_md=body.body_md,
             notification_sink=service,
             approval_queue=broadcast_gateway,
+            approval_policy=(
+                "direct_send"
+                if ctx.principal_kind == "session"
+                else "queue_multi_recipient"
+            ),
         )
         return BroadcastSendResponse(
             status=outcome.status,

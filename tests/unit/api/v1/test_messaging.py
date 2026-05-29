@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, date, datetime
 
+import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
@@ -23,7 +25,7 @@ from app.api.errors import _handle_domain_error, add_exception_handlers
 from app.api.v1.messaging import build_messaging_router
 from app.domain.errors import DomainError
 from app.domain.messaging.push_tokens import validate_endpoint
-from app.tenancy import WorkspaceContext, tenant_agnostic
+from app.tenancy import PrincipalKind, WorkspaceContext, tenant_agnostic
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
 from tests.factories.identity import (
@@ -223,13 +225,66 @@ def test_broadcast_single_recipient_creates_notification_row() -> None:
         engine.dispose()
 
 
-def test_broadcast_multi_recipient_returns_approval_without_fanout() -> None:
+def test_broadcast_multi_recipient_human_session_sends_without_approval() -> None:
     _load_all_models()
     engine: Engine = make_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     try:
         factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
         ctx, worker_ids = _seed_broadcast_workspace(factory)
+        client = _build_db_client(factory, ctx)
+        preview = client.get("/messaging/broadcast/recipients")
+        assert preview.status_code == 200
+        employees_token = next(
+            group["token"]
+            for group in preview.json()["groups"]
+            if group["kind"] == "workspace_role" and group["label"] == "Employees"
+        )
+
+        resp = client.post(
+            "/messaging/broadcast",
+            json={
+                "audience_tokens": [employees_token],
+                "confirmed_recipient_count": 2,
+                "subject": "Storm watch",
+                "body_md": "Bring patio furniture inside before 16:00.",
+            },
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "sent"
+        assert body["recipient_count"] == 2
+        assert len(body["notification_ids"]) == 2
+        assert body["approval_request_id"] is None
+
+        with factory() as session, tenant_agnostic():
+            notification_rows = session.scalars(select(Notification)).all()
+            approvals = session.scalars(select(ApprovalRequest)).all()
+            assert [row.kind for row in notification_rows] == [
+                "agent_message",
+                "agent_message",
+            ]
+            assert {row.recipient_user_id for row in notification_rows} == set(
+                worker_ids
+            )
+            assert approvals == []
+            assert "approval_needed" not in {row.kind for row in notification_rows}
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("principal_kind", ["token", "demo", "system"])
+def test_broadcast_multi_recipient_non_session_principals_queue_approval(
+    principal_kind: PrincipalKind,
+) -> None:
+    _load_all_models()
+    engine: Engine = make_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    try:
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        session_ctx, worker_ids = _seed_broadcast_workspace(factory)
+        ctx = replace(session_ctx, principal_kind=principal_kind)
         client = _build_db_client(factory, ctx)
         preview = client.get("/messaging/broadcast/recipients")
         assert preview.status_code == 200
@@ -260,8 +315,12 @@ def test_broadcast_multi_recipient_returns_approval_without_fanout() -> None:
             broadcast_rows = session.scalars(
                 select(Notification).where(Notification.kind == "agent_message")
             ).all()
+            approval_rows = session.scalars(
+                select(Notification).where(Notification.kind == "approval_needed")
+            ).all()
             approval = session.get(ApprovalRequest, body["approval_request_id"])
             assert broadcast_rows == []
+            assert approval_rows
             assert approval is not None
             assert approval.action_json["tool_name"] == "messaging.broadcast"
             assert approval.action_json["tool_input"]["recipient_user_ids"] == list(

@@ -171,7 +171,6 @@ export default function DashboardPage() {
         subtitle={
           <>
             {recipientCount} recipient{recipientCount === 1 ? "" : "s"}
-            {recipientCount > 1 ? " · approval required before fanout" : ""}
           </>
         }
         formClassName="broadcast-message-form"
@@ -201,9 +200,7 @@ export default function DashboardPage() {
                 ? "Sending..."
                 : broadcastNotice !== null
                   ? "Queued"
-                  : recipientCount > 1
-                    ? "Request approval"
-                    : "Send"}
+                  : "Send"}
             </button>
           </>
         }

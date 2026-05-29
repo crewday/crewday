@@ -226,14 +226,18 @@ across overlaps, excludes archived/inactive users, and compares
 `confirmed_recipient_count` with the final deduped recipient set so a
 manager explicitly sees the fanout size before submit.
 
-Single-recipient sends execute immediately for callers allowed by
-`messaging.manager_channel` and fan out through `NotificationService`
-with `NotificationKind.agent_message`, producing normal
-`notification`, `email_delivery` (when mail is configured), SSE, push,
-and audit rows. Multi-recipient sends do not fan out immediately:
-they create a replayable `approval_request` row and notify
-owners/managers with `approval_needed`. Approval replay performs the
-same `NotificationService` fanout.
+Human passkey-session owners/managers allowed by
+`messaging.manager_channel` execute sends immediately, including
+multi-recipient broadcasts from the manager dashboard. The direct-send
+path fans out through `NotificationService` with
+`NotificationKind.agent_message`, producing normal `notification`,
+`email_delivery` (when mail is configured), SSE, push, and audit rows.
+Delegated agent, tool-call, automation, and token-presented
+multi-recipient sends do not fan out immediately: they create a
+replayable `approval_request` row and notify owners/managers with
+`approval_needed`. Approval replay performs the same
+`NotificationService` fanout, preserving idempotency by the stored
+`broadcast_id`.
 
 ### `email_opt_out`
 

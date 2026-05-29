@@ -2017,7 +2017,7 @@ A small starter list of routes that carry
 | `POST /inventory/{id}/restock`                | "Restock *{id|inventory:name}* by {qty} {unit}?"                     |
 | `POST /schedules`                             | "Add schedule *{template_id|template:name}* on {rrule}?"             |
 | `POST /stays`                                 | "Create stay at {property_id|property:name} {check_in}–{check_out}?" |
-| `POST /messaging/broadcast` (single-recipient path) | "Send broadcast *{subject}*?" |
+| `POST /messaging/broadcast` (delegated single-recipient path; multi-recipient queues) | "Send broadcast *{subject}*?" |
 
 Routes that carry bare `x-agent-confirm: true` (and are not in the
 workspace policy lists) execute silently in `auto` mode and use a
@@ -2072,7 +2072,12 @@ The canonical list, configurable per workspace:
 - Payslip issuance and paid transition (`payroll.issue`, `payroll.pay`).
 - Granting a new scope to an existing token.
 - Rotating another token.
-- Sending a broadcast email/message to more than one recipient.
+- Sending a broadcast email/message to more than one recipient from a
+  delegated agent, automation, demo, system, or other token-presented
+  initial caller. Human passkey-session owners/managers using the
+  manager web app direct-send through §10.5 instead of entering the
+  agent approval queue; approved replay is the post-decision fanout,
+  not a new bypassable submission.
 - Bulk schedule changes affecting > 50 future tasks.
 
 **Always-gated (not configurable)** — these actions touch money

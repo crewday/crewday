@@ -289,6 +289,50 @@ def test_multi_recipient_broadcast_queues_approval_without_fanout(
         )
 
 
+def test_multi_recipient_human_session_policy_sends_immediately(
+    factory: sessionmaker[Session], persona: _Persona
+) -> None:
+    sink = _FakeSink()
+    with factory() as session:
+        gateway = SqlAlchemyBroadcastGateway(session)
+        outcome = send_or_queue_broadcast(
+            session,
+            persona.ctx,
+            audience=gateway,
+            audience_tokens=[
+                audience_token_for_work_role(persona.driver_role_id),
+                audience_token_for_work_role(persona.maid_role_id),
+                audience_token_for_user(persona.worker_ids[0]),
+            ],
+            confirmed_recipient_count=2,
+            subject="Storm watch",
+            body_md="Bring patio furniture inside before 16:00.",
+            notification_sink=sink,
+            approval_queue=gateway,
+            approval_policy="direct_send",
+            clock=FrozenClock(_PINNED),
+        )
+        session.commit()
+
+    assert outcome.status == "sent"
+    assert outcome.recipient_count == 2
+    assert outcome.notification_ids == ("notif_1", "notif_2")
+    assert outcome.approval_request_id is None
+    assert [call[0] for call in sink.calls] == list(persona.worker_ids)
+
+    with factory() as session, tenant_agnostic():
+        approvals = session.scalars(select(ApprovalRequest)).all()
+        audits = session.scalars(
+            select(AuditLog).where(
+                AuditLog.entity_kind == "messaging_broadcast",
+                AuditLog.action == "messaging.broadcast.sent",
+            )
+        ).all()
+    assert approvals == []
+    assert len(audits) == 1
+    assert audits[0].diff["recipient_count"] == 2
+
+
 def test_recipient_preview_lists_current_workspace_people_and_groups(
     factory: sessionmaker[Session], persona: _Persona
 ) -> None:
