@@ -159,7 +159,7 @@
   opacity: 0.58;
 }
 
-.inline-table-form__head {
+.inline-table-form__row--head {
   background:
     linear-gradient(90deg, var(--paper-2), color-mix(in srgb, var(--paper-2) 70%, var(--card)));
   border-bottom: 1px solid var(--line);

@@ -67,6 +67,13 @@ const roleOptions = [
   { value: "admin", label: "Admin" },
 ];
 
+function cssBlocks(selector: string): string[] {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return [...inlineTableCss.matchAll(new RegExp(`^\\s*${escapedSelector}\\s*\\{([^{}]*)\\}`, "gm"))].map(
+    (match) => match[1],
+  );
+}
+
 const columns: InlineTableColumn<Draft>[] = [
   {
     key: "title",
@@ -2670,6 +2677,13 @@ describe("InlineTableForm", () => {
     );
     expect(inlineTableCss).toMatch(
       /\.inline-table-form__icon-selector \.icon-selector__selected\s*{[\s\S]*border-color: var\(--line\);/m,
+    );
+    const headDeclarations = cssBlocks(".inline-table-form__head").join("\n");
+    const headRowDeclarations = cssBlocks(".inline-table-form__row--head").join("\n");
+    expect(headDeclarations).not.toContain("border-bottom:");
+    expect(headRowDeclarations).toContain("border-bottom: 1px solid var(--line);");
+    expect(inlineTableCss).toMatch(
+      /@supports \(grid-template-columns: subgrid\)\s*{[\s\S]*\.inline-table-form__head,\s*\.inline-table-form__body\s*{[\s\S]*display: contents;/m,
     );
     expect(inlineTableCss).toMatch(
       /@media \(max-width: 720px\)\s*{[\s\S]*\.inline-table-form__head\s*{\s*display: none;/m,
