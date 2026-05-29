@@ -154,7 +154,7 @@ function emptyDraft(todayIso: string): ClosureDraft {
     id: null,
     starts_on: todayIso,
     ends_on: todayIso,
-    reason: "Renovation",
+    reason: "",
     source_ical_feed_id: null,
   };
 }
@@ -423,7 +423,7 @@ export default function PropertyClosuresPage() {
           value={row.draft.reason}
           disabled={disabled}
           ariaLabel="Reason"
-          placeholder="Renovation"
+          placeholder="Enter a reason"
           onChange={(reason) => update({ reason })}
         />
       ),

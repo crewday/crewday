@@ -530,11 +530,14 @@ describe("<PropertyClosuresPage>", () => {
       render(<Harness />);
 
       const createRow = await screen.findByLabelText("New closure");
+      const reasonField = within(createRow).getByLabelText("Reason");
       expect(screen.queryByRole("dialog")).toBeNull();
+      expect(reasonField).toHaveValue("");
+      expect(reasonField).toHaveAttribute("placeholder", "Enter a reason");
       expect(within(createRow).getByRole("button", { name: "Save" })).toBeDisabled();
       fireEvent.change(within(createRow).getByLabelText("Start date"), { target: { value: "2026-04-16" } });
       fireEvent.change(within(createRow).getByLabelText("End date"), { target: { value: "2026-04-18" } });
-      fireEvent.change(within(createRow).getByLabelText("Reason"), { target: { value: "  Owner repainting west wing  " } });
+      fireEvent.change(reasonField, { target: { value: "  Owner repainting west wing  " } });
       expect(within(createRow).getByRole("button", { name: "Save" })).toBeEnabled();
       fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
 
@@ -550,6 +553,12 @@ describe("<PropertyClosuresPage>", () => {
         reason: "Owner repainting west wing",
         source_ical_feed_id: null,
       });
+      await waitFor(() => {
+        expect(within(createRow).getByLabelText("End date")).toHaveValue("2026-04-16");
+      });
+      expect(reasonField).toHaveValue("");
+      expect(reasonField).toHaveAttribute("placeholder", "Enter a reason");
+      expect(within(createRow).getByRole("button", { name: "Save" })).toBeDisabled();
     } finally {
       fake.restore();
     }
@@ -638,6 +647,8 @@ describe("<PropertyClosuresPage>", () => {
 
       const manualRow = await screen.findByLabelText("Renovation closure from 10 Apr to 12 Apr");
       fireEvent.click(within(manualRow).getByRole("button", { name: "Edit" }));
+      expect(within(manualRow).getByLabelText("Reason")).toHaveValue("Renovation");
+      expect(within(manualRow).getByLabelText("Reason")).toHaveAttribute("placeholder", "Enter a reason");
       fireEvent.change(within(manualRow).getByLabelText("Start date"), { target: { value: "2026-04-11" } });
       fireEvent.change(within(manualRow).getByLabelText("Reason"), { target: { value: "Owner maintenance" } });
       fireEvent.click(within(manualRow).getByRole("button", { name: "Save" }));
@@ -730,6 +741,27 @@ describe("<PropertyClosuresPage>", () => {
     }
   });
 
+  it("cancels create-row drafts back to an empty reason", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      const createRow = await screen.findByLabelText("New closure");
+      fireEvent.change(within(createRow).getByLabelText("End date"), { target: { value: "2026-04-18" } });
+      fireEvent.change(within(createRow).getByLabelText("Reason"), { target: { value: "Owner maintenance" } });
+      fireEvent.click(within(createRow).getByRole("button", { name: "Cancel" }));
+
+      expect(within(createRow).getByLabelText("Start date")).toHaveValue("2026-04-16");
+      expect(within(createRow).getByLabelText("End date")).toHaveValue("2026-04-16");
+      expect(within(createRow).getByLabelText("Reason")).toHaveValue("");
+      expect(within(createRow).getByLabelText("Reason")).toHaveAttribute("placeholder", "Enter a reason");
+      expect(within(createRow).getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(fake.requests.some((request) => request.url === "/w/acme/api/v1/property_closures" && request.init?.method === "POST")).toBe(false);
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("shows empty and validation states inside the inline table", async () => {
     const fake = installFetch({ emptyClosures: true });
     try {
@@ -742,6 +774,22 @@ describe("<PropertyClosuresPage>", () => {
       fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
 
       expect(within(createRow).getByText("End date must be on or after the start date.")).toBeInTheDocument();
+      expect(fake.requests.some((request) => request.url === "/w/acme/api/v1/property_closures" && request.init?.method === "POST")).toBe(false);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("requires a reason before creating a manual closure", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      const createRow = await screen.findByLabelText("New closure");
+      fireEvent.change(within(createRow).getByLabelText("End date"), { target: { value: "2026-04-17" } });
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
+
+      expect(within(createRow).getByText("Reason is required.")).toBeInTheDocument();
       expect(fake.requests.some((request) => request.url === "/w/acme/api/v1/property_closures" && request.init?.method === "POST")).toBe(false);
     } finally {
       fake.restore();
