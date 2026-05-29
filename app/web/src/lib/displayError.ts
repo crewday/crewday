@@ -62,7 +62,11 @@ export function toDisplayError(error: unknown, fallback: string = DEFAULT_FALLBA
   const title = nonEmptyString(apiError.title) ?? nonEmptyString(apiError.problem?.title);
   const detail = nonEmptyString(apiError.detail) ?? nonEmptyString(apiError.problem?.detail);
   const userMessage = nonEmptyString(apiError.userMessage) ?? nonEmptyString(apiError.problem?.user_message);
-  const message = userMessage ?? detail ?? title ?? nonEmptyString(apiError.message) ?? safeFallback;
+  const message = withRetryContext(
+    userMessage ?? detail ?? title ?? nonEmptyString(apiError.message) ?? safeFallback,
+    apiError.status,
+    apiError.problem,
+  );
   const type = nonEmptyString(apiError.type) ?? shortProblemType(apiError.problem);
   const machineCode = nonEmptyString(apiError.machineCode) ?? nonEmptyString(apiError.problem?.error);
   const instance = nonEmptyString(apiError.instance) ?? nonEmptyString(apiError.problem?.instance);
@@ -186,6 +190,31 @@ function addExtensionDetails(
       "extension",
     );
   }
+}
+
+function withRetryContext(message: string, status: number, problem: ProblemDetail | null): string {
+  if (status !== 429) return message;
+  const retryAfter = retryAfterSeconds(problem);
+  if (retryAfter === null) return message;
+  return `${trimTerminalPunctuation(message)}. Try again ${formatRetryDelay(retryAfter)}.`;
+}
+
+function retryAfterSeconds(problem: ProblemDetail | null): number | null {
+  const raw = problem?.retry_after_seconds;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return null;
+  return Math.ceil(raw);
+}
+
+function formatRetryDelay(seconds: number): string {
+  if (seconds < 60) return `in ${seconds} ${seconds === 1 ? "second" : "seconds"}`;
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return `in ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+  const hours = Math.ceil(minutes / 60);
+  return `in ${hours} ${hours === 1 ? "hour" : "hours"}`;
+}
+
+function trimTerminalPunctuation(value: string): string {
+  return value.replace(/[.!?]+$/u, "");
 }
 
 function humanizeExtensionKey(key: string): string {

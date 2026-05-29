@@ -1,6 +1,6 @@
 # 03 — App integration
 
-Two narrow contracts live at the boundary between site and app.
+Three narrow contracts live at the boundary between site and app.
 Everything else is isolated.
 
 1. **Feedback RPCs** — `site/api/` → app over HTTP. Three
@@ -9,13 +9,19 @@ Everything else is isolated.
    shape.
 2. **`CREWDAY_FEEDBACK_URL`** — the app renders a "Give feedback"
    link pointing at the site, or renders nothing at all.
+3. **Agent-originated feedback ingest** — app → `site/api/` over
+   HTTP for feature requests and bug reports filed by embedded app
+   agents, including proactive reports when an agent observes that a
+   product path is broken.
 
-Neither contract gives the site any knowledge of real app user
+None of these contracts gives the site any knowledge of real app user
 identities — only opaque pseudonymous hashes (`user_hash` and
 `workspace_hash`, derived app-side under
-`CREWDAY_FEEDBACK_HASH_SALT`; see §02 "Auth flow"). Neither gives
-the app any knowledge of submitted feedback bodies beyond what the
-site sends in a single request.
+`CREWDAY_FEEDBACK_HASH_SALT`; see §02 "Auth flow"). Site → app RPCs
+give the app only the redacted public submission text needed for
+moderation, embedding, and clustering. App → site agent ingest gives
+the site only pseudonymous workspace/user hashes plus private agent
+trace/evidence context.
 
 ## Why not a tighter coupling
 
@@ -24,9 +30,12 @@ site sends in a single request.
 - **Shared code is out.** `site/api/` does not import from `app/`.
   Cross-package imports break the "independent deploy" promise
   and couple versioning.
-- **Webhook-on-event is out for v1.** The app does not push
-  anything to the site; site orchestrates pulls. Keeps the app
-  stateless w.r.t. the site and avoids a second delivery queue.
+- **Webhook-on-event is out for v1.** The app does not stream
+  product events to the site. The one app → site write is the
+  explicit agent-originated feedback ingest route, invoked only
+  when an agent decides to file a feature request or bug report.
+  Routine telemetry and monitoring alerts stay in the app's own
+  observability stack.
 
 ## Feedback RPCs
 
@@ -83,10 +92,12 @@ Request:
 ```json
 {
   "version": 1,
-  "submission": {
-    "ref": "sub_01JK...",
-    "body": "i wish the agent knew which rooms need deep cleaning weekly",
-    "category": "idea"
+   "submission": {
+     "ref": "sub_01JK...",
+     "kind": "feature_request",
+     "source": "human",
+     "body": "i wish the agent knew which rooms need deep cleaning weekly",
+     "category": "idea"
   },
   "policy": {
     "embed": true
@@ -98,11 +109,16 @@ Request:
   re-applies its own redaction layer (§11) defensively and aborts
   with `422 redaction_failed` if any well-known PII pattern
   survives. No echo of offending text.
-- `category` is the site's enum; the app uses it as a weak
+- `kind` is exactly `feature_request` or `bug_report`. The app uses
+  it to choose the moderation prompt and the board-safe
+  reformulation style.
+- `source` is exactly `human` or `agent`. It is used only for
+  prompt context and audit; it does not change moderation rules.
+- `category` is the site's kind-specific enum; the app uses it as a weak
   prompt-shaping hint. Not used for auth or policy.
-- No `source` field. Every submission reaching this endpoint is
-  authenticated app feedback by construction (§02); the site never
-  sends or stores a source discriminator.
+- Private bug details, attachments, agent trace ids, and
+  `on_behalf_of_user_hash` are not sent to this RPC. They remain
+  site-side deployment-admin evidence (§02).
 - `policy.embed`: `true` means return an embedding in the same
   call (routes to `feedback.embed` internally). `false` means the
   site will call `/embed` separately with the returned
@@ -256,7 +272,8 @@ Request (synchronous, batch of 1):
   ],
   "submissions": [
     {
-      "ref": "sub_01JK...",
+     "ref": "sub_01JK...",
+      "kind": "feature_request",
       "reformulated_title": "Let the agent set per-room cleaning cadence",
       "reformulated_body": "The submitter wants...",
       "embedding_title_en": "Let the agent set per-room cleaning cadence",
@@ -305,6 +322,11 @@ Request (batch merge pass):
 - `submissions` is not present. `candidates` is not present.
   Presence of `check_merges` puts the call into merge-check
   mode.
+- In assign mode every submission carries `kind`, and every
+  candidate must already be same-kind. In merge-check mode each
+  pair must be same-kind. The app rejects mixed-kind requests with
+  `422 kind_mismatch`; the site treats that as a bug in its local
+  candidate query.
 
 Response (assign mode):
 
@@ -377,6 +399,7 @@ Notes:
 | `404` | `not_enabled` | The capability backing this endpoint (`feedback.moderate`, `feedback.embed`, or `feedback.cluster`) is off on this deployment. |
 | `409` | `budget_exhausted` | The capability's deployment-scope budget cap is hit; site should back off until next UTC midnight. |
 | `413` | `payload_too_large` | Request body exceeded cap. |
+| `422` | `kind_mismatch` | `/cluster` received mixed feature-request and bug-report submissions/candidates. |
 | `422` | `redaction_failed` | Post-redaction body still matched a PII pattern (`/moderate` only). |
 | `422` | `dim_mismatch` | `/embed` asked to produce a dimension different from what the model emits. |
 | `429` | `rate_limited` | Too many calls; carries `Retry-After`. |
@@ -534,12 +557,72 @@ Notes:
   emits a minimal 4xx with plain text; the app's normal login
   wall handles the unauthenticated case.
 - The endpoint is **agent-forbidden** (`x-agent-forbidden: true`)
-  — an agent holding a delegated token cannot mint a feedback
-  token for its user. Keeps "feedback submitted by an agent on
-  my behalf" out of scope entirely.
+  — an agent holding a delegated token cannot mint a browser
+  feedback token for its user. Agent-originated reports use the
+  server-to-server ingest path below so their source and private
+  on-behalf context are explicit.
 - `/feedback-redirect` is also rate-limited deployment-wide to
   10 000 per day — a cheap rail against a compromised account
   scripting the mint.
+
+### Agent-originated ingest
+
+Embedded app agents can file feature requests and bug reports without
+opening a browser session on the site. The app posts to the site:
+
+```
+POST /api/feedback/agent-submissions
+Host: crew.day
+Authorization: Bearer <APP_SITE_RPC_TOKEN>
+Content-Type: application/json; charset=utf-8
+X-Feedback-Ingest-Version: 1
+X-Feedback-Request-Id: <ULID chosen by the app>
+```
+
+Request:
+
+```json
+{
+  "version": 1,
+  "kind": "bug_report",
+  "body": "Inline table rows fail to save after validation",
+  "category": "regression",
+  "private_details_md": "Agent observed POST /api/v1/... returning 422 after the user corrected the row label. Trace: trc_01JK...",
+  "attachment_refs": [],
+  "workspace_hash": "9f2c...",
+  "agent_reporter_id": "chat.manager",
+  "agent_thread_id": "thr_01JK...",
+  "agent_trace_id": "trc_01JK...",
+  "on_behalf_of_user_hash": "aa31..."
+}
+```
+
+Rules:
+
+- This is **app → site**, not site → app. It reuses the same shared
+  secret as the feedback RPC family (`APP_SITE_RPC_TOKEN` on the
+  app, matching `SITE_APP_RPC_TOKEN` on the site), but the opposite
+  direction is distinguished by `X-Feedback-Ingest-Version` and the
+  `/api/feedback/agent-submissions` path. Rotation remains
+  coordinated under §04.
+- The app computes `workspace_hash` and optional
+  `on_behalf_of_user_hash` with `CREWDAY_FEEDBACK_HASH_SALT`. It
+  never sends real ULIDs, emails, display names, or workspace slugs.
+- `on_behalf_of_user_hash` is optional and private. It is present
+  when the report arose inside a user conversation, but it is never
+  public attribution, never a vote, and never shown to the user by
+  the site.
+- Agent-created attachments are supported only as private evidence
+  blobs already uploaded by the app to the site attachment endpoint
+  under the same server-to-server auth. They follow §02 attachment
+  rules and are never sent to the feedback RPCs.
+- The site writes the submission with `source='agent'`, then runs the
+  same moderate → embed → cluster pipeline as human submissions.
+  Failures leave the row `pending`; the app receives `202 Accepted`
+  with the site submission id.
+- The agent may file proactively only for concrete observed failures
+  or clearly missing affordances; routine telemetry, stack traces, and
+  monitoring alerts do not use this path.
 
 ### Site-side verification
 
@@ -573,7 +656,7 @@ stripped.
   magic-link shape: small, observable, rotatable, and fails
   closed.
 - Alternative: OIDC with the app as IdP. Overkill for a
-  suggestion-box cookie; adds a whole authz surface and a second
+  feedback-board cookie; adds a whole authz surface and a second
   set of client credentials to manage.
 
 ## Versioning

@@ -409,6 +409,7 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
           setRowErrors((current) => clearMapValue(current, rowId));
         }}
         onReorder={canReorderAreas ? handleReorder : undefined}
+        showReorderHandles={areas.length > 1}
         onDelete={(rowId) => deleteArea.mutate(rowId)}
         trailingCreateRow={trailingCreateRow}
         getRowLabel={(row) => row.draft.name || row.label || "New area"}

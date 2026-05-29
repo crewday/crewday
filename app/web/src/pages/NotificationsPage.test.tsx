@@ -13,6 +13,10 @@ import NotificationsPage from "./NotificationsPage";
 
 let restoreIndexedDb: (() => void) | null = null;
 
+function isReadPatchBody(body: unknown): body is { read: boolean } {
+  return typeof body === "object" && body !== null && "read" in body && typeof body.read === "boolean";
+}
+
 function notification(overrides: Partial<NotificationPayload> = {}): NotificationPayload {
   return {
     id: "notif_1",
@@ -112,7 +116,7 @@ describe("NotificationsPage", () => {
         method: "PATCH",
         path: "/w/acme/api/v1/messaging/notifications/notif_1",
         respond: (request) => {
-          current = request.body?.read ? read : unread;
+          current = isReadPatchBody(request.body) && request.body.read ? read : unread;
           return { body: current };
         },
       },

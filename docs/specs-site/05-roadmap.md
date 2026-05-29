@@ -43,7 +43,7 @@ wired to a placeholder anchor.
   pre-selected persona.
 - `/why-crewday`, `/pricing`, `/changelog` stubs with real copy.
 - Legal pages (`/legal/terms`, `/legal/privacy`) — privacy reflects
-  the posture in §02 and §04 even though the suggestion box is
+  the posture in §02 and §04 even though the feedback boards are
   not live yet (zero PII = smallest possible privacy policy).
 - i18n seam wired; English shipped as the only locale.
 - **App-side:** app §24 adds the `start=` query-string extension
@@ -61,24 +61,29 @@ Chrome, and Firefox.
 
 ## Phase 2 — Auth-gated submit (operator-only review)
 
-Store-and-review; no public board, no agent, no clustering. The
-magic-link auth bridge between app and site ships in this phase
-so the write path is authenticated from day one.
+Store-and-review for feature requests and bug reports; no public
+board, no agent moderation, no clustering. The magic-link auth
+bridge between app and site ships in this phase so the human write
+path is authenticated from day one.
 
-- `/suggest` renders the form (no board panel yet). The form
-  only shows when a valid `__Host-suggest_session` cookie is
-  present; otherwise the panel shows the "Log in to submit" CTA
-  linking into `app.crew.day/login?return=/feedback-redirect`.
+- `/suggest` renders the feature-request form and `/bugs` renders
+  the bug-report form (no board panels yet). Forms only show when a
+  valid `__Host-suggest_session` cookie is present; otherwise each
+  panel shows the "Log in to submit" CTA linking into
+  `app.crew.day/login?return=/feedback-redirect`.
 - `feedback_submission` table + migration (no `embedding` or
   `reformulated_*` columns yet — added in Phase 3). Submissions
-  land with `status='pending'` and verbatim (redacted) body
-  only, keyed by `submitter_user_hash` and
-  `submitter_workspace_hash`.
+  carry `kind='feature_request' | 'bug_report'`, land with
+  `status='pending'`, and store redacted body plus optional
+  redacted bug `private_details_md`, keyed by
+  `submitter_user_hash` and `submitter_workspace_hash`.
+- `feedback_attachment` table + private upload route for bug
+  evidence; attachments are deployment-admin-only and never public.
 - `used_token_nonce` table + migration; 15-minute prune cron.
 - Regex redaction pass on insert per §02 "PII posture".
 - Rate limits per §04 (10/hour/user, 50/day/user,
   100/day/workspace).
-- `/suggest/thanks` with the "We'll review ideas soon" copy —
+- `/feedback/thanks` with the "We'll review feedback soon" copy —
   no cluster information yet.
 - `site-admin submissions list [--since]` / `show <id>` and
   `site-admin users ban` / `workspaces ban`.
@@ -89,17 +94,20 @@ so the write path is authenticated from day one.
   and the `PageHeader` overflow-menu entry that hrefs into it.
   Additive PR to the app.
 
-**Exit:** an authenticated app user clicks "Give feedback",
-arrives on `crew.day/suggest` with a fresh `__Host-suggest_session`
-cookie, submits an idea, and lands a redacted row on the site.
-A logged-out visitor sees the "Log in to submit" CTA and can
-read nothing else yet (board is absent). A replayed token is
-refused. Operator can walk the backlog via CLI.
+**Exit:** an authenticated app user clicks "Give feedback", arrives
+on `crew.day/suggest` with a fresh `__Host-suggest_session` cookie,
+submits a feature request, then opens `/bugs` and submits a bug
+report with a screenshot attachment. Redacted rows and private
+attachment metadata land on the site. A logged-out visitor sees the
+"Log in to submit" CTA and can read nothing else yet (boards are
+absent). A replayed token is refused. Operator can walk the backlog
+and fetch private bug evidence via CLI.
 
 ## Phase 3 — Agent pipeline + public board
 
 The big phase: three new capabilities on the app side, a vector
-store on the site side, and the public board lights up.
+store on the site side, app-agent ingest, and the public boards
+light up.
 
 - `reformulated_title`, `reformulated_body`,
   `embedding_title_en`, `embedding_body_en`, `embedding`,
@@ -107,7 +115,8 @@ store on the site side, and the public board lights up.
   `embedded_at` columns added to `feedback_submission`
   (migration).
 - `feedback_cluster` (with `summary_embedding`), `feedback_vote`,
-  `cluster_run` tables + migration.
+  `cluster_run` tables + migration. Clusters carry `kind`, so
+  feature requests and bug reports never merge.
 - `sqlite-vec` integration on SQLite (Postgres+pgvector on the
   Postgres path). Vector index on `feedback_submission.embedding`
   and `feedback_cluster.summary_embedding`.
@@ -123,6 +132,12 @@ store on the site side, and the public board lights up.
     default. The managed SaaS flips all three on.
   - Prompt templates for moderate and cluster seeded into the
     app's prompt library (app §11 "Prompt library").
+- **App-side agent ingest:** embedded agents can file
+  `feature_request` and `bug_report` rows through the server-to-
+  server `/api/feedback/agent-submissions` path, including
+  proactive bug reports when they observe concrete product failures.
+  Optional `on_behalf_of_user_hash` and runtime trace context remain
+  private deployment-admin evidence.
 - **Site-side pipeline:**
   - Stage 1 (sync on submit): call `/moderate` with
     `policy.embed=true`. Reject → store + done. Keep → store
@@ -141,22 +156,26 @@ store on the site side, and the public board lights up.
     no time-based limit. Below threshold the site re-asks with
     `force_existing_only=true` and takes the agent's best
     existing-cluster pick.
-- Public board at `/suggest` showing reformulated titles;
-  cluster detail at `/suggest/cluster/<id>`.
+- Public feature-request board at `/suggest` and public bug-report
+  board at `/bugs`, both showing reformulated titles; cluster detail
+  at `/suggest/cluster/<id>` and `/bugs/cluster/<id>`.
 - Vote widget with 30/hour/user-hash rate limit.
 - Static-with-ISR build for the board (10-minute rebuild).
 - `site-admin submissions rejected-list`, `unreject`,
   `reprocess`, and `clusters merge/split` CLI commands per §02.
 
-**Exit:** a visitor submits; the agent moderates (rejecting
-gibberish) and reformulates; two near-duplicate submissions
-land in the same cluster; a substantially new idea creates its
-own cluster; the board shows reformulated titles only. The
-operator walks `rejected-list`, un-rejects one false-positive,
+**Exit:** a visitor submits a feature request and a bug report; the
+agent moderates (rejecting gibberish) and reformulates; two near-
+duplicate submissions of the same kind land in the same cluster; a
+substantially new idea or bug creates its own same-kind cluster. The
+feature board and bug board show reformulated titles only. The app
+agent files a proactive bug report with private trace context; the
+operator can see that context via CLI but the public board cannot.
+The operator walks `rejected-list`, un-rejects one false-positive,
 and confirms it re-enters the pipeline. The manifest endpoint
 reports `embed_dim=384` and the site boots clean against it.
-Deployment-scope budgets on `/admin` show non-zero spend for
-all three capabilities.
+Deployment-scope budgets on `/admin` show non-zero spend for all
+three capabilities.
 
 ## Phase 4 — Moderation and lifecycle
 
@@ -234,6 +253,10 @@ The site roadmap coordinates with app §19 on three points:
   tracking. It also ships a bundled local embedding model
   (`BAAI/bge-small-en-v1.5` via fastembed) in the app image —
   a ~30 MB addition.
+- **Phase 3 here** also requires the app to expose a feedback-report
+  tool to embedded agents, backed by server-to-server site ingest,
+  so agents can file feature requests and proactive bug reports
+  without minting a browser feedback token.
 
 None of the three lands on self-host deployments by default.
 They are SaaS-operator configurations.

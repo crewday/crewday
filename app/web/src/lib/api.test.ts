@@ -446,6 +446,33 @@ describe("fetchJson error mapping", () => {
     }
   });
 
+  it("adds retry timing to display copy for rate-limited responses", async () => {
+    const problem = {
+      type: "https://crewday.dev/errors/rate_limited",
+      title: "Rate limited",
+      status: 429,
+      detail: "Too many API requests.",
+      retry_after_seconds: 75,
+    };
+    const { restore } = installFetch([{ status: 429, body: problem }]);
+    try {
+      await expect(fetchJson("/api/v1/tasks")).rejects.toSatisfy((err: unknown) => {
+        expect(err).toBeInstanceOf(ApiError);
+        const display = toDisplayError(err);
+        expect(display.message).toBe("Too many API requests. Try again in 2 minutes.");
+        expect(display.details).toContainEqual({
+          label: "Retry after seconds",
+          message: "75",
+          path: "retry_after_seconds",
+          type: "extension",
+        });
+        return true;
+      });
+    } finally {
+      restore();
+    }
+  });
+
   it("surfaces approval_required extension fields on a 409", async () => {
     const problem = {
       type: "https://crewday.dev/errors/approval_required",

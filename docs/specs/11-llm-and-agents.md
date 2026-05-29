@@ -962,9 +962,9 @@ check returns `422 assignment_missing_capability`.
 | `chat.detect_language` | Detect message language for auto-translation (§10, §18)                     | `chat`, `json_mode`          |
 | `chat.translate`       | Translate a message into the workspace default language (§10, §18)          | `chat`                       |
 | `documents.ocr`        | Vision fallback for image-bearing documents when local OCR yields no text   | `vision`                     |
-| `feedback.moderate`    | **Deployment-scope.** Moderate + reformulate one marketing-site suggestion — called from `site/` over `/_internal/feedback/moderate`. Emits a keep/reject verdict plus (on keep) `reformulated_title`, `reformulated_body`, `detected_language`, and canonical English `embedding_title_en` / `embedding_body_en`. May emit an embedding in-line when `policy.embed=true`. | `chat`, `json_mode`          |
-| `feedback.embed`       | **Deployment-scope.** Compute dense embeddings for one or more canonical English texts — called from `site/` over `/_internal/feedback/embed`. Used by the suggestion-box pipeline for submission embeddings, cluster summary embeddings, and operator re-embeds. It does not translate. | `embeddings`                 |
-| `feedback.cluster`     | **Deployment-scope.** Classify a canonical English marketing-site submission against a site-provided top-K candidate list, or propose a new cluster — called from `site/` over `/_internal/feedback/cluster`. | `chat`, `json_mode`          |
+| `feedback.moderate`    | **Deployment-scope.** Moderate + reformulate one marketing-site feedback submission (`feature_request` or `bug_report`) — called from `site/` over `/_internal/feedback/moderate`. Emits a keep/reject verdict plus (on keep) `reformulated_title`, `reformulated_body`, `detected_language`, and canonical English `embedding_title_en` / `embedding_body_en`. May emit an embedding in-line when `policy.embed=true`. | `chat`, `json_mode`          |
+| `feedback.embed`       | **Deployment-scope.** Compute dense embeddings for one or more canonical English texts — called from `site/` over `/_internal/feedback/embed`. Used by the feedback-board pipeline for submission embeddings, cluster summary embeddings, and operator re-embeds. It does not translate. | `embeddings`                 |
+| `feedback.cluster`     | **Deployment-scope.** Classify a canonical English marketing-site feedback submission against a same-kind site-provided top-K candidate list, or propose a new same-kind cluster. Called from `site/` over `/_internal/feedback/cluster`. | `chat`, `json_mode`          |
 
 The `required_capabilities` column lives in code — capabilities are a
 closed enum declared by the application, not workspace-configurable.
@@ -977,7 +977,8 @@ Most capabilities in the table above are **workspace-scope**: every
 call is attributed to a workspace and meters against that
 workspace's rolling 30-day budget (§ "Workspace usage budget").
 Three capabilities are **deployment-scope** instead — the three
-that drive the marketing site's suggestion box (`crew.day/suggest`).
+that drive the marketing site's feedback boards (`crew.day/suggest`
+and `crew.day/bugs`).
 They are called by `site/api/`, not by anything inside a workspace,
 so there is no authenticated user and no `workspace_id` to attribute
 the call to. Each therefore meters against a **per-deployment
@@ -1005,7 +1006,7 @@ rather than the workspace audit log.
   Cohere, OpenAI, Google) is a pure-data change — a new
   `llm_provider` + `llm_provider_model` row plus an
   `llm_assignment` override.
-- The suggestion-box pipeline embeds canonical English text. The
+- The feedback-board pipeline embeds canonical English text. The
   `feedback.moderate` assignment is responsible for producing that
   text for every kept submission; `feedback.embed` only vectorises
   the strings it receives. This keeps the default English embedding
@@ -1031,6 +1032,44 @@ opaque `user_hash` / `workspace_hash` the site keys writes off).
 All three default unset; partial configuration → boot fails.
 Documented end-to-end in `docs/specs-site/03-app-integration.md`
 under "`CREWDAY_FEEDBACK_URL` → Configuration".
+
+### Agent-filed feature requests and bug reports
+
+Embedded app agents may file feedback into the site when the bridge
+is configured. This is a normal tool/action in the agent runtime,
+not a browser redirect:
+
+- Tool name: `feedback.submit`.
+- Accepted kinds: `feature_request` and `bug_report`.
+- Allowed callers: `chat.manager`, `chat.employee`, and
+  `chat.admin`, under the same delegated-token permission model as
+  other tools. The tool is hidden entirely when
+  `CREWDAY_FEEDBACK_URL`, `CREWDAY_FEEDBACK_SIGN_KEY`, or
+  `CREWDAY_FEEDBACK_HASH_SALT` is unset.
+- Human-requested use: if a user says "file that as feedback" or
+  "report this bug", the agent may call the tool with
+  `on_behalf_of_user_hash` set from the delegating user.
+- Proactive use: the agent may call the tool without a direct user
+  command only after observing a concrete product failure through
+  ordinary tools or UI-adjacent runtime state: failed API calls,
+  missing expected routes, repeated validation dead ends, broken UI
+  state, or a user request the product cannot satisfy. It must include
+  private details describing the observation and the runtime trace id.
+- Private context: `on_behalf_of_user_hash`, `agent_thread_id`,
+  `agent_trace_id`, tool-call errors, and attachments are sent only to
+  the site ingest endpoint as deployment-admin evidence. They are not
+  public attribution, not votes, not clustering input, and not shown
+  back to the user by the site.
+- Approval: `feedback.submit` is not approval-gated by default. It is
+  low-impact because it writes to the public-site feedback queue, not
+  to workspace business data; workspace policy may still force it
+  through the generic approval pipeline if an operator wants a
+  stricter posture.
+
+The route `GET /feedback-redirect` remains `x-agent-forbidden`.
+Agents do not mint browser feedback tokens; they use the
+server-to-server ingest contract in
+`docs/specs-site/03-app-integration.md`.
 
 ## Model assignment
 

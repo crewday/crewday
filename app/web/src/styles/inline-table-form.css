@@ -319,6 +319,13 @@
   justify-content: flex-end;
 }
 
+.inline-table-form__th--reorder,
+.inline-table-form__td--reorder {
+  justify-content: center;
+  padding-right: 6px;
+  padding-left: 6px;
+}
+
 .inline-table-form__td--center,
 .inline-table-form__th--center {
   justify-content: center;
@@ -598,26 +605,31 @@
 
 .inline-table-form__actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
   min-width: 0;
 }
 
-.inline-table-form__reorder {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.inline-table-form__button-group {
+  min-width: max-content;
 }
 
 .inline-table-form__drag-handle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
+  width: 28px;
+  height: 32px;
+  border-radius: 999px;
   color: var(--ink-3);
   cursor: grab;
+}
+
+.inline-table-form__drag-handle:hover {
+  background: var(--paper-2);
+  color: var(--ink);
 }
 
 .inline-table-form__group.is-dragging .inline-table-form__drag-handle {
@@ -625,6 +637,7 @@
 }
 
 .inline-table-form__icon-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -673,14 +686,42 @@
   padding: 0;
 }
 
+.inline-table-form__button-group > .inline-table-form__icon-btn {
+  border-radius: 0;
+}
+
+.inline-table-form__button-group > .inline-table-form__icon-btn:not(:first-child) {
+  margin-left: -1px;
+}
+
+.inline-table-form__button-group > .inline-table-form__icon-btn:first-child {
+  border-top-left-radius: 999px;
+  border-bottom-left-radius: 999px;
+}
+
+.inline-table-form__button-group > .inline-table-form__icon-btn:last-child {
+  border-top-right-radius: 999px;
+  border-bottom-right-radius: 999px;
+}
+
+.inline-table-form__button-group > .inline-table-form__icon-btn:focus-visible,
+.inline-table-form__button-group > .inline-table-form__icon-btn:hover {
+  z-index: 1;
+}
+
 .inline-table-form__icon-btn:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
 
+.inline-table-form__group.is-saving .inline-table-form__icon-btn:disabled {
+  opacity: 1;
+}
+
 .inline-table-form__status {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   min-height: 24px;
   padding: 2px 7px;
   border-radius: 999px;
@@ -693,8 +734,17 @@
 }
 
 .inline-table-form__status--saving {
-  background: var(--sky-soft);
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+  background: transparent;
   color: var(--sky);
+}
+
+.inline-table-form__status-spinner {
+  flex: 0 0 auto;
 }
 
 .inline-table-form__status--error {
@@ -867,7 +917,8 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .inline-table-form__load-more-spinner {
+  .inline-table-form__load-more-spinner,
+  .inline-table-form__status-spinner {
     animation: inline-table-form-spin 800ms linear infinite;
   }
 }
@@ -1044,6 +1095,20 @@
 
   .inline-table-form__td--actions {
     justify-content: stretch;
+  }
+
+  .inline-table-form__td--reorder {
+    grid-template-columns: 1fr;
+    min-height: 38px;
+  }
+
+  .inline-table-form__td--actions {
+    grid-template-columns: 1fr;
+  }
+
+  .inline-table-form__td--actions .inline-table-form__mobile-label,
+  .inline-table-form__td--reorder .inline-table-form__mobile-label {
+    display: none;
   }
 
   .inline-table-form__mobile-label {

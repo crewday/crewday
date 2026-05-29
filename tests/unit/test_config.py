@@ -133,7 +133,7 @@ class TestRateLimitConfig:
         monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")
         s = Settings()
         assert s.rate_limit_backend == "memory"
-        assert s.rate_limit_token_per_minute == 60
+        assert s.rate_limit_token_per_minute == 180
         assert s.rate_limit_personal_me_per_minute == 600
         assert s.rate_limit_anonymous_per_minute == 30
 

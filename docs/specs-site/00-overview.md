@@ -5,13 +5,15 @@
 The public surface of crew.day. Everything a prospect sees before
 they have an account, plus the feedback channel that links back
 from the app. Hosted on `crew.day` itself; uses the app only as a
-data consumer (for clustering) and as an embed target (for the demo
+service boundary for feedback moderation, embedding, clustering, and
+agent-originated ingest, and as an embed target (for the demo
 iframes).
 
-The site does not store workspace data, does not hold user
-sessions, and is not in the path of any authenticated workflow. It
-is a marketing and feedback surface — functionally closer to a
-landing page with a contact form than to the app.
+The site does not store workspace data and does not hold app user
+sessions. Its only authenticated state is the short-lived feedback
+cookie minted by the app bridge. It is a marketing and feedback
+surface — functionally closer to a landing page with a contact form
+than to the app.
 
 ## Audiences
 
@@ -22,8 +24,9 @@ landing page with a contact form than to the app.
   `app.crew.day` or a live demo iframe on `demo.crew.day`.
 - **Existing users.** Click the "Give feedback" link inside the
   app (rendered only when `CREWDAY_FEEDBACK_URL` is set; see
-  §03). They land on the suggestion box to browse the public
-  board or submit a new idea.
+  §03). They land on the feedback surface to browse feature
+  suggestions, browse public bug-report clusters, submit a new
+  feature request, or report a bug.
 - **Partners, press, operators.** Read docs, pricing, changelog;
   optionally file a feedback item tagged as an enquiry.
 
@@ -31,7 +34,7 @@ landing page with a contact form than to the app.
 
 | Host | Role | Owned by |
 |------|------|----------|
-| `crew.day` | Landing, pricing, scenario picker + demo embed, suggestion box, public board, legal, changelog | This repo, `site/` tree (these specs) |
+| `crew.day` | Landing, pricing, scenario picker + demo embed, feature-request board, bug-report board, legal, changelog | This repo, `site/` tree (these specs) |
 | `app.crew.day` | The product itself | This repo, `app/` tree (app specs) |
 | `demo.crew.day` | App with `CREWDAY_DEMO_MODE=1` — ephemeral workspaces, iframe-embeddable | This repo, `app/` tree under app §24 |
 
@@ -53,9 +56,10 @@ do not build, deploy, or maintain anything under `site/`. Concretely:
 - The app's logged-out bare-root redirect is off unless
   `CREWDAY_PUBLIC_SITE_URL` is set. Without that URL, self-hosters
   keep the local app login fallback and do not need to build `site/`.
-- The app's `feedback.cluster` capability (§03, app §11) is off
-  by default on every deployment; a self-hoster does not pay LLM
-  budget for it unless they explicitly turn it on.
+- The app's `feedback.*` capabilities (§03, app §11) are off by
+  default on every deployment; a self-hoster does not pay LLM
+  budget for moderation, embedding, or clustering unless they
+  explicitly turn them on.
 - No migration, no settings flag, no UI toggle appears on a
   self-host deployment because of the existence of these specs.
 
@@ -75,8 +79,8 @@ behind the shared Traefik / Pangolin badger front door on the dev box.
   paint come free. The landing is brochure-shaped; shipping a
   React SPA for it would be the wrong reach.
 - React islands hydrate only the interactive bits: the scenario
-  picker, the demo iframe/video swap, the suggestion form, the
-  public board's filter controls.
+  picker, the demo iframe/video swap, the feedback forms, the
+  public boards' filter controls.
 - Strict TypeScript (`strict: true`), matching the app's posture
   (AGENTS.md "Type safety").
 - **Design tokens and icons flow one-way from app to site.** The
@@ -94,8 +98,8 @@ Postgres.
 - Same `uv` / `ruff` / `mypy --strict` / `pytest` toolchain as the
   app — one mental model for reviewers.
 - Narrow schema: `feedback_submission`, `feedback_cluster`,
-  `feedback_vote`, plus one queue-ish `cluster_run` row to track
-  the clustering job. See §02.
+  `feedback_vote`, `feedback_attachment`, plus one queue-ish
+  `cluster_run` row to track the clustering job. See §02.
 - No shared code with the app. `site/api/` is a separate Python
   package with its own `pyproject.toml`; it does not import from
   `app/`. The only link is the HTTP RPC in §03.
@@ -126,7 +130,7 @@ site/
 │   │   ├── styles/             # tokens.css, globals.css
 │   │   └── icons/              # shared Lucide exports
 │   └── public/                 # static assets, demo videos, OG images
-└── api/                        # FastAPI suggestion-box backend
+└── api/                        # FastAPI feedback backend
     ├── pyproject.toml
     ├── site_api/
     │   ├── main.py
@@ -152,7 +156,7 @@ versa.
 - **Static first.** Anything that can be HTML at build time, is.
   Hydration pays only for the controls that genuinely need it.
 - **Zero tracking on marketing pages.** No third-party analytics,
-  no cookies, no pixels on the landing pages. The suggestion box
+  no cookies, no pixels on the landing pages. The feedback boards
   is the only surface that writes anything server-side, and even
   it strips PII by default (§02).
 - **App is a service, not a library.** `site/api/` reaches the

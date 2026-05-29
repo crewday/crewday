@@ -13,7 +13,7 @@ import {
   useState,
 } from "react";
 import type { InfiniteData } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Check, GripVertical, Loader2, Pencil, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { Check, GripVertical, Loader2, Pencil, RotateCcw, Search, Trash2, X } from "lucide-react";
 import ConfirmationModal from "@/components/ConfirmationModal";
 import IconSelector from "@/components/IconSelector";
 import { EmptyState } from "@/components/common";
@@ -158,21 +158,25 @@ export function useInlineTableInfiniteRows<TItem, TDraft>({
 }: UseInlineTableInfiniteRowsOptions<TItem, TDraft>): UseInlineTableInfiniteRowsResult<TDraft> {
   const [localRows, setLocalRows] = useState<ReadonlyMap<string, InlineTableRow<TDraft>>>(() => new Map());
   const rowsByIdRef = useRef<ReadonlyMap<string, InlineTableRow<TDraft>>>(new Map());
+  const baseRowsByIdRef = useRef<ReadonlyMap<string, InlineTableRow<TDraft>>>(new Map());
   const baseRowIds = useMemo(() => new Set(data?.pages.flatMap((page) => page.data.map(getRowId)) ?? []), [data, getRowId]);
 
   const rows = useMemo(() => {
     let rowIndex = 0;
+    const baseRows: InlineTableRow<TDraft>[] = [];
     const nextRows: InlineTableRow<TDraft>[] = [];
 
     for (const page of data?.pages ?? []) {
       for (const item of page.data) {
         const baseRow = mapRow(item, rowIndex);
+        baseRows.push(baseRow);
         const localRow = localRows.get(baseRow.id);
         nextRows.push(localRow ? mergeRow(baseRow, localRow, item, rowIndex) : baseRow);
         rowIndex += 1;
       }
     }
 
+    baseRowsByIdRef.current = new Map(baseRows.map((row) => [row.id, row]));
     rowsByIdRef.current = new Map(nextRows.map((row) => [row.id, row]));
     return nextRows;
   }, [data, localRows, mapRow, mergeRow]);
@@ -186,6 +190,22 @@ export function useInlineTableInfiniteRows<TItem, TDraft>({
       return next.size === current.size ? current : next;
     });
   }, [baseRowIds]);
+
+  useEffect(() => {
+    setLocalRows((current) => {
+      let changed = false;
+      const next = new Map(current);
+      for (const [rowId, localRow] of current) {
+        const baseRow = baseRowsByIdRef.current.get(rowId);
+        if (!baseRow || isLocalRowPending(localRow) || !shallowEqualDraft(baseRow.draft, localRow.draft)) {
+          continue;
+        }
+        next.delete(rowId);
+        changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [rows]);
 
   const updateRow = useCallback((rowId: string, update: (row: InlineTableRow<TDraft>) => InlineTableRow<TDraft>) => {
     setLocalRows((current) => {
@@ -267,6 +287,8 @@ interface InlineTableFormBaseProps<TDraft> {
   onDelete?: (rowId: string) => void;
   /** Opt-in row reordering for read-mode rows. Caller owns persisting the returned order. */
   onReorder?: (reorder: InlineTableReorder<TDraft>) => void;
+  /** Keeps the leading reorder affordance visible while a caller temporarily disables onReorder. */
+  showReorderHandles?: boolean;
   /** Defaults to icons for dense sheets; use text when a page needs extra action clarity. */
   actionDisplay?: InlineTableActionDisplay;
   /** Defaults to single-click entry; use doubleClick for select-first workflows with `e`/`dd`. */
@@ -338,6 +360,7 @@ export function InlineTableForm<TDraft>({
   onEdit,
   onDelete,
   onReorder,
+  showReorderHandles = false,
   actionDisplay = "icons",
   activationMode = "singleClick",
   addRow,
@@ -375,9 +398,11 @@ export function InlineTableForm<TDraft>({
   const [factoryCreateRow, setFactoryCreateRow] = useState<InlineTableRow<TDraft> | null>(() => (
     createEmptyDraft && onCreate ? makeFactoryCreateRow(createEmptyDraft, createRowLabel) : null
   ));
+  const hasReorderColumn = Boolean(onReorder) || showReorderHandles;
   const templateColumns = [
+    ...(hasReorderColumn ? ["42px"] : []),
     ...columns.map((column) => columnTemplate(column.width)),
-    onReorder ? "minmax(184px, max-content)" : "minmax(112px, max-content)",
+    "max-content",
   ].join(" ");
   const classes = [
     "inline-table-form",
@@ -730,6 +755,12 @@ export function InlineTableForm<TDraft>({
       <div className="inline-table-form__table" role="table" aria-label={ariaLabel}>
         <div className="inline-table-form__head" role="rowgroup">
           <div className="inline-table-form__row inline-table-form__row--head" role="row">
+            {hasReorderColumn ? (
+              <div
+                className="inline-table-form__th inline-table-form__th--reorder"
+                role="columnheader"
+              />
+            ) : null}
             {columns.map((column) => (
               <div
                 key={column.key}
@@ -739,9 +770,7 @@ export function InlineTableForm<TDraft>({
                 {column.header}
               </div>
             ))}
-            <div className="inline-table-form__th inline-table-form__th--actions" role="columnheader">
-              State
-            </div>
+            <div className="inline-table-form__th inline-table-form__th--actions" role="columnheader" />
           </div>
         </div>
 
@@ -756,7 +785,7 @@ export function InlineTableForm<TDraft>({
               <div
                 className="inline-table-form__empty-cell"
                 role="cell"
-                aria-colspan={columns.length + 1}
+                aria-colspan={columns.length + (hasReorderColumn ? 2 : 1)}
               >
                 {hasActiveSearch ? search?.noResultsState ?? (
                   <EmptyState
@@ -781,45 +810,44 @@ export function InlineTableForm<TDraft>({
             const isFactoryCreate = factoryCreateRow?.id === row.id;
             const status = rowStatus(row);
             const editing = row.editing ?? false;
-            const disabled = row.disabled || row.saving || status === "disabled";
+            const renderEditing = editing && !row.saving;
+            const controlsDisabled = row.disabled || row.saving || status === "disabled";
+            const selectionDisabled = row.disabled || status === "disabled";
             const messageId = rowMessageId(tableId, row.id);
             const context: InlineTableCellContext<TDraft> = {
               row,
               saveMode,
-              disabled,
+              disabled: controlsDisabled,
               update: (patch) => updateRowDraft(row, patch),
               save: () => saveRow(row, isTrailingCreate),
               cancel: () => cancelRow(row),
             };
             const detail = renderDetail?.(context);
-            const selected = selectedRowId === row.id && !disabled && (!editing || isTrailingCreate);
+            const selected = selectedRowId === row.id && !selectionDisabled && (!renderEditing || isTrailingCreate);
             const deleteArmed = deleteArmedRowId === row.id && selected;
             const movableIndex = reorderableRows.findIndex((candidate) => candidate.id === row.id);
-            const canReorderRow = Boolean(onReorder)
-              && !editing
-              && !disabled
-              && !isTrailingCreate
-              && movableIndex >= 0;
+            const canShowReorderHandle = hasReorderColumn && !row.disabled && !isTrailingCreate;
+            const canReorderRow = canShowReorderHandle && !editing && !row.saving && movableIndex >= 0;
             const reorderItemProps = canReorderRow ? reorderable.getItemProps(movableIndex) : null;
             const dropPosition = reorderable.dropTarget?.id === row.id
               ? reorderable.dropTarget.position
               : null;
             const isDragging = reorderable.draggedId === row.id;
             const activateCell = (columnKey: string) => {
-              if (editing || disabled || !onEdit) return;
+              if (renderEditing || controlsDisabled || !onEdit) return;
               editRow(row.id, columnKey);
             };
 
             return (
               <div
                 key={row.id}
-                tabIndex={(editing && !isTrailingCreate) || disabled ? undefined : 0}
+                tabIndex={(renderEditing && !isTrailingCreate) || selectionDisabled ? undefined : 0}
                 className={[
                   "inline-table-form__group",
-                  row.isNew ? "inline-table-form__group--new" : null,
+                  row.isNew && !row.saving ? "inline-table-form__group--new" : null,
                   isTrailingCreate ? "inline-table-form__group--trailing-create" : null,
-                  editing ? "is-editing" : "is-reading",
-                  row.dirty ? "is-dirty" : null,
+                  renderEditing ? "is-editing" : "is-reading",
+                  row.dirty && !row.saving ? "is-dirty" : null,
                   row.saving ? "is-saving" : null,
                   row.error ? "has-error" : null,
                   row.validation ? "has-validation" : null,
@@ -839,7 +867,7 @@ export function InlineTableForm<TDraft>({
                 onDrop={reorderItemProps?.onDrop}
                 onDragEnd={reorderItemProps?.onDragEnd}
                 onClick={(event) => {
-                  if (activationMode !== "doubleClick" || editing || disabled) return;
+                  if (activationMode !== "doubleClick" || renderEditing || controlsDisabled) return;
                   if (isInteractiveEventTarget(event.target)) return;
                   selectRow(row.id);
                   event.currentTarget.focus();
@@ -863,14 +891,14 @@ export function InlineTableForm<TDraft>({
                   }
                 }}
                 onKeyDown={(event) => {
-                  if (!editing || (isTrailingCreate && !isEditableShortcutTarget(event.target))) {
+                  if (!renderEditing || (isTrailingCreate && !isEditableShortcutTarget(event.target))) {
                     handleReadRowKeyDown(event, {
                       rowId: row.id,
-                      disabled,
+                      disabled: controlsDisabled,
                       selected,
                       onEdit: onEdit || isTrailingCreate ? () => {
                         const firstColumn = columns[0];
-                        if (firstColumn) focusEditCell(row.id, firstColumn.key, { alreadyEditing: editing });
+                        if (firstColumn) focusEditCell(row.id, firstColumn.key, { alreadyEditing: renderEditing });
                       } : undefined,
                       onDelete: onDelete && !isTrailingCreate ? () => deleteFromKeyboard(row.id) : undefined,
                       onArmDelete: () => armDeleteRow(row.id),
@@ -884,7 +912,7 @@ export function InlineTableForm<TDraft>({
                     return;
                   }
                   handleGroupKeyDown(event, {
-                    canSave: !disabled,
+                    canSave: !controlsDisabled,
                     onSave: () => saveRow(row, isTrailingCreate),
                     onCancel: () => cancelRow(row),
                   });
@@ -895,6 +923,17 @@ export function InlineTableForm<TDraft>({
                   role="row"
                   aria-describedby={detail || row.validation || row.error || row.meta ? messageId : undefined}
                 >
+                  {hasReorderColumn ? (
+                    <div
+                      className="inline-table-form__td inline-table-form__td--reorder"
+                      role="cell"
+                      data-label=""
+                    >
+                      {canShowReorderHandle ? (
+                        <InlineTableDragHandle label={label} />
+                      ) : null}
+                    </div>
+                  ) : null}
                   {columns.map((column) => (
                     <div
                       key={column.key}
@@ -915,7 +954,7 @@ export function InlineTableForm<TDraft>({
                       <span className="inline-table-form__mobile-label">
                         {column.mobileLabel ?? column.header}
                       </span>
-                      {editing ? column.renderEdit(context) : column.renderRead(context)}
+                      {renderEditing ? column.renderEdit(context) : column.renderRead(context)}
                     </div>
                   ))}
                   <div
@@ -923,11 +962,11 @@ export function InlineTableForm<TDraft>({
                     role="cell"
                     data-label="State"
                   >
-                    <span className="inline-table-form__mobile-label">State</span>
+                    <span className="inline-table-form__mobile-label" />
                     <InlineTableActions
-                      editing={editing}
+                      editing={renderEditing}
                       dirty={Boolean(row.dirty)}
-                      disabled={disabled}
+                      disabled={controlsDisabled}
                       saveMode={saveMode}
                       status={status}
                       onEdit={onEdit ? () => {
@@ -937,13 +976,6 @@ export function InlineTableForm<TDraft>({
                       } : undefined}
                       onDelete={onDelete && !isTrailingCreate ? () => requestDelete(row.id) : undefined}
                       deleteLabel={deleteActionLabel}
-                      reorderControls={canReorderRow ? {
-                        label,
-                        canMoveUp: movableIndex > 0,
-                        canMoveDown: movableIndex < reorderableRows.length - 1,
-                        onMoveUp: () => reorderRow(row.id, movableIndex - 1),
-                        onMoveDown: () => reorderRow(row.id, movableIndex + 1),
-                      } : undefined}
                       onSave={() => saveRow(row, isTrailingCreate)}
                       onCancel={() => cancelRow(row)}
                       actionDisplay={actionDisplay}
@@ -1026,7 +1058,6 @@ function InlineTableActions({
   onEdit,
   onDelete,
   deleteLabel,
-  reorderControls,
   onSave,
   onCancel,
   actionDisplay,
@@ -1042,13 +1073,6 @@ function InlineTableActions({
   onEdit?: () => void;
   onDelete?: () => void;
   deleteLabel: string;
-  reorderControls?: {
-    label: string;
-    canMoveUp: boolean;
-    canMoveDown: boolean;
-    onMoveUp: () => void;
-    onMoveDown: () => void;
-  };
   onSave: () => void;
   onCancel: () => void;
   actionDisplay: InlineTableActionDisplay;
@@ -1060,30 +1084,28 @@ function InlineTableActions({
     return (
       <div className="inline-table-form__actions">
         <InlineTableStatus status={status} />
-        {reorderControls ? (
-          <InlineTableReorderControls
-            {...reorderControls}
-            disabled={disabled}
-          />
-        ) : null}
-        {onDelete ? (
-          <InlineTableActionButton
-            action="delete"
-            display={actionDisplay}
-            label={deleteLabel}
-            disabled={disabled}
-            onClick={onDelete}
-            onPointerDown={() => onActionPointerDown("delete")}
-          />
-        ) : null}
-        {onEdit ? (
-          <InlineTableActionButton
-            action="edit"
-            display={actionDisplay}
-            disabled={disabled}
-            onClick={onEdit}
-            onPointerDown={() => onActionPointerDown("edit")}
-          />
+        {onDelete || onEdit ? (
+          <div className="inline-table-form__button-group btn-group btn-group--attached" role="group" aria-label="Row actions">
+            {onDelete ? (
+              <InlineTableActionButton
+                action="delete"
+                display={actionDisplay}
+                label={deleteLabel}
+                disabled={disabled}
+                onClick={onDelete}
+                onPointerDown={() => onActionPointerDown("delete")}
+              />
+            ) : null}
+            {onEdit ? (
+              <InlineTableActionButton
+                action="edit"
+                display={actionDisplay}
+                disabled={disabled}
+                onClick={onEdit}
+                onPointerDown={() => onActionPointerDown("edit")}
+              />
+            ) : null}
+          </div>
         ) : null}
       </div>
     );
@@ -1092,33 +1114,37 @@ function InlineTableActions({
   return (
     <div className="inline-table-form__actions">
       <InlineTableStatus status={status} />
-      {onDelete ? (
-        <InlineTableActionButton
-          action="delete"
-          display={actionDisplay}
-          label={deleteLabel}
-          disabled={disabled}
-          onClick={onDelete}
-          onPointerDown={() => onActionPointerDown("delete")}
-        />
-      ) : null}
-      {!hideRowCommit && !hideCancel ? (
-        <InlineTableActionButton
-          action="cancel"
-          display={actionDisplay}
-          disabled={disabled}
-          onClick={onCancel}
-          onPointerDown={() => onActionPointerDown("cancel")}
-        />
-      ) : null}
-      {!hideRowCommit && saveMode === "explicit" ? (
-        <InlineTableActionButton
-          action="save"
-          display={actionDisplay}
-          disabled={disabled || !dirty}
-          onClick={onSave}
-          onPointerDown={() => onActionPointerDown("save")}
-        />
+      {onDelete || (!hideRowCommit && (!hideCancel || saveMode === "explicit")) ? (
+        <div className="inline-table-form__button-group btn-group btn-group--attached" role="group" aria-label="Edit row actions">
+          {onDelete ? (
+            <InlineTableActionButton
+              action="delete"
+              display={actionDisplay}
+              label={deleteLabel}
+              disabled={disabled}
+              onClick={onDelete}
+              onPointerDown={() => onActionPointerDown("delete")}
+            />
+          ) : null}
+          {!hideRowCommit && !hideCancel ? (
+            <InlineTableActionButton
+              action="cancel"
+              display={actionDisplay}
+              disabled={disabled}
+              onClick={onCancel}
+              onPointerDown={() => onActionPointerDown("cancel")}
+            />
+          ) : null}
+          {!hideRowCommit && saveMode === "explicit" ? (
+            <InlineTableActionButton
+              action="save"
+              display={actionDisplay}
+              disabled={disabled || !dirty}
+              onClick={onSave}
+              onPointerDown={() => onActionPointerDown("save")}
+            />
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
@@ -1269,50 +1295,18 @@ export function InlineTableLoadMore({
   );
 }
 
-function InlineTableReorderControls({
+function InlineTableDragHandle({
   label,
-  canMoveUp,
-  canMoveDown,
-  disabled,
-  onMoveUp,
-  onMoveDown,
 }: {
   label: string;
-  canMoveUp: boolean;
-  canMoveDown: boolean;
-  disabled: boolean;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
 }) {
   return (
-    <span className="inline-table-form__reorder" role="group" aria-label={`Reorder ${label}`}>
-      <span
-        className="inline-table-form__drag-handle"
-        aria-hidden="true"
-        title="Drag to reorder"
-      >
-        <GripVertical size={15} aria-hidden="true" />
-      </span>
-      <button
-        type="button"
-        className="inline-table-form__icon-btn inline-table-form__icon-btn--icon-only"
-        aria-label={`Move ${label} up`}
-        title={`Move ${label} up`}
-        disabled={disabled || !canMoveUp}
-        onClick={onMoveUp}
-      >
-        <ArrowUp size={15} aria-hidden="true" />
-      </button>
-      <button
-        type="button"
-        className="inline-table-form__icon-btn inline-table-form__icon-btn--icon-only"
-        aria-label={`Move ${label} down`}
-        title={`Move ${label} down`}
-        disabled={disabled || !canMoveDown}
-        onClick={onMoveDown}
-      >
-        <ArrowDown size={15} aria-hidden="true" />
-      </button>
+    <span
+      className="inline-table-form__drag-handle"
+      aria-label={`Drag ${label} to reorder`}
+      title={`Drag ${label} to reorder`}
+    >
+      <GripVertical size={15} aria-hidden="true" />
     </span>
   );
 }
@@ -1372,6 +1366,18 @@ function actionIcon(action: "edit" | "delete" | "cancel" | "save") {
 
 function InlineTableStatus({ status }: { status: InlineTableRowStatus }) {
   if (status !== "saving" && status !== "error" && status !== "disabled") return null;
+  if (status === "saving") {
+    return (
+      <span
+        className={statusClass(status)}
+        role="status"
+        aria-label="Saving..."
+        title="Saving..."
+      >
+        <Loader2 className="inline-table-form__status-spinner" size={13} aria-hidden="true" />
+      </span>
+    );
+  }
   return <span className={statusClass(status)}>{statusLabel(status)}</span>;
 }
 
@@ -1795,6 +1801,24 @@ function mergeInlineTableRowState<TDraft>(
   };
 }
 
+function isLocalRowPending<TDraft>(row: InlineTableRow<TDraft>): boolean {
+  return Boolean(row.editing || row.dirty || row.saving || row.error || row.validation);
+}
+
+function shallowEqualDraft<TDraft>(left: TDraft, right: TDraft): boolean {
+  if (Object.is(left, right)) return true;
+  if (!isRecord(left) || !isRecord(right)) return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => Object.prototype.hasOwnProperty.call(right, key)
+    && Object.is(left[key], right[key]));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 function makeBatchContext<TDraft>(
   rows: readonly InlineTableRow<TDraft>[],
   onBatchCancel: (() => void) | undefined,
@@ -1843,7 +1867,6 @@ function statusClass(status: InlineTableRowStatus) {
 }
 
 function statusLabel(status: InlineTableRowStatus) {
-  if (status === "saving") return "Saving";
   if (status === "error") return "Needs review";
   if (status === "disabled") return "Locked";
   return "";

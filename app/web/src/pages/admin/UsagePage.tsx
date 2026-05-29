@@ -349,8 +349,20 @@ export default function AdminUsagePage() {
         error: "Could not save cap. Try again.",
       }));
     },
-    onSuccess: (_data, vars) => {
-      workspaceRows.resetRow(vars.id);
+    onSuccess: (data, vars) => {
+      workspaceRows.updateRow(vars.id, (row) => {
+        const draft = { ...row.draft, capDollars: centsToDollars(data.cap_cents_30d) };
+        return {
+          ...row,
+          draft,
+          committedDraft: draft,
+          editing: false,
+          dirty: false,
+          saving: false,
+          error: undefined,
+          validation: undefined,
+        };
+      });
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: qk.adminUsageWorkspaces() });

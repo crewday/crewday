@@ -150,7 +150,7 @@ class Settings(BaseSettings):
     # deployments use ``postgres`` so bucket state is shared through the
     # deployment-wide ``rate_limit_bucket`` table.
     rate_limit_backend: Literal["memory", "postgres"] = "memory"
-    rate_limit_token_per_minute: int = Field(default=60, ge=1)
+    rate_limit_token_per_minute: int = Field(default=180, ge=1)
     rate_limit_personal_me_per_minute: int = Field(default=600, ge=1)
     rate_limit_anonymous_per_minute: int = Field(default=30, ge=1)
     idempotency_max_body_bytes: int = Field(default=10 * 1024 * 1024, ge=1)

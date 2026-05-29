@@ -2,7 +2,7 @@
 
 Marketing surface for crew.day — the landing pages at the root
 `crew.day` host, the scenario-driven demo picker, and the
-agent-clustered suggestion box linked from the app.
+agent-clustered feedback boards linked from the app.
 
 > **This directory is separate from `docs/specs/`.** Those are the
 > **app** specs — the product itself. The files here govern only the
@@ -18,9 +18,10 @@ agent-clustered suggestion box linked from the app.
 - The **embedded demo picker** on the landing page: a two-axis
   (persona × intent) selector that resolves to a §24 demo URL and
   either mounts it as an iframe or plays a pre-recorded video.
-- The **suggestion box** at `crew.day/suggest`: unauthenticated
-  submission form + public board of agent-clustered ideas. The app
-  links here via `CREWDAY_FEEDBACK_URL`.
+- The **feedback boards** at `crew.day/suggest` and `crew.day/bugs`:
+  public clustered boards plus authenticated submit flows for feature
+  requests and bug reports. The app links here via
+  `CREWDAY_FEEDBACK_URL`; writes require the app handshake.
 - The **clustering RPC** contract — the site calls the app; the
   app owns the LLM side (budget, redaction, audit).
 - Deployment, security, abuse posture for the site alone.
@@ -40,7 +41,7 @@ agent-clustered suggestion box linked from the app.
 |---|------|--------|
 | 00 | [Overview](00-overview.md) | Vision, audiences, surfaces, tech stack, repo layout, principles |
 | 01 | [Landing and demo embed](01-landing-and-demo-embed.md) | Page map, scenario picker, iframe vs video policy, copy + i18n |
-| 02 | [Suggestion box](02-suggestion-box.md) | Form, data model, public board, moderation, PII, rate limits |
+| 02 | [Suggestion box](02-suggestion-box.md) | Feature requests, bug reports, forms, data model, public boards, moderation, PII, rate limits |
 | 03 | [App integration](03-app-integration.md) | Clustering RPC, `CREWDAY_FEEDBACK_URL`, versioning |
 | 04 | [Deployment and security](04-deployment-and-security.md) | Independent deploy, DNS, CSP, abuse controls, privacy |
 | 05 | [Roadmap](05-roadmap.md) | Phased delivery |

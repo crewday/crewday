@@ -21,6 +21,7 @@ import {
   useInlineTableInfiniteRows,
 } from "./InlineTableForm";
 import type { ListEnvelope } from "@/lib/listResponse";
+import formsCss from "@/styles/forms.css?raw";
 import inlineTableCss from "@/styles/inline-table-form.css?raw";
 
 interface Draft {
@@ -69,8 +70,8 @@ const roleOptions = [
 
 function cssBlocks(selector: string): string[] {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return [...inlineTableCss.matchAll(new RegExp(`^\\s*${escapedSelector}\\s*\\{([^{}]*)\\}`, "gm"))].map(
-    (match) => match[1],
+  return [...inlineTableCss.matchAll(new RegExp(`^\\s*${escapedSelector}\\s*\\{([^{}]*)\\}`, "gm"))].flatMap(
+    (match) => match[1] ?? [],
   );
 }
 
@@ -181,8 +182,9 @@ const tagColumns: InlineTableColumn<RoleDraft>[] = [
 function cssDeclarationValue(css: string, selector: string, property: string) {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const rule = css.match(new RegExp(`${escapedSelector}\\s*\\{(?<body>[^}]*)\\}`));
-  const value = rule?.groups?.body.match(new RegExp(`${property}\\s*:\\s*(?<value>[^;]+);`));
-  return value?.groups?.value.trim();
+  const body = rule?.groups?.body;
+  const value = body?.match(new RegExp(`${property}\\s*:\\s*(?<value>[^;]+);`));
+  return value?.groups?.value?.trim();
 }
 
 function renderInlineTable({
@@ -772,9 +774,62 @@ describe("InlineTableForm", () => {
     expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["Cancel", "Save"]);
   });
 
+  it("renders saving rows as read rows with the pending draft and compact status icon", () => {
+    function Harness() {
+      const [rows, setRows] = useState<InlineTableRow<Draft>[]>([
+        { ...editableRow(), editing: true, dirty: true, isNew: true },
+      ]);
+
+      return (
+        <InlineTableForm
+          ariaLabel="Saving style rows"
+          columns={columns}
+          rows={rows}
+          saveMode="explicit"
+          onDraftChange={(rowId, patch) => {
+            setRows((current) => current.map((row) => (
+              row.id === rowId
+                ? { ...row, draft: { ...row.draft, ...patch }, dirty: true }
+                : row
+            )));
+          }}
+          onEdit={vi.fn()}
+          onReorder={vi.fn()}
+          onSave={(rowId) => {
+            setRows((current) => current.map((row) => (
+              row.id === rowId
+                ? { ...row, dirty: true, isNew: true, saving: true }
+                : row
+            )));
+          }}
+          onCancel={vi.fn()}
+          getRowLabel={(row) => row.draft.title}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Fresh linen" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    const rowGroup = screen.getByLabelText("Fresh linen");
+    expect(rowGroup).toHaveClass("is-saving");
+    expect(rowGroup).toHaveClass("is-selected");
+    expect(rowGroup).toHaveClass("is-reading");
+    expect(rowGroup).not.toHaveClass("is-dirty");
+    expect(rowGroup).not.toHaveClass("inline-table-form__group--new");
+    expect(within(rowGroup).getByText("Fresh linen")).toBeInTheDocument();
+    expect(within(rowGroup).queryByLabelText("Title")).toBeNull();
+    expect(within(rowGroup).getByLabelText("Drag Fresh linen to reorder")).toBeInTheDocument();
+    expect(within(rowGroup).getByRole("status", { name: "Saving..." })).toBeInTheDocument();
+    expect(within(rowGroup).queryByText("Saving")).toBeNull();
+    expect(within(rowGroup).getByRole("button", { name: "Edit" })).toBeDisabled();
+  });
+
   it("defaults to compact icon actions with accessible names", () => {
     const onDelete = vi.fn();
-    render(
+    const { container } = render(
       <InlineTableForm
         ariaLabel="Icon action table"
         columns={columns}
@@ -789,7 +844,11 @@ describe("InlineTableForm", () => {
 
     const rowGroup = screen.getByLabelText("Confirm linen");
     const buttons = within(rowGroup).getAllByRole("button");
+    const buttonGroup = within(rowGroup).getByRole("group", { name: "Edit row actions" });
+    const table = container.querySelector(".inline-table-form");
 
+    expect(table).toHaveStyle({ "--inline-table-columns": "minmax(180px, 1fr) minmax(120px, 1fr) max-content" });
+    expect(buttonGroup).toHaveClass("inline-table-form__button-group", "btn-group", "btn-group--attached");
     expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
       "Delete",
       "Cancel",
@@ -803,6 +862,21 @@ describe("InlineTableForm", () => {
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete row" }));
     expect(onDelete).toHaveBeenCalledWith("r-1");
+  });
+
+  it("defines attached button groups for inline action buttons", () => {
+    expect(formsCss).toContain(".btn-group--attached");
+    expect(cssDeclarationValue(
+      inlineTableCss,
+      ".inline-table-form__actions",
+      "flex-wrap",
+    )).toBe("nowrap");
+    expect(cssDeclarationValue(
+      inlineTableCss,
+      ".inline-table-form__button-group",
+      "min-width",
+    )).toBe("max-content");
+    expect(inlineTableCss).toContain(".inline-table-form__button-group > .inline-table-form__icon-btn:not(:first-child)");
   });
 
   it("lets callers provide delete confirmation copy", () => {
@@ -927,8 +1001,15 @@ describe("InlineTableForm", () => {
 
     const first = screen.getByLabelText("First");
     const third = screen.getByLabelText("Third");
+    const firstCells = within(first).getAllByRole("cell");
+    const dragCell = firstCells[0];
+    if (!dragCell) throw new Error("Expected a leading reorder cell.");
 
     expect(first).toHaveAttribute("draggable", "true");
+    expect(dragCell).toHaveClass("inline-table-form__td--reorder");
+    expect(within(dragCell).getByLabelText("Drag First to reorder")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /move .* up/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /move .* down/i })).toBeNull();
     fireEvent.dragStart(first, { dataTransfer });
     fireEvent.dragOver(third, { dataTransfer, clientY: 20 });
     fireEvent.drop(third, { dataTransfer, clientY: 20 });
@@ -946,12 +1027,10 @@ describe("InlineTableForm", () => {
     });
   });
 
-  it("moves rows with keyboard controls and disables edge moves", () => {
-    const onReorder = vi.fn();
-    const onEdit = vi.fn();
+  it("renders a virtual reorder column and leaves the action header empty when drag and drop is enabled", () => {
     render(
       <InlineTableForm
-        ariaLabel="Keyboard reorder rows"
+        ariaLabel="Drag reorder rows"
         columns={columns}
         rows={[
           rowWithTitle("r-1", "First"),
@@ -962,32 +1041,19 @@ describe("InlineTableForm", () => {
         onDraftChange={vi.fn()}
         onSave={vi.fn()}
         onCancel={vi.fn()}
-        onEdit={onEdit}
-        onReorder={onReorder}
+        onEdit={vi.fn()}
+        onReorder={vi.fn()}
         getRowLabel={(row) => row.draft.title}
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Move First up" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Move Third down" })).toBeDisabled();
-
-    fireEvent.click(screen.getByRole("button", { name: "Move First down" }));
-
-    expect(onReorder).toHaveBeenCalledWith(expect.objectContaining({
-      rowId: "r-1",
-      fromIndex: 0,
-      toIndex: 1,
-      orderedRowIds: ["r-2", "r-1", "r-3"],
-    }));
-
-    const moveFirstDown = screen.getByRole("button", { name: "Move First down" });
-    moveFirstDown.focus();
-    fireEvent.keyDown(moveFirstDown, { key: "Enter" });
-
-    expect(onEdit).not.toHaveBeenCalled();
+    const headers = screen.getAllByRole("columnheader");
+    expect(headers.map((header) => header.textContent)).toEqual(["", "Title", "Owner", ""]);
+    expect(headers[0]).toHaveClass("inline-table-form__th--reorder");
+    expect(headers[3]).toHaveClass("inline-table-form__th--actions");
   });
 
-  it("omits reorder controls for disabled edge rows and locks adjacent moves", () => {
+  it("keeps drag handles visible for editing and saving rows", () => {
     render(
       <InlineTableForm
         ariaLabel="Locked edge reorder rows"
@@ -995,8 +1061,9 @@ describe("InlineTableForm", () => {
         rows={[
           { ...rowWithTitle("r-0", "Locked top"), disabled: true },
           rowWithTitle("r-1", "First movable"),
-          rowWithTitle("r-2", "Second movable"),
-          { ...rowWithTitle("r-3", "Locked bottom"), disabled: true },
+          { ...rowWithTitle("r-2", "Editing movable"), editing: true, dirty: true },
+          { ...rowWithTitle("r-3", "Saving movable"), saving: true },
+          { ...rowWithTitle("r-4", "Locked bottom"), disabled: true },
         ]}
         saveMode="explicit"
         onDraftChange={vi.fn()}
@@ -1007,10 +1074,37 @@ describe("InlineTableForm", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Move Locked top down" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Move Locked bottom up" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Move First movable up" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Move Second movable down" })).toBeDisabled();
+    expect(screen.queryByLabelText("Drag Locked top to reorder")).toBeNull();
+    expect(screen.queryByLabelText("Drag Locked bottom to reorder")).toBeNull();
+    expect(screen.getByLabelText("Drag First movable to reorder")).toBeInTheDocument();
+    expect(screen.getByLabelText("Drag Editing movable to reorder")).toBeInTheDocument();
+    expect(screen.getByLabelText("Drag Saving movable to reorder")).toBeInTheDocument();
+  });
+
+  it("keeps the reorder affordance visible when callers temporarily disable reordering", () => {
+    render(
+      <InlineTableForm
+        ariaLabel="Locked visual reorder rows"
+        columns={columns}
+        rows={[
+          { ...rowWithTitle("r-1", "Editing movable"), editing: true, dirty: true },
+          { ...rowWithTitle("r-2", "Saving movable"), saving: true },
+        ]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        showReorderHandles
+        getRowLabel={(row) => row.draft.title}
+      />,
+    );
+
+    const editingRow = screen.getByLabelText("Editing movable");
+    const savingRow = screen.getByLabelText("Saving movable");
+    expect(editingRow).not.toHaveAttribute("draggable");
+    expect(savingRow).not.toHaveAttribute("draggable");
+    expect(within(editingRow).getByLabelText("Drag Editing movable to reorder")).toBeInTheDocument();
+    expect(within(savingRow).getByLabelText("Drag Saving movable to reorder")).toBeInTheDocument();
   });
 
   it("keeps edit, save, and delete shortcuts working when reorder is enabled", () => {
@@ -1047,7 +1141,7 @@ describe("InlineTableForm", () => {
     expect(onEdit).toHaveBeenCalledWith("r-1");
     expect(onDelete).toHaveBeenCalledWith("r-1");
     expect(onSave).toHaveBeenCalledWith("r-2");
-    expect(screen.queryByRole("button", { name: "Move Editing row up" })).toBeNull();
+    expect(screen.getByLabelText("Drag Editing row to reorder")).toBeInTheDocument();
   });
 
   it("saves textarea rows on Enter and keeps Shift+Enter for a newline", () => {
@@ -1444,7 +1538,7 @@ describe("InlineTableForm", () => {
 
     expect(screen.getByText("Title is required.")).toBeInTheDocument();
     expect(screen.getByText("Save failed.")).toBeInTheDocument();
-    expect(screen.getByText("Saving")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Saving..." })).toBeInTheDocument();
     expect(screen.getByText("Locked")).toBeInTheDocument();
     expect(screen.getByText("dirty 5, validation 1, errors 1, saving 1, disabled 1, can submit false"))
       .toBeInTheDocument();
@@ -2049,7 +2143,7 @@ describe("InlineTableForm", () => {
     );
 
     expect(container.querySelector(".inline-table-form")).toHaveStyle({
-      "--inline-table-columns": "minmax(120px, 2fr) 96px minmax(80px, 180px) minmax(112px, max-content)",
+      "--inline-table-columns": "minmax(120px, 2fr) 96px minmax(80px, 180px) max-content",
     });
   });
 
@@ -2570,6 +2664,98 @@ describe("InlineTableForm", () => {
     expect(screen.getByLabelText("Title")).toHaveValue("Edited linen");
     expect(screen.getByLabelText("Edited linen")).toHaveClass("is-editing");
     expect(fetchPage).toHaveBeenCalledWith("cursor-2");
+  });
+
+  it("keeps a saved local draft visible across stale refetches until the server catches up", async () => {
+    function Harness() {
+      const [data, setData] = useState<InfiniteData<CursorPage>>(() => ({
+        pageParams: [null],
+        pages: [cursorPage([cursorRecord("c-1", "Old linen")], null)],
+      }));
+      const infiniteRows = useInlineTableInfiniteRows<CursorRecord, Draft>({
+        data,
+        getRowId: (record) => record.id,
+        mapRow: cursorRecordToRow,
+      });
+
+      return (
+        <>
+          <InlineTableForm
+            ariaLabel="Stale refetch rows"
+            columns={columns}
+            rows={infiniteRows.rows}
+            saveMode="explicit"
+            onDraftChange={infiniteRows.patchRowDraft}
+            onEdit={(rowId) => infiniteRows.updateRow(rowId, (row) => ({ ...row, editing: true }))}
+            onCancel={infiniteRows.resetRow}
+            onSave={(rowId) => {
+              infiniteRows.updateRow(rowId, (row) => ({
+                ...row,
+                saving: true,
+                error: undefined,
+                validation: undefined,
+              }));
+              setData({
+                pageParams: [null],
+                pages: [cursorPage([cursorRecord("c-1", "Old linen")], null)],
+              });
+            }}
+            getRowLabel={(row) => row.draft.title}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              infiniteRows.updateRow("c-1", (row) => ({
+                ...row,
+                dirty: false,
+                editing: false,
+                saving: false,
+                committedDraft: row.draft,
+              }));
+            }}
+          >
+            Resolve save
+          </button>
+          <button
+            type="button"
+            onClick={() => setData({
+              pageParams: [null],
+              pages: [cursorPage([cursorRecord("c-1", "Fresh linen")], null)],
+            })}
+          >
+            Server caught up
+          </button>
+          <button
+            type="button"
+            onClick={() => setData({
+              pageParams: [null],
+              pages: [cursorPage([cursorRecord("c-1", "External linen")], null)],
+            })}
+          >
+            External update
+          </button>
+        </>
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Fresh linen" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(screen.getByLabelText("Fresh linen")).toHaveClass("is-saving");
+    expect(screen.queryByText("Old linen")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Resolve save" }));
+    expect(screen.getByLabelText("Fresh linen")).toBeInTheDocument();
+    expect(screen.queryByText("Old linen")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Server caught up" }));
+    await waitFor(() => expect(screen.getByLabelText("Fresh linen")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "External update" }));
+
+    expect(await screen.findByLabelText("External linen")).toBeInTheDocument();
   });
 
   it("renders cursor load errors and retries the failed page", async () => {

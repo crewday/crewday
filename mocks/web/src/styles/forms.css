@@ -33,6 +33,7 @@
    .btn-group--between   → split ends (e.g. back / next)
    .btn-group--split     → equal-width children, no wrap (best with
                            .btn--block on phones; dialog 2-up CTAs)
+   .btn-group--attached  → adjacent segmented buttons with shared borders
    .btn-group--stack     → vertical stack; children fill container
                            (stacked CTAs, login cards, pref panels) */
 .btn-group {
@@ -43,6 +44,29 @@
 .btn-group--between { justify-content: space-between; }
 .btn-group--split   { flex-wrap: nowrap; }
 .btn-group--split > .btn { flex: 1 1 0; min-width: 0; }
+.btn-group--attached {
+  flex-wrap: nowrap;
+  gap: 0;
+}
+.btn-group--attached > .btn {
+  border-radius: 0;
+}
+.btn-group--attached > .btn:not(:first-child) {
+  margin-left: -1px;
+}
+.btn-group--attached > .btn:first-child {
+  border-top-left-radius: 999px;
+  border-bottom-left-radius: 999px;
+}
+.btn-group--attached > .btn:last-child {
+  border-top-right-radius: 999px;
+  border-bottom-right-radius: 999px;
+}
+.btn-group--attached > .btn:focus-visible,
+.btn-group--attached > .btn:hover {
+  position: relative;
+  z-index: 1;
+}
 .btn-group--stack {
   flex-direction: column; flex-wrap: nowrap; align-items: stretch;
 }

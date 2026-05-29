@@ -17,7 +17,7 @@ lives in React islands noted per route.
 | `/for-owners` | Deep dive into the villa-owner story; auto-opens the picker with persona pre-selected. | `ScenarioPicker`, `DemoFrame` |
 | `/for-agencies` | Same for rental-manager. | `ScenarioPicker`, `DemoFrame` |
 | `/for-housekeepers` | Same for housekeeper. | `ScenarioPicker`, `DemoFrame` |
-| `/pricing` | v1 is a placeholder: "Self-host free; managed pricing — contact us via suggestion box." | — |
+| `/pricing` | v1 is a placeholder: "Self-host free; managed pricing — contact us via the feedback boards." | — |
 | `/changelog` | Rendered from MDX in `content/<locale>/changelog/`. | — |
 | `/legal/terms` | Terms of service (generic SaaS stub). | — |
 | `/legal/privacy` | Privacy policy — see §04 for the full posture. | — |

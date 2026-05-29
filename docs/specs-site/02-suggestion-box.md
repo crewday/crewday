@@ -1,35 +1,52 @@
-# 02 — Suggestion box
+# 02 — Suggestion box and bug reports
 
-The agent-clustered feedback surface at `crew.day/suggest`.
-Authenticated app users submit ideas from inside the product; the
-agent moderates and reformulates each one; the app clusters
-submissions into themes; the public board shows the largest and
-most recent clusters so the team can see what matters without
-reading every message.
+The agent-clustered feedback surface at `crew.day/suggest` and
+`crew.day/bugs`. Authenticated app users submit feature requests
+and bug reports from inside the product; app agents can submit the
+same two kinds when they notice a gap or a broken path. The agent
+moderates and reformulates each one; the app clusters submissions
+into themes; the public boards show the largest and most recent
+clusters so the team can see what matters without reading every
+message.
 
-**Submit and vote require authentication; viewing the board is
-public.** The site is never an anonymous submission surface —
-that would put an unauthenticated write path on the marketing
-origin, and bring with it a captcha/rate-limit arms race we don't
-need. Every write is attributable to a pseudonymous app user
-(§ "Auth flow" below).
+**Submit and vote require authentication; viewing the boards is
+public.** The site is never an anonymous submission surface — that
+would put an unauthenticated write path on the marketing origin,
+and bring with it a captcha/rate-limit arms race we don't need.
+Every human write is attributable to a pseudonymous app user
+(§ "Auth flow" below). Every agent write is attributable to the
+originating workspace and agent, with any "on behalf of user"
+context stored privately for deployment admins only (§ "Agent-
+originated submissions").
 
 The site owns the form, the data, and the pipeline cadence. The
 app owns the LLM and embedding calls — it moderates, reformulates,
 and embeds each submission, then classifies it against a top-K
 short-list the site retrieved locally (§03). The site stores
-everything.
+everything, including private bug evidence attachments.
+
+These bug reports are **product feedback**, not workspace operational
+issues. A cleaner reporting a broken appliance, guest damage, or a
+payroll problem still uses the in-app issue/task flows (§10, §12).
+`kind='bug_report'` here means "crew.day itself appears broken."
 
 ## Actors
 
 - **App user (submitter).** Signed into their app workspace; clicks
   "Give feedback" in the app overflow menu; lands on `crew.day/suggest`
-  with a signed, short-lived token minted by the app. Can submit,
-  vote, and read the board. Rate-limited per user (§ "Rate limits").
+  with a signed, short-lived token minted by the app. Can submit
+  feature requests, report bugs, vote, and read both boards.
+  Rate-limited per user (§ "Rate limits").
+- **App agent (reporter).** The embedded app agent (§11) can file a
+  feature request or bug report through the app-to-site ingest path
+  when the user asks it to, or proactively when it observes that a
+  product path does not work. The public submission is
+  agent-originated; private metadata records the workspace, agent
+  runtime trace id, and optional `on_behalf_of_user_hash`.
 - **Marketing-site visitor.** No app account. Can **read** the
-  public board and cluster detail pages. Cannot submit or vote —
+  public boards and cluster detail pages. Cannot submit or vote —
   submit/vote UI shows a clear "Log in to your crew.day workspace
-  to submit an idea" CTA with a link to the app's login.
+  to submit feedback" CTA with a link to the app's login.
 - **Site operator.** Person running `crew.day`. Uses a host-only
   CLI inside `site/api/` (`site-admin clusters hide <id>`,
   `submissions unreject <id>`, etc.). No web UI in v1.
@@ -38,7 +55,7 @@ everything.
   Stateless per call.
 
 The site **never learns the user's email, ULID, display name, or
-workspace slug**. Submissions and votes are keyed by a
+workspace slug**. Human submissions and votes are keyed by a
 `submitter_user_hash` (HMAC of the user's ULID under a shared
 salt) and `submitter_workspace_hash` (same treatment for the
 workspace ULID). The site only ever sees hashes — enough to
@@ -47,29 +64,38 @@ asked for this" without holding any identifiable data.
 
 ## Surfaces
 
-- `/suggest` — split view: the form on the left, the public board
-  on the right (stacked on narrow viewports). The form panel
-  renders differently per auth state:
+- `/suggest` — feature-request surface. Split view: the feature
+  request form on the left, the public feature board on the right
+  (stacked on narrow viewports). The form panel renders differently
+  per auth state:
   - **Auth cookie present** — full form + vote controls enabled.
   - **No auth cookie** — the form panel shows a compact
     "Log in to your workspace to submit or vote"
     call-to-action with a single button linking to
     `https://app.crew.day/login?return=%2Ffeedback-redirect`.
     The board itself stays fully interactive for reading.
-- `/suggest/cluster/<id>` — static page per visible cluster. Shows
-  the cluster summary, count, the reformulated titles of the
-  five most recent non-hidden submissions, vote widget
-  (disabled without auth), "N people at your workspace also
-  asked for this" line when the visitor has an auth cookie.
-- `/suggest/thanks` — post-submit landing. Confirms receipt and
+- `/bugs` — bug-report surface. Same auth and layout rules as
+  `/suggest`, but the board contains only `kind='bug_report'`
+  clusters. Public bug clusters show sanitized summaries and
+  lifecycle; private details, runtime context, and attachments are
+  never rendered.
+- `/suggest/cluster/<id>` and `/bugs/cluster/<id>` — static page per
+  visible cluster. Shows the cluster summary, count, the
+  reformulated titles of the five most recent non-hidden
+  submissions, vote widget (disabled without auth), "N people at
+  your workspace also asked for this" line when the visitor has an
+  auth cookie. A cluster has exactly one `kind`, so a bug cluster
+  never appears on the feature board and vice versa.
+- `/feedback/thanks` — post-submit landing. Confirms receipt and
   shows the cluster the submission joined if stage 3 matched
-  synchronously; otherwise says "We group ideas every few
-  hours — yours will show up on the board once we've grouped
-  it."
-- `crew.day/api/suggest/*` — the backend routes the islands call.
+  synchronously; otherwise says "We group feedback every few
+  hours — yours will show up on the right board once we've grouped
+  it." `/suggest/thanks` remains a redirect alias for older links.
+- `crew.day/api/feedback/*` — the backend routes the islands call.
   Served by `site/api/`, not by Astro. See §03 and §04 for
   origin / routing. Writes (submit, vote) require the auth
-  cookie; board reads are open.
+  cookie except the app-to-site agent ingest endpoint (§ "Agent-
+  originated submissions"); board reads are open.
 
 ## Auth flow
 
@@ -193,20 +219,76 @@ workspace_hash = HMAC-SHA256(workspace_ulid, CREWDAY_FEEDBACK_HASH_SALT)[:16 byt
   operator can look up the hash in the CLI if needed, but the
   site does not display identifying detail.
 
-## Submission form
+## Submission forms
 
-Three fields. Only `body` is required. The visitor must be
-authenticated; an unauthenticated caller hitting the submit
-endpoint gets `401 unauthenticated`.
+Both public write surfaces submit to `POST /api/feedback/submissions`.
+Only `kind` and `body` are required. The visitor must be
+authenticated; an unauthenticated caller hitting the submit endpoint
+gets `401 unauthenticated`.
 
 | Field | Required | Max | Notes |
 |-------|----------|-----|-------|
+| `kind` | yes | enum | `feature_request` from `/suggest`; `bug_report` from `/bugs`. The client sets it from the route, not from a free-form selector. |
 | `body` | yes | 4 000 chars | Free-form English or any locale the agent can read. Rejects < 10 chars with "Could you give us a bit more detail?" |
-| `category` | no | enum | Visitor-selected chip: `idea`, `bug`, `question`, `other`. Default `idea`. Never a drop-down; large touch targets. |
+| `category` | no | enum | Visitor-selected chip. Feature requests use `idea`, `question`, `other`; bug reports use `bug`, `regression`, `performance`, `other`. Never a drop-down; large touch targets. |
+| `private_details_md` | no | 8 000 chars | Bug-report-only detail field for repro steps, expected/actual behaviour, browser/device notes, or logs. Redacted before insert. Visible only to deployment admins through `site-admin`; never rendered publicly, never embedded, and never used as cluster display text. |
+| `attachment_ids` | no | 5 ids | Bug-report-only list of previously uploaded private evidence blobs. Screenshots, short screen recordings, logs, and PDFs are allowed subject to §04 MIME/size gates. Attachments are visible only to deployment admins. |
 | `notify_email` | no | 254 chars | Optional address for update emails. Stored only if the box "Email me when this is acted on" is ticked. Visitor may prefer a different address from their workspace email — kept as a free field. |
 
-No `form_token`, no captcha, no `source` field. Every submission
-is `source='app'` by definition.
+No `form_token`, no captcha. Human submissions have
+`source='human'` by definition. Agent-originated submissions use
+the app-to-site ingest route below, not a browser form.
+
+### Private evidence uploads
+
+Bug-report attachments are uploaded before submit via
+`POST /api/feedback/attachments`, which requires the same
+`__Host-suggest_session` cookie as submit. The response is an
+opaque `attachment_id`; the submit call references zero to five ids.
+
+Controls:
+
+- Attachment rows are scoped to the same `submitter_user_hash` and
+  `submitter_workspace_hash` as the session that uploaded them.
+  Submit rejects an attachment id that belongs to a different cookie.
+- Allowed types: `image/png`, `image/jpeg`, `image/webp`,
+  `video/webm`, `text/plain`, `application/pdf`. Max 10 MB each,
+  30 MB per submission.
+- The site strips image EXIF where possible, scans/sniffs MIME, and
+  stores only post-scan blobs. A scan failure leaves the attachment in
+  `status='quarantined'` and submit returns `422 attachment_unavailable`.
+- Attachments are never passed to `/_internal/feedback/*`, never
+  embedded, never included in public board HTML, never emailed to
+  subscribers, and never exposed through public URLs. `site-admin
+  attachments fetch <id>` is the only read path in v1.
+
+### Agent-originated submissions
+
+The app may submit either `feature_request` or `bug_report` directly
+to `POST /api/feedback/agent-submissions` when all feedback bridge
+configuration is present (§03). This route is server-to-server: it
+uses the app/site shared RPC token and never accepts browser cookies.
+
+Rules:
+
+- `source='agent'`; `submitter_user_hash` is null. The app sends
+  `submitter_workspace_hash` plus private `agent_reporter_id`,
+  `agent_thread_id`, `agent_trace_id`, and optional
+  `on_behalf_of_user_hash`.
+- `on_behalf_of_user_hash` is **private admin context**, not public
+  attribution. It exists so deployment admins can correlate a report
+  with a support conversation when needed; it is never rendered on a
+  board, never counted as a vote, and never shown back to the user.
+- Proactive filing is allowed only for concrete product failures or
+  clearly missing product affordances the agent observed while using
+  ordinary app tools: failed API calls, missing expected routes,
+  repeated validation dead ends, broken UI state, or a user request
+  the product cannot satisfy. The agent must include a short
+  `private_details_md` trace explaining what it observed.
+- Agent submissions are subject to the same moderation, clustering,
+  lifecycle, and operator review path as human submissions, but they
+  do not participate in per-user duplicate detection or vote
+  uniqueness because there is no voting user.
 
 ## Data model
 
@@ -219,11 +301,18 @@ logical column, the dimension, and the distance metric.
 ```
 feedback_submission
 ├── id                         ULID PK
+├── kind                       text — feature_request | bug_report
+├── source                     text — human | agent
 ├── body                       text — verbatim, redacted per "PII posture"; stored but NEVER publicly rendered
-├── category                   text — idea | bug | question | other
+├── private_details_md         text NULL — bug-report details, redacted, admin-only
+├── category                   text — kind-specific enum; see "Submission forms"
 ├── submitted_at               tstz
-├── submitter_user_hash        bytea(16) — app-derived HMAC of user ULID; opaque to site
+├── submitter_user_hash        bytea(16) NULL — app-derived HMAC of user ULID; null for source='agent'
 ├── submitter_workspace_hash   bytea(16) — app-derived HMAC of workspace ULID; opaque to site
+├── agent_reporter_id          text NULL — source='agent' private reporter id chosen by the app
+├── agent_thread_id            text NULL — source='agent' private chat/thread context
+├── agent_trace_id             text NULL — source='agent' private runtime trace id
+├── on_behalf_of_user_hash     bytea(16) NULL — source='agent' private support context, never public
 ├── notify_email               text NULL — present only if opt-in ticked
 ├── detected_language          text NULL — two-letter ISO, set by the moderation pass
 ├── cluster_id                 ulid NULL — set on successful cluster assignment
@@ -240,6 +329,7 @@ feedback_submission
 
 feedback_cluster
 ├── id                     ULID PK
+├── kind                   text — feature_request | bug_report
 ├── summary                text — one-line English label (≤120 chars), set by the clustering agent
 ├── description            text NULL — optional English 2-3 sentence elaboration
 ├── summary_embedding      vector(384) — embedding of `summary + "\n" + (description ?? "")`; cosine
@@ -260,6 +350,20 @@ feedback_vote
 ├── direction              int — +1 | -1
 └── voted_at               tstz
 UNIQUE (cluster_id, voter_user_hash)
+
+feedback_attachment
+├── id                         ULID PK
+├── submission_id              ulid FK NULL — set after the submit call attaches it
+├── uploaded_at                tstz
+├── uploaded_by_user_hash      bytea(16) NULL — set for browser uploads
+├── uploaded_by_workspace_hash bytea(16)
+├── uploaded_by_agent_trace_id text NULL — set for source='agent' private evidence
+├── content_type               text
+├── byte_size                  int
+├── blob_ref                   text — private object-store/localfs reference
+├── sha256                     text
+├── status                     text — pending_scan | available | quarantined | deleted
+└── scan_note                  text NULL — operator/debug text, never public
 
 used_token_nonce
 ├── nonce                  text PK — ULID from a verified magic-link token
@@ -308,13 +412,15 @@ users.ban` / `users.unban` / `workspaces.ban` / `workspaces.unban`);
 unbans delete the `banned_*` row and write a balancing audit entry,
 so the audit table is the single source of truth for ban history.
 
-- **Pseudonymous from day 1.** `submitter_user_hash` and
-  `submitter_workspace_hash` are pre-computed by the app before
-  the token is signed (§ "Auth flow — Hash derivation"). The
-  site never sees ULIDs, emails, or workspace slugs.
-- **No `source` column.** Every submission comes from an
-  authenticated app user via the magic-link handoff; there is no
-  other origin.
+- **Pseudonymous from day 1.** `submitter_user_hash`,
+  `submitter_workspace_hash`, and `on_behalf_of_user_hash` are
+  pre-computed by the app before the token or server-to-server
+  request is signed (§ "Auth flow — Hash derivation"). The site
+  never sees ULIDs, emails, or workspace slugs.
+- **Source is narrow.** `source` is exactly `human` or `agent`.
+  Human writes require the magic-link handoff; agent writes require
+  the server-to-server ingest path. There is no anonymous or
+  partner-origin write path.
 - **No IP fields.** The site does not log request IPs on the
   submit/vote path; Caddy's access log strips the client IP to
   its `/24` prefix so rough geographic debugging still works
@@ -326,6 +432,16 @@ so the audit table is the single source of truth for ban history.
   submission rendering uses the agent's `reformulated_title`, while
   prompts and vector search use the canonical `embedding_*_en`
   fields plus the reformulated text only as trace/display context.
+- **Private details and attachments are not clustering input.**
+  `private_details_md`, `feedback_attachment.*`, `agent_thread_id`,
+  `agent_trace_id`, and `on_behalf_of_user_hash` exist only for
+  deployment-admin debugging and support. They are not sent to the
+  LLM, not embedded, not used for cluster membership, and not copied
+  into email.
+- **Clusters are kind-specific.** A `feature_request` submission can
+  only join a `feature_request` cluster; a `bug_report` can only join
+  a `bug_report` cluster. The vector search query includes
+  `WHERE kind = :submission_kind` before similarity ordering.
 - **Embeddings are 384-dimensional `float32`** under v1, matching
   the seeded embedding model (see §03 and app §11). The dimension
   is a deployment-time choice; changing it requires a migration
@@ -346,9 +462,10 @@ so the audit table is the single source of truth for ban history.
 ## Agent pipeline
 
 Every submission walks the same three stages before it lands on
-the board. Each stage is an HTTP call from `site/api/` to the app
+its board. Each stage is an HTTP call from `site/api/` to the app
 (§03). The site owns orchestration; the app owns the LLM plumbing
-and the embedding model.
+and the embedding model. `kind` is carried through every stage so
+feature requests and bug reports cluster separately.
 
 ```
                       ┌─────────────────────────┐
@@ -381,9 +498,10 @@ submit ──────────────▶│ 1. moderate + reformulat
 ### Stage 1 — moderate + reformulate + embed
 
 One RPC: `POST /_internal/feedback/moderate` (§03). Input is the
-raw redacted body, category, and source. Output is a single
-verdict plus (on keep) the reformulated text pair and the
-embedding vector.
+redacted public body, `kind`, category, and source. Private bug
+details, attachments, agent trace ids, and on-behalf-of user hashes
+are not sent. Output is a single verdict plus (on keep) the
+reformulated text pair and the embedding vector.
 
 **Moderation categories** — the agent may emit exactly one
 `moderation_reason` when rejecting:
@@ -408,9 +526,10 @@ moderation verdict.
 **Reformulation** — on `keep`, the agent returns:
 
 - `reformulated_title` — one crisp line (≤ 120 chars). No emoji,
-  no trailing punctuation, no "Feature request: " prefix. Neutral
-  imperative or noun phrase: "Let the agent assign tasks based on
-  room type". This is what the board shows.
+  no trailing punctuation, no "Feature request: " or "Bug: " prefix.
+  Neutral imperative or noun phrase: "Let the agent assign tasks
+  based on room type" or "Inline table rows fail to save after
+  validation". This is what the board shows.
 - `reformulated_body` — cleaned-up 2-3 sentence paraphrase (≤ 500
   chars) in the submission's detected language. Used for operator
   review via CLI. Never rendered publicly.
@@ -453,7 +572,8 @@ A local SQL query. No RPC.
 ```
 SELECT id, summary, description
 FROM feedback_cluster
-WHERE visibility IN ('visible', 'promoted')
+WHERE kind = :submission_kind
+  AND visibility IN ('visible', 'promoted')
 ORDER BY 1 - (summary_embedding <=> :query_embedding)   -- pgvector / sqlite-vec syntax
 LIMIT :k
 ```
@@ -469,11 +589,11 @@ LIMIT :k
 ### Stage 3 — cluster assignment
 
 RPC: `POST /_internal/feedback/cluster` (§03). Input is the
-canonical English embedding pair plus the top-K candidates; the
-reformulated pair is included only as trace/display context. Output
-is either an existing `cluster_id` (from the candidates) or
-`new_cluster` with an English `new_summary`, `new_description`, and
-`new_summary_embedding`.
+submission `kind`, canonical English embedding pair plus the top-K
+candidates; the reformulated pair is included only as trace/display
+context. Output is either an existing same-kind `cluster_id` (from
+the candidates) or `new_cluster` with an English `new_summary`,
+`new_description`, and `new_summary_embedding`.
 
 - The LLM sees **only the top-K candidates**, not the entire
   cluster set. The site has already pre-filtered with embeddings,
@@ -494,15 +614,15 @@ is either an existing `cluster_id` (from the candidates) or
   real flood-of-noise-clusters scenario required anonymous writes.
 
 Stage 3 runs synchronously on submit; budget 2 s. Stage 2 + 3
-together under 3 s means the `/thanks` page can confidently show
-"Your idea is grouped with: <cluster summary>" for the common
-case.
+together under 3 s means the `/feedback/thanks` page can confidently
+show "Your feedback is grouped with: <cluster summary>" for the
+common case.
 
 **End-to-end submit budget.** Stage 1 (3 s) + stage 3 (2 s) + the
 local stage-2 query and database write give a worst-case sync
 budget of ~5 s, with another ~1 s of headroom for network jitter.
 The submit form is a POST with an optimistic loading indicator
-(spinner + "Posting your idea — this can take a few seconds");
+(spinner + "Posting your feedback — this can take a few seconds");
 the React island never blocks the UI thread and the indicator
 must tolerate a tail latency up to ~6 s before it gives up and
 shows the timeout copy.
@@ -514,8 +634,8 @@ Every 6 hours a worker pulls up to 200 submissions with
 and drives them through the pipeline as above. It also takes an
 opportunistic pass at **cluster merges**:
 
-- Pulls all pairs of visible clusters with cosine similarity ≥
-  `0.82` between `summary_embedding`s.
+- Pulls all pairs of visible same-kind clusters with cosine
+  similarity ≥ `0.82` between `summary_embedding`s.
 - Sends the pairs to the cluster RPC in its merge-check mode (a
   request whose body carries a `check_merges` array of
   `{src_id, dst_id, src_summary, dst_summary}` items, no
@@ -531,21 +651,25 @@ Batch run summaries are written to `cluster_run` with `kind='batch_cluster'`
 or `kind='batch_merge'` so operators can monitor cost and
 throughput without reading logs.
 
-## Public board
+## Public boards
 
 Rendered statically at build time (with a short ISR-like rebuild
 every 10 minutes) plus a React island for live vote updates.
 
+- `/suggest` renders only `kind='feature_request'` clusters.
+- `/bugs` renders only `kind='bug_report'` clusters.
 - Default sort: `submission_count DESC, last_submitted_at DESC`.
-- Filter chips: `idea | bug | question | all` and `any lifecycle
-  | active | shipped | declined`.
+- Filter chips: kind-specific categories plus `any lifecycle |
+  active | shipped | declined`.
 - Search: client-side `fuzzy` over cluster summaries; no
   server-side search in v1.
 - Each cluster card shows: summary, submission count, vote total,
   lifecycle pill, last-updated relative timestamp. Clicking the
-  card routes to `/suggest/cluster/<id>`.
-- Empty state: "No ideas yet — be the first." with a pointer at
-  the form.
+  card routes to `/suggest/cluster/<id>` or `/bugs/cluster/<id>`
+  according to cluster kind.
+- Empty state: "No ideas yet — be the first." on `/suggest`, and
+  "No bug reports yet." on `/bugs`, each with a pointer at the
+  matching form.
 - `visibility='hidden'` clusters never render. `visibility='promoted'`
   clusters pin above the sort order, max 3.
 
@@ -559,12 +683,16 @@ every 10 minutes) plus a React island for live vote updates.
   neither is any timestamp more precise than the date, nor any
   attribution.
 - Vote widget (see below).
-- "Submit your own idea" link back to `/suggest`.
+- "Submit your own idea" link back to `/suggest` for feature
+  clusters; "Report this bug too" link back to `/bugs` for bug
+  clusters.
 
 The reformulated title is the public unit of content. The
 original verbatim `body` is stored (for operator review via CLI
 and for re-running the pipeline if the agent changes) but no
-public route renders it.
+public route renders it. Private bug details, attachments, agent
+trace ids, and on-behalf-of user context are deployment-admin-only
+and are never present in static board output.
 
 ## Voting
 
@@ -599,14 +727,18 @@ site-admin clusters set <id> --visibility promoted
 site-admin clusters merge <src-id> <dst-id>
 site-admin clusters split <id> <submission-id> [<submission-id>...]
 
+site-admin attachments list <submission-id>
+site-admin attachments fetch <attachment-id> --output <path>
+site-admin attachments quarantine <attachment-id> [--reason "<free text>"]
+
 site-admin submissions hide <id> [--reason "<free text>"]
 site-admin submissions rejected-list [--reason <category>] [--since <ts>]
 site-admin submissions unreject <id>              # clears reject, re-runs the pipeline
 site-admin submissions reprocess <id>             # force-re-run the pipeline on a kept submission
 site-admin submissions force-keep <id> --title "..." --body "..." [--embedding-title-en "..."] [--embedding-body-en "..."]  # operator authors kept text and skips the pipeline
-site-admin submissions show <id>                  # shows verbatim body + reformulated pair + English embedding text + agent's reasoning
+site-admin submissions show <id>                  # shows verbatim body + private bug details + attachment ids + reformulated pair + English embedding text + agent's reasoning + private agent/on-behalf context
 
-site-admin notify <cluster-id>                    # dispatches "your idea is now in progress" emails
+site-admin notify <cluster-id>                    # dispatches lifecycle emails
 ```
 
 - Every CLI action writes a row to a `mod_action` audit table
@@ -616,6 +748,9 @@ site-admin notify <cluster-id>                    # dispatches "your idea is now
   the audit trail).
 - `split` pulls out listed submissions into a brand-new cluster
   whose summary is generated by a fresh single-item RPC call.
+- Attachment commands are deployment-admin-only. They never create
+  public URLs; `fetch` streams the private blob to the operator's
+  terminal or chosen local path for debugging.
 - `unreject` and `reprocess` re-run the full pipeline (moderation
   → embed → cluster) and **override** the `moderation_decision`
   if the agent's new call disagrees with the operator's
@@ -684,6 +819,12 @@ shouldn't. Posture:
   ticked.** The UI cannot pre-check it. The email is kept in a
   separate column, never rendered on the board, and never passed
   to the clustering RPC — the app never sees emails.
+- **Private details and attachments are deployment-admin-only.**
+  Bug-report `private_details_md`, evidence files, scan notes,
+  agent trace ids, and `on_behalf_of_user_hash` are only available
+  through authenticated `site-admin` commands. They are excluded
+  from board JSON, static HTML, email notifications, OpenGraph
+  metadata, and clustering RPC payloads.
 - **Board rendering never shows any user or workspace identifier,
   raw email, raw timestamp-to-the-second, or any string marked
   hidden/rejected/spam.** Only the agent-authored
@@ -696,6 +837,10 @@ shouldn't. Posture:
   circumstance — not on the cluster card, not on the detail
   page, not in email. Only operators see it, via
   `site-admin submissions show`.
+- **Attachments inherit site backup retention.** Deleting or
+  quarantining an attachment removes it from operator fetch paths
+  immediately; object-store/localfs garbage collection runs with
+  the same 30-day retention window as `site.db` snapshots (§04).
 - **No IP logging.** Caddy access logs on the submit/vote paths
   truncate the client IP to its `/24` prefix; `site-api` itself
   logs nothing IP-shaped. The hash-based model replaces the IP-
@@ -726,6 +871,11 @@ Every write carries an auth cookie bound to `submitter_user_hash`
 and `submitter_workspace_hash`. Limits key off those, not off IP:
 
 - **Submit:** 10 per `submitter_user_hash` per hour; 50 per day.
+- **Agent submit:** 20 per `submitter_workspace_hash` per day and
+  200 deployment-wide per day. Proactive agent reports should be
+  useful signals, not a substitute for runtime telemetry.
+- **Attachment upload:** 20 files per `submitter_user_hash` per
+  hour, still capped to five attachments per submission.
 - **Vote:** 30 per `voter_user_hash` per hour.
 - **Per-workspace rail:** 100 submits per `submitter_workspace_hash`
   per day. Stops a single compromised or over-enthusiastic
@@ -736,15 +886,19 @@ and `submitter_workspace_hash`. Limits key off those, not off IP:
 - **Payload cap:** 4 KB per field, 32 KB per request body.
 - **Per-user duplicate detection:** identical body (post-redaction,
   case-folded, whitespace-normalised) from the same
-  `submitter_user_hash` in the last 24 h returns
+  `submitter_user_hash` and same `kind` in the last 24 h returns
   `200 {duplicate: true, cluster_id: <id> | null}` without writing a
   new submission. `cluster_id` is the cluster the original
   submission joined, when it has one. The `/thanks` page shows
-  "You already submitted this idea — it's grouped with
+  "You already submitted this feedback — it's grouped with
   <cluster summary>" (or, if the original is still `pending`,
-  "We already have your idea — it's queued for grouping"). With
+  "We already have your feedback — it's queued for grouping"). With
   authenticated submits there is no anonymity to protect, so the
   earlier silent-drop is replaced by an honest response.
+- **Agent duplicate detection:** identical body + same
+  `agent_trace_id` is idempotent. Identical body + same
+  `submitter_workspace_hash` within 24 h returns duplicate unless
+  the new report includes different private evidence attachment ids.
 - **Ban list:** `site-admin users ban <user_hash>` flips an
   entry in a `banned_user_hash` table; subsequent tokens for
   that hash verify fine but the submit/vote endpoints return
@@ -766,12 +920,17 @@ doing that work now.
 | an unauthenticated visitor hits the submit endpoint directly | `401 unauthenticated`. The form on `/suggest` wouldn't have rendered, so this is either a scripted probe or someone who expired mid-draft. The UI kicks the user back to the "Log in to submit" CTA. |
 | a verified token is replayed | `410 token_already_used`. The nonce lives in `used_token_nonce` until its `exp + 30s`. The UI sends the user back to the app for a fresh mint. |
 | a user's auth cookie expires mid-draft | Submit returns `401`; the island swaps in a "Your session timed out — log in to submit this" card with the draft preserved in localStorage. |
-| the visitor submits while the app is down | Stage 1 times out; submission lands with `status='pending'`. The batch pass re-runs the full pipeline when the app is back. `/thanks` shows the generic "We group ideas every few hours" line. |
+| the visitor submits while the app is down | Stage 1 times out; submission lands with `status='pending'`. The batch pass re-runs the full pipeline when the app is back. `/feedback/thanks` shows the generic "We group feedback every few hours" line. |
+| a bug-report attachment scan fails | The attachment stays `quarantined`; submit rejects with `422 attachment_unavailable` and lists the failing attachment ids. The draft body/details remain client-side so the user can remove the file and retry. |
+| a user attaches a screenshot with visible PII | EXIF is stripped where possible, but image pixels are not OCR-redacted in v1. The file remains private deployment-admin evidence and is never public, emailed, embedded, or sent to the app feedback RPC. |
+| an app agent notices a broken product path without a user asking | The app may call the server-to-server agent ingest route with `source='agent'`, `kind='bug_report'`, private trace context, and optional `on_behalf_of_user_hash` if the failure happened inside a user thread. The public board only sees the sanitized reformulated cluster. |
+| an app agent proposes a feature during a user conversation | The app may file `kind='feature_request'` with `source='agent'`; `on_behalf_of_user_hash` stays private and does not create a vote or public attribution. |
 | the agent rejects a genuine piece of feedback | Operator un-rejects via `site-admin submissions unreject <id>`. The pipeline re-runs; if the agent still rejects, the operator runs `site-admin submissions force-keep <id> --title "..." --body "..."` (§ "CLI surface") to author the reformulated text directly and skip the agent. |
 | the agent keeps something the operator considers crap | `site-admin submissions hide <id> --reason spam`. Cluster counts refresh on the next card render. |
 | the agent proposes `new_cluster` with `confidence < 0.65` | The site re-asks with `force_existing_only=true`. If the best candidate still fails `min_confidence_existing=0.5`, the submission lands as `pending` and the batch pass re-tries 6 h later. No hard "1 per hour" quota. |
 | the agent returns a `cluster_id` not in the top-K candidates | The site rejects the response as malformed, retries once with `force_existing_only=false` (letting the agent propose `new_cluster`), and on persistent failure queues the submission as `pending`. |
 | two concurrent submissions both trigger a `new_cluster` proposal for the same theme | A per-minute advisory lock on "new-cluster proposals" forces one to win; the loser falls through to `pending`. The batch merge pass picks up any near-duplicate that slips through the lock window. |
+| a feature request and bug report are semantically similar | They remain separate clusters because every vector lookup and merge pass is scoped by `kind`. Operators may cross-link them through `external_ref`, but not merge them. |
 | an operator merges `src` into `dst` but `dst` later gets split | Audit trail keeps the history; member submissions follow the latest assignment. No retroactive re-computation. |
 | a submission's body is redacted to empty | Treated as `<0 chars after redaction>` → rejected client-side before submit; the server also rejects with a generic "Please give a bit more detail." |
 | the visitor types PII into the body anyway (free-text personal info) | The redaction pass catches the well-known patterns; the agent sees only the redacted text. The verbatim body is never rendered publicly (only shown to the operator via CLI). |
@@ -784,7 +943,8 @@ doing that work now.
 ## Cross-references
 
 - §03 App integration — for the `moderate`, `embed`, and
-  `cluster` RPC shapes and the `CREWDAY_FEEDBACK_URL` link.
+  `cluster` RPC shapes, agent-originated ingest, and the
+  `CREWDAY_FEEDBACK_URL` link.
 - §04 Deployment and security — for the CSP, rate-limit
   enforcement tier, and the "no tracking" privacy contract.
 - App §11 — the three deployment-scope capabilities

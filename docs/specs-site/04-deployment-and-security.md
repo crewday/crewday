@@ -180,7 +180,7 @@ preload list decision rides on the app's, not re-litigated here.
 | Secret | Stored | Rotated |
 |--------|--------|---------|
 | `SITE_ROOT_KEY` | Secrets manager → env | Annually |
-| `SITE_APP_RPC_TOKEN` | Secrets manager → env on both sides | On breach + annually |
+| `SITE_APP_RPC_TOKEN` / `APP_SITE_RPC_TOKEN` | Secrets manager → env on site / app respectively; same value | On breach + annually |
 | `SITE_FEEDBACK_SIGN_KEY` | Secrets manager → env on both sides (matches `CREWDAY_FEEDBACK_SIGN_KEY`) | On breach + annually |
 | `SITE_SMTP_PASS` | Secrets manager → env | Per provider policy |
 
@@ -192,6 +192,11 @@ preload list decision rides on the app's, not re-litigated here.
   `unsubscribe_link`) for any future derived secret. No salt is
   used. Rotation invalidates every live cookie — visitors re-enter
   via the app.
+- `SITE_APP_RPC_TOKEN` authenticates both directions of the feedback
+  bridge: site → app `/_internal/feedback/*` RPCs and app → site
+  `/api/feedback/agent-submissions` / server-side attachment ingest.
+  Direction is still enforced by path, version header, and CIDR /
+  reverse-proxy policy; the shared secret is only one gate.
 - `SITE_FEEDBACK_SIGN_KEY` verifies the magic-link token minted
   by the app's `/feedback-redirect` (§03). Rotation is
   coordinated with the app: the app accepts the new key on mint;
@@ -245,15 +250,21 @@ Summary here for reviewers:
   `/pricing`, `/changelog`, `/legal/*`). Astro's output is HTML
   with no set-cookie header. No analytics cookie, no consent
   banner needed.
-- **One auth cookie on `/suggest`** (`__Host-suggest_session`,
+- **One auth cookie on `/suggest` and `/bugs`** (`__Host-suggest_session`,
   12 h, site-origin only) — set after the app's magic-link
   handshake (§02 "Auth flow"). Used only for submit and vote;
-  browsing the board works without it.
+  browsing either board works without it.
 - **Submission body is redacted before insert** (§02 "PII
   posture"). Raw pre-redaction text never hits disk.
 - **Email is opt-in, used only for operator-triggered
   updates** (§02 "Email posture"). Unsubscribe is one click,
   signed link.
+- **Bug-report evidence stays private.** `private_details_md`,
+  attachments, scan notes, agent trace ids, and
+  `on_behalf_of_user_hash` are available only through deployment-
+  admin `site-admin` commands; they are excluded from public board
+  output, email notifications, OpenGraph metadata, and feedback RPC
+  payloads.
 - **No user or workspace identity ever enters the site.** The
   app derives `user_hash` / `workspace_hash` before signing the
   token; the site receives opaque hashes. No IP logging on the
@@ -322,6 +333,8 @@ docker compose -f site/docker-compose.yml -f site/docker-compose.dev.yml --profi
 | Signing-key rotation without coordination | Grace window: site accepts both keys for 24 h; app starts minting under the new key at rotation time |
 | `/feedback-redirect` clicked by a logged-out user | App returns `302 /login?return=/feedback-redirect` — standard session handling |
 | Agent on the app is coerced to mint a feedback token | `/feedback-redirect` carries `x-agent-forbidden: true` — delegated tokens reject at the auth middleware |
+| Agent spams proactive bug reports | Agent-originated ingest has per-workspace and deployment-wide daily caps (§02); reports require concrete observed failure context and write `source='agent'` for operator filtering |
+| Private bug attachment leaks to public board | Attachments have no public route, no signed public URL, and are never included in board JSON, static HTML, email, or RPC payloads (§02) |
 | RPC token leak | `CREWDAY_FEEDBACK_RPC_ALLOW_CIDR` on the app side (§03); 24 h grace window on rotation |
 | XSS via submission body | Bodies are rendered with the framework's default escape (React island, Astro SSR); CSP forbids inline scripts |
 | Clickjacking of the form | `frame-ancestors 'self'` denies iframe embedding |
