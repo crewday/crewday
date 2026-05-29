@@ -678,7 +678,7 @@ export default function InlineTableFormsDemoPage() {
           />
         </DemoPanel>
 
-        <DemoPanel title="Fully default table" copy="No optional presentation or interaction overrides: autosave, icon actions, single-click edit, derived labels, standard density, default widths, and factory create row." tag="defaults">
+        <DemoPanel title="Fully default table" copy="No optional presentation or interaction overrides: autosave, icon actions, single-click edit, derived labels, full-width edit controls, default widths, and factory create row." tag="defaults">
           <InlineTableForm
             ariaLabel="Fully default inline table"
             columns={defaultColumns}

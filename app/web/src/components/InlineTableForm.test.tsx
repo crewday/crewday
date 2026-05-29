@@ -2061,6 +2061,9 @@ describe("InlineTableForm", () => {
     expect(inlineTableCss).toContain(".inline-table-form__group.is-delete-armed:focus-visible");
     expect(inlineTableCss).toContain(".inline-table-form__icon-selector .icon-selector__selected:disabled:hover");
     expect(inlineTableCss).toMatch(
+      /\.inline-table-form__group\.is-editing \.inline-table-form__td:not\(\.inline-table-form__td--actions\) > :not\(\.inline-table-form__mobile-label\)\s*{[\s\S]*flex: 1 1 auto;[\s\S]*min-width: 0;/m,
+    );
+    expect(inlineTableCss).toMatch(
       /\.inline-table-form__tag-options\s*{[\s\S]*flex-wrap: wrap;/m,
     );
     expect(inlineTableCss).toMatch(

@@ -334,6 +334,11 @@
   max-width: 100%;
 }
 
+.inline-table-form__group.is-editing .inline-table-form__td:not(.inline-table-form__td--actions) > :not(.inline-table-form__mobile-label) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .inline-table-form__mobile-label {
   display: none;
 }

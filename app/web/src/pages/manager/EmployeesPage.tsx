@@ -12,7 +12,6 @@ import FormModal from "@/components/FormModal";
 import { AssetIcon, isAssetIconName } from "@/components/AssetIcon";
 import {
   InlineIconField,
-  InlineNoteField,
   InlineTableForm,
   InlineTextField,
   type InlineTableColumn,
@@ -378,6 +377,41 @@ function WorkRoleCatalogManager() {
           );
         },
       },
+      {
+        key: "description",
+        header: "Description",
+        width: { flex: 1.8, min: 240 },
+        renderRead: ({ row }) => (
+          <span className={row.draft.description_md ? "inline-table-form__read" : "inline-table-form__read inline-table-form__read--muted"}>
+            {row.draft.description_md || "No description"}
+          </span>
+        ),
+        renderEdit: ({ row, update, disabled }) => {
+          const fieldErrors = fieldErrorsForRoleRow(row.id, rowFieldErrors, createFieldErrors);
+          return (
+            <span className="work-role-inline-field">
+              <InlineTextField
+                value={row.draft.description_md}
+                onChange={(description_md) => update({ description_md })}
+                disabled={disabled}
+                ariaLabel="Description"
+                placeholder="What this role covers in this workspace."
+                ariaInvalid={Boolean(fieldErrors.description_md)}
+                ariaDescribedBy={
+                  fieldErrors.description_md
+                    ? workRoleFieldErrorId(row.id, "description_md")
+                    : undefined
+                }
+              />
+              {fieldErrors.description_md ? (
+                <span id={workRoleFieldErrorId(row.id, "description_md")} className="form-field-error">
+                  {fieldErrors.description_md}
+                </span>
+              ) : null}
+            </span>
+          );
+        },
+      },
     ],
     [createFieldErrors, rowFieldErrors],
   );
@@ -524,37 +558,6 @@ function WorkRoleCatalogManager() {
             />
           )}
           getRowLabel={(row) => row.draft.name || row.label || "New work role"}
-          renderDetail={({ row, update, disabled }) => {
-            const fieldErrors = fieldErrorsForRoleRow(row.id, rowFieldErrors, createFieldErrors);
-            if (row.editing) {
-              return (
-                <span className="work-role-inline-detail">
-                  <InlineNoteField
-                    value={row.draft.description_md}
-                    onChange={(description_md) => update({ description_md })}
-                    disabled={disabled}
-                    ariaLabel="Description"
-                    placeholder="What this role covers in this workspace."
-                    ariaInvalid={Boolean(fieldErrors.description_md)}
-                    ariaDescribedBy={
-                      fieldErrors.description_md
-                        ? workRoleFieldErrorId(row.id, "description_md")
-                        : undefined
-                    }
-                  />
-                  {fieldErrors.description_md ? (
-                    <span
-                      id={workRoleFieldErrorId(row.id, "description_md")}
-                      className="form-field-error"
-                    >
-                      {fieldErrors.description_md}
-                    </span>
-                  ) : null}
-                </span>
-              );
-            }
-            return row.draft.description_md ? <p>{row.draft.description_md}</p> : null;
-          }}
           renderDeleteConfirmation={({ label }) => ({
             title: "Remove work role?",
             confirmLabel: "Remove role",

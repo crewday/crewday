@@ -579,8 +579,13 @@ describe("<EmployeesPage> work-role catalog", () => {
     const catalog = screen.getByRole("region", { name: "Work roles" });
     expect(within(catalog).queryByText("Selected icon")).not.toBeInTheDocument();
     expect(within(catalog).getByRole("button", { name: "Icon: Brush Cleaning. Edit icon" })).toBeInTheDocument();
+    const descriptionInput = within(catalog).getByLabelText("Description");
+    expect(descriptionInput.tagName).toBe("INPUT");
+    expect(within(catalog).queryByRole("textbox", { name: "Description" })?.tagName).toBe("INPUT");
+    expect(catalog.querySelector("textarea")).not.toBeInTheDocument();
     fireEvent.change(within(catalog).getByLabelText("Name"), { target: { value: "Lead housekeeper" } });
     fireEvent.change(within(catalog).getByLabelText("Key"), { target: { value: "lead_housekeeper" } });
+    fireEvent.change(descriptionInput, { target: { value: "Runs quality checks." } });
     fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("Lead housekeeper")).toBeInTheDocument();
@@ -588,7 +593,7 @@ describe("<EmployeesPage> work-role catalog", () => {
     expect(patchRequest?.body).toEqual({
       name: "Lead housekeeper",
       key: "lead_housekeeper",
-      description_md: "Turns guest rooms between stays.",
+      description_md: "Runs quality checks.",
       icon_name: "BrushCleaning",
     });
   });
