@@ -366,7 +366,9 @@ export function InlineTableForm<TDraft>({
   const pendingDeletedSelectionRef = useRef<string | null>(null);
   const lastDeleteKeyRef = useRef<{ rowId: string; at: number } | null>(null);
   const deleteArmTimerRef = useRef<number | null>(null);
-  const suppressAutosaveBlurRef = useRef<string | null>(null);
+  const suppressAutosaveBlurRowsRef = useRef<Set<string>>(new Set());
+  const exitedAutosaveRowsBeforeEditRef = useRef<Set<string>>(new Set());
+  const pendingFormPointerTargetRef = useRef<EventTarget | null>(null);
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [deleteArmedRowId, setDeleteArmedRowId] = useState<string | null>(null);
   const [deleteConfirmationRowId, setDeleteConfirmationRowId] = useState<string | null>(null);
@@ -469,6 +471,18 @@ export function InlineTableForm<TDraft>({
     if (deleteArmTimerRef.current) window.clearTimeout(deleteArmTimerRef.current);
   }, []);
 
+  useEffect(() => {
+    const clearPendingPointerTarget = () => {
+      pendingFormPointerTargetRef.current = null;
+    };
+    window.addEventListener("pointerup", clearPendingPointerTarget, true);
+    window.addEventListener("pointercancel", clearPendingPointerTarget, true);
+    return () => {
+      window.removeEventListener("pointerup", clearPendingPointerTarget, true);
+      window.removeEventListener("pointercancel", clearPendingPointerTarget, true);
+    };
+  }, []);
+
   const clearDeleteArm = () => {
     if (deleteArmTimerRef.current) {
       window.clearTimeout(deleteArmTimerRef.current);
@@ -494,6 +508,47 @@ export function InlineTableForm<TDraft>({
     if (shouldFocus) pendingRowFocusRef.current = rowId;
   };
 
+  const suppressAutosaveBlur = (rowId: string) => {
+    suppressAutosaveBlurRowsRef.current.add(rowId);
+  };
+
+  const consumeSuppressedAutosaveBlur = (rowId: string) => {
+    if (!suppressAutosaveBlurRowsRef.current.has(rowId)) return false;
+    suppressAutosaveBlurRowsRef.current.delete(rowId);
+    return true;
+  };
+
+  const clearSuppressedAutosaveBlur = (rowId: string) => {
+    suppressAutosaveBlurRowsRef.current.delete(rowId);
+  };
+
+  const focusMovedInsideForm = (target: EventTarget | null) => (
+    target instanceof Node && Boolean(rootRef.current?.contains(target))
+  );
+
+  const exitAutosaveRowsBeforeEdit = (targetRowId: string) => {
+    if (saveMode !== "autosave") return;
+    for (const candidate of renderedRows) {
+      if (
+        candidate.id === targetRowId
+        || candidate.id === activeTrailingCreateRow?.id
+        || !isRowEditing(candidate)
+        || candidate.saving
+        || candidate.disabled
+        || exitedAutosaveRowsBeforeEditRef.current.has(candidate.id)
+      ) {
+        continue;
+      }
+      exitedAutosaveRowsBeforeEditRef.current.add(candidate.id);
+      suppressAutosaveBlur(candidate.id);
+      if (candidate.dirty) {
+        onSave?.(candidate.id);
+      } else {
+        onCancel?.(candidate.id);
+      }
+    }
+  };
+
   const focusEditCell = (rowId: string, columnKey: string, options?: { alreadyEditing?: boolean }) => {
     clearDeleteArm();
     pendingFocusRef.current = { rowId, columnKey };
@@ -501,7 +556,9 @@ export function InlineTableForm<TDraft>({
       pendingFocusRef.current = null;
       return;
     }
+    exitAutosaveRowsBeforeEdit(rowId);
     onEdit?.(rowId);
+    exitedAutosaveRowsBeforeEditRef.current.clear();
   };
 
   const editRow = (rowId: string, columnKey: string) => {
@@ -555,7 +612,7 @@ export function InlineTableForm<TDraft>({
   };
 
   const exitRow = (row: InlineTableRow<TDraft>, action: () => void, options?: { selectCreated?: boolean }) => {
-    suppressAutosaveBlurRef.current = row.id;
+    suppressAutosaveBlur(row.id);
     if (options?.selectCreated) {
       pendingCreatedSelectionRef.current = {
         previousIds: new Set(renderedRows.map((candidate) => candidate.id)),
@@ -568,21 +625,21 @@ export function InlineTableForm<TDraft>({
   };
 
   const requestDelete = (rowId: string) => {
-    suppressAutosaveBlurRef.current = rowId;
+    suppressAutosaveBlur(rowId);
     clearDeleteArm();
     selectRow(rowId);
     setDeleteConfirmationRowId(rowId);
   };
 
   const cancelDelete = () => {
-    suppressAutosaveBlurRef.current = null;
+    if (deleteConfirmationRowId) clearSuppressedAutosaveBlur(deleteConfirmationRowId);
     setDeleteConfirmationRowId(null);
   };
 
   const confirmDelete = () => {
     const rowId = deleteConfirmationRowId;
     if (!rowId || !onDelete) return;
-    suppressAutosaveBlurRef.current = null;
+    clearSuppressedAutosaveBlur(rowId);
     pendingDeletedSelectionRef.current = deleteSelectionTarget(rowId);
     onDelete(rowId);
   };
@@ -640,6 +697,15 @@ export function InlineTableForm<TDraft>({
       className={classes}
       style={{ "--inline-table-columns": templateColumns } as CSSProperties}
       aria-label={ariaLabel}
+      onPointerDownCapture={(event) => {
+        pendingFormPointerTargetRef.current = event.target;
+      }}
+      onPointerUpCapture={() => {
+        pendingFormPointerTargetRef.current = null;
+      }}
+      onPointerCancelCapture={() => {
+        pendingFormPointerTargetRef.current = null;
+      }}
     >
       {search ? (
         <InlineTableSearchToolbar
@@ -761,15 +827,18 @@ export function InlineTableForm<TDraft>({
                 onBlur={(event) => {
                   if (saveMode !== "autosave" || row.saving || row.disabled) return;
                   if (focusStayedInside(event)) return;
-                  if (suppressAutosaveBlurRef.current === row.id) {
-                    suppressAutosaveBlurRef.current = null;
+                  if (consumeSuppressedAutosaveBlur(row.id)) {
                     return;
                   }
+                  const movedInsideForm = focusMovedInsideForm(event.relatedTarget)
+                    || focusMovedInsideForm(pendingFormPointerTargetRef.current);
                   if (row.dirty) {
+                    if (movedInsideForm) exitedAutosaveRowsBeforeEditRef.current.add(row.id);
                     onSave?.(row.id);
                     return;
                   }
                   if (editing && !isTrailingCreate) {
+                    if (movedInsideForm) exitedAutosaveRowsBeforeEditRef.current.add(row.id);
                     onCancel?.(row.id);
                   }
                 }}
@@ -841,7 +910,11 @@ export function InlineTableForm<TDraft>({
                       disabled={disabled}
                       saveMode={saveMode}
                       status={status}
-                      onEdit={onEdit ? () => onEdit(row.id) : undefined}
+                      onEdit={onEdit ? () => {
+                        exitAutosaveRowsBeforeEdit(row.id);
+                        onEdit(row.id);
+                        exitedAutosaveRowsBeforeEditRef.current.clear();
+                      } : undefined}
                       onDelete={onDelete && !isTrailingCreate ? () => requestDelete(row.id) : undefined}
                       deleteLabel={deleteActionLabel}
                       reorderControls={canReorderRow ? {
@@ -856,8 +929,8 @@ export function InlineTableForm<TDraft>({
                       actionDisplay={actionDisplay}
                       hideRowCommit={saveMode === "batch"}
                       hideCancel={isFactoryCreate && !row.dirty}
-                      onActionPointerDown={() => {
-                        suppressAutosaveBlurRef.current = row.id;
+                      onActionPointerDown={(action) => {
+                        if (editing || action !== "edit") suppressAutosaveBlur(row.id);
                       }}
                     />
                   </div>
@@ -961,7 +1034,7 @@ function InlineTableActions({
   actionDisplay: InlineTableActionDisplay;
   hideRowCommit: boolean;
   hideCancel: boolean;
-  onActionPointerDown: () => void;
+  onActionPointerDown: (action: "edit" | "delete" | "cancel" | "save") => void;
 }) {
   if (!editing) {
     return (
@@ -980,7 +1053,7 @@ function InlineTableActions({
             label={deleteLabel}
             disabled={disabled}
             onClick={onDelete}
-            onPointerDown={onActionPointerDown}
+            onPointerDown={() => onActionPointerDown("delete")}
           />
         ) : null}
         {onEdit ? (
@@ -989,7 +1062,7 @@ function InlineTableActions({
             display={actionDisplay}
             disabled={disabled}
             onClick={onEdit}
-            onPointerDown={onActionPointerDown}
+            onPointerDown={() => onActionPointerDown("edit")}
           />
         ) : null}
       </div>
@@ -1006,7 +1079,7 @@ function InlineTableActions({
           label={deleteLabel}
           disabled={disabled}
           onClick={onDelete}
-          onPointerDown={onActionPointerDown}
+          onPointerDown={() => onActionPointerDown("delete")}
         />
       ) : null}
       {!hideRowCommit && !hideCancel ? (
@@ -1015,7 +1088,7 @@ function InlineTableActions({
           display={actionDisplay}
           disabled={disabled}
           onClick={onCancel}
-          onPointerDown={onActionPointerDown}
+          onPointerDown={() => onActionPointerDown("cancel")}
         />
       ) : null}
       {!hideRowCommit && saveMode === "explicit" ? (
@@ -1024,7 +1097,7 @@ function InlineTableActions({
           display={actionDisplay}
           disabled={disabled || !dirty}
           onClick={onSave}
-          onPointerDown={onActionPointerDown}
+          onPointerDown={() => onActionPointerDown("save")}
         />
       ) : null}
     </div>

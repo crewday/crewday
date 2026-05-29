@@ -1083,6 +1083,232 @@ describe("InlineTableForm", () => {
     expect(onSave).toHaveBeenCalledWith("r-1");
   });
 
+  it("saves a dirty autosave row before switching rows from an Edit action", async () => {
+    const onSave = vi.fn();
+    const onEdit = vi.fn();
+
+    function Harness() {
+      const [rows, setRows] = useState<InlineTableRow<Draft>[]>([
+        { ...rowWithTitle("r-1", "Confirm linen"), editing: true, dirty: true },
+        rowWithTitle("r-2", "Restock towels"),
+      ]);
+
+      return (
+        <InlineTableForm
+          ariaLabel="Autosave switch rows"
+          columns={columns}
+          rows={rows}
+          saveMode="autosave"
+          onDraftChange={vi.fn()}
+          onSave={(rowId) => {
+            onSave(rowId);
+            setRows((current) => current.map((row) => (
+              row.id === rowId ? { ...row, editing: false, dirty: false } : row
+            )));
+          }}
+          onCancel={vi.fn()}
+          onEdit={(rowId) => {
+            onEdit(rowId);
+            setRows((current) => current.map((row) => (
+              row.id === rowId ? { ...row, editing: true } : row
+            )));
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    const title = screen.getByLabelText("Title");
+    const edit = within(screen.getByLabelText("Restock towels")).getByRole("button", { name: "Edit" });
+    fireEvent.pointerDown(edit);
+    fireEvent.blur(title, { relatedTarget: edit });
+    fireEvent.click(edit);
+
+    expect(onSave).toHaveBeenCalledWith("r-1");
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onEdit).toHaveBeenCalledWith("r-2");
+    expect(onSave.mock.invocationCallOrder[0]).toBeLessThan(onEdit.mock.invocationCallOrder[0]!);
+    await waitFor(() => expect(screen.getByLabelText("Confirm linen")).toHaveClass("is-reading"));
+    expect(screen.getByLabelText("Restock towels")).toHaveClass("is-editing");
+  });
+
+  it("saves a dirty autosave row before keyboard editing a selected target row", () => {
+    const onSave = vi.fn();
+    const onEdit = vi.fn();
+
+    function Harness() {
+      const [rows, setRows] = useState<InlineTableRow<Draft>[]>([
+        { ...rowWithTitle("r-1", "Confirm linen"), editing: true, dirty: true },
+        rowWithTitle("r-2", "Restock towels"),
+      ]);
+
+      return (
+        <InlineTableForm
+          ariaLabel="Keyboard autosave switch rows"
+          columns={columns}
+          rows={rows}
+          saveMode="autosave"
+          activationMode="doubleClick"
+          onDraftChange={vi.fn()}
+          onSave={(rowId) => {
+            onSave(rowId);
+            setRows((current) => current.map((row) => (
+              row.id === rowId ? { ...row, editing: false, dirty: false } : row
+            )));
+          }}
+          onCancel={vi.fn()}
+          onEdit={(rowId) => {
+            onEdit(rowId);
+            setRows((current) => current.map((row) => (
+              row.id === rowId ? { ...row, editing: true } : row
+            )));
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    const targetRow = screen.getByLabelText("Restock towels");
+    fireEvent.click(targetRow);
+    expect(onSave).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(targetRow, { key: "Enter" });
+
+    expect(onSave).toHaveBeenCalledWith("r-1");
+    expect(onEdit).toHaveBeenCalledWith("r-2");
+    expect(onSave.mock.invocationCallOrder[0]).toBeLessThan(onEdit.mock.invocationCallOrder[0]!);
+    expect(screen.getByLabelText("Restock towels")).toHaveClass("is-editing");
+  });
+
+  it("saves before cell activation and focuses the intended target field", async () => {
+    const onSave = vi.fn();
+    const onEdit = vi.fn();
+
+    function Harness() {
+      const [rows, setRows] = useState<InlineTableRow<Draft>[]>([
+        { ...rowWithTitle("r-1", "Confirm linen"), editing: true, dirty: true },
+        { ...rowWithTitle("r-2", "Restock towels"), draft: { title: "Restock towels", owner: "enzo", note: "" } },
+      ]);
+
+      return (
+        <InlineTableForm
+          ariaLabel="Autosave focus switch rows"
+          columns={columns}
+          rows={rows}
+          saveMode="autosave"
+          onDraftChange={vi.fn()}
+          onSave={(rowId) => {
+            onSave(rowId);
+            setRows((current) => current.map((row) => (
+              row.id === rowId ? { ...row, editing: false, dirty: false } : row
+            )));
+          }}
+          onCancel={vi.fn()}
+          onEdit={(rowId) => {
+            onEdit(rowId);
+            setRows((current) => current.map((row) => (
+              row.id === rowId ? { ...row, editing: true } : row
+            )));
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    const title = screen.getByLabelText("Title");
+    const targetCell = screen.getByText("enzo");
+    title.focus();
+    fireEvent.pointerDown(targetCell);
+    fireEvent.blur(title, { relatedTarget: null });
+    fireEvent.click(targetCell);
+
+    expect(onSave).toHaveBeenCalledWith("r-1");
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onEdit).toHaveBeenCalledWith("r-2");
+    expect(onSave.mock.invocationCallOrder[0]).toBeLessThan(onEdit.mock.invocationCallOrder[0]!);
+    await waitFor(() => expect(screen.getByLabelText("Owner")).toHaveFocus());
+  });
+
+  it("cancels an unchanged autosave row once before activating a different cell", async () => {
+    const onCancel = vi.fn();
+    const onEdit = vi.fn();
+
+    function Harness() {
+      const [rows, setRows] = useState<InlineTableRow<Draft>[]>([
+        { ...rowWithTitle("r-1", "Confirm linen"), editing: true, dirty: false },
+        { ...rowWithTitle("r-2", "Restock towels"), draft: { title: "Restock towels", owner: "enzo", note: "" } },
+      ]);
+
+      return (
+        <InlineTableForm
+          ariaLabel="Autosave unchanged focus switch rows"
+          columns={columns}
+          rows={rows}
+          saveMode="autosave"
+          onDraftChange={vi.fn()}
+          onSave={vi.fn()}
+          onCancel={(rowId) => {
+            onCancel(rowId);
+            setRows((current) => current.map((row) => (
+              row.id === rowId ? { ...row, editing: false } : row
+            )));
+          }}
+          onEdit={(rowId) => {
+            onEdit(rowId);
+            setRows((current) => current.map((row) => (
+              row.id === rowId ? { ...row, editing: true } : row
+            )));
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    const title = screen.getByLabelText("Title");
+    const targetCell = screen.getByText("enzo");
+    title.focus();
+    fireEvent.pointerDown(targetCell);
+    fireEvent.blur(title, { relatedTarget: null });
+    fireEvent.click(targetCell);
+
+    expect(onCancel).toHaveBeenCalledWith("r-1");
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onEdit).toHaveBeenCalledWith("r-2");
+    expect(onCancel.mock.invocationCallOrder[0]).toBeLessThan(onEdit.mock.invocationCallOrder[0]!);
+    await waitFor(() => expect(screen.getByLabelText("Owner")).toHaveFocus());
+  });
+
+  it("autosaves a dirty row when an outside click moves focus out of the form", () => {
+    const onSave = vi.fn();
+    render(
+      <>
+        <InlineTableForm
+          ariaLabel="Outside autosave rows"
+          columns={columns}
+          rows={[{ ...editableRow(), dirty: true }]}
+          saveMode="autosave"
+          onDraftChange={vi.fn()}
+          onSave={onSave}
+          onCancel={vi.fn()}
+        />
+        <button type="button">Outside action</button>
+      </>,
+    );
+
+    const title = screen.getByLabelText("Title");
+    const outside = screen.getByRole("button", { name: "Outside action" });
+    title.focus();
+    outside.focus();
+    fireEvent.blur(title, { relatedTarget: outside });
+    fireEvent.click(outside);
+
+    expect(onSave).toHaveBeenCalledWith("r-1");
+  });
+
   it("exits unchanged autosave rows on blur without saving", () => {
     const onCancel = vi.fn();
     const onSave = vi.fn();
@@ -1291,6 +1517,50 @@ describe("InlineTableForm", () => {
     expect(onDraftChange).toHaveBeenCalledWith("r-1", { title: "Batch count" });
     expect(onSave).not.toHaveBeenCalled();
     expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it("preserves caller-owned multi-row editing when switching rows in batch mode", () => {
+    const onSave = vi.fn();
+    const onCancel = vi.fn();
+    const onEdit = vi.fn();
+
+    function Harness() {
+      const [rows, setRows] = useState<InlineTableRow<Draft>[]>([
+        { ...rowWithTitle("r-1", "Count towels"), editing: true, dirty: true },
+        { ...rowWithTitle("r-2", "Count soap"), editing: true, dirty: true },
+        rowWithTitle("r-3", "Count tea"),
+      ]);
+
+      return (
+        <InlineTableForm
+          ariaLabel="Batch switch rows"
+          columns={columns}
+          rows={rows}
+          saveMode="batch"
+          onDraftChange={vi.fn()}
+          onSave={onSave}
+          onCancel={onCancel}
+          onEdit={(rowId) => {
+            onEdit(rowId);
+            setRows((current) => current.map((row) => (
+              row.id === rowId ? { ...row, editing: true } : row
+            )));
+          }}
+          renderBatchActions={() => <button type="button">Commit changes</button>}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.click(within(screen.getByLabelText("Count tea")).getByRole("button", { name: "Edit" }));
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(onEdit).toHaveBeenCalledWith("r-3");
+    expect(screen.getByLabelText("Count towels")).toHaveClass("is-editing");
+    expect(screen.getByLabelText("Count soap")).toHaveClass("is-editing");
+    expect(screen.getByLabelText("Count tea")).toHaveClass("is-editing");
   });
 
   it("blocks batch submit while a dirty row is disabled", () => {
