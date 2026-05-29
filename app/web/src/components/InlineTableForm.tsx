@@ -508,6 +508,20 @@ export function InlineTableForm<TDraft>({
     if (shouldFocus) pendingRowFocusRef.current = rowId;
   };
 
+  useEffect(() => {
+    if (!selectedRowId) return;
+    const clearSelectionForOutsidePointer = (event: PointerEvent) => {
+      if (selectedRowContainsTarget(rootRef.current, selectedRowId, event.target)) return;
+      pendingRowFocusRef.current = null;
+      clearDeleteArm();
+      setSelectedRowId(null);
+    };
+    window.addEventListener("pointerdown", clearSelectionForOutsidePointer, true);
+    return () => {
+      window.removeEventListener("pointerdown", clearSelectionForOutsidePointer, true);
+    };
+  }, [selectedRowId]);
+
   const suppressAutosaveBlur = (rowId: string) => {
     suppressAutosaveBlurRowsRef.current.add(rowId);
   };
@@ -1962,6 +1976,15 @@ function rowMessageId(tableId: string, rowId: string) {
 function focusStayedInside(event: FocusEvent<HTMLElement>) {
   const next = event.relatedTarget;
   return next instanceof Node && event.currentTarget.contains(next);
+}
+
+function selectedRowContainsTarget(root: HTMLElement | null, rowId: string, target: EventTarget | null) {
+  if (!root || !(target instanceof Node) || !root.contains(target)) return false;
+  const element = target instanceof Element ? target : target.parentElement;
+  const rowGroup = element?.closest("[data-inline-table-row-group]");
+  return rowGroup instanceof HTMLElement
+    && root.contains(rowGroup)
+    && rowGroup.dataset.inlineTableRowGroup === rowId;
 }
 
 function handleReadRowKeyDown(

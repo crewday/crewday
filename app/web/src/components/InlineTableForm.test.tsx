@@ -2083,6 +2083,122 @@ describe("InlineTableForm", () => {
     expect(onDelete).toHaveBeenCalledWith("r-1");
   });
 
+  it("clears selected read rows when clicking outside the table", () => {
+    render(
+      <div>
+        <button type="button">Outside target</button>
+        <InlineTableForm
+          ariaLabel="Outside selection rows"
+          columns={columns}
+          rows={[{ ...editableRow(), editing: false, dirty: false }]}
+          saveMode="explicit"
+          onDraftChange={vi.fn()}
+          onSave={vi.fn()}
+          onCancel={vi.fn()}
+          activationMode="doubleClick"
+        />
+      </div>,
+    );
+
+    fireEvent.click(screen.getByText("maria"));
+    const rowGroup = screen.getByLabelText("Confirm linen");
+    expect(rowGroup).toHaveClass("is-selected");
+    expect(rowGroup).toHaveAttribute("aria-selected", "true");
+
+    const outsideTarget = screen.getByRole("button", { name: "Outside target" });
+    fireEvent.pointerDown(outsideTarget);
+    fireEvent.click(outsideTarget);
+
+    expect(rowGroup).not.toHaveClass("is-selected");
+    expect(rowGroup).not.toHaveAttribute("aria-selected");
+  });
+
+  it("clears the previous selected row when clicking another row", () => {
+    const rows: InlineTableRow<Draft>[] = [
+      rowWithTitle("r-1", "First"),
+      rowWithTitle("r-2", "Second"),
+      { ...rowWithTitle("r-3", "Locked"), disabled: true },
+      { ...rowWithTitle("r-4", "Editing"), editing: true, dirty: true },
+    ];
+
+    render(
+      <InlineTableForm
+        ariaLabel="Pointer selection rows"
+        columns={columns}
+        rows={rows}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        activationMode="doubleClick"
+        getRowLabel={(row) => row.draft.title}
+      />,
+    );
+
+    const firstRow = screen.getByLabelText("First");
+    const secondRow = screen.getByLabelText("Second");
+    const disabledRow = screen.getByLabelText("Locked");
+    const editingRow = screen.getByLabelText("Editing");
+
+    fireEvent.click(firstRow);
+    expect(firstRow).toHaveClass("is-selected");
+
+    fireEvent.pointerDown(secondRow);
+    fireEvent.click(secondRow);
+
+    expect(firstRow).not.toHaveClass("is-selected");
+    expect(secondRow).toHaveClass("is-selected");
+    expect(secondRow).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.pointerDown(disabledRow);
+    fireEvent.click(disabledRow);
+
+    expect(secondRow).not.toHaveClass("is-selected");
+    expect(disabledRow).not.toHaveClass("is-selected");
+    expect(editingRow).not.toHaveClass("is-selected");
+  });
+
+  it("clears selected rows across tables that reuse row ids", () => {
+    render(
+      <div>
+        <InlineTableForm
+          ariaLabel="First duplicate-id rows"
+          columns={columns}
+          rows={[rowWithTitle("r-1", "First table row")]}
+          saveMode="explicit"
+          onDraftChange={vi.fn()}
+          onSave={vi.fn()}
+          onCancel={vi.fn()}
+          activationMode="doubleClick"
+          getRowLabel={(row) => row.draft.title}
+        />
+        <InlineTableForm
+          ariaLabel="Second duplicate-id rows"
+          columns={columns}
+          rows={[rowWithTitle("r-1", "Second table row")]}
+          saveMode="explicit"
+          onDraftChange={vi.fn()}
+          onSave={vi.fn()}
+          onCancel={vi.fn()}
+          activationMode="doubleClick"
+          getRowLabel={(row) => row.draft.title}
+        />
+      </div>,
+    );
+
+    const firstRow = screen.getByLabelText("First table row");
+    const secondRow = screen.getByLabelText("Second table row");
+
+    fireEvent.click(firstRow);
+    expect(firstRow).toHaveClass("is-selected");
+
+    fireEvent.pointerDown(secondRow);
+    fireEvent.click(secondRow);
+
+    expect(firstRow).not.toHaveClass("is-selected");
+    expect(secondRow).toHaveClass("is-selected");
+  });
+
   it("selects the next row after dd delete, or the previous row when deleting the last row", () => {
     function Harness() {
       const [rows, setRows] = useState<InlineTableRow<Draft>[]>([
