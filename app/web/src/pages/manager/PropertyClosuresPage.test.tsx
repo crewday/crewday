@@ -6,6 +6,7 @@ import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { __resetApiProvidersForTests } from "@/lib/api";
 import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
 import * as preferences from "@/lib/preferences";
+import managerPanelsCss from "@/styles/manager-panels.css?raw";
 import PropertyClosuresPage from "./PropertyClosuresPage";
 import { installFetchRouteHandlers } from "@/test/helpers";
 
@@ -249,6 +250,20 @@ function Harness() {
   );
 }
 
+function cssRule(selector: string, css = managerPanelsCss, occurrence = 0) {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matches = Array.from(css.matchAll(new RegExp(`^\\s*${escapedSelector}\\s*{([^}]*)}`, "gm")));
+  const match = matches[occurrence];
+  expect(match, `${selector} rule should exist`).not.toBeNull();
+  return match?.[1] ?? "";
+}
+
+function expectCssDeclaration(rule: string, property: string, value: string) {
+  const escapedProperty = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedValue = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  expect(rule).toMatch(new RegExp(`${escapedProperty}\\s*:\\s*${escapedValue}\\s*;`));
+}
+
 beforeEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
@@ -347,6 +362,67 @@ describe("<PropertyClosuresPage>", () => {
         expect(within(cell).getByTitle("Owner stay closure, manual source")).toBeInTheDocument();
       }
       expect(within(exclusiveEnd).queryByText("Owner stay")).toBeNull();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("stacks closure calendar months and lays out closure chip text vertically", async () => {
+    const fake = installFetch({
+      closureRows: [{
+        id: "closure_overlap",
+        property_id: "prop_1",
+        starts_at: "2026-04-16T00:00:00Z",
+        ends_at: "2026-04-17T00:00:00Z",
+        reason: "Owner stay",
+        source_ical_feed_id: null,
+      }],
+    });
+    try {
+      render(<Harness />);
+
+      const calendarGroup = await screen.findByRole("group", { name: "Three-month property calendar" });
+      const months = Array.from(calendarGroup.querySelectorAll(".property-calendar__month"));
+      expect(months).toHaveLength(3);
+      expect(months.map((month) => within(month as HTMLElement).getByRole("heading").textContent)).toEqual([
+        "April 2026",
+        "May 2026",
+        "June 2026",
+      ]);
+
+      const april = screen.getByRole("grid", { name: "April 2026 property calendar" });
+      const overlapCell = within(april).getByRole("gridcell", {
+        name: /2026-04-16.*Owner stay closure, manual source.*Ada Guest stay, manual source/,
+      });
+      const closureChip = within(overlapCell).getByTitle("Owner stay closure, manual source");
+      const stayBar = overlapCell.querySelector(".mini-cal__bar");
+      const [dayNumber, chipSibling, staySibling] = Array.from(overlapCell.children);
+
+      expect(dayNumber).toHaveClass("mini-cal__num");
+      expect(chipSibling).toBe(closureChip);
+      expect(staySibling).toBe(stayBar);
+      expect(stayBar).toBeInTheDocument();
+      expect(Array.from(closureChip.children).map((child) => child.className)).toEqual([
+        "mini-cal__closure-reason",
+        "mini-cal__closure-source",
+      ]);
+
+      const calendarRule = cssRule(".property-calendar");
+      const closureRule = cssRule(".mini-cal__closure");
+      const closureTextRule = cssRule(".mini-cal__closure-reason,\n.mini-cal__closure-source");
+      const sourceRule = cssRule(".mini-cal__closure-source", managerPanelsCss, 1);
+
+      expectCssDeclaration(calendarRule, "grid-template-columns", "minmax(0, 1fr)");
+      expect(managerPanelsCss).not.toMatch(/\.property-calendar\s*{[^}]*repeat\(auto-fit/);
+      expectCssDeclaration(closureRule, "display", "flex");
+      expectCssDeclaration(closureRule, "flex-direction", "column");
+      expectCssDeclaration(closureRule, "max-width", "100%");
+      expectCssDeclaration(closureRule, "overflow", "hidden");
+      expectCssDeclaration(closureTextRule, "width", "100%");
+      expectCssDeclaration(closureTextRule, "max-width", "100%");
+      expectCssDeclaration(closureTextRule, "text-overflow", "ellipsis");
+      expectCssDeclaration(sourceRule, "color", "var(--ink-3)");
+      expect(managerPanelsCss).not.toMatch(/\.mini-cal__closure-source\s*{[^}]*clip:\s*rect/);
     } finally {
       fake.restore();
     }
