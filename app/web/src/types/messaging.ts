@@ -87,6 +87,7 @@ export interface BroadcastAudienceGroupPayload {
   label: string;
   kind: "everyone" | "workspace_role" | "work_role";
   resolved_recipient_count: number;
+  recipient_user_ids: string[];
 }
 
 export interface BroadcastRecipientsResponse {

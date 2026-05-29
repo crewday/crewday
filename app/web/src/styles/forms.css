@@ -671,6 +671,150 @@
   padding: var(--space-5);
   color: var(--ink-3);
 }
+
+.broadcast-recipient-picker {
+  position: relative;
+}
+.broadcast-recipient-picker__control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  min-height: 44px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+}
+.broadcast-recipient-picker__control:focus-within {
+  border-color: var(--moss);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--moss) 16%, transparent);
+}
+.broadcast-recipient-picker__search {
+  flex: none;
+  color: var(--ink-3);
+}
+.broadcast-recipient-picker__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 3px 4px 3px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.broadcast-recipient-picker__chip--group {
+  background: var(--moss-soft);
+  border-color: color-mix(in srgb, var(--moss) 28%, var(--line));
+  color: var(--moss-2);
+}
+.broadcast-recipient-picker__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: currentColor;
+  cursor: pointer;
+}
+.broadcast-recipient-picker__remove:hover,
+.broadcast-recipient-picker__remove:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, currentColor 13%, transparent);
+}
+.broadcast-recipient-picker__input {
+  flex: 1 1 12rem;
+  min-width: 10rem;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  box-shadow: none;
+  outline: 0;
+}
+.broadcast-recipient-picker__input::placeholder {
+  color: var(--ink-3);
+}
+.broadcast-recipient-picker__summary {
+  margin-top: var(--space-3);
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.broadcast-recipient-picker__summary strong {
+  color: var(--ink);
+}
+.broadcast-recipient-picker__popover {
+  position: absolute;
+  z-index: 30;
+  inset-inline: 0;
+  top: calc(100% + var(--space-2));
+}
+.broadcast-recipient-picker__list {
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--space-2);
+  list-style: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+.broadcast-recipient-picker__option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  min-height: 44px;
+  padding: var(--space-4) var(--space-5);
+  border-radius: 8px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.broadcast-recipient-picker__option:hover,
+.broadcast-recipient-picker__option--active {
+  background: var(--paper-2);
+}
+.broadcast-recipient-picker__option-main {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+.broadcast-recipient-picker__option-label {
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+.broadcast-recipient-picker__option-detail {
+  overflow-wrap: anywhere;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.broadcast-recipient-picker__option-kind {
+  flex: none;
+  color: var(--ink-3);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.broadcast-recipient-picker__empty {
+  padding: var(--space-5);
+  color: var(--ink-3);
+}
 .field--warn input,
 .field--warn textarea,
 .field--warn select {

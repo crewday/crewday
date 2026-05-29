@@ -5661,6 +5661,13 @@
             "title": "Label",
             "type": "string"
           },
+          "recipient_user_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Recipient User Ids",
+            "type": "array"
+          },
           "resolved_recipient_count": {
             "title": "Resolved Recipient Count",
             "type": "integer"
@@ -5673,6 +5680,7 @@
         "required": [
           "kind",
           "label",
+          "recipient_user_ids",
           "resolved_recipient_count",
           "token"
         ],

@@ -201,16 +201,51 @@ function installFetch(dashboard: DashboardPayload = emptyDashboard()) {
               display_name: "Ivo Costa",
               email: "ivo@example.com",
             },
+            {
+              user_id: "usr_worker_3",
+              token: "user:usr_worker_3",
+              display_name: "Bea Rocha",
+              email: "bea@example.com",
+            },
           ],
           groups: [
             {
               token: "group:everyone",
               label: "Everyone",
               kind: "everyone",
+              resolved_recipient_count: 3,
+              recipient_user_ids: ["usr_worker_1", "usr_worker_2", "usr_worker_3"],
+            },
+            {
+              token: "group:workspace_role:managers",
+              label: "Managers",
+              kind: "workspace_role",
+              resolved_recipient_count: 1,
+              recipient_user_ids: ["usr_worker_1"],
+            },
+            {
+              token: "group:workspace_role:employees",
+              label: "Employees",
+              kind: "workspace_role",
+              resolved_recipient_count: 3,
+              recipient_user_ids: ["usr_worker_1", "usr_worker_2", "usr_worker_3"],
+            },
+            {
+              token: "group:work_role:drivers",
+              label: "Drivers",
+              kind: "work_role",
               resolved_recipient_count: 2,
+              recipient_user_ids: ["usr_worker_1", "usr_worker_2"],
+            },
+            {
+              token: "group:work_role:maids",
+              label: "Maids",
+              kind: "work_role",
+              resolved_recipient_count: 2,
+              recipient_user_ids: ["usr_worker_2", "usr_worker_3"],
             },
           ],
-          total: 2,
+          total: 3,
         },
       },
     },
@@ -220,8 +255,8 @@ function installFetch(dashboard: DashboardPayload = emptyDashboard()) {
       respond: {
         body: {
           status: "sent",
-          recipient_count: 2,
-          notification_ids: ["notif_1", "notif_2"],
+          recipient_count: 3,
+          notification_ids: ["notif_1", "notif_2", "notif_3"],
           approval_request_id: null,
           expires_at: null,
         },
@@ -343,7 +378,9 @@ describe("<DashboardPage>", () => {
       fireEvent.click(screen.getByRole("menuitem", { name: /Broadcast message/ }));
 
       const dialog = await screen.findByRole("dialog", { name: "Broadcast message" });
-      expect(await within(dialog).findByText(/2 recipients/)).toBeInTheDocument();
+      expect(await within(dialog).findByText(/3 recipients/)).toBeInTheDocument();
+      expect(within(dialog).getByRole("combobox", { name: /^Recipients\b/ })).toBeInTheDocument();
+      expect(within(dialog).queryByRole("radiogroup", { name: "Broadcast target" })).not.toBeInTheDocument();
       expect(within(dialog).queryByText(/approval required/i)).not.toBeInTheDocument();
       fireEvent.change(within(dialog).getByLabelText(/^Subject\b/), {
         target: { value: "Storm watch" },
@@ -363,11 +400,106 @@ describe("<DashboardPage>", () => {
           path: "/w/acme/api/v1/messaging/broadcast",
           body: expect.objectContaining({
             audience_tokens: ["group:everyone"],
-            confirmed_recipient_count: 2,
+            confirmed_recipient_count: 3,
             subject: "Storm watch",
           }),
         }),
       );
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("selects broadcast groups and people through the token combobox", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "More actions" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: /Broadcast message/ }));
+      const dialog = await screen.findByRole("dialog", { name: "Broadcast message" });
+      const combobox = await within(dialog).findByRole("combobox", { name: /^Recipients\b/ });
+      const summary = dialog.querySelector(".broadcast-recipient-picker__summary");
+      if (!(summary instanceof HTMLElement)) throw new Error("Recipient summary missing");
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Remove Everyone" }));
+      expect(summary).toHaveTextContent("Server-resolved recipient count: 0");
+
+      fireEvent.change(combobox, { target: { value: "driver" } });
+      expect(await within(dialog).findByRole("option", { name: /Drivers/ })).toBeInTheDocument();
+      fireEvent.keyDown(combobox, { key: "ArrowDown" });
+      fireEvent.keyDown(combobox, { key: "Enter" });
+
+      fireEvent.change(combobox, { target: { value: "maid" } });
+      expect(await within(dialog).findByRole("option", { name: /Maids/ })).toBeInTheDocument();
+      fireEvent.keyDown(combobox, { key: "Enter" });
+
+      fireEvent.change(combobox, { target: { value: "ivo" } });
+      expect(await within(dialog).findByRole("option", { name: /Ivo Costa/ })).toBeInTheDocument();
+      fireEvent.keyDown(combobox, { key: "Enter" });
+
+      expect(within(dialog).getByRole("button", { name: "Remove Drivers" })).toBeInTheDocument();
+      expect(within(dialog).getByRole("button", { name: "Remove Maids" })).toBeInTheDocument();
+      expect(within(dialog).getByRole("button", { name: "Remove Ivo Costa" })).toBeInTheDocument();
+      expect(summary).toHaveTextContent("Server-resolved recipient count: 3");
+
+      fireEvent.change(within(dialog).getByLabelText(/^Subject\b/), {
+        target: { value: "Storm watch" },
+      });
+      fireEvent.change(within(dialog).getByLabelText(/^Body\b/), {
+        target: { value: "Bring patio furniture inside before 16:00." },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Send" }));
+
+      await waitFor(() => {
+        expect(fake.requests).toContainEqual(
+          expect.objectContaining({
+            method: "POST",
+            path: "/w/acme/api/v1/messaging/broadcast",
+            body: expect.objectContaining({
+              audience_tokens: ["group:work_role:drivers", "group:work_role:maids", "user:usr_worker_2"],
+              confirmed_recipient_count: 3,
+            }),
+          }),
+        );
+      });
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("supports broadcast picker Backspace chip removal and Escape close", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "More actions" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: /Broadcast message/ }));
+      const dialog = await screen.findByRole("dialog", { name: "Broadcast message" });
+      const combobox = await within(dialog).findByRole("combobox", { name: /^Recipients\b/ });
+      const summary = dialog.querySelector(".broadcast-recipient-picker__summary");
+      if (!(summary instanceof HTMLElement)) throw new Error("Recipient summary missing");
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Remove Everyone" }));
+      fireEvent.keyDown(combobox, { key: "Escape" });
+      fireEvent.keyDown(combobox, { key: "ArrowDown" });
+      fireEvent.keyDown(combobox, { key: "Enter" });
+      expect(within(dialog).getByRole("button", { name: "Remove Everyone" })).toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Remove Everyone" }));
+
+      fireEvent.change(combobox, { target: { value: "driver" } });
+      fireEvent.keyDown(combobox, { key: "Enter" });
+      expect(within(dialog).getByRole("button", { name: "Remove Drivers" })).toBeInTheDocument();
+      expect(summary).toHaveTextContent("Server-resolved recipient count: 2");
+
+      fireEvent.keyDown(combobox, { key: "Backspace" });
+      expect(within(dialog).queryByRole("button", { name: "Remove Drivers" })).not.toBeInTheDocument();
+      expect(summary).toHaveTextContent("Server-resolved recipient count: 0");
+
+      fireEvent.change(combobox, { target: { value: "maid" } });
+      expect(await within(dialog).findByRole("option", { name: /Maids/ })).toBeInTheDocument();
+      fireEvent.keyDown(combobox, { key: "Escape" });
+      expect(within(dialog).queryByRole("option", { name: /Maids/ })).not.toBeInTheDocument();
     } finally {
       fake.restore();
     }

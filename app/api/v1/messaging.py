@@ -340,6 +340,7 @@ class BroadcastAudienceGroupPayload(BaseModel):
     label: str
     kind: BroadcastAudienceGroupKind
     resolved_recipient_count: int
+    recipient_user_ids: list[str]
 
     @classmethod
     def from_view(cls, view: BroadcastAudienceGroup) -> BroadcastAudienceGroupPayload:
@@ -348,6 +349,7 @@ class BroadcastAudienceGroupPayload(BaseModel):
             label=view.label,
             kind=view.kind,
             resolved_recipient_count=view.resolved_recipient_count,
+            recipient_user_ids=list(view.recipient_user_ids),
         )
 
 

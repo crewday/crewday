@@ -1,12 +1,15 @@
-import { useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 import {
   CalendarOff,
   CircleAlert,
   ClipboardList,
+  Search,
   ShieldCheck,
   Users,
+  X,
 } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -18,7 +21,7 @@ import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
 import FormModal from "@/components/FormModal";
 import NewTaskButton from "@/components/NewTaskModal";
-import { Avatar, Checkbox, Chip, EmptyState, Loading, Panel, StatCard } from "@/components/common";
+import { Avatar, Chip, EmptyState, Loading, Panel, StatCard } from "@/components/common";
 import {
   APPROVAL_RISK_TONE,
   ISSUE_SEVERITY_TONE,
@@ -26,33 +29,275 @@ import {
   TASK_STATUS_TONE,
 } from "@/lib/tones";
 import type { DashboardPayload as Dashboard, Me } from "@/types/api";
+import type {
+  BroadcastAudienceGroupPayload,
+  BroadcastRecipientPayload,
+  BroadcastRecipientsResponse,
+  BroadcastSendRequest,
+  BroadcastSendResponse,
+} from "@/types/messaging";
 
-interface BroadcastRecipient {
-  user_id: string;
-  token: string;
-  display_name: string;
-  email: string | null;
-}
-
-interface BroadcastAudienceGroup {
+interface BroadcastAudienceOption {
   token: string;
   label: string;
-  kind: "everyone" | "workspace_role" | "work_role";
-  resolved_recipient_count: number;
+  detail: string | null;
+  kind: "group" | "person";
+  count: number | null;
+  userId: string | null;
+  recipientUserIds: string[] | null;
 }
 
-interface BroadcastRecipientsResponse {
-  people: BroadcastRecipient[];
-  groups: BroadcastAudienceGroup[];
-  total: number;
+function audienceGroupDetail(group: BroadcastAudienceGroupPayload): string {
+  const typeLabel =
+    group.kind === "everyone"
+      ? "Workspace group"
+      : group.kind === "workspace_role"
+        ? "Workspace role"
+        : "Work role";
+  const count = group.resolved_recipient_count;
+  return `${typeLabel} · ${count} recipient${count === 1 ? "" : "s"}`;
 }
 
-interface BroadcastSendResponse {
-  status: "sent" | "pending_approval";
-  recipient_count: number;
-  notification_ids: string[];
-  approval_request_id: string | null;
-  expires_at: string | null;
+function broadcastAudienceOptions(
+  groups: BroadcastAudienceGroupPayload[] = [],
+  people: BroadcastRecipientPayload[] = [],
+): BroadcastAudienceOption[] {
+  return [
+    ...groups.map((group) => ({
+      token: group.token,
+      label: group.label,
+      detail: audienceGroupDetail(group),
+      kind: "group" as const,
+      count: group.resolved_recipient_count,
+      userId: null,
+      recipientUserIds: group.recipient_user_ids,
+    })),
+    ...people.map((person) => ({
+      token: person.token,
+      label: person.display_name,
+      detail: person.email,
+      kind: "person" as const,
+      count: 1,
+      userId: person.user_id,
+      recipientUserIds: [person.user_id],
+    })),
+  ];
+}
+
+function resolvedRecipientCount(
+  selectedTokens: string[],
+  options: BroadcastAudienceOption[],
+): number {
+  const selected = new Set(selectedTokens);
+  const selectedOptions = options.filter((option) => selected.has(option.token));
+  const everyone = selectedOptions.find((option) => option.kind === "group" && option.token === "group:everyone");
+  if (everyone?.count !== null && everyone?.count !== undefined) return everyone.count;
+
+  const resolvedIds = new Set<string>();
+  let hasCompleteMembership = selectedOptions.length > 0;
+  let fallbackCount = 0;
+  for (const option of selectedOptions) {
+    if (option.recipientUserIds) {
+      option.recipientUserIds.forEach((id) => resolvedIds.add(id));
+      continue;
+    }
+    hasCompleteMembership = false;
+    fallbackCount += option.count ?? 0;
+  }
+  return hasCompleteMembership ? resolvedIds.size : fallbackCount + resolvedIds.size;
+}
+
+function BroadcastRecipientPicker({
+  groups,
+  people,
+  selectedTokens,
+  onChange,
+  loading,
+  resolvedCount,
+}: {
+  groups: BroadcastAudienceGroupPayload[];
+  people: BroadcastRecipientPayload[];
+  selectedTokens: string[];
+  onChange: (tokens: string[]) => void;
+  loading: boolean;
+  resolvedCount: number;
+}) {
+  const inputId = useId();
+  const listId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const options = useMemo(() => broadcastAudienceOptions(groups, people), [groups, people]);
+  const selected = useMemo(() => new Set(selectedTokens), [selectedTokens]);
+  const selectedOptions = options.filter((option) => selected.has(option.token));
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredOptions = options.filter((option) => {
+    if (selected.has(option.token)) return false;
+    if (!normalizedQuery) return true;
+    return (
+      option.label.toLowerCase().includes(normalizedQuery) ||
+      (option.detail?.toLowerCase().includes(normalizedQuery) ?? false)
+    );
+  });
+  const activeOption = filteredOptions[activeIndex] ?? null;
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [normalizedQuery, selectedTokens.length]);
+
+  useEffect(() => {
+    if (activeIndex >= filteredOptions.length) {
+      setActiveIndex(Math.max(filteredOptions.length - 1, 0));
+    }
+  }, [activeIndex, filteredOptions.length]);
+
+  const selectOption = (option: BroadcastAudienceOption) => {
+    onChange([...selectedTokens, option.token]);
+    setQuery("");
+    setOpen(true);
+    inputRef.current?.focus();
+  };
+
+  const removeToken = (token: string) => {
+    onChange(selectedTokens.filter((selectedToken) => selectedToken !== token));
+    inputRef.current?.focus();
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setOpen(true);
+      if (!open) {
+        setActiveIndex(0);
+        return;
+      }
+      setActiveIndex((index) => Math.min(index + 1, Math.max(filteredOptions.length - 1, 0)));
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setOpen(true);
+      if (!open) {
+        setActiveIndex(Math.max(filteredOptions.length - 1, 0));
+        return;
+      }
+      setActiveIndex((index) => Math.max(index - 1, 0));
+      return;
+    }
+    if (event.key === "Enter" && open && activeOption) {
+      event.preventDefault();
+      selectOption(activeOption);
+      return;
+    }
+    if (event.key === "Backspace" && query === "" && selectedOptions.length > 0) {
+      event.preventDefault();
+      removeToken(selectedOptions[selectedOptions.length - 1]!.token);
+      return;
+    }
+    if (event.key === "Escape") {
+      setOpen(false);
+    }
+  };
+
+  return (
+    <div
+      className="broadcast-recipient-picker"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+      }}
+    >
+      <div
+        className="broadcast-recipient-picker__control"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) inputRef.current?.focus();
+        }}
+      >
+        <Search className="broadcast-recipient-picker__search" size={16} aria-hidden="true" />
+        {selectedOptions.map((option) => (
+          <span
+            key={option.token}
+            className={
+              "broadcast-recipient-picker__chip" +
+              (option.kind === "group" ? " broadcast-recipient-picker__chip--group" : "")
+            }
+          >
+            {option.label}
+            <button
+              type="button"
+              className="broadcast-recipient-picker__remove"
+              onClick={() => removeToken(option.token)}
+              aria-label={`Remove ${option.label}`}
+            >
+              <X size={13} aria-hidden="true" />
+            </button>
+          </span>
+        ))}
+        <input
+          id={inputId}
+          ref={inputRef}
+          role="combobox"
+          aria-label="Recipients"
+          aria-autocomplete="list"
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-activedescendant={open && activeOption ? `${listId}-${activeOption.token}` : undefined}
+          aria-describedby={`${inputId}-summary`}
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={handleKeyDown}
+          placeholder={selectedOptions.length === 0 ? "Search groups or people" : ""}
+          className="broadcast-recipient-picker__input"
+        />
+      </div>
+      <div id={`${inputId}-summary`} className="broadcast-recipient-picker__summary" aria-live="polite">
+        Server-resolved recipient count: <strong>{resolvedCount}</strong>
+      </div>
+      {open && (
+        <div className="broadcast-recipient-picker__popover">
+          <ul id={listId} className="broadcast-recipient-picker__list" role="listbox">
+            {loading ? (
+              <li className="broadcast-recipient-picker__empty">Loading recipients...</li>
+            ) : filteredOptions.length === 0 ? (
+              <li className="broadcast-recipient-picker__empty">No matching audiences</li>
+            ) : (
+              filteredOptions.map((option, index) => (
+                <li
+                  id={`${listId}-${option.token}`}
+                  key={option.token}
+                  role="option"
+                  aria-selected={index === activeIndex}
+                  className={
+                    "broadcast-recipient-picker__option" +
+                    (index === activeIndex ? " broadcast-recipient-picker__option--active" : "")
+                  }
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    selectOption(option);
+                  }}
+                  onMouseEnter={() => setActiveIndex(index)}
+                >
+                  <span className="broadcast-recipient-picker__option-main">
+                    <span className="broadcast-recipient-picker__option-label">{option.label}</span>
+                    {option.detail ? (
+                      <span className="broadcast-recipient-picker__option-detail">{option.detail}</span>
+                    ) : null}
+                  </span>
+                  <span className="broadcast-recipient-picker__option-kind">
+                    {option.kind === "group" ? "Group" : "Person"}
+                  </span>
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function DashboardPage() {
@@ -62,8 +307,7 @@ export default function DashboardPage() {
   const me = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
   const qc = useQueryClient();
   const [broadcastOpen, setBroadcastOpen] = useState(false);
-  const [broadcastTarget, setBroadcastTarget] = useState<"all_staff" | "selected">("all_staff");
-  const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
+  const [selectedAudienceTokens, setSelectedAudienceTokens] = useState<string[]>(["group:everyone"]);
   const [broadcastSubject, setBroadcastSubject] = useState("");
   const [broadcastBody, setBroadcastBody] = useState("");
   const [broadcastNotice, setBroadcastNotice] = useState<string | null>(null);
@@ -88,26 +332,21 @@ export default function DashboardPage() {
       fetchJson<BroadcastRecipientsResponse>("/api/v1/messaging/broadcast/recipients"),
     enabled: broadcastOpen,
   });
-  const allStaffGroup = broadcastRecipients.data?.groups.find((group) => group.kind === "everyone");
-  const recipientCount =
-    broadcastTarget === "all_staff"
-      ? (allStaffGroup?.resolved_recipient_count ?? broadcastRecipients.data?.total ?? 0)
-      : selectedRecipients.length;
+  const broadcastOptions = useMemo(
+    () => broadcastAudienceOptions(broadcastRecipients.data?.groups, broadcastRecipients.data?.people),
+    [broadcastRecipients.data?.groups, broadcastRecipients.data?.people],
+  );
+  const recipientCount = resolvedRecipientCount(selectedAudienceTokens, broadcastOptions);
   const sendBroadcast = useMutation({
     mutationFn: () =>
       fetchJson<BroadcastSendResponse>("/api/v1/messaging/broadcast", {
         method: "POST",
         body: {
-          audience_tokens:
-            broadcastTarget === "selected"
-              ? selectedRecipients
-              : allStaffGroup
-                ? [allStaffGroup.token]
-                : [],
+          audience_tokens: selectedAudienceTokens,
           confirmed_recipient_count: recipientCount,
           subject: broadcastSubject.trim(),
           body_md: broadcastBody.trim(),
-        },
+        } satisfies BroadcastSendRequest,
       }),
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: qk.dashboard() });
@@ -120,8 +359,7 @@ export default function DashboardPage() {
   });
 
   const resetBroadcast = () => {
-    setBroadcastTarget("all_staff");
-    setSelectedRecipients([]);
+    setSelectedAudienceTokens(["group:everyone"]);
     setBroadcastSubject("");
     setBroadcastBody("");
     setBroadcastNotice(null);
@@ -177,7 +415,7 @@ export default function DashboardPage() {
         onClose={resetBroadcast}
         onSubmit={(e) => {
           e.preventDefault();
-          if (!broadcastSubject.trim() || !broadcastBody.trim() || recipientCount < 1) return;
+          if (!broadcastSubject.trim() || !broadcastBody.trim() || recipientCount < 1 || selectedAudienceTokens.length < 1) return;
           sendBroadcast.mutate();
         }}
         actions={
@@ -193,7 +431,8 @@ export default function DashboardPage() {
                 broadcastNotice !== null ||
                 !broadcastSubject.trim() ||
                 !broadcastBody.trim() ||
-                recipientCount < 1
+                recipientCount < 1 ||
+                selectedAudienceTokens.length < 1
               }
             >
               {sendBroadcast.isPending
@@ -221,68 +460,16 @@ export default function DashboardPage() {
             </div>
           )}
 
-          <div className="form" role="radiogroup" aria-label="Broadcast target">
-            <label className="checkbox checkbox--block">
-              <input
-                type="radio"
-                className="checkbox__input"
-                name="broadcast-target"
-                checked={broadcastTarget === "all_staff"}
-                onChange={() => setBroadcastTarget("all_staff")}
-              />
-              <span className="checkbox__box" aria-hidden="true">
-                <svg className="checkbox__tick" viewBox="0 0 18 18">
-                  <path d="M3.8 9.6 L7.4 13 L14.2 5.4" />
-                </svg>
-              </span>
-              <span className="checkbox__label">All staff ({broadcastRecipients.data?.total ?? 0})</span>
-            </label>
-            <label className="checkbox checkbox--block">
-              <input
-                type="radio"
-                className="checkbox__input"
-                name="broadcast-target"
-                checked={broadcastTarget === "selected"}
-                onChange={() => setBroadcastTarget("selected")}
-              />
-              <span className="checkbox__box" aria-hidden="true">
-                <svg className="checkbox__tick" viewBox="0 0 18 18">
-                  <path d="M3.8 9.6 L7.4 13 L14.2 5.4" />
-                </svg>
-              </span>
-              <span className="checkbox__label">Selected recipients ({selectedRecipients.length})</span>
-            </label>
-          </div>
-
-          {broadcastTarget === "selected" && (
-            <div className="task-list task-list--desk" aria-label="Broadcast recipients">
-              {broadcastRecipients.isPending && (
-                <EmptyState
-                  icon={Users}
-                  title={
-                    "Loading recipients" // code-health: ignore[ccn nloc] Lizard misattributes the dashboard TSX subtree to this loading prop.
-                  }
-                  variant="quiet"
-                />
-              )}
-              {(broadcastRecipients.data?.people ?? []).map((recipient) => (
-                <Checkbox
-                  key={recipient.user_id}
-                  checked={selectedRecipients.includes(recipient.token)}
-                  onChange={(e) => {
-                    setSelectedRecipients((prev) =>
-                      e.target.checked
-                        ? [...prev, recipient.token]
-                        : prev.filter((token) => token !== recipient.token),
-                    );
-                  }}
-                  label={recipient.display_name}
-                  hint={recipient.email ?? undefined}
-                  block
-                />
-              ))}
-            </div>
-          )}
+          <FormField label="Recipients" requirement="required" className="broadcast-message-form__field sheet-form__field">
+            <BroadcastRecipientPicker
+              groups={broadcastRecipients.data?.groups ?? []}
+              people={broadcastRecipients.data?.people ?? []}
+              selectedTokens={selectedAudienceTokens}
+              onChange={setSelectedAudienceTokens}
+              loading={broadcastRecipients.isPending}
+              resolvedCount={recipientCount}
+            />
+          </FormField>
 
           <FormField label="Subject" requirement="required" className="broadcast-message-form__field sheet-form__field">
             <input
