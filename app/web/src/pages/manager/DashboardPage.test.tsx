@@ -360,22 +360,22 @@ describe("<DashboardPage>", () => {
     }
   });
 
-  it("opens the real new-task and broadcast dialogs", async () => {
+  it("opens the broadcast dialog from the primary header action", async () => {
     const fake = installFetch();
     try {
       render(<Harness />);
 
-      fireEvent.click(await screen.findByRole("button", { name: "+ New task" }));
-      expect(screen.getByRole("link", { name: /By property/ })).toHaveAttribute("href", "/w/acme/properties");
-      const allLinks = screen.getAllByRole("link", { name: /All/ });
-      expect(allLinks.map((link) => link.getAttribute("href"))).toEqual([
-        "/w/acme/approvals",
-        "/w/acme/leaves",
-      ]);
-      expect(await screen.findByRole("heading", { name: "New task" })).toBeInTheDocument();
+      const broadcastAction = await screen.findByRole("button", { name: "Broadcast message" });
+      expect(broadcastAction).toHaveClass("btn--moss");
+      expect(screen.queryByRole("button", { name: "+ New task" })).not.toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole("button", { name: "More actions" }));
-      fireEvent.click(screen.getByRole("menuitem", { name: /Broadcast message/ }));
+      const moreActions = screen.queryByRole("button", { name: "More actions" });
+      if (moreActions) {
+        fireEvent.click(moreActions);
+        expect(screen.queryByRole("menuitem", { name: "Broadcast message" })).not.toBeInTheDocument();
+      }
+
+      fireEvent.click(broadcastAction);
 
       const dialog = await screen.findByRole("dialog", { name: "Broadcast message" });
       expect(await within(dialog).findByText(/3 recipients/)).toBeInTheDocument();
@@ -415,8 +415,7 @@ describe("<DashboardPage>", () => {
     try {
       render(<Harness />);
 
-      fireEvent.click(await screen.findByRole("button", { name: "More actions" }));
-      fireEvent.click(screen.getByRole("menuitem", { name: /Broadcast message/ }));
+      fireEvent.click(await screen.findByRole("button", { name: "Broadcast message" }));
       const dialog = await screen.findByRole("dialog", { name: "Broadcast message" });
       const combobox = await within(dialog).findByRole("combobox", { name: /^Recipients\b/ });
       const summary = dialog.querySelector(".broadcast-recipient-picker__summary");
@@ -473,8 +472,7 @@ describe("<DashboardPage>", () => {
     try {
       render(<Harness />);
 
-      fireEvent.click(await screen.findByRole("button", { name: "More actions" }));
-      fireEvent.click(screen.getByRole("menuitem", { name: /Broadcast message/ }));
+      fireEvent.click(await screen.findByRole("button", { name: "Broadcast message" }));
       const dialog = await screen.findByRole("dialog", { name: "Broadcast message" });
       const combobox = await within(dialog).findByRole("combobox", { name: /^Recipients\b/ });
       const summary = dialog.querySelector(".broadcast-recipient-picker__summary");

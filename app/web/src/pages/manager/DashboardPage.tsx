@@ -20,7 +20,6 @@ import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
 import FormModal from "@/components/FormModal";
-import NewTaskButton from "@/components/NewTaskModal";
 import { Avatar, Chip, EmptyState, Loading, Panel, StatCard } from "@/components/common";
 import {
   APPROVAL_RISK_TONE,
@@ -394,13 +393,11 @@ export default function DashboardPage() {
     <DeskPage
       title="Dashboard"
       sub={`Good morning, ${firstName} · ${todayLong} · ${properties.length} properties · 5 staff · ${totalToday} tasks today`}
-      actions={<NewTaskButton />}
-      overflow={[
-        {
-          label: "Broadcast message",
-          onSelect: openBroadcast,
-        },
-      ]}
+      actions={
+        <button type="button" className="btn btn--moss" onClick={openBroadcast}>
+          Broadcast message
+        </button>
+      }
     >
       <FormModal
         open={broadcastOpen}
