@@ -59,6 +59,7 @@ from app.domain.messaging.notifications import (
     NotificationKind,
     NotificationService,
     TemplateNotFound,
+    _notification_autoescape,
 )
 from app.events import NotificationCreated, bus, get_event_type
 from app.events.bus import EventBus
@@ -409,6 +410,65 @@ class TestTemplateLoader:
         # At least one of the kinds ships with a default subject file.
         assert (TEMPLATE_ROOT / "task_assigned.subject.j2").exists()
 
+    def test_subject_and_markdown_templates_do_not_html_escape_text(self) -> None:
+        loader = Jinja2TemplateLoader.default()
+        summary = "Broadcast 'Test' to 3 recipients?"
+
+        subject = loader.render(
+            kind="approval_needed",
+            locale=None,
+            channel="subject",
+            context={"card_summary": summary},
+        )
+        body_md = loader.render(
+            kind="approval_needed",
+            locale=None,
+            channel="body_md",
+            context={
+                "card_summary": summary,
+                "recipient_display_name": "Owner",
+            },
+        )
+
+        assert "Broadcast 'Test' to 3 recipients?" in subject
+        assert "Broadcast 'Test' to 3 recipients?" in body_md
+        assert "&#39;" not in subject
+        assert "&#39;" not in body_md
+
+    def test_html_templates_still_escape_html(self, tmp_path: Path) -> None:
+        env = Environment(
+            loader=FileSystemLoader(str(tmp_path)),
+            autoescape=_notification_autoescape,
+            undefined=StrictUndefined,
+        )
+        (tmp_path / "k.subject.j2").write_text("{{ value }}\n")
+        (tmp_path / "k.body_html.j2").write_text("{{ value }}\n")
+        (tmp_path / "k.html.j2").write_text("{{ value }}\n")
+        loader = Jinja2TemplateLoader(env=env)
+
+        text = loader.render(
+            kind="k",
+            locale=None,
+            channel="subject",
+            context={"value": "<strong>Owner's</strong>"},
+        )
+        html = loader.render(
+            kind="k",
+            locale=None,
+            channel="body_html",
+            context={"value": "<strong>Owner's</strong>"},
+        )
+        html_channel = loader.render(
+            kind="k",
+            locale=None,
+            channel="html",
+            context={"value": "<strong>Owner's</strong>"},
+        )
+
+        assert text.strip() == "<strong>Owner's</strong>"
+        assert html.strip() == "&lt;strong&gt;Owner&#39;s&lt;/strong&gt;"
+        assert html_channel.strip() == "&lt;strong&gt;Owner&#39;s&lt;/strong&gt;"
+
 
 # ---------------------------------------------------------------------------
 # NotificationService — happy path
@@ -483,6 +543,35 @@ class TestNotifyHappyPath:
         assert call.kind == "task_assigned"
         assert "Clean room 3" in call.body
         assert call.payload == {"task_title": "Clean room 3"}
+
+    def test_approval_needed_persists_literal_apostrophes_in_subject_and_body(
+        self,
+        session: Session,
+        base_env: tuple[WorkspaceContext, str, FrozenClock],
+    ) -> None:
+        ctx, recipient_id, clock = base_env
+        mailer = InMemoryMailer()
+        service = NotificationService(
+            session=session,
+            ctx=ctx,
+            mailer=mailer,
+            clock=clock,
+            bus=bus,
+        )
+
+        service.notify(
+            recipient_user_id=recipient_id,
+            kind=NotificationKind.APPROVAL_NEEDED,
+            payload={"card_summary": "Broadcast 'Test' to 3 recipients?"},
+        )
+        row = session.execute(select(Notification)).scalar_one()
+
+        assert row.subject == "Approval needed: Broadcast 'Test' to 3 recipients?"
+        assert "**Broadcast 'Test' to 3 recipients?**" in row.body_md
+        assert "&#39;" not in row.subject
+        assert "&#39;" not in row.body_md
+        assert mailer.sent[0].subject == row.subject
+        assert mailer.sent[0].body_text == row.body_md
 
     def test_audit_row_per_channel(
         self,

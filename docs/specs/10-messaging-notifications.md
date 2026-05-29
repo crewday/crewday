@@ -63,8 +63,9 @@ text for auth flows, with optional HTML alternative parts when an auth
 template provides `body_html`.
 
 The notification rendering helper is
-`app.domain.messaging.notifications.Jinja2TemplateLoader` (autoescape
-on, `StrictUndefined`); auth flows render through
+`app.domain.messaging.notifications.Jinja2TemplateLoader`
+(`StrictUndefined`, with autoescape off for `subject`, `body_md`, and
+`push` templates and on for optional HTML templates); auth flows render through
 `app.mail.auth_templates.render_auth_email` which uses a text
 `jinja2.Environment` with autoescape off for subjects and plain-text
 bodies (HTML escaping would mangle URLs and mask copy in the inbox)

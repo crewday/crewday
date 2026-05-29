@@ -207,6 +207,19 @@ class TemplateNotFound(LookupError):
 TEMPLATE_ROOT: Path = Path(__file__).resolve().parent / "templates"
 
 
+def _notification_autoescape(template_name: str | None) -> bool:
+    """Escape HTML notification templates, not subject/Markdown text."""
+    if template_name is None:
+        return False
+    if select_autoescape(["html"])(template_name):
+        return True
+    template_stem = template_name.removesuffix(".j2")
+    return any(
+        segment == "html" or segment.endswith("_html")
+        for segment in template_stem.split(".")
+    )
+
+
 class TemplateLoader(Protocol):
     """Render a template for (``kind``, ``locale``, ``channel``).
 
@@ -249,11 +262,9 @@ class Jinja2TemplateLoader:
       key raises at render time instead of silently emitting the
       empty string; the service turns the error into a clear
       exception the caller sees.
-    * :func:`select_autoescape` — HTML escaping on ``.html`` / ``.j2``
-      files defensively. The v1 templates are Markdown (``body_md``)
-      and plaintext (subject + push), so autoescape is a no-op on
-      them; wiring it here keeps the door open for the MJML / HTML
-      variants the spec calls out without a second env later.
+    * HTML-aware autoescaping — HTML templates are escaped, while
+      plaintext subjects, push copy, and Markdown bodies render as
+      text so inbox rows do not store HTML entities.
 
     The loader caches compiled templates via Jinja's built-in cache;
     no process-level invalidation needed for v1 (templates live in
@@ -272,7 +283,7 @@ class Jinja2TemplateLoader:
         env = Environment(
             loader=FileSystemLoader(str(TEMPLATE_ROOT)),
             extensions=["jinja2.ext.i18n"],
-            autoescape=select_autoescape(["html", "j2"]),
+            autoescape=_notification_autoescape,
             undefined=StrictUndefined,
             # ``trim_blocks`` + ``lstrip_blocks`` keep block-tag
             # whitespace honest in Markdown bodies — without them the
