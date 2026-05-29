@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, Euro, ListTodo, UserCircle } from "lucide-react";
+import { Bell, CalendarDays, Euro, ListTodo, UserCircle } from "lucide-react";
 import AgentSidebar from "@/components/AgentSidebar";
 import BottomTabs from "@/components/BottomTabs";
 import SideNav, { type SideNavItem } from "@/components/SideNav";
@@ -42,6 +42,7 @@ const NAV_ITEMS: SideNavItem[] = [
   { type: "link", to: "/today", matchPrefix: ["/today", "/task/"], label: "Today", phoneHidden: true, icon: NAV_ICON(ListTodo) },
   { type: "link", to: "/schedule", label: "Schedule", phoneHidden: true, icon: NAV_ICON(CalendarDays) },
   { type: "link", to: "/my/expenses", label: "Expenses", phoneHidden: true, icon: NAV_ICON(Euro) },
+  { type: "link", to: "/notifications", label: "Notifications", icon: NAV_ICON(Bell) },
   { type: "link", to: "/me", matchPrefix: ["/me", "/history"], label: "Me", phoneHidden: true, icon: NAV_ICON(UserCircle) },
 ];
 

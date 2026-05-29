@@ -88,6 +88,7 @@ export const qk = {
   taskInstructions: (tid: string) => [...ws(), "task", tid, "instructions"] as const,
   today: () => [...ws(), "today"] as const,
   week: () => [...ws(), "week"] as const,
+  notifications: () => [...ws(), "messaging", "notifications"] as const,
   // §14 worker schedule — bidirectional infinite-agenda pages keyed
   // under the workspace-scoped `[..., "my-schedule", ...]` prefix so
   // SSE invalidations via `mySchedulePrefix()` match every loaded

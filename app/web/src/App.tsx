@@ -17,6 +17,7 @@ import HistoryPage from "@/pages/employee/HistoryPage";
 import IssueNewPage from "@/pages/employee/IssueNewPage";
 import EmployeeAssetPage from "@/pages/employee/EmployeeAssetPage";
 import AssetScanPage from "@/pages/employee/AssetScanPage";
+import NotificationsPage from "@/pages/NotificationsPage";
 
 import DashboardPage from "@/pages/manager/DashboardPage";
 import PropertiesPage from "@/pages/manager/PropertiesPage";
@@ -212,6 +213,7 @@ function sharedWorkspaceRoutes(isManagerSurface: boolean) {
       <Route path="task/:tid" element={<TaskDetailPage />} />
       <Route path="my/expenses" element={<MyExpensesPage />} />
       <Route path="me" element={<MePage />} />
+      <Route path="notifications" element={<NotificationsPage />} />
       <Route path="chat" element={<ChatPage />} />
       <Route path="scheduler" element={<SchedulerPage />} />
       {/* Legacy /bookings and /shifts URLs — spec §14 collapses

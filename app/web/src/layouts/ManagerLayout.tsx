@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Archive,
   BedDouble,
+  Bell,
   Boxes,
   Building2,
   CalendarCheck,
@@ -68,6 +69,7 @@ const BASE_NAV_ITEMS: SideNavItem[] = [
   { type: "link", to: "/today", matchPrefix: ["/today", "/task/"], label: "My Day", phoneHidden: true, icon: NAV_ICON(Sunrise) },
   { type: "link", to: "/schedule", label: "My Schedule", phoneHidden: true, icon: NAV_ICON(CalendarClock) },
   { type: "link", to: "/my/expenses", matchPrefix: "/my/expenses", label: "My Expenses", phoneHidden: true, icon: NAV_ICON(Euro) },
+  { type: "link", to: "/notifications", label: "Notifications", icon: NAV_ICON(Bell) },
   { type: "link", to: "/me", matchPrefix: ["/me", "/history"], label: "My profile", phoneHidden: true, icon: NAV_ICON(UserCircle) },
   { type: "section", label: "OPERATE" },
   { type: "link", to: "/dashboard", label: "Dashboard", icon: NAV_ICON(LayoutDashboard) },

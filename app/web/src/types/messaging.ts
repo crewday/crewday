@@ -55,3 +55,22 @@ export interface ChatGatewayProvider {
   last_webhook_at: string | null;
   templates: string[];
 }
+
+export interface NotificationPayload {
+  id: string;
+  workspace_id: string;
+  recipient_user_id: string;
+  kind: string;
+  subject: string;
+  body_md: string | null;
+  payload: Record<string, unknown>;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface NotificationListResponse {
+  data: NotificationPayload[];
+  next_cursor: string | null;
+  has_more: boolean;
+  total_estimate: number;
+}
