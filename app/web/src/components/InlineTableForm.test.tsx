@@ -619,6 +619,53 @@ describe("InlineTableForm", () => {
     expect(onDraftChange).toHaveBeenCalledWith("icon-1", { iconName: "" });
   });
 
+  it("lets closed inline icon selector Escape cancel the row", () => {
+    const onCancel = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Closed icon escape rows"
+        columns={iconColumns}
+        rows={[{ id: "icon-1", editing: true, dirty: true, draft: { iconName: "ChefHat" }, label: "Chef" }]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={onCancel}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "Role icon: Chef Hat. Edit icon" }), { key: "Escape" });
+
+    expect(onCancel).toHaveBeenCalledWith("icon-1");
+  });
+
+  it("closes an open inline icon selector before Escape cancels the row", async () => {
+    const onCancel = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Open icon escape rows"
+        columns={iconColumns}
+        rows={[{ id: "icon-1", editing: true, dirty: true, draft: { iconName: "ChefHat" }, label: "Chef" }]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={onCancel}
+      />,
+    );
+
+    const preview = screen.getByRole("button", { name: "Role icon: Chef Hat. Edit icon" });
+    fireEvent.keyDown(preview, { key: "Enter" });
+    await waitFor(() => expect(screen.getByLabelText("Search role icon choices")).toHaveFocus());
+
+    fireEvent.keyDown(screen.getByLabelText("Search role icon choices"), { key: "Escape" });
+
+    expect(screen.queryByRole("dialog", { name: "Role icon choices" })).not.toBeInTheDocument();
+    expect(onCancel).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(preview, { key: "Escape" });
+
+    expect(onCancel).toHaveBeenCalledWith("icon-1");
+  });
+
   it("passes time field changes through as raw strings", () => {
     const onChange = vi.fn();
     render(<InlineTimeField value="09:30" ariaLabel="Shift start time" onChange={onChange} />);
@@ -1858,6 +1905,48 @@ describe("InlineTableForm", () => {
     fireEvent.keyDown(screen.getByLabelText("Confirm linen"), { key: "e" });
 
     expect(screen.getByLabelText("Title")).toHaveFocus();
+  });
+
+  it("cancels rows entered into edit mode from keyboard Enter", async () => {
+    const onCancel = vi.fn();
+    function Harness() {
+      const [rows, setRows] = useState<InlineTableRow<Draft>[]>([
+        { ...editableRow(), editing: false, dirty: false },
+      ]);
+      return (
+        <InlineTableForm
+          ariaLabel="Keyboard cancel rows"
+          columns={columns}
+          rows={rows}
+          saveMode="explicit"
+          onDraftChange={vi.fn()}
+          onSave={vi.fn()}
+          onCancel={(rowId) => {
+            onCancel(rowId);
+            setRows((current) => current.map((row) => (
+              row.id === rowId ? { ...row, editing: false, dirty: false } : row
+            )));
+          }}
+          activationMode="doubleClick"
+          onEdit={(rowId) => {
+            setRows((current) => current.map((row) => (
+              row.id === rowId ? { ...row, editing: true, dirty: true } : row
+            )));
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.click(screen.getByText("maria"));
+    fireEvent.keyDown(screen.getByLabelText("Confirm linen"), { key: "Enter" });
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveFocus());
+
+    fireEvent.keyDown(screen.getByLabelText("Title"), { key: "Escape" });
+
+    expect(onCancel).toHaveBeenCalledWith("r-1");
+    expect(screen.getByLabelText("Confirm linen")).toHaveClass("is-reading");
   });
 
   it("selects a trailing create row, edits it from Enter, and selects the created row after save", () => {

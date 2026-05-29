@@ -1606,9 +1606,7 @@ export function InlineIconField({
   return (
     <div
       className="inline-table-form__icon-field"
-      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
-        event.stopPropagation();
-      }}
+      data-inline-table-enter-save="false"
     >
       <IconSelector
         label={label}

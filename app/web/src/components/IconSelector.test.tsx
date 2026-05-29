@@ -87,4 +87,31 @@ describe("IconSelector", () => {
     expect(screen.queryByRole("dialog", { name: "Icon choices" })).not.toBeInTheDocument();
     expect(preview).toHaveFocus();
   });
+
+  it("only stops Escape propagation while the popover is open", async () => {
+    const onKeyDown = vi.fn();
+    render(
+      <div onKeyDown={onKeyDown}>
+        <IconSelector label="Icon" value="Refrigerator" onChange={vi.fn()} />
+      </div>,
+    );
+
+    const preview = screen.getByRole("button", { name: "Icon: Refrigerator. Edit icon" });
+    fireEvent.keyDown(preview, { key: "Escape" });
+
+    expect(onKeyDown).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(preview, { key: "Enter" });
+    await waitFor(() => expect(screen.getByLabelText("Search icon choices")).toHaveFocus());
+    onKeyDown.mockClear();
+
+    fireEvent.keyDown(screen.getByLabelText("Search icon choices"), { key: "Escape" });
+
+    expect(onKeyDown).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Icon choices" })).not.toBeInTheDocument();
+
+    fireEvent.keyDown(preview, { key: "Escape" });
+
+    expect(onKeyDown).toHaveBeenCalledTimes(1);
+  });
 });
