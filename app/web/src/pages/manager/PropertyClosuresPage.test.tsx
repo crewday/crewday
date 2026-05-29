@@ -274,9 +274,20 @@ describe("<PropertyClosuresPage>", () => {
     try {
       render(<Harness />);
 
-      expect(await screen.findByRole("heading", { name: "Villa Rosa — closures" })).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: /Back to property/ })).toHaveAttribute("href", "/w/acme/property/prop_1");
-      expect(screen.getByRole("button", { name: "+ Add closure" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Villa Rosa" })).toBeInTheDocument();
+      expect(screen.getByText("Porto · Europe/Lisbon")).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /Back to property/ })).toBeNull();
+      expect(screen.queryByText(/events upsert here automatically/)).toBeNull();
+      expect(screen.queryByRole("button", { name: "+ Add closure" })).toBeNull();
+      const propertySections = screen.getByRole("navigation", { name: "Property sections" });
+      expect(within(propertySections).getByRole("link", { name: "Overview" })).toHaveAttribute("href", "/w/acme/property/prop_1");
+      expect(within(propertySections).getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/w/acme/property/prop_1#settings");
+      const relatedPages = screen.getByRole("navigation", { name: "Related property pages" });
+      expect(within(relatedPages).getByRole("link", { name: "Stays" })).toHaveAttribute("href", "/w/acme/stays?property_id=prop_1");
+      expect(within(relatedPages).getByRole("link", { name: "Instructions" })).toHaveAttribute("href", "/w/acme/instructions?property_id=prop_1");
+      expect(within(relatedPages).getByRole("link", { name: "Closures" })).toHaveAttribute("href", "/w/acme/property/prop_1/closures");
+      expect(within(relatedPages).getByRole("link", { name: "Closures" })).toHaveAttribute("aria-current", "page");
+      expect(within(relatedPages).getByRole("link", { name: "Closures" })).toHaveClass("page-tabs__tab--active");
       expect(screen.getByRole("table", { name: "Property closures" })).toBeInTheDocument();
       expect(screen.getByLabelText("Renovation closure from 10 Apr to 12 Apr")).toBeInTheDocument();
       expect(screen.getAllByText("Renovation").length).toBeGreaterThan(0);
@@ -411,7 +422,7 @@ describe("<PropertyClosuresPage>", () => {
       render(<Harness />);
 
       expect(await screen.findByText("Failed to load.")).toBeInTheDocument();
-      expect(screen.queryByRole("heading", { name: "Villa Rosa — closures" })).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Villa Rosa" })).toBeNull();
     } finally {
       fake.restore();
     }
@@ -423,7 +434,7 @@ describe("<PropertyClosuresPage>", () => {
       render(<Harness />);
 
       expect(await screen.findByText("Failed to load.")).toBeInTheDocument();
-      expect(screen.queryByRole("heading", { name: "Villa Rosa — closures" })).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Villa Rosa" })).toBeNull();
       expect(fake.calls).toContain("/w/acme/api/v1/property_closures?property_id=prop_1&limit=100");
     } finally {
       fake.restore();
@@ -435,13 +446,13 @@ describe("<PropertyClosuresPage>", () => {
     try {
       render(<Harness />);
 
-      fireEvent.click(await screen.findByRole("button", { name: "+ Add closure" }));
-      expect(screen.queryByRole("dialog")).toBeNull();
       const createRow = await screen.findByLabelText("New closure");
-      expect(within(createRow).getByRole("button", { name: "Save" })).toBeEnabled();
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(within(createRow).getByRole("button", { name: "Save" })).toBeDisabled();
       fireEvent.change(within(createRow).getByLabelText("Start date"), { target: { value: "2026-04-16" } });
       fireEvent.change(within(createRow).getByLabelText("End date"), { target: { value: "2026-04-18" } });
       fireEvent.change(within(createRow).getByLabelText("Reason"), { target: { value: "  Owner repainting west wing  " } });
+      expect(within(createRow).getByRole("button", { name: "Save" })).toBeEnabled();
       fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
@@ -466,7 +477,6 @@ describe("<PropertyClosuresPage>", () => {
     try {
       render(<Harness />);
 
-      fireEvent.click(await screen.findByRole("button", { name: "+ Add closure" }));
       const createRow = await screen.findByLabelText("New closure");
       const startDate = within(createRow).getByLabelText("Start date");
       const endDate = within(createRow).getByLabelText("End date");
@@ -490,7 +500,6 @@ describe("<PropertyClosuresPage>", () => {
     try {
       render(<Harness />);
 
-      fireEvent.click(await screen.findByRole("button", { name: "+ Add closure" }));
       const createRow = await screen.findByLabelText("New closure");
       fireEvent.change(within(createRow).getByLabelText("Start date"), { target: { value: "2026-04-16" } });
       fireEvent.change(within(createRow).getByLabelText("End date"), { target: { value: "2026-04-18" } });

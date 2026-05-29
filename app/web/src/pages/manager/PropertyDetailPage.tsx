@@ -1,14 +1,12 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation, useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import AgentPreferencesPanel from "@/components/AgentPreferencesPanel";
 import { Loading } from "@/components/common";
-import PageTabs, { type PageTab } from "@/components/PageTabs";
 import { useWorkspace } from "@/context/WorkspaceContext";
-import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { AuthMe } from "@/auth/types";
 import type {
   Employee,
@@ -25,20 +23,9 @@ import PropertyEditDialog, {
 } from "./property/PropertyEditDialog";
 import SettingsOverridePanel from "./property/SettingsOverridePanel";
 import SharingPanel from "./property/SharingPanel";
+import PropertyTabs, { panelIdFor, PROPERTY_TABS } from "./property/PropertyTabs";
 import { fetchPropertyDetail } from "./property/propertyDetailApi";
 import type { PropertyRecord, PropertyTab } from "./property/types";
-
-const PROPERTY_TABS = [
-  { key: "overview", label: "Overview", panelId: panelIdFor("overview") },
-  { key: "areas", label: "Areas", panelId: panelIdFor("areas") },
-  { key: "assets", label: "Assets", panelId: panelIdFor("assets") },
-  { key: "sharing", label: "Sharing & client", panelId: panelIdFor("sharing") },
-  { key: "settings", label: "Settings", panelId: panelIdFor("settings") },
-] satisfies Array<PageTab & { key: PropertyTab }>;
-
-function panelIdFor(tab: PropertyTab): string {
-  return `property-${tab}-panel`;
-}
 
 function tabFromHash(hash: string): PropertyTab {
   const key = hash.replace(/^#/, "");
@@ -151,37 +138,12 @@ export default function PropertyDetailPage() {
         },
       ]}
     >
-      <div className="property-tabs">
-        <PageTabs
-          ariaLabel="Property sections"
-          tabs={PROPERTY_TABS}
-          hashBacked
-          defaultKey="overview"
-          selectedKey={activeTab}
-          onSelect={selectTab}
-          className="property-tabs__sections"
-        />
-        <nav className="property-tabs__links" aria-label="Related property pages">
-          <Link
-            className="page-tabs__tab"
-            to={workspaceRouteForPathname(pathname, "/stays?property_id=" + encodeURIComponent(property.id))}
-          >
-            Stays
-          </Link>
-          <Link
-            className="page-tabs__tab"
-            to={workspaceRouteForPathname(pathname, "/instructions?property_id=" + encodeURIComponent(property.id))}
-          >
-            Instructions
-          </Link>
-          <Link
-            className="page-tabs__tab"
-            to={workspaceRouteForPathname(pathname, "/property/" + property.id + "/closures")}
-          >
-            Closures
-          </Link>
-        </nav>
-      </div>
+      <PropertyTabs
+        pathname={pathname}
+        propertyId={property.id}
+        activeSection={activeTab}
+        onSectionSelect={selectTab}
+      />
 
       {activeTab === "overview" && (
         <div id={panelIdFor("overview")} role="tabpanel">

@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation, useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { CalendarX } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
-import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
 import {
   InlineDateField,
@@ -16,6 +15,7 @@ import {
 } from "@/components/InlineTableForm";
 import { Chip, EmptyState, Loading } from "@/components/common";
 import type { Me, Property, PropertyClosure, Stay } from "@/types/api";
+import PropertyTabs from "./property/PropertyTabs";
 import {
   fallbackProperty,
   mapReservation,
@@ -265,7 +265,6 @@ export default function PropertyClosuresPage() {
   const { pid = "" } = useParams<{ pid: string }>();
   const { pathname } = useLocation();
   const queryClient = useQueryClient();
-  const tableShellRef = useRef<HTMLDivElement | null>(null);
   const [rowEdits, setRowEdits] = useState<ReadonlyMap<string, InlineTableRow<ClosureDraft>>>(() => new Map());
   const [createRow, setCreateRow] = useState<InlineTableRow<ClosureDraft>>(() => makeCreateRow("2026-04-01"));
   const [showArchivedClosures, setShowArchivedClosures] = useState(false);
@@ -576,26 +575,11 @@ export default function PropertyClosuresPage() {
     deleteClosure.mutate(rowId);
   }
 
-  function focusCreateRow() {
-    setCreateRow((row) => ({
-      ...row,
-      dirty: true,
-      validation: undefined,
-      error: undefined,
-      meta: undefined,
-    }));
-    const row = tableShellRef.current?.querySelector<HTMLElement>(
-      `[data-inline-table-row-group="${createRow.id}"]`,
-    );
-    row?.scrollIntoView?.({ block: "nearest" });
-    row?.querySelector<HTMLElement>("input, select, button")?.focus();
-  }
-
   if (dataQ.isPending || meQ.isPending) {
-    return <DeskPage title="Closures"><Loading /></DeskPage>;
+    return <DeskPage title="Property"><Loading /></DeskPage>;
   }
   if (!dataQ.data || !meQ.data || !dataQ.data.property) {
-    return <DeskPage title="Closures">Failed to load.</DeskPage>;
+    return <DeskPage title="Property">Failed to load.</DeskPage>;
   }
 
   const { property, stays } = dataQ.data;
@@ -605,24 +589,16 @@ export default function PropertyClosuresPage() {
 
   return (
     <DeskPage
-      title={property.name + " — closures"}
-      sub={
-        <>
-          <Link to={workspaceRouteForPathname(pathname, "/property/" + property.id)} className="link">← Back to property</Link>{" "}
-          · iCal "Not available" / "Blocked" events upsert here automatically.
-        </>
-      }
-      actions={
-        <button
-          type="button"
-          className="btn btn--moss"
-          onClick={focusCreateRow}
-        >
-          + Add closure
-        </button>
-      }
+      title={property.name}
+      sub={property.city + " · " + property.timezone}
     >
-      <div className="panel" ref={tableShellRef}>
+      <PropertyTabs
+        pathname={pathname}
+        propertyId={property.id}
+        activeRelatedPage="closures"
+      />
+
+      <div className="panel">
         {archivedClosureCount > 0 ? (
           <div className="property-closure-archive-control">
             <span className="property-closure-archive-control__count" role="status" aria-live="polite">
