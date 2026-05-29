@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCheck, Mail, MailOpen } from "lucide-react";
+import { useEffect, useMemo, useRef } from "react";
+import { Mail, MailOpen } from "lucide-react";
 import ChatMessageBody from "@/components/chat/ChatMessageBody";
 import DateTime from "@/components/DateTime";
 import PageHeader from "@/components/PageHeader";
@@ -9,6 +10,8 @@ import { qk } from "@/lib/queryKeys";
 import type { NotificationListResponse, NotificationPayload } from "@/types/api";
 
 const NOTIFICATIONS_URL = "/api/v1/messaging/notifications";
+const EMPTY_NOTIFICATIONS: NotificationPayload[] = [];
+const autoMarkedNotificationSignatures = new Set<string>();
 
 function payloadText(notification: NotificationPayload, key: string): string | null {
   const value = notification.payload[key];
@@ -48,112 +51,51 @@ function mergeNotifications(
 export default function NotificationsPage() {
   const qc = useQueryClient();
   const queryKey = qk.notifications();
+  const visuallyUnreadIdsRef = useRef<Set<string>>(new Set());
   const q = useQuery({
     queryKey,
     queryFn: () => fetchJson<NotificationListResponse>(`${NOTIFICATIONS_URL}?limit=100`),
   });
-  const notifications = q.data?.data ?? [];
-  const visibleUnreadIds = notifications
-    .filter((notification) => notification.read_at === null)
-    .map((notification) => notification.id);
+  const notifications = q.data?.data ?? EMPTY_NOTIFICATIONS;
+  const visibleUnreadIds = useMemo(
+    () =>
+      notifications
+        .filter((notification) => notification.read_at === null)
+        .map((notification) => notification.id),
+    [notifications],
+  );
+  const visibleUnreadSignature = visibleUnreadIds.join("\u001f");
 
-  const patchRead = useMutation<
-    NotificationPayload,
-    Error,
-    { id: string; read: boolean },
-    { previous?: NotificationListResponse }
-  >({
-    mutationFn: ({ id, read }: { id: string; read: boolean }) =>
-      fetchJson<NotificationPayload>(`${NOTIFICATIONS_URL}/${id}`, {
-        method: "PATCH",
-        body: { read },
-      }),
-    onMutate: async ({ id, read }) => {
-      await qc.cancelQueries({ queryKey });
-      const previous = qc.getQueryData<NotificationListResponse>(queryKey);
-      const readAt = read ? new Date().toISOString() : null;
-      qc.setQueryData<NotificationListResponse>(queryKey, (current) => {
-        if (!current) return current;
-        return {
-          ...current,
-          data: current.data.map((notification) =>
-            notification.id === id
-              ? { ...notification, read_at: readAt }
-              : notification
-          ),
-        };
-      });
-      return { previous };
-    },
-    onError: (_error, _variables, context) => {
-      if (context?.previous) qc.setQueryData(queryKey, context.previous);
-    },
-    onSuccess: (updated) => {
-      qc.setQueryData<NotificationListResponse>(queryKey, (current) =>
-        mergeNotifications(current, [updated])
-      );
-    },
-    onSettled: () => qc.invalidateQueries({ queryKey }),
-  });
-
-  const markVisibleRead = useMutation<
-    NotificationListResponse,
-    Error,
-    string[],
-    { previous?: NotificationListResponse }
-  >({
+  const markVisibleRead = useMutation<NotificationListResponse, Error, string[]>({
     mutationFn: (ids: string[]) =>
       fetchJson<NotificationListResponse>(`${NOTIFICATIONS_URL}:mark-read`, {
         method: "POST",
         body: { ids },
       }),
-    onMutate: async (ids) => {
-      await qc.cancelQueries({ queryKey });
-      const previous = qc.getQueryData<NotificationListResponse>(queryKey);
-      const readAt = new Date().toISOString();
-      const visibleIds = new Set(ids);
-      qc.setQueryData<NotificationListResponse>(queryKey, (current) => {
-        if (!current) return current;
-        return {
-          ...current,
-          data: current.data.map((notification) =>
-            visibleIds.has(notification.id)
-              ? { ...notification, read_at: readAt }
-              : notification
-          ),
-        };
-      });
-      return { previous };
-    },
-    onError: (_error, _ids, context) => {
-      if (context?.previous) qc.setQueryData(queryKey, context.previous);
-    },
     onSuccess: (updated) => {
       qc.setQueryData<NotificationListResponse>(queryKey, (current) =>
-        mergeNotifications(current, updated.data)
+        mergeNotifications(current, updated.data),
       );
     },
-    onSettled: () => qc.invalidateQueries({ queryKey }),
   });
 
-  const actions = (
-    <button
-      type="button"
-      className="btn btn--moss"
-      disabled={visibleUnreadIds.length === 0 || markVisibleRead.isPending}
-      onClick={() => markVisibleRead.mutate(visibleUnreadIds)}
-    >
-      <CheckCheck size={16} strokeWidth={1.8} aria-hidden="true" />
-      Mark visible read
-    </button>
-  );
+  useEffect(() => {
+    if (!q.isSuccess || visibleUnreadIds.length === 0) return;
+    const autoMarkSignature = JSON.stringify([...queryKey, visibleUnreadSignature]);
+    if (autoMarkedNotificationSignatures.has(autoMarkSignature)) return;
+    autoMarkedNotificationSignatures.add(autoMarkSignature);
+    visuallyUnreadIdsRef.current = new Set([
+      ...visuallyUnreadIdsRef.current,
+      ...visibleUnreadIds,
+    ]);
+    markVisibleRead.mutate(visibleUnreadIds);
+  }, [markVisibleRead, q.isSuccess, queryKey, visibleUnreadIds, visibleUnreadSignature]);
 
   return (
     <>
       <PageHeader
         title="Notifications"
         sub="Messages and workspace alerts sent to you."
-        actions={actions}
         back={false}
       />
       <section className="notifications-page">
@@ -168,8 +110,7 @@ export default function NotificationsPage() {
               <NotificationItem
                 key={notification.id}
                 notification={notification}
-                pending={patchRead.isPending}
-                onToggleRead={(read) => patchRead.mutate({ id: notification.id, read })}
+                forceUnread={visuallyUnreadIdsRef.current.has(notification.id)}
               />
             ))}
           </ul>
@@ -181,14 +122,12 @@ export default function NotificationsPage() {
 
 function NotificationItem({
   notification,
-  pending,
-  onToggleRead,
+  forceUnread,
 }: {
   notification: NotificationPayload;
-  pending: boolean;
-  onToggleRead: (read: boolean) => void;
+  forceUnread: boolean;
 }) {
-  const isUnread = notification.read_at === null;
+  const isUnread = forceUnread || notification.read_at === null;
   const body = notificationBody(notification);
   return (
     <li
@@ -209,19 +148,6 @@ function NotificationItem({
             <span>{notificationKindLabel(notification.kind)}</span>
             <DateTime value={notification.created_at} showTime className="mono" />
           </div>
-          <button
-            type="button"
-            className="btn btn--ghost btn--sm notification-card__toggle"
-            disabled={pending}
-            onClick={() => onToggleRead(isUnread)}
-          >
-            {isUnread ? (
-              <MailOpen size={14} strokeWidth={1.8} aria-hidden="true" />
-            ) : (
-              <Mail size={14} strokeWidth={1.8} aria-hidden="true" />
-            )}
-            {isUnread ? "Mark read" : "Mark unread"}
-          </button>
         </div>
         <h2 className="notification-card__title">{notificationTitle(notification)}</h2>
         {body ? (

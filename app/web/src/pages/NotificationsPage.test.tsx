@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -12,10 +12,6 @@ import type { NotificationListResponse, NotificationPayload } from "@/types/api"
 import NotificationsPage from "./NotificationsPage";
 
 let restoreIndexedDb: (() => void) | null = null;
-
-function isReadPatchBody(body: unknown): body is { read: boolean } {
-  return typeof body === "object" && body !== null && "read" in body && typeof body.read === "boolean";
-}
 
 function notification(overrides: Partial<NotificationPayload> = {}): NotificationPayload {
   return {
@@ -48,10 +44,15 @@ function list(data: NotificationPayload[]): NotificationListResponse {
   };
 }
 
-function Harness(): ReactElement {
-  const queryClient = new QueryClient({
+function createTestQueryClient(): QueryClient {
+  return new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+}
+
+function Harness({
+  queryClient = createTestQueryClient(),
+}: { queryClient?: QueryClient } = {}): ReactElement {
   return (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/w/acme/notifications"]}>
@@ -85,9 +86,15 @@ describe("NotificationsPage", () => {
         path: "/w/acme/api/v1/messaging/notifications?limit=100",
         respond: { body: list([notification()]) },
       },
+      {
+        method: "POST",
+        path: "/w/acme/api/v1/messaging/notifications:mark-read",
+        respond: { body: list([{ ...notification(), read_at: "2026-05-29T10:45:00Z" }]) },
+      },
     ]);
 
-    render(<Harness />);
+    const queryClient = createTestQueryClient();
+    render(<Harness queryClient={queryClient} />);
 
     const card = await screen.findByRole("article", { name: "crew.day - Storm watch" });
     expect(within(card).getByText("Unread")).toBeInTheDocument();
@@ -98,68 +105,15 @@ describe("NotificationsPage", () => {
       "href",
       "/w/acme/notifications",
     );
+    expect(screen.queryByRole("button", { name: "Mark visible read" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Mark read" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Mark unread" })).not.toBeInTheDocument();
     expect(screen.queryByText("usr_other")).not.toBeInTheDocument();
     expect(screen.queryByText("other@example.test")).not.toBeInTheDocument();
     expect(env.requests[0]?.path).toBe("/w/acme/api/v1/messaging/notifications?limit=100");
   });
 
-  it("marks one notification read and unread through the notification patch endpoint", async () => {
-    const unread = notification();
-    const read = notification({ read_at: "2026-05-29T10:35:00Z" });
-    let current = unread;
-    const env = installFetchRouteHandlers([
-      {
-        path: "/w/acme/api/v1/messaging/notifications?limit=100",
-        respond: () => ({ body: list([current]) }),
-      },
-      {
-        method: "PATCH",
-        path: "/w/acme/api/v1/messaging/notifications/notif_1",
-        respond: (request) => {
-          current = isReadPatchBody(request.body) && request.body.read ? read : unread;
-          return { body: current };
-        },
-      },
-    ]);
-
-    render(<Harness />);
-
-    const markRead = await screen.findByRole("button", { name: "Mark read" });
-    await waitFor(() => {
-      expect(markRead).toBeEnabled();
-    });
-    fireEvent.click(markRead);
-    await waitFor(() => {
-      expect(
-        env.requests.some(
-          (request) =>
-            request.method === "PATCH" &&
-            request.path === "/w/acme/api/v1/messaging/notifications/notif_1",
-        ),
-      ).toBe(true);
-    });
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Mark unread" })).toBeInTheDocument();
-    });
-    expect(
-      env.requests.find(
-        (request) =>
-          request.method === "PATCH" &&
-          request.path === "/w/acme/api/v1/messaging/notifications/notif_1",
-      )?.body,
-    ).toEqual({ read: true });
-
-    fireEvent.click(screen.getByRole("button", { name: "Mark unread" }));
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Mark read" })).toBeInTheDocument();
-    });
-    const patchBodies = env.requests
-      .filter((request) => request.method === "PATCH")
-      .map((request) => request.body);
-    expect(patchBodies).toEqual([{ read: true }, { read: false }]);
-  });
-
-  it("bulk-marks visible unread notifications read", async () => {
+  it("auto-marks loaded unread notifications read without changing the visible list", async () => {
     const first = notification({ id: "notif_1", subject: "First broadcast" });
     const second = notification({ id: "notif_2", subject: "Second broadcast" });
     const alreadyRead = notification({
@@ -176,27 +130,34 @@ describe("NotificationsPage", () => {
       {
         method: "POST",
         path: "/w/acme/api/v1/messaging/notifications:mark-read",
-        respond: () => {
+        respond: (request) => {
           const updated = [
             { ...first, read_at: "2026-05-29T10:45:00Z" },
             { ...second, read_at: "2026-05-29T10:45:00Z" },
           ];
           current = [...updated, alreadyRead];
-          return { body: list(updated) };
+          return { body: list(updated), status: request.body ? 200 : 400 };
         },
       },
     ]);
 
-    render(<Harness />);
+    const queryClient = createTestQueryClient();
+    render(<Harness queryClient={queryClient} />);
 
-    const markVisibleRead = await screen.findByRole("button", { name: "Mark visible read" });
-    await waitFor(() => {
-      expect(markVisibleRead).toBeEnabled();
-    });
-    fireEvent.click(markVisibleRead);
+    expect(await screen.findByRole("article", { name: "First broadcast" })).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Second broadcast" })).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Already read" })).toBeInTheDocument();
+    expect(screen.getAllByText("Unread")).toHaveLength(2);
+    expect(screen.getAllByText("Read")).toHaveLength(1);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Mark visible read" })).toBeDisabled();
+      expect(
+        env.requests.filter(
+          (request) =>
+            request.method === "POST" &&
+            request.path === "/w/acme/api/v1/messaging/notifications:mark-read",
+        ),
+      ).toHaveLength(1);
     });
     const post = env.requests.find(
       (request) =>
@@ -204,6 +165,23 @@ describe("NotificationsPage", () => {
         request.path === "/w/acme/api/v1/messaging/notifications:mark-read",
     );
     expect(post?.body).toEqual({ ids: ["notif_1", "notif_2"] });
+
+    expect(screen.getAllByText("Unread")).toHaveLength(2);
+    expect(screen.getAllByText("Read")).toHaveLength(1);
+
+    cleanup();
+    render(<Harness queryClient={queryClient} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Read")).toHaveLength(3);
+    });
     expect(screen.getAllByText("Read")).toHaveLength(3);
+    expect(
+      env.requests.filter(
+        (request) =>
+          request.method === "POST" &&
+          request.path === "/w/acme/api/v1/messaging/notifications:mark-read",
+      ),
+    ).toHaveLength(1);
   });
 });
