@@ -209,9 +209,17 @@ function validateClosureDraft(draft: ClosureDraft): string | null {
 
 function sourceCell(draft: ClosureDraft) {
   if (draft.source_ical_feed_id !== null) {
-    return <Chip tone="sky" size="sm">Airbnb / VRBO iCal</Chip>;
+    return (
+      <span className="property-closure-source-chip">
+        <Chip tone="sky" size="sm">Airbnb / VRBO iCal</Chip>
+      </span>
+    );
   }
-  return <Chip tone="ghost" size="sm">manual</Chip>;
+  return (
+    <span className="property-closure-source-chip">
+      <Chip tone="ghost" size="sm">manual</Chip>
+    </span>
+  );
 }
 
 function closureSourceLabel(closure: PropertyClosure): string {
@@ -424,6 +432,7 @@ export default function PropertyClosuresPage() {
       key: "source",
       header: "Source",
       width: { px: 150 },
+      className: "property-closure-source",
       renderRead: ({ row }) => sourceCell(row.draft),
       renderEdit: ({ row }) => sourceCell(row.draft),
     },

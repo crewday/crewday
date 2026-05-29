@@ -264,6 +264,13 @@ function expectCssDeclaration(rule: string, property: string, value: string) {
   expect(rule).toMatch(new RegExp(`${escapedProperty}\\s*:\\s*${escapedValue}\\s*;`));
 }
 
+function expectDirectSourceChip(cell: Element | null, label: string) {
+  expect(cell).toHaveClass("property-closure-source");
+  const chip = Array.from(cell?.children ?? []).find((child) => child.classList.contains("property-closure-source-chip"));
+  expect(chip).toBeInstanceOf(HTMLElement);
+  expect(within(chip as HTMLElement).getByText(label)).toHaveClass("chip");
+}
+
 beforeEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
@@ -566,6 +573,39 @@ describe("<PropertyClosuresPage>", () => {
         "style",
         expect.stringContaining("--inline-table-columns: 156px 156px"),
       );
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("keeps closure source chips compact in read, edit, and create rows", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      const readRow = await screen.findByLabelText("Renovation closure from 10 Apr to 12 Apr");
+      const readSourceCell = readRow.querySelector('[data-inline-table-column="source"]');
+      expectDirectSourceChip(readSourceCell, "manual");
+
+      const importedRow = screen.getByLabelText("Owner repainting west wing closure from 20 Apr to 21 Apr");
+      const importedSourceCell = importedRow.querySelector('[data-inline-table-column="source"]');
+      expectDirectSourceChip(importedSourceCell, "Airbnb / VRBO iCal");
+
+      fireEvent.click(within(readRow).getByRole("button", { name: "Edit" }));
+      const editSourceCell = readRow.querySelector('[data-inline-table-column="source"]');
+      expectDirectSourceChip(editSourceCell, "manual");
+
+      const createRow = screen.getByLabelText("New closure");
+      const createSourceCell = createRow.querySelector('[data-inline-table-column="source"]');
+      expectDirectSourceChip(createSourceCell, "manual");
+
+      const chipRule = cssRule(".property-closure-source-chip");
+      expectCssDeclaration(chipRule, "display", "inline-flex");
+      expectCssDeclaration(chipRule, "width", "fit-content");
+      const editRule = cssRule(
+        ".inline-table-form__group.is-editing .inline-table-form__td.property-closure-source > .property-closure-source-chip",
+      );
+      expectCssDeclaration(editRule, "flex", "0 1 auto");
     } finally {
       fake.restore();
     }

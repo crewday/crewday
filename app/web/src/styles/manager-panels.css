@@ -324,6 +324,18 @@
   text-transform: uppercase;
 }
 .property-closure-reason { display: block; min-width: 0; overflow-wrap: anywhere; font-weight: 600; color: var(--ink); }
+.property-closure-source-chip {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+}
+.property-closure-source-chip > .chip {
+  max-width: 100%;
+}
+.inline-table-form__group.is-editing .inline-table-form__td.property-closure-source > .property-closure-source-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+}
 .property-closure-archive-control {
   display: flex;
   flex-wrap: wrap;
