@@ -614,6 +614,7 @@ COVERED_METHODS: frozenset[str] = frozenset(
         # rows with ``ctx.workspace_id``.
         "app.domain.messaging.broadcasts.execute_broadcast",
         "app.domain.messaging.broadcasts.list_broadcast_recipients",
+        "app.domain.messaging.broadcasts.preview_broadcast_audience",
         "app.domain.messaging.broadcasts.send_or_queue_broadcast",
         # cd-95zb: receipt OCR / autofill. Loads claim + attachment
         # through ``_load_claim`` / ``_load_attachment`` which scope
