@@ -53,6 +53,10 @@ function dateOnly(iso: string): string {
   return iso.slice(0, 10);
 }
 
+function firstDayOfMonth(iso: string): string {
+  return iso.slice(0, 7) + "-01";
+}
+
 function buildMonthCalendar(anchorIso: string, monthOffset = 0): {
   days: CalendarDay[];
   label: string;
@@ -264,6 +268,7 @@ export default function PropertyClosuresPage() {
   const tableShellRef = useRef<HTMLDivElement | null>(null);
   const [rowEdits, setRowEdits] = useState<ReadonlyMap<string, InlineTableRow<ClosureDraft>>>(() => new Map());
   const [createRow, setCreateRow] = useState<InlineTableRow<ClosureDraft>>(() => makeCreateRow("2026-04-01"));
+  const [showArchivedClosures, setShowArchivedClosures] = useState(false);
   const dataQ = useQuery({
     queryKey: qk.propertyClosures(pid),
     queryFn: () => fetchClosuresPayload(pid),
@@ -425,7 +430,20 @@ export default function PropertyClosuresPage() {
     },
   ], []);
 
-  const rows = useMemo<InlineTableRow<ClosureDraft>[]>(() => closures.map((closure) => {
+  const todayIsoForArchive = dateOnly(meQ.data?.today ?? "2026-04-01");
+  const currentMonthStartIso = firstDayOfMonth(todayIsoForArchive);
+  const archivedClosures = useMemo(
+    () => closures.filter((closure) => closure.ends_on < currentMonthStartIso),
+    [closures, currentMonthStartIso],
+  );
+  const tableClosures = useMemo(
+    () => showArchivedClosures ? closures : closures.filter((closure) => closure.ends_on >= currentMonthStartIso),
+    [closures, currentMonthStartIso, showArchivedClosures],
+  );
+  const archivedClosureCount = archivedClosures.length;
+  const archivedClosureNoun = archivedClosureCount === 1 ? "closure" : "closures";
+
+  const rows = useMemo<InlineTableRow<ClosureDraft>[]>(() => tableClosures.map((closure) => {
     const imported = isImportedClosure(closure);
     const baseDraft = draftFromClosure(closure);
     const localRow = rowEdits.get(closure.id);
@@ -445,12 +463,12 @@ export default function PropertyClosuresPage() {
       ) : undefined,
     };
   }), [
-    closures,
     deleteClosure.isPending,
     deleteClosure.variables,
     rowEdits,
     saveClosure.isPending,
     saveClosure.variables,
+    tableClosures,
   ]);
 
   const activeCreateRow = useMemo<InlineTableRow<ClosureDraft>>(() => ({
@@ -605,6 +623,23 @@ export default function PropertyClosuresPage() {
       }
     >
       <div className="panel" ref={tableShellRef}>
+        {archivedClosureCount > 0 ? (
+          <div className="property-closure-archive-control">
+            <span className="property-closure-archive-control__count" role="status" aria-live="polite">
+              {archivedClosureCount} past {archivedClosureNoun} {showArchivedClosures ? "shown" : "hidden"}
+            </span>
+            <button
+              type="button"
+              className="property-closure-archive-control__button"
+              aria-pressed={showArchivedClosures}
+              onClick={() => setShowArchivedClosures((current) => !current)}
+            >
+              {showArchivedClosures
+                ? "Hide past closures"
+                : `Show ${archivedClosureCount} past ${archivedClosureNoun}`}
+            </button>
+          </div>
+        ) : null}
         <InlineTableForm
           ariaLabel="Property closures"
           columns={closureColumns}

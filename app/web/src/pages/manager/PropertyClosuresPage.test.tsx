@@ -9,8 +9,45 @@ import * as preferences from "@/lib/preferences";
 import PropertyClosuresPage from "./PropertyClosuresPage";
 import { installFetchRouteHandlers } from "@/test/helpers";
 
+interface TestClosurePayload {
+  id: string;
+  property_id: string;
+  starts_at: string;
+  ends_at: string;
+  reason: string;
+  source_ical_feed_id: string | null;
+}
+
+function defaultClosureRows(manualReason: string, boundaryClosure: boolean): TestClosurePayload[] {
+  return [{
+    id: "closure_1",
+    property_id: "prop_1",
+    starts_at: "2026-04-10T00:00:00Z",
+    ends_at: "2026-04-13T00:00:00Z",
+    reason: manualReason,
+    source_ical_feed_id: null,
+  },
+  {
+    id: "closure_2",
+    property_id: "prop_1",
+    starts_at: "2026-04-20T00:00:00Z",
+    ends_at: "2026-04-22T00:00:00Z",
+    reason: "Owner repainting west wing",
+    source_ical_feed_id: "feed_1",
+  },
+  ...(boundaryClosure ? [{
+    id: "closure_3",
+    property_id: "prop_1",
+    starts_at: "2026-04-29T00:00:00Z",
+    ends_at: "2026-05-04T00:00:00Z",
+    reason: "Owner stay",
+    source_ical_feed_id: null,
+  }] : [])];
+}
+
 function installFetch({
   boundaryClosure = false,
+  closureRows,
   emptyClosures = false,
   failCreate = false,
   failClosures = false,
@@ -19,6 +56,7 @@ function installFetch({
   missingProperty = false,
 }: {
   boundaryClosure?: boolean;
+  closureRows?: TestClosurePayload[];
   emptyClosures?: boolean;
   failCreate?: boolean;
   failClosures?: boolean;
@@ -130,30 +168,7 @@ function installFetch({
         ? { status: 500, body: { type: "server_error", title: "Server error" } }
         : {
           body: {
-            data: emptyClosures ? [] : [{
-              id: "closure_1",
-              property_id: "prop_1",
-              starts_at: "2026-04-10T00:00:00Z",
-              ends_at: "2026-04-13T00:00:00Z",
-              reason: manualReason,
-              source_ical_feed_id: null,
-            },
-            {
-              id: "closure_2",
-              property_id: "prop_1",
-              starts_at: "2026-04-20T00:00:00Z",
-              ends_at: "2026-04-22T00:00:00Z",
-              reason: "Owner repainting west wing",
-              source_ical_feed_id: "feed_1",
-            },
-            ...(boundaryClosure ? [{
-              id: "closure_3",
-              property_id: "prop_1",
-              starts_at: "2026-04-29T00:00:00Z",
-              ends_at: "2026-05-04T00:00:00Z",
-              reason: "Owner stay",
-              source_ical_feed_id: null,
-            }] : [])],
+            data: emptyClosures ? [] : closureRows ?? defaultClosureRows(manualReason, boundaryClosure),
             next_cursor: null,
             has_more: false,
           },
@@ -321,6 +336,70 @@ describe("<PropertyClosuresPage>", () => {
         expect(within(cell).getByTitle("Owner stay closure, manual source")).toBeInTheDocument();
       }
       expect(within(exclusiveEnd).queryByText("Owner stay")).toBeNull();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("hides past closure rows until the archive control reveals them", async () => {
+    const fake = installFetch({
+      closureRows: [
+        {
+          id: "closure_past",
+          property_id: "prop_1",
+          starts_at: "2026-03-27T00:00:00Z",
+          ends_at: "2026-04-01T00:00:00Z",
+          reason: "March plumbing",
+          source_ical_feed_id: null,
+        },
+        {
+          id: "closure_current",
+          property_id: "prop_1",
+          starts_at: "2026-03-29T00:00:00Z",
+          ends_at: "2026-04-03T00:00:00Z",
+          reason: "Early April maintenance",
+          source_ical_feed_id: null,
+        },
+        {
+          id: "closure_imported_past",
+          property_id: "prop_1",
+          starts_at: "2026-03-24T00:00:00Z",
+          ends_at: "2026-04-01T00:00:00Z",
+          reason: "Imported owner block",
+          source_ical_feed_id: "feed_1",
+        },
+        {
+          id: "closure_future",
+          property_id: "prop_1",
+          starts_at: "2026-05-07T00:00:00Z",
+          ends_at: "2026-05-10T00:00:00Z",
+          reason: "May repainting",
+          source_ical_feed_id: null,
+        },
+      ],
+    });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByRole("button", { name: "Show 2 past closures" })).toBeInTheDocument();
+      expect(screen.getByText("2 past closures hidden")).toBeInTheDocument();
+      expect(screen.queryByLabelText("March plumbing closure from 27 Mar to 31 Mar")).toBeNull();
+      expect(screen.queryByLabelText("Imported owner block closure from 24 Mar to 31 Mar")).toBeNull();
+      expect(screen.getByLabelText("Early April maintenance closure from 29 Mar to 02 Apr")).toBeInTheDocument();
+      expect(screen.getByLabelText("May repainting closure from 07 May to 09 May")).toBeInTheDocument();
+      expect(screen.getByLabelText("New closure")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Show 2 past closures" }));
+
+      const pastRow = screen.getByLabelText("March plumbing closure from 27 Mar to 31 Mar");
+      const importedPastRow = screen.getByLabelText("Imported owner block closure from 24 Mar to 31 Mar");
+      expect(pastRow).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Hide past closures" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByText("2 past closures shown")).toBeInTheDocument();
+      expect(within(pastRow).getByRole("button", { name: "Edit" })).toBeEnabled();
+      expect(within(pastRow).getByRole("button", { name: "Delete" })).toBeEnabled();
+      expect(within(importedPastRow).getByRole("button", { name: "Edit" })).toBeDisabled();
+      expect(within(importedPastRow).getByRole("button", { name: "Delete" })).toBeDisabled();
     } finally {
       fake.restore();
     }
