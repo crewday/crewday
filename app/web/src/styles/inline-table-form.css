@@ -348,7 +348,7 @@
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  border: 1px solid transparent;
+  border: 1px solid var(--line);
   border-radius: 6px;
   background: transparent;
   color: var(--ink);
@@ -370,7 +370,7 @@
 .inline-table-form__control:hover,
 .inline-table-form__note:hover {
   background: var(--paper);
-  border-color: var(--line);
+  border-color: var(--line-strong);
 }
 
 .inline-table-form__control:focus,
@@ -383,9 +383,14 @@
 }
 
 .inline-table-form__control:disabled,
-.inline-table-form__note:disabled {
+.inline-table-form__control[readonly],
+.inline-table-form__note:disabled,
+.inline-table-form__note[readonly] {
   cursor: not-allowed;
   color: var(--ink-3);
+  border-color: var(--line);
+  background: var(--paper-2);
+  opacity: 0.72;
 }
 
 .inline-table-form__control--date,
@@ -394,7 +399,8 @@
   cursor: pointer;
 }
 
-.inline-table-form__control:disabled {
+.inline-table-form__control:disabled,
+.inline-table-form__control[readonly] {
   cursor: not-allowed;
 }
 
@@ -469,7 +475,7 @@
 
 .inline-table-form__tag-option:disabled,
 .inline-table-form__tag-option:disabled:hover {
-  border-color: transparent;
+  border-color: var(--line);
   background: var(--paper-2);
   color: var(--ink-3);
   cursor: not-allowed;
@@ -523,20 +529,21 @@
 .inline-table-form__icon-selector .icon-selector__selected {
   min-height: 38px;
   padding: 5px 8px;
-  border-color: transparent;
+  border-color: var(--line);
   border-radius: 6px;
   background: transparent;
 }
 
 .inline-table-form__icon-selector .icon-selector__selected:hover {
-  border-color: var(--line);
+  border-color: var(--line-strong);
   background: var(--paper);
 }
 
 .inline-table-form__icon-selector .icon-selector__selected:disabled,
 .inline-table-form__icon-selector .icon-selector__selected:disabled:hover {
-  border-color: transparent;
-  background: transparent;
+  border-color: var(--line);
+  background: var(--paper-2);
+  color: var(--ink-3);
 }
 
 .inline-table-form__icon-selector .icon-selector__selected[aria-expanded="true"] {

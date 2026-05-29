@@ -2196,6 +2196,27 @@ describe("InlineTableForm", () => {
       /\.inline-table-form__tag-option\s*{[\s\S]*min-width: 0;[\s\S]*max-width: 100%;/m,
     );
     expect(inlineTableCss).toMatch(
+      /\.inline-table-form__control,\s*\.inline-table-form__note\s*{[\s\S]*border: 1px solid var\(--line\);/m,
+    );
+    expect(inlineTableCss).toMatch(
+      /\.inline-table-form__control:hover,\s*\.inline-table-form__note:hover\s*{[\s\S]*border-color: var\(--line-strong\);/m,
+    );
+    expect(inlineTableCss).toMatch(
+      /\.inline-table-form__control:focus,\s*\.inline-table-form__note:focus\s*{[\s\S]*border-color: var\(--moss\);/m,
+    );
+    expect(inlineTableCss).toMatch(
+      /\.inline-table-form__control:disabled,[\s\S]*\.inline-table-form__note\[readonly\]\s*{[\s\S]*background: var\(--paper-2\);/m,
+    );
+    expect(inlineTableCss).toMatch(
+      /\.inline-table-form__control:disabled,\s*\.inline-table-form__control\[readonly\]\s*{[\s\S]*cursor: not-allowed;/m,
+    );
+    expect(inlineTableCss).toMatch(
+      /\.inline-table-form__tag-option:disabled,\s*\.inline-table-form__tag-option:disabled:hover\s*{[\s\S]*border-color: var\(--line\);/m,
+    );
+    expect(inlineTableCss).toMatch(
+      /\.inline-table-form__icon-selector \.icon-selector__selected\s*{[\s\S]*border-color: var\(--line\);/m,
+    );
+    expect(inlineTableCss).toMatch(
       /@media \(max-width: 720px\)\s*{[\s\S]*\.inline-table-form__head\s*{\s*display: none;/m,
     );
     expect(inlineTableCss).toMatch(
