@@ -53,21 +53,24 @@ function dateOnly(iso: string): string {
   return iso.slice(0, 10);
 }
 
-function buildMonthCalendar(anchorIso: string): {
+function buildMonthCalendar(anchorIso: string, monthOffset = 0): {
   days: CalendarDay[];
   label: string;
   leadingBlanks: number;
 } {
-  const year = Number(anchorIso.slice(0, 4));
-  const month = Number(anchorIso.slice(5, 7));
-  const firstOfMonth = new Date(Date.UTC(year, month - 1, 1));
+  const anchorYear = Number(anchorIso.slice(0, 4));
+  const anchorMonth = Number(anchorIso.slice(5, 7));
+  const firstOfMonth = new Date(Date.UTC(anchorYear, anchorMonth - 1 + monthOffset, 1));
+  const year = firstOfMonth.getUTCFullYear();
+  const month = firstOfMonth.getUTCMonth() + 1;
+  const monthPrefix = `${year}-${String(month).padStart(2, "0")}-`;
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
   const leadingBlanks = (firstOfMonth.getUTCDay() + 6) % 7;
   const days = Array.from({ length: daysInMonth }, (_, index) => {
     const day = index + 1;
     return {
       day,
-      iso: `${anchorIso.slice(0, 8)}${String(day).padStart(2, "0")}`,
+      iso: `${monthPrefix}${String(day).padStart(2, "0")}`,
     };
   });
   return {
@@ -79,6 +82,10 @@ function buildMonthCalendar(anchorIso: string): {
     }),
     leadingBlanks,
   };
+}
+
+function buildVisibleCalendars(anchorIso: string) {
+  return [0, 1, 2].map((offset) => buildMonthCalendar(anchorIso, offset));
 }
 
 function closureCoversDate(closure: PropertyClosure, iso: string): boolean {
@@ -201,6 +208,27 @@ function sourceCell(draft: ClosureDraft) {
     return <Chip tone="sky" size="sm">Airbnb / VRBO iCal</Chip>;
   }
   return <Chip tone="ghost" size="sm">manual</Chip>;
+}
+
+function closureSourceLabel(closure: PropertyClosure): string {
+  return isImportedClosure(closure) ? "iCal" : "manual";
+}
+
+function closureCalendarLabel(closure: PropertyClosure): string {
+  return `${closure.reason} closure, ${closureSourceLabel(closure)} source`;
+}
+
+function stayCalendarLabel(stay: Stay): string {
+  return `${stay.guest_name} stay, ${stay.source} source`;
+}
+
+function calendarDayLabel(iso: string, closures: PropertyClosure[], stays: Stay[]): string {
+  const entries = [
+    ...closures.map(closureCalendarLabel),
+    ...stays.map(stayCalendarLabel),
+  ];
+  if (entries.length === 0) return iso;
+  return `${iso}, ${entries.join(", ")}`;
 }
 
 function closureRowLabel(row: InlineTableRow<ClosureDraft>): string {
@@ -554,7 +582,8 @@ export default function PropertyClosuresPage() {
 
   const { property, stays } = dataQ.data;
   const todayIso = dateOnly(meQ.data.today);
-  const calendar = buildMonthCalendar(todayIso);
+  const calendars = buildVisibleCalendars(todayIso);
+  const calendarRangeLabel = calendars.map((calendar) => calendar.label).join(", ");
 
   return (
     <DeskPage
@@ -602,55 +631,68 @@ export default function PropertyClosuresPage() {
       <div className="panel">
         <header className="panel__head">
           <h2>Calendar view</h2>
-          <span className="muted">{calendar.label}</span>
+          <span className="muted">{calendarRangeLabel}</span>
         </header>
-        <div className="mini-cal" role="grid" aria-label={calendar.label + " property calendar"}>
-          {WEEKDAY_LABELS.map((weekday) => (
-            <div key={weekday} className="mini-cal__weekday" role="columnheader">
-              {weekday}
-            </div>
-          ))}
-          {Array.from({ length: calendar.leadingBlanks }, (_, index) => (
-            <div key={"blank-" + index} className="mini-cal__blank" aria-hidden="true" />
-          ))}
-          {calendar.days.map((day) => {
-            let reason: string | null = null;
-            for (const c of closures) {
-              if (closureCoversDate(c, day.iso)) {
-                reason = c.reason;
-                break;
-              }
-            }
-            const closed = reason !== null;
-            const cls = [
-              "mini-cal__day",
-              closed ? "mini-cal__day--closed" : "",
-              day.iso === todayIso ? "mini-cal__day--today" : "",
-            ]
-              .filter(Boolean)
-              .join(" ");
+        <div className="property-calendar" role="group" aria-label="Three-month property calendar">
+          {calendars.map((calendar) => {
+            const monthId = "property-calendar-" + calendar.label.replaceAll(" ", "-");
             return (
-              <div key={day.iso} className={cls} role="gridcell" aria-label={day.iso}>
-                <span className="mini-cal__num">{day.day}</span>
-                {closed && (
-                  <span
-                    className="mini-cal__bar mini-cal__bar--closed"
-                    title={reason ?? undefined}
-                  />
-                )}
-                {stays.map((s) => {
-                  if (stayCoversDate(s, day.iso)) {
+              <section key={calendar.label} className="property-calendar__month" aria-labelledby={monthId}>
+                <h3 id={monthId}>{calendar.label}</h3>
+                <div className="mini-cal" role="grid" aria-label={calendar.label + " property calendar"}>
+                  {WEEKDAY_LABELS.map((weekday) => (
+                    <div key={weekday} className="mini-cal__weekday" role="columnheader">
+                      {weekday}
+                    </div>
+                  ))}
+                  {Array.from({ length: calendar.leadingBlanks }, (_, index) => (
+                    <div key={"blank-" + index} className="mini-cal__blank" aria-hidden="true" />
+                  ))}
+                  {calendar.days.map((day) => {
+                    const dayClosures = closures.filter((closure) => closureCoversDate(closure, day.iso));
+                    const dayStays = stays.filter((stay) => stayCoversDate(stay, day.iso));
+                    const dayLabel = calendarDayLabel(day.iso, dayClosures, dayStays);
+                    const closed = dayClosures.length > 0;
+                    const cls = [
+                      "mini-cal__day",
+                      closed ? "mini-cal__day--closed" : "",
+                      day.iso === todayIso ? "mini-cal__day--today" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ");
                     return (
-                      <span
-                        key={s.id}
-                        className={"mini-cal__bar mini-cal__bar--" + property.color}
-                        title={s.guest_name + " (" + s.source + ")"}
-                      />
+                      <div
+                        key={day.iso}
+                        className={cls}
+                        role="gridcell"
+                        aria-label={dayLabel}
+                        title={dayLabel === day.iso ? undefined : dayLabel}
+                      >
+                        <span className="mini-cal__num">{day.day}</span>
+                        {dayClosures.map((closure) => (
+                          <span
+                            key={closure.id}
+                            className="mini-cal__closure"
+                            role="group"
+                            title={closureCalendarLabel(closure)}
+                            aria-label={closureCalendarLabel(closure)}
+                          >
+                            <span className="mini-cal__closure-reason">{closure.reason}</span>
+                            <span className="mini-cal__closure-source">{closureSourceLabel(closure)}</span>
+                          </span>
+                        ))}
+                        {dayStays.map((s) => (
+                          <span
+                            key={s.id}
+                            className={"mini-cal__bar mini-cal__bar--" + property.color}
+                            title={s.guest_name + " (" + s.source + ")"}
+                          />
+                        ))}
+                      </div>
                     );
-                  }
-                  return null;
-                })}
-              </div>
+                  })}
+                </div>
+              </section>
             );
           })}
         </div>

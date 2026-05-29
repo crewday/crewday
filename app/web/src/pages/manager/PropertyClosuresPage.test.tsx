@@ -10,6 +10,7 @@ import PropertyClosuresPage from "./PropertyClosuresPage";
 import { installFetchRouteHandlers } from "@/test/helpers";
 
 function installFetch({
+  boundaryClosure = false,
   emptyClosures = false,
   failCreate = false,
   failClosures = false,
@@ -17,6 +18,7 @@ function installFetch({
   manualReason = "Renovation",
   missingProperty = false,
 }: {
+  boundaryClosure?: boolean;
   emptyClosures?: boolean;
   failCreate?: boolean;
   failClosures?: boolean;
@@ -143,7 +145,15 @@ function installFetch({
               ends_at: "2026-04-22T00:00:00Z",
               reason: "Owner repainting west wing",
               source_ical_feed_id: "feed_1",
-            }],
+            },
+            ...(boundaryClosure ? [{
+              id: "closure_3",
+              property_id: "prop_1",
+              starts_at: "2026-04-29T00:00:00Z",
+              ends_at: "2026-05-04T00:00:00Z",
+              reason: "Owner stay",
+              source_ical_feed_id: null,
+            }] : [])],
             next_cursor: null,
             has_more: false,
           },
@@ -262,6 +272,8 @@ describe("<PropertyClosuresPage>", () => {
       expect(within(importedRow).getByRole("button", { name: "Delete" })).toBeDisabled();
       expect(screen.getByText("Calendar view")).toBeInTheDocument();
       const calendar = screen.getByRole("grid", { name: "April 2026 property calendar" });
+      expect(screen.getByRole("grid", { name: "May 2026 property calendar" })).toBeInTheDocument();
+      expect(screen.getByRole("grid", { name: "June 2026 property calendar" })).toBeInTheDocument();
       expect(Array.from(calendar.children).slice(0, 10).map((el) => el.textContent)).toEqual([
         "Mon",
         "Tue",
@@ -275,9 +287,40 @@ describe("<PropertyClosuresPage>", () => {
         "1",
       ]);
       expect(calendar.querySelectorAll(".mini-cal__blank")).toHaveLength(2);
-      expect(within(calendar).getByRole("gridcell", { name: "2026-04-16" })).toHaveClass("mini-cal__day--today");
+      expect(within(calendar).getByRole("gridcell", { name: /^2026-04-16\b/ })).toHaveClass("mini-cal__day--today");
+      const importedCell = within(calendar).getByRole("gridcell", {
+        name: /2026-04-20.*Owner repainting west wing closure, iCal source/,
+      });
+      expect(within(importedCell).getByText("Owner repainting west wing")).toBeInTheDocument();
+      expect(within(importedCell).getByText("iCal")).toBeInTheDocument();
+      expect(within(importedCell).getByTitle("Owner repainting west wing closure, iCal source")).toBeInTheDocument();
       expect(fake.calls).toContain("/w/acme/api/v1/property_closures?property_id=prop_1&limit=100");
       expect(fake.calls).toContain("/w/acme/api/v1/stays/reservations?property_id=prop_1&limit=100");
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("renders closure reason and source across the current and next two calendar months", async () => {
+    const fake = installFetch({ boundaryClosure: true });
+    try {
+      render(<Harness />);
+
+      const april = await screen.findByRole("grid", { name: "April 2026 property calendar" });
+      const may = screen.getByRole("grid", { name: "May 2026 property calendar" });
+      expect(screen.getByRole("grid", { name: "June 2026 property calendar" })).toBeInTheDocument();
+
+      const aprilStart = within(april).getByRole("gridcell", { name: /^2026-04-29\b/ });
+      const mayMiddle = within(may).getByRole("gridcell", { name: /^2026-05-01\b/ });
+      const mayEnd = within(may).getByRole("gridcell", { name: /^2026-05-03\b/ });
+      const exclusiveEnd = within(may).getByRole("gridcell", { name: "2026-05-04" });
+
+      for (const cell of [aprilStart, mayMiddle, mayEnd]) {
+        expect(within(cell).getByText("Owner stay")).toBeInTheDocument();
+        expect(within(cell).getByText("manual")).toBeInTheDocument();
+        expect(within(cell).getByTitle("Owner stay closure, manual source")).toBeInTheDocument();
+      }
+      expect(within(exclusiveEnd).queryByText("Owner stay")).toBeNull();
     } finally {
       fake.restore();
     }
