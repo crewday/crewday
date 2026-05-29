@@ -31,7 +31,11 @@ describe("IconSelector", () => {
     render(<IconSelector label="Icon" value="ChefHat" onChange={onChange} />);
 
     expect(screen.queryByText("Selected icon")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Icon: Chef Hat. Edit icon" })).toBeInTheDocument();
+    expect(screen.getByText("Chef Hat")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Icon: Chef Hat. Edit icon" })).toHaveAttribute(
+      "title",
+      "Icon: Chef Hat. Edit icon",
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Icon: Chef Hat. Edit icon" }));
     const choices = screen.getByRole("group", { name: "Icon choices" });

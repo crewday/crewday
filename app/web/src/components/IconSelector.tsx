@@ -24,6 +24,7 @@ interface IconSelectorProps {
   allowEmpty?: boolean;
   disabled?: boolean;
   className?: string;
+  showSelectedLabel?: boolean;
   error?: string;
   errorId?: string;
 }
@@ -47,6 +48,7 @@ export default function IconSelector({
   allowEmpty = requirement !== "required",
   disabled = false,
   className,
+  showSelectedLabel = true,
   error,
   errorId,
 }: IconSelectorProps) {
@@ -142,6 +144,7 @@ export default function IconSelector({
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? errorId : hasUnknownValue ? `${controlId}-unknown` : undefined}
           aria-label={`${label}: ${selectedLabel}. Edit icon`}
+          title={`${label}: ${selectedLabel}. Edit icon`}
           disabled={disabled}
           onKeyDown={handlePreviewKeyDown}
           onClick={() => setIsOpen((open) => !open)}
@@ -149,7 +152,7 @@ export default function IconSelector({
           <span className="icon-selector__selected-mark">
             {selectedName ? <AssetIcon name={selectedName} size={18} /> : <X size={16} aria-hidden="true" />}
           </span>
-          <strong className="icon-selector__selected-name">{selectedLabel}</strong>
+          {showSelectedLabel ? <strong className="icon-selector__selected-name">{selectedLabel}</strong> : null}
           <Pencil className="icon-selector__selected-edit" size={16} aria-hidden="true" />
         </button>
         {hasUnknownValue ? (

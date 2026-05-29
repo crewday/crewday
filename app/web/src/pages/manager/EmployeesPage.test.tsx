@@ -579,6 +579,7 @@ describe("<EmployeesPage> work-role catalog", () => {
     const catalog = screen.getByRole("region", { name: "Work roles" });
     expect(within(catalog).queryByText("Selected icon")).not.toBeInTheDocument();
     expect(within(catalog).getByRole("button", { name: "Icon: Brush Cleaning. Edit icon" })).toBeInTheDocument();
+    expect(within(catalog).queryByText("Brush Cleaning")).not.toBeInTheDocument();
     const descriptionInput = within(catalog).getByLabelText("Description");
     expect(descriptionInput.tagName).toBe("INPUT");
     expect(within(catalog).queryByRole("textbox", { name: "Description" })?.tagName).toBe("INPUT");
@@ -644,6 +645,7 @@ describe("<EmployeesPage> work-role catalog", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const catalog = screen.getByRole("region", { name: "Work roles" });
     fireEvent.click(within(catalog).getByRole("button", { name: "Icon: Brush Cleaning. Edit icon" }));
+    expect(within(catalog).getByText("Brush Cleaning")).toBeInTheDocument();
     fireEvent.change(within(catalog).getByLabelText("Search icon choices"), { target: { value: "waves" } });
     fireEvent.click(within(catalog).getByRole("button", { name: "Select Waves icon" }));
     fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));

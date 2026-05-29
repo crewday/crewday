@@ -1618,6 +1618,7 @@ export function InlineIconField({
         allowEmpty={allowEmpty}
         error={error}
         errorId={errorId}
+        showSelectedLabel={false}
         className="inline-table-form__icon-selector"
       />
     </div>

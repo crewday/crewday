@@ -550,6 +550,7 @@ describe("InlineTableForm", () => {
     const onChange = vi.fn();
     const { rerender } = render(<InlineIconField label="Role icon" value="" onChange={onChange} />);
 
+    expect(screen.queryByText("No icon")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Role icon: No icon. Edit icon" }));
     await waitFor(() => expect(screen.getByLabelText("Search role icon choices")).toHaveFocus());
     fireEvent.change(screen.getByLabelText("Search role icon choices"), { target: { value: "waves" } });
@@ -559,7 +560,9 @@ describe("InlineTableForm", () => {
 
     onChange.mockClear();
     rerender(<InlineIconField label="Role icon" value="ChefHat" onChange={onChange} />);
+    expect(screen.queryByText("Chef Hat")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Role icon: Chef Hat. Edit icon" }));
+    expect(screen.getByText("Chef Hat")).toBeInTheDocument();
     fireEvent.click(within(screen.getByRole("group", { name: "Role icon choices" })).getByRole("button", { name: "No icon" }));
 
     expect(onChange).toHaveBeenCalledWith("");
