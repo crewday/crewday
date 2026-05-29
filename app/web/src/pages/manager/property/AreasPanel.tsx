@@ -2,12 +2,12 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   InlineNoteField,
-  InlineNumberField,
   InlineSearchableSelectField,
   InlineSelectField,
   InlineTableForm,
   InlineTextField,
   type InlineTableColumn,
+  type InlineTableReorder,
   type InlineTableRow,
 } from "@/components/InlineTableForm";
 import { Loading } from "@/components/common";
@@ -34,7 +34,7 @@ interface AreaDraft {
   unit_id: string | null;
   name: string;
   kind: AreaKind;
-  order_hint: string;
+  order_hint: number;
   parent_area_id: string;
   notes_md: string;
 }
@@ -51,6 +51,16 @@ interface AreaWriteBody {
 interface AreaSaveVariables {
   rowId: string;
   draft: AreaDraft;
+  orderHint?: number;
+}
+
+interface AreaReorderVariables {
+  rowId: string;
+  orderedRows: readonly InlineTableRow<AreaDraft>[];
+}
+
+interface AreaReorderContext {
+  previousAreas?: Area[];
 }
 
 const CREATE_ROW_ID = "__new_area__";
@@ -67,7 +77,7 @@ function emptyAreaDraft(): AreaDraft {
     unit_id: null,
     name: "",
     kind: "indoor_room",
-    order_hint: "0",
+    order_hint: 0,
     parent_area_id: "",
     notes_md: "",
   };
@@ -79,7 +89,7 @@ function draftFromArea(area: Area): AreaDraft {
     unit_id: area.unit_id,
     name: area.name,
     kind: area.kind,
-    order_hint: String(area.order_hint),
+    order_hint: area.order_hint,
     parent_area_id: area.parent_area_id ?? "",
     notes_md: area.notes_md,
   };
@@ -89,13 +99,12 @@ function areaSelectOption(area: Area): SearchableSelectOption {
   return { value: area.id, label: area.name };
 }
 
-function bodyFromDraft(draft: AreaDraft): AreaWriteBody {
-  const parsedOrder = Number.parseInt(draft.order_hint, 10);
+function bodyFromDraft(draft: AreaDraft, orderHint = draft.order_hint): AreaWriteBody {
   return {
     name: draft.name.trim(),
     kind: draft.kind,
     unit_id: draft.unit_id,
-    order_hint: Number.isFinite(parsedOrder) ? Math.max(0, parsedOrder) : 0,
+    order_hint: Math.max(0, orderHint),
     parent_area_id: draft.parent_area_id || null,
     notes_md: draft.notes_md.trim(),
   };
@@ -110,6 +119,22 @@ async function invalidatePropertyAreaViews(
     queryClient.invalidateQueries({ queryKey: qk.property(propertyId) }),
     queryClient.invalidateQueries({ queryKey: qk.properties() }),
   ]);
+}
+
+function nextAreaOrderHint(areas: readonly Area[]): number {
+  if (areas.length === 0) return 0;
+  return Math.max(...areas.map((area) => area.order_hint)) + 1;
+}
+
+function reorderedAreasFromRows(
+  orderedRows: readonly InlineTableRow<AreaDraft>[],
+  areasById: ReadonlyMap<string, Area>,
+): Area[] {
+  return orderedRows.flatMap((row, index) => {
+    const area = areasById.get(row.id);
+    if (!area) return [];
+    return [{ ...area, order_hint: index }];
+  });
 }
 
 export default function AreasPanel({ propertyId }: { propertyId: string }) {
@@ -127,8 +152,8 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
   });
 
   const saveArea = useMutation({
-    mutationFn: ({ draft }: AreaSaveVariables) => {
-      const body = bodyFromDraft(draft);
+    mutationFn: ({ draft, orderHint }: AreaSaveVariables) => {
+      const body = bodyFromDraft(draft, orderHint);
       if (draft.id) {
         return fetchJson<Area>("/api/v1/areas/" + draft.id, {
           method: "PATCH",
@@ -176,7 +201,56 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
 
   const areas = areasQ.data ?? [];
   const areasById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
-  const busy = saveArea.isPending || deleteArea.isPending;
+  const reorderAreas = useMutation<Area[], Error, AreaReorderVariables, AreaReorderContext>({
+    mutationFn: async ({ orderedRows }) => {
+      const updates = orderedRows
+        .map((row, index) => ({ row, orderHint: index }))
+        .filter(({ row }) => row.id !== CREATE_ROW_ID && row.draft.id)
+        .filter(({ row, orderHint }) => row.draft.order_hint !== orderHint);
+      const results = await Promise.allSettled(
+        updates.map(({ row, orderHint }) =>
+          fetchJson<Area>("/api/v1/areas/" + row.id, {
+            method: "PATCH",
+            body: bodyFromDraft(row.draft, orderHint),
+          }),
+        ),
+      );
+      const areas: Area[] = [];
+      let firstError: unknown = null;
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          areas.push(result.value);
+        } else {
+          firstError ??= result.reason;
+        }
+      }
+      if (firstError !== null) throw firstError;
+      return areas;
+    },
+    onMutate: async (variables) => {
+      await queryClient.cancelQueries({ queryKey: qk.propertyAreas(propertyId) });
+      const previousAreas = queryClient.getQueryData<Area[]>(qk.propertyAreas(propertyId));
+      queryClient.setQueryData<Area[]>(
+        qk.propertyAreas(propertyId),
+        reorderedAreasFromRows(variables.orderedRows, areasById),
+      );
+      setRowErrors((current) => clearMapValue(current, variables.rowId));
+      return { previousAreas };
+    },
+    onError: (err, variables, context) => {
+      if (context?.previousAreas) {
+        queryClient.setQueryData(qk.propertyAreas(propertyId), context.previousAreas);
+      }
+      setRowErrors((current) =>
+        setMapValue(current, variables.rowId, errorMessage(err, "Areas could not be reordered.")),
+      );
+    },
+    onSettled: async () => {
+      await invalidatePropertyAreaViews(queryClient, propertyId);
+    },
+  });
+  const busy = saveArea.isPending || deleteArea.isPending || reorderAreas.isPending;
+  const canReorderAreas = editedDrafts.size === 0 && !createDirty && !busy;
   const rows = useMemo(
     () => areas.map((area): InlineTableRow<AreaDraft> => {
       const editedDraft = editedDrafts.get(area.id);
@@ -256,27 +330,16 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
           />
         ),
       },
-      {
-        key: "order",
-        header: "Order",
-        width: { px: 96 },
-        className: "mono",
-        align: "end",
-        renderRead: ({ row }) => row.draft.order_hint,
-        renderEdit: ({ row, update, disabled }) => (
-          <InlineNumberField
-            value={row.draft.order_hint}
-            min={0}
-            step={1}
-            onChange={(order_hint) => update({ order_hint })}
-            disabled={disabled}
-            ariaLabel="Order"
-          />
-        ),
-      },
     ],
     [areas, areasById],
   );
+
+  function handleReorder(reordered: InlineTableReorder<AreaDraft>): void {
+    reorderAreas.mutate({
+      rowId: reordered.rowId,
+      orderedRows: reordered.orderedRows,
+    });
+  }
 
   if (areasQ.isPending) return <Loading />;
   if (areasQ.isError || !areasQ.data) {
@@ -323,11 +386,17 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
         }}
         onSave={(rowId) => {
           if (rowId === CREATE_ROW_ID) {
-            saveArea.mutate({ rowId, draft: createDraft });
+            saveArea.mutate({
+              rowId,
+              draft: createDraft,
+              orderHint: nextAreaOrderHint(areas),
+            });
             return;
           }
           const draft = editedDrafts.get(rowId);
-          if (draft) saveArea.mutate({ rowId, draft });
+          if (draft) {
+            saveArea.mutate({ rowId, draft, orderHint: areasById.get(rowId)?.order_hint });
+          }
         }}
         onCancel={(rowId) => {
           if (rowId === CREATE_ROW_ID) {
@@ -339,6 +408,7 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
           setEditedDrafts((current) => clearMapValue(current, rowId));
           setRowErrors((current) => clearMapValue(current, rowId));
         }}
+        onReorder={canReorderAreas ? handleReorder : undefined}
         onDelete={(rowId) => deleteArea.mutate(rowId)}
         trailingCreateRow={trailingCreateRow}
         getRowLabel={(row) => row.draft.name || row.label || "New area"}

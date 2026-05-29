@@ -23,12 +23,23 @@ interface TestArea {
   notes_md: string;
 }
 
-function renderAreasPanel(initialAreas: TestArea[] = []) {
+interface RenderAreasPanelOptions {
+  failPatchAreaIds?: readonly string[];
+}
+
+function orderedAreas(areas: readonly TestArea[]): TestArea[] {
+  return [...areas].sort(
+    (left, right) => left.order_hint - right.order_hint || left.id.localeCompare(right.id),
+  );
+}
+
+function renderAreasPanel(initialAreas: TestArea[] = [], options: RenderAreasPanelOptions = {}) {
   let areas = [...initialAreas];
+  const failPatchAreaIds = new Set(options.failPatchAreaIds ?? []);
   const routes: FetchRoute[] = [
     {
       path: "/w/acme/api/v1/properties/prop_1/areas",
-      respond: () => ({ body: { data: areas, next_cursor: null, has_more: false } }),
+      respond: () => ({ body: { data: orderedAreas(areas), next_cursor: null, has_more: false } }),
     },
     {
       path: "/w/acme/api/v1/properties/prop_1/areas",
@@ -49,6 +60,31 @@ function renderAreasPanel(initialAreas: TestArea[] = []) {
         return { status: 201, body: area };
       },
     },
+    ...initialAreas.map((area): FetchRoute => ({
+      path: "/w/acme/api/v1/areas/" + area.id,
+      method: "PATCH",
+      respond: ({ body }) => {
+        if (failPatchAreaIds.has(area.id)) {
+          return { status: 500, body: { detail: "Reorder failed." } };
+        }
+        const draft = body as Omit<TestArea, "id" | "property_id">;
+        let patched: TestArea | null = null;
+        areas = areas.map((current) => {
+          if (current.id !== area.id) return current;
+          patched = {
+            ...current,
+            unit_id: draft.unit_id,
+            name: draft.name,
+            kind: draft.kind,
+            order_hint: draft.order_hint,
+            parent_area_id: draft.parent_area_id,
+            notes_md: draft.notes_md,
+          };
+          return patched;
+        });
+        return patched ? { body: patched } : { status: 404, body: { detail: "Area not found" } };
+      },
+    })),
   ];
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const fetchEnv = installFetchRouteHandlers(routes);
@@ -75,20 +111,41 @@ afterEach(() => {
 
 describe("<AreasPanel>", () => {
   it("shows an editable create row by default without a separate add button", async () => {
-    renderAreasPanel();
+    renderAreasPanel([
+      areaFixture({
+        id: "area_1",
+        name: "Storage",
+        order_hint: 27,
+      }),
+    ]);
 
     expect(await screen.findByRole("table", { name: "Property areas" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Order" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "New area" })).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText("Storage")).queryByText("27")).not.toBeInTheDocument();
     const createRow = screen.getByLabelText("New area");
 
     expect(createRow).toHaveClass("inline-table-form__group--trailing-create", "is-editing");
     expect(within(createRow).getByLabelText("Name")).toBeInTheDocument();
+    expect(within(createRow).queryByLabelText("Order")).not.toBeInTheDocument();
     expect(within(createRow).getByRole("button", { name: "Save" })).toBeDisabled();
     expect(screen.queryByRole("heading", { name: "No areas yet" })).not.toBeInTheDocument();
   });
 
   it("creates from the default row and leaves a fresh empty row ready", async () => {
-    const { requests } = renderAreasPanel();
+    const { requests } = renderAreasPanel([
+      areaFixture({
+        id: "area_1",
+        name: "Kitchen",
+        order_hint: 2,
+      }),
+      areaFixture({
+        id: "area_2",
+        name: "Terrace",
+        kind: "outdoor",
+        order_hint: 7,
+      }),
+    ]);
 
     const createRow = await screen.findByLabelText("New area");
     fireEvent.change(within(createRow).getByLabelText("Name"), {
@@ -96,9 +153,6 @@ describe("<AreasPanel>", () => {
     });
     fireEvent.change(within(createRow).getByLabelText("Kind"), {
       target: { value: "outdoor" },
-    });
-    fireEvent.change(within(createRow).getByLabelText("Order"), {
-      target: { value: "3" },
     });
     fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
 
@@ -108,7 +162,7 @@ describe("<AreasPanel>", () => {
     expect(createRequest?.body).toMatchObject({
       name: "Pool",
       kind: "outdoor",
-      order_hint: 3,
+      order_hint: 8,
       parent_area_id: null,
     });
 
@@ -116,4 +170,179 @@ describe("<AreasPanel>", () => {
       expect(within(screen.getByLabelText("New area")).getByLabelText("Name")).toHaveValue("");
     });
   });
+
+  it("hides reorder controls while the create row has unsaved input", async () => {
+    renderAreasPanel([
+      areaFixture({
+        id: "area_1",
+        name: "Kitchen",
+        order_hint: 0,
+      }),
+      areaFixture({
+        id: "area_2",
+        name: "Pool",
+        kind: "outdoor",
+        order_hint: 1,
+      }),
+    ]);
+
+    await screen.findByText("Kitchen");
+    expect(screen.getByRole("button", { name: "Move Pool up" })).toBeInTheDocument();
+
+    const createRow = screen.getByLabelText("New area");
+    fireEvent.change(within(createRow).getByLabelText("Name"), {
+      target: { value: "Pantry" },
+    });
+
+    expect(screen.queryByRole("button", { name: "Move Pool up" })).not.toBeInTheDocument();
+
+    fireEvent.click(within(createRow).getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByRole("button", { name: "Move Pool up" })).toBeInTheDocument();
+  });
+
+  it("persists area reorders through hidden order hints", async () => {
+    const { container, requests } = renderAreasPanel([
+      areaFixture({
+        id: "area_1",
+        name: "Kitchen",
+        order_hint: 0,
+      }),
+      areaFixture({
+        id: "area_2",
+        name: "Pool",
+        kind: "outdoor",
+        order_hint: 1,
+      }),
+    ]);
+
+    await screen.findByText("Kitchen");
+    fireEvent.click(screen.getByRole("button", { name: "Move Pool up" }));
+
+    await waitFor(() => {
+      expect(requests.filter((request) => request.method === "PATCH")).toHaveLength(2);
+    });
+    expect(
+      requests.find((request) => request.path === "/w/acme/api/v1/areas/area_2")?.body,
+    ).toMatchObject({
+      order_hint: 0,
+    });
+    expect(
+      requests.find((request) => request.path === "/w/acme/api/v1/areas/area_1")?.body,
+    ).toMatchObject({
+      order_hint: 1,
+    });
+
+    await waitFor(() => {
+      const rowLabels = Array.from(container.querySelectorAll("[data-inline-table-row-group]")).map((row) =>
+        row.getAttribute("aria-label"),
+      );
+      expect(rowLabels.slice(0, 2)).toEqual(["Pool", "Kitchen"]);
+    });
+  });
+
+  it("persists drag reorders through the shared row affordance", async () => {
+    const { container, requests } = renderAreasPanel([
+      areaFixture({
+        id: "area_1",
+        name: "Kitchen",
+        order_hint: 0,
+      }),
+      areaFixture({
+        id: "area_2",
+        name: "Pool",
+        kind: "outdoor",
+        order_hint: 1,
+      }),
+    ]);
+
+    await screen.findByText("Kitchen");
+    const kitchenRow = screen.getByLabelText("Kitchen");
+    const poolRow = screen.getByLabelText("Pool");
+    const transfer = dataTransfer();
+    fireEvent.dragStart(kitchenRow, { dataTransfer: transfer });
+    fireEvent.dragOver(poolRow, { dataTransfer: transfer });
+    fireEvent.drop(poolRow, { dataTransfer: transfer });
+    fireEvent.dragEnd(kitchenRow, { dataTransfer: transfer });
+
+    await waitFor(() => {
+      expect(requests.filter((request) => request.method === "PATCH")).toHaveLength(2);
+    });
+    expect(
+      requests.find((request) => request.path === "/w/acme/api/v1/areas/area_2")?.body,
+    ).toMatchObject({
+      order_hint: 0,
+    });
+    expect(
+      requests.find((request) => request.path === "/w/acme/api/v1/areas/area_1")?.body,
+    ).toMatchObject({
+      order_hint: 1,
+    });
+
+    await waitFor(() => {
+      const rowLabels = Array.from(container.querySelectorAll("[data-inline-table-row-group]")).map((row) =>
+        row.getAttribute("aria-label"),
+      );
+      expect(rowLabels.slice(0, 2)).toEqual(["Pool", "Kitchen"]);
+    });
+  });
+
+  it("refetches the canonical area order when a reorder patch fails", async () => {
+    const { container, requests } = renderAreasPanel(
+      [
+        areaFixture({
+          id: "area_1",
+          name: "Kitchen",
+          order_hint: 0,
+        }),
+        areaFixture({
+          id: "area_2",
+          name: "Pool",
+          kind: "outdoor",
+          order_hint: 1,
+        }),
+      ],
+      { failPatchAreaIds: ["area_1"] },
+    );
+
+    await screen.findByText("Kitchen");
+    fireEvent.click(screen.getByRole("button", { name: "Move Pool up" }));
+
+    expect(await screen.findByText("Reorder failed.")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        requests.filter(
+          (request) => request.method === "GET" && request.path === "/w/acme/api/v1/properties/prop_1/areas",
+        ).length,
+      ).toBeGreaterThan(1);
+    });
+    const rowLabels = Array.from(container.querySelectorAll("[data-inline-table-row-group]")).map((row) =>
+      row.getAttribute("aria-label"),
+    );
+    expect(rowLabels.slice(0, 2)).toEqual(["Kitchen", "Pool"]);
+  });
 });
+
+function dataTransfer(): DataTransfer {
+  return {
+    effectAllowed: "",
+    dropEffect: "",
+    setData() {},
+    getData() {
+      return "";
+    },
+  } as unknown as DataTransfer;
+}
+
+function areaFixture(overrides: Partial<TestArea>): TestArea {
+  return {
+    id: "area_1",
+    property_id: "prop_1",
+    unit_id: null,
+    name: "Kitchen",
+    kind: "indoor_room",
+    order_hint: 0,
+    parent_area_id: null,
+    notes_md: "",
+    ...overrides,
+  };
+}
