@@ -9,7 +9,7 @@ import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
 import {
   InlineDateField,
-  InlineSelectField,
+  InlineTextField,
   InlineTableForm,
   type InlineTableColumn,
   type InlineTableRow,
@@ -34,7 +34,7 @@ interface ClosurePayload {
   property_id: string;
   starts_at: string;
   ends_at: string;
-  reason: PropertyClosure["reason"];
+  reason: string;
   source_ical_feed_id?: string | null;
 }
 
@@ -108,6 +108,7 @@ function mapClosure(row: ClosurePayload): PropertyClosure {
     starts_on: dateOnly(row.starts_at),
     ends_on: exclusiveEndAtToInclusiveDate(row.ends_at),
     reason: row.reason,
+    source_ical_feed_id: row.source_ical_feed_id ?? null,
     note: "",
   };
 }
@@ -131,29 +132,19 @@ interface ClosureDraft {
   id: string | null;
   starts_on: string;
   ends_on: string;
-  reason: PropertyClosure["reason"];
+  reason: string;
+  source_ical_feed_id: string | null;
 }
 
-type ManualClosureReason = Exclude<PropertyClosure["reason"], "ical_unavailable">;
-
-const REASONS: readonly ManualClosureReason[] = [
-  "renovation",
-  "owner_stay",
-  "seasonal",
-  "other",
-];
-
-const REASON_OPTIONS = REASONS.map((reason) => ({
-  value: reason,
-  label: reasonLabel(reason),
-}));
+const MAX_REASON_LENGTH = 120;
 
 function emptyDraft(todayIso: string): ClosureDraft {
   return {
     id: null,
     starts_on: todayIso,
     ends_on: todayIso,
-    reason: "renovation",
+    reason: "Renovation",
+    source_ical_feed_id: null,
   };
 }
 
@@ -163,6 +154,7 @@ function draftFromClosure(closure: PropertyClosure): ClosureDraft {
     starts_on: closure.starts_on,
     ends_on: closure.ends_on,
     reason: closure.reason,
+    source_ical_feed_id: closure.source_ical_feed_id,
   };
 }
 
@@ -184,28 +176,28 @@ function closureBody(form: ClosureDraft, propertyId: string) {
     unit_id: null,
     starts_at: form.starts_on + "T00:00:00Z",
     ends_at: inclusiveDateToExclusiveEndAt(form.ends_on),
-    reason: form.reason,
+    reason: form.reason.trim(),
     source_ical_feed_id: null,
   };
 }
 
-function reasonLabel(reason: PropertyClosure["reason"]): string {
-  if (reason === "ical_unavailable") return "iCal unavailable";
-  return reason.replace("_", " ");
-}
-
 function isImportedClosure(closure: PropertyClosure): boolean {
-  return closure.reason === "ical_unavailable";
+  return closure.source_ical_feed_id !== null;
 }
 
 function validateClosureDraft(draft: ClosureDraft): string | null {
   if (!draft.starts_on || !draft.ends_on) return "Start and end dates are required.";
   if (draft.ends_on < draft.starts_on) return "End date must be on or after the start date.";
+  const trimmedReason = draft.reason.trim();
+  if (!trimmedReason) return "Reason is required.";
+  if (trimmedReason.length > MAX_REASON_LENGTH) {
+    return "Reason must be 120 characters or fewer.";
+  }
   return null;
 }
 
 function sourceCell(draft: ClosureDraft) {
-  if (draft.reason === "ical_unavailable") {
+  if (draft.source_ical_feed_id !== null) {
     return <Chip tone="sky" size="sm">Airbnb / VRBO iCal</Chip>;
   }
   return <Chip tone="ghost" size="sm">manual</Chip>;
@@ -213,11 +205,7 @@ function sourceCell(draft: ClosureDraft) {
 
 function closureRowLabel(row: InlineTableRow<ClosureDraft>): string {
   if (row.isNew) return "New closure";
-  return `${reasonLabel(row.draft.reason)} closure from ${fmtDayMon(row.draft.starts_on)} to ${fmtDayMon(row.draft.ends_on)}`;
-}
-
-function pickReason(value: string): ManualClosureReason {
-  return REASONS.find((reason) => reason === value) ?? "other";
+  return `${row.draft.reason} closure from ${fmtDayMon(row.draft.starts_on)} to ${fmtDayMon(row.draft.ends_on)}`;
 }
 
 async function fetchClosuresPayload(pid: string): Promise<ClosuresPayload> {
@@ -358,7 +346,7 @@ export default function PropertyClosuresPage() {
     {
       key: "starts_on",
       header: "Start",
-      width: { px: 132 },
+      width: { px: 124 },
       renderRead: ({ row }) => <span className="mono">{fmtDayMon(row.draft.starts_on)}</span>,
       renderEdit: ({ row, update, disabled }) => (
         <InlineDateField
@@ -372,7 +360,7 @@ export default function PropertyClosuresPage() {
     {
       key: "ends_on",
       header: "End",
-      width: { px: 132 },
+      width: { px: 124 },
       renderRead: ({ row }) => <span className="mono">{fmtDayMon(row.draft.ends_on)}</span>,
       renderEdit: ({ row, update, disabled }) => (
         <InlineDateField
@@ -386,26 +374,24 @@ export default function PropertyClosuresPage() {
     {
       key: "reason",
       header: "Reason",
-      width: { min: 180 },
+      width: { flex: 2.2, min: 240 },
       renderRead: ({ row }) => (
-        <Chip tone={row.draft.reason === "ical_unavailable" ? "sky" : "ghost"} size="sm">
-          {reasonLabel(row.draft.reason)}
-        </Chip>
+        <span className="property-closure-reason" title={row.draft.reason}>{row.draft.reason}</span>
       ),
       renderEdit: ({ row, update, disabled }) => (
-        <InlineSelectField
-          value={row.draft.reason === "ical_unavailable" ? "other" : row.draft.reason}
-          options={REASON_OPTIONS}
+        <InlineTextField
+          value={row.draft.reason}
           disabled={disabled}
           ariaLabel="Reason"
-          onChange={(reason) => update({ reason: pickReason(reason) })}
+          placeholder="Renovation"
+          onChange={(reason) => update({ reason })}
         />
       ),
     },
     {
       key: "source",
       header: "Source",
-      width: { min: 184 },
+      width: { px: 150 },
       renderRead: ({ row }) => sourceCell(row.draft),
       renderEdit: ({ row }) => sourceCell(row.draft),
     },
@@ -628,7 +614,7 @@ export default function PropertyClosuresPage() {
             <div key={"blank-" + index} className="mini-cal__blank" aria-hidden="true" />
           ))}
           {calendar.days.map((day) => {
-            let reason: PropertyClosure["reason"] | null = null;
+            let reason: string | null = null;
             for (const c of closures) {
               if (closureCoversDate(c, day.iso)) {
                 reason = c.reason;

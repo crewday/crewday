@@ -94,7 +94,6 @@ __all__ = [
     "PermissionRuleDeleted",
     "PermissionRuleUpserted",
     "PropertyClosureCreated",
-    "PropertyClosureReason",
     "PropertyClosureUpdated",
     "PropertyWorkspaceChanged",
     "QuoteDecided",
@@ -1129,13 +1128,6 @@ class StayUpcoming(Event):
 # applied to a previously-seen UID. The closed set lets SPA reducers
 # branch without parsing payloads.
 ReservationChangeKind = Literal["created", "updated", "cancelled"]
-PropertyClosureReason = Literal[
-    "renovation",
-    "owner_stay",
-    "seasonal",
-    "ical_unavailable",
-    "other",
-]
 
 
 @register
@@ -1183,14 +1175,14 @@ class PropertyClosureCreated(Event):
     Blocked-pattern VEVENT (Airbnb "Not available", VRBO "Blocked",
     Google Calendar "Reserved") translates into a fresh
     :class:`~app.adapters.db.places.models.PropertyClosure` row with
-    ``reason='ical_unavailable'`` and ``source_ical_feed_id`` set to
-    the polling feed (§04 "iCal feed" §"Polling behavior"). The §06
+    readable reason text and ``source_ical_feed_id`` set to the
+    polling feed (§04 "iCal feed" §"Polling behavior"). The §06
     occurrence-generator subscribes to this event to skip task
     materialisation across the closed window.
 
     **Payload posture.** The event carries the closure id, property id,
-    bounded UTC window, reason enum, and optional iCal-feed lineage.
-    It intentionally carries no free-text notes.
+    bounded UTC window, and optional iCal-feed lineage. It intentionally
+    carries no free text; subscribers re-fetch the row through REST.
 
     **Role scope.** Defaults to :data:`ALL_ROLES`. A closure affects
     the manager calendar, the worker schedule (no turnover that
@@ -1206,7 +1198,6 @@ class PropertyClosureCreated(Event):
     property_id: str
     starts_at: datetime
     ends_at: datetime
-    reason: PropertyClosureReason
     source_ical_feed_id: str | None
 
     @field_validator("starts_at", "ends_at")
@@ -1231,7 +1222,6 @@ class PropertyClosureUpdated(Event):
     property_id: str
     starts_at: datetime
     ends_at: datetime
-    reason: PropertyClosureReason
     source_ical_feed_id: str | None
 
     @field_validator("starts_at", "ends_at")

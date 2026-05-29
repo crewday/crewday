@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any, Literal
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -52,15 +52,10 @@ __all__ = [
 ]
 
 
-ClosureReason = Literal[
-    "renovation",
-    "owner_stay",
-    "seasonal",
-    "ical_unavailable",
-    "other",
-]
+type ClosureReason = str
 
 _MAX_ID_LEN = 64
+_MAX_REASON_LEN = 120
 
 
 class ClosureNotFound(LookupError):
@@ -72,9 +67,21 @@ class _ClosureBody(BaseModel):
 
     starts_at: datetime
     ends_at: datetime
-    reason: ClosureReason
+    reason: ClosureReason = Field(..., min_length=1, max_length=_MAX_REASON_LEN)
     unit_id: str | None = Field(default=None, max_length=_MAX_ID_LEN)
     source_ical_feed_id: str | None = Field(default=None, max_length=_MAX_ID_LEN)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _reason_must_be_bounded_text(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("reason must not be empty")
+        if len(trimmed) > _MAX_REASON_LEN:
+            raise ValueError(f"reason must be {_MAX_REASON_LEN} characters or fewer")
+        return trimmed
 
     @field_validator("starts_at", "ends_at")
     @classmethod
@@ -196,7 +203,6 @@ def create_closure(
             property_id=property_id,
             starts_at=body.starts_at,
             ends_at=body.ends_at,
-            reason=body.reason,
             source_ical_feed_id=body.source_ical_feed_id,
         )
     )
@@ -256,7 +262,6 @@ def update_closure(
             property_id=row.property_id,
             starts_at=body.starts_at,
             ends_at=body.ends_at,
-            reason=body.reason,
             source_ical_feed_id=body.source_ical_feed_id,
         )
     )
@@ -507,26 +512,12 @@ def _row_to_view(row: PropertyClosure) -> PropertyClosureView:
         unit_id=row.unit_id,
         starts_at=row.starts_at,
         ends_at=row.ends_at,
-        reason=_narrow_reason(row.reason),
+        reason=row.reason,
         source_ical_feed_id=row.source_ical_feed_id,
         created_by_user_id=row.created_by_user_id,
         created_at=row.created_at,
         deleted_at=row.deleted_at,
     )
-
-
-def _narrow_reason(value: str) -> ClosureReason:
-    if value == "renovation":
-        return "renovation"
-    if value == "owner_stay":
-        return "owner_stay"
-    if value == "seasonal":
-        return "seasonal"
-    if value == "ical_unavailable":
-        return "ical_unavailable"
-    if value == "other":
-        return "other"
-    raise ValueError(f"unknown property_closure.reason {value!r} on loaded row")
 
 
 def _view_to_diff_dict(view: PropertyClosureView) -> dict[str, Any]:

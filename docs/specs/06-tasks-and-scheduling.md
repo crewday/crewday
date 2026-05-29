@@ -674,14 +674,16 @@ During task generation and assignment:
 | unit_id       | ULID FK?  | null = property-wide closure (all units). Non-null = unit-specific closure |
 | starts_on     | date      | inclusive                             |
 | ends_on       | date      | inclusive                             |
-| reason        | enum      | `renovation | owner_stay | seasonal | ical_unavailable | other` |
-| source_ical_feed_id | ULID FK? | populated when auto-imported (§04) |
+| reason        | text      | required bounded free text, trimmed, 1-120 chars |
+| source_ical_feed_id | ULID FK? | populated when auto-imported (§04); this, not `reason`, determines imported/source behavior |
 | note_md       | text?     |                                       |
 | created_at / updated_at | tstz |                                   |
 | deleted_at    | tstz?     |                                       |
 
 iCal `Not available` / `Blocked` VEVENTs (§04) upsert as
-`property_closure` rows with `reason = ical_unavailable`.
+`property_closure` rows with readable reason text such as
+`iCal unavailable` and `source_ical_feed_id` set. The reason text is
+display-only and never controls source/read-only behavior.
 
 ### Interaction with assignment and generation
 

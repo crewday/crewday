@@ -21,7 +21,7 @@ Covers the cd-d48 acceptance criteria:
   ``status="cancelled"`` + ``change_kind="cancelled"``; a never-seen
   cancelled UID is a no-op (no phantom row).
 * Blocked SUMMARY: every Airbnb / VRBO / Google variant lands a
-  :class:`PropertyClosure` with ``reason="ical_unavailable"`` +
+  :class:`PropertyClosure` with readable reason text +
   ``source_ical_feed_id`` set, fires
   :class:`PropertyClosureCreated`.
 * Closure idempotency: re-poll over the same Blocked window writes
@@ -951,7 +951,7 @@ class TestBlockedSummaryToClosure:
         assert len(rows) == 1
         row = rows[0]
         assert row.property_id == prop
-        assert row.reason == "ical_unavailable"
+        assert row.reason == "iCal unavailable"
         assert row.source_ical_feed_id == feed_id
         assert row.source_external_uid == f"b-{summary}"
         assert row.source_last_seen_at is not None
@@ -962,7 +962,6 @@ class TestBlockedSummaryToClosure:
         assert captured[0].source_ical_feed_id == feed_id
         assert captured[0].starts_at == starts
         assert captured[0].ends_at == ends
-        assert captured[0].reason == "ical_unavailable"
 
 
 class TestClosureIdempotency:
@@ -1012,6 +1011,58 @@ class TestClosureIdempotency:
         rows = list(session.scalars(select(PropertyClosure)).all())
         assert len(rows) == 1
         assert len(captured) == 1
+
+    def test_existing_property_closure_import_reason_normalization_publishes_update(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+        envelope: FakeEnvelope,
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        feed_id = _bootstrap_feed(
+            session, workspace_id=ws, property_id=prop, envelope=envelope
+        )
+        starts = datetime(2026, 5, 1, 0, 0, tzinfo=UTC)
+        ends = datetime(2026, 5, 8, 0, 0, tzinfo=UTC)
+        session.add(
+            PropertyClosure(
+                id=new_ulid(),
+                property_id=prop,
+                unit_id=None,
+                starts_at=starts,
+                ends_at=ends,
+                reason="ical_unavailable",
+                source_ical_feed_id=feed_id,
+                source_external_uid="blocked-x",
+                source_last_seen_at=_PINNED - timedelta(minutes=30),
+                created_by_user_id=None,
+                created_at=_PINNED - timedelta(minutes=30),
+            )
+        )
+        session.flush()
+        body = _vcalendar(
+            _vevent_blocked(uid="blocked-x", starts=starts, ends=ends),
+        )
+        fetcher = _ScriptedFetcher(responses={_FEED_URL: [_ok(body)]})
+        updated = _record_closure_updates(bus)
+
+        report = poll_ical(
+            _ctx(ws),
+            session=session,
+            envelope=envelope,
+            clock=clock,
+            event_bus=bus,
+            fetcher=fetcher,
+            resolver=_fixed_resolver([_FAKE_IP]),  # type: ignore[arg-type]
+        )
+
+        row = session.scalars(select(PropertyClosure)).one()
+        assert report.closures_created == 0
+        assert row.reason == "iCal unavailable"
+        assert len(updated) == 1
+        assert updated[0].source_ical_feed_id == feed_id
 
     def test_manual_delete_is_sticky_until_upstream_reasserts(
         self,

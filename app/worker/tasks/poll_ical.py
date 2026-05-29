@@ -19,8 +19,8 @@ the diff:
 * **Blocked-pattern VEVENT** (``SUMMARY`` in ``_BLOCKED_SUMMARIES`` —
   Airbnb "Not available", VRBO "Blocked", Google Calendar "Reserved")
   → insert a :class:`~app.adapters.db.places.models.PropertyClosure`
-  row with ``reason='ical_unavailable'`` and ``source_ical_feed_id``
-  set, plus a ``property.closure.created`` event. Closures are NOT
+  row with readable reason text and ``source_ical_feed_id`` set, plus
+  a ``property.closure.created`` event. Closures are NOT
   retracted when a VEVENT disappears upstream — operators may want
   to keep the historical record; spec §04 explicitly notes
   "deleting them manually is allowed".
@@ -156,6 +156,7 @@ _BLOCKED_SUMMARIES: Final[tuple[str, ...]] = (
     "unavailable",
     "closed",
 )
+_ICAL_UNAVAILABLE_REASON: Final[str] = "iCal unavailable"
 # Separators that admit a Blocked-token prefix into the Blocked path.
 # Anything else immediately after the token (a letter, a name, a
 # digit) means the summary carries an additional payload — most likely
@@ -1763,7 +1764,7 @@ def _create_closure(
         unit_id=feed.unit_id,
         starts_at=ev.starts_at,
         ends_at=ev.ends_at,
-        reason="ical_unavailable",
+        reason=_ICAL_UNAVAILABLE_REASON,
         source_ical_feed_id=feed.id,
         source_external_uid=ev.uid,
         source_last_seen_at=work.resolved_now,
@@ -1782,7 +1783,7 @@ def _closure_fields_changed(
     return (
         _ensure_utc(row.starts_at) != ev.starts_at
         or _ensure_utc(row.ends_at) != ev.ends_at
-        or row.reason != "ical_unavailable"
+        or row.reason != _ICAL_UNAVAILABLE_REASON
         or row.unit_id != feed.unit_id
     )
 
@@ -1797,7 +1798,7 @@ def _apply_closure_event_fields(
     row.unit_id = feed.unit_id
     row.starts_at = ev.starts_at
     row.ends_at = ev.ends_at
-    row.reason = "ical_unavailable"
+    row.reason = _ICAL_UNAVAILABLE_REASON
     row.source_external_uid = ev.uid
     row.source_last_seen_at = work.resolved_now
 
@@ -1819,7 +1820,6 @@ def _publish_closure_created(
             property_id=feed.property_id,
             starts_at=ev.starts_at,
             ends_at=ev.ends_at,
-            reason="ical_unavailable",
             source_ical_feed_id=feed.id,
         )
     )
@@ -1842,7 +1842,6 @@ def _publish_closure_updated(
             property_id=feed.property_id,
             starts_at=ev.starts_at,
             ends_at=ev.ends_at,
-            reason="ical_unavailable",
             source_ical_feed_id=feed.id,
         )
     )

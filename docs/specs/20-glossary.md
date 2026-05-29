@@ -632,7 +632,8 @@ fix the offender.
   and iCal feeds are unit-scoped. See §04.
 - **Unavailable marker.** Historical name for iCal blocks that are
   not stays; these are now modeled as `property_closure` rows with
-  `reason = ical_unavailable`.
+  `source_ical_feed_id` set and readable free-text reasons such as
+  `iCal unavailable`.
 - **Welcome link.** Tokenized public URL exposing the guest welcome
   page for a stay. Revocation or expiry both serve a 410 with the
   same layout; wording differs.

@@ -59,6 +59,7 @@ interface ClosurePayload {
   starts_at: string;
   ends_at: string;
   reason: PropertyClosure["reason"];
+  source_ical_feed_id?: string | null;
 }
 
 interface MembershipPayload {
@@ -115,6 +116,7 @@ function mapClosure(row: ClosurePayload): PropertyClosure {
     starts_on: dateOnly(row.starts_at),
     ends_on: dateOnly(row.ends_at),
     reason: row.reason,
+    source_ical_feed_id: row.source_ical_feed_id ?? null,
     note: "",
   };
 }

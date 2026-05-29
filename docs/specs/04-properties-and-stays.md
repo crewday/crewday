@@ -402,11 +402,12 @@ but differ on whether they ingest VEVENTs into rows:
 - Use `If-None-Match` / `If-Modified-Since` to avoid re-downloads.
 - Parse with `icalendar`. VEVENTs whose `SUMMARY` signals
   "Not available" or "Blocked" (Airbnb conventions) are upserted as
-  **`property_closure`** rows (§06) with `reason = ical_unavailable`
-  and `source_ical_feed_id` set — not as stays. Managers see them on
-  the calendar with a distinct swatch; deleting them manually is
-  allowed (the next poll will not recreate them unless the underlying
-  VEVENT reappears upstream).
+  **`property_closure`** rows (§06) with readable reason text such as
+  `iCal unavailable` and `source_ical_feed_id` set — not as stays.
+  Managers see them on the calendar with a distinct swatch; deleting
+  them manually is allowed (the next poll will not recreate them unless
+  the underlying VEVENT reappears upstream). Source/read-only behavior
+  follows `source_ical_feed_id`, never the free-text reason.
 - Diff ordinary VEVENTs against existing stays: create, update, or
   cancel.
 - Surface parse errors as `issue` against the feed.

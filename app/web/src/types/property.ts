@@ -86,7 +86,8 @@ export interface PropertyClosure {
   property_id: string;
   starts_on: string;
   ends_on: string;
-  reason: "renovation" | "owner_stay" | "seasonal" | "ical_unavailable" | "other";
+  reason: string;
+  source_ical_feed_id: string | null;
   note: string;
 }
 

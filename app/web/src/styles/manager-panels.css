@@ -264,6 +264,7 @@
 .mini-cal__bar--sky  { background: var(--sky);  }
 .mini-cal__bar--rust { background: var(--rust); }
 .mini-cal__bar--closed { background: var(--ink-4); opacity: 0.6; }
+.property-closure-reason { display: block; min-width: 0; overflow-wrap: anywhere; font-weight: 600; color: var(--ink); }
 
 .stays-agenda {
   margin-top: 16px;

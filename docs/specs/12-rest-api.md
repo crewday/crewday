@@ -1680,8 +1680,8 @@ GET    /stay_task_bundles              # filter: ?stay_id=…&unit_id=…&lifecy
 GET    /stay_task_bundles/{id}
 
 GET    /property_closures              # filter: ?property_id=…&unit_id=…&from=…&to=…
-POST   /property_closures              # body may include unit_id
-PATCH  /property_closures/{id}
+POST   /property_closures              # body: {property_id, starts_at, ends_at, reason, unit_id?, source_ical_feed_id?}; reason is trimmed required text, 1-120 chars
+PATCH  /property_closures/{id}         # body: {starts_at, ends_at, reason, unit_id?, source_ical_feed_id?}; same reason validation
 DELETE /property_closures/{id}
 ```
 

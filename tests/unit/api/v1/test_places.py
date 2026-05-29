@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -144,13 +145,14 @@ def test_closure_persists_and_returns_unit_id(
             "unit_id": unit_id,
             "starts_at": "2026-05-02T00:00:00+00:00",
             "ends_at": "2026-05-04T00:00:00+00:00",
-            "reason": "renovation",
+            "reason": "  Owner repainting west wing  ",
         },
     )
 
     assert response.status_code == 201, response.text
     created = response.json()
     assert created["unit_id"] == unit_id
+    assert created["reason"] == "Owner repainting west wing"
 
     listed = client.get(
         "/property_closures", params={"property_id": property_id, "unit_id": unit_id}
@@ -164,11 +166,42 @@ def test_closure_persists_and_returns_unit_id(
             "unit_id": None,
             "starts_at": "2026-05-03T00:00:00+00:00",
             "ends_at": "2026-05-05T00:00:00+00:00",
-            "reason": "seasonal",
+            "reason": "Owner maintenance",
         },
     )
     assert updated.status_code == 200, updated.text
     assert updated.json()["unit_id"] is None
+    assert updated.json()["reason"] == "Owner maintenance"
+
+
+@pytest.mark.parametrize(
+    ("reason", "message"),
+    [
+        ("   ", "reason must not be empty"),
+        ("x" * 121, "reason must be 120 characters or fewer"),
+    ],
+)
+def test_closure_rejects_blank_or_overlong_reason(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    reason: str,
+    message: str,
+) -> None:
+    ctx, factory, _ = owner_ctx
+    client = _client(ctx, factory)
+    property_id = client.post("/properties", json=_property_body()).json()["id"]
+
+    response = client.post(
+        "/property_closures",
+        json={
+            "property_id": property_id,
+            "starts_at": "2026-05-02T00:00:00+00:00",
+            "ends_at": "2026-05-04T00:00:00+00:00",
+            "reason": reason,
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    assert message in response.text
 
 
 def test_closure_rejects_invalid_or_cross_property_unit_id(

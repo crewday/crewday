@@ -6900,15 +6900,7 @@
             "type": "string"
           },
           "reason": {
-            "enum": [
-              "ical_unavailable",
-              "other",
-              "owner_stay",
-              "renovation",
-              "seasonal"
-            ],
-            "title": "Reason",
-            "type": "string"
+            "$ref": "#/components/schemas/ClosureReason-Input"
           },
           "source_ical_feed_id": {
             "anyOf": [
@@ -6982,6 +6974,14 @@
         "title": "ClosureListResponse",
         "type": "object"
       },
+      "ClosureReason-Input": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "ClosureReason-Output": {
+        "type": "string"
+      },
       "ClosureResponse": {
         "properties": {
           "created_at": {
@@ -7026,15 +7026,7 @@
             "type": "string"
           },
           "reason": {
-            "enum": [
-              "ical_unavailable",
-              "other",
-              "owner_stay",
-              "renovation",
-              "seasonal"
-            ],
-            "title": "Reason",
-            "type": "string"
+            "$ref": "#/components/schemas/ClosureReason-Output"
           },
           "source_ical_feed_id": {
             "anyOf": [
@@ -7088,15 +7080,7 @@
             "type": "string"
           },
           "reason": {
-            "enum": [
-              "ical_unavailable",
-              "other",
-              "owner_stay",
-              "renovation",
-              "seasonal"
-            ],
-            "title": "Reason",
-            "type": "string"
+            "$ref": "#/components/schemas/ClosureReason-Input"
           },
           "source_ical_feed_id": {
             "anyOf": [

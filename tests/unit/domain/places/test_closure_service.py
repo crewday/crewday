@@ -227,7 +227,6 @@ def test_create_and_update_publish_events_once_with_payload(
     assert created_events[0].closure_id == created.id
     assert created_events[0].property_id == property_id
     assert created_events[0].starts_at == datetime(2026, 5, 1, 0, 0, tzinfo=UTC)
-    assert created_events[0].reason == "renovation"
     assert len(updated_events) == 1
     assert updated_events[0].closure_id == created.id
     assert updated_events[0].ends_at == datetime(2026, 5, 5, 0, 0, tzinfo=UTC)
@@ -236,6 +235,40 @@ def test_create_and_update_publish_events_once_with_payload(
         select(AuditLog).where(AuditLog.entity_id == created.id)
     ).all()
     assert [audit.action for audit in audits] == ["create", "update"]
+
+
+def test_reason_is_trimmed_and_custom_text_persists(
+    session_closure: Session, frozen_clock: FrozenClock
+) -> None:
+    ws = _make_workspace(session_closure, slug="closure-custom-reason")
+    ctx = _ctx(workspace_id=ws, slug="closure-custom-reason")
+    property_id = _create_property(session_closure, ctx)
+
+    created = create_closure(
+        session_closure,
+        ctx,
+        property_id=property_id,
+        body=_body(reason="  Owner repainting west wing  "),
+        clock=frozen_clock,
+        event_bus=EventBus(),
+    )
+
+    assert created.reason == "Owner repainting west wing"
+    db_row = session_closure.get(PropertyClosure, created.id)
+    assert db_row is not None
+    assert db_row.reason == "Owner repainting west wing"
+
+
+@pytest.mark.parametrize(
+    ("reason", "message"),
+    [
+        ("   ", "reason must not be empty"),
+        ("x" * 121, "reason must be 120 characters or fewer"),
+    ],
+)
+def test_reason_rejects_empty_or_overlong_text(reason: str, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        _body(reason=reason)
 
 
 def test_ical_lineage_is_persisted_and_listed(
@@ -250,7 +283,7 @@ def test_ical_lineage_is_persisted_and_listed(
         session_closure,
         ctx,
         property_id=property_id,
-        body=_body(reason="ical_unavailable", source_ical_feed_id=feed_id),
+        body=_body(reason="iCal unavailable", source_ical_feed_id=feed_id),
         clock=frozen_clock,
         event_bus=EventBus(),
     )
