@@ -346,7 +346,7 @@ export default function PropertyClosuresPage() {
     {
       key: "starts_on",
       header: "Start",
-      width: { px: 124 },
+      width: { px: 156 },
       renderRead: ({ row }) => <span className="mono">{fmtDayMon(row.draft.starts_on)}</span>,
       renderEdit: ({ row, update, disabled }) => (
         <InlineDateField
@@ -360,7 +360,7 @@ export default function PropertyClosuresPage() {
     {
       key: "ends_on",
       header: "End",
-      width: { px: 124 },
+      width: { px: 156 },
       renderRead: ({ row }) => <span className="mono">{fmtDayMon(row.draft.ends_on)}</span>,
       renderEdit: ({ row, update, disabled }) => (
         <InlineDateField

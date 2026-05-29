@@ -339,6 +339,30 @@ describe("<PropertyClosuresPage>", () => {
     }
   });
 
+  it("allocates enough inline table width for closure date controls", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "+ Add closure" }));
+      const createRow = await screen.findByLabelText("New closure");
+      const startDate = within(createRow).getByLabelText("Start date");
+      const endDate = within(createRow).getByLabelText("End date");
+      const inlineForm = screen.getByRole("table", { name: "Property closures" }).closest(".inline-table-form");
+
+      expect(startDate).toHaveClass("inline-table-form__control--date");
+      expect(endDate).toHaveClass("inline-table-form__control--date");
+      expect(startDate).toHaveValue("2026-04-16");
+      expect(endDate).toHaveValue("2026-04-16");
+      expect(inlineForm).toHaveAttribute(
+        "style",
+        expect.stringContaining("--inline-table-columns: 156px 156px"),
+      );
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("keeps create-row API errors and drafts inside the inline table", async () => {
     const fake = installFetch({ failCreate: true });
     try {

@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
+  InlineDateField,
   InlineNumberField,
   InlineIconField,
   InlineTableLoadMore,
@@ -170,6 +171,13 @@ const tagColumns: InlineTableColumn<RoleDraft>[] = [
   },
 ];
 
+function cssDeclarationValue(css: string, selector: string, property: string) {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rule = css.match(new RegExp(`${escapedSelector}\\s*\\{(?<body>[^}]*)\\}`));
+  const value = rule?.groups?.body.match(new RegExp(`${property}\\s*:\\s*(?<value>[^;]+);`));
+  return value?.groups?.value.trim();
+}
+
 function renderInlineTable({
   saveMode = "explicit",
   rows = [editableRow()],
@@ -325,6 +333,32 @@ describe("InlineTableForm", () => {
     expect(input).toHaveAttribute("step", "900");
     expect(input).toBeDisabled();
     expect((input as HTMLInputElement).value).toBe("09:30");
+  });
+
+  it("keeps date fields wide enough for ISO date values", () => {
+    const onChange = vi.fn();
+    render(
+      <InlineDateField
+        value="2026-05-29"
+        disabled
+        ariaLabel="Closure date"
+        onChange={onChange}
+      />,
+    );
+
+    const input = screen.getByLabelText("Closure date");
+    expect(input).toHaveAttribute("type", "date");
+    expect(input).toHaveClass("inline-table-form__control", "inline-table-form__control--date");
+    expect(input).toHaveValue("2026-05-29");
+    expect(input).toBeDisabled();
+    expect(cssDeclarationValue(
+      inlineTableCss,
+      ".inline-table-form__control--date",
+      "min-width",
+    )).toBe("min(136px, 100%)");
+    expect(inlineTableCss).toMatch(
+      /@media\s*\(max-width:\s*720px\)[\s\S]*\.inline-table-form__td\s*\{[\s\S]*grid-template-columns:\s*minmax\(90px,\s*0\.35fr\)\s*minmax\(0,\s*1fr\);/,
+    );
   });
 
   it("toggles fixed tag options and normalizes duplicate unknown values into option order", () => {

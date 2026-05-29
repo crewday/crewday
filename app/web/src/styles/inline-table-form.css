@@ -363,6 +363,10 @@
   padding: 7px 8px;
 }
 
+.inline-table-form__control--date {
+  min-width: min(136px, 100%);
+}
+
 .inline-table-form__control:hover,
 .inline-table-form__note:hover {
   background: var(--paper);
