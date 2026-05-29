@@ -1,0 +1,9 @@
+{
+  "include": [
+    "app/api/v1"
+  ],
+  "pythonVersion": "3.11",
+  "reportMissingImports": false,
+  "reportMissingModuleSource": false,
+  "typeCheckingMode": "basic"
+}
