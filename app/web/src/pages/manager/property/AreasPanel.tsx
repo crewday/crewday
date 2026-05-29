@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   InlineNoteField,
@@ -140,6 +140,7 @@ function reorderedAreasFromRows(
 export default function AreasPanel({ propertyId }: { propertyId: string }) {
   const queryClient = useQueryClient();
   const [editedDrafts, setEditedDrafts] = useState<ReadonlyMap<string, AreaDraft>>(() => new Map());
+  const [savedDrafts, setSavedDrafts] = useState<ReadonlyMap<string, AreaDraft>>(() => new Map());
   const [rowErrors, setRowErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [createDraft, setCreateDraft] = useState<AreaDraft>(() => emptyAreaDraft());
   const [createDirty, setCreateDirty] = useState(false);
@@ -165,14 +166,16 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
         body,
       });
     },
-    onSuccess: async (_area, variables) => {
+    onSuccess: async (area, variables) => {
       setRowErrors((current) => clearMapValue(current, variables.rowId));
       if (variables.rowId === CREATE_ROW_ID) {
         setCreateDraft(emptyAreaDraft());
         setCreateDirty(false);
         setCreateError(null);
       } else {
+        const savedDraft = draftFromArea(area);
         setEditedDrafts((current) => clearMapValue(current, variables.rowId));
+        setSavedDrafts((current) => setMapValue(current, variables.rowId, savedDraft));
       }
       await invalidatePropertyAreaViews(queryClient, propertyId);
     },
@@ -191,6 +194,7 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
       fetchJson<null>("/api/v1/areas/" + areaId, { method: "DELETE" }),
     onSuccess: async (_result, areaId) => {
       setEditedDrafts((current) => clearMapValue(current, areaId));
+      setSavedDrafts((current) => clearMapValue(current, areaId));
       setRowErrors((current) => clearMapValue(current, areaId));
       await invalidatePropertyAreaViews(queryClient, propertyId);
     },
@@ -201,6 +205,21 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
 
   const areas = areasQ.data ?? [];
   const areasById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
+  useEffect(() => {
+    setSavedDrafts((current) => {
+      let changed = false;
+      const next = new Map(current);
+      for (const [areaId, draft] of current) {
+        const area = areasById.get(areaId);
+        if (area && areaDraftsEqual(draftFromArea(area), draft)) {
+          next.delete(areaId);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [areasById]);
+
   const reorderAreas = useMutation<Area[], Error, AreaReorderVariables, AreaReorderContext>({
     mutationFn: async ({ orderedRows }) => {
       const updates = orderedRows
@@ -254,11 +273,12 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
   const rows = useMemo(
     () => areas.map((area): InlineTableRow<AreaDraft> => {
       const editedDraft = editedDrafts.get(area.id);
+      const savedDraft = savedDrafts.get(area.id);
       const savingThisRow = saveArea.isPending && saveArea.variables?.rowId === area.id;
       return {
         id: area.id,
         label: area.name,
-        draft: editedDraft ?? draftFromArea(area),
+        draft: editedDraft ?? savedDraft ?? draftFromArea(area),
         committedDraft: draftFromArea(area),
         editing: editedDraft !== undefined,
         dirty: editedDraft !== undefined,
@@ -267,7 +287,7 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
         error: rowErrors.get(area.id),
       };
     }),
-    [areas, busy, editedDrafts, rowErrors, saveArea.isPending, saveArea.variables],
+    [areas, busy, editedDrafts, rowErrors, savedDrafts, saveArea.isPending, saveArea.variables],
   );
   const trailingCreateRow: InlineTableRow<AreaDraft> = {
     id: CREATE_ROW_ID,
@@ -373,15 +393,17 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
           setEditedDrafts((current) => {
             const area = areasById.get(rowId);
             if (!area) return current;
-            const draft = current.get(rowId) ?? draftFromArea(area);
+            const draft = current.get(rowId) ?? savedDrafts.get(rowId) ?? draftFromArea(area);
             return setMapValue(current, rowId, { ...draft, ...patch });
           });
+          setSavedDrafts((current) => clearMapValue(current, rowId));
           setRowErrors((current) => clearMapValue(current, rowId));
         }}
         onEdit={(rowId) => {
           const area = areasById.get(rowId);
           if (!area) return;
-          setEditedDrafts((current) => setMapValue(current, rowId, draftFromArea(area)));
+          setEditedDrafts((current) => setMapValue(current, rowId, savedDrafts.get(rowId) ?? draftFromArea(area)));
+          setSavedDrafts((current) => clearMapValue(current, rowId));
           setRowErrors((current) => clearMapValue(current, rowId));
         }}
         onSave={(rowId) => {
@@ -406,6 +428,7 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
             return;
           }
           setEditedDrafts((current) => clearMapValue(current, rowId));
+          setSavedDrafts((current) => clearMapValue(current, rowId));
           setRowErrors((current) => clearMapValue(current, rowId));
         }}
         onReorder={canReorderAreas ? handleReorder : undefined}
@@ -457,6 +480,16 @@ function parentOptions(areas: readonly Area[], draft: AreaDraft): Area[] {
 
 function childAreaCount(areas: readonly Area[], areaId: string): number {
   return areas.filter((area) => area.parent_area_id === areaId).length;
+}
+
+function areaDraftsEqual(left: AreaDraft, right: AreaDraft): boolean {
+  return left.id === right.id
+    && left.unit_id === right.unit_id
+    && left.name === right.name
+    && left.kind === right.kind
+    && left.order_hint === right.order_hint
+    && left.parent_area_id === right.parent_area_id
+    && left.notes_md === right.notes_md;
 }
 
 function setMapValue<TValue>(

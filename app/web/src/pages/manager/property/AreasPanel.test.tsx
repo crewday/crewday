@@ -25,6 +25,7 @@ interface TestArea {
 
 interface RenderAreasPanelOptions {
   failPatchAreaIds?: readonly string[];
+  stalePatchAreaIds?: readonly string[];
 }
 
 function orderedAreas(areas: readonly TestArea[]): TestArea[] {
@@ -36,6 +37,7 @@ function orderedAreas(areas: readonly TestArea[]): TestArea[] {
 function renderAreasPanel(initialAreas: TestArea[] = [], options: RenderAreasPanelOptions = {}) {
   let areas = [...initialAreas];
   const failPatchAreaIds = new Set(options.failPatchAreaIds ?? []);
+  const stalePatchAreaIds = new Set(options.stalePatchAreaIds ?? []);
   const routes: FetchRoute[] = [
     {
       path: "/w/acme/api/v1/properties/prop_1/areas",
@@ -80,7 +82,7 @@ function renderAreasPanel(initialAreas: TestArea[] = [], options: RenderAreasPan
             parent_area_id: draft.parent_area_id,
             notes_md: draft.notes_md,
           };
-          return patched;
+          return stalePatchAreaIds.has(area.id) ? current : patched;
         });
         return patched ? { body: patched } : { status: 404, body: { detail: "Area not found" } };
       },
@@ -93,7 +95,14 @@ function renderAreasPanel(initialAreas: TestArea[] = [], options: RenderAreasPan
       <AreasPanel propertyId="prop_1" />
     </QueryClientProvider>,
   );
-  return { ...view, ...fetchEnv };
+  return {
+    ...view,
+    ...fetchEnv,
+    setAreas(nextAreas: TestArea[]) {
+      areas = [...nextAreas];
+    },
+    queryClient,
+  };
 }
 
 beforeEach(() => {
@@ -171,7 +180,7 @@ describe("<AreasPanel>", () => {
     });
   });
 
-  it("hides reorder controls while the create row has unsaved input", async () => {
+  it("disables reorder dragging while the create row has unsaved input", async () => {
     renderAreasPanel([
       areaFixture({
         id: "area_1",
@@ -187,17 +196,22 @@ describe("<AreasPanel>", () => {
     ]);
 
     await screen.findByText("Kitchen");
-    expect(screen.getByRole("button", { name: "Move Pool up" })).toBeInTheDocument();
+    const poolRow = screen.getByLabelText("Pool");
+    expect(poolRow).toHaveAttribute("draggable", "true");
+    expect(screen.getByLabelText("Drag Pool to reorder")).toBeInTheDocument();
 
     const createRow = screen.getByLabelText("New area");
     fireEvent.change(within(createRow).getByLabelText("Name"), {
       target: { value: "Pantry" },
     });
 
-    expect(screen.queryByRole("button", { name: "Move Pool up" })).not.toBeInTheDocument();
+    expect(poolRow).not.toHaveAttribute("draggable");
+    expect(screen.getByLabelText("Drag Pool to reorder")).toBeInTheDocument();
 
     fireEvent.click(within(createRow).getByRole("button", { name: "Cancel" }));
-    expect(await screen.findByRole("button", { name: "Move Pool up" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(poolRow).toHaveAttribute("draggable", "true");
+    });
   });
 
   it("persists area reorders through hidden order hints", async () => {
@@ -216,7 +230,7 @@ describe("<AreasPanel>", () => {
     ]);
 
     await screen.findByText("Kitchen");
-    fireEvent.click(screen.getByRole("button", { name: "Move Pool up" }));
+    dragAreaAfter("Kitchen", "Pool");
 
     await waitFor(() => {
       expect(requests.filter((request) => request.method === "PATCH")).toHaveLength(2);
@@ -305,7 +319,7 @@ describe("<AreasPanel>", () => {
     );
 
     await screen.findByText("Kitchen");
-    fireEvent.click(screen.getByRole("button", { name: "Move Pool up" }));
+    dragAreaAfter("Kitchen", "Pool");
 
     expect(await screen.findByText("Reorder failed.")).toBeInTheDocument();
     await waitFor(() => {
@@ -320,7 +334,51 @@ describe("<AreasPanel>", () => {
     );
     expect(rowLabels.slice(0, 2)).toEqual(["Kitchen", "Pool"]);
   });
+
+  it("keeps a saved area draft visible across a stale refetch", async () => {
+    const { requests } = renderAreasPanel(
+      [
+        areaFixture({
+          id: "area_1",
+          name: "Old pantry",
+          order_hint: 0,
+        }),
+      ],
+      { stalePatchAreaIds: ["area_1"] },
+    );
+
+    const areaRow = await screen.findByLabelText("Old pantry");
+    fireEvent.click(within(areaRow).getByRole("button", { name: "Edit" }));
+    fireEvent.change(within(areaRow).getByLabelText("Name"), {
+      target: { value: "Fresh pantry" },
+    });
+    fireEvent.click(within(areaRow).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(
+        requests.filter(
+          (request) => request.method === "GET" && request.path === "/w/acme/api/v1/properties/prop_1/areas",
+        ).length,
+      ).toBeGreaterThan(1);
+    });
+    expect(screen.getByLabelText("Fresh pantry")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Old pantry")).not.toBeInTheDocument();
+
+    const savedRow = screen.getByLabelText("Fresh pantry");
+    fireEvent.click(within(savedRow).getByRole("button", { name: "Edit" }));
+    expect(within(savedRow).getByLabelText("Name")).toHaveValue("Fresh pantry");
+  });
 });
+
+function dragAreaAfter(sourceLabel: string, targetLabel: string): void {
+  const sourceRow = screen.getByLabelText(sourceLabel);
+  const targetRow = screen.getByLabelText(targetLabel);
+  const transfer = dataTransfer();
+  fireEvent.dragStart(sourceRow, { dataTransfer: transfer });
+  fireEvent.dragOver(targetRow, { dataTransfer: transfer });
+  fireEvent.drop(targetRow, { dataTransfer: transfer });
+  fireEvent.dragEnd(sourceRow, { dataTransfer: transfer });
+}
 
 function dataTransfer(): DataTransfer {
   return {

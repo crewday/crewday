@@ -733,16 +733,25 @@
   white-space: nowrap;
 }
 
-.inline-table-form__status--saving {
+.inline-table-form__status--saving,
+.inline-table-form__status--disabled {
   width: 18px;
   min-width: 18px;
   height: 18px;
   min-height: 18px;
   padding: 0;
   background: transparent;
+}
+
+.inline-table-form__status--saving {
   color: var(--sky);
 }
 
+.inline-table-form__status--disabled {
+  color: var(--ink-3);
+}
+
+.inline-table-form__status-icon,
 .inline-table-form__status-spinner {
   flex: 0 0 auto;
 }
@@ -750,11 +759,6 @@
 .inline-table-form__status--error {
   background: var(--rust-soft);
   color: var(--rust);
-}
-
-.inline-table-form__status--disabled {
-  background: var(--paper-3);
-  color: var(--ink-3);
 }
 
 .inline-table-form__detail {

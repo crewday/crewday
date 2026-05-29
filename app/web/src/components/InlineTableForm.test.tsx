@@ -1539,7 +1539,8 @@ describe("InlineTableForm", () => {
     expect(screen.getByText("Title is required.")).toBeInTheDocument();
     expect(screen.getByText("Save failed.")).toBeInTheDocument();
     expect(screen.getByRole("status", { name: "Saving..." })).toBeInTheDocument();
-    expect(screen.getByText("Locked")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Locked" })).toBeInTheDocument();
+    expect(screen.queryByText("Locked")).not.toBeInTheDocument();
     expect(screen.getByText("dirty 5, validation 1, errors 1, saving 1, disabled 1, can submit false"))
       .toBeInTheDocument();
   });
@@ -2238,8 +2239,9 @@ describe("InlineTableForm", () => {
 
     const firstRow = screen.getByLabelText("First");
     const secondRow = screen.getByLabelText("Second");
-    const disabledRow = screen.getByLabelText("Locked");
+    const disabledRow = screen.getByText("Locked").closest("[data-inline-table-row-group]");
     const editingRow = screen.getByLabelText("Editing");
+    if (!disabledRow) throw new Error("Expected the locked row group.");
 
     fireEvent.click(firstRow);
     expect(firstRow).toHaveClass("is-selected");

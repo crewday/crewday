@@ -13,7 +13,7 @@ import {
   useState,
 } from "react";
 import type { InfiniteData } from "@tanstack/react-query";
-import { Check, GripVertical, Loader2, Pencil, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { Check, GripVertical, Loader2, Lock, Pencil, RotateCcw, Search, Trash2, X } from "lucide-react";
 import ConfirmationModal from "@/components/ConfirmationModal";
 import IconSelector from "@/components/IconSelector";
 import { EmptyState } from "@/components/common";
@@ -1375,6 +1375,18 @@ function InlineTableStatus({ status }: { status: InlineTableRowStatus }) {
         title="Saving..."
       >
         <Loader2 className="inline-table-form__status-spinner" size={13} aria-hidden="true" />
+      </span>
+    );
+  }
+  if (status === "disabled") {
+    return (
+      <span
+        className={statusClass(status)}
+        role="status"
+        aria-label="Locked"
+        title="Locked"
+      >
+        <Lock className="inline-table-form__status-icon" size={13} aria-hidden="true" />
       </span>
     );
   }
