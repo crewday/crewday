@@ -8,7 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { __resetApiProvidersForTests } from "@/lib/api";
 import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
@@ -240,15 +240,18 @@ function installFetch(
   };
 }
 
-function Harness() {
+function Harness({ initial = "/w/acme/inventory" }: { initial?: string } = {}) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return (
     <QueryClientProvider client={qc}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[initial]}>
         <WorkspaceProvider>
-          <InventoryPage />
+          <Routes>
+            <Route path="/w/:slug/inventory" element={<InventoryPage />} />
+            <Route path="/w/:slug/property/:pid/inventory" element={<InventoryPage />} />
+          </Routes>
         </WorkspaceProvider>
       </MemoryRouter>
     </QueryClientProvider>
@@ -307,6 +310,55 @@ describe("<InventoryPage>", () => {
     expect(appSource.slice(guardStart, nextGuard)).toContain(
       '<Route path="inventory" element={<InventoryPage />} />',
     );
+    expect(appSource.slice(guardStart, nextGuard)).toContain(
+      '<Route path="property/:pid/inventory" element={<InventoryPage />} />',
+    );
+  });
+
+  it("loads property-scoped inventory with the property tabs active", async () => {
+    const fake = installFetch([...ITEMS], [PROPERTIES[0]!, SECOND_PROPERTY]);
+    try {
+      render(<Harness initial="/w/acme/property/prop_1/inventory" />);
+
+      expect(await screen.findByText("Paper towels")).toBeInTheDocument();
+      expect(screen.queryByText("Casa Azul")).not.toBeInTheDocument();
+      expect(
+        fake.requests.some((r) => r.url === "/w/acme/api/v1/inventory/properties/prop_1/items"),
+      ).toBe(true);
+      expect(
+        fake.requests.some((r) => r.url === "/w/acme/api/v1/inventory/properties/prop_2/items"),
+      ).toBe(false);
+
+      const relatedPages = screen.getByRole("navigation", { name: "Related property pages" });
+      expect(within(relatedPages).getByRole("link", { name: "Inventory" })).toHaveAttribute(
+        "href",
+        "/w/acme/property/prop_1/inventory",
+      );
+      expect(within(relatedPages).getByRole("link", { name: "Inventory" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("keeps the workspace inventory route loading all visible properties", async () => {
+    const fake = installFetch([...ITEMS], [PROPERTIES[0]!, SECOND_PROPERTY]);
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Paper towels")).toBeInTheDocument();
+      expect(
+        fake.requests.some((r) => r.url === "/w/acme/api/v1/inventory/properties/prop_1/items"),
+      ).toBe(true);
+      expect(
+        fake.requests.some((r) => r.url === "/w/acme/api/v1/inventory/properties/prop_2/items"),
+      ).toBe(true);
+      expect(screen.queryByRole("navigation", { name: "Related property pages" })).toBeNull();
+    } finally {
+      fake.restore();
+    }
   });
 
   it("loads inventory and closes the drawer on Escape", async () => {
@@ -559,6 +611,50 @@ describe("<InventoryPage>", () => {
             r.url === "/w/acme/api/v1/inventory/properties/prop_1/items",
         ),
       ).toHaveLength(2);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("refetches only the property-scoped inventory page after creating an item from a property route", async () => {
+    const liveItems = [...ITEMS];
+    const fake = installFetch(liveItems, [PROPERTIES[0]!, SECOND_PROPERTY]);
+    try {
+      render(<Harness initial="/w/acme/property/prop_1/inventory" />);
+      await screen.findByText("Paper towels");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
+      const dialog = await screen.findByRole("dialog", { name: "Create item" });
+      expect(within(dialog).queryByRole("combobox", { name: /^Property\b/ })).toBeNull();
+      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
+        target: { value: "Dish soap" },
+      });
+      fireEvent.change(within(dialog).getByLabelText(/^Unit\b/), {
+        target: { value: "bottle" },
+      });
+      fireEvent.change(within(dialog).getByLabelText(/^Reorder point\b/), {
+        target: { value: "4" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Create item" }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name: "Create item" })).not.toBeInTheDocument();
+      });
+      expect(await screen.findByText("Dish soap")).toBeInTheDocument();
+      expect(
+        fake.requests.filter(
+          (r) =>
+            r.method === "GET" &&
+            r.url === "/w/acme/api/v1/inventory/properties/prop_1/items",
+        ),
+      ).toHaveLength(2);
+      expect(
+        fake.requests.some(
+          (r) =>
+            r.method === "GET" &&
+            r.url === "/w/acme/api/v1/inventory/properties/prop_2/items",
+        ),
+      ).toBe(false);
     } finally {
       fake.restore();
     }

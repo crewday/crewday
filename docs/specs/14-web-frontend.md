@@ -276,6 +276,7 @@ booking *is* the time record (§09 "Bookings").
 dashboard                      properties
 property/<id>                  property/<id>/stays
 property/<id>/instructions     property/<id>/closures
+property/<id>/inventory
 stays                          users
 user/<id>                      user/<id>/leaves
 user/<id>/availability         leaves

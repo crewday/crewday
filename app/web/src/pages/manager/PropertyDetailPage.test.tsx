@@ -478,6 +478,7 @@ function Harness({ initial = "/w/acme/property/prop_1" }: { initial?: string }) 
             <Route path="/w/:slug/property/:pid/stays" element={<RelatedRoute label="Stays route reached" activeRelatedPage="stays" />} />
             <Route path="/w/:slug/property/:pid/instructions" element={<RelatedRoute label="Instructions route reached" activeRelatedPage="instructions" />} />
             <Route path="/w/:slug/property/:pid/closures" element={<RelatedRoute label="Closures route reached" activeRelatedPage="closures" />} />
+            <Route path="/w/:slug/property/:pid/inventory" element={<RelatedRoute label="Inventory route reached" activeRelatedPage="inventory" />} />
           </Routes>
         </WorkspaceProvider>
       </MemoryRouter>
@@ -890,6 +891,7 @@ describe("<PropertyDetailPage>", () => {
       expect(screen.getByRole("link", { name: "Stays" })).toHaveAttribute("href", "/w/acme/property/prop_1/stays");
       expect(screen.getByRole("link", { name: "Instructions" })).toHaveAttribute("href", "/w/acme/property/prop_1/instructions");
       expect(screen.getByRole("link", { name: "Closures" })).toHaveAttribute("href", "/w/acme/property/prop_1/closures");
+      expect(screen.getByRole("link", { name: "Inventory" })).toHaveAttribute("href", "/w/acme/property/prop_1/inventory");
 
       fireEvent.click(screen.getByRole("link", { name: "Stays" }));
       await waitFor(() => {
@@ -919,6 +921,18 @@ describe("<PropertyDetailPage>", () => {
       await waitFor(() => {
         expect(screen.getByText("Closures route reached")).toBeInTheDocument();
       });
+
+      cleanup();
+      window.history.replaceState(null, "", "/");
+      render(<Harness />);
+      expect(await screen.findByText("Tasks for this property")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("link", { name: "Inventory" }));
+      await waitFor(() => {
+        expect(screen.getByText("Inventory route reached")).toBeInTheDocument();
+      });
+      const inventoryRelatedPages = screen.getByRole("navigation", { name: "Related property pages" });
+      expect(within(inventoryRelatedPages).getByRole("link", { name: "Inventory" })).toHaveAttribute("aria-current", "page");
+      expect(within(inventoryRelatedPages).getByRole("link", { name: "Inventory" })).toHaveClass("page-tabs__tab--active");
     } finally {
       fake.restore();
     }

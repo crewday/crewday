@@ -289,6 +289,9 @@ function managerWorkspaceRoutes(isManagerSurface: boolean) {
         <Route element={<RequirePermission actionKey="instructions.edit" />}>
           <Route path="property/:pid/instructions" element={<InstructionsPage />} />
         </Route>
+        <Route element={<RequirePermission actionKey="scope.view" />}>
+          <Route path="property/:pid/inventory" element={<InventoryPage />} />
+        </Route>
       </Route>
 
       <Route element={<RequirePermission actionKey="assets.manage_documents" />}>

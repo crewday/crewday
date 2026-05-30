@@ -38,6 +38,11 @@ export default function PropertyTabs({
       label: "Closures",
       to: workspaceRouteForPathname(pathname, "/property/" + propertyId + "/closures"),
     },
+    {
+      key: "inventory",
+      label: "Inventory",
+      to: workspaceRouteForPathname(pathname, "/property/" + propertyId + "/inventory"),
+    },
   ] satisfies PageTabLink[];
 
   return (

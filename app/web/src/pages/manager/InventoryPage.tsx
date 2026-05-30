@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { useLocation, useParams } from "react-router-dom";
 import {
   useInfiniteQuery,
   useMutation,
@@ -28,6 +29,7 @@ import {
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { Chip, Loading } from "@/components/common";
 import type { Property } from "@/types/api";
+import PropertyTabs from "./property/PropertyTabs";
 
 type InventoryMovementReason =
   | "restock"
@@ -375,14 +377,29 @@ interface WireMovementsPage {
 export default function InventoryPage() {
   // code-health: ignore[ccn nloc] Inventory route keeps filters, inline adjustment dialog, and table actions together.
   const qc = useQueryClient();
+  const { pid } = useParams<{ pid?: string }>();
+  const routePropertyId = pid ?? null;
+  const { pathname } = useLocation();
   const propsQ = useQuery({
     queryKey: qk.properties(),
     queryFn: () => fetchList<Property>("/api/v1/properties"),
   });
+  const pageProperties = useMemo(
+    () => {
+      if (!propsQ.data) return undefined;
+      return routePropertyId
+        ? propsQ.data.filter((property) => property.id === routePropertyId)
+        : propsQ.data;
+    },
+    [propsQ.data, routePropertyId],
+  );
+  const inventoryQueryKey = routePropertyId
+    ? ([...qk.inventory(), "property", routePropertyId] as const)
+    : qk.inventory();
   const invQ = useQuery({
-    queryKey: qk.inventory(),
-    queryFn: () => fetchInventoryForProperties(propsQ.data ?? []),
-    enabled: propsQ.data !== undefined,
+    queryKey: inventoryQueryKey,
+    queryFn: () => fetchInventoryForProperties(pageProperties ?? []),
+    enabled: pageProperties !== undefined,
   });
 
   const [openItemId, setOpenItemId] = useState<string | null>(null);
@@ -420,14 +437,14 @@ export default function InventoryPage() {
     },
   ];
 
-  if (propsQ.isPending || (propsQ.data !== undefined && invQ.isPending)) {
+  if (propsQ.isPending || (pageProperties !== undefined && invQ.isPending)) {
     return (
       <DeskPage title="Inventory" sub={sub} actions={actions} overflow={overflow}>
         <Loading />
       </DeskPage>
     );
   }
-  if (!invQ.data || !propsQ.data) {
+  if (!invQ.data || !propsQ.data || !pageProperties) {
     return (
       <DeskPage title="Inventory" sub={sub} actions={actions} overflow={overflow}>
         Failed to load.
@@ -436,12 +453,12 @@ export default function InventoryPage() {
   }
 
   const propsById = new Map(propsQ.data.map((p) => [p.id, p]));
-  const order: string[] = [];
+  const order: string[] = routePropertyId ? pageProperties.map((property) => property.id) : [];
   const byProp = new Map<string, InventoryItem[]>();
   for (const item of invQ.data) {
     if (!byProp.has(item.property_id)) {
       byProp.set(item.property_id, []);
-      order.push(item.property_id);
+      if (!routePropertyId) order.push(item.property_id);
     }
     byProp.get(item.property_id)!.push(item);
   }
@@ -457,6 +474,14 @@ export default function InventoryPage() {
 
   return (
     <DeskPage title="Inventory" sub={sub} actions={actions} overflow={overflow}>
+      {routePropertyId ? (
+        <PropertyTabs
+          pathname={pathname}
+          propertyId={routePropertyId}
+          activeRelatedPage="inventory"
+        />
+      ) : null}
+
       {order.map((pid) => {
         const p = propsById.get(pid);
         const items = byProp.get(pid) ?? [];
@@ -557,7 +582,7 @@ export default function InventoryPage() {
 
       {creating ? (
         <NewInventoryItemForm
-          properties={propsQ.data}
+          properties={pageProperties}
           onClose={() => setCreating(false)}
         />
       ) : null}

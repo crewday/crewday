@@ -185,6 +185,7 @@ describe("<RequirePermission>", () => {
   it("gates property related tab routes before related content can render", () => {
     expectNestedOutletPermissionPage("property/:pid/stays", "properties.read", "stays.read", "StaysPage");
     expectNestedOutletPermissionPage("property/:pid/instructions", "properties.read", "instructions.edit", "InstructionsPage");
+    expectNestedOutletPermissionPage("property/:pid/inventory", "properties.read", "scope.view", "InventoryPage");
   });
 
   it("gates the real properties list route before properties content can render", () => {
