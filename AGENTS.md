@@ -243,8 +243,8 @@ update in your wrap-up.
   `ruff format` + `ruff check --fix` autofixes, re-check the remaining
   lint/format issues, repair container-readable permissions for
   bind-mounted source files, run `mypy --strict app`, run React Doctor
-  for the active React surfaces (`app/web` and `site/web`, excluding
-  `mocks/web`), and run pytest through `pytest-testmon`
+  for the active React surfaces (`app/web` and `site/web`), and run
+  pytest through `pytest-testmon`
   (`--testmon-forceselect`, so it still works with the repo's default
   marker filter) to deselect cached unaffected tests by default. Use
   `./scripts/react-doctor-gate.sh` for the focused frontend static gate.

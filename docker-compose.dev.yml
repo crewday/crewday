@@ -59,12 +59,12 @@ services:
   app-api:
     build:
       context: .
-      dockerfile: deploy/dev/Dockerfile.app-api
+      dockerfile: deploy/dev/Dockerfile.api-dev
     container_name: crewday-app-api
     restart: unless-stopped
     # Root entrypoint chowns ``/data`` (the named volume arrives
     # root-owned) and then drops to the ``crewday`` uid before
-    # ``exec``ing uvicorn — see ``deploy/dev/Dockerfile.app-api``.
+    # ``exec``ing uvicorn — see ``deploy/dev/Dockerfile.api-dev``.
     volumes:
       - ./app:/app/app:ro
       - ./migrations:/app/migrations:ro

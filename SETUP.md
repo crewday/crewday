@@ -346,8 +346,8 @@ pytest through `pytest-testmon`. The focused frontend static gate is:
 ./scripts/react-doctor-gate.sh
 ```
 
-It intentionally excludes `mocks/web` and fails unless each active
-React surface has score 100 and zero diagnostics. Use:
+It fails unless each active React surface has score 100 and zero diagnostics.
+Use:
 
 ```bash
 ./scripts/agent-quality.sh --full-tests

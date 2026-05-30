@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Run the blocking React Doctor quality gate for active React surfaces.
-# Intentionally excludes mocks/web, which is not an active surface.
 
 set -uo pipefail
 
