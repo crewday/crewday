@@ -266,7 +266,7 @@ def _http_for_service_error(exc: Exception) -> HTTPException:
         )
     if isinstance(exc, service.ScopeValidationError):
         return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "error": "scope_invalid",
                 "message": str(exc),
