@@ -318,7 +318,7 @@ async function chooseSearchableOption(
 ): Promise<void> {
   const input = within(container).getByRole("combobox", { name: label });
   fireEvent.change(input, { target: { value: query } });
-  await within(container).findByText(query);
+  await screen.findByRole("option", { name: (name) => name.includes(query) });
   fireEvent.keyDown(input, { key: "Enter" });
 }
 

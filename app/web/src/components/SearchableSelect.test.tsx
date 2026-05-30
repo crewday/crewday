@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import SearchableSelect, { type SearchableSelectOption } from "./SearchableSelect";
 import formsCss from "@/styles/forms.css?raw";
 
@@ -14,6 +14,10 @@ const LONG_OPTIONS: readonly SearchableSelectOption[] = Array.from({ length: 45 
   value: `option-${index}`,
   label: `Option ${index.toString().padStart(2, "0")}`,
 }));
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("SearchableSelect", () => {
   it("filters options and commits the active option from the keyboard", () => {
@@ -173,6 +177,26 @@ describe("SearchableSelect", () => {
     expect(new FormData(form).get("country")).toBe("FR");
   });
 
+  it("keeps portaled listbox aria relationships and mouse selection wired", () => {
+    render(<SearchableSelectHarness />);
+
+    const input = screen.getByRole("combobox", { name: /country/i });
+    fireEvent.focus(input);
+
+    const listbox = screen.getByRole("listbox", { name: /country/i });
+    const france = screen.getByRole("option", { name: /france/i });
+    expect(listbox.parentElement?.parentElement).toBe(document.body);
+    expect(input).toHaveAttribute("aria-controls", listbox.id);
+    expect(input).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: /germany/i }).id);
+
+    fireEvent.mouseEnter(france);
+    expect(input).toHaveAttribute("aria-activedescendant", france.id);
+
+    fireEvent.mouseDown(france);
+    expect(input).toHaveValue("France");
+    expect(screen.queryByRole("listbox", { name: /country/i })).not.toBeInTheDocument();
+  });
+
   it("keeps a required blank option invalid until a real option is selected", () => {
     render(<SearchableSelectHarness initialValue="" required />);
 
@@ -309,6 +333,104 @@ describe("SearchableSelect", () => {
       /\.searchable-select__value \{[\s\S]*max-width: 45%;[\s\S]*overflow-wrap: anywhere;[\s\S]*\}/m,
     );
   });
+
+  it("portals the popover above clipped inline tables when there is not enough table space below", () => {
+    mockViewport({ width: 1440, height: 1000 });
+    mockRects({
+      input: rect({ top: 260, bottom: 300, left: 420, right: 620, width: 200, height: 40 }),
+      table: rect({ top: 80, bottom: 314, left: 300, right: 900, width: 600, height: 234 }),
+    });
+
+    render(
+      <div className="inline-table-form__table" data-testid="inline-table">
+        <SearchableSelect
+          label="Template"
+          value=""
+          options={OPTIONS}
+          onChange={vi.fn()}
+          placeholder="Select template"
+        />
+      </div>,
+    );
+
+    fireEvent.focus(screen.getByRole("combobox", { name: /template/i }));
+
+    const listbox = screen.getByRole("listbox", { name: /template/i });
+    const popover = listbox.closest(".searchable-select__popover");
+    expect(popover?.parentElement).toBe(document.body);
+    expect(popover).toHaveClass("searchable-select__popover--above");
+    expect(popover).toHaveAttribute("data-placement", "above");
+    expect(popover).toHaveStyle({ left: "420px", width: "200px" });
+  });
+
+  it("keeps the popover below inline table controls when there is enough table space", () => {
+    mockViewport({ width: 1440, height: 1000 });
+    mockRects({
+      input: rect({ top: 120, bottom: 160, left: 420, right: 620, width: 200, height: 40 }),
+      table: rect({ top: 80, bottom: 620, left: 300, right: 900, width: 600, height: 540 }),
+    });
+
+    render(
+      <div className="inline-table-form__table">
+        <SearchableSelect
+          label="Property"
+          value=""
+          options={OPTIONS}
+          onChange={vi.fn()}
+          placeholder="Select property"
+        />
+      </div>,
+    );
+
+    fireEvent.focus(screen.getByRole("combobox", { name: /property/i }));
+
+    const popover = screen.getByRole("listbox", { name: /property/i }).closest(".searchable-select__popover");
+    expect(popover).toHaveClass("searchable-select__popover--below");
+    expect(popover).toHaveAttribute("data-placement", "below");
+    expect(popover).toHaveStyle({ top: "168px", width: "200px" });
+  });
+
+  it("updates fixed popover placement on layout changes and removes window listeners when closed", () => {
+    mockViewport({ width: 1440, height: 1000 });
+    const inputRect = mutableRect({ top: 120, bottom: 160, left: 420, right: 620, width: 200, height: 40 });
+    const tableRect = mutableRect({ top: 80, bottom: 620, left: 300, right: 900, width: 600, height: 540 });
+    mockRects({ input: inputRect, table: tableRect });
+    const addListener = vi.spyOn(window, "addEventListener");
+    const removeListener = vi.spyOn(window, "removeEventListener");
+
+    render(
+      <div className="inline-table-form__table">
+        <SearchableSelect
+          label="Template"
+          value=""
+          options={OPTIONS}
+          onChange={vi.fn()}
+          placeholder="Select template"
+        />
+      </div>,
+    );
+
+    const input = screen.getByRole("combobox", { name: /template/i });
+    fireEvent.focus(input);
+    expect(screen.getByRole("listbox", { name: /template/i }).closest(".searchable-select__popover"))
+      .toHaveAttribute("data-placement", "below");
+    expect(addListener).toHaveBeenCalledWith("resize", expect.any(Function));
+    expect(addListener).toHaveBeenCalledWith("scroll", expect.any(Function), true);
+
+    inputRect.top = 260;
+    inputRect.bottom = 300;
+    tableRect.bottom = 314;
+    fireEvent.scroll(window);
+
+    expect(screen.getByRole("listbox", { name: /template/i }).closest(".searchable-select__popover"))
+      .toHaveAttribute("data-placement", "above");
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(screen.queryByRole("listbox", { name: /template/i })).not.toBeInTheDocument();
+    expect(removeListener).toHaveBeenCalledWith("resize", expect.any(Function));
+    expect(removeListener).toHaveBeenCalledWith("scroll", expect.any(Function), true);
+  });
 });
 
 interface SearchableSelectHarnessProps {
@@ -343,4 +465,49 @@ function SearchableSelectHarness({
       />
     </form>
   );
+}
+
+interface MockViewport {
+  width: number;
+  height: number;
+}
+
+interface MockRects {
+  input: DOMRect;
+  table: DOMRect;
+}
+
+function mockViewport({ width, height }: MockViewport) {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+  Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
+}
+
+function mockRects({ input, table }: MockRects) {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function getBoundingClientRect() {
+    if (this.classList.contains("inline-table-form__table")) return table;
+    if (this.getAttribute("role") === "combobox") return input;
+    return rect({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 });
+  });
+}
+
+interface RectValues {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+  width: number;
+  height: number;
+}
+
+function rect(values: RectValues): DOMRect {
+  return {
+    ...values,
+    x: values.left,
+    y: values.top,
+    toJSON: () => values,
+  } as DOMRect;
+}
+
+function mutableRect(values: RectValues): DOMRect {
+  return values as DOMRect;
 }

@@ -532,7 +532,7 @@ async function chooseSearchableOption(
 ): Promise<void> {
   const input = within(container).getByRole("combobox", { name: label });
   fireEvent.change(input, { target: { value: query } });
-  await within(container).findByText(query);
+  await screen.findByRole("option", { name: (name) => name.includes(query) });
   fireEvent.keyDown(input, { key: "Enter" });
 }
 
@@ -664,7 +664,7 @@ describe("<PropertyDetailPage>", () => {
       fireEvent.change(within(dialog).getByRole("combobox", { name: /^Timezone\b/ }), {
         target: { value: "Madrid" },
       });
-      expect((await within(dialog).findAllByText("Europe/Madrid")).length).toBeGreaterThan(0);
+      expect((await screen.findAllByText("Europe/Madrid")).length).toBeGreaterThan(0);
       fireEvent.keyDown(within(dialog).getByRole("combobox", { name: /^Timezone\b/ }), { key: "Enter" });
       fireEvent.click(within(dialog).getByRole("button", { name: "Save property" }));
 
@@ -732,7 +732,7 @@ describe("<PropertyDetailPage>", () => {
       fireEvent.change(within(kitchenRow).getByRole("combobox", { name: /^Parent\b/ }), {
         target: { value: "Terrace" },
       });
-      expect(await within(kitchenRow).findByText("No parent areas")).toBeInTheDocument();
+      expect(await screen.findByText("No parent areas")).toBeInTheDocument();
       fireEvent.click(within(kitchenRow).getByRole("button", { name: "Cancel" }));
 
       fireEvent.click(within(kitchenRow).getByRole("button", { name: "Delete" }));

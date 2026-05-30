@@ -1,4 +1,4 @@
-import { fireEvent, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 
 export async function chooseSearchableOption(
   container: HTMLElement,
@@ -8,5 +8,5 @@ export async function chooseSearchableOption(
   const input = await within(container).findByRole("combobox", { name: label });
   fireEvent.focus(input);
   fireEvent.change(input, { target: { value: optionName.source.replace(/\\/g, "") } });
-  fireEvent.mouseDown(await within(container).findByRole("option", { name: optionName }));
+  fireEvent.mouseDown(await screen.findByRole("option", { name: optionName }));
 }

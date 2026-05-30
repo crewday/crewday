@@ -634,15 +634,19 @@
   cursor: not-allowed;
 }
 .searchable-select__popover {
-  position: absolute;
-  z-index: 20;
-  inset-inline: 0;
-  top: calc(100% + var(--space-2));
+  position: fixed;
+  z-index: 80;
   min-width: 0;
+}
+.searchable-select__popover--above {
+  transform-origin: bottom center;
+}
+.searchable-select__popover--below {
+  transform-origin: top center;
 }
 .searchable-select__list {
   list-style: none;
-  max-height: 240px;
+  max-height: var(--searchable-select-popover-max-height, 240px);
   overflow-y: auto;
   margin: var(--space-0);
   padding: var(--space-2);

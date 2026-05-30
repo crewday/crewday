@@ -1,5 +1,6 @@
 import {
   type AriaAttributes,
+  type CSSProperties,
   type KeyboardEvent,
   type ReactNode,
   useEffect,
@@ -8,11 +9,16 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import FormField, { type FieldRequirement } from "@/components/FormField";
 
 const COMBOBOX_ROLE = "combobox";
 const LISTBOX_ROLE = "listbox";
 const OPTION_ROLE = "option";
+const POPOVER_GAP_PX = 8;
+const POPOVER_MAX_HEIGHT_PX = 240;
+const POPOVER_MIN_HEIGHT_PX = 120;
+const POPOVER_VIEWPORT_MARGIN_PX = 8;
 
 export interface SearchableSelectOption {
   value: string;
@@ -53,6 +59,17 @@ interface SearchableSelectProps {
 
 const MAX_VISIBLE_OPTIONS = 40;
 
+type SearchableSelectPopoverPlacement = "above" | "below";
+
+type SearchableSelectPopoverStyle = CSSProperties & {
+  "--searchable-select-popover-max-height": string;
+};
+
+interface SearchableSelectPopoverLayout {
+  placement: SearchableSelectPopoverPlacement;
+  style: SearchableSelectPopoverStyle;
+}
+
 export default function SearchableSelect({
   label,
   value,
@@ -80,10 +97,12 @@ export default function SearchableSelect({
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const activeIndexRef = useRef(0);
+  const updatePopoverLayoutRef = useRef<() => void>(() => undefined);
   const selectOptions = useMemo(() => withBlankOption(options, blankOption), [blankOption, options]);
   const [draftQuery, setDraftQuery] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [popoverLayout, setPopoverLayout] = useState<SearchableSelectPopoverLayout | null>(null);
 
   const selectedOption = selectOptions.find((option) => option.value === value);
   const selectedOptionLabel = selectedOption?.label ?? "";
@@ -119,6 +138,35 @@ export default function SearchableSelect({
     inputRef.current?.setCustomValidity(invalidSelection ? `Select a ${label.toLocaleLowerCase()}.` : "");
   }, [invalidSelection, label]);
 
+  updatePopoverLayoutRef.current = () => {
+    const input = inputRef.current;
+    if (!input) return;
+    setPopoverLayout(calculatePopoverLayout(input));
+  };
+
+  useEffect(() => {
+    if (!open) {
+      setPopoverLayout(null);
+      return undefined;
+    }
+
+    updatePopoverLayoutRef.current();
+    const handleLayoutChange = () => {
+      updatePopoverLayoutRef.current();
+    };
+    window.addEventListener("resize", handleLayoutChange);
+    window.addEventListener("scroll", handleLayoutChange, true);
+
+    return () => {
+      window.removeEventListener("resize", handleLayoutChange);
+      window.removeEventListener("scroll", handleLayoutChange, true);
+    };
+  }, [open]);
+
+  function updatePopoverLayout() {
+    updatePopoverLayoutRef.current();
+  }
+
   function commit(option: SearchableSelectOption) {
     if (disabled || option.disabled) return;
     onChange(option.value);
@@ -132,6 +180,7 @@ export default function SearchableSelect({
   }
 
   function openAtSelected() {
+    updatePopoverLayout();
     setOpen(true);
     if (selectedOption?.disabled) {
       updateActiveIndex(firstEnabledIndex(
@@ -146,6 +195,7 @@ export default function SearchableSelect({
   }
 
   function moveActive(direction: -1 | 1) {
+    updatePopoverLayout();
     setOpen(true);
     setActiveIndex((index) => {
       const maxIndex = Math.max(visibleOptions.length - 1, 0);
@@ -199,6 +249,7 @@ export default function SearchableSelect({
         onChange={(event) => {
           const nextQuery = event.currentTarget.value;
           setDraftQuery(nextQuery);
+          updatePopoverLayout();
           setOpen(true);
           updateActiveIndex(firstEnabledIndex(
             filterOptions(selectOptions, nextQuery).slice(0, MAX_VISIBLE_OPTIONS),
@@ -224,46 +275,141 @@ export default function SearchableSelect({
         }}
       />
       {name ? <input type="hidden" name={name} value={value} disabled={disabled} /> : null}
-      {open && (
-        <div className="searchable-select__popover">
-          <div id={listboxId} className="searchable-select__list" role={LISTBOX_ROLE} aria-label={label}>
-            {visibleOptions.map((option, index) => {
-              const secondaryText = renderOptionSecondaryText(option);
-              return (
-                <button
-                  type="button"
-                  id={optionId(listboxId, index)}
-                  key={option.value}
-                  role={OPTION_ROLE}
-                  aria-selected={option.value === selectedOption?.value}
-                  aria-disabled={option.disabled || undefined}
-                  disabled={option.disabled}
-                  className={[
-                    "searchable-select__option",
-                    index === activeIndex ? "is-active" : null,
-                    option.disabled ? "is-disabled" : null,
-                  ].filter(Boolean).join(" ")}
-                  onMouseEnter={() => {
-                    if (!option.disabled) updateActiveIndex(index);
-                  }}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    commit(option);
-                  }}
-                >
-                  <span className="searchable-select__label">{option.label}</span>
-                  {secondaryText ? <span className="searchable-select__value">{secondaryText}</span> : null}
-                </button>
-              );
-            })}
-            {visibleOptions.length === 0 && (
-              <div className="searchable-select__empty" aria-live="polite">{noResultsLabel}</div>
-            )}
-          </div>
-        </div>
-      )}
+      {open && popoverLayout ? createPortal(
+        <div
+          className={[
+            "searchable-select__popover",
+            `searchable-select__popover--${popoverLayout.placement}`,
+          ].join(" ")}
+          style={popoverLayout.style}
+          data-placement={popoverLayout.placement}
+        >
+          <SearchableSelectListbox
+            listboxId={listboxId}
+            label={label}
+            visibleOptions={visibleOptions}
+            selectedOptionValue={selectedOption?.value}
+            activeIndex={activeIndex}
+            noResultsLabel={noResultsLabel}
+            renderOptionSecondaryText={renderOptionSecondaryText}
+            updateActiveIndex={updateActiveIndex}
+            commit={commit}
+          />
+        </div>,
+        document.body,
+      ) : null}
     </FormField>
   );
+}
+
+interface SearchableSelectListboxProps {
+  listboxId: string;
+  label: string;
+  visibleOptions: readonly SearchableSelectOption[];
+  selectedOptionValue: string | undefined;
+  activeIndex: number;
+  noResultsLabel: string;
+  renderOptionSecondaryText: (option: SearchableSelectOption) => ReactNode;
+  updateActiveIndex: (nextIndex: number) => void;
+  commit: (option: SearchableSelectOption) => void;
+}
+
+function SearchableSelectListbox({
+  listboxId,
+  label,
+  visibleOptions,
+  selectedOptionValue,
+  activeIndex,
+  noResultsLabel,
+  renderOptionSecondaryText,
+  updateActiveIndex,
+  commit,
+}: SearchableSelectListboxProps) {
+  return (
+    <div id={listboxId} className="searchable-select__list" role={LISTBOX_ROLE} aria-label={label}>
+      {visibleOptions.map((option, index) => {
+        const secondaryText = renderOptionSecondaryText(option);
+        return (
+          <button
+            type="button"
+            id={optionId(listboxId, index)}
+            key={option.value}
+            role={OPTION_ROLE}
+            aria-selected={option.value === selectedOptionValue}
+            aria-disabled={option.disabled || undefined}
+            disabled={option.disabled}
+            className={[
+              "searchable-select__option",
+              index === activeIndex ? "is-active" : null,
+              option.disabled ? "is-disabled" : null,
+            ].filter(Boolean).join(" ")}
+            onMouseEnter={() => {
+              if (!option.disabled) updateActiveIndex(index);
+            }}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              commit(option);
+            }}
+          >
+            <span className="searchable-select__label">{option.label}</span>
+            {secondaryText ? <span className="searchable-select__value">{secondaryText}</span> : null}
+          </button>
+        );
+      })}
+      {visibleOptions.length === 0 && (
+        <div className="searchable-select__empty" aria-live="polite">{noResultsLabel}</div>
+      )}
+    </div>
+  );
+}
+
+function calculatePopoverLayout(input: HTMLInputElement): SearchableSelectPopoverLayout {
+  const rect = input.getBoundingClientRect();
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+  const clippingContainer = input.closest(".inline-table-form__table");
+  const containerRect = clippingContainer?.getBoundingClientRect();
+  const topBoundary = containerRect ? Math.max(POPOVER_VIEWPORT_MARGIN_PX, containerRect.top) : POPOVER_VIEWPORT_MARGIN_PX;
+  const bottomBoundary = containerRect
+    ? Math.min(viewportHeight - POPOVER_VIEWPORT_MARGIN_PX, containerRect.bottom)
+    : viewportHeight - POPOVER_VIEWPORT_MARGIN_PX;
+  const availableBelow = Math.max(0, bottomBoundary - rect.bottom - POPOVER_GAP_PX);
+  const availableAbove = Math.max(0, rect.top - topBoundary - POPOVER_GAP_PX);
+  const placement = availableBelow >= POPOVER_MIN_HEIGHT_PX || availableBelow >= availableAbove ? "below" : "above";
+  const availableHeight = placement === "below" ? availableBelow : availableAbove;
+  const maxHeight = Math.max(
+    Math.min(POPOVER_MIN_HEIGHT_PX, POPOVER_MAX_HEIGHT_PX),
+    Math.min(POPOVER_MAX_HEIGHT_PX, Math.floor(availableHeight)),
+  );
+  const maxWidth = Math.max(0, viewportWidth - POPOVER_VIEWPORT_MARGIN_PX * 2);
+  const width = Math.min(rect.width, maxWidth);
+  const left = Math.min(
+    Math.max(rect.left, POPOVER_VIEWPORT_MARGIN_PX),
+    Math.max(POPOVER_VIEWPORT_MARGIN_PX, viewportWidth - width - POPOVER_VIEWPORT_MARGIN_PX),
+  );
+  const baseStyle: SearchableSelectPopoverStyle = {
+    left,
+    width,
+    "--searchable-select-popover-max-height": `${maxHeight}px`,
+  };
+
+  if (placement === "above") {
+    return {
+      placement,
+      style: {
+        ...baseStyle,
+        bottom: Math.max(POPOVER_VIEWPORT_MARGIN_PX, viewportHeight - rect.top + POPOVER_GAP_PX),
+      },
+    };
+  }
+
+  return {
+    placement,
+    style: {
+      ...baseStyle,
+      top: Math.min(rect.bottom + POPOVER_GAP_PX, viewportHeight - POPOVER_VIEWPORT_MARGIN_PX),
+    },
+  };
 }
 
 function withBlankOption(

@@ -265,7 +265,7 @@ async function chooseSearchableOption(
 ): Promise<void> {
   const input = within(container).getByRole("combobox", { name: label });
   fireEvent.change(input, { target: { value: query } });
-  await within(container).findByText(query);
+  await screen.findByRole("option", { name: (name) => name.includes(query) });
   fireEvent.keyDown(input, { key: "Enter" });
 }
 
@@ -414,7 +414,7 @@ describe("<InventoryPage>", () => {
       const property = within(inlineForm).getByRole("combobox", { name: /^Property\b/ });
       expect(property).toHaveValue("Villa Rosa");
       fireEvent.focus(property);
-      expect(await within(inlineForm).findByText("Casa Azul")).toBeInTheDocument();
+      expect(await screen.findByRole("option", { name: (name) => name.includes("Casa Azul") })).toBeInTheDocument();
       expect(within(inlineForm).getByLabelText(/^Name\b/)).toBeInTheDocument();
       expect(within(inlineForm).getByLabelText(/^Unit\b/)).toHaveValue("each");
       expect(within(inlineForm).getByLabelText(/^SKU\b/)).toBeInTheDocument();
