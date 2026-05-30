@@ -39,12 +39,12 @@ export default function PropertyTabs({
     {
       key: "stays",
       label: "Stays",
-      to: workspaceRouteForPathname(pathname, "/stays?property_id=" + encodeURIComponent(propertyId)),
+      to: workspaceRouteForPathname(pathname, "/property/" + propertyId + "/stays"),
     },
     {
       key: "instructions",
       label: "Instructions",
-      to: workspaceRouteForPathname(pathname, "/instructions?property_id=" + encodeURIComponent(propertyId)),
+      to: workspaceRouteForPathname(pathname, "/property/" + propertyId + "/instructions"),
     },
     {
       key: "closures",

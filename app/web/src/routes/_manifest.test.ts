@@ -33,6 +33,22 @@ describe("frontend route manifest", () => {
       query: [],
       agentLinkable: true,
     });
+    expect(route("property.stays")).toEqual({
+      name: "property.stays",
+      scope: "workspace",
+      template: "/property/:pid/stays",
+      params: [{ name: "pid", required: true, source: "path" }],
+      query: [],
+      agentLinkable: true,
+    });
+    expect(route("property.instructions")).toEqual({
+      name: "property.instructions",
+      scope: "workspace",
+      template: "/property/:pid/instructions",
+      params: [{ name: "pid", required: true, source: "path" }],
+      query: [],
+      agentLinkable: true,
+    });
     expect(route("today").query).toEqual([]);
     expect(route("assets.index").query).toEqual([
       { name: "category", required: false },

@@ -283,6 +283,12 @@ function managerWorkspaceRoutes(isManagerSurface: boolean) {
         <Route path="properties" element={<PropertiesPage />} />
         <Route path="property/:pid" element={<PropertyDetailPage />} />
         <Route path="property/:pid/closures" element={<PropertyClosuresPage />} />
+        <Route element={<RequirePermission actionKey="stays.read" />}>
+          <Route path="property/:pid/stays" element={<StaysPage />} />
+        </Route>
+        <Route element={<RequirePermission actionKey="instructions.edit" />}>
+          <Route path="property/:pid/instructions" element={<InstructionsPage />} />
+        </Route>
       </Route>
 
       <Route element={<RequirePermission actionKey="assets.manage_documents" />}>

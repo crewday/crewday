@@ -1,5 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useMemo, useState } from "react";
+import { useLocation, useParams } from "react-router-dom";
 import { ApiError, fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
@@ -20,6 +21,7 @@ import type {
 import type { AuthMe } from "@/auth/types";
 import { isoDate } from "@/pages/employee/schedule/lib/dateHelpers";
 import { useIsPhone } from "@/pages/employee/schedule/lib/useIsPhone";
+import PropertyTabs from "./property/PropertyTabs";
 import { InfiniteStaysAgenda } from "./stays/InfiniteStaysAgenda";
 
 type IcalProvider = "airbnb" | "vrbo" | "booking" | "gcal" | "generic";
@@ -405,6 +407,8 @@ function describedBy(...ids: Array<string | false | null | undefined>): string |
 
 export default function StaysPage() {
   // code-health: ignore[nloc] Stays page is declarative reservation/closure composition over promoted route data.
+  const { pid } = useParams<{ pid?: string }>();
+  const { pathname } = useLocation();
   const { workspaceId } = useWorkspace();
   const isPhone = useIsPhone();
   const queryClient = useQueryClient();
@@ -653,6 +657,14 @@ export default function StaysPage() {
         },
       ]}
     >
+      {pid ? (
+        <PropertyTabs
+          pathname={pathname}
+          propertyId={pid}
+          activeRelatedPage="stays"
+        />
+      ) : null}
+
       <FormModal
         open={manualForm !== null}
         title="Add stay"

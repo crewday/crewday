@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { CalendarClock } from "lucide-react";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { EmptyState } from "@/components/common";
@@ -10,6 +10,7 @@ import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
 import * as preferences from "@/lib/preferences";
 import { jsonResponse } from "@/test/helpers";
 import PropertyDetailPage from "./PropertyDetailPage";
+import PropertyTabs, { type PropertyRelatedPage } from "./property/PropertyTabs";
 
 interface RequestRecord {
   url: string;
@@ -473,13 +474,34 @@ function Harness({ initial = "/w/acme/property/prop_1" }: { initial?: string }) 
         <WorkspaceProvider>
           <Routes>
             <Route path="/w/:slug/property/:pid" element={<PropertyDetailPage />} />
-            <Route path="/w/:slug/stays" element={<div>Stays route reached</div>} />
-            <Route path="/w/:slug/instructions" element={<div>Instructions route reached</div>} />
-            <Route path="/w/:slug/property/:pid/closures" element={<div>Closures route reached</div>} />
+            <Route path="/w/:slug/property/:pid/stays" element={<RelatedRoute label="Stays route reached" activeRelatedPage="stays" />} />
+            <Route path="/w/:slug/property/:pid/instructions" element={<RelatedRoute label="Instructions route reached" activeRelatedPage="instructions" />} />
+            <Route path="/w/:slug/property/:pid/closures" element={<RelatedRoute label="Closures route reached" activeRelatedPage="closures" />} />
           </Routes>
         </WorkspaceProvider>
       </MemoryRouter>
     </QueryClientProvider>
+  );
+}
+
+function RelatedRoute({
+  label,
+  activeRelatedPage,
+}: {
+  label: string;
+  activeRelatedPage: PropertyRelatedPage;
+}) {
+  const { pathname } = useLocation();
+  const { pid = "" } = useParams<{ pid: string }>();
+  return (
+    <>
+      <PropertyTabs
+        pathname={pathname}
+        propertyId={pid}
+        activeRelatedPage={activeRelatedPage}
+      />
+      <div>{label}</div>
+    </>
   );
 }
 
@@ -686,9 +708,6 @@ describe("<PropertyDetailPage>", () => {
         target: { value: "outdoor" },
       });
       await chooseSearchableOption(createRow, /^Parent\b/, "Kitchen");
-      fireEvent.change(within(createRow).getByLabelText("Order"), {
-        target: { value: "3" },
-      });
       fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
       expect(await screen.findByText("Pool")).toBeInTheDocument();
 
@@ -696,9 +715,6 @@ describe("<PropertyDetailPage>", () => {
       fireEvent.click(within(poolRow).getByRole("button", { name: "Edit" }));
       fireEvent.change(within(poolRow).getByLabelText("Name"), {
         target: { value: "Pool deck" },
-      });
-      fireEvent.change(within(poolRow).getByLabelText("Order"), {
-        target: { value: "-5" },
       });
       fireEvent.change(within(poolRow).getByLabelText("Notes"), {
         target: { value: "Check loungers after checkout." },
@@ -734,7 +750,7 @@ describe("<PropertyDetailPage>", () => {
         parent_area_id: "area_1",
       });
       expect(fake.calls.find((call) => call.url === "/w/acme/api/v1/areas/area_3" && call.method === "PATCH")?.body).toMatchObject({
-        order_hint: 0,
+        order_hint: 3,
         notes_md: "Check loungers after checkout.",
       });
       expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/areas/area_3" && call.method === "DELETE")).toBe(true);
@@ -870,14 +886,17 @@ describe("<PropertyDetailPage>", () => {
       expect(window.location.hash).toBe("#settings");
       expect(await screen.findByText("Settings overrides")).toBeInTheDocument();
 
-      expect(screen.getByRole("link", { name: "Stays" })).toHaveAttribute("href", "/w/acme/stays?property_id=prop_1");
-      expect(screen.getByRole("link", { name: "Instructions" })).toHaveAttribute("href", "/w/acme/instructions?property_id=prop_1");
+      expect(screen.getByRole("link", { name: "Stays" })).toHaveAttribute("href", "/w/acme/property/prop_1/stays");
+      expect(screen.getByRole("link", { name: "Instructions" })).toHaveAttribute("href", "/w/acme/property/prop_1/instructions");
       expect(screen.getByRole("link", { name: "Closures" })).toHaveAttribute("href", "/w/acme/property/prop_1/closures");
 
       fireEvent.click(screen.getByRole("link", { name: "Stays" }));
       await waitFor(() => {
         expect(screen.getByText("Stays route reached")).toBeInTheDocument();
       });
+      const staysRelatedPages = screen.getByRole("navigation", { name: "Related property pages" });
+      expect(within(staysRelatedPages).getByRole("link", { name: "Stays" })).toHaveAttribute("aria-current", "page");
+      expect(within(staysRelatedPages).getByRole("link", { name: "Stays" })).toHaveClass("page-tabs__tab--active");
 
       cleanup();
       window.history.replaceState(null, "", "/");
@@ -887,6 +906,9 @@ describe("<PropertyDetailPage>", () => {
       await waitFor(() => {
         expect(screen.getByText("Instructions route reached")).toBeInTheDocument();
       });
+      const instructionsRelatedPages = screen.getByRole("navigation", { name: "Related property pages" });
+      expect(within(instructionsRelatedPages).getByRole("link", { name: "Instructions" })).toHaveAttribute("aria-current", "page");
+      expect(within(instructionsRelatedPages).getByRole("link", { name: "Instructions" })).toHaveClass("page-tabs__tab--active");
 
       cleanup();
       window.history.replaceState(null, "", "/");

@@ -396,6 +396,18 @@ export const FRONTEND_ROUTES = [
     params: ["pid"],
   }),
   route({
+    name: "property.stays",
+    scope: "workspace",
+    template: "/property/:pid/stays",
+    params: ["pid"],
+  }),
+  route({
+    name: "property.instructions",
+    scope: "workspace",
+    template: "/property/:pid/instructions",
+    params: ["pid"],
+  }),
+  route({
     name: "property.closures",
     scope: "workspace",
     template: "/property/:pid/closures",

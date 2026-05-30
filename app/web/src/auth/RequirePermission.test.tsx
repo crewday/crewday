@@ -56,6 +56,21 @@ function expectOutletPermissionPage(path: string, actionKey: string, pageName: s
   );
 }
 
+function expectNestedOutletPermissionPage(
+  path: string,
+  outerActionKey: string,
+  innerActionKey: string,
+  pageName: string,
+): void {
+  expect(appSource).toMatch(
+    new RegExp(
+      `<Route element={<RequirePermission actionKey="${escaped(outerActionKey)}" />}>[\\s\\S]*?` +
+        `<Route element={<RequirePermission actionKey="${escaped(innerActionKey)}" />}>\\s*` +
+        `<Route path="${escaped(path)}" element={<${pageName} />} />`,
+    ),
+  );
+}
+
 interface FakeResponse {
   status: number;
   body: unknown;
@@ -165,6 +180,11 @@ describe("<RequirePermission>", () => {
 
   it("gates the real property closures route before closures content can render", () => {
     expectOutletPermissionPage("property/:pid/closures", "properties.read", "PropertyClosuresPage");
+  });
+
+  it("gates property related tab routes before related content can render", () => {
+    expectNestedOutletPermissionPage("property/:pid/stays", "properties.read", "stays.read", "StaysPage");
+    expectNestedOutletPermissionPage("property/:pid/instructions", "properties.read", "instructions.edit", "InstructionsPage");
   });
 
   it("gates the real properties list route before properties content can render", () => {

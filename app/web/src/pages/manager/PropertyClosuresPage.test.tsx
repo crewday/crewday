@@ -305,8 +305,8 @@ describe("<PropertyClosuresPage>", () => {
       expect(within(propertySections).getByRole("link", { name: "Overview" })).toHaveAttribute("href", "/w/acme/property/prop_1");
       expect(within(propertySections).getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/w/acme/property/prop_1#settings");
       const relatedPages = screen.getByRole("navigation", { name: "Related property pages" });
-      expect(within(relatedPages).getByRole("link", { name: "Stays" })).toHaveAttribute("href", "/w/acme/stays?property_id=prop_1");
-      expect(within(relatedPages).getByRole("link", { name: "Instructions" })).toHaveAttribute("href", "/w/acme/instructions?property_id=prop_1");
+      expect(within(relatedPages).getByRole("link", { name: "Stays" })).toHaveAttribute("href", "/w/acme/property/prop_1/stays");
+      expect(within(relatedPages).getByRole("link", { name: "Instructions" })).toHaveAttribute("href", "/w/acme/property/prop_1/instructions");
       expect(within(relatedPages).getByRole("link", { name: "Closures" })).toHaveAttribute("href", "/w/acme/property/prop_1/closures");
       expect(within(relatedPages).getByRole("link", { name: "Closures" })).toHaveAttribute("aria-current", "page");
       expect(within(relatedPages).getByRole("link", { name: "Closures" })).toHaveClass("page-tabs__tab--active");

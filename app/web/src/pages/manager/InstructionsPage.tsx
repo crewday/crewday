@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
@@ -14,6 +14,7 @@ import SearchableSelect, { type SearchableSelectOption } from "@/components/Sear
 import { Chip, Loading } from "@/components/common";
 import { INSTRUCTION_SCOPE_TONE } from "@/lib/tones";
 import type { Instruction, Property } from "@/types/api";
+import PropertyTabs from "./property/PropertyTabs";
 
 function preview(body: string): string {
   return body.length > 180 ? body.slice(0, 180) + "…" : body;
@@ -113,6 +114,7 @@ function canSubmitCreate(draft: InstructionCreateDraft): boolean {
 
 export default function InstructionsPage() {
   const { pathname } = useLocation();
+  const { pid } = useParams<{ pid?: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
@@ -319,6 +321,14 @@ export default function InstructionsPage() {
 
   return (
     <DeskPage title="Instructions" sub={sub} actions={actions}>
+      {pid ? (
+        <PropertyTabs
+          pathname={pathname}
+          propertyId={pid}
+          activeRelatedPage="instructions"
+        />
+      ) : null}
+
       <section className="panel">
         <div className="desk-filters">
           <span className="chip chip--ghost chip--sm chip--active">All</span>
