@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.assets.models import AssetDocument
+from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.storage.ports import Storage
 from app.audit import write_audit
 from app.domain.assets.assets import (
@@ -32,6 +33,7 @@ __all__ = [
     "attach_document",
     "delete_document",
     "list_documents",
+    "list_property_documents",
     "list_workspace_documents",
 ]
 
@@ -101,8 +103,9 @@ class AssetDocumentView:
 def attach_document(
     session: Session,
     ctx: WorkspaceContext,
-    asset_id: str,
+    asset_id: str | None,
     *,
+    property_id: str | None = None,
     blob_hash: str,
     filename: str,
     category: str,
@@ -112,9 +115,17 @@ def attach_document(
     clock: Clock | None = None,
     event_bus: EventBus | None = None,
 ) -> AssetDocumentView:
-    """Attach an already-stored blob to an asset."""
+    """Attach an already-stored blob to an asset or property."""
     # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
-    asset = _load_asset(session, ctx, asset_id, include_archived=False)
+    if (asset_id is None) == (property_id is None):
+        raise AssetDocumentValidationError("parent", "exactly_one_required")
+    asset = (
+        _load_asset(session, ctx, asset_id, include_archived=False)
+        if asset_id is not None
+        else None
+    )
+    if property_id is not None:
+        _load_property(session, ctx, property_id)
     if storage is not None and not storage.exists(blob_hash):
         raise AssetDocumentValidationError("blob_hash", "not_found")
     validated_category = _validate_category(category)
@@ -134,8 +145,8 @@ def attach_document(
         file_id=None,
         blob_hash=blob_hash,
         filename=cleaned_filename,
-        asset_id=asset.id,
-        property_id=None,
+        asset_id=asset.id if asset is not None else None,
+        property_id=property_id,
         kind=validated_category,
         title=cleaned_title,
         notes_md=_clean_text(notes_md),
@@ -157,16 +168,20 @@ def attach_document(
         diff={"after": _audit_dict(row)},
         clock=resolved_clock,
     )
-    _queue_asset_changed(
-        session,
-        _pending_event(
-            ctx,
-            asset,
-            resolved_bus,
-            action="document_create",
-            changed_fields=("asset_documents",),
-        ),
-    )
+    if asset is not None:
+        _queue_asset_changed(
+            session,
+            _pending_event(
+                ctx,
+                asset,
+                resolved_bus,
+                action="document_create",
+                changed_fields=("asset_documents",),
+            ),
+        )
+    # There is no property-scoped document SSE event yet. Property
+    # document uploads still write audit rows and enqueue extraction;
+    # clients refresh through the REST list until that event contract lands.
     # Mint the paired ``file_extraction`` row in ``pending`` so the
     # cd-mo9e worker tick picks it up. Local import — the extraction
     # service imports from here for ``AssetDocumentNotFound``, so
@@ -189,6 +204,29 @@ def list_documents(
     stmt = select(AssetDocument).where(
         AssetDocument.workspace_id == ctx.workspace_id,
         AssetDocument.asset_id == asset_id,
+        AssetDocument.deleted_at.is_(None),
+    )
+    if category is not None:
+        stmt = stmt.where(AssetDocument.kind == _validate_category(category))
+    stmt = stmt.order_by(AssetDocument.created_at.desc(), AssetDocument.id.desc())
+    with tenant_agnostic():
+        rows = session.scalars(stmt).all()
+    return [_row_to_view(row) for row in rows]
+
+
+def list_property_documents(
+    session: Session,
+    ctx: WorkspaceContext,
+    property_id: str,
+    *,
+    category: str | None = None,
+) -> list[AssetDocumentView]:
+    """List active documents attached directly to a property."""
+    _load_property(session, ctx, property_id)
+    stmt = select(AssetDocument).where(
+        AssetDocument.workspace_id == ctx.workspace_id,
+        AssetDocument.property_id == property_id,
+        AssetDocument.asset_id.is_(None),
         AssetDocument.deleted_at.is_(None),
     )
     if category is not None:
@@ -238,10 +276,15 @@ def delete_document(
     clock: Clock | None = None,
     event_bus: EventBus | None = None,
 ) -> AssetDocumentView:
-    """Soft-delete an asset document."""
+    """Soft-delete an asset or property document."""
     row = _load_document(session, ctx, document_id)
-    assert row.asset_id is not None
-    asset = _load_asset(session, ctx, row.asset_id, include_archived=False)
+    asset = (
+        _load_asset(session, ctx, row.asset_id, include_archived=False)
+        if row.asset_id is not None
+        else None
+    )
+    if row.property_id is not None:
+        _load_property(session, ctx, row.property_id)
     resolved_clock = clock if clock is not None else SystemClock()
     before = _audit_dict(row)
     row.deleted_at = resolved_clock.now()
@@ -256,16 +299,17 @@ def delete_document(
         diff={"before": before, "after": _audit_dict(row)},
         clock=resolved_clock,
     )
-    _queue_asset_changed(
-        session,
-        _pending_event(
-            ctx,
-            asset,
-            event_bus if event_bus is not None else default_event_bus,
-            action="document_delete",
-            changed_fields=("asset_documents",),
-        ),
-    )
+    if asset is not None:
+        _queue_asset_changed(
+            session,
+            _pending_event(
+                ctx,
+                asset,
+                event_bus if event_bus is not None else default_event_bus,
+                action="document_delete",
+                changed_fields=("asset_documents",),
+            ),
+        )
     return _row_to_view(row)
 
 
@@ -279,12 +323,32 @@ def _load_document(
             select(AssetDocument).where(
                 AssetDocument.workspace_id == ctx.workspace_id,
                 AssetDocument.id == document_id,
-                AssetDocument.asset_id.is_not(None),
                 AssetDocument.deleted_at.is_(None),
             )
         ).one_or_none()
     if row is None:
         raise AssetDocumentNotFound(document_id)
+    return row
+
+
+def _load_property(
+    session: Session,
+    ctx: WorkspaceContext,
+    property_id: str,
+) -> Property:
+    with tenant_agnostic():
+        row = session.scalars(
+            select(Property)
+            .join(PropertyWorkspace, PropertyWorkspace.property_id == Property.id)
+            .where(
+                Property.id == property_id,
+                Property.deleted_at.is_(None),
+                PropertyWorkspace.workspace_id == ctx.workspace_id,
+                PropertyWorkspace.status == "active",
+            )
+        ).one_or_none()
+    if row is None:
+        raise AssetDocumentNotFound(property_id)
     return row
 
 

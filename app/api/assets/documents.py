@@ -2,7 +2,8 @@
 
 Two surfaces live here:
 
-- :func:`build_documents_router` — workspace-scoped ``/documents`` and
+- :func:`build_documents_router` — workspace-scoped ``/documents``,
+  property-scoped ``/properties/{property_id}/documents``, and
   ``/documents/{document_id}/extraction`` routes. The extraction
   endpoints read the persisted ``file_extraction`` rows minted by
   :func:`app.domain.assets.documents.attach_document` and walked by the
@@ -10,9 +11,9 @@ Two surfaces live here:
   ``failed`` row back to ``pending`` and returns 409 on any other
   state.
 - :func:`build_asset_documents_subrouter` — asset-scoped
-  ``/{asset_id}/documents`` listing + upload and the workspace-level
-  ``/documents/{document_id}`` DELETE. Mounted by the core asset
-  router so the public paths stay unchanged.
+  ``/{asset_id}/documents`` listing + upload and the legacy
+  ``/assets/documents/{document_id}`` DELETE alias. Mounted by the
+  core asset router so the public paths stay unchanged.
 """
 
 from __future__ import annotations
@@ -66,6 +67,7 @@ from app.domain.assets.documents import (
     attach_document,
     delete_document,
     list_documents,
+    list_property_documents,
     list_workspace_documents,
 )
 from app.domain.assets.extraction import (
@@ -166,6 +168,40 @@ def _load_workspace_document(
     raise AssetDocumentNotFound(document_id)
 
 
+async def _require_document_upload(
+    file: UploadFile | None,
+) -> tuple[UploadFile, str]:
+    if file is None:
+        raise Validation(extra={"error": "asset_document_file_required"})
+    try:
+        declared_type = require_upload_content_type(
+            file,
+            missing=lambda: UnsupportedMediaType(
+                extra={"error": "asset_document_content_type_missing"}
+            ),
+        )
+    except DomainError:
+        await file.close()
+        raise
+    return file, declared_type
+
+
+async def _store_uploaded_document(
+    file: UploadFile,
+    *,
+    declared_type: str,
+    storage: StorageDep,
+    mime_sniffer: MimeSnifferDep,
+) -> tuple[str, str]:
+    payload = await read_document_capped(file)
+    sniffed_type = sniff_document_mime(
+        mime_sniffer, payload, declared_type=declared_type
+    )
+    blob_hash = hashlib.sha256(payload).hexdigest()
+    storage.put(blob_hash, io.BytesIO(payload), content_type=sniffed_type)
+    return blob_hash, file.filename or "upload.bin"
+
+
 def build_documents_router() -> APIRouter:
     api = APIRouter(tags=["assets"], responses=ASSET_ERROR_RESPONSES)
     manage_documents_gate = Depends(
@@ -227,6 +263,94 @@ def build_documents_router() -> APIRouter:
         return WorkspaceDocumentListResponse(data=rows)
 
     @api.get(
+        "/properties/{property_id}/documents",
+        response_model=AssetDocumentListResponse,
+        operation_id="properties.documents.list",
+        summary="List property documents",
+        dependencies=[manage_documents_gate],
+    )
+    def property_documents(
+        property_id: str,
+        ctx: Ctx,
+        session: Db,
+        category: (
+            Literal[
+                "manual",
+                "warranty",
+                "invoice",
+                "receipt",
+                "photo",
+                "certificate",
+                "contract",
+                "permit",
+                "insurance",
+                "other",
+            ]
+            | None
+        ) = Query(default=None),
+    ) -> AssetDocumentListResponse:
+        try:
+            views = list_property_documents(
+                session, ctx, property_id, category=category
+            )
+        except (AssetDocumentNotFound, AssetDocumentValidationError) as exc:
+            raise http_for_document_error(exc) from exc
+        return AssetDocumentListResponse(
+            data=[AssetDocumentResponse.from_view(view) for view in views]
+        )
+
+    @api.post(
+        "/properties/{property_id}/documents",
+        response_model=AssetDocumentResponse,
+        status_code=status.HTTP_201_CREATED,
+        operation_id="properties.documents.upload",
+        summary="Upload a property document",
+        dependencies=[manage_documents_gate],
+    )
+    async def upload_property_document(
+        property_id: str,
+        ctx: Ctx,
+        session: Db,
+        storage: StorageDep,
+        mime_sniffer: MimeSnifferDep,
+        category: Annotated[str, Form()],
+        title: Annotated[str | None, Form(max_length=200)] = None,
+        notes_md: Annotated[str | None, Form(max_length=20_000)] = None,
+        file: Annotated[UploadFile | None, File()] = None,
+    ) -> AssetDocumentResponse:
+        # code-health: ignore[params] FastAPI params are OpenAPI contract.
+        upload, declared_type = await _require_document_upload(file)
+        try:
+            list_property_documents(session, ctx, property_id)
+            if category not in ASSET_DOCUMENT_CATEGORIES:
+                raise AssetDocumentValidationError("category", "invalid")
+        except (AssetDocumentNotFound, AssetDocumentValidationError) as exc:
+            await upload.close()
+            raise http_for_document_error(exc) from exc
+        blob_hash, filename = await _store_uploaded_document(
+            upload,
+            declared_type=declared_type,
+            storage=storage,
+            mime_sniffer=mime_sniffer,
+        )
+        try:
+            view = attach_document(
+                session,
+                ctx,
+                None,
+                property_id=property_id,
+                blob_hash=blob_hash,
+                filename=filename,
+                category=category,
+                title=title,
+                notes_md=notes_md,
+                storage=storage,
+            )
+        except (AssetDocumentNotFound, AssetDocumentValidationError) as exc:
+            raise http_for_document_error(exc) from exc
+        return AssetDocumentResponse.from_view(view)
+
+    @api.get(
         "/documents/{document_id}",
         response_model=WorkspaceDocumentResponse,
         operation_id="documents.get",
@@ -248,6 +372,24 @@ def build_documents_router() -> APIRouter:
             )
         except (AssetDocumentNotFound, AssetDocumentValidationError) as exc:
             raise http_for_document_error(exc) from exc
+
+    @api.delete(
+        "/documents/{document_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        operation_id="documents.delete",
+        summary="Delete a workspace document",
+        dependencies=[manage_documents_gate],
+    )
+    def delete_workspace_document(
+        document_id: str,
+        ctx: Ctx,
+        session: Db,
+    ) -> Response:
+        try:
+            delete_document(session, ctx, document_id)
+        except (AssetNotFound, AssetDocumentNotFound) as exc:
+            raise http_for_document_error(exc) from exc
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @api.get(
         "/documents/{document_id}/extraction",
@@ -403,38 +545,27 @@ def build_asset_documents_subrouter() -> APIRouter:
         file: Annotated[UploadFile | None, File()] = None,
     ) -> AssetDocumentResponse:
         # code-health: ignore[params] FastAPI params are OpenAPI contract.
-        if file is None:
-            raise Validation(extra={"error": "asset_document_file_required"})
-        try:
-            declared_type = require_upload_content_type(
-                file,
-                missing=lambda: UnsupportedMediaType(
-                    extra={"error": "asset_document_content_type_missing"}
-                ),
-            )
-        except DomainError:
-            await file.close()
-            raise
+        upload, declared_type = await _require_document_upload(file)
         try:
             get_asset(session, ctx, asset_id=asset_id)
             if category not in ASSET_DOCUMENT_CATEGORIES:
                 raise AssetDocumentValidationError("category", "invalid")
         except (AssetNotFound, AssetDocumentValidationError) as exc:
-            await file.close()
+            await upload.close()
             raise http_for_document_error(exc) from exc
-        payload = await read_document_capped(file)
-        sniffed_type = sniff_document_mime(
-            mime_sniffer, payload, declared_type=declared_type
+        blob_hash, filename = await _store_uploaded_document(
+            upload,
+            declared_type=declared_type,
+            storage=storage,
+            mime_sniffer=mime_sniffer,
         )
-        blob_hash = hashlib.sha256(payload).hexdigest()
-        storage.put(blob_hash, io.BytesIO(payload), content_type=sniffed_type)
         try:
             view = attach_document(
                 session,
                 ctx,
                 asset_id,
                 blob_hash=blob_hash,
-                filename=file.filename or "upload.bin",
+                filename=filename,
                 category=category,
                 title=title,
                 notes_md=notes_md,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
@@ -13,6 +14,7 @@ from httpx import Response
 from sqlalchemy.orm import Session
 
 import app.api.assets._shared as asset_shared
+from app.adapters.db.assets.models import FileExtraction
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.api.deps import (
@@ -25,6 +27,7 @@ from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.assets import documents_router
 from app.api.v1.assets import router as assets_router
 from app.domain.assets.assets import create_asset
+from app.domain.assets.documents import AssetDocumentValidationError, attach_document
 from app.tenancy.context import ActorGrantRole, WorkspaceContext
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
@@ -397,6 +400,128 @@ def test_worker_cannot_delete_document(db_session: Session) -> None:
     )
 
 
+def test_property_document_routes_require_manage_documents_permission(
+    db_session: Session,
+) -> None:
+    ctx, property_id, owner_id, slug = _seed_workspace(db_session)
+    worker = bootstrap_user(
+        db_session,
+        email="property-documents-worker@example.com",
+        display_name="Property Document Worker",
+    )
+    db_session.add(
+        RoleGrant(
+            id=new_ulid(),
+            workspace_id=ctx.workspace_id,
+            user_id=worker.id,
+            grant_role="worker",
+            scope_kind="workspace",
+            scope_property_id=None,
+            created_at=_NOW,
+            created_by_user_id=owner_id,
+        )
+    )
+    storage = InMemoryStorage()
+    manager_client = _client(
+        db_session,
+        ctx,
+        storage=storage,
+        sniffed_type="application/pdf",
+    )
+    created = manager_client.post(
+        f"/properties/{property_id}/documents",
+        data={"category": "permit", "title": "Managed permit"},
+        files={"file": ("permit.pdf", b"%PDF permit", "application/pdf")},
+    )
+    assert created.status_code == 201
+    document_id = created.json()["id"]
+    worker_ctx = _ctx(
+        ctx.workspace_id,
+        worker.id,
+        slug=slug,
+        role="worker",
+    )
+    worker_client = _client(db_session, worker_ctx, storage=storage)
+    denied_payload = b"%PDF denied"
+
+    list_denied = worker_client.get(f"/properties/{property_id}/documents")
+    upload_denied = worker_client.post(
+        f"/properties/{property_id}/documents",
+        data={"category": "permit", "title": "Denied permit"},
+        files={"file": ("denied.pdf", denied_payload, "application/pdf")},
+    )
+    delete_denied = worker_client.delete(f"/documents/{document_id}")
+
+    for response in (list_denied, upload_denied, delete_denied):
+        assert response.status_code == 403
+        assert (
+            _assert_problem_error(response, error="permission_denied")["action_key"]
+            == "assets.manage_documents"
+        )
+    assert not storage.exists(hashlib.sha256(denied_payload).hexdigest())
+
+
+def test_property_document_routes_are_workspace_scoped(
+    db_session: Session,
+) -> None:
+    ctx, _property_id, _owner_id, _slug = _seed_workspace(db_session)
+    other_owner = bootstrap_user(
+        db_session,
+        email="other-property-documents-owner@example.com",
+        display_name="Other Property Documents Owner",
+    )
+    other_workspace = bootstrap_workspace(
+        db_session,
+        slug="other-property-documents-api",
+        name="Other Property Documents API",
+        owner_user_id=other_owner.id,
+    )
+    other_property_id = "prop_other_asset_documents"
+    db_session.add(
+        Property(
+            id=other_property_id,
+            name="Other Asset Documents Villa",
+            kind="residence",
+            address="2 Asset Documents Road",
+            address_json={"line1": "2 Asset Documents Road", "country": "US"},
+            country="US",
+            timezone="UTC",
+            tags_json=[],
+            welcome_defaults_json={},
+            property_notes_md="",
+            created_at=_NOW,
+            updated_at=_NOW,
+            deleted_at=None,
+        )
+    )
+    db_session.add(
+        PropertyWorkspace(
+            property_id=other_property_id,
+            workspace_id=other_workspace.id,
+            label="Other Asset Documents Villa",
+            membership_role="owner_workspace",
+            share_guest_identity=False,
+            status="active",
+            created_at=_NOW,
+        )
+    )
+    db_session.flush()
+    storage = InMemoryStorage()
+    client = _client(db_session, ctx, storage=storage, sniffed_type="application/pdf")
+    denied_payload = b"%PDF wrong workspace"
+
+    listed = client.get(f"/properties/{other_property_id}/documents")
+    uploaded = client.post(
+        f"/properties/{other_property_id}/documents",
+        data={"category": "permit", "title": "Wrong workspace permit"},
+        files={"file": ("wrong-workspace.pdf", denied_payload, "application/pdf")},
+    )
+
+    assert listed.status_code == 404
+    assert uploaded.status_code == 404
+    assert not storage.exists(hashlib.sha256(denied_payload).hexdigest())
+
+
 def test_extraction_retry_happy_path_resets_failed_row(
     db_session: Session,
 ) -> None:
@@ -457,3 +582,120 @@ def test_extraction_retry_happy_path_resets_failed_row(
     body = post_retry.json()
     assert body["status"] == "pending"
     assert body["last_error"] is None
+
+
+def test_property_document_upload_lists_extracts_and_deletes(
+    db_session: Session,
+) -> None:
+    ctx, property_id, _owner_id, _slug = _seed_workspace(db_session)
+    asset = create_asset(
+        db_session,
+        ctx,
+        property_id=property_id,
+        label="Property document contrast asset",
+        token_factory=lambda: "D0CMNT000008",
+        clock=FrozenClock(_NOW),
+    )
+    storage = InMemoryStorage()
+    client = _client(db_session, ctx, storage=storage, sniffed_type="application/pdf")
+    asset_created = client.post(
+        f"/assets/{asset.id}/documents",
+        data={"category": "manual", "title": "Asset manual"},
+        files={"file": ("asset-manual.pdf", b"%PDF asset", "application/pdf")},
+    )
+    assert asset_created.status_code == 201
+
+    uploaded = client.post(
+        f"/properties/{property_id}/documents",
+        data={
+            "category": "permit",
+            "title": "Pool permit",
+            "notes_md": "Expires with renovation.",
+        },
+        files={"file": ("permit.pdf", b"%PDF permit", "application/pdf")},
+    )
+
+    assert uploaded.status_code == 201
+    body = uploaded.json()
+    document_id = body["id"]
+    assert body["asset_id"] is None
+    assert body["property_id"] == property_id
+    assert body["category"] == "permit"
+    assert body["title"] == "Pool permit"
+    assert body["notes_md"] == "Expires with renovation."
+    assert body["filename"] == "permit.pdf"
+    assert storage.exists(hashlib.sha256(b"%PDF permit").hexdigest())
+
+    property_list = client.get(f"/properties/{property_id}/documents")
+    assert property_list.status_code == 200
+    assert [row["id"] for row in property_list.json()["data"]] == [document_id]
+
+    workspace_filtered = client.get(f"/documents?property_id={property_id}&kind=permit")
+    assert workspace_filtered.status_code == 200
+    assert [row["id"] for row in workspace_filtered.json()["data"]] == [document_id]
+
+    extraction = db_session.get(FileExtraction, document_id)
+    assert extraction is not None
+    assert extraction.workspace_id == ctx.workspace_id
+    assert extraction.extraction_status == "pending"
+
+    deleted = client.delete(f"/documents/{document_id}")
+    assert deleted.status_code == 204
+    assert client.get(f"/properties/{property_id}/documents").json()["data"] == []
+    assert (
+        client.get(f"/documents?property_id={property_id}&kind=permit").json()["data"]
+        == []
+    )
+
+    asset_list = client.get(f"/assets/{asset.id}/documents")
+    assert asset_list.status_code == 200
+    assert [row["id"] for row in asset_list.json()["data"]] == [
+        asset_created.json()["id"]
+    ]
+
+    asset_deleted = client.delete(f"/documents/{asset_created.json()['id']}")
+    assert asset_deleted.status_code == 204
+    assert client.get(f"/assets/{asset.id}/documents").json()["data"] == []
+
+
+def test_attach_document_requires_exactly_one_parent(db_session: Session) -> None:
+    ctx, property_id, _owner_id, _slug = _seed_workspace(db_session)
+    asset = create_asset(
+        db_session,
+        ctx,
+        property_id=property_id,
+        label="Document parent invariant asset",
+        token_factory=lambda: "D0CMNT000009",
+        clock=FrozenClock(_NOW),
+    )
+    storage = InMemoryStorage()
+    blob_hash = hashlib.sha256(b"%PDF invariant").hexdigest()
+    storage.put(
+        blob_hash,
+        io.BytesIO(b"%PDF invariant"),
+        content_type="application/pdf",
+    )
+
+    with pytest.raises(AssetDocumentValidationError, match="parent"):
+        attach_document(
+            db_session,
+            ctx,
+            None,
+            blob_hash=blob_hash,
+            filename="missing-parent.pdf",
+            category="manual",
+            storage=storage,
+            clock=FrozenClock(_NOW),
+        )
+    with pytest.raises(AssetDocumentValidationError, match="parent"):
+        attach_document(
+            db_session,
+            ctx,
+            asset.id,
+            property_id=property_id,
+            blob_hash=blob_hash,
+            filename="two-parents.pdf",
+            category="manual",
+            storage=storage,
+            clock=FrozenClock(_NOW),
+        )
