@@ -42,7 +42,7 @@
 # AGENTS.md) still applies: no app port is published on a public
 # interface; Traefik owns 80/443 and terminates externally.
 
-name: "crewday-mocks"
+name: "crewday"
 
 services:
   # Production FastAPI application — ``app.main:create_app`` factory
@@ -59,12 +59,12 @@ services:
   app-api:
     build:
       context: .
-      dockerfile: mocks/Dockerfile.app-api
+      dockerfile: deploy/dev/Dockerfile.app-api
     container_name: crewday-app-api
     restart: unless-stopped
     # Root entrypoint chowns ``/data`` (the named volume arrives
     # root-owned) and then drops to the ``crewday`` uid before
-    # ``exec``ing uvicorn — see ``mocks/Dockerfile.app-api``.
+    # ``exec``ing uvicorn — see ``deploy/dev/Dockerfile.app-api``.
     volumes:
       - ./app:/app/app:ro
       - ./migrations:/app/migrations:ro
@@ -115,10 +115,17 @@ services:
       # real OpenRouter locally, put CREWDAY_LLM_PROVIDER=openrouter
       # and CREWDAY_OPENROUTER_API_KEY=<key> in the gitignored root .env;
       # never put the key in this tracked compose file or docs.
-      # The e2e override repeats fake values so CI stays keyless.
       CREWDAY_LLM_PROVIDER: "${CREWDAY_LLM_PROVIDER:-fake}"
       CREWDAY_OPENROUTER_API_KEY: "${CREWDAY_OPENROUTER_API_KEY:-}"
       CREWDAY_LLM_OCR_MODEL: "fake-ocr"
+      # DEV / E2E ONLY — DO NOT enable in production (cd-xr652).
+      # E2E sets this host env var to 1 so the iCal journey can
+      # register a feed against its in-cluster HTTPS fixture. Default
+      # stays hardened for normal dev and every production recipe.
+      CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES: "${CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES:-0}"
+      CREWDAY_RATE_LIMIT_ANONYMOUS_PER_MINUTE: "${CREWDAY_RATE_LIMIT_ANONYMOUS_PER_MINUTE:-30}"
+      CREWDAY_RATE_LIMIT_TOKEN_PER_MINUTE: "${CREWDAY_RATE_LIMIT_TOKEN_PER_MINUTE:-180}"
+      CREWDAY_RATE_LIMIT_PERSONAL_ME_PER_MINUTE: "${CREWDAY_RATE_LIMIT_PERSONAL_ME_PER_MINUTE:-600}"
     expose:
       - "8000"
     ports:

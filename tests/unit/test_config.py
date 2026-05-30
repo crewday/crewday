@@ -111,9 +111,8 @@ class TestIcalAllowPrivateAddresses:
 
     The default must stay ``False`` everywhere — the §04 SSRF guard
     private-address rejection is what keeps a malicious feed URL from
-    probing the operator's internal network. Only the e2e compose
-    override layered on the root dev compose file
-    (``mocks/docker-compose.e2e.yml``) flips it on.
+    probing the operator's internal network. Only the documented
+    Playwright e2e environment flips it on.
     """
 
     def test_default_is_false(self, monkeypatch: MonkeyPatch) -> None:

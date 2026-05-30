@@ -427,7 +427,7 @@ def fetch_ical_body(  # code-health: ignore[nloc,params] SSRF fetch policy bound
     validator. The fan-out body in
     :func:`app.worker.jobs.stays._make_poll_ical_fanout_body` reads
     :attr:`app.config.Settings.ical_allow_private_addresses` and
-    forwards it here so the e2e compose override
+    forwards it here so the documented e2e environment
     (``CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES=1``) lets the worker poll
     the same in-cluster ICS server that registration accepted.
     Production must keep it ``False``.

@@ -351,7 +351,15 @@ jobs:
         # (``network create`` errors if the name already exists).
         run: docker network create traefik-proxy || true
       - name: Bring up dev stack
-        run: docker compose -f docker-compose.dev.yml -f mocks/docker-compose.e2e.yml up -d --build
+        env:
+          CREWDAY_PUBLIC_URL: "http://localhost:8100"
+          CREWDAY_WEBAUTHN_RP_ID: "localhost"
+          CREWDAY_LLM_PROVIDER: "fake"
+          CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES: "1"
+          CREWDAY_RATE_LIMIT_ANONYMOUS_PER_MINUTE: "10000"
+          CREWDAY_RATE_LIMIT_TOKEN_PER_MINUTE: "10000"
+          CREWDAY_RATE_LIMIT_PERSONAL_ME_PER_MINUTE: "10000"
+        run: docker compose -f docker-compose.dev.yml up -d --build
       - name: Wait for app-api healthz
         # The compose healthcheck has start_period=30s and retries=3;
         # we poll the loopback port the web-dev Vite container
@@ -374,8 +382,8 @@ jobs:
           until curl -fsS http://127.0.0.1:8100/healthz >/dev/null; do
             if (( SECONDS >= deadline )); then
               echo "::error::dev stack not healthy after 240s"
-              docker compose -f docker-compose.dev.yml -f mocks/docker-compose.e2e.yml ps
-              docker compose -f docker-compose.dev.yml -f mocks/docker-compose.e2e.yml logs --tail=200
+              docker compose -f docker-compose.dev.yml ps
+              docker compose -f docker-compose.dev.yml logs --tail=200
               exit 1
             fi
             sleep 2
@@ -403,8 +411,7 @@ jobs:
         # reads it.
         run: |
           set -euo pipefail
-          docker compose -f docker-compose.dev.yml -f mocks/docker-compose.e2e.yml \
-              exec -T web-dev npx vite build
+          docker compose -f docker-compose.dev.yml exec -T web-dev npx vite build
           test -s app/web/dist/_surface.json
           echo "surface manifest emitted ($(wc -c <app/web/dist/_surface.json) bytes)"
       - name: pytest (e2e)
@@ -449,4 +456,4 @@ jobs:
         # ephemeral VM. ``-v`` wipes the SQLite volume so subsequent
         # runs start from a clean slate.
         if: always()
-        run: docker compose -f docker-compose.dev.yml -f mocks/docker-compose.e2e.yml down -v
+        run: docker compose -f docker-compose.dev.yml down -v

@@ -467,14 +467,14 @@ field is an **operator-supplied URL** subject to SSRF rules
 **Dev / e2e carve-out (cd-xr652).** The host-resolution gate
 recognises a single deployment knob,
 `CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES` (default `0`). When `1`,
-the private-address rejection is bypassed so the e2e stack (root
-`docker-compose.dev.yml` plus `mocks/docker-compose.e2e.yml`) can
-register a feed pointing at an in-cluster ICS server for the GA journey
-3 Playwright test (cd-zxvk). **The flag is dev / e2e ONLY — every
-production deployment must keep it unset / `0`.** Every other gate
-(scheme, DNS-rebind pin, same-origin redirects, body cap, timeout,
-certificate validation) still applies when the private-address gate is
-open; only that one filter is loosened.
+the private-address rejection is bypassed so the e2e stack
+(`docker-compose.dev.yml` with the documented Playwright e2e
+environment) can register a feed pointing at an in-cluster ICS server
+for the GA journey 3 Playwright test (cd-zxvk). **The flag is dev /
+e2e ONLY — every production deployment must keep it unset / `0`.**
+Every other gate (scheme, DNS-rebind pin, same-origin redirects, body
+cap, timeout, certificate validation) still applies when the
+private-address gate is open; only that one filter is loosened.
 See `docs/specs/16-deployment-operations.md` "Environment
 variables".
 

@@ -47,8 +47,8 @@ SKIP_PATHS: frozenset[str] = frozenset(
         # ``document.cookie`` regardless), and the sidebar writers use
         # ``navigator.sendBeacon`` which cannot attach the ``X-CSRF``
         # header the CSRF middleware would otherwise require. Skipping
-        # CSRF here too matches the mock implementation in
-        # ``mocks/app/main.py`` and keeps the writer surface honest.
+        # CSRF here too matches the preference-router contract and
+        # keeps the writer surface honest.
         #
         # The ``/workspaces``, ``/agent``, and ``/nav`` namespaces
         # could plausibly host future bare-host routes that DO carry

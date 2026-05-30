@@ -37,7 +37,7 @@ Read locally first:
 
 - Root [`AGENTS.md`](../../../AGENTS.md).
 - Relevant `docs/specs/*.md`.
-- Any code under `app/`, `mocks/`, or `site/` touching the area.
+- Any code under `app/` or `site/` touching the area.
 
 Use web search only for external standards, current security guidance,
 or facts that cannot be answered from the repo. Cite sources when web

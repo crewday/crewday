@@ -8,8 +8,8 @@ DB chain and assert:
   callers.
 * 422 surfaces from FastAPI's Pydantic ``Literal`` validation for
   unknown ``tab`` values.
-* Each of the four tabs returns the rows the mock filter rule lets
-  through:
+* Each of the four tabs returns the rows the production filter rule
+  lets through:
 
   - ``tasks`` — caller's ``Occurrence`` rows in ``{completed, skipped}``.
   - ``expenses`` — caller's ``ExpenseClaim`` rows in
@@ -24,8 +24,7 @@ DB chain and assert:
 * Pagination: a tab with more than the requested page size returns the
   newest page plus a cursor for the older rows.
 
-See ``app/api/v1/history.py`` for the route, ``mocks/app/main.py:3539-3562``
-for the filter reference the production filter mirrors, and
+See ``app/api/v1/history.py`` for the route and
 ``docs/specs/12-rest-api.md`` §"Self-service shortcuts" for the spec
 row.
 """

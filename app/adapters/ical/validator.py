@@ -192,9 +192,9 @@ def resolve_public_address(
     *without* the env-var second factor that the shared guard's
     :func:`safe_fetch` requires. The escape hatch's two-factor design
     is for new callers; the iCal validator keeps single-factor
-    semantics so the existing e2e compose override (which sets only
-    :class:`app.config.Settings.ical_allow_private_addresses`)
-    keeps working. We forward the kwarg directly to a thin
+    semantics so the documented e2e environment (which sets only
+    :class:`app.config.Settings.ical_allow_private_addresses`) keeps
+    working. We forward the kwarg directly to a thin
     re-implementation rather than going through
     :func:`app.net.fetch_guard.resolve_public_address` whose env-var
     gate would block the e2e path.
@@ -524,12 +524,11 @@ class IcalValidatorConfig:
     # targets. **Production default is ``False``** and must stay that
     # way — the §04 "SSRF guard" private-address rejection is what
     # keeps a malicious feed URL from probing the operator's internal
-    # network. Flipped to ``True`` only by the e2e compose override
-    # (``CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES=1`` in
-    # ``mocks/docker-compose.e2e.yml``) so Playwright's GA journey 3
-    # can point a feed at an in-cluster ICS server. Every other
-    # validator check (scheme, DNS-rebind pin, redirects, body cap,
-    # timeout) still applies when the gate is open. See cd-xr652 and
+    # network. Flipped to ``True`` only by the Playwright e2e
+    # environment so GA journey 3 can point a feed at an in-cluster ICS
+    # server. Every other validator check (scheme, DNS-rebind pin,
+    # redirects, body cap, timeout) still applies when the gate is
+    # open. See cd-xr652 and
     # ``app.config.Settings.ical_allow_private_addresses``.
     allow_private_addresses: bool = False
     # §04 SSRF carve-out (cd-t2qtg): per-feed "Allow self-signed iCal"

@@ -2040,8 +2040,7 @@ GET    /history?tab=tasks|chats|expenses|leaves&cursor=…&limit=…
                                           #   chats use {id,title,last_at,summary}.
                                           #   Each tab is newest-first and paged
                                           #   independently with `cursor`/`limit`.
-                                          #   Filters mirror the mock at
-                                          #   mocks/app/main.py:3539-3562:
+                                          #   Filters:
                                           #     tasks    — Occurrence rows assigned
                                           #                to caller, state in
                                           #                {completed, skipped}.
@@ -2934,8 +2933,7 @@ See §10 for the envelope and headers.
 ## Examples
 
 Worked request/response examples are served by the generated
-OpenAPI document (`GET /api/openapi.json`) and by the mock
-FastAPI app under `mocks/app/`. An `approval_required` response
+OpenAPI document (`GET /api/openapi.json`). An `approval_required` response
 is **HTTP 409** (not 202 — the action is blocked, not queued for
 the caller), RFC 7807 envelope, with `approval_request_id` and
 optional `expires_at` merged into the body — see §11 for the

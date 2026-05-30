@@ -70,8 +70,8 @@ application now includes:
   detection, audit/event plumbing, and deployment/admin commands.
 - Automated coverage across unit, integration, contract, frontend, and
   Playwright end-to-end tests under [`tests/`](tests/) and `app/web/src/**/*.test.*`.
-- Legacy mock backend context under [`mocks/`](mocks/) and an independently
-  deployable marketing/suggestion-box surface under [`site/`](site/).
+- An independently deployable marketing/suggestion-box surface under
+  [`site/`](site/).
 
 The remaining work is product hardening rather than blank-slate scaffolding:
 open Beads tasks currently track frontend polish, empty-state gaps, asset

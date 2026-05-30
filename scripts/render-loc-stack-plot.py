@@ -44,7 +44,6 @@ LABEL_NAMES = {
     "cli/": "CLI",
     "deploy/": "Deploy",
     "migrations/": "Migrations",
-    "mocks/": "Mocks",
     "scripts/": "Scripts",
     "site/": "Website",
     "tests/": "Tests",

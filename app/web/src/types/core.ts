@@ -1,7 +1,6 @@
 // crewday — JSON API types: core primitives.
-// Shapes mirror the dataclasses in mocks/app/mock_data.py. The FastAPI
-// layer serializes via dataclasses.asdict, so dates arrive as ISO-8601
-// strings and enums as their literal string values.
+// Shapes mirror the production FastAPI response models, so dates arrive
+// as ISO-8601 strings and enums as their literal string values.
 
 export type Role = "employee" | "manager" | "client" | "admin";
 export type Theme = "light" | "dark" | "system";

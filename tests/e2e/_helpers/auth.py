@@ -18,8 +18,8 @@ Two surfaces:
   browser ceremonies. Implements the §17 "End-to-end" pilot journey
   against the loopback e2e stack.
 
-  **RP-ID gate.** The e2e compose override must serve a WebAuthn
-  ``rp_id`` that matches the loopback host. The helper raises
+  **RP-ID gate.** The e2e stack must serve a WebAuthn ``rp_id`` that
+  matches the loopback host. The helper raises
   :class:`RPIDMismatch` with a focused message when the running stack
   still advertises the normal ``dev-app.crew.day`` RP ID.
 
@@ -97,6 +97,16 @@ DEFAULT_DEV_PASSKEY_NAME: Final[str] = "e2e-virtual-authenticator"
 # the host cwd).
 _COMPOSE_FILE: Final[Path] = (
     Path(__file__).resolve().parents[3] / "docker-compose.dev.yml"
+)
+_E2E_STACK_COMMAND: Final[str] = (
+    "CREWDAY_PUBLIC_URL=http://localhost:8100 "
+    "CREWDAY_WEBAUTHN_RP_ID=localhost "
+    "CREWDAY_LLM_PROVIDER=fake "
+    "CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES=1 "
+    "CREWDAY_RATE_LIMIT_ANONYMOUS_PER_MINUTE=10000 "
+    "CREWDAY_RATE_LIMIT_TOKEN_PER_MINUTE=10000 "
+    "CREWDAY_RATE_LIMIT_PERSONAL_ME_PER_MINUTE=10000 "
+    "docker compose -f docker-compose.dev.yml up -d --build"
 )
 # Dev-only cookie alias that the FastAPI routers accept in addition to
 # the canonical ``__Host-crewday_session`` — see
@@ -559,12 +569,11 @@ def enroll_owner(
     6. Land on ``/today`` (or the role-appropriate home).
 
     **RP-ID prerequisite.** The dev stack must serve a ``rp_id`` that
-    matches the host portion of ``base_url``. The e2e compose
-    override ships with ``rp_id=localhost`` and the loopback default
-    ``base_url`` is ``http://localhost:8100``. Running without that
-    override raises :class:`RPIDMismatch` immediately so the test
-    failure points at config drift rather than a black-box WebAuthn
-    error.
+    matches the host portion of ``base_url``. The e2e environment sets
+    ``rp_id=localhost`` and the loopback default ``base_url`` is
+    ``http://localhost:8100``. Running without that environment raises
+    :class:`RPIDMismatch` immediately so the test failure points at
+    config drift rather than a black-box WebAuthn error.
 
     The helper does NOT install the virtual authenticator on its own —
     callers must do so via :func:`install_virtual_authenticator`
@@ -579,8 +588,7 @@ def enroll_owner(
             f"WebAuthn rp_id {rp_id!r} does not match origin host "
             f"{host!r}; the browser will refuse "
             "navigator.credentials.create() against this combination. "
-            "Run `docker compose -f docker-compose.dev.yml "
-            "-f mocks/docker-compose.e2e.yml up -d --build` so "
+            f"Run `{_E2E_STACK_COMMAND}` so "
             "CREWDAY_PUBLIC_URL=http://localhost:8100 and "
             "CREWDAY_WEBAUTHN_RP_ID=localhost when the e2e base URL is "
             "http://localhost:8100."

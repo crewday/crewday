@@ -108,10 +108,10 @@ class Settings(BaseSettings):
     # and root-key are unset. ``"openrouter"`` is the explicit prod
     # form. ``"fake"`` swaps in the in-process
     # :class:`~app.adapters.llm.fake.FakeLLMClient` so dev / e2e stacks
-    # exercise the LLM path without an upstream key — gated to dev/e2e
-    # via ``docker-compose.dev.yml`` and repeated in the e2e override
-    # (see §16 "Environment variables"). Production deployments leave
-    # this unset; the §11 ``fake`` provider type is dev/test only.
+    # exercise the LLM path without an upstream key — gated to the
+    # dev/e2e ``docker-compose.dev.yml`` environment (see §16
+    # "Environment variables"). Production deployments leave this
+    # unset; the §11 ``fake`` provider type is dev/test only.
     llm_provider: Literal["openrouter", "fake"] | None = None
     # Model id used by :mod:`app.domain.expenses.autofill` for receipt
     # OCR + structured extraction. ``None`` disables the capability at
@@ -266,14 +266,14 @@ class Settings(BaseSettings):
     # §04 "SSRF guard" private-address rejection inside
     # :class:`app.adapters.ical.validator.IcalValidatorConfig`, so a
     # feed URL whose host resolves to loopback / RFC 1918 / link-local
-    # passes registration. The sole supported caller is
-    # ``mocks/docker-compose.e2e.yml`` — Playwright's GA journey 3
-    # (cd-zxvk) needs to point a feed at an in-cluster ICS server. No
-    # other validator gate (scheme, DNS-rebind pin, redirects, size,
-    # timeout) is loosened by this knob; only the public-IP filter.
-    # Default ``False`` everywhere else; the production app refuses
-    # any private-IP feed URL on registration regardless of how the
-    # operator's compose file is shaped.
+    # passes registration. The only supported runtime caller is the
+    # Playwright e2e environment — GA journey 3 (cd-zxvk) needs to
+    # point a feed at an in-cluster ICS server. No other validator gate
+    # (scheme, DNS-rebind pin, redirects, size, timeout) is loosened by
+    # this knob; only the public-IP filter. Default ``False``
+    # everywhere else; the production app refuses any private-IP feed
+    # URL on registration regardless of how the operator's compose file
+    # is shaped.
     ical_allow_private_addresses: bool = False
 
     # --- Tenancy (cd-iwsv, cd-9il) ---

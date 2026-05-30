@@ -1032,9 +1032,8 @@ def invite(
     2. Resolve or create the invitee's :class:`User` row. A fresh
        email spawns a new row at invite time so the later
        :func:`consume_invite_token` can bind a passkey to it; the
-       ``user.invited`` audit carries the hash. This matches the
-       mock's shape (``mocks/app/main.py::api_users_invite``) and
-       mirrors the spec's "creates (or re-uses, if email matches)".
+       ``user.invited`` audit carries the hash. This mirrors the
+       spec's "creates (or re-uses, if email matches)".
     3. If a pending invite already exists for
        ``(workspace_id, email_lower)``, update it in place — refresh
        the TTL, refresh the grants / memberships payload, drop any

@@ -28,18 +28,15 @@ envelope. ``tab`` selects which row projection lands in ``data``:
 {"data": [...], "next_cursor": null, "has_more": false}
 ```
 
-**Filters mirror the mock reference.**
+**Filters.**
 
 * ``tab=tasks``: ``Occurrence`` rows assigned to the caller with
-  ``state IN ('completed', 'skipped')``. Matches the mock's
-  ``status in {completed, skipped}`` rule.
+  ``state IN ('completed', 'skipped')``.
 * ``tab=expenses``: ``ExpenseClaim`` rows whose ``work_engagement``
   belongs to the caller, with ``state IN ('approved', 'rejected',
-  'reimbursed')``. Matches the mock's ``status in {approved,
-  reimbursed, rejected}`` rule.
+  'reimbursed')``.
 * ``tab=leaves``: ``Leave`` rows for the caller with
-  ``status='approved'`` and ``ends_at < today (UTC)``. Matches the
-  mock's ``approved_at IS NOT NULL AND ends_on < today`` rule.
+  ``status='approved'`` and ``ends_at < today (UTC)``.
 * ``tab=chats``: archived agent chat channels owned by the caller
   (``external_ref = agent:<scope>:<actor_id>``), newest first.
 
@@ -93,14 +90,10 @@ __all__ = [
 _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]
 _Db = Annotated[Session, Depends(db_session)]
 
-# §06 ``occurrence.state`` values that count as "history" — the mock
-# at ``mocks/app/main.py:3550`` filters tasks to ``status in
-# {completed, skipped}``; production mirrors this exactly.
+# §06 ``occurrence.state`` values that count as worker history.
 _HISTORY_TASK_STATES: tuple[str, ...] = ("completed", "skipped")
 
-# §09 ``expense_claim.state`` values that count as "history" — the
-# mock at ``mocks/app/main.py:3553`` filters claims to ``status in
-# {approved, reimbursed, rejected}``.
+# §09 ``expense_claim.state`` values that count as worker history.
 _HISTORY_EXPENSE_STATES: tuple[ExpenseState, ...] = (
     "approved",
     "reimbursed",

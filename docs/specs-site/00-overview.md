@@ -142,9 +142,9 @@ site/
     └── tests/
 ```
 
-The `mocks/` and `app/` trees are untouched. `site/web/` shares no
-`package.json` with the app frontend or retiring mock frontend, and
-`site/api/` shares no `pyproject.toml` with `mocks/app/` or `app/`.
+The `app/` tree is untouched. `site/web/` shares no `package.json`
+with the app frontend, and `site/api/` shares no `pyproject.toml`
+with the production app under `app/`.
 Two build graphs, two deploy pipelines, zero cross-import.
 
 The site gets its own CI lane (lint, typecheck, build, unit

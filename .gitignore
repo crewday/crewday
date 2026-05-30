@@ -39,8 +39,8 @@ docker-compose.override.yml
 
 # Ad-hoc preview screenshots and recordings dropped at the repo root
 # (the `/` prefix scopes this to the root only, so legitimate UI
-# assets under mocks/app/static/, docs/, or /record-demo GIFs under
-# their documented paths are *not* affected).
+# assets under docs/ or /record-demo GIFs under their documented paths
+# are *not* affected).
 /*.png
 /*.jpg
 /*.jpeg

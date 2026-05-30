@@ -73,9 +73,9 @@ JOURNEY_SLUG_PREFIX: Final[str] = "e2e-turnover-welcome"
 #    from the docker bridge interface to the host; binding on the
 #    bridge gateway IP loses traffic on those hosts even though the
 #    interface is administratively up.
-# 2. The compose stack already grants ``CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES=1``
-#    in the e2e override (cd-xr652). Loopback is a private address
-#    so the SSRF gate clears, and the validator's
+# 2. The documented e2e environment grants
+#    ``CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES=1`` (cd-xr652). Loopback is
+#    a private address so the SSRF gate clears, and the validator's
 #    ``ical.allow_self_signed=true`` workspace setting (cd-t2qtg)
 #    accepts the freshly-minted self-signed cert. Together those two
 #    knobs are the documented dev / e2e carve-out — production keeps

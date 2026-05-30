@@ -73,6 +73,16 @@ __all__ = [
 # forward-auth for scripted verification.
 DEFAULT_BASE_URL: Final[str] = "http://localhost:8100"
 ENV_BASE_URL: Final[str] = "CREWDAY_E2E_BASE_URL"
+E2E_STACK_COMMAND: Final[str] = (
+    "CREWDAY_PUBLIC_URL=http://localhost:8100 "
+    "CREWDAY_WEBAUTHN_RP_ID=localhost "
+    "CREWDAY_LLM_PROVIDER=fake "
+    "CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES=1 "
+    "CREWDAY_RATE_LIMIT_ANONYMOUS_PER_MINUTE=10000 "
+    "CREWDAY_RATE_LIMIT_TOKEN_PER_MINUTE=10000 "
+    "CREWDAY_RATE_LIMIT_PERSONAL_ME_PER_MINUTE=10000 "
+    "docker compose -f docker-compose.dev.yml up -d --build"
+)
 
 # Where Playwright drops trace.zip / screenshots / videos when its
 # ``--tracing`` / ``--screenshot`` / ``--video`` flags fire. Keeps
@@ -130,14 +140,11 @@ def dev_stack_ready(base_url: str) -> str:
             if resp.status != 200:
                 pytest.skip(
                     f"dev stack /healthz returned {resp.status}; "
-                    "run `docker compose -f docker-compose.dev.yml "
-                    "-f mocks/docker-compose.e2e.yml up -d --build`"
+                    f"run `{E2E_STACK_COMMAND}`"
                 )
     except (TimeoutError, urllib.error.URLError, ConnectionError) as exc:
         pytest.skip(
-            f"dev stack unreachable at {base_url} ({exc!r}); "
-            "run `docker compose -f docker-compose.dev.yml "
-            "-f mocks/docker-compose.e2e.yml up -d --build`"
+            f"dev stack unreachable at {base_url} ({exc!r}); run `{E2E_STACK_COMMAND}`"
         )
     _assert_webauthn_rp_id_matches_origin(base_url)
     return base_url
@@ -163,8 +170,7 @@ def _assert_webauthn_rp_id_matches_origin(base_url: str) -> None:
     except (TimeoutError, urllib.error.URLError, ConnectionError) as exc:
         pytest.skip(
             f"dev stack WebAuthn preflight failed at {url} ({exc!r}); "
-            "run `docker compose -f docker-compose.dev.yml "
-            "-f mocks/docker-compose.e2e.yml up -d --build`"
+            f"run `{E2E_STACK_COMMAND}`"
         )
     rp_id = payload.get("options", {}).get("rpId")
     if not isinstance(rp_id, str) or not rp_id:
@@ -175,9 +181,8 @@ def _assert_webauthn_rp_id_matches_origin(base_url: str) -> None:
         return
     pytest.skip(
         f"WebAuthn rp_id {rp_id!r} does not match e2e origin host {host!r}. "
-        "The e2e suite must run with the loopback override: "
-        "`docker compose -f docker-compose.dev.yml "
-        "-f mocks/docker-compose.e2e.yml up -d --build`. "
+        "The e2e suite must run with the loopback e2e environment: "
+        f"`{E2E_STACK_COMMAND}`. "
         f"When {ENV_BASE_URL}=http://localhost:8100, the stack must advertise "
         "CREWDAY_PUBLIC_URL=http://localhost:8100 and "
         "CREWDAY_WEBAUTHN_RP_ID=localhost."

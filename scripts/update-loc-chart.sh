@@ -119,7 +119,6 @@ echo "Generating app/test chart -> $AREA_OUT_SVG"
     --legend-title "Area" \
     --group "App + website=app/,site/" \
     --group "Tests=tests/" \
-    --group "Mocks=mocks/" \
     --group "Supporting code=/,cli/,deploy/,migrations/,scripts/" \
     "$STATS_DIR/dirs.json"
 

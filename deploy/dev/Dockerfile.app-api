@@ -31,9 +31,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 # Non-root user pinned at the image level per docs/specs/16.
-# uid/gid 10001 matches the mocks image + the production recipe so a
-# bind-mounted ``/data`` volume lands with the right ownership under
-# compose.
+# uid/gid 10001 matches the production recipe so a bind-mounted
+# ``/data`` volume lands with the right ownership under compose.
 RUN groupadd --system --gid 10001 crewday \
  && useradd  --system --uid 10001 --gid crewday --home-dir /app --shell /usr/sbin/nologin crewday
 

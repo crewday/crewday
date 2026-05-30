@@ -395,10 +395,10 @@ Plain text to the user; CLI handles styling.
   `.playwright-mcp/README.md`). Close the browser
   (`mcp__playwright__browser_close`) when done.
 - **End-to-end Playwright suite (`tests/e2e/`)** runs against the
-  dev compose stack plus an e2e override that aligns WebAuthn with
-  the loopback origin. Fast (~10 s on Chromium). For the full
-  invocation (compose override, `playwright install`, pytest flags
-  that actually emit traces/videos), see
+  dev compose stack with documented e2e environment variables that
+  align WebAuthn with the loopback origin. Fast (~10 s on Chromium).
+  For the full invocation (compose command, `playwright install`,
+  pytest flags that actually emit traces/videos), see
   [`tests/e2e/README.md`](tests/e2e/README.md).
 
 ## Session wrap-up

@@ -709,9 +709,8 @@ llm_provider
     few-shot regressions. Never available in production. The factory
     selects this adapter when `CREWDAY_LLM_PROVIDER=fake` (see §16
     "Environment variables"); the dev / e2e Playwright stack
-    (`docker-compose.dev.yml`, repeated in
-    `mocks/docker-compose.e2e.yml`) is the only deployment that flips
-    it on.
+    (`docker-compose.dev.yml`) is the only deployment that flips it
+    on.
   - `local_embedding` — in-process CPU embedding runtime backed by
     FastEmbed. It has no API key, no endpoint requirement, and is only
     valid for provider-model rows whose model carries `embeddings`.

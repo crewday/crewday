@@ -21,8 +21,8 @@ workspace; those live in `docs/specs/11-llm-and-agents.md` and
   - Default source hot reload path: `http://127.0.0.1:18081`.
 - **Production**: not deployed yet.
   - Production app code lives under `app/`.
-  - Legacy mock backend context remains under `mocks/`; the parallel
-    mock SPA has been retired in favor of `app/web` styleguide routes.
+  - Legacy mock runtimes have been retired in favor of the production
+    app stack and `app/web` styleguide routes.
   - See `docs/specs/19-roadmap.md`.
 
 Never bind a new service to the public interface. Use `127.0.0.1` or
@@ -363,6 +363,6 @@ function length, parameter count, and duplicate token blocks.
 ## End-to-End Tests
 
 The Playwright e2e suite under `tests/e2e/` runs against the dev compose stack
-plus an override that aligns WebAuthn with loopback. See `tests/e2e/README.md`
-for the full compose override, Playwright install, pytest flags, traces, and
-videos.
+with documented e2e environment variables that align WebAuthn with loopback.
+See `tests/e2e/README.md` for the full compose command, Playwright install,
+pytest flags, traces, and videos.

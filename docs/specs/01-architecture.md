@@ -431,7 +431,7 @@ crewday/
 │   │       ├── billing.py
 │   │       ├── messaging.py
 │   │       └── llm.py
-│   ├── web/               # SPA catch-all + SSE handler (no Jinja)
+│   ├── web/               # Production React + Vite SPA source + styleguide
 │   ├── domain/            # bounded contexts; sibling imports
 │   │   ├── identity/      # only via __init__.py public surface
 │   │   ├── places/
@@ -465,22 +465,6 @@ crewday/
 │   ├── events/            # in-process event bus + typed registry
 │   ├── worker/            # APScheduler jobs
 │   └── util/              # clock, ulid, hashids, money helpers
-├── mocks/
-│   ├── app/               # FastAPI JSON API + SSE + SPA catch-all
-│   └── web/               # Vite + React + TypeScript SPA
-│       ├── src/
-│       │   ├── main.tsx
-│       │   ├── App.tsx
-│       │   ├── routes.tsx
-│       │   ├── layouts/
-│       │   ├── components/
-│       │   ├── pages/
-│       │   ├── lib/       # fetchJson, queryClient, etc.
-│       │   ├── context/   # SseContext, AuthContext, etc.
-│       │   ├── styles/    # BEM globals + per-component CSS modules
-│       │   └── types/
-│       ├── vite.config.ts
-│       └── tsconfig.json
 ├── cli/
 │   └── crewday/
 │       ├── __main__.py        # entry point
@@ -501,6 +485,7 @@ crewday/
 │   ├── e2e/               # playwright
 │   └── load/              # locust
 ├── deploy/
+│   ├── dev/               # Dockerfile for the local app dev stack
 │   ├── single/            # Dockerfile for minimal SQLite image
 │   └── compose/           # docker-compose.yml + Caddyfile + MinIO
 ├── scripts/

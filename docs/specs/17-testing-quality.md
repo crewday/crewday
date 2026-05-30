@@ -208,7 +208,7 @@ comment).
      approval is queued and approved.
 - Passkey ceremonies are exercised via Chromium's
   [WebAuthn virtual authenticator](https://playwright.dev/docs/api/
-  class-cdpsession). The e2e compose override aligns
+  class-cdpsession). The documented e2e environment aligns
   `CREWDAY_PUBLIC_URL` / `CREWDAY_WEBAUTHN_RP_ID` with
   `http://localhost:8100` so the browser origin satisfies WebAuthn's
   RP-ID rule. The e2e stack remains bound to loopback; `localhost` is

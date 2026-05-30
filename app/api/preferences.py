@@ -2,8 +2,7 @@
 
 Five fire-and-forget endpoints the SPA hits to persist UI preferences
 the browser then reads back synchronously from ``document.cookie`` on
-the next page load. Mirrors the mock implementation in
-``mocks/app/main.py``:
+the next page load:
 
 * ``/switch/{role}``          — ``crewday_role`` (employee/manager/client/admin)
 * ``/theme/set/{value}``      — ``crewday_theme`` (light/dark/system)
@@ -24,7 +23,7 @@ Why these are bare-host and unauthenticated:
   ``crewday_workspace`` cookie *is* the workspace pointer the
   tenancy middleware would otherwise need to resolve.
 
-Cookie attributes mirror :mod:`mocks.app.main`:
+Cookie attributes:
 
 * ``Path=/``, ``SameSite=Lax`` — readable on the SPA's pages, sent on
   top-level navigations so a bookmark restores the right shell state.
@@ -57,8 +56,7 @@ reasons make the bypass safe for the cookie setters specifically:
   real security gain.
 
 The ``/switch/{role}`` and ``/theme/set/{value}`` endpoints
-additionally accept ``GET`` for legacy ``href=`` writers in the mocks,
-which matches ``mocks/app/main.py``.
+additionally accept ``GET`` for legacy ``href=`` writers.
 
 Validation: unknown values for role / theme / state return ``400``.
 The workspace id passes through unchanged — the cookie is just a
@@ -88,8 +86,7 @@ _AGENT_COLLAPSED_COOKIE: Final[str] = "crewday_agent_collapsed"
 _NAV_COLLAPSED_COOKIE: Final[str] = "crewday_nav_collapsed"
 
 
-# Validation sets — match :mod:`mocks.app.main` so the mocks and the
-# production app agree on what counts as a valid preference value.
+# Validation sets for the public preference-cookie contract.
 _VALID_ROLES: Final[frozenset[str]] = frozenset(
     {"employee", "manager", "client", "admin"}
 )

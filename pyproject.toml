@@ -238,7 +238,6 @@ python_version = "3.14"
 plugins = ["pydantic.mypy"]
 explicit_package_bases = true
 namespace_packages = true
-exclude = ["mocks/"]
 # Map the on-disk ``cli/crewday/`` directory to the ``crewday``
 # top-level package so ``mypy cli/`` resolves imports the same way
 # the wheel layout does (see
