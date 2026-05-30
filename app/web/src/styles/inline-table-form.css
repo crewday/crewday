@@ -655,6 +655,20 @@
   color: var(--ink-3);
 }
 
+.inline-table-form__field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.inline-table-form__list {
+  display: grid;
+  gap: 3px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
 .inline-table-form__actions {
   display: flex;
   flex-wrap: nowrap;

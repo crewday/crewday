@@ -1,114 +1,200 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
-import { __resetApiProvidersForTests } from "@/lib/api";
-import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
-import * as preferences from "@/lib/preferences";
-import type { AssetType } from "@/types/api";
+import { __resetApiProvidersForTests, registerWorkspaceSlugGetter } from "@/lib/api";
+import {
+  __resetQueryKeyGetterForTests,
+  qk,
+  registerQueryKeyWorkspaceGetter,
+} from "@/lib/queryKeys";
+import { installFetchRouteHandlers, type FetchRoute } from "@/test/helpers";
+import type { AssetType, Me } from "@/types/api";
 import AssetTypesPage from "./AssetTypesPage";
 import appSource from "../../App.tsx?raw";
-import { jsonResponse } from "@/test/helpers";
 
-const ASSET_TYPES: AssetType[] = [
-  {
-    id: "type_lock",
-    workspace_id: "workspace_1",
-    key: "lock",
-    name: "Smart lock",
-    category: "security",
-    icon_name: "lock",
-    description_md: null,
-    default_actions: [
-      {
-        kind: "inspect",
-        label: "Battery check",
-        interval_days: 30,
-        warn_before_days: 7,
-      },
-      {
-        kind: "inspect",
-        label: "Battery check",
-        interval_days: 30,
-        warn_before_days: 7,
-      },
-    ],
-    default_actions_json: [
-      {
-        kind: "inspect",
-        label: "Battery check",
-        interval_days: 30,
-        warn_before_days: 7,
-      },
-      {
-        kind: "inspect",
-        label: "Battery check",
-        interval_days: 30,
-        warn_before_days: 7,
-      },
-    ],
-    default_lifespan_years: 5,
-    created_at: "2026-04-29T12:00:00Z",
-    updated_at: "2026-04-29T12:00:00Z",
-    deleted_at: null,
-    archived_at: null,
-    is_system: false,
-  },
-  {
-    id: "type_pump",
-    workspace_id: "workspace_1",
-    key: "pump",
-    name: "Pool pump",
-    category: "pool",
-    icon_name: "waves",
-    description_md: null,
-    default_actions: [],
-    default_actions_json: [],
-    default_lifespan_years: null,
-    created_at: "2026-04-29T12:00:00Z",
-    updated_at: "2026-04-29T12:00:00Z",
-    deleted_at: null,
-    archived_at: null,
-    is_system: false,
-  },
-];
+const originalShowModal = HTMLDialogElement.prototype.showModal;
+const originalClose = HTMLDialogElement.prototype.close;
 
-function installFetch(body: unknown = { data: ASSET_TYPES }, status = 200) {
-  const original = globalThis.fetch;
-  const spy = vi.fn(async (url: string | URL | Request) => {
-    const resolved = typeof url === "string" ? url : url.toString();
-    const path = new URL(resolved, "http://crewday.test").pathname;
-    if (path === "/w/acme/api/v1/asset_types") return jsonResponse(body, status);
-    throw new Error(`Unexpected fetch call: ${resolved}`);
-  });
-  (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
-  return () => {
-    (globalThis as { fetch: typeof fetch }).fetch = original;
-  };
+const ME: Me = {
+  role: "manager",
+  theme: "system",
+  agent_sidebar_collapsed: false,
+  employee: {
+    id: "emp_1",
+    name: "Mina Manager",
+    roles: ["manager"],
+    properties: [],
+    avatar_initials: "MM",
+    avatar_file_id: null,
+    avatar_url: null,
+    phone: "",
+    email: "mina@example.test",
+    started_on: "",
+    capabilities: {},
+    workspaces: ["ws_1"],
+    villas: [],
+    language: "en",
+    weekly_availability: {},
+    evidence_policy: "inherit",
+    preferred_locale: null,
+    settings_override: {},
+  },
+  manager_name: "Mina",
+  today: "2026-05-05",
+  now: "2026-05-05T10:00:00Z",
+  user_id: "usr_1",
+  agent_approval_mode: "auto",
+  current_workspace_id: "ws_1",
+  available_workspaces: [],
+  client_binding_org_ids: [],
+  is_deployment_admin: false,
+  is_deployment_owner: false,
+};
+
+const SYSTEM_TYPE: AssetType = {
+  id: "type_system_fire",
+  workspace_id: null,
+  key: "fire_extinguisher",
+  name: "Fire extinguisher",
+  category: "safety",
+  icon_name: "Flame",
+  description_md: "Portable fire safety equipment.",
+  default_actions: [
+    {
+      kind: "inspect",
+      label: "Visual inspection",
+      interval_days: 30,
+      warn_before_days: 7,
+    },
+  ],
+  default_actions_json: [
+    {
+      kind: "inspect",
+      label: "Visual inspection",
+      interval_days: 30,
+      warn_before_days: 7,
+    },
+  ],
+  default_lifespan_years: 12,
+  created_at: "2026-04-29T12:00:00Z",
+  updated_at: "2026-04-29T12:00:00Z",
+  deleted_at: null,
+  archived_at: null,
+  is_system: true,
+};
+
+const CUSTOM_TYPE: AssetType = {
+  id: "type_lock",
+  workspace_id: "ws_1",
+  key: "lock",
+  name: "Smart lock",
+  category: "security",
+  icon_name: "Lock",
+  description_md: "Connected entry locks.",
+  default_actions: [
+    {
+      kind: "inspect",
+      label: "Battery check",
+      interval_days: 30,
+      warn_before_days: 7,
+    },
+    {
+      kind: "inspect",
+      label: "Battery check",
+      interval_days: 30,
+      warn_before_days: 7,
+    },
+  ],
+  default_actions_json: [
+    {
+      kind: "inspect",
+      label: "Battery check",
+      interval_days: 30,
+      warn_before_days: 7,
+    },
+    {
+      kind: "inspect",
+      label: "Battery check",
+      interval_days: 30,
+      warn_before_days: 7,
+    },
+  ],
+  default_lifespan_years: 5,
+  created_at: "2026-04-29T12:00:00Z",
+  updated_at: "2026-04-29T12:00:00Z",
+  deleted_at: null,
+  archived_at: null,
+  is_system: false,
+};
+
+function renderAssetTypes(
+  routes: FetchRoute[] = [],
+  options: { permission?: "allow" | "deny"; initialTypes?: AssetType[] } = {},
+) {
+  const types = [...(options.initialTypes ?? [SYSTEM_TYPE, CUSTOM_TYPE])];
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  qc.setQueryData(qk.assets(), { data: [] });
+  const fetchEnv = installFetchRouteHandlers([
+    ...routes,
+    { path: "/w/acme/api/v1/me", respond: { body: ME } },
+    {
+      path: "/w/acme/api/v1/permissions/resolved/self?action_key=assets.manage_types&scope_kind=workspace&scope_id=ws_1",
+      respond: {
+        body: {
+          effect: options.permission ?? "allow",
+          source_layer: "default_allow",
+          source_rule_id: null,
+          matched_groups: options.permission === "deny" ? [] : ["managers"],
+        },
+      },
+    },
+    {
+      path: "/w/acme/api/v1/asset_types",
+      respond: () => ({ body: { data: types, next_cursor: null, has_more: false } }),
+    },
+  ]);
+  const view = render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter initialEntries={["/w/acme/asset_types"]}>
+        <WorkspaceProvider>
+          <AssetTypesPage />
+        </WorkspaceProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  return { ...view, ...fetchEnv, qc, types };
 }
 
-function Harness() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return (
-    <QueryClientProvider client={qc}>
-      <WorkspaceProvider>
-        <MemoryRouter initialEntries={["/asset_types"]}>
-          <AssetTypesPage />
-        </MemoryRouter>
-      </WorkspaceProvider>
-    </QueryClientProvider>
-  );
+async function findCatalog(): Promise<HTMLElement> {
+  const catalog = await screen.findByRole("region", { name: "Asset types" });
+  await within(catalog).findByRole("table", { name: "Asset type catalog" });
+  return catalog;
+}
+
+function installDialogPolyfill(): void {
+  HTMLDialogElement.prototype.showModal = vi.fn(function showModal(this: HTMLDialogElement) {
+    this.setAttribute("open", "");
+  });
+  HTMLDialogElement.prototype.close = vi.fn(function close(this: HTMLDialogElement) {
+    this.removeAttribute("open");
+    this.dispatchEvent(new Event("close"));
+  });
 }
 
 beforeEach(() => {
+  installDialogPolyfill();
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
-  vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("acme");
+  registerWorkspaceSlugGetter(() => "acme");
+  registerQueryKeyWorkspaceGetter(() => "acme");
 });
 
 afterEach(() => {
   cleanup();
+  HTMLDialogElement.prototype.showModal = originalShowModal;
+  HTMLDialogElement.prototype.close = originalClose;
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.restoreAllMocks();
@@ -116,10 +202,6 @@ afterEach(() => {
 
 describe("<AssetTypesPage>", () => {
   it("gates the asset type route before asset type content can render", () => {
-    // The scope.view block bundles every read-only asset / inventory
-    // surface; sibling routes (e.g. `/inventory`) may sit between
-    // `/assets` and `/asset_types`. Match the wrapper + the AssetTypes
-    // route presence rather than locking adjacency.
     expect(appSource).toMatch(
       /<Route element={<RequirePermission actionKey="scope\.view" \/>}>\s*(?:(?!<\/Route>)[\s\S])*?<Route path="asset_types" element={<AssetTypesPage \/>} \/>/,
     );
@@ -132,46 +214,231 @@ describe("<AssetTypesPage>", () => {
     expect(appSource).toContain('<Route path="asset_types" element={<AssetTypesPage />} />');
   });
 
-  it("renders asset types from paginated API envelopes", async () => {
-    const restore = installFetch();
+  it("renders an inline table with locked system rows and a create row for managers", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    try {
-      render(<Harness />);
+    renderAssetTypes();
 
-      expect(await screen.findByText("Smart lock")).toBeInTheDocument();
-      expect(screen.getByText("Pool pump")).toBeInTheDocument();
-      expect(screen.getByText("security")).toBeInTheDocument();
-      expect(screen.getByText("Expected lifespan: 5 years")).toBeInTheDocument();
-      expect(screen.getAllByText("Battery check")).toHaveLength(2);
-      expect(screen.getAllByText("every 30d")).toHaveLength(2);
-      const consoleText = consoleError.mock.calls.flat().join("\n");
-      expect(consoleText).not.toContain('Each child in a list should have a unique "key" prop');
-    } finally {
-      restore();
-    }
+    const catalog = await findCatalog();
+    expect(within(catalog).queryByRole("article")).not.toBeInTheDocument();
+    expect(within(catalog).getByText("Fire extinguisher")).toBeInTheDocument();
+    expect(within(catalog).getByText("Smart lock")).toBeInTheDocument();
+    expect(within(catalog).getAllByText("Battery check")).toHaveLength(2);
+    expect(within(catalog).getAllByText("every 30d")).toHaveLength(3);
+    expect(within(catalog).getByText(/System type/)).toBeInTheDocument();
+    expect(within(catalog).getByLabelText("New asset type")).toBeInTheDocument();
+    const systemRow = within(catalog).getByLabelText("Fire extinguisher");
+    expect(within(systemRow).getByRole("button", { name: "Edit" })).toBeDisabled();
+    expect(within(systemRow).getByRole("button", { name: "Archive" })).toBeDisabled();
+    expect(within(systemRow).getByLabelText("Locked")).toBeInTheDocument();
+    const consoleText = consoleError.mock.calls.flat().join("\n");
+    expect(consoleText).not.toContain('Each child in a list should have a unique "key" prop');
+  });
+
+  it("shows catalog rows without mutation affordances for view-only users", async () => {
+    renderAssetTypes([], { permission: "deny" });
+
+    const catalog = await findCatalog();
+    expect(within(catalog).getByText("Smart lock")).toBeInTheDocument();
+    expect(within(catalog).queryByLabelText("New asset type")).not.toBeInTheDocument();
+    expect(within(catalog).queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(within(catalog).queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
+    expect(within(catalog).getByText(/do not have permission to manage asset types/i)).toBeInTheDocument();
+  });
+
+  it("creates a workspace-custom asset type and invalidates dependent catalog queries", async () => {
+    const { requests, types, qc } = renderAssetTypes([
+      {
+        path: "/w/acme/api/v1/asset_types",
+        method: "POST",
+        respond: ({ body }) => {
+          const created = {
+            ...CUSTOM_TYPE,
+            ...(body as Partial<AssetType>),
+            id: "type_pool_heater",
+            workspace_id: "ws_1",
+            created_at: "2026-05-05T00:00:00Z",
+            updated_at: "2026-05-05T00:00:00Z",
+            deleted_at: null,
+            archived_at: null,
+            is_system: false,
+          } satisfies AssetType;
+          types.push(created);
+          return { status: 201, body: created };
+        },
+      },
+    ]);
+
+    const catalog = await findCatalog();
+    const createRow = within(catalog).getByLabelText("New asset type");
+    fireEvent.change(within(createRow).getByLabelText("Name"), { target: { value: "Pool heater" } });
+    fireEvent.change(within(createRow).getByLabelText("Key"), { target: { value: "pool_heater" } });
+    fireEvent.change(within(createRow).getByLabelText("Category"), { target: { value: "pool" } });
+    fireEvent.change(within(createRow).getByLabelText("Default lifespan years"), { target: { value: "10" } });
+    fireEvent.change(within(createRow).getByLabelText("Description"), {
+      target: { value: "Outdoor pool heating equipment." },
+    });
+    fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(requests.some((request) => request.method === "POST" && request.path === "/w/acme/api/v1/asset_types")).toBe(true);
+    });
+    const createRequest = requests.find((request) => request.method === "POST" && request.path === "/w/acme/api/v1/asset_types");
+    expect(createRequest?.body).toEqual({
+      key: "pool_heater",
+      name: "Pool heater",
+      category: "pool",
+      icon_name: null,
+      description_md: "Outdoor pool heating equipment.",
+      default_lifespan_years: 10,
+      default_actions: [],
+    });
+    expect(await screen.findByText("Pool heater")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("New asset type")).getByLabelText("Name")).toHaveValue("");
+    expect(requests.filter((request) => request.path === "/w/acme/api/v1/asset_types").length).toBeGreaterThan(1);
+    expect(qc.getQueryState(qk.assets())?.isInvalidated).toBe(true);
+  });
+
+  it("edits supported fields on a workspace-custom row without dropping default actions", async () => {
+    const { requests, types } = renderAssetTypes([
+      {
+        path: "/w/acme/api/v1/asset_types/type_lock",
+        method: "PATCH",
+        respond: ({ body }) => {
+          types[1] = { ...types[1]!, ...(body as Partial<AssetType>) };
+          return { body: types[1] };
+        },
+      },
+    ]);
+
+    const catalog = await findCatalog();
+    const row = within(catalog).getByLabelText("Smart lock");
+    fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    fireEvent.change(within(row).getByLabelText("Name"), { target: { value: "Smart entry lock" } });
+    fireEvent.change(within(row).getByLabelText("Category"), { target: { value: "safety" } });
+    fireEvent.change(within(row).getByLabelText("Default lifespan years"), { target: { value: "6" } });
+    fireEvent.change(within(row).getByLabelText("Description"), { target: { value: "Updated locks." } });
+    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Smart entry lock")).toBeInTheDocument();
+    const patchRequest = requests.find((request) => request.method === "PATCH");
+    expect(patchRequest?.body).toEqual({
+      key: "lock",
+      name: "Smart entry lock",
+      category: "safety",
+      icon_name: "Lock",
+      description_md: "Updated locks.",
+      default_lifespan_years: 6,
+    });
+    expect(JSON.stringify(patchRequest?.body)).not.toContain("default_actions");
+    expect(screen.getAllByText("Battery check")).toHaveLength(2);
+  });
+
+  it("confirms archive behavior before deleting a workspace-custom row", async () => {
+    const { requests, types } = renderAssetTypes([
+      {
+        path: "/w/acme/api/v1/asset_types/type_lock",
+        method: "DELETE",
+        respond: () => {
+          types.splice(1, 1);
+          return { status: 204, body: null };
+        },
+      },
+    ]);
+
+    const catalog = await findCatalog();
+    const row = within(catalog).getByLabelText("Smart lock");
+    fireEvent.click(within(row).getByRole("button", { name: "Archive" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Archive asset type?" });
+    expect(dialog).toHaveTextContent("Unused custom types may disappear immediately");
+    expect(dialog).toHaveTextContent("referenced types are retained");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Archive type" }));
+
+    await waitFor(() => {
+      expect(requests.some((request) => request.method === "DELETE")).toBe(true);
+    });
+  });
+
+  it("keeps create drafts visible when duplicate-key errors return from the backend", async () => {
+    renderAssetTypes([
+      {
+        path: "/w/acme/api/v1/asset_types",
+        method: "POST",
+        respond: {
+          status: 409,
+          body: {
+            type: "https://crewday.dev/errors/conflict",
+            title: "Conflict",
+            status: 409,
+            detail: "asset type key 'lock' already exists in this workspace",
+            error: "asset_type_key_conflict",
+          },
+        },
+      },
+    ]);
+
+    const catalog = await findCatalog();
+    const createRow = within(catalog).getByLabelText("New asset type");
+    fireEvent.change(within(createRow).getByLabelText("Name"), { target: { value: "Duplicate lock" } });
+    fireEvent.change(within(createRow).getByLabelText("Key"), { target: { value: "lock" } });
+    fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
+
+    expect(await within(createRow).findByRole("alert")).toHaveTextContent(
+      "That asset type key is already used. Choose a unique key.",
+    );
+    expect(within(createRow).getByLabelText("Name")).toHaveValue("Duplicate lock");
+    expect(within(createRow).getByLabelText("Key")).toHaveValue("lock");
+  });
+
+  it("surfaces stale mutation permission failures as inline row errors", async () => {
+    renderAssetTypes([
+      {
+        path: "/w/acme/api/v1/asset_types/type_lock",
+        method: "PATCH",
+        respond: {
+          status: 403,
+          body: {
+            type: "https://crewday.dev/errors/forbidden",
+            title: "Forbidden",
+            status: 403,
+            detail: "Forbidden",
+          },
+        },
+      },
+    ]);
+
+    const catalog = await findCatalog();
+    const row = within(catalog).getByLabelText("Smart lock");
+    fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    fireEvent.change(within(row).getByLabelText("Name"), { target: { value: "Denied lock" } });
+    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+
+    expect(await within(row).findByRole("alert")).toHaveTextContent(
+      "You do not have permission to manage asset types.",
+    );
+    expect(within(row).getByLabelText("Name")).toHaveValue("Denied lock");
   });
 
   it("renders bare list responses for mock parity", async () => {
-    const restore = installFetch(ASSET_TYPES);
-    try {
-      render(<Harness />);
+    renderAssetTypes([
+      {
+        path: "/w/acme/api/v1/asset_types",
+        respond: { body: [SYSTEM_TYPE, CUSTOM_TYPE] },
+      },
+    ], { initialTypes: [] });
 
-      expect(await screen.findByText("Smart lock")).toBeInTheDocument();
-      expect(screen.getByText("Pool pump")).toBeInTheDocument();
-    } finally {
-      restore();
-    }
+    expect(await screen.findByText("Fire extinguisher")).toBeInTheDocument();
+    expect(screen.getByText("Smart lock")).toBeInTheDocument();
   });
 
-  it("shows the mock loading and error states", async () => {
-    const restore = installFetch({ detail: "nope" }, 500);
-    try {
-      render(<Harness />);
+  it("shows the loading and error states", async () => {
+    renderAssetTypes([
+      {
+        path: "/w/acme/api/v1/asset_types",
+        respond: { status: 500, body: { detail: "nope" } },
+      },
+    ], { initialTypes: [] });
 
-      expect(screen.getByText(/Loading/)).toBeInTheDocument();
-      expect(await screen.findByText("Failed to load.")).toBeInTheDocument();
-    } finally {
-      restore();
-    }
+    expect(screen.getByText(/Loading/)).toBeInTheDocument();
+    expect(await screen.findByText("Failed to load.")).toBeInTheDocument();
   });
 });
