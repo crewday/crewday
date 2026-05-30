@@ -305,6 +305,18 @@ tokens                         settings
 kb
 ```
 
+Managers edit property closures on `/property/<id>/closures` through
+the always-visible inline "New closure" row. The adjacent three-month
+calendar is an input surface for that row: pointer down on a day and
+drag or release on another day writes the sorted inclusive start/end
+dates into the new row, and the calendar renders an unsaved draft
+closure block for every covered day. The draft block mirrors the row's
+current reason immediately, remains visible as a placeholder while the
+reason is blank, and never creates or updates a closure until the
+manager uses the row's explicit Save action. Persisted manual/iCal
+closure blocks and stay markers continue to render in the same day
+cells.
+
 The manager `/settings` page contains a workspace **Danger zone**
 section for owners. It offers exactly three current workspace
 lifecycle actions:

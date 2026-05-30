@@ -279,9 +279,13 @@
   min-width: 0;
   font-size: 12px;
   position: relative;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
 }
 .mini-cal__day--today { outline: 2px solid var(--moss); }
 .mini-cal__day--closed { background: var(--paper-3); }
+.mini-cal__day--selecting { box-shadow: inset 0 0 0 1px var(--moss); }
 .mini-cal__num { color: var(--ink-3); font-family: "JetBrains Mono", monospace; font-size: 11px; line-height: 1; }
 .mini-cal__bar { display: block; height: 4px; margin-top: 2px; border-radius: 999px; }
 .mini-cal__bar--moss { background: var(--moss); }
@@ -304,6 +308,11 @@
   max-width: 100%;
   overflow: hidden;
   position: relative;
+}
+.mini-cal__closure--draft {
+  background: var(--moss-soft);
+  box-shadow: inset 2px 0 0 var(--moss);
+  outline: 1px dashed var(--moss);
 }
 .mini-cal__closure-reason,
 .mini-cal__closure-source {

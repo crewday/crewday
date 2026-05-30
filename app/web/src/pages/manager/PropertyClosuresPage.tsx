@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "react-router-dom";
 import { CalendarX } from "lucide-react";
@@ -207,6 +207,10 @@ function validateClosureDraft(draft: ClosureDraft): string | null {
   return null;
 }
 
+function sortedDateRange(a: string, b: string): Pick<ClosureDraft, "starts_on" | "ends_on"> {
+  return a <= b ? { starts_on: a, ends_on: b } : { starts_on: b, ends_on: a };
+}
+
 function sourceCell(draft: ClosureDraft) {
   if (draft.source_ical_feed_id !== null) {
     return (
@@ -230,13 +234,24 @@ function closureCalendarLabel(closure: PropertyClosure): string {
   return `${closure.reason} closure, ${closureSourceLabel(closure)} source`;
 }
 
+function draftClosureCalendarLabel(draft: ClosureDraft): string {
+  const reason = draft.reason.trim();
+  return reason ? `${reason} draft closure` : "Draft closure";
+}
+
 function stayCalendarLabel(stay: Stay): string {
   return `${stay.guest_name} stay, ${stay.source} source`;
 }
 
-function calendarDayLabel(iso: string, closures: PropertyClosure[], stays: Stay[]): string {
+function calendarDayLabel(
+  iso: string,
+  closures: PropertyClosure[],
+  stays: Stay[],
+  draft: ClosureDraft | null,
+): string {
   const entries = [
     ...closures.map(closureCalendarLabel),
+    ...(draft ? [draftClosureCalendarLabel(draft)] : []),
     ...stays.map(stayCalendarLabel),
   ];
   if (entries.length === 0) return iso;
@@ -276,6 +291,8 @@ export default function PropertyClosuresPage() {
   const [rowEdits, setRowEdits] = useState<ReadonlyMap<string, InlineTableRow<ClosureDraft>>>(() => new Map());
   const [createRow, setCreateRow] = useState<InlineTableRow<ClosureDraft>>(() => makeCreateRow("2026-04-01"));
   const [showArchivedClosures, setShowArchivedClosures] = useState(false);
+  const [dragSelectionAnchor, setDragSelectionAnchor] = useState<string | null>(null);
+  const dragSelectionAnchorRef = useRef<string | null>(null);
   const dataQ = useQuery({
     queryKey: qk.propertyClosures(pid),
     queryFn: () => fetchClosuresPayload(pid),
@@ -304,6 +321,20 @@ export default function PropertyClosuresPage() {
       committedDraft: emptyDraft(todayIso),
     });
   }, [meQ.data]);
+
+  useEffect(() => {
+    if (!dragSelectionAnchor) return;
+    const clearSelection = () => {
+      dragSelectionAnchorRef.current = null;
+      setDragSelectionAnchor(null);
+    };
+    window.addEventListener("pointerup", clearSelection);
+    window.addEventListener("pointercancel", clearSelection);
+    return () => {
+      window.removeEventListener("pointerup", clearSelection);
+      window.removeEventListener("pointercancel", clearSelection);
+    };
+  }, [dragSelectionAnchor]);
 
   const saveClosure = useMutation({
     mutationFn: (next: ClosureDraft) => {
@@ -525,6 +556,34 @@ export default function PropertyClosuresPage() {
     });
   }
 
+  function patchCreateRowRange(fromIso: string, toIso: string) {
+    patchRow(createRow.id, sortedDateRange(fromIso, toIso));
+  }
+
+  function startCalendarSelection(iso: string) {
+    dragSelectionAnchorRef.current = iso;
+    setDragSelectionAnchor(iso);
+    patchCreateRowRange(iso, iso);
+  }
+
+  function updateCalendarSelection(iso: string, event: PointerEvent<HTMLDivElement>) {
+    const anchor = dragSelectionAnchorRef.current;
+    if (!anchor) return;
+    if ((event.buttons & 1) !== 1) {
+      dragSelectionAnchorRef.current = null;
+      setDragSelectionAnchor(null);
+      return;
+    }
+    patchCreateRowRange(anchor, iso);
+  }
+
+  function finishCalendarSelection(iso: string) {
+    const anchor = dragSelectionAnchorRef.current;
+    if (anchor) patchCreateRowRange(anchor, iso);
+    dragSelectionAnchorRef.current = null;
+    setDragSelectionAnchor(null);
+  }
+
   function editRow(rowId: string) {
     const closure = closureById.get(rowId);
     if (!closure || isImportedClosure(closure)) return;
@@ -595,6 +654,9 @@ export default function PropertyClosuresPage() {
   const todayIso = dateOnly(meQ.data.today);
   const calendars = buildVisibleCalendars(todayIso);
   const calendarRangeLabel = calendars.map((calendar) => calendar.label).join(", ");
+  const draftPreview = createRow.dirty && createRow.draft.starts_on <= createRow.draft.ends_on
+    ? createRow.draft
+    : null;
 
   return (
     <DeskPage
@@ -671,11 +733,13 @@ export default function PropertyClosuresPage() {
                   {calendar.days.map((day) => {
                     const dayClosures = closures.filter((closure) => closureCoversDate(closure, day.iso));
                     const dayStays = stays.filter((stay) => stayCoversDate(stay, day.iso));
-                    const dayLabel = calendarDayLabel(day.iso, dayClosures, dayStays);
-                    const closed = dayClosures.length > 0;
+                    const dayDraft = draftPreview && closureCoversDate(draftPreview, day.iso) ? draftPreview : null;
+                    const dayLabel = calendarDayLabel(day.iso, dayClosures, dayStays, dayDraft);
+                    const closed = dayClosures.length > 0 || dayDraft !== null;
                     const cls = [
                       "mini-cal__day",
                       closed ? "mini-cal__day--closed" : "",
+                      dragSelectionAnchor && dayDraft ? "mini-cal__day--selecting" : "",
                       day.iso === todayIso ? "mini-cal__day--today" : "",
                     ]
                       .filter(Boolean)
@@ -687,6 +751,17 @@ export default function PropertyClosuresPage() {
                         role="gridcell"
                         aria-label={dayLabel}
                         title={dayLabel === day.iso ? undefined : dayLabel}
+                        onPointerDown={(event) => {
+                          if (event.button !== 0) return;
+                          event.preventDefault();
+                          startCalendarSelection(day.iso);
+                        }}
+                        onPointerEnter={(event) => updateCalendarSelection(day.iso, event)}
+                        onPointerUp={() => finishCalendarSelection(day.iso)}
+                        onPointerCancel={() => {
+                          dragSelectionAnchorRef.current = null;
+                          setDragSelectionAnchor(null);
+                        }}
                       >
                         <span className="mini-cal__num">{day.day}</span>
                         {dayClosures.map((closure) => (
@@ -701,6 +776,19 @@ export default function PropertyClosuresPage() {
                             <span className="mini-cal__closure-source">{closureSourceLabel(closure)}</span>
                           </span>
                         ))}
+                        {dayDraft ? (
+                          <span
+                            className="mini-cal__closure mini-cal__closure--draft"
+                            role="group"
+                            title={draftClosureCalendarLabel(dayDraft)}
+                            aria-label={draftClosureCalendarLabel(dayDraft)}
+                          >
+                            <span className="mini-cal__closure-reason">
+                              {dayDraft.reason.trim() || "\u00a0"}
+                            </span>
+                            <span className="mini-cal__closure-source">draft</span>
+                          </span>
+                        ) : null}
                         {dayStays.map((s) => (
                           <span
                             key={s.id}
