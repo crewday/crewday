@@ -49,7 +49,7 @@ per-role scopes), and can be attached to tasks.*
 | slug               | text    | URL-safe handle, UNIQUE per workspace                                         |
 | title              | text    | short, human-readable                                                         |
 | scope_kind         | enum    | `template | property | area | asset | stay | role | workspace`                |
-| scope_id           | ULID?   | NULL iff `scope_kind = workspace`; otherwise points at the scoped row         |
+| scope_id           | ULID?   | NULL iff `scope_kind = workspace`; for property scope, mirrors the first associated property for legacy compatibility; otherwise points at the scoped row |
 | current_version_id | ULID?   | soft-ref to `instruction_version.id`; written atomically on version bump      |
 | tags               | text[]  | `safety`, `pets`, `food`, ...; lowercase, deduped, capped at 20               |
 | archived_at        | tstz?   | NULL on live rows; set on archive, cleared on restore (replaces v0 `status`)  |
@@ -59,13 +59,35 @@ per-role scopes), and can be attached to tasks.*
 Constraints:
 
 - `scope_kind = workspace` → `scope_id` NULL.
-- Any other `scope_kind` → `scope_id` set, pointing at the
-  appropriate target row (a `task_template`, `property`,
-  `area`, `asset`, `stay`, or `work_role`).
+- `scope_kind = property` → at least one row in
+  `instruction_property_scope`; `scope_id` stores the first selected
+  property as a compatibility mirror and is not the authoritative
+  property set.
+- Any other non-workspace `scope_kind` → `scope_id` set, pointing at
+  the appropriate target row (a `task_template`, `area`, `asset`,
+  `stay`, or `work_role`).
 - `scope_id` is a soft-ref :class:`str` rather than a polymorphic
   FK because SQLAlchemy does not portably express a column-dependent
   foreign key; the domain layer enforces the kind/id pair.
 - UNIQUE `(workspace_id, slug)`.
+
+### `instruction_property_scope`
+
+Authoritative property associations for property-scoped instructions.
+This table lets one instruction apply to one or more properties
+without duplicating content or versions.
+
+| field          | type    | notes                                      |
+|----------------|---------|--------------------------------------------|
+| workspace_id   | ULID FK | denormalised tenant scope                  |
+| instruction_id | ULID FK | parent `instruction.id`, cascade on delete |
+| property_id    | ULID    | property that the instruction applies to   |
+| created_at     | tstz    | association creation time                  |
+
+Primary key `(workspace_id, instruction_id, property_id)`. Property ids
+are soft refs; the service validates that every selected property is
+live in the workspace. Existing single-property rows are migrated into
+this table from `instruction.scope_id`.
 
 ### `instruction_version`
 
@@ -121,7 +143,9 @@ or `stay_id`, the set of applicable instructions (live rows —
 `archived_at IS NULL`) is the **union** of:
 
 1. All `workspace`-scoped instructions — universal.
-2. All `property`-scoped instructions where `scope_id = P`.
+2. All `property`-scoped instructions where `instruction_property_scope`
+   contains `(instruction_id, P)`. Legacy rows whose `scope_id = P`
+   are treated equivalently during migration/backward compatibility.
 3. All `area`-scoped instructions where `scope_id = A` (and
    therefore the area belongs to `P`).
 4. All `template`-scoped instructions where `scope_id = T`.
@@ -185,7 +209,8 @@ was updated after the last task completion; review".
   callouts (`> ⚠️ Warning:` renders as a warning block).
 - Scope picker at the top: **Workspace / Property / Area /
   Template / Asset / Stay / Role**, with a live-filtered selector
-  per scope kind.
+  per scope kind. Property scope accepts one or more selected
+  properties; area scope remains exactly one area under one property.
 - Tag chips (free-form; auto-complete from existing tags).
 - "Link to..." picker (UI ships with cd-oyq's instructions service
   on top of the existing `instruction_link` table): task templates,

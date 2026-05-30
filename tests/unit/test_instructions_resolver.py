@@ -225,6 +225,37 @@ def test_property_context_returns_property_before_global(
     ]
 
 
+def test_property_context_uses_property_scope_join_table(
+    session_instructions_resolver: Session,
+    clock: FrozenClock,
+) -> None:
+    session = session_instructions_resolver
+    ws, _, ctx = _bootstrap_owner(session, slug="resolver-multi-prop", clock=clock)
+    prop_a = _seed_property(session, ws=ws, label="Villa A")
+    prop_b = _seed_property(session, ws=ws, label="Villa B")
+    repo = SqlAlchemyInstructionsRepository(session)
+    instruction_id = _seed_current_instruction(
+        repo,
+        ctx,
+        slug="shared-property",
+        scope_kind="property",
+        scope_id=prop_a.id,
+        body_md="shared property body",
+    )
+    repo.replace_instruction_property_scopes(
+        workspace_id=ctx.workspace_id,
+        instruction_id=instruction_id,
+        property_ids=[prop_a.id, prop_b.id],
+        created_at=_PINNED,
+    )
+
+    resolved = resolve_instructions(repo, ctx, property_id=prop_b.id)
+
+    assert [(row.instruction_id, row.provenance) for row in resolved] == [
+        (instruction_id, "scope:property")
+    ]
+
+
 def test_area_context_implies_property_and_orders_specific_first(
     session_instructions_resolver: Session,
     clock: FrozenClock,

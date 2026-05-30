@@ -24,12 +24,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, delete, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.instructions.models import (
     Instruction,
     InstructionLink,
+    InstructionPropertyScope,
     InstructionVersion,
 )
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace
@@ -64,7 +65,10 @@ def _ensure_utc_optional(value: datetime | None) -> datetime | None:
 
 
 def _to_instruction_row(
-    row: Instruction, *, property_id: str | None = None
+    row: Instruction,
+    *,
+    property_id: str | None = None,
+    property_ids: Sequence[str] = (),
 ) -> InstructionRow:
     return InstructionRow(
         id=row.id,
@@ -74,6 +78,7 @@ def _to_instruction_row(
         scope_kind=row.scope_kind,
         scope_id=row.scope_id,
         property_id=property_id,
+        property_ids=tuple(property_ids),
         current_version_id=row.current_version_id,
         # ``tags`` is a JSON list on the column; surface it as an
         # immutable tuple so callers can't mutate the projection.
@@ -276,6 +281,32 @@ class SqlAlchemyInstructionsRepository(InstructionsRepository):
             for inst, version in self._session.execute(stmt).all()
         ]
 
+    def list_live_current_by_property(
+        self,
+        *,
+        workspace_id: str,
+        property_id: str,
+    ) -> Sequence[InstructionResolutionRow]:
+        associated = exists(
+            select(InstructionPropertyScope.instruction_id).where(
+                InstructionPropertyScope.workspace_id == workspace_id,
+                InstructionPropertyScope.instruction_id == Instruction.id,
+                InstructionPropertyScope.property_id == property_id,
+            )
+        )
+        stmt = (
+            self._live_current_stmt(workspace_id=workspace_id)
+            .where(
+                Instruction.scope_kind == "property",
+                or_(Instruction.scope_id == property_id, associated),
+            )
+            .order_by(Instruction.created_at.asc(), Instruction.id.asc())
+        )
+        return [
+            _to_resolution_row(inst, version)
+            for inst, version in self._session.execute(stmt).all()
+        ]
+
     def list_live_current_by_link(
         self,
         *,
@@ -403,6 +434,35 @@ class SqlAlchemyInstructionsRepository(InstructionsRepository):
         self._session.flush()
         return self._to_instruction_row(row)
 
+    def replace_instruction_property_scopes(
+        self,
+        *,
+        workspace_id: str,
+        instruction_id: str,
+        property_ids: Sequence[str],
+        created_at: datetime,
+    ) -> InstructionRow:
+        row = self._load_instruction_orm(
+            workspace_id=workspace_id, instruction_id=instruction_id
+        )
+        self._session.execute(
+            delete(InstructionPropertyScope).where(
+                InstructionPropertyScope.workspace_id == workspace_id,
+                InstructionPropertyScope.instruction_id == instruction_id,
+            )
+        )
+        for property_id in property_ids:
+            self._session.add(
+                InstructionPropertyScope(
+                    workspace_id=workspace_id,
+                    instruction_id=instruction_id,
+                    property_id=property_id,
+                    created_at=created_at,
+                )
+            )
+        self._session.flush()
+        return self._to_instruction_row(row)
+
     def set_archived_at(
         self,
         *,
@@ -507,8 +567,10 @@ class SqlAlchemyInstructionsRepository(InstructionsRepository):
 
     def _to_instruction_row(self, row: Instruction) -> InstructionRow:
         property_id: str | None = None
+        property_ids: tuple[str, ...] = ()
         if row.scope_kind == "property":
-            property_id = row.scope_id
+            property_ids = self._property_ids_for_instruction(row)
+            property_id = property_ids[0] if property_ids else row.scope_id
         elif row.scope_kind == "area" and row.scope_id is not None:
             property_id = self._session.scalar(
                 select(Area.property_id).where(
@@ -516,4 +578,28 @@ class SqlAlchemyInstructionsRepository(InstructionsRepository):
                     Area.deleted_at.is_(None),
                 )
             )
-        return _to_instruction_row(row, property_id=property_id)
+        return _to_instruction_row(
+            row,
+            property_id=property_id,
+            property_ids=property_ids,
+        )
+
+    def _property_ids_for_instruction(self, row: Instruction) -> tuple[str, ...]:
+        ids = tuple(
+            self._session.scalars(
+                select(InstructionPropertyScope.property_id)
+                .where(
+                    InstructionPropertyScope.workspace_id == row.workspace_id,
+                    InstructionPropertyScope.instruction_id == row.id,
+                )
+                .order_by(
+                    InstructionPropertyScope.created_at.asc(),
+                    InstructionPropertyScope.property_id.asc(),
+                )
+            ).all()
+        )
+        if ids or row.scope_id is None:
+            if row.scope_id in ids:
+                return (row.scope_id, *(item for item in ids if item != row.scope_id))
+            return ids
+        return (row.scope_id,)

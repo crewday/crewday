@@ -49,11 +49,22 @@ from __future__ import annotations
 from app.adapters.db.instructions.models import (
     Instruction,
     InstructionLink,
+    InstructionPropertyScope,
     InstructionVersion,
 )
 from app.tenancy.registry import register
 
-for _table in ("instruction", "instruction_version", "instruction_link"):
+for _table in (
+    "instruction",
+    "instruction_version",
+    "instruction_property_scope",
+    "instruction_link",
+):
     register(_table)
 
-__all__ = ["Instruction", "InstructionLink", "InstructionVersion"]
+__all__ = [
+    "Instruction",
+    "InstructionLink",
+    "InstructionPropertyScope",
+    "InstructionVersion",
+]

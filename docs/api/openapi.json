@@ -10458,6 +10458,21 @@
             ],
             "title": "Property Id"
           },
+          "property_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Ids"
+          },
           "scope": {
             "default": "global",
             "enum": [
@@ -10578,6 +10593,13 @@
             ],
             "title": "Property Id"
           },
+          "property_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Property Ids",
+            "type": "array"
+          },
           "scope": {
             "enum": [
               "area",
@@ -10626,6 +10648,7 @@
           "current_revision_id",
           "id",
           "property_id",
+          "property_ids",
           "scope",
           "slug",
           "tags",
@@ -10720,6 +10743,21 @@
               }
             ],
             "title": "Property Id"
+          },
+          "property_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Ids"
           },
           "scope": {
             "anyOf": [
@@ -10835,6 +10873,13 @@
             ],
             "title": "Property Id"
           },
+          "property_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Property Ids",
+            "type": "array"
+          },
           "scope": {
             "enum": [
               "area",
@@ -10872,6 +10917,7 @@
           "current_revision_id",
           "id",
           "property_id",
+          "property_ids",
           "scope",
           "slug",
           "tags",
@@ -144678,6 +144724,23 @@
               "default": false,
               "title": "Include Archived",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "property_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Property Id"
             }
           },
           {

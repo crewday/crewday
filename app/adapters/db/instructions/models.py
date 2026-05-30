@@ -73,7 +73,12 @@ from app.adapters.db.base import Base
 # been imported, so we register it here as a side effect.
 from app.adapters.db.workspace import models as _workspace_models  # noqa: F401
 
-__all__ = ["Instruction", "InstructionLink", "InstructionVersion"]
+__all__ = [
+    "Instruction",
+    "InstructionLink",
+    "InstructionPropertyScope",
+    "InstructionVersion",
+]
 
 
 # Allowed ``instruction.scope_kind`` values — the v1 taxonomy matching
@@ -305,6 +310,44 @@ class InstructionVersion(Base):
             "ix_instruction_version_instruction_body_hash",
             "instruction_id",
             "body_hash",
+        ),
+    )
+
+
+class InstructionPropertyScope(Base):
+    """Property associations for one property-scoped instruction."""
+
+    __tablename__ = "instruction_property_scope"
+
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        primary_key=True,
+        nullable=False,
+    )
+    instruction_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("instruction.id", ondelete="CASCADE"),
+        primary_key=True,
+        nullable=False,
+    )
+    property_id: Mapped[str] = mapped_column(
+        String,
+        primary_key=True,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+
+    __table_args__ = (
+        Index(
+            "ix_instruction_property_scope_workspace_property",
+            "workspace_id",
+            "property_id",
+        ),
+        Index(
+            "ix_instruction_property_scope_workspace_instruction",
+            "workspace_id",
+            "instruction_id",
         ),
     )
 

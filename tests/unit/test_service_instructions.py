@@ -55,7 +55,11 @@ from app.adapters.db.authz.models import (
 )
 from app.adapters.db.base import Base
 from app.adapters.db.identity.models import User
-from app.adapters.db.instructions.models import Instruction, InstructionVersion
+from app.adapters.db.instructions.models import (
+    Instruction,
+    InstructionPropertyScope,
+    InstructionVersion,
+)
 from app.adapters.db.instructions.repositories import (
     SqlAlchemyInstructionsRepository,
 )
@@ -265,6 +269,16 @@ def _versions(session: Session, *, instruction_id: str) -> list[InstructionVersi
     )
 
 
+def _property_scope_ids(session: Session, *, instruction_id: str) -> list[str]:
+    return list(
+        session.scalars(
+            select(InstructionPropertyScope.property_id)
+            .where(InstructionPropertyScope.instruction_id == instruction_id)
+            .order_by(InstructionPropertyScope.property_id.asc())
+        ).all()
+    )
+
+
 def _bootstrap_owner(
     session: Session, *, slug: str, clock: FrozenClock
 ) -> tuple[Workspace, User, WorkspaceContext]:
@@ -329,12 +343,13 @@ class TestCreate:
         assert audit[0].diff["revision_id"] == result.revision.id
         assert audit[0].diff["version_num"] == 1
 
-    def test_property_scope_records_property_id(
+    def test_property_scope_records_property_ids(
         self, session_instructions: Session, clock: FrozenClock
     ) -> None:
         session = session_instructions
         ws, _, ctx = _bootstrap_owner(session, slug="ws-prop", clock=clock)
         prop = _seed_property(session, ws=ws, label="Villa Sud")
+        prop_b = _seed_property(session, ws=ws, label="Villa Nord")
         repo = SqlAlchemyInstructionsRepository(session)
 
         result = create(
@@ -344,14 +359,19 @@ class TestCreate:
             title="Keys at Villa Sud",
             body_md="Keys are under the pot.",
             scope="property",
-            property_id=prop.id,
+            property_ids=[prop.id, prop_b.id],
             tags=[],
             clock=clock,
         )
         # Stored shape projects back to the spec-narrow scope on the view.
         assert result.instruction.scope == "property"
         assert result.instruction.property_id == prop.id
+        assert result.instruction.property_ids == (prop.id, prop_b.id)
         assert result.instruction.area_id is None
+        assert _property_scope_ids(session, instruction_id=result.instruction.id) == [
+            prop.id,
+            prop_b.id,
+        ]
 
     def test_area_scope_mirrors_parent_property(
         self, session_instructions: Session, clock: FrozenClock
@@ -425,7 +445,7 @@ class TestCreateScopeValidation:
             )
         assert exc_info.value.field == "area_id"
 
-    def test_property_without_property_id_rejected(
+    def test_property_without_property_ids_rejected(
         self, session_instructions: Session, clock: FrozenClock
     ) -> None:
         session = session_instructions
@@ -442,7 +462,49 @@ class TestCreateScopeValidation:
                 scope="property",
                 clock=clock,
             )
-        assert exc_info.value.field == "property_id"
+        assert exc_info.value.field == "property_ids"
+
+    def test_property_with_empty_property_ids_rejected(
+        self, session_instructions: Session, clock: FrozenClock
+    ) -> None:
+        session = session_instructions
+        _, _, ctx = _bootstrap_owner(session, slug="ws-pempty", clock=clock)
+        repo = SqlAlchemyInstructionsRepository(session)
+
+        with pytest.raises(ScopeValidationError) as exc_info:
+            create(
+                repo,
+                ctx,
+                slug="bad",
+                title="Bad",
+                body_md="x",
+                scope="property",
+                property_ids=[],
+                clock=clock,
+            )
+        assert exc_info.value.field == "property_ids"
+
+    def test_empty_property_ids_with_legacy_property_id_blames_property_ids(
+        self, session_instructions: Session, clock: FrozenClock
+    ) -> None:
+        session = session_instructions
+        ws, _, ctx = _bootstrap_owner(session, slug="ws-pempty-legacy", clock=clock)
+        prop = _seed_property(session, ws=ws, label="Villa")
+        repo = SqlAlchemyInstructionsRepository(session)
+
+        with pytest.raises(ScopeValidationError) as exc_info:
+            create(
+                repo,
+                ctx,
+                slug="bad",
+                title="Bad",
+                body_md="x",
+                scope="property",
+                property_id=prop.id,
+                property_ids=[],
+                clock=clock,
+            )
+        assert exc_info.value.field == "property_ids"
 
     def test_property_with_unknown_property_id_rejected(
         self, session_instructions: Session, clock: FrozenClock
@@ -462,7 +524,7 @@ class TestCreateScopeValidation:
                 property_id=new_ulid(),
                 clock=clock,
             )
-        assert exc_info.value.field == "property_id"
+        assert exc_info.value.field == "property_ids"
 
     def test_area_without_area_id_rejected(
         self, session_instructions: Session, clock: FrozenClock
@@ -634,6 +696,7 @@ class TestUpdateMetadata:
         session = session_instructions
         ws, _, ctx = _bootstrap_owner(session, slug="ws-um2", clock=clock)
         prop = _seed_property(session, ws=ws, label="Villa")
+        prop_b = _seed_property(session, ws=ws, label="Loft")
         repo = SqlAlchemyInstructionsRepository(session)
         created = create(
             repo,
@@ -653,15 +716,24 @@ class TestUpdateMetadata:
             instruction_id=created.instruction.id,
             tags=["pets", "safety"],
             scope="property",
-            property_id=prop.id,
+            property_ids=[prop.id, prop_b.id],
             clock=clock,
         )
         assert view.scope == "property"
         assert view.property_id == prop.id
+        assert view.property_ids == (prop.id, prop_b.id)
         assert view.tags == ("pets", "safety")
         assert view.current_version_id == original_rev
         versions = _versions(session, instruction_id=created.instruction.id)
         assert len(versions) == 1
+        assert _property_scope_ids(session, instruction_id=created.instruction.id) == [
+            prop.id,
+            prop_b.id,
+        ]
+
+        audit = _audit_rows(session, entity_id=created.instruction.id)
+        assert audit[-1].diff["before"]["property_ids"] == []
+        assert audit[-1].diff["after"]["property_ids"] == [prop.id, prop_b.id]
 
     def test_no_op_metadata_update_writes_no_audit(
         self, session_instructions: Session, clock: FrozenClock

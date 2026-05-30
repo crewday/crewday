@@ -58,7 +58,7 @@ safety notes) per ``docs/specs/07-instructions-kb.md`` §"Data model"
   projection: spec §07's narrower ``global | property | area``
   surface lands on top of the wider taxonomy at the service
   boundary.
-* ``property`` ⇒ ``property_id`` set, ``area_id`` NULL.
+* ``property`` ⇒ one-or-more ``property_ids`` set, ``area_id`` NULL.
 * ``area`` ⇒ ``area_id`` set; ``property_id`` is mirrored from the
   area's parent and consistency-checked against any caller-supplied
   override.
@@ -200,6 +200,7 @@ class InstructionView:
     title: str
     scope: InstructionScope
     property_id: str | None
+    property_ids: tuple[str, ...]
     area_id: str | None
     current_version_id: str | None
     tags: tuple[str, ...]
@@ -381,15 +382,17 @@ def _resolve_scope(
     workspace_id: str,
     scope: InstructionScope,
     property_id: str | None,
+    property_ids: Sequence[str] | None,
     area_id: str | None,
-) -> tuple[str, str | None]:
+) -> tuple[str, str | None, tuple[str, ...]]:
     """Validate the scope payload and return ``(scope_kind, scope_id)``.
 
     Enforces the §"instruction" constraint table:
 
     * ``global`` ⇒ ``property_id`` AND ``area_id`` MUST be ``None``.
-    * ``property`` ⇒ ``property_id`` MUST be set; ``area_id`` MUST be
-      ``None``; the property MUST belong to the caller's workspace.
+    * ``property`` ⇒ ``property_ids`` (or legacy ``property_id``) MUST
+      contain at least one id; ``area_id`` MUST be ``None``; every
+      property MUST belong to the caller's workspace.
     * ``area`` ⇒ ``area_id`` MUST be set; the area MUST exist in this
       workspace; ``property_id`` (if supplied) MUST equal the area's
       parent ``property_id`` (the spec calls this "mirrored ...
@@ -411,27 +414,52 @@ def _resolve_scope(
                 "global scope must not carry area_id",
                 field="area_id",
             )
-        return _SCOPE_KIND_FOR_SCOPE["global"], None
+        if property_ids is not None and property_ids:
+            raise ScopeValidationError(
+                "global scope must not carry property_ids",
+                field="property_ids",
+            )
+        return _SCOPE_KIND_FOR_SCOPE["global"], None, ()
 
     if scope == "property":
-        if property_id is None:
+        scope_property_ids: tuple[str, ...]
+        if property_ids is None:
+            scope_property_ids = (property_id,) if property_id is not None else ()
+        else:
+            scope_property_ids = _normalise_property_ids(property_ids)
+            if not scope_property_ids:
+                raise ScopeValidationError(
+                    "property scope requires at least one property_id",
+                    field="property_ids",
+                )
+            if property_id is not None and property_id not in scope_property_ids:
+                raise ScopeValidationError(
+                    "property_id must be one of property_ids",
+                    field="property_id",
+                )
+        if not scope_property_ids:
             raise ScopeValidationError(
-                "property scope requires property_id",
-                field="property_id",
+                "property scope requires at least one property_id",
+                field="property_ids",
             )
         if area_id is not None:
             raise ScopeValidationError(
                 "property scope must not carry area_id",
                 field="area_id",
             )
-        if not repo.property_exists_in_workspace(
-            workspace_id=workspace_id, property_id=property_id
-        ):
-            raise ScopeValidationError(
-                f"property {property_id!r} not found in workspace",
-                field="property_id",
-            )
-        return _SCOPE_KIND_FOR_SCOPE["property"], property_id
+        for scope_property_id in scope_property_ids:
+            if not repo.property_exists_in_workspace(
+                workspace_id=workspace_id, property_id=scope_property_id
+            ):
+                raise ScopeValidationError(
+                    f"property {scope_property_id!r} not found in workspace",
+                    field="property_ids",
+                )
+        return (
+            _SCOPE_KIND_FOR_SCOPE["property"],
+            scope_property_ids[0],
+            scope_property_ids,
+        )
 
     # scope == "area"
     if area_id is None:
@@ -454,7 +482,31 @@ def _resolve_scope(
     # The model only carries ``scope_id`` (no separate property
     # mirror column on this v1 schema). The repository projects the
     # area's parent property back into ``InstructionRow.property_id``.
-    return _SCOPE_KIND_FOR_SCOPE["area"], area_id
+    if property_ids is not None and property_ids:
+        raise ScopeValidationError(
+            "area scope must not carry property_ids",
+            field="property_ids",
+        )
+    return _SCOPE_KIND_FOR_SCOPE["area"], area_id, ()
+
+
+def _normalise_property_ids(property_ids: Sequence[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for property_id in property_ids:
+        if not isinstance(property_id, str):
+            raise ScopeValidationError(
+                f"property_id must be str, got {type(property_id).__name__}",
+                field="property_ids",
+            )
+        cleaned = property_id.strip()
+        if not cleaned:
+            continue
+        if cleaned in seen:
+            continue
+        seen.add(cleaned)
+        out.append(cleaned)
+    return tuple(out)
 
 
 def _view_from_row(row: InstructionRow) -> InstructionView:
@@ -467,14 +519,21 @@ def _view_from_row(row: InstructionRow) -> InstructionView:
     scope: InstructionScope
     property_id: str | None
     area_id: str | None
+    property_ids: tuple[str, ...]
     if row.scope_kind == "workspace":
-        scope, property_id, area_id = "global", None, None
+        scope, property_id, area_id, property_ids = "global", None, None, ()
     elif row.scope_kind == "property":
-        scope, property_id, area_id = "property", row.scope_id, None
+        scope = "property"
+        property_ids = row.property_ids or (
+            (row.scope_id,) if row.scope_id is not None else ()
+        )
+        property_id = property_ids[0] if property_ids else None
+        area_id = None
     elif row.scope_kind == "area":
         scope = "area"
         area_id = row.scope_id
         property_id = row.property_id
+        property_ids = ()
     else:
         # The wider model taxonomy includes ``template | asset | stay
         # | role`` from cd-bce. Spec §07 doesn't surface these as
@@ -493,6 +552,7 @@ def _view_from_row(row: InstructionRow) -> InstructionView:
         title=row.title,
         scope=scope,
         property_id=property_id,
+        property_ids=property_ids,
         area_id=area_id,
         current_version_id=row.current_version_id,
         tags=row.tags,
@@ -611,10 +671,9 @@ def resolve_instructions(
         )
     if resolved_property_id is not None:
         append_rows(
-            repo.list_live_current_by_scope(
+            repo.list_live_current_by_property(
                 workspace_id=ctx.workspace_id,
-                scope_kind="property",
-                scope_id=resolved_property_id,
+                property_id=resolved_property_id,
             ),
             "scope:property",
         )
@@ -668,6 +727,7 @@ def create(
     scope: InstructionScope,
     tags: Sequence[str] = (),
     property_id: str | None = None,
+    property_ids: Sequence[str] | None = None,
     area_id: str | None = None,
     change_note: str | None = None,
     clock: Clock | None = None,
@@ -697,11 +757,12 @@ def create(
     # code-health: ignore[nloc,params] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     _require_edit(repo, ctx)
     normalised_tags = _normalise_tags(tags)
-    scope_kind, scope_id = _resolve_scope(
+    scope_kind, scope_id, scope_property_ids = _resolve_scope(
         repo,
         workspace_id=ctx.workspace_id,
         scope=scope,
         property_id=property_id,
+        property_ids=property_ids,
         area_id=area_id,
     )
     now = _now(clock)
@@ -720,6 +781,13 @@ def create(
         created_by=ctx.actor_id,
         created_at=now,
     )
+    if scope_kind == "property":
+        repo.replace_instruction_property_scopes(
+            workspace_id=ctx.workspace_id,
+            instruction_id=instruction_id,
+            property_ids=scope_property_ids,
+            created_at=now,
+        )
     version_row = repo.insert_version(
         version_id=version_id,
         workspace_id=ctx.workspace_id,
@@ -747,7 +815,12 @@ def create(
             "title": title,
             "slug": slug,
             "scope": scope,
-            "property_id": property_id,
+            "property_id": (
+                scope_property_ids[0]
+                if scope == "property" and scope_property_ids
+                else property_id
+            ),
+            "property_ids": list(scope_property_ids),
             "area_id": area_id,
             "tags": list(normalised_tags),
             "revision_id": version_id,
@@ -770,6 +843,7 @@ def update_metadata(
     tags: Sequence[str] | None = None,
     scope: InstructionScope | None = None,
     property_id: str | None = None,
+    property_ids: Sequence[str] | None = None,
     area_id: str | None = None,
     clock: Clock | None = None,
 ) -> InstructionView:
@@ -805,20 +879,25 @@ def update_metadata(
         raise InstructionNotFound(instruction_id)
     _require_not_archived(existing)
 
-    if scope is None and (property_id is not None or area_id is not None):
+    if scope is None and (
+        property_id is not None or property_ids is not None or area_id is not None
+    ):
         raise ScopeValidationError(
-            "scope must be supplied alongside property_id / area_id changes",
+            "scope must be supplied alongside property_id / property_ids / "
+            "area_id changes",
             field="scope",
         )
 
     new_scope_kind: str | None = None
     new_scope_id: str | None = None
+    new_scope_property_ids: tuple[str, ...] = ()
     if scope is not None:
-        new_scope_kind, new_scope_id = _resolve_scope(
+        new_scope_kind, new_scope_id, new_scope_property_ids = _resolve_scope(
             repo,
             workspace_id=ctx.workspace_id,
             scope=scope,
             property_id=property_id,
+            property_ids=property_ids,
             area_id=area_id,
         )
 
@@ -832,12 +911,19 @@ def update_metadata(
         before["title"] = existing.title
         after["title"] = title
     if new_scope_kind is not None and (
-        new_scope_kind != existing.scope_kind or new_scope_id != existing.scope_id
+        new_scope_kind != existing.scope_kind
+        or new_scope_id != existing.scope_id
+        or (
+            new_scope_kind == "property"
+            and new_scope_property_ids != existing.property_ids
+        )
     ):
         before["scope_kind"] = existing.scope_kind
         before["scope_id"] = existing.scope_id
+        before["property_ids"] = list(existing.property_ids)
         after["scope_kind"] = new_scope_kind
         after["scope_id"] = new_scope_id
+        after["property_ids"] = list(new_scope_property_ids)
     if new_tags is not None and new_tags != existing.tags:
         before["tags"] = list(existing.tags)
         after["tags"] = list(new_tags)
@@ -856,6 +942,15 @@ def update_metadata(
         scope_id_provided="scope_kind" in after,
         tags=new_tags if "tags" in after else None,
     )
+    if "scope_kind" in after:
+        refreshed = repo.replace_instruction_property_scopes(
+            workspace_id=ctx.workspace_id,
+            instruction_id=instruction_id,
+            property_ids=(
+                new_scope_property_ids if new_scope_kind == "property" else ()
+            ),
+            created_at=_now(clock),
+        )
 
     write_audit(
         repo.session,

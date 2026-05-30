@@ -7,11 +7,15 @@ from typing import Annotated, Literal, Self
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.adapters.db.instructions.models import Instruction, InstructionVersion
+from app.adapters.db.instructions.models import (
+    Instruction,
+    InstructionPropertyScope,
+    InstructionVersion,
+)
 from app.adapters.db.instructions.repositories import SqlAlchemyInstructionsRepository
 from app.adapters.db.places.models import Area
 from app.api.deps import current_workspace_context, db_session
@@ -33,6 +37,7 @@ router = APIRouter(tags=["instructions"])
 _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]
 _Db = Annotated[Session, Depends(db_session)]
 _MaybeId = Annotated[str | None, Query(max_length=64)]
+_BodyId = Annotated[str, Field(max_length=64)]
 _Scope = Literal["global", "property", "area"]
 _InstructionEventType = (
     type[InstructionArchived] | type[InstructionCreated] | type[InstructionUpdated]
@@ -46,6 +51,7 @@ class InstructionPayload(BaseModel):
     title: str
     scope: _Scope
     property_id: str | None
+    property_ids: tuple[str, ...]
     area_id: str | None
     current_revision_id: str | None
     tags: tuple[str, ...]
@@ -62,6 +68,7 @@ class InstructionPayload(BaseModel):
             title=view.title,
             scope=view.scope,
             property_id=view.property_id,
+            property_ids=view.property_ids,
             area_id=view.area_id,
             current_revision_id=view.current_version_id,
             tags=view.tags,
@@ -155,6 +162,7 @@ class InstructionCreateRequest(BaseModel):
     body_md: str = Field(default="", max_length=200_000)
     scope: _Scope = "global"
     property_id: str | None = Field(default=None, max_length=64)
+    property_ids: tuple[_BodyId, ...] | None = None
     area_id: str | None = Field(default=None, max_length=64)
     tags: tuple[str, ...] = ()
     change_note: str | None = Field(default=None, max_length=1024)
@@ -167,6 +175,7 @@ class InstructionPatchRequest(BaseModel):
     body_md: str | None = Field(default=None, max_length=200_000)
     scope: _Scope | None = None
     property_id: str | None = Field(default=None, max_length=64)
+    property_ids: tuple[_BodyId, ...] | None = None
     area_id: str | None = Field(default=None, max_length=64)
     tags: tuple[str, ...] | None = None
     change_note: str | None = Field(default=None, max_length=1024)
@@ -308,17 +317,23 @@ def _instruction_view(
     scope: _Scope
     property_id: str | None
     area_id: str | None
+    property_ids: tuple[str, ...]
     if row.scope_kind == "workspace":
         scope = "global"
         property_id = None
         area_id = None
+        property_ids = ()
     elif row.scope_kind == "property":
         scope = "property"
-        property_id = row.scope_id
+        property_ids = row.property_ids or (
+            (row.scope_id,) if row.scope_id is not None else ()
+        )
+        property_id = property_ids[0] if property_ids else None
         area_id = None
     elif row.scope_kind == "area":
         scope = "area"
         property_id = row.property_id
+        property_ids = ()
         area_id = row.scope_id
     else:
         raise _http_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "invalid_scope")
@@ -329,6 +344,7 @@ def _instruction_view(
         title=row.title,
         scope=scope,
         property_id=property_id,
+        property_ids=property_ids,
         area_id=area_id,
         current_version_id=row.current_version_id,
         tags=row.tags,
@@ -440,6 +456,7 @@ def create_instruction_route(
             scope=body.scope,
             tags=body.tags,
             property_id=body.property_id,
+            property_ids=body.property_ids,
             area_id=body.area_id,
             change_note=body.change_note,
         )
@@ -469,12 +486,36 @@ def list_instructions_route(
     ctx: _Ctx,
     session: _Db,
     include_archived: bool = False,
+    property_id: _MaybeId = None,
     cursor: PageCursorQuery = None,
     limit: LimitQuery = DEFAULT_LIMIT,
 ) -> InstructionListResponse:
     # code-health: ignore[ccn] Branch table stays explicit.
     cursor_id = decode_cursor(cursor)
     stmt = select(Instruction).where(Instruction.workspace_id == ctx.workspace_id)
+    if property_id is not None:
+        associated_property = exists(
+            select(InstructionPropertyScope.instruction_id).where(
+                InstructionPropertyScope.workspace_id == ctx.workspace_id,
+                InstructionPropertyScope.instruction_id == Instruction.id,
+                InstructionPropertyScope.property_id == property_id,
+            )
+        )
+        area_under_property = exists(
+            select(Area.id).where(
+                Area.id == Instruction.scope_id,
+                Area.property_id == property_id,
+                Area.deleted_at.is_(None),
+            )
+        )
+        stmt = stmt.where(
+            or_(
+                Instruction.scope_kind == "workspace",
+                (Instruction.scope_kind == "property")
+                & or_(Instruction.scope_id == property_id, associated_property),
+                (Instruction.scope_kind == "area") & area_under_property,
+            )
+        )
     if not include_archived:
         stmt = stmt.where(Instruction.archived_at.is_(None))
     if cursor_id is not None:
@@ -577,7 +618,14 @@ def patch_instruction_route(
     fields = body.model_fields_set
     mutation_requested = False
     try:
-        if {"title", "scope", "property_id", "area_id", "tags"} & fields:
+        if {
+            "title",
+            "scope",
+            "property_id",
+            "property_ids",
+            "area_id",
+            "tags",
+        } & fields:
             service.update_metadata(
                 repo,
                 ctx,
@@ -586,6 +634,7 @@ def patch_instruction_route(
                 tags=body.tags if "tags" in fields else None,
                 scope=body.scope if "scope" in fields else None,
                 property_id=body.property_id,
+                property_ids=(body.property_ids if "property_ids" in fields else None),
                 area_id=body.area_id,
             )
             mutation_requested = True

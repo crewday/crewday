@@ -211,6 +211,84 @@ def test_list_area_scope_uses_area_label(
     assert row["area"] == "Pool"
 
 
+def test_property_scope_accepts_multiple_property_ids_and_lists_by_property(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+) -> None:
+    ctx, factory, workspace_id = owner_ctx
+    with factory() as session:
+        ws = session.get(Workspace, workspace_id)
+        assert ws is not None
+        prop_a = _seed_property(session, ws=ws, label="Villa Sud")
+        prop_b = _seed_property(session, ws=ws, label="Villa Nord")
+        prop_c = _seed_property(session, ws=ws, label="Loft")
+        area_b = _seed_area(session, prop=prop_b, label="Kitchen")
+        session.commit()
+    client = _client(ctx, factory)
+    global_row = client.post(
+        "/instructions",
+        json=_create_payload(slug="global", title="Global", body_md="global"),
+    ).json()
+    property_row = client.post(
+        "/instructions",
+        json={
+            **_create_payload(slug="shared", title="Shared", body_md="shared"),
+            "scope": "property",
+            "property_ids": [prop_a.id, prop_b.id],
+        },
+    )
+    area_row = client.post(
+        "/instructions",
+        json={
+            **_create_payload(slug="area-b", title="Area B", body_md="area"),
+            "scope": "area",
+            "property_id": prop_b.id,
+            "area_id": area_b.id,
+        },
+    ).json()
+    client.post(
+        "/instructions",
+        json={
+            **_create_payload(slug="other", title="Other", body_md="other"),
+            "scope": "property",
+            "property_ids": [prop_c.id],
+        },
+    )
+
+    assert property_row.status_code == 201, property_row.text
+    created = property_row.json()
+    assert created["instruction"]["property_id"] == prop_a.id
+    assert created["instruction"]["property_ids"] == [prop_a.id, prop_b.id]
+
+    listed = client.get("/instructions", params={"property_id": prop_b.id})
+
+    assert listed.status_code == 200, listed.text
+    rows = listed.json()["data"]
+    assert [row["id"] for row in rows] == [
+        global_row["instruction"]["id"],
+        created["instruction"]["id"],
+        area_row["instruction"]["id"],
+    ]
+
+
+def test_property_scope_rejects_empty_property_ids(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+) -> None:
+    ctx, factory, _ = owner_ctx
+    client = _client(ctx, factory)
+
+    response = client.post(
+        "/instructions",
+        json={
+            **_create_payload(slug="bad", title="Bad"),
+            "scope": "property",
+            "property_ids": [],
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"]["field"] == "property_ids"
+
+
 def test_versions_list_and_specific_version(
     owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
 ) -> None:

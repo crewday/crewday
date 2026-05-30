@@ -32,7 +32,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.identity.models import User
-from app.adapters.db.instructions.models import Instruction, InstructionVersion
+from app.adapters.db.instructions.models import (
+    Instruction,
+    InstructionVersion,
+)
 from app.adapters.db.workspace.models import Workspace
 from app.tenancy import registry
 from app.tenancy.context import WorkspaceContext
@@ -48,7 +51,11 @@ _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
 _LATER = _PINNED + timedelta(hours=1)
 
 
-_INSTRUCTIONS_TABLES: tuple[str, ...] = ("instruction", "instruction_version")
+_INSTRUCTIONS_TABLES: tuple[str, ...] = (
+    "instruction",
+    "instruction_version",
+    "instruction_property_scope",
+)
 
 
 @pytest.fixture(scope="module")
@@ -124,7 +131,7 @@ def _bootstrap(
 
 
 class TestMigrationShape:
-    """The migration lands both tables with correct keys + indexes."""
+    """The migration lands instruction tables with correct keys + indexes."""
 
     def test_all_tables_exist(self, engine: Engine) -> None:
         tables = set(inspect(engine).get_table_names())
@@ -265,6 +272,47 @@ class TestMigrationShape:
         # Uniqueness is on (instruction_id, version_num), NOT on hash.
         # SQLAlchemy's SQLite reflector returns 0/1 here, not False/True.
         assert not indexes["ix_instruction_version_instruction_body_hash"]["unique"]
+
+    def test_instruction_property_scope_columns(self, engine: Engine) -> None:
+        cols = {
+            c["name"]: c
+            for c in inspect(engine).get_columns("instruction_property_scope")
+        }
+        expected = {"workspace_id", "instruction_id", "property_id", "created_at"}
+        assert set(cols) == expected
+        for notnull in expected:
+            assert cols[notnull]["nullable"] is False, f"{notnull} must be NOT NULL"
+
+    def test_instruction_property_scope_pk_fks_and_indexes(
+        self, engine: Engine
+    ) -> None:
+        pk = inspect(engine).get_pk_constraint("instruction_property_scope")
+        assert pk["constrained_columns"] == [
+            "workspace_id",
+            "instruction_id",
+            "property_id",
+        ]
+
+        fks = {
+            tuple(fk["constrained_columns"]): fk
+            for fk in inspect(engine).get_foreign_keys("instruction_property_scope")
+        }
+        assert fks[("workspace_id",)]["referred_table"] == "workspace"
+        assert fks[("workspace_id",)]["options"].get("ondelete") == "CASCADE"
+        assert fks[("instruction_id",)]["referred_table"] == "instruction"
+        assert fks[("instruction_id",)]["options"].get("ondelete") == "CASCADE"
+        assert ("property_id",) not in fks
+
+        indexes = {
+            ix["name"]: ix
+            for ix in inspect(engine).get_indexes("instruction_property_scope")
+        }
+        assert indexes["ix_instruction_property_scope_workspace_property"][
+            "column_names"
+        ] == ["workspace_id", "property_id"]
+        assert indexes["ix_instruction_property_scope_workspace_instruction"][
+            "column_names"
+        ] == ["workspace_id", "instruction_id"]
 
 
 class TestInstructionCrud:

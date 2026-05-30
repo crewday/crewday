@@ -18,7 +18,11 @@ from datetime import UTC, datetime
 
 from sqlalchemy import CheckConstraint, Index, UniqueConstraint
 
-from app.adapters.db.instructions import Instruction, InstructionVersion
+from app.adapters.db.instructions import (
+    Instruction,
+    InstructionPropertyScope,
+    InstructionVersion,
+)
 from app.adapters.db.instructions import models as instructions_models
 
 _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
@@ -258,11 +262,55 @@ class TestInstructionVersionModel:
         assert target.unique is False
 
 
+class TestInstructionPropertyScopeModel:
+    """The multi-property association table has the expected ORM shape."""
+
+    def test_minimal_construction(self) -> None:
+        scope = InstructionPropertyScope(
+            workspace_id="01HWA00000000000000000WSPA",
+            instruction_id="01HWA00000000000000000INSA",
+            property_id="01HWA00000000000000000PRPA",
+            created_at=_PINNED,
+        )
+
+        assert scope.workspace_id == "01HWA00000000000000000WSPA"
+        assert scope.instruction_id == "01HWA00000000000000000INSA"
+        assert scope.property_id == "01HWA00000000000000000PRPA"
+        assert scope.created_at == _PINNED
+
+    def test_tablename(self) -> None:
+        assert InstructionPropertyScope.__tablename__ == "instruction_property_scope"
+
+    def test_property_lookup_indexes_present(self) -> None:
+        indexes = [
+            i for i in InstructionPropertyScope.__table_args__ if isinstance(i, Index)
+        ]
+        names = [i.name for i in indexes]
+        assert "ix_instruction_property_scope_workspace_property" in names
+        assert "ix_instruction_property_scope_workspace_instruction" in names
+        by_property = next(
+            i
+            for i in indexes
+            if i.name == "ix_instruction_property_scope_workspace_property"
+        )
+        by_instruction = next(
+            i
+            for i in indexes
+            if i.name == "ix_instruction_property_scope_workspace_instruction"
+        )
+        assert [c.name for c in by_property.columns] == ["workspace_id", "property_id"]
+        assert [c.name for c in by_instruction.columns] == [
+            "workspace_id",
+            "instruction_id",
+        ]
+
+
 class TestPackageReExports:
     """``app.adapters.db.instructions`` re-exports every v1-slice model."""
 
     def test_models_re_exported(self) -> None:
         assert Instruction is instructions_models.Instruction
+        assert InstructionPropertyScope is instructions_models.InstructionPropertyScope
         assert InstructionVersion is instructions_models.InstructionVersion
 
 
@@ -286,10 +334,11 @@ class TestRegistryIntent:
         from app.tenancy import registry
 
         registry._reset_for_tests()
-        for table in ("instruction", "instruction_version"):
+        tables = ("instruction", "instruction_version", "instruction_property_scope")
+        for table in tables:
             registry.register(table)
         scoped = registry.scoped_tables()
-        for table in ("instruction", "instruction_version"):
+        for table in tables:
             assert table in scoped, f"{table} must be scoped"
 
     def test_is_scoped_reports_true(self) -> None:
@@ -297,7 +346,8 @@ class TestRegistryIntent:
         from app.tenancy import registry
 
         registry._reset_for_tests()
-        for table in ("instruction", "instruction_version"):
+        tables = ("instruction", "instruction_version", "instruction_property_scope")
+        for table in tables:
             registry.register(table)
-        for table in ("instruction", "instruction_version"):
+        for table in tables:
             assert registry.is_scoped(table) is True

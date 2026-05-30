@@ -2254,6 +2254,22 @@ DELETE /instructions/{id}/link/{link_id}
 GET    /tasks/{id}/instructions    # resolved set
 ```
 
+`scope = "global"` is the workspace-wide scope. Create/patch accepts
+`property_ids: string[]` for `scope = "property"`; the list must contain
+at least one live property id in the workspace or the API returns 422
+with `field = "property_ids"`. The legacy singular `property_id` may be
+present for compatibility, but multi-property clients should send
+`property_ids`.
+
+Instruction responses include both `property_id` and `property_ids`.
+For property scope, `property_ids` is the full selected set and
+`property_id` is the first selected property for older clients. For area
+scope, `property_id` is the area's parent property and `property_ids` is
+empty. `GET /instructions?property_id=<id>` lists the instructions
+applicable to that property: workspace-wide rows, property-scoped rows
+whose `property_ids` contains the id, and area-scoped rows under that
+property.
+
 ### Inventory
 
 ```

@@ -80,6 +80,7 @@ class InstructionRow:
     scope_kind: str
     scope_id: str | None
     property_id: str | None
+    property_ids: tuple[str, ...]
     current_version_id: str | None
     tags: tuple[str, ...]
     archived_at: datetime | None
@@ -272,6 +273,15 @@ class InstructionsRepository(Protocol):
         """Return live instructions for one scope joined to their current body."""
         ...
 
+    def list_live_current_by_property(
+        self,
+        *,
+        workspace_id: str,
+        property_id: str,
+    ) -> Sequence[InstructionResolutionRow]:
+        """Return live property-scoped instructions associated to ``property_id``."""
+        ...
+
     def list_live_current_by_link(
         self,
         *,
@@ -368,6 +378,17 @@ class InstructionsRepository(Protocol):
         service's responsibility to enforce upstream.
         """
         # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
+        ...
+
+    def replace_instruction_property_scopes(
+        self,
+        *,
+        workspace_id: str,
+        instruction_id: str,
+        property_ids: Sequence[str],
+        created_at: datetime,
+    ) -> InstructionRow:
+        """Replace the authoritative property association set for an instruction."""
         ...
 
     def set_archived_at(
