@@ -16,6 +16,8 @@ import {
   type InlineTableReorder,
   type InlineTableRow,
 } from "@/components/InlineTableForm";
+import RecurrencePicker from "@/components/RecurrencePicker";
+import { recurrenceSummary } from "@/components/recurrence";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
@@ -868,14 +870,15 @@ function checklistColumns(): InlineTableColumn<ChecklistTemplateItem>[] {
       header: "Recurrence",
       width: { flex: 1.1, min: 150 },
       renderRead: ({ row }) => row.draft.rrule
-        ? <ReadText value={row.draft.rrule} />
+        ? <ReadText value={recurrenceSummary(row.draft.rrule, { emptyLabel: "Every task" })} />
         : <ReadText value="" fallback="Every task" />,
       renderEdit: ({ row, update, disabled }) => (
-        <InlineTextField
-          value={row.draft.rrule ?? ""}
+        <RecurrencePicker
+          value={row.draft.rrule ?? null}
           disabled={disabled}
-          ariaLabel="Checklist item recurrence"
-          placeholder="FREQ=MONTHLY"
+          label="Checklist item recurrence"
+          triggerLabel="Checklist item recurrence"
+          emptyLabel="Every task"
           onChange={(rrule) => update({ rrule })}
         />
       ),

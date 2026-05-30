@@ -32,15 +32,11 @@ import type { AuthMe } from "@/auth/types";
 import { isoDate } from "@/pages/employee/schedule/lib/dateHelpers";
 import { useIsPhone } from "@/pages/employee/schedule/lib/useIsPhone";
 import PropertyTabs from "./property/PropertyTabs";
-import { InfiniteStaysAgenda, type StaysPlannerDraftRange } from "./stays/InfiniteStaysAgenda";
+import { InfiniteStaysAgenda, type PageStay, type StaysPlannerDraftRange } from "./stays/InfiniteStaysAgenda";
 
 type IcalProvider = "airbnb" | "vrbo" | "booking" | "gcal" | "generic";
-type StaySource = Stay["source"];
-type StayStatus = Stay["status"];
-
-interface PageStay extends Stay {
-  unit_id: string | null;
-}
+type StaySource = PageStay["source"];
+type StayStatus = PageStay["status"];
 
 interface StaysPayload {
   stays: PageStay[];

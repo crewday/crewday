@@ -1,0 +1,260 @@
+.recurrence-picker {
+  width: 100%;
+  min-width: 0;
+}
+
+.recurrence-picker__trigger {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+  font-family: "Inter Tight", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.recurrence-picker__trigger:hover,
+.recurrence-picker__trigger:focus-visible {
+  border-color: var(--moss);
+  background: var(--moss-soft);
+  color: var(--moss);
+  outline: 0;
+}
+
+.recurrence-picker__trigger:disabled {
+  cursor: not-allowed;
+  border-color: var(--line);
+  background: var(--paper-2);
+  color: var(--ink-3);
+  opacity: 0.72;
+}
+
+.recurrence-picker__trigger svg {
+  flex: 0 0 auto;
+}
+
+.recurrence-picker__trigger-text {
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recurrence-picker__form {
+  min-height: min(620px, calc(100dvh - 28px));
+}
+
+.recurrence-picker__body {
+  gap: 16px;
+}
+
+.recurrence-picker__tabs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper-2);
+}
+
+.recurrence-picker__tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.recurrence-picker__tab:hover,
+.recurrence-picker__tab:focus-visible {
+  color: var(--ink);
+  outline: 2px solid var(--moss);
+  outline-offset: 2px;
+}
+
+.recurrence-picker__tab.is-active {
+  background: var(--card);
+  color: var(--moss);
+  box-shadow: var(--shadow);
+}
+
+.recurrence-picker__section {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.recurrence-picker__field {
+  min-width: 0;
+}
+
+.recurrence-picker__select,
+.recurrence-picker__number,
+.recurrence-picker__raw {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+
+.recurrence-picker__raw {
+  display: block;
+  min-height: 96px;
+  resize: vertical;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.recurrence-picker__stepper {
+  display: grid;
+  grid-template-columns: minmax(74px, 0.45fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.recurrence-picker__weekday-set {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+
+.recurrence-picker__weekday-set legend {
+  margin-bottom: 8px;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.recurrence-picker__weekday-options {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.recurrence-picker__weekday {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 40px;
+  padding: 6px 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.recurrence-picker__weekday:hover,
+.recurrence-picker__weekday:focus-visible {
+  border-color: var(--moss);
+  color: var(--moss);
+  outline: 0;
+}
+
+.recurrence-picker__weekday.is-selected {
+  border-color: var(--moss);
+  background: var(--moss);
+  color: var(--card);
+}
+
+.recurrence-picker__error {
+  margin: 7px 0 0;
+  color: var(--rust);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.recurrence-picker__preview {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.recurrence-picker__preview--empty,
+.recurrence-picker__preview--error {
+  display: block;
+}
+
+.recurrence-picker__preview--error {
+  color: var(--rust);
+  background: var(--rust-soft);
+  border-color: color-mix(in srgb, var(--rust) 26%, var(--line));
+}
+
+.recurrence-picker__preview-label {
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.recurrence-picker__preview ol {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.recurrence-picker__preview li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .recurrence-picker__trigger {
+    min-height: 44px;
+  }
+
+  .recurrence-picker__form {
+    min-height: min(620px, calc(100dvh - 16px));
+  }
+
+  .recurrence-picker__weekday-options {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

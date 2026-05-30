@@ -39,6 +39,7 @@
 @import "./error-toast.css";
 @import "./inline-error-alert.css";
 @import "./inline-table-form.css";
+@import "./recurrence-picker.css";
 @import "./notifications.css";
 
 .panel--inset {

@@ -13,7 +13,7 @@ import {
   useState,
 } from "react";
 import type { InfiniteData } from "@tanstack/react-query";
-import { Check, GripVertical, Loader2, Lock, Pencil, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, GripVertical, Loader2, Lock, Pencil, RotateCcw, Search, Trash2, X } from "lucide-react";
 import ConfirmationModal from "@/components/ConfirmationModal";
 import IconSelector from "@/components/IconSelector";
 import { EmptyState } from "@/components/common";
@@ -932,7 +932,13 @@ export function InlineTableForm<TDraft>({
                       data-label=""
                     >
                       {canShowReorderHandle ? (
-                        <InlineTableDragHandle label={label} />
+                        <InlineTableReorderControls
+                          label={label}
+                          canMoveUp={canReorderRow && movableIndex > 0}
+                          canMoveDown={canReorderRow && movableIndex < reorderableRows.length - 1}
+                          onMoveUp={() => reorderRow(row.id, movableIndex - 1)}
+                          onMoveDown={() => reorderRow(row.id, movableIndex + 1)}
+                        />
                       ) : null}
                     </div>
                   ) : null}
@@ -1310,6 +1316,46 @@ export function InlineTableLoadMore({
       </button>
       {countLabel}
     </div>
+  );
+}
+
+function InlineTableReorderControls({
+  label,
+  canMoveUp,
+  canMoveDown,
+  onMoveUp,
+  onMoveDown,
+}: {
+  label: string;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+}) {
+  return (
+    <span className="inline-table-form__reorder-tools">
+      <button
+        type="button"
+        className="inline-table-form__reorder-btn"
+        disabled={!canMoveUp}
+        aria-label={`Move ${label} up`}
+        title={`Move ${label} up`}
+        onClick={onMoveUp}
+      >
+        <ArrowUp size={13} aria-hidden="true" />
+      </button>
+      <InlineTableDragHandle label={label} />
+      <button
+        type="button"
+        className="inline-table-form__reorder-btn"
+        disabled={!canMoveDown}
+        aria-label={`Move ${label} down`}
+        title={`Move ${label} down`}
+        onClick={onMoveDown}
+      >
+        <ArrowDown size={13} aria-hidden="true" />
+      </button>
+    </span>
   );
 }
 

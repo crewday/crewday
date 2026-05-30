@@ -15,6 +15,13 @@ import {
   type InlineTableRow,
 } from "@/components/InlineTableForm";
 import { Avatar, Chip, EmptyState, Loading } from "@/components/common";
+import {
+  buildRecurrenceRrule,
+  frequencyFromRecurrence,
+  weekdayForDate,
+  type RecurrenceFrequency,
+  type RecurrenceWeekday,
+} from "@/components/recurrence";
 import type { Employee, Property, Schedule, TaskTemplate } from "@/types/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 
@@ -25,7 +32,7 @@ interface SchedulesPayload {
   templates_by_id: Record<string, TaskTemplate>;
 }
 
-type ScheduleFrequency = "DAILY" | "WEEKLY" | "MONTHLY";
+type ScheduleFrequency = Extract<RecurrenceFrequency, "DAILY" | "WEEKLY" | "MONTHLY">;
 
 interface ScheduleDraft {
   name: string;
@@ -89,21 +96,20 @@ function timePart(localDateTime: string): string {
   return localDateTime.slice(11, 16) || "09:00";
 }
 
-function weekdayFor(date: string): string {
-  const days = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
-  const index = new Date(`${date}T00:00:00`).getDay();
-  return days[index] ?? "MO";
+function weekdayFor(date: string): RecurrenceWeekday {
+  return weekdayForDate(date);
 }
 
 function rruleFor(frequency: ScheduleFrequency, activeFrom: string): string {
-  if (frequency === "WEEKLY") return `RRULE:FREQ=WEEKLY;BYDAY=${weekdayFor(activeFrom)}`;
-  return `RRULE:FREQ=${frequency}`;
+  return buildRecurrenceRrule({
+    frequency,
+    byday: frequency === "WEEKLY" ? [weekdayFor(activeFrom)] : undefined,
+  }, { includePrefix: true });
 }
 
 function frequencyFromRrule(rrule: string): ScheduleFrequency {
-  if (rrule.includes("FREQ=DAILY")) return "DAILY";
-  if (rrule.includes("FREQ=MONTHLY")) return "MONTHLY";
-  return "WEEKLY";
+  const frequency = frequencyFromRecurrence(rrule);
+  return frequency === "YEARLY" ? "WEEKLY" : frequency;
 }
 
 function templateOption(template: TaskTemplate) {
@@ -490,6 +496,9 @@ export default function SchedulesPage() {
       header: "Repeats",
       width: { px: 128 },
       renderRead: ({ row }) => schedules.find((schedule) => schedule.id === row.id)?.rrule_human ?? row.draft.frequency.toLowerCase(),
+      // Schedules split recurrence across start date, start time, and frequency,
+      // and the API owns the human summary. Reuse shared RRULE helpers here;
+      // the full picker fits checklist-row RRULE editing, not this schedule row.
       renderEdit: ({ row, update, disabled }) => (
         <InlineSelectField
           value={row.draft.frequency}

@@ -439,9 +439,14 @@ describe("<TemplatesPage> checklist reorder", () => {
       fireEvent.change(text, { target: { value: "Inspect kitchen" } });
       fireEvent.click(within(row).getByRole("checkbox", { name: "Required" }));
       fireEvent.click(within(row).getByRole("checkbox", { name: "Guest-visible" }));
-      fireEvent.change(within(row).getByLabelText("Checklist item recurrence"), {
-        target: { value: "FREQ=WEEKLY" },
+      fireEvent.click(within(row).getByRole("button", { name: "Checklist item recurrence" }));
+      const dialog = await screen.findByRole("dialog", { name: "Recurrence" });
+      fireEvent.change(within(dialog).getByLabelText(/^Repeats\b/), {
+        target: { value: "weekly" },
       });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Wed" }));
+      expect(within(dialog).getByText("Next occurrences")).toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }));
       fireEvent.keyDown(text, { key: "Enter" });
 
       await act(async () => {
@@ -456,7 +461,7 @@ describe("<TemplatesPage> checklist reorder", () => {
         text: "Inspect kitchen",
         required: true,
         guest_visible: true,
-        rrule: "FREQ=WEEKLY",
+        rrule: "FREQ=WEEKLY;BYDAY=MO,WE",
       });
     } finally {
       harness.restore();
