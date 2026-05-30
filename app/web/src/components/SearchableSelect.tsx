@@ -256,22 +256,26 @@ export default function SearchableSelect({
           ));
         }}
         onKeyDown={(event) => {
-          onInputKeyDown?.(event);
           if (disabled) return;
           if (event.key === "ArrowDown") {
             event.preventDefault();
+            event.stopPropagation();
             moveActive(1);
           } else if (event.key === "ArrowUp") {
             event.preventDefault();
+            event.stopPropagation();
             moveActive(-1);
           } else if (event.key === "Enter" && open) {
             event.preventDefault();
+            event.stopPropagation();
             const option = visibleOptions[activeIndexRef.current];
             if (option) commit(option);
-          } else if (event.key === "Escape") {
+          } else if (event.key === "Escape" && open) {
             event.preventDefault();
+            event.stopPropagation();
             resetToSelected();
           }
+          onInputKeyDown?.(event);
         }}
       />
       {name ? <input type="hidden" name={name} value={value} disabled={disabled} /> : null}

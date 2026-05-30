@@ -145,6 +145,26 @@ const searchableColumns: InlineTableColumn<Draft>[] = [
   },
 ];
 
+const preventedKeyColumns: InlineTableColumn<Draft>[] = [
+  {
+    key: "title",
+    header: "Title",
+    renderRead: ({ row }) => <span>{row.draft.title}</span>,
+    renderEdit: ({ row }) => (
+      <input
+        aria-label="Prevented title"
+        value={row.draft.title}
+        onChange={vi.fn()}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === "Escape") {
+            event.preventDefault();
+          }
+        }}
+      />
+    ),
+  },
+];
+
 const iconColumns: InlineTableColumn<IconDraft>[] = [
   {
     key: "icon",
@@ -605,7 +625,7 @@ describe("InlineTableForm", () => {
     expect(input).toHaveValue("Unassigned");
   });
 
-  it("keeps searchable select keyboard interaction from saving or canceling the row", () => {
+  it("keeps open searchable select keys local and lets closed Enter save and Escape cancel the row", () => {
     const onDraftChange = vi.fn();
     const onSave = vi.fn();
     const onCancel = vi.fn();
@@ -625,9 +645,37 @@ describe("InlineTableForm", () => {
     fireEvent.focus(input);
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.keyDown(input, { key: "Escape" });
 
     expect(onDraftChange).toHaveBeenCalledWith("r-1", { owner: "enzo" });
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(onSave).toHaveBeenCalledWith("r-1");
+    expect(onCancel).toHaveBeenCalledWith("r-1");
+  });
+
+  it("does not save or cancel when an inline child control already handled the key", () => {
+    const onSave = vi.fn();
+    const onCancel = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Prevented key rows"
+        columns={preventedKeyColumns}
+        rows={[editableRow()]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={onSave}
+        onCancel={onCancel}
+      />,
+    );
+
+    const input = screen.getByRole("textbox", { name: "Prevented title" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Escape" });
+
     expect(onSave).not.toHaveBeenCalled();
     expect(onCancel).not.toHaveBeenCalled();
   });

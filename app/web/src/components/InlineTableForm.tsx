@@ -1820,7 +1820,7 @@ export function InlineSearchableSelectField({
         noResultsLabel={noResultsLabel}
         renderOptionSecondaryText={renderOptionSecondaryText}
         onInputKeyDown={(event) => {
-          if (isInlineSearchableSelectKey(event.key) && isComboboxEventTarget(event.target)) {
+          if (event.defaultPrevented && isInlineSearchableSelectKey(event.key) && isComboboxEventTarget(event.target)) {
             event.stopPropagation();
           }
         }}
@@ -2223,6 +2223,7 @@ function handleGroupKeyDown(
   event: KeyboardEvent<HTMLElement>,
   options: { canSave: boolean; onSave: () => void; onCancel: () => void },
 ) {
+  if (event.defaultPrevented) return;
   if (event.key === "Escape") {
     event.preventDefault();
     options.onCancel();

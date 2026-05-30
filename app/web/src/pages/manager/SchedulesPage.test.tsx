@@ -625,6 +625,52 @@ describe("<SchedulesPage> inline schedules table", () => {
     }
   });
 
+  it.each([
+    ["Template", /^Template\b/, /Turnover clean/i],
+    ["Property", /^Property\b/, /Villa Azul/i],
+    ["Default assignee", /^Default assignee\b/, /Mina Silva/i],
+  ])("saves the create row from a closed %s searchable select", async (_field, label, optionName) => {
+    const harness = installSchedulesFetch();
+    try {
+      render(<Harness client={makeClient()} />);
+      await waitFor(() => {
+        expect(screen.getAllByText("Existing turnover").length).toBeGreaterThan(0);
+      });
+      fireEvent.click(screen.getByRole("button", { name: "+ New schedule" }));
+
+      const createRow = screen.getByLabelText("New schedule");
+      await chooseSearchableOption(createRow, label, optionName);
+      fireEvent.keyDown(within(createRow).getByRole("combobox", { name: label }), { key: "Enter" });
+
+      expect(createRow).toHaveTextContent("Name is required.");
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it.each([
+    ["Template", /^Template\b/, /Turnover clean/i],
+    ["Property", /^Property\b/, /Villa Azul/i],
+    ["Default assignee", /^Default assignee\b/, /Unassigned/i],
+  ])("cancels the existing row from a closed %s searchable select", async (_field, label, optionName) => {
+    const harness = installSchedulesFetch();
+    try {
+      render(<Harness client={makeClient()} />);
+      await waitFor(() => {
+        expect(screen.getAllByText("Existing turnover").length).toBeGreaterThan(0);
+      });
+
+      const scheduleRow = screen.getByLabelText("Existing turnover");
+      fireEvent.click(within(scheduleRow).getByRole("button", { name: "Edit" }));
+      await chooseSearchableOption(scheduleRow, label, optionName);
+      fireEvent.keyDown(within(scheduleRow).getByRole("combobox", { name: label }), { key: "Escape" });
+
+      expect(within(scheduleRow).queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    } finally {
+      harness.restore();
+    }
+  });
+
   it("preserves the existing schedule list and preview while editing inline", async () => {
     const harness = installSchedulesFetch();
     try {

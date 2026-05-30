@@ -46,6 +46,42 @@ describe("SearchableSelect", () => {
     expect(onChange).toHaveBeenCalledWith("FR");
   });
 
+  it("keeps open popover keys local and lets closed Enter and Escape bubble", () => {
+    const onChange = vi.fn();
+    const onKeyDown = vi.fn();
+    render(
+      <div onKeyDown={onKeyDown}>
+        <SearchableSelect
+          label="Country"
+          value="DE"
+          options={OPTIONS}
+          onChange={onChange}
+        />
+      </div>,
+    );
+
+    const input = screen.getByRole("combobox", { name: /country/i });
+    fireEvent.focus(input);
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(input).toHaveAttribute("aria-expanded", "false");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onKeyDown).not.toHaveBeenCalled();
+
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onChange).toHaveBeenCalledWith("DE");
+    expect(onKeyDown).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(onKeyDown).toHaveBeenCalledTimes(2);
+    expect(onKeyDown.mock.calls.map(([event]) => event.key)).toEqual(["Enter", "Escape"]);
+  });
+
   it("tracks the active descendant while arrowing through open options", () => {
     const onChange = vi.fn();
     render(
