@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   scenarioPersonas,
   scenarioPickerCopy,
@@ -51,25 +51,36 @@ function readHashSelection(fixedPersona?: PersonaKey): {
   return { personaKey, intentSlug };
 }
 
+function normalizeSelection(
+  selection: { personaKey: PersonaKey; intentSlug?: IntentSlug },
+  fixedPersona?: PersonaKey,
+): {
+  persona: ScenarioPersona;
+  intent: ScenarioIntent;
+} {
+  const persona = findPersona(fixedPersona ?? selection.personaKey);
+  const intent = findIntent(persona, selection.intentSlug);
+  return { persona, intent };
+}
+
 function writeHash(persona: ScenarioPersona, intent: ScenarioIntent): void {
   const nextHash = `#try-it?persona=${persona.key}&intent=${intent.slug}`;
   const nextUrl = `${window.location.pathname}${window.location.search}${nextHash}`;
   window.history.replaceState(null, "", nextUrl);
 }
 
+function subscribeToReducedMotion(onStoreChange: () => void): () => void {
+  const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+  query.addEventListener("change", onStoreChange);
+  return () => query.removeEventListener("change", onStoreChange);
+}
+
+function readReducedMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 function useReducedMotion(): boolean {
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(true);
-
-  useEffect(() => {
-    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setPrefersReducedMotion(query.matches);
-
-    const handleChange = () => setPrefersReducedMotion(query.matches);
-    query.addEventListener("change", handleChange);
-    return () => query.removeEventListener("change", handleChange);
-  }, []);
-
-  return prefersReducedMotion;
+  return useSyncExternalStore(subscribeToReducedMotion, readReducedMotion, () => true);
 }
 
 export function ScenarioPicker({
@@ -77,19 +88,11 @@ export function ScenarioPicker({
 }: {
   fixedPersona?: PersonaKey;
 }) {
-  const initialSelection = {
-    personaKey: fixedPersona ?? DEFAULT_PERSONA,
-    intentSlug: undefined,
-  };
-  const [personaKey, setPersonaKey] = useState<PersonaKey>(initialSelection.personaKey);
-  const [intentSlug, setIntentSlug] = useState<IntentSlug | undefined>(
-    initialSelection.intentSlug,
-  );
+  const [selection, setSelection] = useState(() => readHashSelection(fixedPersona));
   const [liveMode, setLiveMode] = useState(false);
   const prefersReducedMotion = useReducedMotion();
 
-  const persona = findPersona(personaKey);
-  const intent = findIntent(persona, intentSlug);
+  const { intent, persona } = normalizeSelection(selection, fixedPersona);
   const shouldShowPersonaAxis = fixedPersona === undefined;
 
   useEffect(() => {
@@ -101,8 +104,7 @@ export function ScenarioPicker({
       const hashSelection = readHashSelection(fixedPersona);
       const hashPersona = findPersona(hashSelection.personaKey);
       const hashIntent = findIntent(hashPersona, hashSelection.intentSlug);
-      setPersonaKey(hashSelection.personaKey);
-      setIntentSlug(hashIntent.slug);
+      setSelection({ personaKey: hashSelection.personaKey, intentSlug: hashIntent.slug });
       writeHash(hashPersona, hashIntent);
       document.getElementById("try-it")?.scrollIntoView({ block: "start" });
     };
@@ -112,24 +114,15 @@ export function ScenarioPicker({
     return () => window.removeEventListener("hashchange", syncFromHash);
   }, [fixedPersona]);
 
-  useEffect(() => {
-    if (fixedPersona !== undefined && fixedPersona !== personaKey) {
-      const nextPersona = findPersona(fixedPersona);
-      setPersonaKey(fixedPersona);
-      setIntentSlug(nextPersona.intents[0].slug);
-    }
-  }, [fixedPersona, personaKey]);
-
   function selectPersona(nextPersonaKey: PersonaKey): void {
     const nextPersona = findPersona(nextPersonaKey);
     const nextIntent = nextPersona.intents[0];
-    setPersonaKey(nextPersona.key);
-    setIntentSlug(nextIntent.slug);
+    setSelection({ personaKey: nextPersona.key, intentSlug: nextIntent.slug });
     writeHash(nextPersona, nextIntent);
   }
 
   function selectIntent(nextIntent: ScenarioIntent): void {
-    setIntentSlug(nextIntent.slug);
+    setSelection({ personaKey: persona.key, intentSlug: nextIntent.slug });
     writeHash(persona, nextIntent);
   }
 

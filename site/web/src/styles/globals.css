@@ -208,49 +208,6 @@
   line-height: 1.55;
 }
 
-.feature-illustration {
-  display: grid;
-  place-items: center;
-  min-height: 220px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--paper-2) 80%, transparent) 1px, transparent 1px),
-    linear-gradient(color-mix(in srgb, var(--paper-2) 80%, transparent) 1px, transparent 1px),
-    var(--card-raised);
-  background-size: 28px 28px;
-}
-
-.feature-illustration svg {
-  width: min(100%, 320px);
-  height: auto;
-}
-
-.feature-illustration__wash {
-  fill: var(--paper-2);
-  stroke: var(--line-strong);
-  stroke-width: 2;
-}
-
-.feature-illustration__line {
-  fill: none;
-  stroke: var(--ink-3);
-  stroke-linecap: round;
-  stroke-width: 8;
-}
-
-.feature-illustration__accent {
-  fill: none;
-  stroke: var(--moss);
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 10;
-}
-
-.feature-illustration__dot {
-  fill: var(--sky);
-}
-
 .page-hero {
   padding: clamp(28px, 6vw, 72px);
 }
@@ -615,9 +572,6 @@
     width: 100%;
   }
 
-  .feature-illustration {
-    min-height: 180px;
-  }
 }
 
 .landing-page {

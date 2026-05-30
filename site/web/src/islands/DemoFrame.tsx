@@ -1,6 +1,5 @@
-import type { ScenarioIntent, ScenarioPersona } from "@/content/en/scenarios";
+import { buildDemoUrl, type DemoSelection } from "./DemoFrame.lib";
 
-const DEMO_ORIGIN = "https://demo.crew.day";
 const DEMO_SANDBOX =
   "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation";
 
@@ -15,16 +14,6 @@ type DemoFrameCopy = {
   videoFallback: string;
   videoModeLabel: string;
 };
-
-export type DemoSelection = {
-  persona: ScenarioPersona;
-  intent: ScenarioIntent;
-};
-
-export function buildDemoUrl(selection: DemoSelection): string {
-  const { intent, persona } = selection;
-  return `${DEMO_ORIGIN}/app?scenario=${persona.scenarioKey}&as=${persona.as}&start=${encodeURIComponent(intent.start)}`;
-}
 
 export function DemoFrame({
   copy,
