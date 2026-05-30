@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Route, Routes, useParams } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { __resetApiProvidersForTests } from "@/lib/api";
 import { __resetQueryKeyGetterForTests, qk } from "@/lib/queryKeys";
@@ -159,7 +159,8 @@ function createdPropertyInstructionEnvelope() {
 
 function DetailRoute() {
   const params = useParams<{ iid: string }>();
-  return <div>Instruction detail {params.iid}</div>;
+  const location = useLocation();
+  return <div>Instruction detail {params.iid}{location.search}</div>;
 }
 
 function renderInstructions(routes: FetchRoute[] = [], initial = "/w/acme/instructions") {
@@ -368,6 +369,8 @@ describe("<InstructionsPage>", () => {
     ], "/w/acme/property/prop_1/instructions");
 
     await screen.findByText("Entry code");
+    const relatedPages = screen.getByRole("navigation", { name: "Related property pages" });
+    expect(within(relatedPages).getByRole("link", { name: "Instructions" })).toHaveAttribute("aria-current", "page");
     expect(
       requests.some(
         (request) =>
@@ -375,5 +378,62 @@ describe("<InstructionsPage>", () => {
           request.method === "GET",
       ),
     ).toBe(true);
+  });
+
+  it("defaults property-tab inline create to the current property and preserves detail context", async () => {
+    const { requests } = renderInstructions([
+      {
+        path: "/w/acme/api/v1/instructions?property_id=prop_1",
+        method: "GET",
+        respond: { body: instructionListPayload() },
+      },
+      {
+        path: "/w/acme/api/v1/instructions",
+        method: "POST",
+        respond: { status: 201, body: createdPropertyInstructionEnvelope() },
+      },
+    ], "/w/acme/property/prop_1/instructions");
+
+    const row = await screen.findByLabelText("New instruction");
+    expect(within(row).getByLabelText(/^Instruction scope\b/)).toHaveValue("property");
+    expect(within(row).getByRole("button", { name: "Villa Rosa" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.change(within(row).getByLabelText(/^Instruction title\b/), {
+      target: { value: "Pool rules" },
+    });
+    fireEvent.change(within(row).getByLabelText(/^Markdown\b/), {
+      target: { value: "Close the cover after service." },
+    });
+    fireEvent.click(within(row).getByRole("button", { name: "Casa Azul" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+
+    await screen.findByText("Instruction detail ins_property?property_id=prop_1");
+    const post = requests.find(
+      (request) =>
+        request.path === "/w/acme/api/v1/instructions" && request.method === "POST",
+    );
+    expect(post?.body).toMatchObject({
+      scope: "property",
+      property_id: "prop_1",
+      property_ids: ["prop_1", "prop_2"],
+      area_id: null,
+    });
+  });
+
+  it("keeps top-level instructions unfiltered and links detail without property context", async () => {
+    const { requests } = renderInstructions();
+
+    const rowLink = await screen.findByRole("link", { name: /Entry code/ });
+    expect(rowLink).toHaveAttribute("href", "/w/acme/instructions/ins_1");
+    expect(
+      requests.some(
+        (request) =>
+          request.path === "/w/acme/api/v1/instructions" &&
+          request.method === "GET",
+      ),
+    ).toBe(true);
+    expect(
+      requests.some((request) => request.path.includes("/instructions?property_id=")),
+    ).toBe(false);
   });
 });

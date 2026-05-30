@@ -142,12 +142,18 @@ function makeQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-function Harness({ queryClient = makeQueryClient() }: { queryClient?: QueryClient }) {
+function Harness({
+  initial = "/w/acme/instructions/ins_1",
+  queryClient = makeQueryClient(),
+}: {
+  initial?: string;
+  queryClient?: QueryClient;
+}) {
   // code-health: ignore[nloc] Instruction detail route harness keeps providers and route setup local to the test.
   return (
     <QueryClientProvider client={queryClient}>
       <WorkspaceProvider>
-        <MemoryRouter initialEntries={["/w/acme/instructions/ins_1"]}>
+        <MemoryRouter initialEntries={[initial]}>
           <Routes>
             <Route path="/w/:slug/instructions/:iid" element={<InstructionDetailPage />} />
           </Routes>
@@ -246,6 +252,21 @@ describe("<InstructionDetailPage>", () => {
       });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.instructions() });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.instructionVersions("ins_1") });
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("returns to the property instructions tab when opened with property context", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness initial="/w/acme/instructions/ins_1?property_id=prop_1" />);
+
+      expect(await screen.findByRole("heading", { name: "Entry code" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "← All instructions" })).toHaveAttribute(
+        "href",
+        "/w/acme/property/prop_1/instructions",
+      );
     } finally {
       fake.restore();
     }

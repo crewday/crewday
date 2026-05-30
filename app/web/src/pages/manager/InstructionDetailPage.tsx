@@ -207,7 +207,8 @@ function patchBody(patch: InstructionPatch) {
 export default function InstructionDetailPage() {
   // code-health: ignore[ccn] Instruction detail route coordinates read/ack/comment mutations around one promoted detail layout.
   const { iid } = useParams<{ iid: string }>();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
+  const contextPropertyId = new URLSearchParams(search).get("property_id") ?? undefined;
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
@@ -296,7 +297,14 @@ export default function InstructionDetailPage() {
 
   const sub = (
     <>
-      <Link to={workspaceRouteForPathname(pathname, "/instructions")} className="link">← All instructions</Link>{" "}·{" "}
+      <Link
+        to={contextPropertyId
+          ? workspaceRouteForPathname(pathname, "/property/" + contextPropertyId + "/instructions")
+          : workspaceRouteForPathname(pathname, "/instructions")}
+        className="link"
+      >
+        ← All instructions
+      </Link>{" "}·{" "}
       <Chip tone={INSTRUCTION_SCOPE_TONE[i.scope]} size="sm">{scopeSummary}</Chip>
     </>
   );

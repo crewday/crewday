@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
@@ -224,13 +224,24 @@ function instructionsListUrl(propertyId: string | undefined): string {
   return `/api/v1/instructions?${params.toString()}`;
 }
 
+function instructionDetailPath(pathname: string, instructionId: string, propertyId: string | undefined): string {
+  const path = workspaceRouteForPathname(pathname, "/instructions/" + instructionId);
+  if (!propertyId) return path;
+  const params = new URLSearchParams({ property_id: propertyId });
+  return `${path}?${params.toString()}`;
+}
+
 export default function InstructionsPage() {
   const { pathname } = useLocation();
   const { pid } = useParams<{ pid?: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [rowEdits, setRowEdits] = useState<ReadonlyMap<string, InlineTableRow<InstructionDraft>>>(new Map());
-  const [createRow, setCreateRow] = useState<InlineTableRow<InstructionDraft>>(() => newCreateRow());
+  const [createRow, setCreateRow] = useState<InlineTableRow<InstructionDraft>>(() => newCreateRow(pid));
+
+  useEffect(() => {
+    setCreateRow(newCreateRow(pid));
+  }, [pid]);
 
   const instrQ = useQuery({
     queryKey: qk.instructionsList(pid),
@@ -271,8 +282,8 @@ export default function InstructionsPage() {
       queryClient.setQueryData(qk.instruction(instruction.id), instruction);
       void queryClient.invalidateQueries({ queryKey: qk.instructions() });
       void queryClient.invalidateQueries({ queryKey: qk.instruction(instruction.id) });
-      setCreateRow(newCreateRow());
-      navigate(workspaceRouteForPathname(pathname, "/instructions/" + instruction.id));
+      setCreateRow(newCreateRow(pid));
+      navigate(instructionDetailPath(pathname, instruction.id, pid));
     },
     onError: () => {
       setCreateRow((row) => ({
@@ -344,6 +355,7 @@ export default function InstructionsPage() {
   });
   const columns = instructionColumns({
     pathname,
+    propertyId: pid,
     propsById,
     propertyOptions,
     searchablePropertyOptions,
@@ -421,7 +433,7 @@ export default function InstructionsPage() {
           }}
           onCancel={(rowId) => {
             if (rowId === CREATE_ROW_ID) {
-              setCreateRow(newCreateRow());
+              setCreateRow(newCreateRow(pid));
               return;
             }
             setRowEdits((current) => {
@@ -459,6 +471,7 @@ export default function InstructionsPage() {
 
 function instructionColumns({
   pathname,
+  propertyId,
   propsById,
   propertyOptions,
   searchablePropertyOptions,
@@ -467,6 +480,7 @@ function instructionColumns({
   tagOptions,
 }: {
   pathname: string;
+  propertyId: string | undefined;
   propsById: ReadonlyMap<string, Property>;
   propertyOptions: readonly { value: string; label: string }[];
   searchablePropertyOptions: readonly ReturnType<typeof propertySelectOption>[];
@@ -481,7 +495,7 @@ function instructionColumns({
       width: { flex: 1.7, min: 220 },
       renderRead: ({ row }) => (
         <Link
-          to={workspaceRouteForPathname(pathname, "/instructions/" + row.id)}
+          to={instructionDetailPath(pathname, row.id, propertyId)}
           className="instruction-inline-title"
         >
           <strong>{row.draft.title}</strong>
@@ -630,11 +644,18 @@ function rowFromInstruction(instruction: Instruction): InlineTableRow<Instructio
   };
 }
 
-function newCreateRow(): InlineTableRow<InstructionDraft> {
+function newCreateRow(propertyId?: string): InlineTableRow<InstructionDraft> {
   return {
     id: CREATE_ROW_ID,
     label: "New instruction",
-    draft: EMPTY_CREATE_DRAFT,
+    draft: propertyId
+      ? {
+          ...EMPTY_CREATE_DRAFT,
+          scope: "property",
+          property_id: propertyId,
+          property_ids: [propertyId],
+        }
+      : EMPTY_CREATE_DRAFT,
     editing: true,
     dirty: false,
     isNew: true,
