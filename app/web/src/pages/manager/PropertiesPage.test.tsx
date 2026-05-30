@@ -408,7 +408,10 @@ describe("<PropertiesPage>", () => {
       fireEvent.change(countryInput, {
         target: { value: "United" },
       });
-      expect((await within(dialog).findAllByText("United States")).length).toBeGreaterThan(0);
+      const countryListbox = await screen.findByRole("listbox", { name: /^Country\b/ });
+      expect(
+        within(countryListbox).getByRole("option", { name: /United States/ }),
+      ).toBeInTheDocument();
       fireEvent.keyDown(countryInput, { key: "ArrowDown" });
       fireEvent.keyDown(countryInput, { key: "ArrowDown" });
       fireEvent.keyDown(countryInput, { key: "Enter" });
@@ -416,7 +419,10 @@ describe("<PropertiesPage>", () => {
       fireEvent.change(timezoneInput, {
         target: { value: "Chicago" },
       });
-      expect((await within(dialog).findAllByText("America/Chicago")).length).toBeGreaterThan(0);
+      const timezoneListbox = await screen.findByRole("listbox", { name: /^Timezone\b/ });
+      expect(
+        within(timezoneListbox).getByRole("option", { name: /America\/Chicago/ }),
+      ).toBeInTheDocument();
       fireEvent.keyDown(timezoneInput, { key: "Enter" });
       expect(timezoneInput).toHaveValue("America/Chicago");
       fireEvent.click(within(dialog).getByRole("button", { name: "Create property" }));

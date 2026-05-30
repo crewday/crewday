@@ -637,7 +637,10 @@ describe("<TemplatesPage> create flow", () => {
       const role = within(dialog).getByRole("combobox", { name: /^Role\b/ });
       expect(role).toHaveValue("Any role");
       fireEvent.focus(role);
-      expect(await within(dialog).findByRole("option", { name: /Housekeeping/i })).toBeInTheDocument();
+      const roleListbox = await screen.findByRole("listbox", { name: /^Role\b/ });
+      expect(
+        within(roleListbox).getByRole("option", { name: /Housekeeping/i }),
+      ).toBeInTheDocument();
     } finally {
       harness.restore();
     }

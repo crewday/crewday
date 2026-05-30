@@ -2703,8 +2703,11 @@ describe("Admin LlmPage", () => {
       });
       fireEvent.focus(createParentPicker);
       fireEvent.change(createParentPicker, { target: { value: "chat.manager" } });
+      const createParentListbox = screen.getByRole("listbox", {
+        name: /Parent capability/,
+      });
       fireEvent.mouseDown(
-        within(dialog).getByRole("option", { name: /chat\.manager/ }),
+        within(createParentListbox).getByRole("option", { name: /chat\.manager/ }),
       );
       fireEvent.click(within(dialog).getByRole("button", { name: "Create inheritance" }));
 
@@ -2732,7 +2735,12 @@ describe("Admin LlmPage", () => {
       });
       fireEvent.focus(parentPicker);
       fireEvent.change(parentPicker, { target: { value: "default" } });
-      fireEvent.mouseDown(within(dialog).getByRole("option", { name: /default/ }));
+      const changeInheritanceListbox = screen.getByRole("listbox", {
+        name: /Change inheritance/,
+      });
+      fireEvent.mouseDown(
+        within(changeInheritanceListbox).getByRole("option", { name: /default/ }),
+      );
       fireEvent.click(within(dialog).getByRole("button", { name: "Change inheritance" }));
 
       await waitFor(() => {

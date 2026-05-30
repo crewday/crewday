@@ -89,7 +89,7 @@ function providerModelRow(dialog: HTMLElement, name: string): HTMLElement {
 function visibleOptionLabels(dialog: HTMLElement, label: RegExp): string[] {
   const picker = within(dialog).getByRole("combobox", { name: label });
   fireEvent.focus(picker);
-  const listbox = within(dialog).getByRole("listbox", { name: label });
+  const listbox = screen.getByRole("listbox", { name: label });
   return within(listbox)
     .getAllByRole("option")
     .map((option) => option.textContent ?? "");
@@ -281,16 +281,21 @@ describe("LlmAssignmentModal", () => {
     ).not.toBeInTheDocument();
     expect(within(dialog).queryByText("Available provider-models")).not.toBeInTheDocument();
     fireEvent.focus(parentPicker);
+    const inheritanceListbox = screen.getByRole("listbox", {
+      name: /Change inheritance/,
+    });
     expect(
-      within(dialog).queryByRole("option", { name: /voice\.transcribe/ }),
+      within(inheritanceListbox).queryByRole("option", { name: /voice\.transcribe/ }),
     ).not.toBeInTheDocument();
     expect(
-      within(dialog).queryByRole("option", { name: /chat\.admin/ }),
+      within(inheritanceListbox).queryByRole("option", { name: /chat\.admin/ }),
     ).not.toBeInTheDocument();
     fireEvent.change(parentPicker, { target: { value: "default" } });
-    expect(within(dialog).getByRole("option", { name: /default/ })).toBeInTheDocument();
     expect(
-      within(dialog).queryByRole("option", { name: /chat\.manager/ }),
+      within(inheritanceListbox).getByRole("option", { name: /default/ }),
+    ).toBeInTheDocument();
+    expect(
+      within(inheritanceListbox).queryByRole("option", { name: /chat\.manager/ }),
     ).not.toBeInTheDocument();
   });
 
@@ -304,7 +309,12 @@ describe("LlmAssignmentModal", () => {
     });
     fireEvent.focus(parentPicker);
     fireEvent.change(parentPicker, { target: { value: "default" } });
-    fireEvent.mouseDown(within(dialog).getByRole("option", { name: /default/ }));
+    fireEvent.mouseDown(
+      within(screen.getByRole("listbox", { name: /Change inheritance/ })).getByRole(
+        "option",
+        { name: /default/ },
+      ),
+    );
     expect(parentPicker).toHaveValue("default");
 
     const changeButton = within(dialog).getByRole("button", {
@@ -368,7 +378,12 @@ describe("LlmAssignmentModal", () => {
     });
     fireEvent.focus(parentPicker);
     fireEvent.change(parentPicker, { target: { value: "default" } });
-    fireEvent.mouseDown(within(dialog).getByRole("option", { name: /default/ }));
+    fireEvent.mouseDown(
+      within(screen.getByRole("listbox", { name: /Change inheritance/ })).getByRole(
+        "option",
+        { name: /default/ },
+      ),
+    );
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Change inheritance" }));
 
@@ -439,7 +454,12 @@ describe("LlmAssignmentModal", () => {
     });
     fireEvent.focus(parentPicker);
     fireEvent.change(parentPicker, { target: { value: "default" } });
-    fireEvent.mouseDown(within(dialog).getByRole("option", { name: /default/ }));
+    fireEvent.mouseDown(
+      within(screen.getByRole("listbox", { name: /Parent capability/ })).getByRole(
+        "option",
+        { name: /default/ },
+      ),
+    );
 
     const createButton = within(dialog).getByRole("button", {
       name: "Create inheritance",
