@@ -14,8 +14,8 @@
    visually matches the previous render. New rules go in the file that
    matches their topic; if no file fits, add a new layer here in the
    right slot. Per docs/specs/14-web-frontend.md "App / Mock Ownership",
-   `mocks/web/src/styles/` is the source tree and `app/web/src/styles/`
-   mirrors the layout for promoted surfaces. */
+   app/web/src/styles/ is the production source tree; retiring mock
+   styles are migration context only. */
 
 @import "./shell.css";
 @import "./tasks.css";

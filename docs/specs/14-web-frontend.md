@@ -1189,6 +1189,15 @@ frontend gaps against `app/web/` via `bd create`, and migrate any useful
 mock-only variation into `/styleguide` before deleting the mock fixture
 that exposed it.
 
+- **Styleguide inventory (cd-x4p6c).** The retiring mock SPA exposes
+  only one styleguide route, `/styleguide`; its component coverage is
+  already mirrored by `app/web/src/pages/StyleguidePage.tsx`. The mock
+  `pages/`, `components/`, and `styles/` filenames all have `app/web`
+  counterparts, so there are no mock-only component-demo routes to keep
+  alive. The app-owned `/styleguide/inline-table-forms` route is the
+  retained component-variation surface for dense inline editing; the
+  remaining mock app routes are discarded as historical application
+  previews, not as standalone styleguide fixtures.
 - **User / manager terminology.** Legacy mock routes still include
   `/employees`, `/employee/:eid`, `/employee/:eid/leaves`; the spec
   (§05) canonicalises these to `/users`, `/user/<id>`,

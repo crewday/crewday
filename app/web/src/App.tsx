@@ -434,9 +434,8 @@ export default function App() {
           <Route path="/w/:slug/guest/:token" element={<GuestPage />} />
         </Route>
 
-        {/* Styleguide — public dev surface; render without auth so
-            designers can land on it directly. Same posture as
-            `mocks/web/`. */}
+        {/* Styleguide — public dev/staging surface; render without
+            auth so designers can land on component fixtures directly. */}
         {StyleguidePage ? (
           <Route
             path="/styleguide"

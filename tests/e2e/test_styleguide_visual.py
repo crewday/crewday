@@ -1,4 +1,4 @@
-"""Pilot visual-regression test against ``/styleguide`` (cd-ndmv).
+"""Pilot visual-regression test against the production app ``/styleguide``.
 
 Spec: ``docs/specs/17-testing-quality.md`` §"Visual regression" —
 ``/styleguide`` is the public dev-surface baseline; a > 0.1 % diff
@@ -6,7 +6,7 @@ fails the check.
 
 The pilot lands the harness end-to-end:
 
-* Navigate to ``/styleguide`` (public — no auth needed).
+* Navigate to the app-owned ``/styleguide`` (public — no auth needed).
 * Capture a full-page PNG.
 * Diff against ``tests/e2e/_baselines/styleguide.png`` via
   pixelmatch.
