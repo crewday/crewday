@@ -12,4 +12,4 @@ export const PROPERTY_TABS = [
   { key: "settings", label: "Settings", panelId: panelIdFor("settings") },
 ] satisfies Array<PageTab & { key: PropertyTab }>;
 
-export type PropertyRelatedPage = "stays" | "instructions" | "closures" | "inventory" | "assets";
+export type PropertyRelatedPage = "stays" | "instructions" | "closures" | "inventory" | "assets" | "schedules";

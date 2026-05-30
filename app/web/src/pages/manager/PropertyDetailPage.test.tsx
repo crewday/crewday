@@ -480,6 +480,7 @@ function Harness({ initial = "/w/acme/property/prop_1" }: { initial?: string }) 
             <Route path="/w/:slug/property/:pid/instructions" element={<RelatedRoute label="Instructions route reached" activeRelatedPage="instructions" />} />
             <Route path="/w/:slug/property/:pid/closures" element={<RelatedRoute label="Closures route reached" activeRelatedPage="closures" />} />
             <Route path="/w/:slug/property/:pid/inventory" element={<RelatedRoute label="Inventory route reached" activeRelatedPage="inventory" />} />
+            <Route path="/w/:slug/property/:pid/schedules" element={<RelatedRoute label="Schedules route reached" activeRelatedPage="schedules" />} />
           </Routes>
         </WorkspaceProvider>
       </MemoryRouter>
@@ -891,6 +892,7 @@ describe("<PropertyDetailPage>", () => {
       expect(screen.getByRole("link", { name: "Instructions" })).toHaveAttribute("href", "/w/acme/property/prop_1/instructions");
       expect(screen.getByRole("link", { name: "Closures" })).toHaveAttribute("href", "/w/acme/property/prop_1/closures");
       expect(screen.getByRole("link", { name: "Inventory" })).toHaveAttribute("href", "/w/acme/property/prop_1/inventory");
+      expect(screen.getByRole("link", { name: "Schedules" })).toHaveAttribute("href", "/w/acme/property/prop_1/schedules");
 
       fireEvent.click(screen.getByRole("link", { name: "Assets" }));
       await waitFor(() => {
@@ -944,6 +946,18 @@ describe("<PropertyDetailPage>", () => {
       const inventoryRelatedPages = screen.getByRole("navigation", { name: "Related property pages" });
       expect(within(inventoryRelatedPages).getByRole("link", { name: "Inventory" })).toHaveAttribute("aria-current", "page");
       expect(within(inventoryRelatedPages).getByRole("link", { name: "Inventory" })).toHaveClass("page-tabs__tab--active");
+
+      cleanup();
+      window.history.replaceState(null, "", "/");
+      render(<Harness />);
+      expect(await screen.findByText("Tasks for this property")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("link", { name: "Schedules" }));
+      await waitFor(() => {
+        expect(screen.getByText("Schedules route reached")).toBeInTheDocument();
+      });
+      const schedulesRelatedPages = screen.getByRole("navigation", { name: "Related property pages" });
+      expect(within(schedulesRelatedPages).getByRole("link", { name: "Schedules" })).toHaveAttribute("aria-current", "page");
+      expect(within(schedulesRelatedPages).getByRole("link", { name: "Schedules" })).toHaveClass("page-tabs__tab--active");
     } finally {
       fake.restore();
     }

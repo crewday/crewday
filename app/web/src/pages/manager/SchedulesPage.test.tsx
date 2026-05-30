@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import type { ReactElement } from "react";
 
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
@@ -56,6 +56,13 @@ const PROPERTY: Property = {
   owner_user_id: null,
 };
 
+const SECOND_PROPERTY: Property = {
+  ...PROPERTY,
+  id: "prop_2",
+  name: "Villa Azul",
+  color: "sky",
+};
+
 const EMPLOYEE: Employee = {
   id: "emp_1",
   name: "Mina Silva",
@@ -104,12 +111,29 @@ function makeClient(): QueryClient {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-function Harness({ client }: { client: QueryClient }): ReactElement {
+function Harness({
+  client,
+  initialEntry = "/schedules",
+}: {
+  client: QueryClient;
+  initialEntry?: string;
+}): ReactElement {
   return (
     <QueryClientProvider client={client}>
       <WorkspaceProvider>
-        <MemoryRouter initialEntries={["/schedules"]}>
-          <SchedulesPage />
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <Routes>
+            <Route path="/schedules" element={<SchedulesPage />} />
+            <Route
+              path="/w/:slug/property/:pid/schedules"
+              element={(
+                <>
+                  <Link to="/w/acme/property/prop_2/schedules">Other schedule property</Link>
+                  <SchedulesPage />
+                </>
+              )}
+            />
+          </Routes>
         </MemoryRouter>
       </WorkspaceProvider>
     </QueryClientProvider>
@@ -143,12 +167,34 @@ function installSchedulesFetch(opts: {
       },
     },
     {
+      path: "/w/acme/api/v1/tasks/schedules?property_id=prop_1",
+      respond: {
+        body: {
+          data: schedules.filter((schedule) => schedule.property_id === "prop_1"),
+          next_cursor: null,
+          has_more: false,
+          templates_by_id: { [TEMPLATE.id]: TEMPLATE },
+        },
+      },
+    },
+    {
+      path: "/w/acme/api/v1/tasks/schedules?property_id=prop_2",
+      respond: {
+        body: {
+          data: schedules.filter((schedule) => schedule.property_id === "prop_2"),
+          next_cursor: null,
+          has_more: false,
+          templates_by_id: { [TEMPLATE.id]: TEMPLATE },
+        },
+      },
+    },
+    {
       path: "/w/acme/api/v1/tasks/task_templates",
       respond: { body: { data: templates, next_cursor: null, has_more: false } },
     },
     {
       path: "/w/acme/api/v1/properties",
-      respond: { body: [PROPERTY] },
+      respond: { body: [PROPERTY, SECOND_PROPERTY] },
     },
     {
       path: "/w/acme/api/v1/employees",
@@ -322,6 +368,132 @@ describe("<SchedulesPage> inline schedules table", () => {
         active_until: null,
       });
       expect(screen.queryByRole("dialog", { name: "New schedule" })).not.toBeInTheDocument();
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("renders property route chrome and fetches schedules filtered to that property", async () => {
+    const harness = installSchedulesFetch({
+      schedules: [
+        SCHEDULE,
+        {
+          ...SCHEDULE,
+          id: "sch_other",
+          name: "Other property schedule",
+          property_id: "prop_other",
+        },
+      ],
+    });
+    try {
+      render(
+        <Harness
+          client={makeClient()}
+          initialEntry="/w/acme/property/prop_1/schedules"
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getAllByText("Existing turnover").length).toBeGreaterThan(0);
+      });
+      expect(screen.queryByText("Other property schedule")).not.toBeInTheDocument();
+      expect(harness.requests.some((request) => (
+        request.path === "/w/acme/api/v1/tasks/schedules?property_id=prop_1"
+      ))).toBe(true);
+
+      const relatedPages = screen.getByRole("navigation", { name: "Related property pages" });
+      expect(within(relatedPages).getByRole("link", { name: "Schedules" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+      expect(within(relatedPages).getByRole("link", { name: "Assets" })).toHaveAttribute(
+        "href",
+        "/w/acme/property/prop_1/assets",
+      );
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("creates schedules for the route property without allowing a workspace-wide draft", async () => {
+    const postRequests: FetchRouteRequest[] = [];
+    const harness = installSchedulesFetch({ postRequests });
+    try {
+      render(
+        <Harness
+          client={makeClient()}
+          initialEntry="/w/acme/property/prop_1/schedules"
+        />,
+      );
+      await waitFor(() => {
+        expect(screen.getAllByText("Existing turnover").length).toBeGreaterThan(0);
+      });
+      fireEvent.click(screen.getByRole("button", { name: "+ New schedule" }));
+
+      const createRow = screen.getByLabelText("New schedule");
+      const propertyField = within(createRow).getByRole("combobox", { name: /^Property\b/ });
+      expect(propertyField).toHaveValue("Casa Verde");
+      expect(propertyField).toBeDisabled();
+
+      fireEvent.change(within(createRow).getByLabelText(/^Name\b/), {
+        target: { value: "Property turnover" },
+      });
+      await chooseSearchableOption(createRow, /^Template\b/, /Turnover clean/i);
+      fireEvent.change(within(createRow).getByLabelText(/^Starts on\b/), {
+        target: { value: "2026-05-08" },
+      });
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(postRequests).toHaveLength(1);
+      });
+      expect(postRequests[0]?.body).toMatchObject({
+        name: "Property turnover",
+        property_id: PROPERTY.id,
+        template_id: TEMPLATE.id,
+      });
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("updates the locked create property when navigating between property schedule routes", async () => {
+    const postRequests: FetchRouteRequest[] = [];
+    const harness = installSchedulesFetch({ postRequests });
+    try {
+      render(
+        <Harness
+          client={makeClient()}
+          initialEntry="/w/acme/property/prop_1/schedules"
+        />,
+      );
+      await waitFor(() => {
+        expect(screen.getAllByText("Existing turnover").length).toBeGreaterThan(0);
+      });
+      const createRow = screen.getByLabelText("New schedule");
+      fireEvent.change(within(createRow).getByLabelText(/^Name\b/), {
+        target: { value: "Property turnover" },
+      });
+      await chooseSearchableOption(createRow, /^Template\b/, /Turnover clean/i);
+      fireEvent.click(screen.getByRole("link", { name: "Other schedule property" }));
+
+      await waitFor(() => {
+        expect(within(screen.getByLabelText("New schedule")).getByRole("combobox", { name: /^Property\b/ })).toHaveValue("Villa Azul");
+      });
+      const reroutedCreateRow = screen.getByLabelText("New schedule");
+      fireEvent.change(within(reroutedCreateRow).getByLabelText(/^Starts on\b/), {
+        target: { value: "2026-05-08" },
+      });
+      fireEvent.click(within(reroutedCreateRow).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(postRequests).toHaveLength(1);
+      });
+      expect(postRequests[0]?.body).toMatchObject({
+        name: "Property turnover",
+        property_id: SECOND_PROPERTY.id,
+        template_id: TEMPLATE.id,
+      });
     } finally {
       harness.restore();
     }

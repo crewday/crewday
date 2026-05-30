@@ -113,7 +113,10 @@ export const qk = {
   icalFeeds: () => [...ws(), "stays", "ical-feeds"] as const,
   taskTemplates: () => [...ws(), "task_templates"] as const,
   workRoles: () => [...ws(), "work_roles"] as const,
-  schedules: () => [...ws(), "schedules"] as const,
+  schedules: (propertyId?: string | null) =>
+    propertyId
+      ? ([...ws(), "schedules", { property_id: propertyId }] as const)
+      : ([...ws(), "schedules"] as const),
   scheduleRulesets: () => [...ws(), "schedule_rulesets"] as const,
   schedulerCalendar: (fromIso: string, toIso: string) =>
     [...ws(), "scheduler-calendar", fromIso, toIso] as const,

@@ -426,6 +426,12 @@ export const FRONTEND_ROUTES = [
     params: ["pid"],
   }),
   route({
+    name: "property.schedules",
+    scope: "workspace",
+    template: "/property/:pid/schedules",
+    params: ["pid"],
+  }),
+  route({
     name: "employee.detail",
     scope: "workspace",
     template: "/employee/:eid",

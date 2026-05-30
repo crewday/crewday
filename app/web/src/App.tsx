@@ -293,6 +293,9 @@ function managerWorkspaceRoutes(isManagerSurface: boolean) {
           <Route path="property/:pid/assets" element={<AssetsPage />} />
           <Route path="property/:pid/inventory" element={<InventoryPage />} />
         </Route>
+        <Route element={<RequirePermission actionKey="availability_overrides.view_others" />}>
+          <Route path="property/:pid/schedules" element={<SchedulesPage />} />
+        </Route>
       </Route>
 
       <Route element={<RequirePermission actionKey="assets.manage_documents" />}>

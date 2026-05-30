@@ -10,6 +10,7 @@ describe("<PropertyTabs>", () => {
     ["Instructions", "instructions"],
     ["Closures", "closures"],
     ["Inventory", "inventory"],
+    ["Schedules", "schedules"],
   ] as const)("links route-backed related pages and marks %s active", (label, key) => {
     render(
       <MemoryRouter initialEntries={["/w/acme/property/prop_1/" + key]}>
@@ -29,6 +30,10 @@ describe("<PropertyTabs>", () => {
     expect(within(relatedPages).getByRole("link", { name: "Inventory" })).toHaveAttribute(
       "href",
       "/w/acme/property/prop_1/inventory",
+    );
+    expect(within(relatedPages).getByRole("link", { name: "Schedules" })).toHaveAttribute(
+      "href",
+      "/w/acme/property/prop_1/schedules",
     );
     expect(within(relatedPages).getByRole("link", { name: "Stays" })).toHaveAttribute(
       "href",

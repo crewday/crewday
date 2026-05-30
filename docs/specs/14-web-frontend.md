@@ -277,6 +277,7 @@ dashboard                      properties
 property/<id>                  property/<id>/stays
 property/<id>/instructions     property/<id>/closures
 property/<id>/assets           property/<id>/inventory
+property/<id>/schedules
 stays                          users
 user/<id>                      user/<id>/leaves
 user/<id>/availability         leaves

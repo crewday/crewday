@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLocation, useParams } from "react-router-dom";
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
@@ -24,6 +25,7 @@ import {
 } from "@/components/recurrence";
 import type { Employee, Property, Schedule, TaskTemplate } from "@/types/api";
 import { type ListEnvelope } from "@/lib/listResponse";
+import PropertyTabs from "./property/PropertyTabs";
 
 interface SchedulesPayload {
   data: Schedule[];
@@ -151,11 +153,11 @@ function scheduleErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
-function emptyScheduleDraft(activeFrom: string): ScheduleDraft {
+function emptyScheduleDraft(activeFrom: string, propertyId = ""): ScheduleDraft {
   return {
     name: "",
     template_id: "",
-    property_id: "",
+    property_id: propertyId,
     area_id: "",
     default_assignee: "",
     backup_assignee_user_ids: [],
@@ -259,17 +261,35 @@ function clearMapValue<TValue>(
   return next;
 }
 
+function rowForRouteProperty(
+  row: InlineTableRow<ScheduleDraft>,
+  propertyId: string,
+): InlineTableRow<ScheduleDraft> {
+  if (!propertyId || row.draft.property_id === propertyId) return row;
+  return {
+    ...row,
+    draft: { ...row.draft, property_id: propertyId },
+    committedDraft: row.committedDraft ? { ...row.committedDraft, property_id: propertyId } : undefined,
+  };
+}
+
 // react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 export default function SchedulesPage() {
   const queryClient = useQueryClient();
+  const location = useLocation();
+  const { pid } = useParams<{ pid?: string }>();
+  const routePropertyId = pid ?? "";
   const tableShellRef = useRef<HTMLDivElement | null>(null);
   const today = todayLocal();
-  const [createRow, setCreateRow] = useState<InlineTableRow<ScheduleDraft>>(() => makeCreateRow(today));
+  const [createRow, setCreateRow] = useState<InlineTableRow<ScheduleDraft>>(() => makeCreateRow(today, routePropertyId));
   const [rowEdits, setRowEdits] = useState<ReadonlyMap<string, InlineTableRow<ScheduleDraft>>>(() => new Map());
+  const schedulesPath = routePropertyId
+    ? `/api/v1/tasks/schedules?property_id=${encodeURIComponent(routePropertyId)}`
+    : "/api/v1/tasks/schedules";
 
   const schedQ = useQuery({
-    queryKey: qk.schedules(),
-    queryFn: () => fetchJson<SchedulesPayload>("/api/v1/tasks/schedules"),
+    queryKey: qk.schedules(routePropertyId),
+    queryFn: () => fetchJson<SchedulesPayload>(schedulesPath),
   });
   const templatesQ = useQuery({
     queryKey: qk.taskTemplates(),
@@ -300,6 +320,7 @@ export default function SchedulesPage() {
       if (!template) throw new Error("Template is required.");
       const row = rowId === CREATE_ROW_ID ? createRow : rowEdits.get(rowId);
       const body = bodyFromDraft(draft, template, row?.committedDraft);
+      if (routePropertyId) body.property_id = routePropertyId;
       if (rowId === CREATE_ROW_ID) {
         return fetchJson<Schedule>("/api/v1/tasks/schedules", { method: "POST", body });
       }
@@ -307,7 +328,7 @@ export default function SchedulesPage() {
     },
     onSuccess: async (_saved, variables) => {
       if (variables.rowId === CREATE_ROW_ID) {
-        setCreateRow(makeCreateRow(today));
+        setCreateRow(makeCreateRow(today, routePropertyId));
       } else {
         setRowEdits((current) => clearMapValue(current, variables.rowId));
       }
@@ -433,8 +454,8 @@ export default function SchedulesPage() {
         <InlineSearchableSelectField
           value={row.draft.property_id}
           options={propertyOptions}
-          blankOption={{ label: "Any property" }}
-          disabled={disabled}
+          blankOption={routePropertyId ? undefined : { label: "Any property" }}
+          disabled={disabled || Boolean(routePropertyId)}
           label="Property"
           onChange={(property_id) => update({ property_id })}
         />
@@ -561,26 +582,34 @@ export default function SchedulesPage() {
     };
   });
 
+  const routeCreateRow = rowForRouteProperty(createRow, routePropertyId);
   const activeCreateRow: InlineTableRow<ScheduleDraft> = {
-    ...createRow,
+    ...routeCreateRow,
     disabled: templatesFailed || !templatesAvailable,
     saving: saveSchedule.isPending && saveSchedule.variables?.rowId === CREATE_ROW_ID,
-    validation: createRow.validation ?? (
+    validation: routeCreateRow.validation ?? (
       templatesFailed || !templatesAvailable
-        ? validateScheduleDraft(createRow.draft, templatesAvailable, templatesFailed, true)
+        ? validateScheduleDraft(routeCreateRow.draft, templatesAvailable, templatesFailed, true)
         : undefined
     ),
-    meta: schedules.length === 0 && createRow.dirty === false && templatesAvailable ? (
+    meta: schedules.length === 0 && routeCreateRow.dirty === false && templatesAvailable ? (
       <EmptyState
         title="No schedules yet"
         copy="Use the trailing row to add recurring work."
         variant="compact"
       />
-    ) : createRow.meta,
+    ) : routeCreateRow.meta,
   };
 
   return (
     <DeskPage title="Schedules" sub={sub} actions={actions}>
+      {routePropertyId ? (
+        <PropertyTabs
+          pathname={location.pathname}
+          propertyId={routePropertyId}
+          activeRelatedPage="schedules"
+        />
+      ) : null}
       <div className="panel" ref={tableShellRef}>
         <InlineTableForm
           ariaLabel="Schedules"
@@ -618,12 +647,12 @@ export default function SchedulesPage() {
     </DeskPage>
   );
 
-  function makeCreateRow(activeFrom: string): InlineTableRow<ScheduleDraft> {
+  function makeCreateRow(activeFrom: string, propertyId = routePropertyId): InlineTableRow<ScheduleDraft> {
     return {
       id: CREATE_ROW_ID,
       label: "New schedule",
-      draft: emptyScheduleDraft(activeFrom),
-      committedDraft: emptyScheduleDraft(activeFrom),
+      draft: emptyScheduleDraft(activeFrom, propertyId),
+      committedDraft: emptyScheduleDraft(activeFrom, propertyId),
       editing: true,
       isNew: true,
     };
@@ -697,14 +726,14 @@ export default function SchedulesPage() {
 
   function cancelRow(rowId: string): void {
     if (rowId === CREATE_ROW_ID) {
-      setCreateRow(makeCreateRow(today));
+      setCreateRow(makeCreateRow(today, routePropertyId));
       return;
     }
     setRowEdits((current) => clearMapValue(current, rowId));
   }
 
   function saveRow(rowId: string): void {
-    const row = rowId === CREATE_ROW_ID ? createRow : rowEdits.get(rowId);
+    const row = rowId === CREATE_ROW_ID ? rowForRouteProperty(createRow, routePropertyId) : rowEdits.get(rowId);
     if (!row) return;
     const validation = validateScheduleDraft(row.draft, templatesAvailable, templatesFailed, rowId === CREATE_ROW_ID);
     if (validation) {

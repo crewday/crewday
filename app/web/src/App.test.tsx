@@ -33,6 +33,7 @@ const mockRenders = vi.hoisted(() => ({
   chatPage: vi.fn(),
   dashboardPage: vi.fn(),
   schedulerPage: vi.fn(),
+  schedulesPage: vi.fn(),
   apiTokensPage: vi.fn(),
 }));
 
@@ -237,6 +238,13 @@ vi.mock("@/pages/SchedulerPage", () => ({
   default: function MockSchedulerPage(): ReactElement {
     mockRenders.schedulerPage();
     return <main data-testid="scheduler-page">Scheduler</main>;
+  },
+}));
+
+vi.mock("@/pages/manager/SchedulesPage", () => ({
+  default: function MockSchedulesPage(): ReactElement {
+    mockRenders.schedulesPage();
+    return <main data-testid="schedules-page">Schedules</main>;
   },
 }));
 
@@ -592,6 +600,16 @@ describe("App public root and protected deep links", () => {
       expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_1/scheduler?view=day");
     });
     expect(await screen.findByTestId("scheduler-page")).toBeInTheDocument();
+  });
+
+  it("renders the property schedules route under the workspace shell", async () => {
+    installPermissionAllowFetch();
+    renderAppAt("/w/ws_1/property/prop_1/schedules", "manager");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/w/ws_1/property/prop_1/schedules");
+    });
+    expect(await screen.findByTestId("schedules-page")).toBeInTheDocument();
   });
 
   it("redirects authenticated bare workspace paths to the active workspace prefix", async () => {
