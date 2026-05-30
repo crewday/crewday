@@ -45,6 +45,25 @@ function isoOfTask(iso: string): string {
   return isoDate(new Date(iso));
 }
 
+function normalizeSchedulerName(name: string): string {
+  return name.trim().replace(/\s+/g, " ");
+}
+
+function schedulerRowLabels(
+  user: SchedulerUserView,
+  scope: "manager" | "employee" | "client",
+): { primary: string; secondary: string | null } {
+  const firstName = normalizeSchedulerName(user.first_name || "");
+  const displayName = normalizeSchedulerName(user.display_name || "");
+  const primary = scope === "client" ? firstName || "," : firstName || displayName || ",";
+  if (scope === "client") return { primary, secondary: null };
+
+  if (!displayName || displayName.toLocaleLowerCase() === primary.toLocaleLowerCase()) {
+    return { primary, secondary: null };
+  }
+  return { primary, secondary: displayName };
+}
+
 interface CellRota {
   assignment: ScheduleAssignment;
   slot: ScheduleRulesetSlot;
@@ -199,30 +218,33 @@ function SchedulerWeekGrid({
             </div>
           );
         })}
-        {usersToShow.map((u) => (
-          <div key={`${group.weekStartIso}-${u.id}`} className="scheduler-row">
-            <div className="scheduler-row__user">
-              <strong>{u.first_name || ","}</strong>
-              {scope !== "client" && u.display_name && (
-                <span className="scheduler-row__sub">{u.display_name}</span>
-              )}
+        {usersToShow.map((u) => {
+          const labels = schedulerRowLabels(u, scope);
+          return (
+            <div key={`${group.weekStartIso}-${u.id}`} className="scheduler-row">
+              <div className="scheduler-row__user">
+                <strong>{labels.primary}</strong>
+                {labels.secondary && (
+                  <span className="scheduler-row__sub">{labels.secondary}</span>
+                )}
+              </div>
+              {group.cells.map((cell) => {
+                const weekday = (cell.date.getDay() + 6) % 7;
+                const rotaKey = `${u.id}|${weekday}`;
+                const taskKey = `${u.id}|${cell.iso}`;
+                return (
+                  <SchedulerCell
+                    key={`${u.id}-${cell.iso}`}
+                    rotas={rotasByCell.get(rotaKey) ?? []}
+                    tasks={tasksByCell.get(taskKey) ?? []}
+                    propertyColor={propertyColor}
+                    scope={scope}
+                  />
+                );
+              })}
             </div>
-            {group.cells.map((cell) => {
-              const weekday = (cell.date.getDay() + 6) % 7;
-              const rotaKey = `${u.id}|${weekday}`;
-              const taskKey = `${u.id}|${cell.iso}`;
-              return (
-                <SchedulerCell
-                  key={`${u.id}-${cell.iso}`}
-                  rotas={rotasByCell.get(rotaKey) ?? []}
-                  tasks={tasksByCell.get(taskKey) ?? []}
-                  propertyColor={propertyColor}
-                  scope={scope}
-                />
-              );
-            })}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

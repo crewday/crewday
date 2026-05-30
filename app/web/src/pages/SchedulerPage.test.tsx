@@ -254,6 +254,40 @@ describe("<SchedulerPage>", () => {
     }
   });
 
+  it("does not repeat a scheduler row name when first and display names match", async () => {
+    const fake = installFetch({
+      ...CALENDAR,
+      users: [
+        { id: "user_alex", first_name: "Vincent", display_name: "  Vincent  " },
+        { id: "user_me", first_name: "me", display_name: "  Me  " },
+      ],
+    });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Vincent")).toBeInTheDocument();
+      expect(screen.getByText("me")).toBeInTheDocument();
+      expect(screen.getAllByText("Vincent")).toHaveLength(1);
+      expect(screen.queryByText("Me")).toBeNull();
+      expect(document.querySelector(".scheduler-row__sub")).toBeNull();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("keeps richer display names visible for manager scheduler rows", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Alex")).toBeInTheDocument();
+      expect(screen.getByText("Alex Rivera")).toBeInTheDocument();
+      expect(document.querySelector(".scheduler-row__sub")?.textContent).toBe("Alex Rivera");
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("fetches and appends the next scheduler week from the bottom sentinel", async () => {
     const fake = installFetch();
     try {
@@ -416,7 +450,10 @@ describe("<SchedulerPage>", () => {
 
   it("keeps client views to first names while still rendering scoped rota data", async () => {
     authenticate("client");
-    const fake = installFetch();
+    const fake = installFetch({
+      ...CALENDAR,
+      users: [{ id: "user_alex", first_name: "Alex", display_name: "  Alex Rivera  " }],
+    });
     try {
       render(<Harness />);
 
@@ -424,6 +461,23 @@ describe("<SchedulerPage>", () => {
       expect(screen.queryByText("Alex Rivera")).toBeNull();
       expect(screen.getByText("08:00–12:00")).toBeInTheDocument();
       expect(screen.queryByText("gap")).toBeNull();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("does not fall back to client-visible display names when first name is absent", async () => {
+    authenticate("client");
+    const fake = installFetch({
+      ...CALENDAR,
+      users: [{ id: "user_alex", first_name: "", display_name: "Alex Rivera" }],
+    });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText(",")).toBeInTheDocument();
+      expect(screen.queryByText("Alex Rivera")).toBeNull();
+      expect(document.querySelector(".scheduler-row__sub")).toBeNull();
     } finally {
       fake.restore();
     }
