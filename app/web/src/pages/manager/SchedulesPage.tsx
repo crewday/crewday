@@ -488,7 +488,8 @@ export default function SchedulesPage() {
     {
       key: "active_from",
       header: "Starts",
-      width: { px: 132 },
+      width: { px: 148 },
+      className: "inline-table-form__cell--temporal",
       renderRead: ({ row }) => <span className="mono">{row.draft.active_from || "-"}</span>,
       renderEdit: ({ row, update, disabled }) => (
         <InlineDateField
@@ -502,7 +503,8 @@ export default function SchedulesPage() {
     {
       key: "starts_at",
       header: "Time",
-      width: { px: 108 },
+      width: { px: 130 },
+      className: "inline-table-form__cell--temporal",
       renderRead: ({ row }) => <span className="mono">{row.draft.starts_at || "-"}</span>,
       renderEdit: ({ row, update, disabled }) => (
         <InlineTimeField
@@ -516,7 +518,7 @@ export default function SchedulesPage() {
     {
       key: "frequency",
       header: "Repeats",
-      width: { px: 128 },
+      width: { px: 120 },
       renderRead: ({ row }) => schedules.find((schedule) => schedule.id === row.id)?.rrule_human ?? row.draft.frequency.toLowerCase(),
       // Schedules split recurrence across start date, start time, and frequency,
       // and the API owns the human summary. Reuse shared RRULE helpers here;
@@ -534,7 +536,7 @@ export default function SchedulesPage() {
     {
       key: "duration",
       header: "Duration",
-      width: { px: 104 },
+      width: { px: 96 },
       className: "mono",
       renderRead: ({ row }) => {
         const schedule = schedules.find((candidate) => candidate.id === row.id);
@@ -550,7 +552,7 @@ export default function SchedulesPage() {
     {
       key: "status",
       header: "Status",
-      width: { px: 128 },
+      width: { px: 112 },
       renderRead: ({ row }) => (
         <ScheduleStatusCell
           row={row}

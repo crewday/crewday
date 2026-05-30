@@ -282,6 +282,51 @@ describe("<SchedulesPage> inline schedules table", () => {
     }
   });
 
+  it("keeps schedule date and time controls readable without widening the action column away", async () => {
+    const harness = installSchedulesFetch();
+    try {
+      const { container } = render(<Harness client={makeClient()} />);
+      await waitFor(() => {
+        expect(screen.getAllByText("Existing turnover").length).toBeGreaterThan(0);
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New schedule" }));
+
+      const table = container.querySelector(".inline-table-form");
+      expect(table).toHaveStyle({
+        "--inline-table-columns": [
+          "minmax(190px, 1.35fr)",
+          "minmax(170px, 1.1fr)",
+          "minmax(160px, 1fr)",
+          "minmax(160px, 1fr)",
+          "148px",
+          "130px",
+          "120px",
+          "96px",
+          "112px",
+          "max-content",
+        ].join(" "),
+      });
+
+      const createRow = screen.getByLabelText("New schedule");
+      const createDate = within(createRow).getByLabelText(/^Starts on\b/);
+      const createTime = within(createRow).getByLabelText(/^Start time\b/);
+      expect(createDate).toHaveClass("inline-table-form__control--date");
+      expect(createTime).toHaveClass("inline-table-form__control--time");
+      expect(createDate.closest("[data-inline-table-column='active_from']")).toHaveClass("inline-table-form__cell--temporal");
+      expect(createTime.closest("[data-inline-table-column='starts_at']")).toHaveClass("inline-table-form__cell--temporal");
+      expect(within(createRow).getByRole("button", { name: "Save" })).toBeInTheDocument();
+
+      const scheduleRow = screen.getByLabelText("Existing turnover");
+      fireEvent.click(within(scheduleRow).getByRole("button", { name: "Edit" }));
+      expect(within(scheduleRow).getByLabelText(/^Starts on\b/)).toHaveValue("2026-04-20");
+      expect(within(scheduleRow).getByLabelText(/^Start time\b/)).toHaveValue("09:00");
+      expect(within(scheduleRow).getByRole("button", { name: "Save" })).toBeInTheDocument();
+    } finally {
+      harness.restore();
+    }
+  });
+
   it("shows an explicit prerequisite message when no task templates exist", async () => {
     const harness = installSchedulesFetch({ templates: [] });
     try {

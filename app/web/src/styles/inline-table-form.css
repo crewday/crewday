@@ -7,7 +7,8 @@
 }
 
 .inline-table-form__table {
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--card);
@@ -330,6 +331,11 @@
   padding-left: 6px;
 }
 
+.inline-table-form__cell--temporal {
+  padding-right: 6px;
+  padding-left: 6px;
+}
+
 .inline-table-form__td--center,
 .inline-table-form__th--center {
   justify-content: center;
@@ -376,6 +382,10 @@
 
 .inline-table-form__control--date {
   min-width: min(136px, 100%);
+}
+
+.inline-table-form__control--time {
+  min-width: min(112px, 100%);
 }
 
 .inline-table-form__control:hover,

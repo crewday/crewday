@@ -342,6 +342,11 @@ describe("InlineTableForm", () => {
     expect(input).toHaveAttribute("step", "900");
     expect(input).toBeDisabled();
     expect((input as HTMLInputElement).value).toBe("09:30");
+    expect(cssDeclarationValue(
+      inlineTableCss,
+      ".inline-table-form__control--time",
+      "min-width",
+    )).toBe("min(112px, 100%)");
   });
 
   it("keeps date fields wide enough for ISO date values", () => {
@@ -368,6 +373,32 @@ describe("InlineTableForm", () => {
     expect(inlineTableCss).toMatch(
       /@media\s*\(max-width:\s*720px\)[\s\S]*\.inline-table-form__td\s*\{[\s\S]*grid-template-columns:\s*minmax\(90px,\s*0\.35fr\)\s*minmax\(0,\s*1fr\);/,
     );
+  });
+
+  it("keeps temporal table cells compact around native date and time controls", () => {
+    expect(cssDeclarationValue(
+      inlineTableCss,
+      ".inline-table-form__cell--temporal",
+      "padding-right",
+    )).toBe("6px");
+    expect(cssDeclarationValue(
+      inlineTableCss,
+      ".inline-table-form__cell--temporal",
+      "padding-left",
+    )).toBe("6px");
+  });
+
+  it("lets wide inline tables scroll horizontally to keep row actions reachable", () => {
+    expect(cssDeclarationValue(
+      inlineTableCss,
+      ".inline-table-form__table",
+      "overflow-x",
+    )).toBe("auto");
+    expect(cssDeclarationValue(
+      inlineTableCss,
+      ".inline-table-form__table",
+      "overflow-y",
+    )).toBe("hidden");
   });
 
   it("toggles fixed tag options and normalizes duplicate unknown values into option order", () => {
