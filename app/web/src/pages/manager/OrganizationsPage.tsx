@@ -70,7 +70,7 @@ interface OrganizationCreateDraft {
   country: string;
 }
 
-// `WorkRole` is not currently exported from api.ts — read the legacy
+// `WorkRole` is not currently exported from api.ts, read the legacy
 // `Role` shape (id + name) used everywhere else for the rate table.
 interface WorkRoleLite {
   id: string;
@@ -143,7 +143,7 @@ async function fetchWorkRoles(): Promise<WorkRoleLite[]> {
   return listData(rows);
 }
 
-// §22 — Organizations directory. Lists every organization in the active
+// §22, Organizations directory. Lists every organization in the active
 // workspace (clients we bill, suppliers that bill us, or both) and lets
 // the manager drill into one to see its rate card, recent booking
 // billings, and the vendor invoices flowing through it.
@@ -196,7 +196,7 @@ export default function OrganizationsPage() {
         <div className="panel">
           <p className="muted">
             No organizations in this workspace. Create one when an owner enters
-            "agency mode" — link a property to a client, or register a supplier
+            "agency mode", link a property to a client, or register a supplier
             to route agency-supplied engagements.
           </p>
         </div>
@@ -598,7 +598,7 @@ function OrganizationDetail({
                 {detail.properties_billed.map((p) => (
                   <li key={p.id}>
                     <strong>{p.name}</strong>
-                    <span className="muted"> — {p.city}</span>
+                    <span className="muted">, {p.city}</span>
                   </li>
                 ))}
               </ul>

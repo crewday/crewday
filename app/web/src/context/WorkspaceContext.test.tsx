@@ -12,7 +12,7 @@ import * as preferences from "@/lib/preferences";
 // must see the correct slug from their very first render, not after
 // some deferred `useEffect` fires. A regression here would leave the
 // cache wedged under `["w", "_", ...]` while the actual fetch went to
-// `/w/<slug>/...` — a subtle inconsistency that SSE invalidation then
+// `/w/<slug>/...`, a subtle inconsistency that SSE invalidation then
 // can't repair.
 
 function Providers({ children }: { children: ReactNode }) {
@@ -36,11 +36,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("<WorkspaceProvider> — getter wiring timing", () => {
+describe("<WorkspaceProvider>, getter wiring timing", () => {
   it("exposes the cookie-resolved slug to children synchronously on first render", () => {
     vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("acme");
 
-    // Observer that samples `qk.*` during its own render — the same
+    // Observer that samples `qk.*` during its own render, the same
     // thing `useQuery({ queryKey: qk.tasks() })` does. If the getter
     // isn't wired until after an effect, this observer would see the
     // `"_"` sentinel instead of `"acme"`.
@@ -83,7 +83,7 @@ describe("<WorkspaceProvider> — getter wiring timing", () => {
       </Providers>,
     );
 
-    // Slug remains correctly resolved after repeated renders — the
+    // Slug remains correctly resolved after repeated renders, the
     // getter still points at a live `slugRef`.
     expect(qk.tasks()).toEqual(["w", "acme", "tasks"]);
     expect(resolveApiPath("/api/v1/tasks")).toBe("/w/acme/api/v1/tasks");

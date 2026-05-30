@@ -9,10 +9,10 @@ import {
 } from "react";
 import {
   ASSET_ICON_NAMES,
-  AssetIcon,
   isAssetIconName,
   type AssetIconName,
-} from "@/components/AssetIcon";
+} from "@/components/AssetIcon.registry";
+import { AssetIcon } from "@/components/AssetIcon";
 import type { FieldRequirement } from "@/components/FormField";
 import SearchField from "@/components/SearchField";
 

@@ -1,24 +1,24 @@
-// crewday — LoginPage component test.
+// crewday, LoginPage component test.
 //
 // What this covers:
-//   1. Happy path — click "Use passkey" → mocked `navigator.credentials
+//   1. Happy path, click "Use passkey" → mocked `navigator.credentials
 //      .get` resolves → the passkey ceremony finishes → the auth store
 //      flips to authenticated → `<Navigate>` fires to the sanitised
 //      `?next=` path (closes cd-g5c2 for the consumption point).
-//   2. Error branches — `PasskeyCancelledError` surfaces an inline
+//   2. Error branches, `PasskeyCancelledError` surfaces an inline
 //      info notice; `PasskeyUnsupportedError` surfaces a danger notice;
 //      `ApiError` 429 surfaces the rate-limit copy. The button re-arms
 //      after each failure.
-//   3. `sanitizeNext` wiring — a crafted `?next=https://evil.example/`
+//   3. `sanitizeNext` wiring, a crafted `?next=https://evil.example/`
 //      does NOT survive into `<Navigate>`; the user lands on the
 //      role-appropriate landing page instead.
 //
 // What this does NOT cover (and why):
 //   - The Playwright pixel-diff against `.playwright-mcp/public-site/
-//     LoginPage.tsx.png` — that's cd-4z54's e2e acceptance, run by the
+//     LoginPage.tsx.png`, that's cd-4z54's e2e acceptance, run by the
 //     Director. A component-level snapshot here would duplicate the
 //     check in jsdom where CSS is only minimally applied.
-//   - The WebAuthn decode/encode paths — owned by
+//   - The WebAuthn decode/encode paths, owned by
 //     `passkey.test.ts`; this test mounts LoginPage against the real
 //     `@/auth` module so we catch a wiring regression (e.g. the page
 //     bypassing `loginWithPasskey()`) but we don't re-verify the
@@ -131,7 +131,7 @@ afterEach(() => {
   __resetApiProvidersForTests();
   vi.unstubAllGlobals();
   // Clear the `navigator.credentials.get` stub so the next test starts
-  // from a clean slate — `installCredentialsGet` replaces a property
+  // from a clean slate, `installCredentialsGet` replaces a property
   // on a shared global; leaving it behind is a cross-test leak.
   const nav = globalThis.navigator as unknown as { credentials?: { get?: unknown } };
   if (nav.credentials) delete (nav.credentials as { get?: unknown }).get;
@@ -139,7 +139,7 @@ afterEach(() => {
 
 // ── Tests ─────────────────────────────────────────────────────────
 
-describe("<LoginPage> — happy path", () => {
+describe("<LoginPage>, happy path", () => {
   it("runs the ceremony, calls useAuth().loginWithPasskey, and navigates to the sanitised ?next", async () => {
     const { calls, restore } = installFetch({
       // Bootstrap probe: no session yet.
@@ -186,7 +186,7 @@ describe("<LoginPage> — happy path", () => {
         // Let the two-request chain (start, navigator.get, finish, /me) settle.
         await new Promise((r) => setTimeout(r, 0));
       });
-      // Second microtask flush — the ceremony chains two awaits.
+      // Second microtask flush, the ceremony chains two awaits.
       await flush();
 
       // WebAuthn helper was called exactly once.
@@ -393,7 +393,7 @@ describe("<LoginPage> — happy path", () => {
   });
 });
 
-describe("<LoginPage> — error branches", () => {
+describe("<LoginPage>, error branches", () => {
   it("surfaces a soft inline notice when the user cancels the passkey prompt", async () => {
     const { restore } = installFetch({
       "/api/v1/auth/me": [{ status: 401, body: { detail: "no session" } }],
@@ -511,7 +511,7 @@ describe("<LoginPage> — error branches", () => {
 
       const notice = screen.getByTestId("login-error");
       expect(notice.textContent).toContain("didn't respond in time");
-      // Timeout is recoverable — info tone, not danger.
+      // Timeout is recoverable, info tone, not danger.
       expect(notice.className).not.toContain("login__notice--danger");
       expect(button.disabled).toBe(false);
     } finally {
@@ -578,7 +578,7 @@ describe("<LoginPage> — error branches", () => {
   });
 });
 
-describe("<LoginPage> — sanitizeNext wiring (closes cd-g5c2)", () => {
+describe("<LoginPage>, sanitizeNext wiring (closes cd-g5c2)", () => {
   it("carries a sanitised ?next into the recover link", async () => {
     const { restore } = installFetch({
       "/api/v1/auth/me": [
@@ -803,11 +803,11 @@ describe("<LoginPage> — sanitizeNext wiring (closes cd-g5c2)", () => {
   });
 });
 
-describe("<LoginPage> — concurrency guard", () => {
+describe("<LoginPage>, concurrency guard", () => {
   it("coalesces rapid double-clicks into a single ceremony", async () => {
     // The button's `disabled` attribute only blocks the *next* click
     // after React commits the pending state. A burst of synchronous
-    // clicks in the same tick can bypass that — the inflight-ref guard
+    // clicks in the same tick can bypass that, the inflight-ref guard
     // is what stops them from firing two `/passkey/login/start` POSTs.
     const { calls, restore } = installFetch({
       "/api/v1/auth/me": [
@@ -831,7 +831,7 @@ describe("<LoginPage> — concurrency guard", () => {
         },
       ],
       // Only ONE `/start` response is scripted. A second POST would
-      // throw "No more responses for: …" and fail the test — which is
+      // throw "No more responses for: …" and fail the test, which is
       // precisely the regression we want to catch.
       "/api/v1/auth/passkey/login/start": [
         { status: 200, body: { challenge_id: "ch_1", options: { challenge: "AQID" } } },
@@ -865,9 +865,9 @@ describe("<LoginPage> — concurrency guard", () => {
   });
 });
 
-describe("<LoginPage> — already-signed-in bounce", () => {
+describe("<LoginPage>, already-signed-in bounce", () => {
   it("redirects straight to the role landing if the user is already authenticated on mount", async () => {
-    // Bootstrap probe returns 200 — the user already has a session,
+    // Bootstrap probe returns 200, the user already has a session,
     // typically from a browser back/forward that re-surfaced /login.
     const { restore } = installFetch({
       "/api/v1/auth/me": [
@@ -901,7 +901,7 @@ describe("<LoginPage> — already-signed-in bounce", () => {
   });
 });
 
-describe("<LoginPage> — admin-next role check (closes cd-28s7)", () => {
+describe("<LoginPage>, admin-next role check (closes cd-28s7)", () => {
   it("drops ?next=/admin/dashboard for a non-admin already-signed-in worker and lands on prefixed today", async () => {
     // Phishing surface: a crafted `/login?next=/admin/dashboard` would
     // otherwise honour `next` verbatim and bounce the worker onto the

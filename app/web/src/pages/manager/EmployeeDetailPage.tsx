@@ -251,6 +251,7 @@ function subscribeHashChange(onStoreChange: () => void): () => void {
   return () => window.removeEventListener("hashchange", onStoreChange);
 }
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 export default function EmployeeDetailPage() {
   const { eid = "" } = useParams<{ eid: string }>();
   const activeTab = useSyncExternalStore(

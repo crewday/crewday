@@ -6,7 +6,7 @@
 //
 // Bookings are the authoritative render of a rota slot for a date
 // (§09 "Nightly materialiser"). A rota slot only renders when no
-// booking covers its time range — so the worker sees tomorrow's shift
+// booking covers its time range, so the worker sees tomorrow's shift
 // even before the nightly job has cut the booking.
 
 import type { MySchedulePayload, ScheduleRulesetSlot, SchedulerTaskView } from "@/types/api";
@@ -35,7 +35,7 @@ function uncoveredRotaFor(cell: DayCell): { slot: ScheduleRulesetSlot; property_
   });
 }
 
-// A "container" is any block that can host tasks on the timeline — a
+// A "container" is any block that can host tasks on the timeline, a
 // materialised booking or an uncovered rota slot. Tasks bind to a
 // container by property_id + time overlap (per §06: a task belongs to
 // the shift it runs during, not to a standalone clock time).
@@ -113,7 +113,7 @@ function DayTimelineBlocks({
   data: MySchedulePayload;
   window: TimeWindow;
 }) {
-  // Tasks live INSIDE their parent container now — a task chip is a
+  // Tasks live INSIDE their parent container now, a task chip is a
   // child of its booking/rota block, positioned by clock time relative
   // to the block's start. Orphan tasks (no parent) render as
   // standalone chips pinned to their own clock time.
@@ -165,7 +165,7 @@ function DayTimelineBlocks({
             } as React.CSSProperties}
             data-property={c.propertyId}
           >
-            {/* Property name floats above the block — its baseline sits
+            {/* Property name floats above the block, its baseline sits
                 on the block's top border, like a ledger tab glued to a
                 file folder. The block is the content; the label names
                 the "where" in italic serif. */}
@@ -206,7 +206,7 @@ function DayTimelineBlocks({
         );
       })}
       {orphans.map((t) => {
-        // Orphan tasks have no parent block to live inside — pin them
+        // Orphan tasks have no parent block to live inside, pin them
         // directly to the rota column at their own clock time. The
         // --orphan modifier gives them the rust dashed outline so they
         // read as "outside the shift" without needing a lane.
@@ -242,14 +242,14 @@ export function DayTimeline({
   const avail = availability(cell);
   // Hour labels at EVERY hour in the visible window. Major hours
   // (every 3rd) render slightly bolder so the eye still gets anchor
-  // points, while minor hours are rendered faint — together they
+  // points, while minor hours are rendered faint, together they
   // make rota blocks read as sitting on a specific clock time rather
   // than floating between unlabeled gridlines.
   const labels: { hour: number; top: number; major: boolean }[] = [];
   for (let h = Math.ceil(w.startMin / 60); h * 60 <= w.endMin; h++) {
     labels.push({ hour: h, top: posTop(h * 60, w), major: h % 3 === 0 });
   }
-  // Rail duration bar. Clamp to the visible window — a 24h leave bar
+  // Rail duration bar. Clamp to the visible window, a 24h leave bar
   // fills the canvas; a 08:00–17:00 shift bar spans just that slice.
   // Null range (worker "Off") renders no bar, only the sideways text.
   const railBar = (() => {

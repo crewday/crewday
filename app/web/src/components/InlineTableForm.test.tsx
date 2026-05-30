@@ -18,9 +18,8 @@ import {
   type InlineTableRow,
   InlineTextField,
   InlineTimeField,
-  inlineTableNextCursor,
-  useInlineTableInfiniteRows,
 } from "./InlineTableForm";
+import { inlineTableNextCursor, useInlineTableInfiniteRows } from "./InlineTableForm.rows";
 import type { ListEnvelope } from "@/lib/listResponse";
 import formsCss from "@/styles/forms.css?raw";
 import inlineTableCss from "@/styles/inline-table-form.css?raw";

@@ -1,7 +1,7 @@
 import { formatContextWindow } from "@/lib/numberFormat";
 import type { LlmGraphPayload } from "@/types";
-import { capabilityTagLabel } from "../CapabilityTagChip";
-import { formatUsageSummary } from "../LlmUsageTotals";
+import { capabilityTagLabel } from "../CapabilityTagChip.lib";
+import { formatUsageSummary } from "../LlmUsageTotals.lib";
 import { thinkingLevelLabel } from "./llmThinking";
 import type { LlmIndexes } from "./llmIndexes";
 import type { Highlighted, Selection } from "../types";

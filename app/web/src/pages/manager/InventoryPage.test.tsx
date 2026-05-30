@@ -733,7 +733,7 @@ describe("<InventoryPage>", () => {
       await screen.findByText("Paper towels");
 
       fireEvent.click(screen.getByRole("button", { name: "Start stocktake" }));
-      const title = await screen.findByText("Stocktake — Villa Rosa");
+      const title = await screen.findByText("Stocktake, Villa Rosa");
       const dialog = title.closest("dialog")!;
       const paperReason = within(dialog).getByLabelText("Paper towels reason");
       expect(paperReason).toBeDisabled();
@@ -826,7 +826,7 @@ describe("<InventoryPage>", () => {
       await screen.findByText("Paper towels");
 
       fireEvent.click(screen.getByRole("button", { name: "Start stocktake" }));
-      const title = await screen.findByText("Stocktake — Villa Rosa");
+      const title = await screen.findByText("Stocktake, Villa Rosa");
       const dialog = title.closest("dialog")!;
       fireEvent.change(within(dialog).getByLabelText("Paper towels observed count"), {
         target: { value: "-1" },
@@ -867,7 +867,7 @@ describe("<InventoryPage>", () => {
       await screen.findByText("Paper towels");
 
       fireEvent.click(screen.getByRole("button", { name: "Start stocktake" }));
-      const title = await screen.findByText("Stocktake — Villa Rosa");
+      const title = await screen.findByText("Stocktake, Villa Rosa");
       const dialog = title.closest("dialog")!;
       fireEvent.change(within(dialog).getByLabelText("Paper towels observed count"), {
         target: { value: "8" },
@@ -875,7 +875,7 @@ describe("<InventoryPage>", () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Commit 1 change" }));
 
       expect(await within(dialog).findByText("Commit failed")).toBeInTheDocument();
-      expect(within(dialog).getByText("Stocktake — Villa Rosa")).toBeInTheDocument();
+      expect(within(dialog).getByText("Stocktake, Villa Rosa")).toBeInTheDocument();
       expect(within(dialog).getByDisplayValue("8")).toBeInTheDocument();
 
       fireEvent.click(within(dialog).getByRole("button", { name: "Discard changes" }));
@@ -897,7 +897,7 @@ describe("<InventoryPage>", () => {
       liveItems.push(SECOND_ITEM);
       fireEvent.click(screen.getByRole("button", { name: "Start stocktake" }));
 
-      const sheet = await screen.findByText("Stocktake — Villa Rosa");
+      const sheet = await screen.findByText("Stocktake, Villa Rosa");
       expect(sheet).toBeInTheDocument();
       const dialog = sheet.closest("dialog")!;
       await waitFor(() => {

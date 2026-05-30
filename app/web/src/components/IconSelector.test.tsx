@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ASSET_ICON_NAMES, isAssetIconName } from "./AssetIcon";
+import { ASSET_ICON_NAMES, isAssetIconName } from "./AssetIcon.registry";
 import IconSelector from "./IconSelector";
 
 describe("IconSelector", () => {

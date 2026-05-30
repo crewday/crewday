@@ -115,12 +115,12 @@ describe("SettingsPage", () => {
     expect(screen.getByText(/Workspace-wide configuration only/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "My profile" })).toHaveAttribute("href", "/w/acme/me");
 
-    const workspacePrefs = await screen.findByLabelText("Agent preferences — Workspace");
+    const workspacePrefs = await screen.findByLabelText("Agent preferences, Workspace");
     expect(workspacePrefs).toBeInTheDocument();
     expect(workspacePrefs).toHaveAttribute("data-scope", "workspace");
 
     expect(screen.queryByRole("heading", { name: "Agent approval mode" })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Agent preferences — You")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Agent preferences, You")).not.toBeInTheDocument();
 
     await waitFor(() => {
       expect(fetchJsonMock).toHaveBeenCalledWith("/api/v1/settings");

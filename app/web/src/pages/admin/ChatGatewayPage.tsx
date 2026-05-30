@@ -58,7 +58,7 @@ function CopyField({ value, label }: { value: string; label: string }) {
   return (
     <div className="chat-gateway-panel__webhook">
       <span className="muted">{label}</span>
-      <code className="inline-code chat-gateway-panel__url">{value || "—"}</code>
+      <code className="inline-code chat-gateway-panel__url">{value || ","}</code>
       <button
         type="button"
         className="btn btn--ghost btn--sm"
@@ -122,7 +122,7 @@ function ProviderPanel({
               <td>{c.label}<div className="table__sub mono">{c.field}</div></td>
               <td className="mono">{c.display_stub}</td>
               <td>
-                <DateTime value={c.updated_at} showTime className="mono muted" empty="—" />
+                <DateTime value={c.updated_at} showTime className="mono muted" empty="," />
                 <div className="table__sub">{c.updated_by ?? ""}</div>
               </td>
               <td>
@@ -156,7 +156,7 @@ function ProviderPanel({
                     ) : null}
                   </td>
                   <td>
-                    <DateTime value={t.last_sync_at} showTime className="mono muted" empty="—" />
+                    <DateTime value={t.last_sync_at} showTime className="mono muted" empty="," />
                   </td>
                   <td>
                     <button type="button" className="btn btn--ghost btn--sm" disabled>Resync</button>
@@ -173,7 +173,7 @@ function ProviderPanel({
         <CopyField label="Verify token" value={p.verify_token_stub} />
         <p className="muted chat-gateway-panel__hint">
           Paste these into the Meta Business Manager → WhatsApp → Configuration panel when
-          provisioning or rotating. Both values are workspace-agnostic — every riding workspace
+          provisioning or rotating. Both values are workspace-agnostic, every riding workspace
           shares them.
         </p>
       </div>
@@ -332,13 +332,13 @@ export default function AdminChatGatewayPage() {
         <StatCard
           label="24h outbound"
           value={wa ? wa.outbound_24h : 0}
-          sub={wa ? `cap ${wa.daily_outbound_cap} / day` : "—"}
+          sub={wa ? `cap ${wa.daily_outbound_cap} / day` : ","}
         />
         <StatCard
           label="Delivery errors"
           value={formatPercent(wa?.delivery_error_rate_pct, {
             input: "percent",
-            fallback: "—",
+            fallback: ",",
             minimumFractionDigits: 1,
             maximumFractionDigits: 1,
           })}
@@ -359,7 +359,7 @@ export default function AdminChatGatewayPage() {
         <p className="muted">
           The chat gateway authenticates the <em>transport</em>; the <em>agent</em> authenticates
           as the delegating user. Every turn runs under a delegated token minted from that user's
-          session, so the agent can only do what the user could do themselves via the CLI — no
+          session, so the agent can only do what the user could do themselves via the CLI, no
           more, no less. Provider credentials on this page therefore carry no app-level authority;
           rotating them never grants or revokes a user's permissions.
         </p>
@@ -385,9 +385,9 @@ export default function AdminChatGatewayPage() {
         </p>
         <dl className="settings-kv">
           <dt>Default per-workspace sub-cap</dt>
-          <dd className="mono">{wa ? wa.per_workspace_soft_cap : "—"} / day</dd>
+          <dd className="mono">{wa ? wa.per_workspace_soft_cap : ","} / day</dd>
           <dt>Deployment-wide ceiling (Meta tier)</dt>
-          <dd className="mono">{wa ? wa.daily_outbound_cap : "—"} / day</dd>
+          <dd className="mono">{wa ? wa.daily_outbound_cap : ","} / day</dd>
         </dl>
       </div>
 
@@ -401,7 +401,7 @@ export default function AdminChatGatewayPage() {
           <>
             <p className="muted">
               These workspaces bring their own Meta Cloud account. The deployment does not hold
-              their credentials — this list is audit-only.
+              their credentials, this list is audit-only.
             </p>
             <table className="table">
               <thead>
@@ -418,7 +418,7 @@ export default function AdminChatGatewayPage() {
                     <td className="mono">{o.phone_display}</td>
                     <td><Chip tone={STATUS_TONE[o.status]} size="sm">{o.status.replace("_", " ")}</Chip></td>
                     <td><DateTime value={o.created_at} showTime className="mono muted" /></td>
-                    <td className="muted">{o.reason ?? "—"}</td>
+                    <td className="muted">{o.reason ?? ","}</td>
                   </tr>
                 ))}
               </tbody>

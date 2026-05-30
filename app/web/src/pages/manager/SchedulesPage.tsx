@@ -259,6 +259,7 @@ function clearMapValue<TValue>(
   return next;
 }
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 export default function SchedulesPage() {
   const queryClient = useQueryClient();
   const tableShellRef = useRef<HTMLDivElement | null>(null);
@@ -596,7 +597,7 @@ export default function SchedulesPage() {
       </div>
 
       <div className="panel">
-        <header className="panel__head"><h2>Preview — next 7 days</h2></header>
+        <header className="panel__head"><h2>Preview, next 7 days</h2></header>
         <ul className="task-list task-list--desk">
           {schedules.filter((s) => !s.paused).map((s) => {
             const p = s.property_id ? propsById.get(s.property_id) : undefined;

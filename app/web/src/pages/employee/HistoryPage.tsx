@@ -114,7 +114,7 @@ export default function HistoryPage() {
     <>
       <PageHeader
         title="History"
-        sub="Everything already wrapped up — tasks, chats, expenses and leaves."
+        sub="Everything already wrapped up, tasks, chats, expenses and leaves."
       />
       <section className="phone__section">
         <PageTabs

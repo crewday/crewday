@@ -1,13 +1,13 @@
 import {
-  forwardRef,
   useImperativeHandle,
   useLayoutEffect,
   useRef,
   type TextareaHTMLAttributes,
+  type Ref,
 } from "react";
 
 // Drop-in replacement for `<textarea>` that resizes to fit its
-// content. By default the textarea grows without bound — no scrollbars
+// content. By default the textarea grows without bound, no scrollbars
 // ever appear. Pass `maxHeight` only for surfaces (e.g. chat composers)
 // that must stay inside a fixed slot; at that point overflow becomes a
 // scrollbar. Works with both controlled and uncontrolled use.
@@ -15,13 +15,18 @@ export interface AutoGrowTextareaProps
   extends TextareaHTMLAttributes<HTMLTextAreaElement> {
   /** Optional pixel cap. Omit to let the textarea grow indefinitely. */
   maxHeight?: number;
+  ref?: Ref<HTMLTextAreaElement>;
 }
 
-const AutoGrowTextarea = forwardRef<HTMLTextAreaElement, AutoGrowTextareaProps>(
-  function AutoGrowTextarea(
-    { maxHeight, rows = 1, onChange, onInput, value, ...rest },
-    forwarded,
-  ) {
+function AutoGrowTextarea({
+  maxHeight,
+  rows = 1,
+  onChange,
+  onInput,
+  value,
+  ref: forwarded,
+  ...rest
+}: AutoGrowTextareaProps) {
     // code-health: ignore[params] Forward-ref textarea preserves native controlled props plus maxHeight without hiding HTML attributes behind a wrapper.
     const localRef = useRef<HTMLTextAreaElement | null>(null);
     useImperativeHandle(forwarded, () => localRef.current as HTMLTextAreaElement);
@@ -40,7 +45,7 @@ const AutoGrowTextarea = forwardRef<HTMLTextAreaElement, AutoGrowTextareaProps>(
       const full = el.scrollHeight + borderY;
       const next = maxHeight != null ? Math.min(full, maxHeight) : full;
       el.style.height = next + "px";
-      // Uncapped: suppress scrollbars unconditionally — the height
+      // Uncapped: suppress scrollbars unconditionally, the height
       // already matches the content. Capped: let overflow-y fall back
       // to the stylesheet so scrollbars appear once the cap is hit.
       el.style.overflowY = maxHeight != null ? "" : "hidden";
@@ -66,7 +71,6 @@ const AutoGrowTextarea = forwardRef<HTMLTextAreaElement, AutoGrowTextareaProps>(
         {...rest}
       />
     );
-  },
-);
+}
 
 export default AutoGrowTextarea;

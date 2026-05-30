@@ -2,18 +2,18 @@
 // view"). Phone stacks one day card per row; desktop stacks one
 // 7-column Mon..Sun week grid per row (see `variant`). Both paths
 // share the query, the sentinels, the monthbar, the anchor-to-today
-// settle phase, and the Today FAB — the only thing that differs is
+// settle phase, and the Today FAB, the only thing that differs is
 // how a week's cells lay out inside the week group.
 //
 // All scroll plumbing (callback ref → `findScrollRoot`, top + bottom
 // IntersectionObservers, scroll-preservation deltas, today re-anchor
 // loop, monthbar topmost-cell observer) lives in `useInfiniteAgenda`
-// — this body just renders the bag of values + handlers it returns.
+//, this body just renders the bag of values + handlers it returns.
 // Sticky chrome (banner, monthbar, dialogs footer) lives in
 // `ScheduleChrome`.
 //
 // Why this layering matters: `/schedule` is the single view a worker
-// hits to know where they are working today and tomorrow — it has to
+// hits to know where they are working today and tomorrow, it has to
 // feel fast, land in the right place, and keep working when the
 // worker idly thumbs back to last Tuesday. A stalled prepend or a
 // monthbar that can't decide which month it's looking at would
@@ -26,8 +26,8 @@ import { SchedulePhoneWeek } from "./PhoneDay";
 import {
   ScheduleBanner,
   ScheduleDialogsFooter,
-  computePendingState,
 } from "./ScheduleChrome";
+import { computePendingState } from "./ScheduleChrome.lib";
 import type { DayCell } from "./lib/buildCells";
 import { addDays, isoDate, parseIsoDate, startOfIsoWeek } from "./lib/dateHelpers";
 import { propertyColor } from "./lib/palette";
@@ -86,7 +86,7 @@ export function InfiniteScheduleBody(props: BodyProps) {
   // ── Render ─────────────────────────────────────────────────────────
   //
   // We always mount the `.schedule` wrapper so the callback ref above
-  // fires on first paint and captures the scroll root — even while
+  // fires on first paint and captures the scroll root, even while
   // the initial query is in flight. Loading / failure states render
   // inside the wrapper instead of early-returning in place of it.
 
@@ -166,7 +166,7 @@ export function InfiniteScheduleBody(props: BodyProps) {
           // sit inside the old grid-panel footer. Rendered above the
           // agenda so it's seen on first paint and then scrolls away
           // as the worker thumbs through weeks; the monthbar above
-          // stays pinned. Phone drops it — cards are labelled in-line.
+          // stays pinned. Phone drops it, cards are labelled in-line.
           <div className="schedule__intro">
             <div className="schedule__legend">
               {(data.properties ?? []).map((p) => (

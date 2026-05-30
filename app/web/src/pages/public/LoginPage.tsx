@@ -1,4 +1,4 @@
-// crewday — production `/login` surface.
+// crewday, production `/login` surface.
 //
 // Passkey is the only credential (§03 Principles): a single "Use
 // passkey" button drives the discoverable-credential ceremony; the
@@ -12,7 +12,7 @@
 // `login__notice` element (`.login__notice[--danger]` in globals.css)
 // surfaces passkey-ceremony errors required by §14 "Error handling".
 // The button copy is wrapped in a `<span>` so pending copy can swap in
-// without disturbing the icon slot — the span has no styling of its own,
+// without disturbing the icon slot, the span has no styling of its own,
 // it's just a DOM seam.
 //
 // Auth plumbing lands in `@/auth` (cd-kc7u): `useAuth()` exposes the
@@ -53,14 +53,14 @@ export default function LoginPage() {
   // (or a keyboard Enter-spam) in the same event tick can enqueue two
   // ceremonies before the attribute is applied. A ref flips
   // synchronously inside the handler, preempting the second call before
-  // it hits `runPasskeyLoginCeremony` — otherwise the server sees two
+  // it hits `runPasskeyLoginCeremony`, otherwise the server sees two
   // `/passkey/login/start` POSTs and the browser's WebAuthn UI
   // rejects the second `navigator.credentials.get()` with
   // `InvalidStateError`.
   const inflightRef = useRef(false);
 
   // Parse `?next=...` once per pathname/search change. We always filter
-  // through `sanitizeNext` — an attacker-crafted `/login?next=https://
+  // through `sanitizeNext`, an attacker-crafted `/login?next=https://
   // evil.example/` must NOT reach `<Navigate to={next}>`. This is the
   // defence-in-depth consumption point for cd-g5c2; the emission
   // points in `<RequireAuth>` and `createOnUnauthorized` already
@@ -77,7 +77,7 @@ export default function LoginPage() {
     setForm({ kind: "pending" });
     try {
       await loginWithPasskey();
-      // The `isAuthenticated` branch below handles the redirect — keep
+      // The `isAuthenticated` branch below handles the redirect, keep
       // the form in `pending` so the button stays disabled through the
       // commit that mounts `<Navigate>`.
     } catch (err) {
@@ -93,7 +93,7 @@ export default function LoginPage() {
   // Already-signed-in users who land on /login (bookmark, back-button)
   // get bounced straight to their role landing. `status === 'loading'`
   // (bootstrap probe mid-flight) falls through to the card so the
-  // passkey button can render — `<AuthProvider>` will re-run the probe
+  // passkey button can render, `<AuthProvider>` will re-run the probe
   // but we don't want to flash a spinner here.
   if (isAuthenticated) {
     return <Navigate to={pickLoginLanding(safeNext, user)} replace />;

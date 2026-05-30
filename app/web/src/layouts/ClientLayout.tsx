@@ -17,10 +17,10 @@ import { initialNavCollapsed, persistNavCollapsed } from "@/lib/preferences";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { Me, User } from "@/types/api";
 
-// §22 — client portal layout. A read-mostly shell with a narrower
+// §22, client portal layout. A read-mostly shell with a narrower
 // nav: properties billed to the user, billable hours, quotes &
 // invoices, and the shared `/me` profile screen. The agent sidebar
-// is intentionally not mounted here — clients don't drive the
+// is intentionally not mounted here, clients don't drive the
 // crewday agent in v1; their actions are the accept/reject of
 // quotes and the read of billing rollups.
 
@@ -52,7 +52,7 @@ function initialsOf(name: string): string {
 
 export default function ClientLayout() {
   const { data } = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
-  // §22 — the client's own User row is the source of truth for the
+  // §22, the client's own User row is the source of truth for the
   // footer; `me.employee` is a legacy compat projection that only
   // the worker shell consumes. Hand the User in directly so the
   // sidebar shows the right person.

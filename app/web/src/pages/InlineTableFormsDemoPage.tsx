@@ -14,8 +14,8 @@ import {
   type InlineTableRow,
   InlineTextField,
   InlineTimeField,
-  useInlineTableInfiniteRows,
 } from "@/components/InlineTableForm";
+import { useInlineTableInfiniteRows } from "@/components/InlineTableForm.rows";
 import type { ListEnvelope } from "@/lib/listResponse";
 import { usePatchReducer } from "@/lib/usePatchReducer";
 
@@ -158,6 +158,7 @@ function nextDemoRowId(prefix: string) {
   return `${prefix}-${Date.now()}-${demoRowCounter}`;
 }
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 export default function InlineTableFormsDemoPage() {
   const [demoState, setDemoState] = usePatchReducer<InlineTableFormsDemoState>(() => ({
     tasks: initialTasks,

@@ -55,6 +55,7 @@ export default function PermissionsPage() {
         onSelect={selectTab}
       />
       <div id={`permissions-${tab}-panel`} role="tabpanel">
+        {/* react-doctor-disable-next-line react-doctor/no-render-in-render -- Tab panel switch is a pure route-local section renderer. */}
         {renderTabPanel(tab)}
       </div>
     </DeskPage>

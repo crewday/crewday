@@ -15,7 +15,7 @@ import type { ApiToken, ApiTokenCreated } from "@/types/api";
 // §03 Personal access tokens. Scoped to `me:*` only; subject narrowing
 // is anchored on the session, so a maid who mints a token can only
 // ever see her own rows through it. The manager /tokens page hides
-// these entirely — this is the only surface where they appear.
+// these entirely, this is the only surface where they appear.
 
 const ME_SCOPES: TokenScopeOption[] = [
   { key: "me.tasks:read",     verb: "Read",  hint: "Your assigned tasks and the unassigned tasks you can claim." },
@@ -67,7 +67,7 @@ export default function PersonalTokensPanel() {
         <div className="panel__head-stack">
           <h2>Personal access tokens</h2>
           <p className="panel__sub">
-            For your own small scripts — print your tasks on a home printer, export your shifts
+            For your own small scripts, print your tasks on a home printer, export your shifts
             to a spreadsheet, or log expenses from your phone. Limited to{" "}
             <code className="inline-code">me:*</code> scopes; a personal token can only ever
             reach your own rows.

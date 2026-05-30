@@ -203,7 +203,7 @@ export default function SharingPanel({
             </h3>
             <p className="modal__sub">
               {confirm.kind === "share"
-                ? "Adds a managed_workspace link. The workspace gains operational access — its members can dispatch workers and create work orders here. Acceptance and invoicing remain bound to the owner workspace's policy."
+                ? "Adds a managed_workspace link. The workspace gains operational access, its members can dispatch workers and create work orders here. Acceptance and invoicing remain bound to the owner workspace's policy."
                 : "Removes the property_workspace link. In production this is approval-gated. The mock skips the approval and applies it immediately so you can see the result."}
             </p>
             <div className="modal__actions">

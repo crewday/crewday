@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, use, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useInRouterContext, useLocation } from "react-router-dom";
 import { clearWorkspaceCookie, persistWorkspace, readWorkspaceCookie } from "@/lib/preferences";
@@ -8,7 +8,7 @@ import { drainOfflineQueue } from "@/lib/offlineQueue";
 import { registerWorkspaceServiceWorker } from "@/lib/pwa";
 import { workspaceSlugFromRoutePath } from "@/lib/workspaceRoutes";
 
-// §02 — active workspace context. Server is authoritative via the
+// §02, active workspace context. Server is authoritative via the
 // `crewday_workspace` cookie; this hook mirrors it so the UI can
 // react synchronously to a switch without waiting for /me to
 // re-fetch. Switching invalidates every workspace-scoped query so
@@ -65,7 +65,7 @@ function WorkspaceProviderInner({ children, routePathname }: { children: ReactNo
 
   // Keep a ref the module-scope getters read from, so a slug switch is
   // visible to `fetchJson` and `qk.*` on the very next call without
-  // having to re-register. Updated during render — React runs the
+  // having to re-register. Updated during render, React runs the
   // parent's body before children render, so every child's first
   // `useQuery({ queryKey: qk.*() })` and every `fetchJson` call below
   // this provider reads the correct slug, including on the very first
@@ -76,7 +76,7 @@ function WorkspaceProviderInner({ children, routePathname }: { children: ReactNo
 
   // Register synchronously (not in `useEffect`) so children mounting
   // below this provider see the getter *before* their render fires
-  // `qk.*()` or `fetchJson` — otherwise the first render would cache
+  // `qk.*()` or `fetchJson`, otherwise the first render would cache
   // the query under `["w", "_", ...]` while the fetch itself resolves
   // to `/w/<slug>/...`, leaving subsequent SSE invalidations unable to
   // match the stranded cache entry. `registeredRef` keeps this a
@@ -93,7 +93,7 @@ function WorkspaceProviderInner({ children, routePathname }: { children: ReactNo
   const setWorkspaceId = useCallback((wsid: string) => {
     setWorkspaceIdState(wsid);
     persistWorkspace(wsid);
-    // Drop every cached entry — every query is potentially scoped to
+    // Drop every cached entry, every query is potentially scoped to
     // the previous workspace. /me will re-fetch with the new context.
     queryClient.invalidateQueries();
   }, [queryClient]);
@@ -134,7 +134,7 @@ function WorkspaceProviderInner({ children, routePathname }: { children: ReactNo
 }
 
 export function useWorkspace(): WorkspaceCtx {
-  const v = useContext(Ctx);
+  const v = use(Ctx);
   if (!v) throw new Error("useWorkspace must be used inside <WorkspaceProvider>");
   return v;
 }

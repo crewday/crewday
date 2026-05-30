@@ -193,10 +193,10 @@ export default function SchedulerPage() {
 
   const sub =
     scope === "client"
-      ? "Who's booked at your properties — week view."
+      ? "Who's booked at your properties, week view."
       : scope === "employee"
         ? "Your rota and scheduled tasks for the week."
-        : "Who is booked where — rota + materialised tasks (§06).";
+        : "Who is booked where, rota + materialised tasks (§06).";
 
   const title = "Scheduler";
 
@@ -266,7 +266,7 @@ export default function SchedulerPage() {
             {usersToShow.map((u) => (
               <div key={u.id} className="scheduler-row">
                 <div className="scheduler-row__user">
-                  <strong>{u.first_name || "—"}</strong>
+                  <strong>{u.first_name || ","}</strong>
                   {scope !== "client" && u.display_name && (
                     <span className="scheduler-row__sub">{u.display_name}</span>
                   )}

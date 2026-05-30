@@ -1,25 +1,25 @@
-// crewday — SignupPage component test.
+// crewday, SignupPage component test.
 //
 // Pins the `/signup` surface against the documented `/signup/start`
 // contract (§03 step 1). Mirrors the harness shape used by
-// RecoverPage.test (scripted-fetch FIFO) — no shared helper module
+// RecoverPage.test (scripted-fetch FIFO), no shared helper module
 // because the existing public-page suites all duplicate this scaffold
 // on purpose so each file stays readable on its own.
 //
 // What this covers:
-//   1. Happy path (202) — form + email + slug submit; confirmation
+//   1. Happy path (202), form + email + slug submit; confirmation
 //      view replaces the form; focus pivots to the heading.
-//   2. Closed deployment (404) — `/signup/*` returns 404 when
+//   2. Closed deployment (404), `/signup/*` returns 404 when
 //      capabilities flip signup off; the SPA must surface the
 //      "signups are closed" view rather than the generic fallback.
 //   3. Slug 409 (`slug_taken`) with one-click suggestion adoption.
 //   4. Slug 409 (`slug_reserved` / `slug_homoglyph_collision` /
-//      `slug_in_grace_period`) — distinct copy per kind.
-//   5. Turnstile — env-gated widget renders, threads captcha_token,
+//      `slug_in_grace_period`), distinct copy per kind.
+//   5. Turnstile, env-gated widget renders, threads captcha_token,
 //      and resets after 422 captcha errors.
-//   6. 429 rate-limit — danger notice; form stays visible.
-//   7. 500 generic — fallback copy; form stays visible.
-//   8. Concurrency guard — synchronous double-submit coalesces.
+//   6. 429 rate-limit, danger notice; form stays visible.
+//   7. 500 generic, fallback copy; form stays visible.
+//   8. Concurrency guard, synchronous double-submit coalesces.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -99,7 +99,7 @@ describe("normalizeWorkspaceSlugInput", () => {
   });
 });
 
-describe("<SignupPage> — happy path (202)", () => {
+describe("<SignupPage>, happy path (202)", () => {
   it("submits email + slug, then renders the 'check your email' confirmation", async () => {
     const { calls, restore } = installFetch({
       "/api/v1/signup/start": [{ status: 202, body: { status: "accepted" } }],
@@ -130,7 +130,7 @@ describe("<SignupPage> — happy path (202)", () => {
         desired_slug: "villasud",
       });
 
-      // Confirmation view replaces the form — `role="status"` for
+      // Confirmation view replaces the form, `role="status"` for
       // assistive tech, focus pivots to the heading.
       const sentPanel = screen.getByTestId("signup-sent");
       expect(sentPanel.getAttribute("role")).toBe("status");
@@ -146,7 +146,7 @@ describe("<SignupPage> — happy path (202)", () => {
   });
 });
 
-describe("<SignupPage> — closed deployment (404)", () => {
+describe("<SignupPage>, closed deployment (404)", () => {
   it("renders the 'signups are closed' view when /signup/start 404s", async () => {
     const { restore } = installFetch({
       "/api/v1/signup/start": [
@@ -169,7 +169,7 @@ describe("<SignupPage> — closed deployment (404)", () => {
 
       expect(screen.getByTestId("signup-closed")).toBeInTheDocument();
       expect(screen.getByText("Signups are closed")).toBeInTheDocument();
-      // Form is replaced — the user can't keep submitting against a
+      // Form is replaced, the user can't keep submitting against a
       // capability-off deployment.
       expect(screen.queryByTestId("signup-email")).toBeNull();
     } finally {
@@ -178,7 +178,7 @@ describe("<SignupPage> — closed deployment (404)", () => {
   });
 });
 
-describe("<SignupPage> — slug 409 with suggestion", () => {
+describe("<SignupPage>, slug 409 with suggestion", () => {
   it("renders the slug-taken notice and accepts the suggestion in one click", async () => {
     const { restore } = installFetch({
       "/api/v1/signup/start": [
@@ -224,7 +224,7 @@ describe("<SignupPage> — slug 409 with suggestion", () => {
   });
 });
 
-describe("<SignupPage> — slug 409 variants", () => {
+describe("<SignupPage>, slug 409 variants", () => {
   it.each([
     {
       kind: "slug_reserved",
@@ -269,7 +269,7 @@ describe("<SignupPage> — slug 409 variants", () => {
   });
 });
 
-describe("<SignupPage> — 422 captcha_required", () => {
+describe("<SignupPage>, 422 captcha_required", () => {
   it("surfaces the friendly fallback copy when no widget site key is configured", async () => {
     const { restore } = installFetch({
       "/api/v1/signup/start": [
@@ -298,7 +298,7 @@ describe("<SignupPage> — 422 captcha_required", () => {
   });
 });
 
-describe("<SignupPage> — Turnstile", () => {
+describe("<SignupPage>, Turnstile", () => {
   it("renders the widget when configured and sends captcha_token", async () => {
     vi.stubEnv("VITE_TURNSTILE_SITE_KEY", "site-key-123");
     const turnstile = installTurnstile();
@@ -376,7 +376,7 @@ describe("<SignupPage> — Turnstile", () => {
   );
 });
 
-describe("<SignupPage> — 429 rate-limit", () => {
+describe("<SignupPage>, 429 rate-limit", () => {
   it("surfaces the rate-limit notice and re-arms the form", async () => {
     const { restore } = installFetch({
       "/api/v1/signup/start": [
@@ -406,7 +406,7 @@ describe("<SignupPage> — 429 rate-limit", () => {
   });
 });
 
-describe("<SignupPage> — 500 generic fallback", () => {
+describe("<SignupPage>, 500 generic fallback", () => {
   it("surfaces the generic copy without leaking the server detail", async () => {
     const { restore } = installFetch({
       "/api/v1/signup/start": [
@@ -435,7 +435,7 @@ describe("<SignupPage> — 500 generic fallback", () => {
   });
 });
 
-describe("<SignupPage> — concurrency guard", () => {
+describe("<SignupPage>, concurrency guard", () => {
   it("coalesces a synchronous double-submit into a single request", async () => {
     const { calls, restore } = installFetch({
       "/api/v1/signup/start": [{ status: 202, body: { status: "accepted" } }],

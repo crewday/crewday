@@ -1,6 +1,7 @@
 import { Chip } from "@/components/common";
 import type { LlmProvider } from "@/types";
-import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
+import LlmUsageTotals from "./LlmUsageTotals";
+import { formatUsageSummary } from "./LlmUsageTotals.lib";
 import { shouldOpenGraphEditor } from "./lib/clickTargets";
 import type { ElementRefSetter, NodeClass, SelectionSetter } from "./types";
 

@@ -72,7 +72,7 @@ export default function LlmEmbeddingSmoke({
       </label>
       {smoke.isPending ? (
         <output className="llm-playground__status">
-          Running embedding smoke...
+          Running embedding smoke…
         </output>
       ) : null}
       <div className="llm-playground__actions">
@@ -94,7 +94,7 @@ export default function LlmEmbeddingSmoke({
           onClick={runSmoke}
           disabled={smoke.isPending}
         >
-          {smoke.isPending ? "Running..." : "Run embedding smoke"}
+          {smoke.isPending ? "Running…" : "Run embedding smoke"}
         </button>
       </div>
       {clientErr ? <EmbeddingSmokeError message={clientErr} /> : null}

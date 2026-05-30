@@ -1,7 +1,8 @@
 import { formatContextWindow } from "@/lib/numberFormat";
 import type { LlmModel, LlmProviderModel } from "@/types";
 import CapabilityTagChip from "./CapabilityTagChip";
-import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
+import LlmUsageTotals from "./LlmUsageTotals";
+import { formatUsageSummary } from "./LlmUsageTotals.lib";
 import { shouldOpenGraphEditor } from "./lib/clickTargets";
 import type { LlmIndexes } from "./lib/llmIndexes";
 import { thinkingLevelLabel } from "./lib/llmThinking";

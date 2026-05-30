@@ -130,6 +130,7 @@ function renderBlock(block: MarkdownBlock, index: number): ReactElement {
     return (
       <ul key={index} className="chat-markdown__list">
         {block.items.map((item, itemIndex) => (
+          // react-doctor-disable-next-line react-doctor/no-render-in-render -- Markdown inline token recursion is parser output, not component-local renderer churn.
           <li key={itemIndex}>{renderInlineTokens(parseInline(item), "li")}</li>
         ))}
       </ul>
@@ -143,6 +144,7 @@ function renderBlock(block: MarkdownBlock, index: number): ReactElement {
         key={index}
         className={`chat-markdown__heading chat-markdown__heading--level-${block.level}`}
       >
+        {/* react-doctor-disable-next-line react-doctor/no-render-in-render -- Markdown inline token recursion is parser output, not component-local renderer churn. */}
         {renderInlineTokens(parseInline(block.text), `h-${index}`)}
       </HeadingTag>
     );
@@ -153,6 +155,7 @@ function renderBlock(block: MarkdownBlock, index: number): ReactElement {
       {block.lines.map((line, lineIndex) => (
         <span key={lineIndex}>
           {lineIndex > 0 && <br />}
+          {/* react-doctor-disable-next-line react-doctor/no-render-in-render -- Markdown inline token recursion is parser output, not component-local renderer churn. */}
           {renderInlineTokens(parseInline(line), `p-${lineIndex}`)}
         </span>
       ))}
@@ -256,9 +259,11 @@ function renderInlineTokens(tokens: InlineToken[], keyPrefix: string): ReactNode
       return <code key={key}>{token.text}</code>;
     }
     if (token.kind === "strong") {
+      // react-doctor-disable-next-line react-doctor/no-render-in-render -- Markdown inline token recursion preserves nested emphasis semantics.
       return <strong key={key}>{renderInlineTokens(token.children, key)}</strong>;
     }
     if (token.kind === "em") {
+      // react-doctor-disable-next-line react-doctor/no-render-in-render -- Markdown inline token recursion preserves nested emphasis semantics.
       return <em key={key}>{renderInlineTokens(token.children, key)}</em>;
     }
     if (token.kind === "link" && token.link) {

@@ -30,7 +30,7 @@ export default function EmployeeLeavesPage() {
 
   return (
     <DeskPage
-      title={subject.name + " — leave ledger"}
+      title={subject.name + ", leave ledger"}
       sub={
         <Link to={workspaceRouteForPathname(pathname, "/employee/" + subject.id)} className="link">
           ← Back to profile

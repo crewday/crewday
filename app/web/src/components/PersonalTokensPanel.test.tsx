@@ -12,7 +12,7 @@ import { installFetchRoutes } from "@/test/helpers";
 import PersonalTokensPanel from "./PersonalTokensPanel";
 
 // `PersonalTokensPanel` lives inside `/me`, which is wrapped by
-// WorkspaceGate — so a slug is always live. The panel calls the
+// WorkspaceGate, so a slug is always live. The panel calls the
 // bare-host `/api/v1/me/tokens` surface; we register a slug here to
 // catch the regression where `resolveApiPath` would mistakenly rewrite
 // the URL into `/w/<slug>/api/v1/me/tokens` (the server only mounts

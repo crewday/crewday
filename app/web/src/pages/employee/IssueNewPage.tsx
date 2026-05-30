@@ -22,8 +22,8 @@ const CATEGORIES: Category[] = ["damage", "broken", "supplies", "safety", "other
 const SEVERITIES: [Severity, string][] = [
   ["low", "Low"],
   ["normal", "Normal"],
-  ["high", "High — unsafe or guest-facing"],
-  ["urgent", "Urgent — needs action today"],
+  ["high", "High, unsafe or guest-facing"],
+  ["urgent", "Urgent, needs action today"],
 ];
 
 interface NewIssueBody {
@@ -109,7 +109,7 @@ export default function IssueNewPage() {
       {header}
       <section className="phone__section">
         <p className="muted">
-          You can also report this in <Link to={workspaceRouteForPathname(pathname, "/chat")} className="issue-new__chat-link">Chat</Link> — it's usually faster.
+          You can also report this in <Link to={workspaceRouteForPathname(pathname, "/chat")} className="issue-new__chat-link">Chat</Link>, it's usually faster.
         </p>
         {submitError && <p className="muted" role="alert">{submitError}</p>}
 

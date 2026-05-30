@@ -1,10 +1,10 @@
-// crewday — production `/recover` surface.
+// crewday, production `/recover` surface.
 //
 // Self-service lost-device recovery (§03 "Self-service lost-device
 // recovery"). The user lost every passkey and needs a magic link to
 // enrol a fresh one on a new device. Workers, clients, and guests
 // enter their email and nothing else; managers and owners-group
-// members additionally enter an unused break-glass code — the
+// members additionally enter an unused break-glass code, the
 // step-up branch (§03 "Entry point").
 //
 // Every semantic class (`login__card`, `field`, `field--inline`,
@@ -14,17 +14,17 @@
 // the submit button carries the pending state.
 //
 // Server contract (`POST /api/v1/recover/passkey/request`):
-//   - 202 { status: "accepted" } on both hit and miss — the
+//   - 202 { status: "accepted" } on both hit and miss, the
 //     enumeration guard means we cannot discriminate. The UI ALWAYS
 //     swaps to the "check your email" confirmation on 2xx and MUST
 //     NOT expose whether the email is known.
-//   - 429 — rate limited; surface a friendly "slow down" notice so
+//   - 429, rate limited; surface a friendly "slow down" notice so
 //     the user doesn't retry immediately.
-//   - Other non-2xx — generic "couldn't send the link" notice; the
+//   - Other non-2xx, generic "couldn't send the link" notice; the
 //     user can retry.
 //
 // The break-glass code is kept in local component state and not yet
-// wired to the request body — the current server schema
+// wired to the request body, the current server schema
 // (`RecoveryRequestBody`) takes `email` only. When the backend adds
 // `break_glass_code` (§03), the payload below extends without a UI
 // change. The step-up state machine is preserved exactly so the
@@ -76,7 +76,7 @@ export default function RecoverPage() {
   // (double-click, Enter held down, a scripted Playwright submit
   // followed immediately by a keyboard press) can enqueue two
   // mutations before `onMutate` runs. Without this ref the server
-  // sees two `/recover/passkey/request` POSTs — burning two attempts
+  // sees two `/recover/passkey/request` POSTs, burning two attempts
   // against the per-IP throttle budget and writing two
   // `audit.recovery.requested` rows for a single user intent. Mirrors
   // LoginPage's fix for cd-4z54.
@@ -111,7 +111,7 @@ export default function RecoverPage() {
   const onSubmit = useCallback(
     (e: FormEvent<HTMLFormElement>) => {
       e.preventDefault();
-      // Ref check before `isPending` — the mutation's pending flag
+      // Ref check before `isPending`, the mutation's pending flag
       // only flips on the microtask after `mutate()` returns, so two
       // synchronous submits in the same tick can both pass
       // `mutation.isPending === false`. The ref flips synchronously
@@ -216,7 +216,7 @@ export default function RecoverPage() {
               </form>
               <p className="login__footnote muted">
                 Links expire after one use or 15 minutes, whichever comes first. If nothing arrives,
-                your workspace may have disabled self-service recovery — ask a manager to re-issue
+                your workspace may have disabled self-service recovery, ask a manager to re-issue
                 your link.
               </p>
             </>
@@ -233,11 +233,11 @@ export default function RecoverPage() {
 /**
  * Generic "check your email" confirmation shown on any 2xx response
  * from `/recover/passkey/request`. The copy deliberately does NOT
- * confirm that the email matched an account — the server replies
+ * confirm that the email matched an account, the server replies
  * 202 on both hit and miss so the UI cannot leak the discriminator.
  *
  * `role="status"` + `aria-live="polite"` announces the swap to
- * screen readers — without it, assistive tech sees the form vanish
+ * screen readers, without it, assistive tech sees the form vanish
  * with no replacement context. `tabIndex={-1}` on the heading makes
  * it programmatically focusable so the callback ref can move
  * keyboard focus off the unmounted submit button and onto a stable
@@ -271,7 +271,7 @@ function RecoverSentConfirmation({
  * 429 gets a dedicated "slow down" message so the user understands
  * why the next click won't help; everything else collapses to a
  * generic "try again" line. We deliberately do NOT surface server
- * `detail` verbatim — the endpoint's enumeration guard means we want
+ * `detail` verbatim, the endpoint's enumeration guard means we want
  * a stable UI regardless of whether the server leaked more context.
  */
 function messageFor(err: unknown): string {

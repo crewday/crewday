@@ -193,7 +193,7 @@ export default function MePage() {
           <div className="panel__head-stack">
             <h2>Passkeys</h2>
             <p className="panel__sub">
-              Devices you've registered to sign in. Remove any you no longer trust —
+              Devices you've registered to sign in. Remove any you no longer trust,
               re-enrolling on a new device revokes the rest automatically.
             </p>
           </div>

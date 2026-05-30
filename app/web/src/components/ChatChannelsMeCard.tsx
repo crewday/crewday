@@ -7,13 +7,13 @@ import DateTime from "@/components/DateTime";
 import { Chip, Loading } from "@/components/common";
 import type { ChatChannelBinding, Me } from "@/types/api";
 
-// §23 — per-user "Chat channels" section for /me. Lists the current
+// §23, per-user "Chat channels" section for /me. Lists the current
 // user's live bindings as credential cards, provides a two-step link
 // ceremony that posts to /api/v1/chat/channels/link/{start,verify}
 // (mock code 424242), and lets the user unlink. No off-app preference
 // toggles: the user either has an active WhatsApp binding (agent may
 // reach out) or does not (agent is web-only). Quiet-hours are
-// handled by the OS, not the app. Revoked bindings are hidden — the
+// handled by the OS, not the app. Revoked bindings are hidden, the
 // user starts a fresh link ceremony if they want one back.
 
 export default function ChatChannelsMeCard({ me }: { me: Me }) {
@@ -74,7 +74,7 @@ export default function ChatChannelsMeCard({ me }: { me: Me }) {
       setError(null);
       qc.invalidateQueries({ queryKey: qk.chatChannels() });
     },
-    onError: () => setError("Wrong code — try 424242 in the mock."),
+    onError: () => setError("Wrong code, try 424242 in the mock."),
   });
 
   const unlink = useMutation({
@@ -153,7 +153,7 @@ export default function ChatChannelsMeCard({ me }: { me: Me }) {
                   {b.state === "active" && (
                     <span>
                       <span className="entry-card__meta-label">Last used</span>
-                      <DateTime value={b.last_message_at} showTime empty="—" />
+                      <DateTime value={b.last_message_at} showTime empty="," />
                     </span>
                   )}
                 </div>

@@ -1,19 +1,19 @@
-// crewday — production click-to-accept invitation surface.
+// crewday, production click-to-accept invitation surface.
 //
 // Spec §03 "Additional users (invite → click-to-accept)". One URL,
 // two rendered states, and the kind comes from the server, not from
 // a `?state=` demo flag:
 //
-//   GET /api/v1/invites/{token} — read-only preview (does NOT burn
+//   GET /api/v1/invites/{token}, read-only preview (does NOT burn
 //     the magic-link nonce). Renders the inviter, the workspace, the
 //     invitee email, and the grants the Accept will activate. The
 //     `kind` field branches on passkey-presence:
-//       * "new_user"     — no passkey on file, render the enrolment
+//       * "new_user", no passkey on file, render the enrolment
 //                          ladder; clicking "Register this device"
 //                          POSTs to `/invites/{token}/accept` then
 //                          drives the bare-host invite passkey
 //                          ceremony (start + finish).
-//       * "existing_user" — at least one passkey on file, render the
+//       * "existing_user", at least one passkey on file, render the
 //                          Accept card; clicking Accept POSTs to
 //                          `/invites/{token}/accept`. A 401 on that
 //                          POST means the SPA needs to redirect to
@@ -26,7 +26,7 @@
 // workspace_slug; we navigate to `/w/<slug>/today`. On `new_user` the
 // invite-passkey ceremony's finish callback returns `{user_id,
 // workspace_id, redirect}` and the server stamps the session cookie
-// in the same UoW (cd-kd26) — no follow-up login required.
+// in the same UoW (cd-kd26), no follow-up login required.
 
 import {
   useCallback,
@@ -97,7 +97,7 @@ export default function AcceptPage(): ReactElement {
   });
 
   const [state, setState] = useState<AcceptState>({ kind: "idle" });
-  // Concurrency guard — prevents an Enter-held / Playwright-burst
+  // Concurrency guard, prevents an Enter-held / Playwright-burst
   // double-submit before `disabled={pending}` lands.
   const inflightRef = useRef(false);
 
@@ -109,7 +109,7 @@ export default function AcceptPage(): ReactElement {
     // sign-in BEFORE the POST. Posting first would burn the magic-link
     // nonce and leave the page unable to recover after the user signs
     // in (the introspect would 404 on return). After login the user
-    // lands back at `/accept/<token>` — the introspect re-runs and
+    // lands back at `/accept/<token>`, the introspect re-runs and
     // the click can complete.
     if (introspect.data.kind === "existing_user" && !isAuthenticated) {
       setState({ kind: "needs_sign_in" });
@@ -131,7 +131,7 @@ export default function AcceptPage(): ReactElement {
         setState({ kind: "done", redirect: finish.redirect });
         return;
       }
-      // existing_user — grants activated on the same call. Use the
+      // existing_user, grants activated on the same call. Use the
       // returned slug to land on the workspace today page.
       const slug = outcome.workspace_slug ?? "";
       const role = outcome.grants?.[0]?.grant_role ?? "worker";
@@ -153,7 +153,7 @@ export default function AcceptPage(): ReactElement {
     }
   }, [introspect.data, isAuthenticated, acceptMutation, queryClient]);
 
-  // Post-success redirect — `useNavigate` cannot run inside the
+  // Post-success redirect, `useNavigate` cannot run inside the
   // mutation callback because navigation disposes the page mid-
   // ceremony if the browser races our state update.
   useEffect(() => {
@@ -247,7 +247,7 @@ function AcceptShell({
           {footerToken !== undefined && (
             <p className="login__footnote muted">
               Invite link: <code className="inline-code">/accept/{footerToken}</code>
-              {" "}— valid once, expires in 24 hours.
+              {" "}, valid once, expires in 24 hours.
             </p>
           )}
         </div>
@@ -313,7 +313,7 @@ function NewUserView({
           <div>
             <strong>Register a passkey</strong>
             <p>
-              Your phone, Face ID, fingerprint — whatever your device already
+              Your phone, Face ID, fingerprint, whatever your device already
               uses to unlock itself. No password to remember.
             </p>
             <button
@@ -373,7 +373,7 @@ function ExistingUserView({
             {preview.grants.map((g, idx) => (
               <li key={`${g.scope_kind}:${g.scope_id}:${idx}`}>
                 <strong>{titleCaseRole(g.grant_role)}</strong>
-                {" — "}
+                {", "}
                 <em>{describeScope(g)}</em>
               </li>
             ))}
@@ -484,7 +484,7 @@ function acceptMessageFor(err: unknown): AcceptMessage {
   if (err instanceof PasskeyTransientError) {
     return {
       message:
-        "Couldn't reach your authenticator. Wait a moment and try again — your invite link stays valid for 24 hours.",
+        "Couldn't reach your authenticator. Wait a moment and try again, your invite link stays valid for 24 hours.",
       tone: "danger",
     };
   }
@@ -492,14 +492,14 @@ function acceptMessageFor(err: unknown): AcceptMessage {
     if (err.kind === "invalid_state") {
       return {
         message:
-          "This device already has a passkey for your account. Try another device — your invite link stays valid for 24 hours.",
+          "This device already has a passkey for your account. Try another device, your invite link stays valid for 24 hours.",
         tone: "danger",
       };
     }
     if (err.kind === "constraint") {
       return {
         message:
-          "Your authenticator can't satisfy the passkey requirements for this workspace. Try another device — your invite link stays valid for 24 hours.",
+          "Your authenticator can't satisfy the passkey requirements for this workspace. Try another device, your invite link stays valid for 24 hours.",
         tone: "danger",
       };
     }
@@ -512,7 +512,7 @@ function acceptMessageFor(err: unknown): AcceptMessage {
     }
     return {
       message:
-        "This browser or device can't register a passkey here. Try another device — your invite link stays valid for 24 hours.",
+        "This browser or device can't register a passkey here. Try another device, your invite link stays valid for 24 hours.",
       tone: "danger",
     };
   }

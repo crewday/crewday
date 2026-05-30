@@ -210,7 +210,7 @@ function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
             <span>hash {detail?.default_hash ?? prompt.default_hash}</span>
             <span>
               Updated{" "}
-              <DateTime value={detail?.updated_at ?? prompt.updated_at} showTime empty="—" />
+              <DateTime value={detail?.updated_at ?? prompt.updated_at} showTime empty="," />
             </span>
             {(detail?.is_customised ?? prompt.is_customised) ? (
               <Chip tone="sand" size="sm">

@@ -115,6 +115,7 @@ const STATUS_TONE: Record<RenderTaskStatus, "moss" | "sky" | "ghost" | "rust"> =
   overdue: "rust",
 };
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 export default function TaskDetailPage() {
   const { tid = "" } = useParams();
   const qc = useQueryClient();
@@ -566,7 +567,7 @@ export default function TaskDetailPage() {
             </ul>
           )}
           <p className="evidence__note-hint muted">
-            Anything the manager should know? Tell the assistant below — it'll
+            Anything the manager should know? Tell the assistant below, it'll
             log a note on this task when it matters.
           </p>
         </section>
@@ -575,7 +576,7 @@ export default function TaskDetailPage() {
       <section className="comments task-chat">
         <h3 className="section-title section-title--sm">Notes (chat)</h3>
         <p className="muted">
-          Messages to and from your workspace assistant — scoped to this task.
+          Messages to and from your workspace assistant, scoped to this task.
         </p>
         <ChatLog
           messages={chatQ.data}
@@ -635,7 +636,7 @@ export default function TaskDetailPage() {
         <FormModalField label="Reason" requirement="required" className="task-skip-form__field">
           <AutoGrowTextarea
             required
-            placeholder="e.g. Guest still in the room — came back early from their day."
+            placeholder="e.g. Guest still in the room, came back early from their day."
             value={skipReason}
             onChange={(e) => setLocalState({ skipReason: e.target.value })}
           />

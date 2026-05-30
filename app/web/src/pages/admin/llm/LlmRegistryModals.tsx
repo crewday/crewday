@@ -473,6 +473,7 @@ export default function LlmRegistryModals(props: RegistryModalsProps) {
   );
 }
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 function ProviderForm(props: ProviderFormProps) {
   // code-health: ignore[ccn] Provider form keeps validation beside the provider payload and API mutation it drives.
   const { mode, provider, providerModels, models, titleId, onClose } = props;
@@ -812,6 +813,7 @@ function ProviderForm(props: ProviderFormProps) {
   );
 }
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 function ModelForm({
   mode,
   model,
@@ -1072,7 +1074,7 @@ function ModelForm({
           className="llm-openrouter-loader__status"
         >
           {openRouterPreview.isPending
-            ? "Loading OpenRouter metadata..."
+            ? "Loading OpenRouter metadata…"
             : openRouterStatus}
         </output>
       ) : null}
@@ -1454,7 +1456,7 @@ function ModelForm({
                             createProviderModel.isPending
                           }
                         >
-                          {pending ? "..." : "+"}
+                          {pending ? "…" : "+"}
                         </button>
                       </>
                     )}
@@ -1474,6 +1476,7 @@ function ModelForm({
   );
 }
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 function ProviderModelForm(props: ProviderModelFormProps) {
   // code-health: ignore[ccn] Provider-model form keeps its pricing, override, capability, and JSON validation next to the save payload.
   const { mode, providerModel, providers, models, titleId, onClose } = props;
@@ -2048,7 +2051,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
                   onClick={syncCurrentPricing}
                   disabled={syncPending || save.isPending || remove.isPending}
                 >
-                  {syncPending ? "Syncing..." : "Sync pricing"}
+                  {syncPending ? "Syncing…" : "Sync pricing"}
                 </button>
               ) : null}
             </div>

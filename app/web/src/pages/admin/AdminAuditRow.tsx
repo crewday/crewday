@@ -107,7 +107,7 @@ export function AdminAuditRow({
       <td data-label="Action"><AdminAuditActionCell row={row} /></td>
       <td data-label="Target"><AdminAuditTargetCell row={row} /></td>
       {showVia ? <td data-label="Via" className="muted admin-audit-via">{row.via}</td> : null}
-      <td data-label="Reason" className="muted admin-audit-reason">{row.reason ?? "—"}</td>
+      <td data-label="Reason" className="muted admin-audit-reason">{row.reason ?? ","}</td>
     </tr>
   );
 }

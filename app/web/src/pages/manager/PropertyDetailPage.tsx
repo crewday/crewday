@@ -17,13 +17,15 @@ import type {
 import AreasPanel from "./property/AreasPanel";
 import AssetsPanel from "./property/AssetsPanel";
 import OverviewPanel from "./property/OverviewPanel";
-import PropertyEditDialog, {
+import PropertyEditDialog from "./property/PropertyEditDialog";
+import {
   buildPropertyPatchBody,
   type PropertyEditDraft,
-} from "./property/PropertyEditDialog";
+} from "./property/PropertyEditDialog.lib";
 import SettingsOverridePanel from "./property/SettingsOverridePanel";
 import SharingPanel from "./property/SharingPanel";
-import PropertyTabs, { panelIdFor, PROPERTY_TABS } from "./property/PropertyTabs";
+import PropertyTabs from "./property/PropertyTabs";
+import { panelIdFor, PROPERTY_TABS } from "./property/PropertyTabs.lib";
 import { fetchPropertyDetail } from "./property/propertyDetailApi";
 import type { PropertyRecord, PropertyTab } from "./property/types";
 
@@ -191,8 +193,8 @@ export default function PropertyDetailPage() {
       <AgentPreferencesPanel
         scope="property"
         scopeId={property.id}
-        title={"Agent preferences — " + property.name}
-        subtitle="Sits between workspace and user preferences when the agent discusses this property. Soft guidance only — hard rules belong in the settings cascade above."
+        title={"Agent preferences, " + property.name}
+        subtitle="Sits between workspace and user preferences when the agent discusses this property. Soft guidance only, hard rules belong in the settings cascade above."
       />
 
       {editingProperty && (

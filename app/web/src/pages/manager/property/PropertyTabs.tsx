@@ -1,20 +1,7 @@
-import PageTabs, { type PageTab, type PageTabLink } from "@/components/PageTabs";
+import PageTabs, { type PageTabLink } from "@/components/PageTabs";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
+import { PROPERTY_TABS, type PropertyRelatedPage } from "./PropertyTabs.lib";
 import type { PropertyTab } from "./types";
-
-export const PROPERTY_TABS = [
-  { key: "overview", label: "Overview", panelId: panelIdFor("overview") },
-  { key: "areas", label: "Areas", panelId: panelIdFor("areas") },
-  { key: "assets", label: "Assets", panelId: panelIdFor("assets") },
-  { key: "sharing", label: "Sharing & client", panelId: panelIdFor("sharing") },
-  { key: "settings", label: "Settings", panelId: panelIdFor("settings") },
-] satisfies Array<PageTab & { key: PropertyTab }>;
-
-export type PropertyRelatedPage = "stays" | "instructions" | "closures";
-
-export function panelIdFor(tab: PropertyTab): string {
-  return `property-${tab}-panel`;
-}
 
 function propertySectionRoute(propertyId: string, tab: PropertyTab): string {
   return "/property/" + propertyId + (tab === "overview" ? "" : "#" + tab);

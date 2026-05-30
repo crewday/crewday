@@ -111,7 +111,7 @@ function RoleHome() {
   );
 }
 
-// §14 — Shared workspace routes (today, schedule, my/expenses, etc.)
+// §14, Shared workspace routes (today, schedule, my/expenses, etc.)
 // render under the viewer's role-appropriate shell below /w/:slug.
 // Manager / Employee / Client each get their own layout; only `me`
 // is currently shared by all three (every surface has a profile
@@ -204,7 +204,7 @@ function sharedWorkspaceRoutes(isManagerSurface: boolean) {
     <>
       <Route path="today" element={<TodayPage />} />
       <Route path="schedule" element={<SchedulePage />} />
-      {/* Legacy URLs — spec §14 collapses Week and /me/schedule
+      {/* Legacy URLs, spec §14 collapses Week and /me/schedule
           into /schedule. Keep redirects so deep-links, CLI
           output, and agent tool refs continue to land on the
           right page. */}
@@ -216,7 +216,7 @@ function sharedWorkspaceRoutes(isManagerSurface: boolean) {
       <Route path="notifications" element={<NotificationsPage />} />
       <Route path="chat" element={<ChatPage />} />
       <Route path="scheduler" element={<SchedulerPage />} />
-      {/* Legacy /bookings and /shifts URLs — spec §14 collapses
+      {/* Legacy /bookings and /shifts URLs, spec §14 collapses
           the standalone bookings page into the /schedule day
           drawer (§09 bookings render alongside rota / tasks /
           leaves). Redirect for bookmarks and agent tool refs. */}
@@ -405,7 +405,7 @@ export default function App() {
   return (
     <Routes>
       <Route element={<PreviewShell />}>
-        {/* Public routes — login, recover, accept, guest. Rendered
+        {/* Public routes, login, recover, accept, guest. Rendered
             without `<RequireAuth>` / `<WorkspaceGate>` so an
             anonymous user can sign in, redeem an invite, or land on
             a guest share link without being bounced. */}
@@ -420,13 +420,13 @@ export default function App() {
               template (`app/mail/templates/auth/magic_link.*.j2`).
               The mailer
               uses this shape for ALL purposes that go through the
-              shared template — signup_verify, email_change_confirm,
+              shared template, signup_verify, email_change_confirm,
               email_change_revert, grant_invite, workspace_verify_ownership.
               Today only signup_verify has an SPA handler; the other
               purposes will surface a `purpose_mismatch` 400 from
               `/api/v1/signup/verify` and the verify page renders the
               standard "expired / invalid" copy. Recovery is the
-              exception — it emits its own `/recover/enroll?token=…`
+              exception, it emits its own `/recover/enroll?token=…`
               URL and never lands on this route. */}
           <Route path="/auth/magic/:token" element={<SignupVerifyPage />} />
           <Route path="/accept/:token" element={<AcceptPage />} />
@@ -434,7 +434,7 @@ export default function App() {
           <Route path="/w/:slug/guest/:token" element={<GuestPage />} />
         </Route>
 
-        {/* Styleguide — public dev/staging surface; render without
+        {/* Styleguide, public dev/staging surface; render without
             auth so designers can land on component fixtures directly. */}
         {StyleguidePage ? (
           <Route
@@ -475,7 +475,7 @@ export default function App() {
               <Route path="*" element={<BareWorkspaceRedirect />} />
             </Route>
 
-            {/* /admin — bare-host deployment admin shell (§14 "Admin
+            {/* /admin, bare-host deployment admin shell (§14 "Admin
               shell"). Sits inside `<RequireAuth>` (the deployment
               admin must be signed in) but **outside** `<WorkspaceGate>`:
               admin is a deployment-scope surface and intentionally

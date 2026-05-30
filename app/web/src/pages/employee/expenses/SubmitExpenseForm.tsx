@@ -24,10 +24,10 @@ import {
 import { SubmitExpenseFields } from "./SubmitExpenseFields";
 
 // Worker's review form. Two entry paths:
-// - **Scan** — `initialScan` carries an `ExpenseScanResult`; high-
+// - **Scan**, `initialScan` carries an `ExpenseScanResult`; high-
 //   confidence fields seed the form, low-confidence fields stay blank,
 //   and a soft amber ring highlights the uncertain band ([0.6, 0.9)).
-// - **Manual** — `initialScan` is null; every field starts blank and
+// - **Manual**, `initialScan` is null; every field starts blank and
 //   nothing is decorated.
 //
 // Form state lives entirely inside the component because the parent
@@ -40,12 +40,12 @@ import { SubmitExpenseFields } from "./SubmitExpenseFields";
 // of the `review` phase (Back, Submitted, manual entry → review with a
 // new scan). That guarantees a fresh local reducer initialiser on every
 // re-entry, so we deliberately do NOT mirror `initialScan` into local
-// state via `useEffect` — that would clobber a partially-typed value if
+// state via `useEffect`, that would clobber a partially-typed value if
 // a future parent ever swapped the scan reference mid-review (and would
 // also fire a redundant extra render on every mount).
 //
 // **Wire contract.** The submit POST matches `ExpenseClaimCreate`
-// (`app/domain/expenses/claims.py:417`) — `vendor`, `purchased_at`,
+// (`app/domain/expenses/claims.py:417`), `vendor`, `purchased_at`,
 // `total_amount_cents`, `currency`, `category`, optional `property_id`,
 // optional `note_md`, plus a `work_engagement_id` resolved from the
 // caller's active engagement via `/api/v1/work_engagements`. The
@@ -165,7 +165,7 @@ export default function SubmitExpenseForm({
       setFormState({ submitError: null });
       if (!workEngagementId) {
         setFormState({
-          submitError: "No active work engagement — ask a manager to seed one before submitting expenses.",
+          submitError: "No active work engagement, ask a manager to seed one before submitting expenses.",
         });
         return;
       }

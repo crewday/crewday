@@ -14,13 +14,13 @@ function useTokenCount(text: string): number {
   return useMemo(() => estimateAgentPreferenceTokens(text), [text]);
 }
 
-// §11 — CLAUDE.md-style free-form guidance stacked into the LLM
+// §11, CLAUDE.md-style free-form guidance stacked into the LLM
 // system prompt. Three layers (workspace / property / user); this
 // component edits a single layer and is reused by SettingsPage,
 // PropertyDetailPage, and the worker "Me" page.
 //
 // The server still records a revision history on every save (§02);
-// it just isn't surfaced in this UI — read it via the CLI or the
+// it just isn't surfaced in this UI, read it via the CLI or the
 // REST endpoint if you need audit context.
 
 type Variant = "panel" | "phone";
@@ -78,7 +78,7 @@ export default function AgentPreferencesPanel({
       if (e instanceof ApiError && e.body && typeof e.body === "object") {
         const body = e.body as { error?: string; pattern?: string; token_count?: number; hard_cap?: number };
         if (body.error === "preference_contains_secret") {
-          setError(`Refused to save — matched ${body.pattern}. Remove the secret and try again.`);
+          setError(`Refused to save, matched ${body.pattern}. Remove the secret and try again.`);
         } else if (body.error === "preference_too_large") {
           setError(`Too long (${body.token_count}/${body.hard_cap} tokens).`);
         } else if (body.error === "forbidden") {
@@ -144,7 +144,7 @@ export default function AgentPreferencesPanel({
 
       <div className="agent-prefs__banner" role="note">
         Preferences are <strong>sent to agents as written.</strong> Do not paste
-        passwords, door codes, or account numbers — the save endpoint will refuse
+        passwords, door codes, or account numbers, the save endpoint will refuse
         them. Hard rules belong in <em>Settings</em>; this area carries soft
         guidance only.
       </div>
@@ -165,7 +165,7 @@ export default function AgentPreferencesPanel({
             <span>
               {draftTokens} / {pref.soft_cap} tokens
               {" (estimate)"}
-              {hardOver ? " — over hard cap" : softOver ? " — over soft cap" : ""}
+              {hardOver ? ", over hard cap" : softOver ? ", over soft cap" : ""}
             </span>
             <span className="muted">
               {pref.updated_at ? (

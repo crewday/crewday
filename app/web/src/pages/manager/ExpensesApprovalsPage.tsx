@@ -314,14 +314,14 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
  * The payload no longer carries a `claimant`/`employee_id` field
  * (engagement → user resolution lives in cd-g6nf). Until that lands
  * the desk shows the bound `work_engagement_id` short-form rather
- * than a name + avatar — surfacing *something* identifiable is
+ * than a name + avatar, surfacing *something* identifiable is
  * better than a blank, and keeps the row expressive enough for a
  * manager to triage. The avatar slot returns once the roster
  * endpoint is wired.
  *
  * Likewise the agent-autofill confidence chip (`ocr_confidence` on the
  * legacy mock shape) is hidden until cd-95zb surfaces a per-claim
- * extraction confidence on the server payload — guessing locally
+ * extraction confidence on the server payload, guessing locally
  * would make the chip lie.
  */
 export default function ExpensesApprovalsPage() {
@@ -392,13 +392,13 @@ export default function ExpensesApprovalsPage() {
           value={reimbursed.length}
           sub="paid out via March payslip"
         />
-        <StatCard label="Rejected (90d)" value={rejected.length} sub="—" />
+        <StatCard label="Rejected (90d)" value={rejected.length} sub="," />
       </section>
 
       <div className="panel">
         <header className="panel__head">
           <h2>Pending · {pending.length}</h2>
-          <span className="muted">Primary queue — work top to bottom.</span>
+          <span className="muted">Primary queue, work top to bottom.</span>
         </header>
         {decisionNotice !== null && (
           <output className="login__notice">
@@ -422,7 +422,7 @@ export default function ExpensesApprovalsPage() {
             const category = x.category || "other";
             // `submitted_at` is non-null for any row in the
             // `submitted` filter above, but TS can't narrow off a
-            // discriminated state literal — guard inline so the chip
+            // discriminated state literal, guard inline so the chip
             // shows a sensible fallback if the server ever returns a
             // misaligned row (e.g. a draft slipped past the filter).
             return (
@@ -495,7 +495,7 @@ export default function ExpensesApprovalsPage() {
       <div className="panel">
         <header className="panel__head">
           <h2>Recent decisions</h2>
-          <span className="muted">History — not actionable.</span>
+          <span className="muted">History, not actionable.</span>
         </header>
         <table className="table">
           <thead>
@@ -525,7 +525,7 @@ export default function ExpensesApprovalsPage() {
                   <td className="mono">{x.work_engagement_id}</td>
                   <td>{x.vendor}<div className="table__sub">{x.note_md}</div></td>
                   <td className="mono">{formatMoney(x.total_amount_cents, x.currency)}</td>
-                  <td><DateTime value={x.submitted_at} showTime className="mono" empty="—" /></td>
+                  <td><DateTime value={x.submitted_at} showTime className="mono" empty="," /></td>
                   <td><Chip tone={EXPENSE_STATUS_TONE[state]} size="sm">{x.state}</Chip></td>
                 </tr>
               );

@@ -34,6 +34,7 @@ interface LlmGraphPageState {
   assignmentDialogCapability: string | null;
 }
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 export default function AdminLlmPage() {
   // code-health: ignore[nloc] LLM graph route already delegates columns, alerts, registry modals, assignments, and drawers.
   const graphQ = useQuery({

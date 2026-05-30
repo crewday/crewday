@@ -45,6 +45,7 @@ const ROLE_ORDER: AgentDocRole[] = ["manager", "employee", "admin"];
 const SAFETY_WARNING =
   "Body is sent to every chat agent that loads this doc. Do not paste workspace secrets, customer data, or live API keys.";
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 export default function AdminAgentDocsPage() {
   const queryClient = useQueryClient();
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
@@ -476,7 +477,7 @@ function RevisionHistory({
     <section className="agent-docs__history" aria-label={`Revision history for ${slug}`}>
       <span className="agent-docs__detail-label">Revision history</span>
       {loading ? (
-        <p className="muted">Loading revisions...</p>
+        <p className="muted">Loading revisions…</p>
       ) : error ? (
         <p className="inline-table-form__message inline-table-form__message--error">{error}</p>
       ) : revisions && revisions.length > 0 ? (

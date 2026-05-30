@@ -4,7 +4,7 @@ import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
 import type { PendingReimbursement } from "@/types/api";
 
-// §09 "Amount owed to the employee" — destination-currency total of
+// §09 "Amount owed to the employee", destination-currency total of
 // approved-but-not-yet-reimbursed claims. Refreshes alongside the
 // expenses list so the worker sees the number update the moment a
 // claim is approved.

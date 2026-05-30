@@ -2,7 +2,7 @@ import {
   createContext,
   type ReactNode,
   useCallback,
-  useContext,
+  use,
   useEffect,
   useId,
   useMemo,
@@ -107,7 +107,7 @@ export function ErrorToastProvider({ children }: { children: ReactNode }) {
 }
 
 export function useErrorToasts(): ErrorToastContextValue {
-  const context = useContext(ErrorToastContext);
+  const context = use(ErrorToastContext);
   if (!context) {
     throw new Error("useErrorToasts must be used within ErrorToastProvider");
   }

@@ -51,7 +51,7 @@ export default function FileDropZone(props: FileDropZoneProps) {
     onFiles(Array.from(files));
   }
 
-  function handleChange(event: ChangeEvent<HTMLInputElement>): void {
+  function selectFiles(event: ChangeEvent<HTMLInputElement>): void {
     emitFiles(event.currentTarget.files);
     event.currentTarget.value = "";
   }
@@ -60,7 +60,7 @@ export default function FileDropZone(props: FileDropZoneProps) {
     return Array.from(types).includes("Files");
   }
 
-  function handleClick(event: ReactMouseEvent<HTMLLabelElement>): void {
+  function preventDisabledPicker(event: ReactMouseEvent<HTMLLabelElement>): void {
     if (disabled) event.preventDefault();
   }
 
@@ -102,7 +102,7 @@ export default function FileDropZone(props: FileDropZoneProps) {
       role={BUTTON_ROLE}
       aria-disabled={disabled}
       tabIndex={disabled ? -1 : 0}
-      onClick={handleClick}
+      onClick={preventDisabledPicker}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -117,7 +117,7 @@ export default function FileDropZone(props: FileDropZoneProps) {
         multiple={multiple}
         capture={capture}
         disabled={disabled}
-        onChange={handleChange}
+        onChange={selectFiles}
       />
       <span className="upload-dropzone__title">{title}</span>
       {description ? (

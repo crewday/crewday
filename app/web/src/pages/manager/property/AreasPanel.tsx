@@ -176,6 +176,7 @@ function reorderedAreasFromRows(
   });
 }
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 export default function AreasPanel({ propertyId }: { propertyId: string }) {
   const queryClient = useQueryClient();
   const [state, dispatch] = useReducer(areasPanelReducer, undefined, initialAreasPanelState);

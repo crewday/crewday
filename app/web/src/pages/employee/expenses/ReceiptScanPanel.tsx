@@ -2,15 +2,16 @@ import { useCallback, useLayoutEffect, useState } from "react";
 import { Search } from "lucide-react";
 import FileDropZone from "@/components/FileDropZone";
 import { EmptyState } from "@/components/common";
-import { ApiError, fetchJson } from "@/lib/api";
+import { fetchJson } from "@/lib/api";
 import type { ExpenseScanResult } from "@/types/api";
+import { messageForScanError } from "./ReceiptScanPanel.lib";
 
 // Phase machine matches the mock verbatim: `upload` shows the receipt
 // picker, `processing` swaps to a spinner with a deliberate 1.5 s
 // minimum so the OCR feels considered (not a flash of "did anything
 // happen?"), then the parent transitions to `review`.
 //
-// The panel only owns the file-picker DOM and the request lifecycle —
+// The panel only owns the file-picker DOM and the request lifecycle,
 // the parent handles `phase` so the upload pane and the review form
 // can share a single state machine without prop-drilling.
 //
@@ -18,12 +19,12 @@ import type { ExpenseScanResult } from "@/types/api";
 //   POST /api/v1/expenses/scan, multipart/form-data, field `image`.
 //   Server allow-list: image/jpeg, image/png, image/webp, image/heic,
 //   application/pdf (≤ 10 MB). Errors arrive as RFC 7807 with the
-//   short `type` keys mapped below — we surface a plain-English line
+//   short `type` keys mapped below, we surface a plain-English line
 //   per code rather than dumping the raw `detail`, since the worker
 //   shouldn't have to read "blob_mime_not_allowed" to understand
 //   "we can't read this format yet". `extraction_*` codes from the
 //   LLM side (timeout, rate-limited, provider error, parse error,
-//   invariant) are folded into a single retry message — the worker's
+//   invariant) are folded into a single retry message, the worker's
 //   action ("try again in a moment, or add it by hand") is identical
 //   regardless of which provider hiccup landed.
 
@@ -70,7 +71,7 @@ interface Props {
    * Called when the scan fails. The parent reverts to `upload` so the
    * panel can re-render its picker with an inline error notice.
    * Optional so older call sites still compile during the staged
-   * rollout, but every production caller wires this — without it the
+   * rollout, but every production caller wires this, without it the
    * spinner would stay visible after a 422.
    */
   onScanFailed?: () => void;
@@ -84,7 +85,7 @@ export default function ReceiptScanPanel({
 }: Props) {
   const [error, setError] = useState<string | null>(null);
 
-  // Drop the inline error the moment the worker leaves the picker —
+  // Drop the inline error the moment the worker leaves the picker,
   // otherwise a failed scan, then "+ New expense" → "Back", would
   // show a stale error against an unrelated fresh picker. We only
   // clear on the transition *out* of `upload`; the in-flight failure
@@ -105,10 +106,10 @@ export default function ReceiptScanPanel({
       if (!ACCEPTED_MIMES.has(file.type)) {
         // Some platforms hand us a blank `type` for HEIC; rather than
         // guess from the extension we surface the same notice and
-        // let the worker re-pick — the server's allow-list is the
+        // let the worker re-pick, the server's allow-list is the
         // source of truth.
         setError(
-          "We can't read that format yet — try a JPEG, PNG, WebP, HEIC, or PDF.",
+          "We can't read that format yet, try a JPEG, PNG, WebP, HEIC, or PDF.",
         );
         return;
       }
@@ -173,44 +174,4 @@ export default function ReceiptScanPanel({
   }
 
   return null;
-}
-
-/**
- * Map a thrown error from `fetchJson` to a plain-English line for
- * the worker. The server's RFC 7807 `type` is the discriminator; we
- * fall back to the response detail / generic message so a brand-new
- * code still surfaces *something* readable rather than "undefined".
- *
- * Exported for unit tests only — the panel is the sole production
- * caller.
- */
-export function messageForScanError(err: unknown): string {
-  if (err instanceof ApiError) {
-    switch (err.type) {
-      case "scan_not_configured":
-        return "Receipt scanning isn't enabled here yet — add the expense by hand for now.";
-      case "blob_mime_not_allowed":
-        return "We can't read that format yet — try a JPEG, PNG, WebP, HEIC, or PDF.";
-      case "blob_too_large":
-        return "That file is too large — keep it under 10 MB.";
-      case "blob_empty":
-        return "That file looked empty. Try the picker again.";
-      case "extraction_timeout":
-      case "extraction_rate_limited":
-      case "extraction_provider_error":
-      case "extraction_parse_error":
-      case "extraction_invariant":
-        return "Our reader is having a moment — try again in a few seconds, or add it by hand.";
-      default:
-        // Unknown short-name: prefer the server's human line over a
-        // generic fallback so a brand-new error still tells the
-        // worker something actionable.
-        return (
-          err.detail ??
-          err.title ??
-          "We couldn't read that receipt. Try again, or add it by hand."
-        );
-    }
-  }
-  return "We couldn't read that receipt. Try again, or add it by hand.";
 }

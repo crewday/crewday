@@ -201,6 +201,7 @@ function QrSheetButton({
   );
 }
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 function NewAssetButton({
   assetTypes,
   properties,

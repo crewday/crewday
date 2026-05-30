@@ -19,11 +19,12 @@ import type {
   Stay,
   Workspace,
 } from "@/types/api";
-import PropertyEditDialog, {
+import PropertyEditDialog from "./property/PropertyEditDialog";
+import {
   blankPropertyDraft,
   buildPropertyCreateBody,
   type PropertyEditDraft,
-} from "./property/PropertyEditDialog";
+} from "./property/PropertyEditDialog.lib";
 import type { PropertyRecord } from "./property/types";
 
 interface StaysPayload {
@@ -84,7 +85,7 @@ interface OrganizationPayload {
   notes_md: string | null;
 }
 
-// §02 — short label for membership_role on the property card. Keep the
+// §02, short label for membership_role on the property card. Keep the
 // vocabulary small so the chip doesn't crowd the row.
 const MEMBERSHIP_LABEL: Record<string, string> = {
   owner_workspace: "Owner",

@@ -1,6 +1,6 @@
 import {
   createContext,
-  useContext,
+  use,
   useEffect,
   useMemo,
   type ReactNode,
@@ -57,7 +57,7 @@ export function I18nProvider({
 }
 
 export function useI18n(): I18nContextValue {
-  const value = useContext(I18nContext);
+  const value = use(I18nContext);
   if (!value) throw new Error("useI18n must be used inside <I18nProvider>");
   return value;
 }

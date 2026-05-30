@@ -43,7 +43,7 @@ afterEach(() => {
   document.cookie = "crewday_workspace=; path=/; max-age=0";
 });
 
-describe("useAuthBootstrap — initial /auth/me probe", () => {
+describe("useAuthBootstrap, initial /auth/me probe", () => {
   it("populates the store with the authenticated user when /auth/me returns 200", async () => {
     const { restore } = installFetch({
       "/api/v1/auth/me": [{
@@ -110,7 +110,7 @@ describe("useAuthBootstrap — initial /auth/me probe", () => {
   });
 });
 
-describe("useAuth — logout sequence", () => {
+describe("useAuth, logout sequence", () => {
   it("calls /auth/logout, clears the store, and navigates to /login", async () => {
     const { calls, restore } = installFetch({
       "/api/v1/auth/me": [{
@@ -210,7 +210,7 @@ describe("useAuth — logout sequence", () => {
   });
 });
 
-describe("useAuth — 401 mid-session", () => {
+describe("useAuth, 401 mid-session", () => {
   it("a 401 from a protected fetch flips the store to unauthenticated and navigates to /login", async () => {
     const { restore } = installFetch({
       "/api/v1/auth/me": [{
@@ -245,7 +245,7 @@ describe("useAuth — 401 mid-session", () => {
       await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
       expect(getAuthState().status).toBe("authenticated");
 
-      // Trigger a 401 from a non-auth endpoint — the registered
+      // Trigger a 401 from a non-auth endpoint, the registered
       // handler should set the store to unauthenticated and navigate.
       const { fetchJson } = await import("@/lib/api");
       await act(async () => {
@@ -409,7 +409,7 @@ describe("useAuth — 401 mid-session", () => {
   it("a 401 from /auth/me probe does NOT trigger the redirect handler (avoids bootstrap loop)", async () => {
     // Bootstrap probe returns 401. The store should land on
     // `unauthenticated` via the probe's own catch, not via the 401
-    // handler — and crucially, the navigate-to-/login redirect must
+    // handler, and crucially, the navigate-to-/login redirect must
     // not fire (the route-level <RequireAuth> handles that, not
     // the central handler).
     const { calls, restore } = installFetch({
@@ -433,7 +433,7 @@ describe("useAuth — 401 mid-session", () => {
       );
       await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
       expect(getAuthState().status).toBe("unauthenticated");
-      // Only the initial render counts — no extra navigation fired.
+      // Only the initial render counts, no extra navigation fired.
       expect(navCount).toBe(1);
       // Sanity: the only fetch was the probe itself.
       expect(calls).toHaveLength(1);

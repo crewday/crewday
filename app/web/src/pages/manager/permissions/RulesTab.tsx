@@ -121,7 +121,7 @@ export default function RulesTab() {
         </header>
         {ruleRows.length === 0 ? (
           <p className="muted">
-            No rules on this workspace — defaults apply for every action below.
+            No rules on this workspace, defaults apply for every action below.
           </p>
         ) : null}
         <table className="table table--roomy permissions__rules">
@@ -160,7 +160,7 @@ export default function RulesTab() {
                   </td>
                   <td>
                     {rs.length === 0 ? (
-                      <span className="muted">— default applies —</span>
+                      <span className="muted">, default applies,</span>
                     ) : (
                       rs.map((r) => (
                         <RuleChip
@@ -175,7 +175,7 @@ export default function RulesTab() {
                   </td>
                   <td>
                     {entry.root_only ? (
-                      <span className="muted">—</span>
+                      <span className="muted">,</span>
                     ) : (
                       <button className="btn btn--ghost btn--sm">
                         <Plus size={13} strokeWidth={2} /> Rule

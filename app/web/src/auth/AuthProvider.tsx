@@ -9,7 +9,7 @@ import { useAuthBootstrap } from "./useAuth";
 // a public dev/staging visual baseline, so it must not emit the
 // unauthenticated `/auth/me` probe.
 //
-// We deliberately do *not* render a loading spinner here — the
+// We deliberately do *not* render a loading spinner here, the
 // initial probe is fast (one `/auth/me` call) and any UI flash would
 // land outside the route shell, where it has nowhere to live. The
 // `<RequireAuth>` guard handles the `'loading'` state at the route

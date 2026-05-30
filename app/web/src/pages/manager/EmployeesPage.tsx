@@ -8,7 +8,8 @@ import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
 import FormModal from "@/components/FormModal";
-import { AssetIcon, isAssetIconName } from "@/components/AssetIcon";
+import { AssetIcon } from "@/components/AssetIcon";
+import { isAssetIconName } from "@/components/AssetIcon.registry";
 import {
   InlineIconField,
   InlineTableForm,
@@ -193,6 +194,7 @@ export default function EmployeesPage() {
   );
 }
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 function WorkRoleCatalogManager() {
   const queryClient = useQueryClient();
   const rolesQ = useQuery({

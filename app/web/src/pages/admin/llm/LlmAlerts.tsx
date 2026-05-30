@@ -38,7 +38,7 @@ export default function LlmAlerts({ graph, syncResult }: LlmAlertsProps) {
         <div className="llm-graph-alert llm-graph-alert--info">
           <strong>Pricing sync:</strong> {syncResult.updated} updated,{" "}
           {syncResult.skipped} unchanged, {syncResult.errors} errors
-          <span className="muted"> — started at {syncResult.started_at}</span>
+          <span className="muted">, started at {syncResult.started_at}</span>
         </div>
       ) : null}
     </>

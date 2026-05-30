@@ -4,7 +4,7 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import FileDropZone from "@/components/FileDropZone";
 
-// §14 — avatar editor modal opened from the /me avatar. The user picks
+// §14, avatar editor modal opened from the /me avatar. The user picks
 // an image (file picker, or front camera on mobile via `capture=user`),
 // pans via drag and zooms via the range slider, then Save renders the
 // circular viewport to a 512x512 WebP via canvas and POSTs it multipart
@@ -197,7 +197,7 @@ export default function AvatarEditor({ open, onClose, currentUrl, userName }: Pr
         <p className="modal__sub">
           {natural
             ? "Drag to reposition, slide to zoom."
-            : "Pick an image — your face shows up in lists, rosters, and chat."}
+            : "Pick an image, your face shows up in lists, rosters, and chat."}
         </p>
 
         {natural && imgUrl ? (

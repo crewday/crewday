@@ -11,7 +11,7 @@ import { usePatchReducer } from "@/lib/usePatchReducer";
 
 // §06 quick-add. Clicking the button opens a <dialog> (same pattern as
 // the task skip modal in TaskDetailPage) and POSTs to /api/v1/tasks.
-// Default is `is_personal = true` — a flip-to-team toggle lives in the
+// Default is `is_personal = true`, a flip-to-team toggle lives in the
 // modal so team tasks still take one click.
 
 interface NewTaskBody {

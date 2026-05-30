@@ -111,6 +111,7 @@ function blockerMessage(error: unknown): string {
   return "The period could not be closed. Review unsettled bookings, approvals, and pay rules.";
 }
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 export default function PayPage() {
   // code-health: ignore[ccn nloc] Pay route coordinates payslip and reimbursement query data while preserving existing table layout.
   const queryClient = useQueryClient();
@@ -131,7 +132,7 @@ export default function PayPage() {
     queryKey: qk.employees(),
     queryFn: () => fetchJson<Employee[]>("/api/v1/employees"),
   });
-  // §09 "Amount owed to the employee" — workspace-wide aggregate of
+  // §09 "Amount owed to the employee", workspace-wide aggregate of
   // approved-but-not-yet-reimbursed claims. Grouped by owed_currency
   // (the destination's currency, not the claim's). ``by_user`` drives
   // the per-employee breakdown table.
@@ -204,7 +205,7 @@ export default function PayPage() {
     if (closeTarget) closeMutation.mutate(closeTarget.id);
   };
 
-  const sub = "Periods, payslips, pay rules. Gross only — taxes and social contributions are out of scope.";
+  const sub = "Periods, payslips, pay rules. Gross only, taxes and social contributions are out of scope.";
   const actions = closeDisabledReason ? (
     <span className="page-action-disabled">
       <button
@@ -353,7 +354,7 @@ export default function PayPage() {
       </section>
 
       <div className="panel">
-        <header className="panel__head"><h2>April 2026 — drafts</h2></header>
+        <header className="panel__head"><h2>April 2026, drafts</h2></header>
         <table className="table table--roomy">
           <thead>
             <tr>
@@ -407,7 +408,7 @@ export default function PayPage() {
         ) : pendingQ.isError || pendingCountsError ? (
           <>Failed to load.</>
         ) : pendingByUser.length === 0 ? (
-          <p className="muted">Nothing owed right now — all approved claims are already on a payslip.</p>
+          <p className="muted">Nothing owed right now, all approved claims are already on a payslip.</p>
         ) : (
           <table className="table">
             <thead>
@@ -466,7 +467,7 @@ export default function PayPage() {
       </div>
 
       <div className="panel">
-        <header className="panel__head"><h2>March 2026 — paid</h2></header>
+        <header className="panel__head"><h2>March 2026, paid</h2></header>
         <table className="table">
           <thead>
             <tr>
@@ -492,7 +493,7 @@ export default function PayPage() {
 
       <div className="panel panel--danger">
         <header className="panel__head"><h2>Always-gated actions</h2></header>
-        <p className="muted">These payroll actions always require a manager passkey — the agent approval flow cannot bypass them.</p>
+        <p className="muted">These payroll actions always require a manager passkey, the agent approval flow cannot bypass them.</p>
         <ul className="danger-list">
           <li><code className="inline-code">payout_destination.create</code> · <code className="inline-code">payout_destination.update</code></li>
           <li><code className="inline-code">work_engagement.set_default_pay_destination</code></li>

@@ -131,7 +131,7 @@ describe("<EmployeeLeavesPage>", () => {
     try {
       render(<Harness />);
 
-      expect(await screen.findByText("Maya Santos — leave ledger")).toBeInTheDocument();
+      expect(await screen.findByText("Maya Santos, leave ledger")).toBeInTheDocument();
       expect(screen.getByText("Family trip")).toBeInTheDocument();
       expect(screen.getByText("Checkup")).toBeInTheDocument();
       expect(screen.getByRole("link", { name: /Back to profile/ })).toHaveAttribute(
@@ -155,7 +155,7 @@ describe("<EmployeeLeavesPage>", () => {
       render(<Harness />);
 
       expect(await screen.findByText("Failed to load.")).toBeInTheDocument();
-      expect(screen.queryByText("Maya Santos — leave ledger")).toBeNull();
+      expect(screen.queryByText("Maya Santos, leave ledger")).toBeNull();
     } finally {
       fake.restore();
     }
@@ -166,7 +166,7 @@ describe("<EmployeeLeavesPage>", () => {
     try {
       render(<Harness initialPath="/w/acme/user/emp_1/leaves" />);
 
-      expect(await screen.findByText("Maya Santos — leave ledger")).toBeInTheDocument();
+      expect(await screen.findByText("Maya Santos, leave ledger")).toBeInTheDocument();
       expect(fake.calls).toContainEqual({
         url: "/w/acme/api/v1/employees/emp_1/leaves",
         method: "GET",

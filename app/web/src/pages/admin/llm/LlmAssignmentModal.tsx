@@ -247,6 +247,7 @@ function initialAssignmentModalState(
   };
 }
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 export default function LlmAssignmentModal({
   capabilityKey,
   graph,

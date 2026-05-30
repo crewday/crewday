@@ -1,5 +1,6 @@
 import type { LlmAssignment } from "@/types";
-import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
+import LlmUsageTotals from "./LlmUsageTotals";
+import { formatUsageSummary } from "./LlmUsageTotals.lib";
 import { shouldOpenGraphEditor } from "./lib/clickTargets";
 import type { LlmIndexes } from "./lib/llmIndexes";
 import { thinkingLevelLabel } from "./lib/llmThinking";

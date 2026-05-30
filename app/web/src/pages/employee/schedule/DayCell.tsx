@@ -47,7 +47,7 @@ export function DayCellView(props: DayCellViewProps) {
       aria-label={
         `Open schedule for ${label.weekday} ${label.day} ${label.month}`
         + (pendingBookings.length > 0
-          ? ` — ${pendingBookings.length} booking${pendingBookings.length === 1 ? "" : "s"} ${pendingBookings.length === 1 ? "needs" : "need"} attention`
+          ? `, ${pendingBookings.length} booking${pendingBookings.length === 1 ? "" : "s"} ${pendingBookings.length === 1 ? "needs" : "need"} attention`
           : "")
       }
       className={

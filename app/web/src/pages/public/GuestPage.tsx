@@ -130,7 +130,7 @@ function emergencyLines(welcome: Record<string, unknown>): string[] {
       const label = stringValue(contact.label);
       const name = stringValue(contact.name);
       const phone = stringValue(contact.phone_e164) ?? stringValue(contact.phone);
-      const left = [label, name].filter(Boolean).join(" — ");
+      const left = [label, name].filter(Boolean).join(", ");
       if (left && phone) return [`${left}: ${phone}`];
       return left || phone ? [left || phone || ""] : [];
     });
@@ -344,7 +344,7 @@ function ChecklistCard({ checklist }: { checklist: ChecklistItem[] }) {
     <article className="guest-card guest-card--wide">
       <h2 className="guest-card__title">Before you leave</h2>
       <p className="muted">
-        A short checklist — nothing scary, just what we always ask.
+        A short checklist, nothing scary, just what we always ask.
       </p>
       <ul className="guest-checklist">
         {checklist.length === 0 ? (

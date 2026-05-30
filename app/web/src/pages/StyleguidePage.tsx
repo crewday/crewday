@@ -1,4 +1,4 @@
-// Visual regression baseline — if anything in tokens.css / globals.css
+// Visual regression baseline, if anything in tokens.css / globals.css
 // drifts, the pixel diff on /styleguide is the fastest signal.
 // Keep this page static and self-contained.
 
@@ -33,7 +33,7 @@ export default function StyleguidePage() {
       <section className="styleguide__section">
         <h2>Typography</h2>
         <div className="type-row">
-          <p className="type-sample type-sample--display">Villa Sud — tomorrow's turnover</p>
+          <p className="type-sample type-sample--display">Villa Sud, tomorrow's turnover</p>
           <p className="type-caption">Fraunces · display · 600</p>
         </div>
         <div className="type-row">
@@ -131,7 +131,7 @@ export default function StyleguidePage() {
               </span>
               <span className="task-card__when">10:30 · 25 min</span>
             </div>
-            <h3 className="task-card__title">Change linen — master bedroom</h3>
+            <h3 className="task-card__title">Change linen, master bedroom</h3>
             <div className="task-card__meta">Master bedroom</div>
             <div className="task-card__progress">
               <span className="progress-bar"><span style={{ width: "33%" }} /></span>
@@ -146,14 +146,14 @@ export default function StyleguidePage() {
         <h2>Motion principles</h2>
         <ul className="kb-list">
           <li className="kb-item">
-            <div className="kb-item__main"><strong>Enter</strong> — 150ms fade &amp; rise 4px.</div>
+            <div className="kb-item__main"><strong>Enter</strong>, 150ms fade &amp; rise 4px.</div>
           </li>
           <li className="kb-item">
-            <div className="kb-item__main"><strong>Tick</strong> — scale-to-checkmark, spring.</div>
+            <div className="kb-item__main"><strong>Tick</strong>, scale-to-checkmark, spring.</div>
           </li>
           <li className="kb-item">
             <div className="kb-item__main">
-              <strong>Respect</strong> <code className="inline-code">prefers-reduced-motion</code> — reduce to opacity only.
+              <strong>Respect</strong> <code className="inline-code">prefers-reduced-motion</code>, reduce to opacity only.
             </div>
           </li>
         </ul>

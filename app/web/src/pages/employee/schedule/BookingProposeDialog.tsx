@@ -1,4 +1,4 @@
-// §09 "Ad-hoc bookings" — worker proposes an unscheduled booking
+// §09 "Ad-hoc bookings", worker proposes an unscheduled booking
 // (swung by for laundry, covered a gap). Always lands with
 // `status = pending_approval`; the manager sees it in the queue and
 // approves or rejects. The mock implements the minimum viable form;

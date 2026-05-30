@@ -1,9 +1,9 @@
-// crewday — shared Vitest render helper.
+// crewday, shared Vitest render helper.
 //
 // Most page suites mount the unit-under-test inside the same shell:
 // QueryClient + MemoryRouter + (optionally) WorkspaceProvider /
 // AuthProvider. `renderWithProviders` opts in to each layer so callers
-// stay explicit — there is no opaque "render everything" mode. Tests
+// stay explicit, there is no opaque "render everything" mode. Tests
 // that need a custom routing tree (e.g. `<Routes><Route path=...>`)
 // pass the entire `<MemoryRouter>` themselves and skip the `router`
 // option.
@@ -45,7 +45,7 @@ export function makeTestQueryClient(): QueryClient {
 /**
  * Render `ui` wrapped in the requested providers. The provider chain
  * is fixed (Query → Router → Workspace → Auth → ui) because order
- * matters — `WorkspaceProvider` calls `useQueryClient()`, so it has to
+ * matters, `WorkspaceProvider` calls `useQueryClient()`, so it has to
  * sit inside `QueryClientProvider`. `AuthProvider` reads the workspace
  * slug to scope `/auth/me` requests.
  */

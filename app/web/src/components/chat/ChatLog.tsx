@@ -14,7 +14,7 @@ export interface ChatLogProps {
    *  flex:1 scroll-box behaviour so the log flows inside a regular page. */
   variant?: "screen" | "inline";
   ariaLabel?: string;
-  /** §14 "Agent turn indicator" — when true, renders a WhatsApp-style
+  /** §14 "Agent turn indicator", when true, renders a WhatsApp-style
    *  typing pill (three animated dots) at the tail of the log. */
   typing?: boolean;
   activity?: AgentActivityState;

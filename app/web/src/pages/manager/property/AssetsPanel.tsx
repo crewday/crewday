@@ -21,7 +21,7 @@ export default function AssetsPanel({ detail }: { detail: PropertyDetail }) {
             {assets.map((a) => (
               <tr key={a.id}>
                 <td><strong>{a.name}</strong>{a.make && <span className="table__sub"> {a.make} {a.model}</span>}</td>
-                <td>{a.area ?? "—"}</td>
+                <td>{a.area ?? ","}</td>
                 <td><Chip tone={a.condition === "fair" ? "sand" : (a.condition === "poor" || a.condition === "needs_replacement") ? "rust" : "moss"} size="sm">{a.condition}</Chip></td>
                 <td><Chip tone={a.status === "active" ? "moss" : a.status === "in_repair" ? "sand" : "rust"} size="sm">{a.status}</Chip></td>
               </tr>

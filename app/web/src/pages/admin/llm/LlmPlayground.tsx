@@ -47,6 +47,7 @@ interface LlmPlaygroundState {
 
 const DEFAULT_VISION_ONLY_PROMPT = "Extract the text from this image.";
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 export default function LlmPlayground({
   providerModel,
   model,
@@ -348,7 +349,7 @@ export default function LlmPlayground({
 
       {playground.isPending ? (
         <output className="llm-playground__status">
-          Running playground test...
+          Running playground test…
         </output>
       ) : null}
 
@@ -375,7 +376,7 @@ export default function LlmPlayground({
           onClick={runPlayground}
           disabled={playground.isPending}
         >
-          {playground.isPending ? "Running..." : "Run playground"}
+          {playground.isPending ? "Running…" : "Run playground"}
         </button>
       </div>
     </section>

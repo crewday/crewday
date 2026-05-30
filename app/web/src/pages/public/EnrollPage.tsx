@@ -1,4 +1,4 @@
-// crewday — production `/recover/enroll` surface.
+// crewday, production `/recover/enroll` surface.
 //
 // The user arrives here from a recovery magic link
 // (`{base_url}/recover/enroll?token=...`, minted by
@@ -12,7 +12,7 @@
 //      → `POST /recover/passkey/finish` ceremony;
 //   4. on success, pulls a fresh `/auth/me` envelope (via
 //      `useAuth().refresh()`), clears any cached query state, and
-//      navigates to the user's role landing — same map LoginPage uses.
+//      navigates to the user's role landing, same map LoginPage uses.
 //
 // Visual contract mirrors the `login__card` shell that LoginPage and
 // RecoverPage use; semantic classes only, no new inline CSS.
@@ -59,7 +59,7 @@ export default function EnrollPage() {
 
   const [verify, setVerify] = useState<VerifyState>({ kind: "idle" });
   const [enroll, setEnroll] = useState<EnrollState>({ kind: "idle" });
-  // Concurrency guard — same pattern as LoginPage. `disabled={pending}`
+  // Concurrency guard, same pattern as LoginPage. `disabled={pending}`
   // only blocks the *next* click after React commits; a rapid burst can
   // enqueue two ceremonies before the attribute applies.
   const inflightRef = useRef(false);
@@ -220,7 +220,7 @@ function VerifyingView() {
   return (
     <output aria-live="polite">
       <h1 className="login__headline">Checking your link…</h1>
-      <p className="login__sub">One moment — we're confirming the recovery token.</p>
+      <p className="login__sub">One moment, we're confirming the recovery token.</p>
     </output>
   );
 }

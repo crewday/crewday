@@ -27,10 +27,10 @@ import { usePatchReducer } from "@/lib/usePatchReducer";
 import type { ChecklistTemplateItem, PhotoEvidence, TaskPriority, TaskTemplate } from "@/types/task";
 import type { WorkRole } from "@/types/employee";
 
-// §08 — decimal qty formatter, trailing zeros trimmed. The wire shape
+// §08, decimal qty formatter, trailing zeros trimmed. The wire shape
 // is currently integer-only (`inventory_consumption_json: dict[str,
 // int]`), but the spec calls for decimals (0.3 bottles of window-
-// washer) and the renderer is the same on both sides — so the helper
+// washer) and the renderer is the same on both sides, so the helper
 // stays decimal-aware now to spare a rewrite when storage widens.
 function fmtQty(n: number): string {
   return formatDecimal(n, { maximumFractionDigits: 3 });
@@ -102,7 +102,7 @@ function truncate(text: string, max: number): string {
 }
 
 // Strip the lightest layer of Markdown so the card preview reads as
-// plain prose. Goes no deeper than that — a real Markdown renderer
+// plain prose. Goes no deeper than that, a real Markdown renderer
 // belongs in the template-detail drawer (out of scope for the list
 // card).
 function plainPreview(md: string): string {
@@ -487,8 +487,8 @@ function NewTemplateForm({
 }
 
 // Wire the PATCH body the backend's TaskTemplateUpdate expects (full
-// replacement of the mutable body). Read-only fields — id,
-// workspace_id, timestamps, the projected inventory_effects — are
+// replacement of the mutable body). Read-only fields, id,
+// workspace_id, timestamps, the projected inventory_effects, are
 // stripped because the DTO uses `extra="forbid"`.
 function templateUpdateBody(tpl: TaskTemplate): Record<string, unknown> {
   return {
@@ -565,7 +565,7 @@ function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement {
         debounceRef.current = null;
       }
       // Don't strand the user's reorder if they navigate away during
-      // the debounce window — fire the queued PATCH so the server
+      // the debounce window, fire the queued PATCH so the server
       // sees the final order. The mutation runs against the still-
       // alive QueryClient; the unmounted component is no longer the
       // observer of its result.
@@ -854,6 +854,7 @@ function checklistColumns(): InlineTableColumn<ChecklistTemplateItem>[] {
       key: "text",
       header: "Item",
       width: { flex: 1.8, min: 180 },
+      // react-doctor-disable-next-line react-doctor/no-render-in-render -- Checklist labels are pure draft formatting for the inline table read cell.
       renderRead: ({ row }) => <ReadText value={renderChecklistLabel(row.draft)} fallback="Untitled item" />,
       renderEdit: ({ row, update, disabled }) => (
         <InlineTextField

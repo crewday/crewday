@@ -1,16 +1,16 @@
-// crewday — SignupEnrollPage component test.
+// crewday, SignupEnrollPage component test.
 //
 // Pins the `/signup/enroll` surface against the documented two-step
 // "passkey ceremony then login" flow (§03 "Self-serve signup"
 // steps 3-4). Signup finish does NOT stamp a session cookie, so the
-// SPA must follow up with a regular passkey login before navigating —
+// SPA must follow up with a regular passkey login before navigating,
 // the happy-path test below asserts that explicit ordering.
 //
 // What this covers:
-//   1. No handoff state — user deep-linked without going through
+//   1. No handoff state, user deep-linked without going through
 //      verify; the "Signup link required" error view renders and
 //      neither passkey endpoint fires.
-//   2. Happy path — render with handoff state in router state, fill
+//   2. Happy path, render with handoff state in router state, fill
 //      in display name, submit. The full chain runs:
 //        POST /signup/passkey/start
 //        navigator.credentials.create  (registration)
@@ -20,7 +20,7 @@
 //        POST /auth/passkey/login/finish
 //        GET  /auth/me                 (loginWithPasskey post-finish)
 //      Then we navigate to the role landing.
-//   3. Cancelled ceremony — `navigator.credentials.create` throws
+//   3. Cancelled ceremony, `navigator.credentials.create` throws
 //      `NotAllowedError`; the page surfaces the inline notice; no
 //      finish endpoint is called; the form re-arms.
 
@@ -155,7 +155,7 @@ afterEach(() => {
 
 // ── Tests ─────────────────────────────────────────────────────────
 
-describe("<SignupEnrollPage> — no handoff state", () => {
+describe("<SignupEnrollPage>, no handoff state", () => {
   it("renders the 'signup link required' error view and never POSTs", async () => {
     const { calls, restore } = installFetch({
       "/api/v1/auth/me": [{ status: 401, body: { detail: "no session" } }],
@@ -183,7 +183,7 @@ describe("<SignupEnrollPage> — no handoff state", () => {
   });
 });
 
-describe("<SignupEnrollPage> — happy path", () => {
+describe("<SignupEnrollPage>, happy path", () => {
   it("runs the full ceremony, then runs passkey login, refreshes /me, and navigates to the role landing", async () => {
     // Two `/auth/me` responses: one for the bootstrap probe (401, no
     // session), then the post-login probe inside `loginWithPasskey`.
@@ -266,7 +266,7 @@ describe("<SignupEnrollPage> — happy path", () => {
       await flush();
 
       // Form is rendered with timezone hint (jsdom defaults to UTC or
-      // the host's TZ — either is fine, just assert the hint is there).
+      // the host's TZ, either is fine, just assert the hint is there).
       const name = screen.getByTestId("signup-enroll-name") as HTMLInputElement;
       fireEvent.change(name, { target: { value: "Maria Aubry" } });
       expect(screen.getByTestId("signup-enroll-timezone")).toBeInTheDocument();
@@ -330,7 +330,7 @@ describe("<SignupEnrollPage> — happy path", () => {
   });
 });
 
-describe("<SignupEnrollPage> — cancelled ceremony", () => {
+describe("<SignupEnrollPage>, cancelled ceremony", () => {
   it("surfaces the inline notice and re-arms the form when the user dismisses the prompt", async () => {
     const { calls, restore } = installFetch({
       "/api/v1/auth/me": [{ status: 401, body: { detail: "no session" } }],
@@ -348,7 +348,7 @@ describe("<SignupEnrollPage> — cancelled ceremony", () => {
           },
         },
       ],
-      // /signup/passkey/finish must NEVER be called — if it is, the
+      // /signup/passkey/finish must NEVER be called, if it is, the
       // unscripted-fetch throw surfaces as the failure we want.
     });
     installCredentials({

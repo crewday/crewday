@@ -17,15 +17,15 @@ import MintTokenModal from "./api-tokens/MintTokenModal";
 import TokenRow from "./api-tokens/TokenRow";
 import TokenAuditPanel from "./api-tokens/TokenAuditPanel";
 
-// §03 API tokens — manager surface. Scoped + delegated workspace
+// §03 API tokens, manager surface. Scoped + delegated workspace
 // tokens live here. Personal access tokens (kind === "personal")
-// are deliberately hidden — they live on /me, revocable only by
+// are deliberately hidden, they live on /me, revocable only by
 // the subject.
 
 export default function ApiTokensPage() {
   const qc = useQueryClient();
   const { pathname } = useLocation();
-  // §12 cursor envelope (cd-msu2). The page renders a single page —
+  // §12 cursor envelope (cd-msu2). The page renders a single page,
   // pagination UI lands as a follow-up; today's per-user/per-workspace
   // caps keep the corpus well below the default limit.
   const listQ = useQuery({

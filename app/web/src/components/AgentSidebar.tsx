@@ -20,7 +20,7 @@ import type { AgentAction, AgentMessage, AgentTurnScope, Role } from "@/types/ap
 // (scrollTop, composer draft, EventSource-fed cache) across page
 // changes.
 //
-// Above 720px the rail renders inline (collapsed or expanded — see
+// Above 720px the rail renders inline (collapsed or expanded, see
 // `initialAgentCollapsed`). Below 720px the rail is hidden by CSS;
 // both shells route their bottom Chat tab to /chat instead. `role`
 // selects the per-role log/message endpoints and gates the
@@ -90,7 +90,7 @@ export default function AgentSidebar({ agentRole: role }: AgentSidebarProps) {
     enabled: showActions,
   });
 
-  // §12 "Agent audit headers" — every message carries the route the
+  // §12 "Agent audit headers", every message carries the route the
   // user is on so the agent can resolve "this workspace" / "this
   // capability" without the user naming it. Admin context also
   // encodes known entity params (ws, capability) lifted from the URL.

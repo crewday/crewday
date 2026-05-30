@@ -1,25 +1,25 @@
-// crewday — production `/signup/verify` surface.
+// crewday, production `/signup/verify` surface.
 //
 // The user lands here after clicking the magic link emailed by
 // `/signup/start`. Two URL shapes hit this page:
 //
-//   1. `/signup/verify?token=…` — canonical SPA path. The link
+//   1. `/signup/verify?token=…`, canonical SPA path. The link
 //      template can emit this directly when the deployment knows
 //      the SPA owns the verify step.
-//   2. `/auth/magic/:token` — generic magic-link URL the mailer
+//   2. `/auth/magic/:token`, generic magic-link URL the mailer
 //      defaults to. The signup mailer
 //      (`app/mail/templates/auth/magic_link.*.j2`) uses
 //      this shape today, so we accept it here and treat the path
 //      param as the token.
 //
 // On mount we POST `/api/v1/signup/verify` with `{token}` (a POST,
-// not a GET — the spec mandates a SPA-first JSON shape; §03 step 2).
+// not a GET, the spec mandates a SPA-first JSON shape; §03 step 2).
 // On success the SPA navigates to `/signup/enroll`, threading the
 // `signup_session_id` + `desired_slug` through React Router state
 // (matching how EnrollPage hands off `recovery_session_id`).
 //
 // Failure modes are deliberately collapsed: 400 / 404 / 409 / 410
-// all mean "this link is no good — request a new one". 429 is
+// all mean "this link is no good, request a new one". 429 is
 // rate-limit. A missing token (user opened the URL by hand) is a
 // no-retry copy. The retry CTA always points back to `/signup`.
 
@@ -86,7 +86,7 @@ export default function SignupVerifyPage(): ReactElement {
         };
         // `replace` so the back button doesn't bounce the user to a
         // burned token. Token rides forward only as router state, not
-        // in the URL — keeps it out of bookmarks / referer headers.
+        // in the URL, keeps it out of bookmarks / referer headers.
         navigate("/signup/enroll", { replace: true, state: handoff });
       } catch (err) {
         setVerify({ kind: "error", ...verifyMessageFor(err) });
@@ -96,7 +96,7 @@ export default function SignupVerifyPage(): ReactElement {
 
   // Already-signed-in user following a stale link: bounce to their
   // landing rather than letting them burn a fresh token. (Recovery
-  // does the same thing — see EnrollPage.)
+  // does the same thing, see EnrollPage.)
   if (isAuthenticated) {
     return <Navigate to={pickRoleLanding(user)} replace />;
   }
@@ -129,7 +129,7 @@ function VerifyingView(): ReactElement {
   return (
     <output role={STATUS_ROLE} aria-live="polite" data-testid="signup-verify-pending">
       <h1 className="login__headline">Confirming your link…</h1>
-      <p className="login__sub">One moment — we're verifying your signup token.</p>
+      <p className="login__sub">One moment, we're verifying your signup token.</p>
     </output>
   );
 }

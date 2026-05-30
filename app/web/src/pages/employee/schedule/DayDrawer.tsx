@@ -36,6 +36,7 @@ interface DayDrawerProps {
   onProposeBooking: (iso: string) => void;
 }
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 export function DayDrawer(props: DayDrawerProps) {
   // code-health: ignore[nloc] Drawer is declarative schedule section composition; mutations/helpers are already extracted.
   const { cell, data, onClose, onRequestLeave, onRequestOverride, onProposeBooking } = props;
@@ -44,7 +45,7 @@ export function DayDrawer(props: DayDrawerProps) {
 
   // §09 amend and decline. Self-amend above the threshold goes
   // straight to `pending_amend_*`, below it mutates actuals directly
-  // — the server decides, we just post. The mock endpoint does the
+  //, the server decides, we just post. The mock endpoint does the
   // simpler "applies whatever you send" behaviour; production does
   // the real §09 gating.
   const amendMutation = useMutation({
@@ -71,13 +72,13 @@ export function DayDrawer(props: DayDrawerProps) {
     },
   });
 
-  // A per-day window for the drawer's hero timeline — it sits in its
+  // A per-day window for the drawer's hero timeline, it sits in its
   // own context so it doesn't need to share scale with the agenda
   // behind it. The empty-day fallback keeps the section silent if the
   // worker opened a rest day (the hero would otherwise look broken).
   const drawerWindow = useMemo(() => (cell ? computeWindow([cell]) : null), [cell]);
 
-  // Universal Esc-to-close — matches the inventory drawer, prompt
+  // Universal Esc-to-close, matches the inventory drawer, prompt
   // drawer, and everything else scrim-backed across the app.
   useCloseOnEscape(onClose, cell !== null && drawerWindow !== null);
 
@@ -203,7 +204,7 @@ export function DayDrawer(props: DayDrawerProps) {
                   // produced the booking yet. "No booking on this day"
                   // would read as a contradiction next to the rota row.
                   <p className="day-drawer__muted">
-                    Rota scheduled — booking will be created automatically.
+                    Rota scheduled, booking will be created automatically.
                   </p>
                 ) : (
                   <p className="day-drawer__muted">No booking on this day.</p>
@@ -257,7 +258,7 @@ export function DayDrawer(props: DayDrawerProps) {
                         <p className="booking-card__pending">
                           Pending manager approval:
                           {" "}{fmtDuration(b.pending_amend_minutes)}
-                          {b.pending_amend_reason ? ` — ${b.pending_amend_reason}` : ""}
+                          {b.pending_amend_reason ? `, ${b.pending_amend_reason}` : ""}
                         </p>
                       )}
                       {(canAmend || isFutureScheduled) && (

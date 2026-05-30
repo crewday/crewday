@@ -1,37 +1,37 @@
-// crewday — RecoverPage component test.
+// crewday, RecoverPage component test.
 //
 // What this covers:
-//   1. Happy path — fill in the email, submit, server returns 202 →
+//   1. Happy path, fill in the email, submit, server returns 202 →
 //      form disappears, "check your email" confirmation replaces it.
 //      The request body carries ONLY the email (no break-glass code)
 //      when the step-up checkbox is off. Focus lands on the "Check
 //      your email" heading so keyboard / screen-reader users aren't
 //      stranded on the unmounted submit button.
-//   2. Step-up branch — checking "I'm a manager or owner" reveals the
+//   2. Step-up branch, checking "I'm a manager or owner" reveals the
 //      break-glass input; a subsequent submit sends both the email
 //      and the break-glass code.
-//   3. 429 rate-limit — server returns 429 → a danger notice surfaces
+//   3. 429 rate-limit, server returns 429 → a danger notice surfaces
 //      the "slow down" copy; the form stays visible so the user can
 //      retry after a minute; the confirmation view is NOT shown.
-//   4. 500 server error — server returns 500 → the generic "couldn't
+//   4. 500 server error, server returns 500 → the generic "couldn't
 //      send the link" fallback surfaces; the form is still
 //      interactive so the user can retry. Mirrors LoginPage's
 //      non-429 error parity.
-//   5. Empty email guard — `fireEvent.submit` bypasses the browser's
+//   5. Empty email guard, `fireEvent.submit` bypasses the browser's
 //      native `required` validation (jsdom honours it for synthesised
 //      `submit` events, but belt-and-braces on the component seam is
 //      cheap). An empty/whitespace email must NOT fire the mutation.
-//   6. Concurrency guard — a synchronous double-submit (two submits
+//   6. Concurrency guard, a synchronous double-submit (two submits
 //      in the same tick, before React commits `pending`) must
 //      coalesce into a single request. Mirrors LoginPage's cd-4z54
 //      fix so a keyboard-Enter-spam doesn't burn two throttle slots.
 //
 // What this does NOT cover (and why):
-//   - The Playwright pixel-diff against the mock — cd-gids's e2e
+//   - The Playwright pixel-diff against the mock, cd-gids's e2e
 //     acceptance run by the Director.
-//   - The actual magic-link-click / enrollment ceremony — that lands
+//   - The actual magic-link-click / enrollment ceremony, that lands
 //     on `/recover/enroll` and is covered by separate tests.
-//   - The "sent_if_exists" audit trail — server concern; the UI's
+//   - The "sent_if_exists" audit trail, server concern; the UI's
 //     job is only to always render the generic confirmation on 2xx,
 //     which is exactly what test #1 asserts.
 
@@ -46,7 +46,7 @@ import { installFetchRoutes, type FakeResponse } from "@/test/helpers";
 
 // ── Test harness ──────────────────────────────────────────────────
 
-/** Scripted `fetch`. Endpoints land at `/api/v1/recover/...` — match
+/** Scripted `fetch`. Endpoints land at `/api/v1/recover/...`, match
  *  on URL suffix so the test reads naturally without juggling the
  *  workspace prefix for an unauthenticated public flow. */
 function installFetch(scripted: Record<string, FakeResponse[]>) {
@@ -85,7 +85,7 @@ afterEach(() => {
 
 // ── Tests ─────────────────────────────────────────────────────────
 
-describe("<RecoverPage> — happy path", () => {
+describe("<RecoverPage>, happy path", () => {
   it("submits the email and shows the 'check your email' confirmation on 202", async () => {
     const { calls, restore } = installFetch({
       "/api/v1/recover/passkey/request": [
@@ -114,7 +114,7 @@ describe("<RecoverPage> — happy path", () => {
       const sent = JSON.parse(calls[0]!.init.body as string) as Record<string, unknown>;
       expect(sent).toEqual({ email: "maria@example.com" });
 
-      // The form is replaced by the generic confirmation — the
+      // The form is replaced by the generic confirmation, the
       // "sent_if_exists" contract means this renders for ANY 2xx,
       // even if the email doesn't match an account.
       const sentPanel = screen.getByTestId("recover-sent");
@@ -125,7 +125,7 @@ describe("<RecoverPage> — happy path", () => {
       expect(sentPanel.getAttribute("aria-live")).toBe("polite");
       const heading = screen.getByText("Check your email");
       expect(heading).toBeInTheDocument();
-      // Focus moves to the confirmation heading — otherwise keyboard
+      // Focus moves to the confirmation heading, otherwise keyboard
       // focus is stranded on the unmounted submit button.
       expect(document.activeElement).toBe(heading);
       // Form inputs are no longer in the DOM.
@@ -139,7 +139,7 @@ describe("<RecoverPage> — happy path", () => {
   });
 });
 
-describe("<RecoverPage> — sign-in link next propagation", () => {
+describe("<RecoverPage>, sign-in link next propagation", () => {
   it("carries a sanitised ?next back to the login link", () => {
     render(<Harness initial="/recover?next=/property/abc" />);
 
@@ -155,7 +155,7 @@ describe("<RecoverPage> — sign-in link next propagation", () => {
   });
 });
 
-describe("<RecoverPage> — step-up branch", () => {
+describe("<RecoverPage>, step-up branch", () => {
   it("reveals the break-glass code field and submits it alongside the email", async () => {
     const { calls, restore } = installFetch({
       "/api/v1/recover/passkey/request": [
@@ -201,7 +201,7 @@ describe("<RecoverPage> — step-up branch", () => {
   });
 });
 
-describe("<RecoverPage> — error branches", () => {
+describe("<RecoverPage>, error branches", () => {
   it("surfaces the rate-limit notice on 429 and leaves the form visible", async () => {
     const { restore } = installFetch({
       "/api/v1/recover/passkey/request": [
@@ -228,7 +228,7 @@ describe("<RecoverPage> — error branches", () => {
       expect(notice.textContent).toContain("Too many recovery requests");
       expect(notice.className).toContain("login__notice--danger");
 
-      // Form is still visible — the user can retry after the window.
+      // Form is still visible, the user can retry after the window.
       // The confirmation view must NOT render on error.
       expect(screen.queryByTestId("recover-sent")).toBeNull();
       const submit = screen.getByTestId("recover-submit") as HTMLButtonElement;
@@ -239,7 +239,7 @@ describe("<RecoverPage> — error branches", () => {
   });
 
   it("surfaces the generic fallback notice on 500 so the user can retry", async () => {
-    // Non-429 errors take the `messageFor` fallback branch — without
+    // Non-429 errors take the `messageFor` fallback branch, without
     // this test, dropping the `ApiError` import or mis-wiring the
     // mutation's `onError` could silently ship a blank card. Mirrors
     // LoginPage's "we couldn't sign you in" parity.
@@ -266,7 +266,7 @@ describe("<RecoverPage> — error branches", () => {
 
       const notice = screen.getByTestId("recover-error");
       expect(notice.textContent).toContain("We couldn't send the recovery link");
-      // The server's `detail` must NOT be surfaced verbatim — the
+      // The server's `detail` must NOT be surfaced verbatim, the
       // enumeration guard demands a stable UI regardless of what the
       // server body leaks.
       expect(notice.textContent).not.toContain("Unexpected failure");
@@ -280,7 +280,7 @@ describe("<RecoverPage> — error branches", () => {
   });
 });
 
-describe("<RecoverPage> — input guards", () => {
+describe("<RecoverPage>, input guards", () => {
   it("does not fire a request when the email is empty or whitespace", async () => {
     // jsdom honours `required` for user-initiated submits, but
     // `fireEvent.submit` on the form element bypasses that gate. The
@@ -289,7 +289,7 @@ describe("<RecoverPage> — input guards", () => {
     // that leans entirely on HTML5 validation doesn't silently send
     // `{email: ""}` to the throttle budget.
     const { calls, restore } = installFetch({
-      // Scripted with an empty queue — if the component ever fires,
+      // Scripted with an empty queue, if the component ever fires,
       // the spy will throw "No more responses for: …" and fail.
       "/api/v1/recover/passkey/request": [],
     });
@@ -306,7 +306,7 @@ describe("<RecoverPage> — input guards", () => {
       await flush();
       expect(calls).toHaveLength(0);
 
-      // Second: whitespace-only email — the trim guard must still
+      // Second: whitespace-only email, the trim guard must still
       // reject it.
       fireEvent.change(email, { target: { value: "   " } });
       await act(async () => {
@@ -316,7 +316,7 @@ describe("<RecoverPage> — input guards", () => {
       await flush();
       expect(calls).toHaveLength(0);
 
-      // Form still in the idle view — no confirmation, no error.
+      // Form still in the idle view, no confirmation, no error.
       expect(screen.queryByTestId("recover-sent")).toBeNull();
       expect(screen.queryByTestId("recover-error")).toBeNull();
     } finally {
@@ -325,13 +325,13 @@ describe("<RecoverPage> — input guards", () => {
   });
 });
 
-describe("<RecoverPage> — concurrency guard", () => {
+describe("<RecoverPage>, concurrency guard", () => {
   it("coalesces a synchronous double-submit into a single request", async () => {
     // `disabled={pending}` only takes effect after React commits the
     // pending state. A synchronous pair of submits (keyboard
     // Enter-spam, double form submission) in the same tick can both
     // pass `mutation.isPending === false` and enqueue two POSTs.
-    // The inflight-ref guard is what stops them — mirrors
+    // The inflight-ref guard is what stops them, mirrors
     // LoginPage's cd-4z54 fix.
     //
     // Only ONE response is scripted. A second POST would throw
@@ -351,7 +351,7 @@ describe("<RecoverPage> — concurrency guard", () => {
 
       await act(async () => {
         const form = email.closest("form")!;
-        // Two synchronous submits in the same tick — before React
+        // Two synchronous submits in the same tick, before React
         // commits the pending state. The ref must coalesce them.
         fireEvent.submit(form);
         fireEvent.submit(form);
@@ -363,7 +363,7 @@ describe("<RecoverPage> — concurrency guard", () => {
         c.url.endsWith("/api/v1/recover/passkey/request"),
       );
       expect(postCalls.length).toBe(1);
-      // Confirmation still renders — the second submit was dropped,
+      // Confirmation still renders, the second submit was dropped,
       // not swallowed by an error.
       expect(screen.getByTestId("recover-sent")).toBeInTheDocument();
     } finally {

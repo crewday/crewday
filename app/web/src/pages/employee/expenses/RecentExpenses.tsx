@@ -6,7 +6,7 @@ import { fmtDate } from "@/lib/dates";
 import { Loading } from "@/components/common";
 import { STATUS_TONE } from "./lib/expenseHelpers";
 
-// "My recent expenses" — always visible below the form so the worker
+// "My recent expenses", always visible below the form so the worker
 // can see what the past week's claims look like (and their status)
 // without leaving the page. Pending / approved / reimbursed all flow
 // through the same list; the chip tone (`STATUS_TONE`) is the only

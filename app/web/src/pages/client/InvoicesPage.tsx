@@ -96,10 +96,10 @@ function ProofUploadButton({
   );
 }
 
-// §22 — vendor invoices billed to one of the user's binding orgs
+// §22, vendor invoices billed to one of the user's binding orgs
 // (the orgs they hold a `client` grant for in the active workspace).
 // Clients can upload proof-of-payment (appends to
-// `proof_of_payment_file_ids`) but cannot mark anything paid — the
+// `proof_of_payment_file_ids`) but cannot mark anything paid, the
 // workspace pushes funds and owns the paid bookkeeping flag.
 export default function ClientInvoicesPage() {
   // code-health: ignore[ccn nloc] Invoice route keeps upload mutation, optimistic invalidation, and table states together.
@@ -165,7 +165,7 @@ export default function ClientInvoicesPage() {
   return (
     <DeskPage
       title="Invoices"
-      sub="Vendor invoices billed to your organization. Upload proof of payment once you've settled one — your agency will reconcile from their bank feed."
+      sub="Vendor invoices billed to your organization. Upload proof of payment once you've settled one, your agency will reconcile from their bank feed."
     >
       {invoices.length === 0 ? (
         <div className="panel">
@@ -209,10 +209,10 @@ export default function ClientInvoicesPage() {
                         {v.proof_of_payment_file_ids.length} uploaded
                       </Chip>
                     ) : (
-                      <span className="muted">—</span>
+                      <span className="muted">,</span>
                     )}
                   </td>
-                  <td className="table__mono muted">—</td>
+                  <td className="table__mono muted">,</td>
                   <td>
                     {v.status === "approved" ? (
                       <ProofUploadButton

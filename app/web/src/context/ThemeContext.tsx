@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, use, useEffect, useMemo, useState, type ReactNode } from "react";
 import { persistTheme, readThemeCookie } from "@/lib/preferences";
 import type { ResolvedTheme, Theme } from "@/types/api";
 
@@ -59,7 +59,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 }
 
 export function useTheme(): ThemeCtx {
-  const v = useContext(Ctx);
+  const v = use(Ctx);
   if (!v) throw new Error("useTheme must be used inside <ThemeProvider>");
   return v;
 }

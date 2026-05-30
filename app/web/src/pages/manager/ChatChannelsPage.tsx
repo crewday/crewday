@@ -78,7 +78,7 @@ export default function ChatChannelsPage() {
   });
 
   const sub =
-    "One runtime per user, many channels — web, WhatsApp, and (deferred) Telegram. " +
+    "One runtime per user, many channels, web, WhatsApp, and (deferred) Telegram. " +
     "Users link a number from their profile; every turn rides the same delegated token.";
 
   if (bindings.isPending || providers.isPending) {
@@ -122,10 +122,10 @@ export default function ChatChannelsPage() {
                   </Chip>
                 </td>
                 <td className="mono">{p.display_stub}</td>
-                <td><DateTime value={p.last_webhook_at} showTime className="mono" empty="—" /></td>
+                <td><DateTime value={p.last_webhook_at} showTime className="mono" empty="," /></td>
                 <td>
                   {p.templates.length === 0
-                    ? <span className="muted">—</span>
+                    ? <span className="muted">,</span>
                     : p.templates.map((t) => (
                         <Chip key={t} tone="ghost" size="sm">{t}</Chip>
                       ))}
@@ -161,8 +161,8 @@ export default function ChatChannelsPage() {
                 <td>
                   <Chip tone={stateTone(b.state)} size="sm">{b.state}</Chip>
                 </td>
-                <td><DateTime value={b.verified_at} showTime className="mono" empty="—" /></td>
-                <td><DateTime value={b.last_message_at} showTime className="mono" empty="—" /></td>
+                <td><DateTime value={b.verified_at} showTime className="mono" empty="," /></td>
+                <td><DateTime value={b.last_message_at} showTime className="mono" empty="," /></td>
                 <td>
                   {b.state !== "revoked" && b.user_id === currentUserId && (
                     <button

@@ -1336,8 +1336,8 @@ describe("LlmRegistryModals", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Sync pricing" }));
 
-    expect(await screen.findByRole("button", { name: "Syncing..." })).toBeDisabled();
-    expect(screen.queryByText("Syncing pricing...")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Syncing…" })).toBeDisabled();
+    expect(screen.queryByText("Syncing pricing…")).not.toBeInTheDocument();
     resolveSync({
       ok: true,
       status: 200,

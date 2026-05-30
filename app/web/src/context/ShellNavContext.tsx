@@ -1,4 +1,4 @@
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, use, type ReactNode } from "react";
 
 // Shared "is there a drawer, and how do I toggle it" handle that the
 // page header reads to decide whether to render a hamburger in its
@@ -28,5 +28,5 @@ export function ShellNavProvider({ hasDrawer, isOpen, toggle, children }: Provid
 }
 
 export function useShellNav(): ShellNavCtxValue | null {
-  return useContext(Ctx);
+  return use(Ctx);
 }

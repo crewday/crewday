@@ -101,7 +101,7 @@ describe("IssueNewPage", () => {
       target: { value: "Master bathroom" },
     });
     fireEvent.click(screen.getByLabelText("Safety"));
-    fireEvent.click(screen.getByLabelText("Urgent — needs action today"));
+    fireEvent.click(screen.getByLabelText("Urgent, needs action today"));
     fireEvent.change(screen.getByLabelText("What happened?"), {
       target: { value: "Water is leaking under the sink." },
     });

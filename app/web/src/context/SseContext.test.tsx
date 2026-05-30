@@ -281,7 +281,7 @@ describe("<SseProvider>", () => {
       });
       expect(created).toHaveLength(2);
 
-      // Second drop — backoff should now be 2s.
+      // Second drop, backoff should now be 2s.
       const second = created[1]! as unknown as {
         readyState: number;
         onerror: (() => void) | null;
@@ -475,7 +475,7 @@ describe("<SseProvider>", () => {
   });
 
   it("resets the backoff ladder after a successful open", () => {
-    // After onopen fires, the next drop should wait 1s again — not
+    // After onopen fires, the next drop should wait 1s again, not
     // continue climbing the previous ladder. This prevents a
     // long-running session from taking 30s to recover from a brief
     // blip.
@@ -513,7 +513,7 @@ describe("<SseProvider>", () => {
         second.onopen?.();
       });
 
-      // Now drop — should reconnect at 1s (not 2s).
+      // Now drop, should reconnect at 1s (not 2s).
       second.readyState = TestEventSource.CLOSED;
       act(() => {
         second.onerror?.();
@@ -536,7 +536,7 @@ import { useRole, RoleProvider } from "@/context/RoleContext";
 import { useTheme, ThemeProvider } from "@/context/ThemeContext";
 import { renderHook } from "@testing-library/react";
 
-describe("context hooks — shape regression", () => {
+describe("context hooks, shape regression", () => {
   it("useRole exposes { role, setRole } inside <RoleProvider>", () => {
     const { result } = renderHook(() => useRole(), {
       wrapper: ({ children }) => <RoleProvider>{children}</RoleProvider>,

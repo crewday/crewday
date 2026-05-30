@@ -76,6 +76,7 @@ export default function TokenAuditPanel({ tokenId, onClose }: TokenAuditPanelPro
             {(auditQ.data ?? []).map((a) => (
               <tr key={a.correlation_id + a.at + a.action + (a.path ?? "")}>
                 <td><DateTime value={a.at} showTime className="tokens-audit__when" /></td>
+                {/* react-doctor-disable-next-line react-doctor/no-render-in-render -- Audit action rendering is a pure formatter for table cell copy. */}
                 <td>{renderAction(a)}</td>
                 <td className="tokens-audit__actor">{a.actor_id}</td>
                 <td className="tokens-audit__cid">{a.correlation_id}</td>

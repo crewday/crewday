@@ -6,7 +6,7 @@ import ReceiptScanPanel from "./expenses/ReceiptScanPanel";
 import RecentExpenses from "./expenses/RecentExpenses";
 import SubmitExpenseForm from "./expenses/SubmitExpenseForm";
 
-// Worker's expense surface (§09). Orchestrator only — owns the
+// Worker's expense surface (§09). Orchestrator only, owns the
 // `ScanPhase` state machine and the post-scan handoff between the
 // receipt picker and the review form. Every panel below it is a
 // self-contained piece (own queries, own mutations, own state) so the
@@ -37,7 +37,7 @@ export default function MyExpensesPage() {
   }, []);
 
   const handleScanFailed = useCallback(() => {
-    // Revert to `upload` so the panel re-renders its picker — the
+    // Revert to `upload` so the panel re-renders its picker, the
     // panel surfaces the failure message itself via local state, so
     // the parent only owns the phase transition.
     setScan(null);
@@ -58,7 +58,7 @@ export default function MyExpensesPage() {
     setPhase("submitted");
     // Auto-rewind to the picker so the worker can scan the next
     // receipt without an extra tap. The 1.5 s pause matches the mock
-    // — long enough to register the success banner, short enough not
+    //, long enough to register the success banner, short enough not
     // to feel sticky.
     setTimeout(() => {
       setScan(null);
@@ -70,7 +70,7 @@ export default function MyExpensesPage() {
     <>
       <PageHeader
         title="My expenses"
-        sub="Scan a receipt or add one by hand — approved claims land with your next payslip."
+        sub="Scan a receipt or add one by hand, approved claims land with your next payslip."
         actions={
           phase === "upload" ? (
             <button

@@ -22,14 +22,14 @@ function roleLabel(role: string): string {
 
 // Phone-frame layout. Body (<Outlet />) + a fixed bottom tab bar that
 // includes the Chat button (mobile entry to the agent). The v0 clock-in
-// dock is gone — under §09's booking model, the booking IS the time
+// dock is gone, under §09's booking model, the booking IS the time
 // record (no clock-in / clock-out tap). The dock now renders the
 // "next booking" hint and a one-tap shortcut to /schedule; the
 // drawer on that day opens straight to the booking row (§14).
 //
 // At tablet / desktop widths (>=720px) the phone becomes a three-column
 // grid: shared <SideNav /> on the left (Chat is removed from its items
-// — the agent lives on the right), the page <Outlet /> in the middle,
+//, the agent lives on the right), the page <Outlet /> in the middle,
 // and the shared <AgentSidebar /> on the right.
 
 const ICON_SIZE = 16;
@@ -100,7 +100,7 @@ export default function EmployeeLayout() {
   const pendingBadge = pendingMutationCount > 0
     ? (
         <output className="offline-queue-badge" aria-live="polite">
-          {pendingMutationCount} queued — will sync
+          {pendingMutationCount} queued, will sync
         </output>
       )
     : null;
@@ -140,7 +140,7 @@ export default function EmployeeLayout() {
 
       {pendingMutationCount > 0 && (
         <output className="offline-queue-badge offline-queue-badge--phone" aria-live="polite">
-          {pendingMutationCount} queued — will sync
+          {pendingMutationCount} queued, will sync
         </output>
       )}
 

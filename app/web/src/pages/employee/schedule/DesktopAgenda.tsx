@@ -29,7 +29,7 @@ export function ScheduleWeekGrid(props: ScheduleWeekGridProps) {
   const { cells, data, today, onOpen, label, hideLabel = false } = props;
   // One window per week so every cell in the row shares top/bottom
   // hours and identical height (see §14 "Shared time window per ISO
-  // week"). Next week recomputes — a quiet week doesn't inherit an
+  // week"). Next week recomputes, a quiet week doesn't inherit an
   // on-call week's stretched scale.
   const win = useMemo(() => computeWindow(cells), [cells]);
   return (

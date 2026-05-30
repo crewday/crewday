@@ -27,7 +27,7 @@ import {
 import { EmptyState } from "@/components/common";
 import type { AdminMe, Me } from "@/types/api";
 
-// AdminLayout — bare-host /admin/* shell (§14 "Admin shell").
+// AdminLayout, bare-host /admin/* shell (§14 "Admin shell").
 //
 // Mirrors ManagerLayout structurally (same .desk grid, same
 // AgentSidebar sibling-of-Outlet pattern so chat state survives
@@ -37,7 +37,7 @@ import type { AdminMe, Me } from "@/types/api";
 // Access: the caller must pass GET /admin/api/v1/me AND have
 // `is_deployment_admin: true` on the bare-host /auth/me payload.
 // A non-admin caller is redirected to `RoleHome` (`/`) rather than
-// shown a polite-card — the LoginPage filters `?next=/admin/...`
+// shown a polite-card, the LoginPage filters `?next=/admin/...`
 // for non-admins (cd-28s7), so the only paths that reach this
 // guard are direct navigation / stale bookmarks. Sending those
 // users home is clearer than dropping them on a denied surface
@@ -120,7 +120,7 @@ export default function AdminLayout() {
   }
 
   if (!hasAccess) {
-    // Still resolving identity — render a minimal chrome without
+    // Still resolving identity, render a minimal chrome without
     // mounting the outlet, so child pages don't fire admin queries
     // before we know whether the caller is authorised. Avoids a burst
     // of 404s in the console for visitors who aren't admins.

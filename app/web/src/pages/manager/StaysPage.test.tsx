@@ -461,7 +461,7 @@ describe("<StaysPage>", () => {
       expect(await screen.findByText("Scroll up for past weeks")).toBeInTheDocument();
       expect(screen.getByText("Keep scrolling for more")).toBeInTheDocument();
       expect(screen.getByLabelText("Stays calendar legend")).toBeInTheDocument();
-      expect(screen.queryByText("April 2026 — calendar")).not.toBeInTheDocument();
+      expect(screen.queryByText("April 2026, calendar")).not.toBeInTheDocument();
       expect(document.querySelector(".cal-wide")).toBeNull();
       expect(document.querySelector(".schedule__monthbar")).not.toBeNull();
     } finally {

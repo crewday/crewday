@@ -300,7 +300,7 @@ function ActionsTab({
             {ac.interval_days != null && (
               <span className="action-row__interval">every {ac.interval_days}d</span>
             )}
-            <DateTime value={ac.last_performed_at} showTime className="muted mono" empty="—" />
+            <DateTime value={ac.last_performed_at} showTime className="muted mono" empty="," />
             <Chip tone={dueTone(ac.next_due_on)} size="sm">{fmtDate(ac.next_due_on)}</Chip>
             <button
               className="btn btn--sm btn--moss"

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, use, useMemo, useState, type ReactNode } from "react";
 import { persistRole, readRoleCookie } from "@/lib/preferences";
 import type { Role } from "@/types/api";
 
@@ -20,7 +20,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
 }
 
 export function useRole(): RoleCtx {
-  const v = useContext(Ctx);
+  const v = use(Ctx);
   if (!v) throw new Error("useRole must be used inside <RoleProvider>");
   return v;
 }

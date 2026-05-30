@@ -21,7 +21,7 @@ const ACTOR_KIND_OPTIONS: {
 
 // Build a query string from the server-honoured slice of the filter
 // (`actor_kind` is applied client-side; the backend does not yet
-// expose it as a query param — see `app.api.admin.audit.list_audit`).
+// expose it as a query param, see `app.api.admin.audit.list_audit`).
 function buildAuditQuery(filter: AdminAuditFilter): string {
   // code-health: ignore[ccn] Small query-string mapper is over-counted by the TS parser but keeps supported filters explicit.
   const params = new URLSearchParams();
@@ -122,7 +122,7 @@ export default function AdminAuditPage() {
   });
 
   const sub =
-    "Deployment-scope audit — scope_kind='deployment' rows only. Each action ties back to its admin actor via actor_id.";
+    "Deployment-scope audit, scope_kind='deployment' rows only. Each action ties back to its admin actor via actor_id.";
 
   const setFilterParam = (key: string, value: string) => {
     setSearchParams(setParam(searchParams, key, value));
@@ -135,7 +135,7 @@ export default function AdminAuditPage() {
   // datalist always reflects what the server actually has. A future
   // ``GET /admin/api/v1/audit/actions`` endpoint can replace this
   // with a deployment-wide distinct list; for v1 the in-page set is
-  // good enough — the action vocabulary is small (≤ a few dozen).
+  // good enough, the action vocabulary is small (≤ a few dozen).
   const actionSuggestions = useMemo(() => {
     if (!q.data) return [];
     return Array.from(new Set(q.data.data.map((r) => r.action))).sort();

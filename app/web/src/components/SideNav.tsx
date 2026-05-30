@@ -8,8 +8,8 @@ import { workspaceRelativePathname } from "@/lib/workspaceRoutes";
 // `.desk`) and EmployeeLayout (`.desk__nav` inside `.phone`, revealed
 // at >=720px; the phone-mode bottom tab bar takes over below).
 //
-// The visual system — brand row, section labels, nav-link padding,
-// hover / active colours, bottom "me" card — lives entirely in CSS
+// The visual system, brand row, section labels, nav-link padding,
+// hover / active colours, bottom "me" card, lives entirely in CSS
 // against these class names (`.desk__brand`, `.desk__nav-group`,
 // `.nav-section`, `.nav-link`, `.desk__me`). Callers pass items +
 // footer; the component renders the chrome.
@@ -184,7 +184,7 @@ function NavItem({ to, matchPrefix, phoneHidden, icon, label, onClick }: NavItem
 }
 
 // Cheap fallback so legacy items without an `icon` still render
-// recognisably when the rail is collapsed — draws the first letter of
+// recognisably when the rail is collapsed, draws the first letter of
 // the label inside the slot where a lucide icon would sit.
 function NavFallbackGlyph({ label }: { label: string }) {
   const ch = (label.trim()[0] ?? "·").toUpperCase();

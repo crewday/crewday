@@ -1,6 +1,7 @@
 import { Chip } from "@/components/common";
 import CapabilityChain from "./CapabilityChain";
-import LlmUsageTotals, { formatUsageSummary } from "./LlmUsageTotals";
+import LlmUsageTotals from "./LlmUsageTotals";
+import { formatUsageSummary } from "./LlmUsageTotals.lib";
 import { shouldOpenGraphEditor } from "./lib/clickTargets";
 import type { LlmAssignmentGroupLayout } from "./lib/graphLayout";
 import type { LlmIndexes } from "./lib/llmIndexes";

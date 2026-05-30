@@ -1,24 +1,24 @@
-// crewday — SignupVerifyPage component test.
+// crewday, SignupVerifyPage component test.
 //
 // Pins the `/signup/verify` (and `/auth/magic/:token`) surface against
 // the documented `/api/v1/signup/verify` contract (§03 step 2).
 //
 // What this covers:
-//   1. Verifying state — POST in flight; the "Confirming your link…"
+//   1. Verifying state, POST in flight; the "Confirming your link…"
 //      view is announced via `role="status"`.
-//   2. Happy path — verify resolves; SPA navigates to `/signup/enroll`
+//   2. Happy path, verify resolves; SPA navigates to `/signup/enroll`
 //      with the `signup_session_id` + `desired_slug` threaded through
 //      router state. Token rides as `?token=…` query.
-//   3. Path-param happy path — the `/auth/magic/:token` mailer-default
+//   3. Path-param happy path, the `/auth/magic/:token` mailer-default
 //      shape lands on the same page; the path param is read in place
 //      of the query.
-//   4. Missing token (no `?token=`, no path param) — error view; verify
+//   4. Missing token (no `?token=`, no path param), error view; verify
 //      endpoint is NEVER called; "Start over" affordance is NOT shown
 //      (canRetry = false).
-//   5. Expired token (410) — error view + "Start over" link to /signup.
-//   6. Invalid/already-consumed token (400/409) — same expired copy +
+//   5. Expired token (410), error view + "Start over" link to /signup.
+//   6. Invalid/already-consumed token (400/409), same expired copy +
 //      retry affordance (the SPA collapses these into one branch).
-//   7. 429 rate-limit — distinct copy, retry affordance.
+//   7. 429 rate-limit, distinct copy, retry affordance.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
@@ -97,7 +97,7 @@ afterEach(() => {
 
 // ── Tests ─────────────────────────────────────────────────────────
 
-describe("<SignupVerifyPage> — verifying state", () => {
+describe("<SignupVerifyPage>, verifying state", () => {
   it("renders the 'Confirming your link' view while POST /signup/verify is in flight", async () => {
     let resolveVerify: ((value: Response) => void) | undefined;
     const original = globalThis.fetch;
@@ -143,7 +143,7 @@ describe("<SignupVerifyPage> — verifying state", () => {
   });
 });
 
-describe("<SignupVerifyPage> — happy path", () => {
+describe("<SignupVerifyPage>, happy path", () => {
   it("verifies the token and navigates to /signup/enroll with handoff state", async () => {
     const probe: { state: SeenState | null } = { state: null };
     const { calls, restore } = installFetch({
@@ -212,7 +212,7 @@ describe("<SignupVerifyPage> — happy path", () => {
   });
 });
 
-describe("<SignupVerifyPage> — error branches", () => {
+describe("<SignupVerifyPage>, error branches", () => {
   it("renders the missing-token error when ?token= is absent and never POSTs", async () => {
     const { calls, restore } = installFetch({
       "/api/v1/auth/me": [{ status: 401, body: { detail: "no session" } }],

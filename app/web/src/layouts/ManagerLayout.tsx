@@ -99,7 +99,7 @@ const BASE_NAV_ITEMS: SideNavItem[] = [
   { type: "link", to: "/settings", label: "Workspace settings", icon: NAV_ICON(Settings) },
 ];
 
-// §14 "Administration link" — rendered only when the caller holds any
+// §14 "Administration link", rendered only when the caller holds any
 // active (scope_kind='deployment') role_grants row. LLM provider +
 // capability config lives on /admin/llm/graph (§11), not on the workspace.
 const ADMINISTRATION_LINK: SideNavItem = {

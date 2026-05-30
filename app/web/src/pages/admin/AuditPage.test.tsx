@@ -103,7 +103,7 @@ describe("Admin AuditPage", () => {
 
       const auditCall = fake.calls.find((c) => c.startsWith("/admin/api/v1/audit?"));
       expect(auditCall).toBeTruthy();
-      // Wire-shaped slice — actor_id + action go through.
+      // Wire-shaped slice, actor_id + action go through.
       expect(auditCall).toContain("actor_id=u-elodie");
       expect(auditCall).toContain("action=deployment.budget.updated");
       // actor_kind is client-side: must NOT appear on the wire.
@@ -166,7 +166,7 @@ describe("Admin AuditPage", () => {
       // start of 2026-05-03 in the *local* zone the picker used; the
       // until boundary must equal the end of 2026-05-04. We compare
       // against the locally-constructed timestamp the helper would
-      // build — independent of the test runner's TZ.
+      // build, independent of the test runner's TZ.
       const expectedSince = new Date(2026, 4, 3, 0, 0, 0, 0).toISOString();
       const expectedUntil = new Date(2026, 4, 4, 23, 59, 59, 999).toISOString();
       expect(since).toBe(expectedSince);

@@ -21,7 +21,7 @@ import { useIsPhone } from "./schedule/lib/useIsPhone";
 // shared day drawer with rota, tasks, bookings (§09, amend/decline
 // inline), plus the Request-leave / Request-override forms. A
 // pending banner sits above the agenda whenever any booking in the
-// loaded window is pending_approval or has a pending self-amend —
+// loaded window is pending_approval or has a pending self-amend,
 // so a stale approval can't fall off-screen. See spec §06 for the
 // approval rules and §09 for the booking lifecycle.
 //
@@ -45,7 +45,7 @@ export default function SchedulePage() {
   const [overrideIso, setOverrideIso] = useState<string | null>(null);
   const [proposeIso, setProposeIso] = useState<string | null>(null);
 
-  // Fetched for invalidation scope on dialog submits — /me's leave
+  // Fetched for invalidation scope on dialog submits, /me's leave
   // panel reads `/api/v1/employees/{empId}/leaves`, which is keyed
   // off the v0-era `employee_id`.
   const meQ = useQuery({
@@ -56,7 +56,7 @@ export default function SchedulePage() {
 
   const title = "Schedule";
   const sub = role === "manager"
-    ? "Your rota, hours, and time off — request changes inline."
+    ? "Your rota, hours, and time off, request changes inline."
     : "Your week at a glance. Tap a day to see tasks or request time off.";
 
   const body: ReactNode = (

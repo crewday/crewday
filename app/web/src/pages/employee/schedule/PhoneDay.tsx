@@ -2,7 +2,7 @@
 // Stacks one day card per row, one full row per ISO week. The same
 // per-week time window is shared across the seven days so vertically
 // scrolling from Monday to Sunday feels like one continuous planner
-// page. Empty days collapse to a short "rest" card — they don't claim
+// page. Empty days collapse to a short "rest" card, they don't claim
 // the shared row height because the cards are stacked, not gridded.
 
 import { useMemo } from "react";

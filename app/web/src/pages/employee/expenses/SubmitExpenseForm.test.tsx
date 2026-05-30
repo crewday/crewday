@@ -202,7 +202,7 @@ describe("SubmitExpenseForm", () => {
       </QueryClientProvider>,
     );
 
-    // Wait for `/me` and the engagement lookup to land — once the
+    // Wait for `/me` and the engagement lookup to land, once the
     // submit button is enabled the work_engagement_id is wired in.
     await waitFor(() => {
       expect(
@@ -282,7 +282,7 @@ describe("SubmitExpenseForm", () => {
     expect(typeof sent.total_amount_cents).toBe("number");
     expect(typeof sent.property_id).toBe("string");
     expect(typeof sent.note_md).toBe("string");
-    // Lock the exact key set — the server's `extra="forbid"` would
+    // Lock the exact key set, the server's `extra="forbid"` would
     // 422 on any drift, but pinning it here surfaces the regression
     // in the unit tier before the integration suite even runs.
     expect(Object.keys(sent).sort()).toEqual([
@@ -384,7 +384,7 @@ describe("SubmitExpenseForm", () => {
     );
     expect(postCall).toBeDefined();
     const sent = JSON.parse(postCall!.init.body as string) as Record<string, unknown>;
-    // The optional pin is omitted, not present-with-null — the
+    // The optional pin is omitted, not present-with-null, the
     // server treats both as "no property" but the wire shape says
     // omit, so we lock that in here.
     expect("property_id" in sent).toBe(false);

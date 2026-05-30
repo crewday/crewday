@@ -419,7 +419,7 @@ describe("<SchedulesPage> inline schedules table", () => {
       fireEvent.click(screen.getByRole("button", { name: "+ New schedule" }));
 
       expect(screen.getByRole("table", { name: "Schedules" })).toBeInTheDocument();
-      expect(screen.getByText("Preview — next 7 days")).toBeInTheDocument();
+      expect(screen.getByText("Preview, next 7 days")).toBeInTheDocument();
       expect(screen.getAllByText("Every Monday at 09:00").length).toBeGreaterThan(0);
       expect(screen.getAllByText("Casa Verde").length).toBeGreaterThan(0);
       expect(screen.getAllByText("45m").length).toBeGreaterThan(0);

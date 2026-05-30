@@ -1,21 +1,21 @@
-// crewday — production `/signup` surface.
+// crewday, production `/signup` surface.
 //
 // Self-serve signup is a first-class flow on every deployment
 // (§03 "Self-serve signup"; §00 G12). The visitor enters their
 // email and a desired workspace slug; on submit we POST
 // `/signup/start`, which gates on:
 //
-//   - `capabilities.settings.signup_enabled` — disabled
+//   - `capabilities.settings.signup_enabled`, disabled
 //     deployments 404 the entire `/signup/*` surface, so we
 //     translate a 404 from `/signup/start` into the "signups are
 //     closed on this deployment" view (the prompt's
-//     capability-off contract — no probe endpoint exists).
-//   - Slug validity / reservation — `409` with one of
+//     capability-off contract, no probe endpoint exists).
+//   - Slug validity / reservation, `409` with one of
 //     `slug_taken | slug_reserved | slug_homoglyph_collision |
 //     slug_in_grace_period`. The first variant carries a
 //     `suggested_alternative`; we surface it inline under the
 //     slug field so the user can take it in one click.
-//   - Abuse mitigations — `422` `captcha_required` /
+//   - Abuse mitigations, `422` `captcha_required` /
 //     `disposable_email`, `429` rate-limit. We surface a friendly
 //     error and let the form re-arm.
 //
@@ -103,7 +103,7 @@ export default function SignupPage(): ReactElement {
   });
   const { email, slug, form, captchaToken, captchaResetSignal } = state;
   const captchaSiteKey = turnstileSiteKey();
-  // Concurrency guard. Same shape as RecoverPage / LoginPage —
+  // Concurrency guard. Same shape as RecoverPage / LoginPage,
   // `disabled={pending}` only kicks in after React commits, so a
   // synchronous burst (Enter held down, Playwright double-submit) can
   // enqueue two POSTs against the per-IP throttle budget before the
@@ -111,7 +111,7 @@ export default function SignupPage(): ReactElement {
   const inflightRef = useRef(false);
   // Focus pivot for the "sent" confirmation. When the form is
   // replaced we move focus off the unmounted submit button onto the
-  // confirmation heading — assistive tech announces the new view
+  // confirmation heading, assistive tech announces the new view
   // and keyboard users keep an anchor.
 
   const mutation = useMutation<SignupStartResponse, Error, SignupStartBody>({
@@ -201,7 +201,7 @@ export default function SignupPage(): ReactElement {
       <h1 className="login__headline">Start your workspace</h1>
       <p className="login__sub">
         Pick a workspace handle and we'll send a one-time link to your inbox. After you click
-        it, you register a passkey on this device — no password, ever.
+        it, you register a passkey on this device, no password, ever.
       </p>
       {form.kind === "error" && (
         <p
@@ -297,7 +297,7 @@ function SignupShell({ children }: { children: ReactNode }): ReactElement {
 
 /**
  * Generic "check your email" confirmation. Mirrors the
- * RecoverPage shape — `role="status"` + `aria-live="polite"` so
+ * RecoverPage shape, `role="status"` + `aria-live="polite"` so
  * assistive tech announces the swap; the heading callback moves
  * keyboard focus off the unmounted submit button when this view mounts.
  */
@@ -313,7 +313,7 @@ function SignupSentConfirmation(): ReactElement {
       </h1>
       <p className="login__sub">
         We've sent a one-time link to verify your address. The link expires in 15 minutes
-        or after one click — whichever comes first.
+        or after one click, whichever comes first.
       </p>
       <p className="login__footnote muted">
         Nothing in your inbox? Check spam, wait a minute, then start over. Repeated requests
@@ -335,7 +335,7 @@ function SignupClosedView(): ReactElement {
       <h1 className="login__headline">Signups are closed</h1>
       <p className="login__sub">
         This crew.day deployment isn't taking new workspaces right now. If you're expecting
-        access, ask your operator to enable signups — or sign in if you already have a
+        access, ask your operator to enable signups, or sign in if you already have a
         workspace.
       </p>
     </div>

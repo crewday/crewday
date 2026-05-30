@@ -615,7 +615,7 @@ function OverrideSummary({ properties, employees }: { properties: Property[]; em
                 <Chip tone={p.color} size="sm">
                   {Object.keys(p.settings_override).length} override{Object.keys(p.settings_override).length !== 1 ? "s" : ""}
                 </Chip>
-                <span className="muted"> — {Object.keys(p.settings_override).join(", ")}</span>
+                <span className="muted">, {Object.keys(p.settings_override).join(", ")}</span>
               </li>
             ))}
           </ul>
@@ -633,7 +633,7 @@ function OverrideSummary({ properties, employees }: { properties: Property[]; em
                 <Chip tone="sky" size="sm">
                   {Object.keys(e.settings_override).length} override{Object.keys(e.settings_override).length !== 1 ? "s" : ""}
                 </Chip>
-                <span className="muted"> — {Object.keys(e.settings_override).join(", ")}</span>
+                <span className="muted">, {Object.keys(e.settings_override).join(", ")}</span>
               </li>
             ))}
           </ul>
@@ -733,6 +733,7 @@ function WorkspaceLifecycleDialog({
   );
 }
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 export default function SettingsPage() {
   // code-health: ignore[nloc] Manager settings route keeps catalog grouping, drafts, and shared setting editor together.
   const { pathname } = useLocation();
@@ -860,11 +861,11 @@ export default function SettingsPage() {
 
   return (
     <DeskPage title="Workspace settings" sub={sub}>
-      {/* §11 — Agent preferences (workspace layer). Soft guidance stacked
+      {/* §11, Agent preferences (workspace layer). Soft guidance stacked
           into every composition-capability system prompt. */}
       <AgentPreferencesPanel
         scope="workspace"
-        title="Agent preferences — Workspace"
+        title="Agent preferences, Workspace"
         subtitle="Stacked broadest-first with property and user preferences into every agent turn. CLAUDE.md-style free-form guidance; not a substitute for the structured settings cascade below."
       />
 
@@ -874,7 +875,7 @@ export default function SettingsPage() {
         <WorkspaceDetailsForm key={ws.meta.display_name} settings={ws} />
       </section>
 
-      {/* §11 — Workspace usage budget. Manager-visible shape is
+      {/* §11, Workspace usage budget. Manager-visible shape is
           percent-only by design: no dollars, no tokens, no reset date.
           Dollars live on /settings/llm for the operator audience. The
           cap itself is adjusted via `crewday admin budget set-cap`; there
@@ -918,14 +919,14 @@ export default function SettingsPage() {
           <Chip tone="ghost" size="sm">using deployment default</Chip>
         </header>
         <p className="muted">
-          WhatsApp runs on the deployment-default Meta account — every workspace on this
+          WhatsApp runs on the deployment-default Meta account, every workspace on this
           deployment shares one phone number. That's what your workers link when they pair their
           phone on <Link to={workspaceRouteForPathname(pathname, "/me")} className="link">/me → Chat channels</Link>.
         </p>
         <p className="muted">
           No per-user preferences live here: a linked WhatsApp means agent reach-out is on for
           that worker, unlinked means off. Whatever a worker could do via the CLI, the chat agent
-          can do on their behalf — never more.
+          can do on their behalf, never more.
         </p>
         <dl className="settings-kv">
           <dt>Provider</dt>
@@ -939,7 +940,7 @@ export default function SettingsPage() {
           </button>
           <p className="muted chat-gateway-panel__hint">
             Overriding the default makes this workspace Meta-verify and own its own WhatsApp
-            Business number — useful for branded communication or stricter isolation.
+            Business number, useful for branded communication or stricter isolation.
           </p>
         </div>
       </section>

@@ -1,22 +1,22 @@
 // Component-level coverage for the worker's receipt-scan picker.
 //
 // What this file pins:
-//   1. Happy path — a valid file lands a multipart POST on
+//   1. Happy path, a valid file lands a multipart POST on
 //      `/api/v1/expenses/scan` with the correct `image` field, and
 //      the parsed `ExpenseScanResult` is forwarded to `onScanResult`.
-//   2. Client-side mime check — a non-receipt mime never reaches
+//   2. Client-side mime check, a non-receipt mime never reaches
 //      `fetch` and surfaces an inline notice.
-//   3. Server error mapping — every documented short-name from
+//   3. Server error mapping, every documented short-name from
 //      §12 §expenses (`blob_too_large`, `blob_empty`,
 //      `blob_mime_not_allowed`, `scan_not_configured`, the three
 //      `extraction_*` flavours) projects to its plain-English line
 //      and `onScanFailed` runs so the parent reverts the phase.
-//   4. Unknown error type — a server code we don't recognise still
+//   4. Unknown error type, a server code we don't recognise still
 //      surfaces a readable line (server `detail` first, then
 //      generic).
 //
 // We patch `MIN_SPINNER_MS` indirectly by using fake timers around
-// the panel — `waitFor` cannot poll under fake timers, so the test
+// the panel, `waitFor` cannot poll under fake timers, so the test
 // drives advancement explicitly via `act` + `runAllTimersAsync`,
 // and asserts state synchronously once the promise chain has
 // drained.
@@ -34,7 +34,8 @@ import {
   registerWorkspaceSlugGetter,
 } from "@/lib/api";
 import FileDropZone from "@/components/FileDropZone";
-import ReceiptScanPanel, { messageForScanError } from "./ReceiptScanPanel";
+import ReceiptScanPanel from "./ReceiptScanPanel";
+import { messageForScanError } from "./ReceiptScanPanel.lib";
 import { ApiError } from "@/lib/api";
 
 interface ScriptedResponse {
@@ -142,7 +143,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("ReceiptScanPanel — happy path", () => {
+describe("ReceiptScanPanel, happy path", () => {
   it("posts the receipt as multipart/form-data and forwards the parsed result", async () => {
     const env = installFetch([{ body: highConfidenceScanBody() }]);
     try {
@@ -244,7 +245,7 @@ describe("FileDropZone", () => {
   });
 });
 
-describe("ReceiptScanPanel — client-side validation", () => {
+describe("ReceiptScanPanel, client-side validation", () => {
   it("rejects a non-receipt mime without hitting the server", async () => {
     // code-health: ignore[nloc] End-to-end component assertion keeps validation, callback, and fetch checks together.
     const env = installFetch([]);
@@ -266,7 +267,7 @@ describe("ReceiptScanPanel — client-side validation", () => {
       });
       selectFile(file);
 
-      // No phase transition — we never even called the server.
+      // No phase transition, we never even called the server.
       expect(onScanStarted).not.toHaveBeenCalled();
       expect(onScanFailed).not.toHaveBeenCalled();
       expect(env.calls).toHaveLength(0);
@@ -274,7 +275,7 @@ describe("ReceiptScanPanel — client-side validation", () => {
       // The notice mounts synchronously off the change handler.
       const notice = screen.getByRole("alert");
       expect(notice).toHaveTextContent(
-        /can't read that format yet — try a JPEG, PNG, WebP, HEIC, or PDF/i,
+        /can't read that format yet, try a JPEG, PNG, WebP, HEIC, or PDF/i,
       );
     } finally {
       env.restore();
@@ -282,7 +283,7 @@ describe("ReceiptScanPanel — client-side validation", () => {
   });
 
   it("accepts every documented mime in the server allow-list", async () => {
-    // One scripted response per mime; we don't care about the body —
+    // One scripted response per mime; we don't care about the body,
     // we only assert each pick reaches `fetch` exactly once and the
     // panel hands the parsed result back via `onScanResult`.
     const mimes = [
@@ -323,7 +324,7 @@ describe("ReceiptScanPanel — client-side validation", () => {
   });
 });
 
-describe("ReceiptScanPanel — server error mapping", () => {
+describe("ReceiptScanPanel, server error mapping", () => {
   // code-health: ignore[nloc] Table-driven error cases document all user-facing server failure branches together.
   // Drive each server error through the component and assert (a) the
   // parent flips back via `onScanFailed`, and (b) the inline notice
@@ -425,7 +426,7 @@ describe("ReceiptScanPanel — server error mapping", () => {
       try {
         const onScanFailed = vi.fn();
         const onScanResult = vi.fn();
-        // The panel is the unit-under-test — we leave `phase` pinned
+        // The panel is the unit-under-test, we leave `phase` pinned
         // at `upload` so the inline notice it sets locally on a
         // failure stays mounted (in production the parent's
         // `onScanFailed` reverts an in-flight `processing` back to
@@ -457,7 +458,7 @@ describe("ReceiptScanPanel — server error mapping", () => {
   }
 });
 
-describe("ReceiptScanPanel — notice lifecycle", () => {
+describe("ReceiptScanPanel, notice lifecycle", () => {
   it("clears the inline error after the parent leaves the picker (manual entry → back)", async () => {
     // Reproduces a stale-notice path: scan fails → "+ New expense"
     // (parent flips to `review`) → "Back" (parent flips to `upload`).
@@ -518,7 +519,7 @@ describe("ReceiptScanPanel — notice lifecycle", () => {
   });
 });
 
-describe("messageForScanError — fallbacks", () => {
+describe("messageForScanError, fallbacks", () => {
   it("falls back to the server detail when the type is unknown", () => {
     const err = new ApiError("something", 422, {
       type: "https://crewday.dev/errors/some_new_thing",

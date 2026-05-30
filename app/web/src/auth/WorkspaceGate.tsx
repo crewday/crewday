@@ -7,7 +7,7 @@ import WorkspacePickList from "@/components/WorkspacePickList";
 import { workspaceRelativePathname, workspaceRoute, workspaceSlugFromRoutePath } from "@/lib/workspaceRoutes";
 import type { AvailableWorkspace } from "@/types/auth";
 
-// §14 "Workspace selector" — when the caller is authenticated but
+// §14 "Workspace selector", when the caller is authenticated but
 // hasn't picked a workspace yet (no `crewday_workspace` cookie set
 // on this device, or the cookie was for a workspace they no longer
 // belong to), block the protected tree behind a chooser.
@@ -24,12 +24,12 @@ import type { AvailableWorkspace } from "@/types/auth";
 //      cookie via `setWorkspaceId`; the protected tree mounts on
 //      the next render.
 //   3. Zero workspaces → render the "no access yet" empty state. The
-//      user is logged in but has no live grants — usually a brand-
+//      user is logged in but has no live grants, usually a brand-
 //      new account whose first invite hasn't been redeemed. They
 //      can sign out to switch identity.
 //
 // Public routes (login, recover, accept) are **not** wrapped with
-// this component — they don't need a workspace. The router places
+// this component, they don't need a workspace. The router places
 // `<WorkspaceGate>` inside the protected branch only.
 
 export function WorkspaceGate({
@@ -47,7 +47,7 @@ export function WorkspaceGate({
   // Focused on mount so keyboard users (and screen-reader users on a
   // JAWS / NVDA "forms mode" switch) land inside the dialog rather
   // than in the page chrome beneath. We target the first pickable
-  // action (workspace pick, admin deep-link, or sign-out) — the
+  // action (workspace pick, admin deep-link, or sign-out), the
   // dialog itself stays non-tabbable so Tab / Shift+Tab move through
   // the picks. The ref is widened to `HTMLElement` so it can hold
   // both the `<button>` picks and the `<a>` rendered by
@@ -97,7 +97,7 @@ export function WorkspaceGate({
   // Auto-adopt for single-workspace users. Runs as an effect so the
   // store update happens outside render (avoids the
   // "setState-during-render" warning) but before the protected tree
-  // commits — `setWorkspaceId` triggers a synchronous re-render via
+  // commits, `setWorkspaceId` triggers a synchronous re-render via
   // the `WorkspaceContext`, and the next pass sees `workspaceId !== null`.
   useEffect(() => {
     if (shouldForcePicker) return;
@@ -108,7 +108,7 @@ export function WorkspaceGate({
   }, [hasValidWorkspace, routeSlug, shouldForcePicker, onlySlug, setWorkspaceId]);
 
   // Server already picked a workspace for this session (cookie was
-  // set by the login handler) — surface it without forcing the user
+  // set by the login handler), surface it without forcing the user
   // through the chooser. The auth-me probe carries
   // `current_workspace_id` exactly so this no-op adoption can happen
   // without a follow-up call.
@@ -144,7 +144,7 @@ export function WorkspaceGate({
 
   if (available.length === 0) {
     // Deployment admins with zero workspace grants would otherwise
-    // dead-end on this empty state — they can't reach the workspace-
+    // dead-end on this empty state, they can't reach the workspace-
     // scoped `/api/v1/me` that drives the manager-nav "Administration"
     // link, so the only way to /admin/dashboard would be to type the
     // URL by hand. Surface the deep-link as a primary action when the

@@ -65,7 +65,7 @@ export default function ProviderModelPricing({
       <div className="llm-pricing-sync">
         <span>
           Last synced{" "}
-          <DateTime value={lastSynced ?? null} showTime className="mono" empty="—" />
+          <DateTime value={lastSynced ?? null} showTime className="mono" empty="," />
         </span>
         <span>
           {formatInteger(pinnedCount)} manual-pinned row{pinnedCount === 1 ? "" : "s"}
@@ -132,7 +132,7 @@ export default function ProviderModelPricing({
                 <td className="mono">{formatUsdAmount(pm.fixed_cost_per_call_usd)}</td>
                 <td className="mono">{formatUsdAmount(pm.audio_cost_per_hour_usd)}</td>
                 <td>
-                  <DateTime value={pm.price_last_synced_at} showTime className="mono muted" empty="—" />
+                  <DateTime value={pm.price_last_synced_at} showTime className="mono muted" empty="," />
                 </td>
                 <td>
                   {pinned ? (

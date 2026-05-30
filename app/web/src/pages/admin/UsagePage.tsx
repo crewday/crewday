@@ -15,11 +15,10 @@ import {
   InlineNumberField,
   InlineTableForm,
   InlineTableLoadMore,
-  inlineTableNextCursor,
-  useInlineTableInfiniteRows,
   type InlineTableColumn,
   type InlineTableRow,
 } from "@/components/InlineTableForm";
+import { inlineTableNextCursor, useInlineTableInfiniteRows } from "@/components/InlineTableForm.rows";
 import { Chip, Loading, ProgressBar, StatCard } from "@/components/common";
 import type {
   AdminUsageSummary,
@@ -178,6 +177,7 @@ function updateUsageWorkspacesCache(
   return updateUsageWorkspacesPage(cache, workspaceId, capCents);
 }
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 export default function AdminUsagePage() {
   // code-health: ignore[nloc] Usage route keeps query orchestration and the single cap-editing table in one place.
   const qc = useQueryClient();
@@ -434,7 +434,7 @@ export default function AdminUsagePage() {
         />
         <StatCard
           label="Top capability"
-          value={topCapability?.capability ?? "—"}
+          value={topCapability?.capability ?? ","}
           sub={
             topCapability
               ? formatMoney(topCapability.spend_cents_30d, "USD")

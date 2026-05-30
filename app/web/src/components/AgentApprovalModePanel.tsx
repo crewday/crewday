@@ -3,7 +3,7 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import type { AgentApprovalMode } from "@/types/api";
 
-// §11 — the user's own agent-approval mode. The three options are
+// §11, the user's own agent-approval mode. The three options are
 // the "signal level" the user wants from their embedded chat agent
 // before it commits a mutation. Cards are rendered from the
 // `x-agent-confirm` annotation on the REST route itself (§12), so
@@ -22,14 +22,14 @@ const CHOICES: ModeChoice[] = [
     label: "Bypass",
     tagline: "Never pause",
     body:
-      "Run every action I could run myself, without asking. The workspace's always-gated actions (money routing, vendor invoices) still need a manager's approval in /approvals — bypass only covers my own self-confirmations.",
+      "Run every action I could run myself, without asking. The workspace's always-gated actions (money routing, vendor invoices) still need a manager's approval in /approvals, bypass only covers my own self-confirmations.",
   },
   {
     value: "auto",
     label: "Auto",
     tagline: "Pause on impactful actions",
     body:
-      "Ask me before doing things I'd want to double-check — creating an expense, completing a task, restocking inventory. The list is declared on each API route; less-impactful work happens silently.",
+      "Ask me before doing things I'd want to double-check, creating an expense, completing a task, restocking inventory. The list is declared on each API route; less-impactful work happens silently.",
   },
   {
     value: "strict",

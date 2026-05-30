@@ -1,4 +1,4 @@
-// crewday — production `/signup/enroll` surface.
+// crewday, production `/signup/enroll` surface.
 //
 // Final step of the self-serve signup flow (§03 "Self-serve signup"
 // steps 3-4). On entry the SPA holds a `signup_session_id` plus the
@@ -14,7 +14,7 @@
 //
 // Backend's finish response does **not** stamp a session cookie
 // (§03 step 4: "no Set-Cookie"). The SPA must therefore run the
-// regular passkey login ceremony immediately afterwards — that's
+// regular passkey login ceremony immediately afterwards, that's
 // what actually authenticates the user. Once `loginWithPasskey()`
 // succeeds we read `useAuth().user`, pick the role landing the same
 // way LoginPage / EnrollPage do, and navigate.
@@ -67,7 +67,7 @@ export default function SignupEnrollPage(): ReactElement {
 
   const [displayName, setDisplayName] = useState("");
   const [enroll, setEnroll] = useState<EnrollState>({ kind: "idle" });
-  // Concurrency guard — prevents a synchronous double-submit (Enter
+  // Concurrency guard, prevents a synchronous double-submit (Enter
   // held, Playwright burst) from enqueueing two ceremonies before
   // `disabled={pending}` lands.
   const inflightRef = useRef(false);
@@ -89,7 +89,7 @@ export default function SignupEnrollPage(): ReactElement {
           browserTimezone,
           browserCountry,
         );
-        // Signup finish does NOT stamp a cookie — run the regular
+        // Signup finish does NOT stamp a cookie, run the regular
         // passkey login to actually authenticate. The user just
         // verified on the same device, so the platform authenticator
         // is warm and the second prompt is usually instant.
@@ -116,7 +116,7 @@ export default function SignupEnrollPage(): ReactElement {
     navigate(pickRoleLanding(user), { replace: true });
   }, [enroll.kind, isAuthenticated, user, navigate]);
 
-  // No handoff state at all — user deep-linked to /signup/enroll
+  // No handoff state at all, user deep-linked to /signup/enroll
   // without going through verify. Push them back to start.
   if (!handoff) {
     return <NoHandoffView />;
@@ -134,7 +134,7 @@ export default function SignupEnrollPage(): ReactElement {
       <h1 className="login__headline">Create your workspace</h1>
       <p className="login__sub">
         You're claiming <strong>{handoff.desiredSlug}</strong>. Confirm your display name,
-        then register a passkey on this device — no password, ever.
+        then register a passkey on this device, no password, ever.
       </p>
 
       {enroll.kind === "error" && (

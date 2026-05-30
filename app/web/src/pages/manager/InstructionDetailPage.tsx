@@ -204,6 +204,7 @@ function patchBody(patch: InstructionPatch) {
   };
 }
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 export default function InstructionDetailPage() {
   // code-health: ignore[ccn] Instruction detail route coordinates read/ack/comment mutations around one promoted detail layout.
   const { iid } = useParams<{ iid: string }>();
@@ -458,6 +459,7 @@ export default function InstructionDetailPage() {
 
       <article className="panel panel--article">
         <div className="kb-body">
+          {/* react-doctor-disable-next-line react-doctor/no-render-in-render -- Markdown body rendering is a pure parser formatter shared by the article and history drawer. */}
           {renderBody(i.body_md)}
         </div>
         <footer className="kb-footer">
@@ -498,7 +500,7 @@ export default function InstructionDetailPage() {
           </li>
           <li className="task-row">
             <span className="task-row__time mono">linked to template</span>
-            <span className="task-row__title"><strong>Linen change — master bedroom</strong></span>
+            <span className="task-row__title"><strong>Linen change, master bedroom</strong></span>
             <Chip tone="moss" size="sm">template link</Chip>
           </li>
         </ul>
@@ -540,7 +542,10 @@ export default function InstructionDetailPage() {
                     Revision {version.version} · <DateTime value={version.created_at} showTime />
                   </h3>
                   {version.change_note && <p className="day-drawer__muted">{version.change_note}</p>}
-                  <div className="kb-body">{renderBody(version.body_md)}</div>
+                  <div className="kb-body">
+                    {/* react-doctor-disable-next-line react-doctor/no-render-in-render -- Markdown body rendering is a pure parser formatter shared by the article and history drawer. */}
+                    {renderBody(version.body_md)}
+                  </div>
                 </section>
               ))}
             </div>

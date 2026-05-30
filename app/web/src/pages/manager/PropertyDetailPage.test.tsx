@@ -10,7 +10,8 @@ import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
 import * as preferences from "@/lib/preferences";
 import { jsonResponse } from "@/test/helpers";
 import PropertyDetailPage from "./PropertyDetailPage";
-import PropertyTabs, { type PropertyRelatedPage } from "./property/PropertyTabs";
+import PropertyTabs from "./property/PropertyTabs";
+import { type PropertyRelatedPage } from "./property/PropertyTabs.lib";
 
 interface RequestRecord {
   url: string;

@@ -1,6 +1,6 @@
 import {
   createContext,
-  useContext,
+  use,
   useEffect,
   useMemo,
   useReducer,
@@ -13,7 +13,7 @@ import { useWorkspace } from "@/context/WorkspaceContext";
 import { getAuthState, subscribeAuth } from "@/auth";
 import { connectEventStream, type SseStatus } from "@/lib/sse";
 
-// §14 "SSE-driven invalidation" — one `EventSource('/w/${slug}/events')`
+// §14 "SSE-driven invalidation", one `EventSource('/w/${slug}/events')`
 // per active workspace. Re-established on workspace switch (and on
 // transport drops, via exponential backoff handled inside
 // `connectEventStream`). When no workspace is picked yet (pre-/me, or
@@ -24,7 +24,7 @@ import { connectEventStream, type SseStatus } from "@/lib/sse";
 //
 // The transport is only opened while the user is authenticated. A
 // logout flips `useAuth().isAuthenticated` to `false`, which tears
-// down this effect and closes the underlying `EventSource` — keeping
+// down this effect and closes the underlying `EventSource`, keeping
 // the §"Logout clears storage + closes SSE" acceptance criterion
 // honest without `SseContext` knowing about cookies or storage.
 //
@@ -80,7 +80,7 @@ export function SseProvider({ children }: { children: ReactNode }) {
   // parent re-renders that produce new setter references. React's
   // `useState` setters are already referentially stable, but threading
   // through a ref makes the callbacks we hand to `connectEventStream`
-  // stable across mounts too — and keeps the effect's dep list honest.
+  // stable across mounts too, and keeps the effect's dep list honest.
   const connectionRef = useRef(dispatchConnection);
   connectionRef.current = dispatchConnection;
 
@@ -93,7 +93,7 @@ export function SseProvider({ children }: { children: ReactNode }) {
     // unauthenticated leg the user is bouncing between /login and the
     // protected tree; opening a stream the server will refuse anyway
     // is wasted reconnect chatter (and would leak a transport across
-    // a logout). The `'loading'` leg also defers — the bootstrap
+    // a logout). The `'loading'` leg also defers, the bootstrap
     // probe usually settles in a single tick.
     if (authStatus !== "authenticated") {
       dispatchConnection({ type: "closed" });
@@ -185,7 +185,7 @@ export function AdminSseProvider({ children }: { children: ReactNode }) {
  * into the transport itself.
  */
 export function useSseConnection(): SseCtxValue {
-  const v = useContext(SseCtx);
+  const v = use(SseCtx);
   // Fall back to a closed/null state when the hook is called outside
   // `<SseProvider>`. Throwing would make the hook unusable in
   // storybook / styleguide / shallow tests that don't mount the

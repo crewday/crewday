@@ -2,7 +2,7 @@ import type { InputHTMLAttributes, ReactNode } from "react";
 import { useEffect, useRef } from "react";
 import type { LucideIcon } from "lucide-react";
 
-// Small presentational helpers. Each one is ~10 lines — trivial at
+// Small presentational helpers. Each one is ~10 lines, trivial at
 // the markup level but standardises class spelling so future refactors
 // don't have to grep 35 files for `.chip--moss`.
 
@@ -236,6 +236,7 @@ export function EmptyState(props: EmptyStateProps) {
     "empty-state__glyph",
     iconTreatment === "fill" ? "empty-state__glyph--fill" : "",
   ].filter(Boolean).join(" ");
+  // react-doctor-disable-next-line react-doctor/no-polymorphic-children -- EmptyState keeps legacy plain-string children while promoted callers move to `copy`.
   const body = copy ?? (typeof children === "string" ? children : null);
   const iconSize = variant === "celebrate" ? 28 : 22;
   return (

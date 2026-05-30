@@ -1,4 +1,4 @@
-// crewday — AdminLayout role guard.
+// crewday, AdminLayout role guard.
 //
 // What this covers:
 //   1. A signed-in non-admin (`is_deployment_admin: false`) hitting
@@ -8,12 +8,12 @@
 //      `?next=` phishing case; AdminLayout is the belt-and-braces
 //      shell guard for direct navigation / stale bookmarks).
 //   2. /admin/api/v1/me returning a non-2xx (mirrors the production
-//      404 the spec describes) drives the same redirect — the probe
+//      404 the spec describes) drives the same redirect, the probe
 //      failure is the canonical "not an admin" signal even when /me
 //      hasn't resolved yet.
 //
 // What this does NOT cover (and why):
-//   - The full `.desk` chrome visuals — those are owned by Playwright.
+//   - The full `.desk` chrome visuals, those are owned by Playwright.
 //     These unit tests only assert the role guard and key admin sidebar
 //     route state.
 
@@ -60,7 +60,7 @@ function installFetch(scripted: Record<string, FakeResponse[]>): {
     queues[path] = [...responses];
   }
   // Longer suffixes first so `/admin/api/v1/me` matches before
-  // `/api/v1/me` — both end in `/me`.
+  // `/api/v1/me`, both end in `/me`.
   const paths = Object.keys(queues).sort((a, b) => b.length - a.length);
   const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const resolved = typeof url === "string" ? url : url.toString();
@@ -93,7 +93,7 @@ function Harness({ initial = "/admin/dashboard" }: { initial?: string }): ReactE
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[initial]}>
         <Routes>
-          {/* Stand-in for App.tsx's RoleHome at `/` — exact behaviour
+          {/* Stand-in for App.tsx's RoleHome at `/`, exact behaviour
               isn't this test's concern; we only need to observe that
               the redirect lands here. */}
           <Route path="/" element={<div data-testid="role-home">role home</div>} />
@@ -118,7 +118,7 @@ afterEach(() => {
 
 // ── Tests ─────────────────────────────────────────────────────────
 
-describe("<AdminLayout> — role guard (closes cd-28s7)", () => {
+describe("<AdminLayout>, role guard (closes cd-28s7)", () => {
   it("groups LLM admin routes and highlights the graph sidebar route", async () => {
     const { restore } = installFetch({
       "/api/v1/me": [
@@ -237,7 +237,7 @@ describe("<AdminLayout> — role guard (closes cd-28s7)", () => {
 
   it("redirects a signed-in non-admin to RoleHome instead of mounting the admin outlet", async () => {
     const { restore } = installFetch({
-      // /api/v1/me — caller is a worker, NOT a deployment admin.
+      // /api/v1/me, caller is a worker, NOT a deployment admin.
       "/api/v1/me": [
         {
           status: 200,
@@ -259,7 +259,7 @@ describe("<AdminLayout> — role guard (closes cd-28s7)", () => {
           },
         },
       ],
-      // /admin/api/v1/me — backend rejects (404 is the spec'd signal,
+      // /admin/api/v1/me, backend rejects (404 is the spec'd signal,
       // mirrored here as a non-2xx so `useQuery({ retry: false })`
       // flips to `isError`).
       "/admin/api/v1/me": [{ status: 404, body: { detail: "not an admin" } }],
@@ -270,7 +270,7 @@ describe("<AdminLayout> — role guard (closes cd-28s7)", () => {
       await waitFor(() => {
         expect(screen.getByTestId("role-home")).toBeInTheDocument();
       });
-      // Outlet must NOT have rendered — that would mean the worker saw
+      // Outlet must NOT have rendered, that would mean the worker saw
       // admin chrome before the redirect committed.
       expect(screen.queryByTestId("admin-dashboard")).toBeNull();
     } finally {
@@ -279,7 +279,7 @@ describe("<AdminLayout> — role guard (closes cd-28s7)", () => {
   });
 
   it("also redirects when /api/v1/me carries is_deployment_admin: false even if /admin/api/v1/me is still resolving", async () => {
-    // The guard short-circuits on `is_deployment_admin === false` —
+    // The guard short-circuits on `is_deployment_admin === false`,
     // we don't wait for the admin probe to finish before sending the
     // worker home. The admin probe is scripted to 404 anyway because
     // jsdom + react-query will fire it; not scripting a response would

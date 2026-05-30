@@ -1,6 +1,6 @@
 import {
   createContext,
-  useContext,
+  use,
   useEffect,
   useMemo,
   useState,
@@ -12,7 +12,7 @@ import { useLocation, useNavigationType } from "react-router-dom";
 // back button uses this to choose between real browser back and the
 // static parent map (cold-load deep links). Without it, every
 // /w/<slug>/task/:id back button goes to /w/<slug>/today regardless
-// of where the user came from — see `routeParents.ts`.
+// of where the user came from, see `routeParents.ts`.
 //
 // Counts:
 //   PUSH    → append (Link click, navigate(to))
@@ -88,7 +88,7 @@ export function NavHistoryProvider({ children }: { children: ReactNode }) {
 }
 
 export function useNavHistory(): NavHistoryValue {
-  return useContext(Ctx);
+  return use(Ctx);
 }
 
 function entryFromLocation(location: ReturnType<typeof useLocation>): NavEntry {

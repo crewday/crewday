@@ -1,5 +1,5 @@
 import { Search } from "lucide-react";
-import { forwardRef, type ComponentPropsWithoutRef, type ReactNode } from "react";
+import { type ComponentPropsWithoutRef, type ReactNode, type Ref } from "react";
 
 export interface SearchFieldProps
   extends Omit<ComponentPropsWithoutRef<"input">, "children" | "className" | "type"> {
@@ -8,17 +8,19 @@ export interface SearchFieldProps
   label?: ReactNode;
 }
 
-const SearchField = forwardRef<HTMLInputElement, SearchFieldProps>(function SearchField(
-  {
-    className,
-    disabled,
-    invalid = false,
-    label,
-    "aria-invalid": ariaInvalid,
-    ...inputProps
-  },
+interface SearchFieldWithRefProps extends SearchFieldProps {
+  ref?: Ref<HTMLInputElement>;
+}
+
+function SearchField({
+  className,
+  disabled,
+  invalid = false,
+  label,
+  "aria-invalid": ariaInvalid,
   ref,
-) {
+  ...inputProps
+}: SearchFieldWithRefProps) {
   const isInvalid = invalid || ariaInvalid === true || ariaInvalid === "true";
   const classes = [
     "search-field",
@@ -41,6 +43,6 @@ const SearchField = forwardRef<HTMLInputElement, SearchFieldProps>(function Sear
       />
     </label>
   );
-});
+}
 
 export default SearchField;

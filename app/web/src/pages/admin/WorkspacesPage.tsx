@@ -15,11 +15,10 @@ import {
   InlineNumberField,
   InlineTableForm,
   InlineTableLoadMore,
-  inlineTableNextCursor,
-  useInlineTableInfiniteRows,
   type InlineTableColumn,
   type InlineTableRow,
 } from "@/components/InlineTableForm";
+import { inlineTableNextCursor, useInlineTableInfiniteRows } from "@/components/InlineTableForm.rows";
 import { Chip, Loading } from "@/components/common";
 import type { AdminWorkspaceRow, AdminWorkspacesResponse } from "@/types/api";
 
@@ -192,6 +191,7 @@ function updateWorkspacesCache(
   return updateWorkspacesPage(cache, id, update);
 }
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 export default function AdminWorkspacesPage() {
   // code-health: ignore[nloc] Workspace admin route composes one optimistic mutation set and its active/archive tables.
   const qc = useQueryClient();

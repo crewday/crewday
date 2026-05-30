@@ -1,25 +1,25 @@
-// crewday — EnrollPage component test.
+// crewday, EnrollPage component test.
 //
 // Pins the `/recover/enroll` surface end-to-end against the real
 // `@/auth` provider so a regression in the verify → ceremony →
 // refresh → redirect chain (cd-3x3t) cannot ship silently.
 //
 // What this covers:
-//   1. Verifying state — `verifyRecoveryToken` is in flight; the
+//   1. Verifying state, `verifyRecoveryToken` is in flight; the
 //      "Checking your link…" view is announced via `role="status"`.
-//   2. Ready state — verify resolves; the "Register passkey" button
+//   2. Ready state, verify resolves; the "Register passkey" button
 //      renders with the documented test-id.
-//   3. Happy path — clicking "Register passkey" runs the full
+//   3. Happy path, clicking "Register passkey" runs the full
 //      ceremony (start + navigator.credentials.create + finish), then
 //      `refresh()` re-hydrates `/auth/me` and the page navigates to
 //      the role landing.
-//   4. Missing-token error — landing on `/recover/enroll` without a
+//   4. Missing-token error, landing on `/recover/enroll` without a
 //      `?token=...` query short-circuits to the error view with the
 //      "Request a new link" affordance hidden (`canRetry: false`).
-//   5. Expired-token error (410) — verify rejects with `ApiError(410)`;
+//   5. Expired-token error (410), verify rejects with `ApiError(410)`;
 //      the user lands on the error view WITH the "Request a new link"
 //      link, since the link is replayable from `/recover`.
-//   6. Enroll-failure error — start succeeds, the navigator throws a
+//   6. Enroll-failure error, start succeeds, the navigator throws a
 //      `NotAllowedError` (user dismissed the prompt). The page stays
 //      on the ready view but surfaces the inline `enroll-error`
 //      notice; no navigation happens.
@@ -27,7 +27,7 @@
 // Mirrors the harness in `RecoverPage.test.tsx` (scripted-fetch FIFO
 // per URL suffix) plus the `installCredentialsGet` pattern from
 // `LoginPage.test.tsx`. We don't reach for a shared helper module
-// because none of the existing tests do — the duplication is small
+// because none of the existing tests do, the duplication is small
 // and kept local on purpose so each suite stays readable on its own.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -140,7 +140,7 @@ afterEach(() => {
 
 // ── Tests ─────────────────────────────────────────────────────────
 
-describe("<EnrollPage> — verifying state", () => {
+describe("<EnrollPage>, verifying state", () => {
   it("renders the 'Checking your link' view while verifyRecoveryToken is in flight", async () => {
     // verify never resolves; the `/auth/me` bootstrap probe is
     // independent and we still answer it so the AuthProvider settles
@@ -192,7 +192,7 @@ describe("<EnrollPage> — verifying state", () => {
   });
 });
 
-describe("<EnrollPage> — ready state", () => {
+describe("<EnrollPage>, ready state", () => {
   it("renders the 'Register passkey' button after the token verifies", async () => {
     const { restore } = installFetch({
       "/api/v1/auth/me": [{ status: 401, body: { detail: "no session" } }],
@@ -216,7 +216,7 @@ describe("<EnrollPage> — ready state", () => {
   });
 });
 
-describe("<EnrollPage> — happy path", () => {
+describe("<EnrollPage>, happy path", () => {
   it("runs the full ceremony, calls refresh(), and navigates to the role landing", async () => {
     const { calls, restore } = installFetch({
       // Bootstrap probe before login: no session.
@@ -311,7 +311,7 @@ describe("<EnrollPage> — happy path", () => {
   });
 });
 
-describe("<EnrollPage> — error branches", () => {
+describe("<EnrollPage>, error branches", () => {
   it("renders the missing-token error view when ?token= is absent", async () => {
     const { calls, restore } = installFetch({
       "/api/v1/auth/me": [{ status: 401, body: { detail: "no session" } }],
@@ -321,13 +321,13 @@ describe("<EnrollPage> — error branches", () => {
       render(<Harness initial="/recover/enroll" />);
       await flush();
 
-      // Error view rendered — no fetch to /verify ever fired.
+      // Error view rendered, no fetch to /verify ever fired.
       expect(screen.getByText("We couldn't use this link")).toBeInTheDocument();
       expect(screen.getByText(/missing its token/i)).toBeInTheDocument();
       // canRetry = false for missing-token, so the "Request a new
       // link" affordance is suppressed.
       expect(screen.queryByText("Request a new link")).toBeNull();
-      // Verify endpoint was NEVER called — the empty-token guard is
+      // Verify endpoint was NEVER called, the empty-token guard is
       // the whole point of this branch.
       const verifyCalls = calls.filter((c) => c.url.includes("/api/v1/recover/passkey/verify"));
       expect(verifyCalls).toHaveLength(0);
@@ -357,7 +357,7 @@ describe("<EnrollPage> — error branches", () => {
       expect(screen.getByText("We couldn't use this link")).toBeInTheDocument();
       expect(screen.getByText(/expired, already used, or invalid/i)).toBeInTheDocument();
       // canRetry = true → the "Request a new link" link is rendered
-      // (anchor, not a button — the user follows it back to /recover).
+      // (anchor, not a button, the user follows it back to /recover).
       const retry = screen.getByText("Request a new link");
       expect(retry).toBeInTheDocument();
       expect(retry.closest("a")?.getAttribute("href")).toBe("/recover");
@@ -377,7 +377,7 @@ describe("<EnrollPage> — error branches", () => {
       "/api/v1/recover/passkey/start": [
         { status: 200, body: { challenge_id: "ch_1", options: { challenge: "AQID", rp: { name: "crew.day" }, user: { id: "AQID", name: "u", displayName: "U" }, pubKeyCredParams: [] } } },
       ],
-      // /finish must NEVER be called — if it is, the unscripted-fetch
+      // /finish must NEVER be called, if it is, the unscripted-fetch
       // throw will surface as the test failure we want.
     });
     installCredentialsCreate(() => {
@@ -397,12 +397,12 @@ describe("<EnrollPage> — error branches", () => {
 
       const notice = screen.getByTestId("enroll-error");
       expect(notice.textContent).toContain("Passkey prompt closed");
-      // Cancellation is not a danger — info tone only.
+      // Cancellation is not a danger, info tone only.
       expect(notice.className).not.toContain("login__notice--danger");
       // Button re-arms so the user can retry.
       const button = screen.getByTestId("enroll-register") as HTMLButtonElement;
       expect(button.disabled).toBe(false);
-      // No navigation happened — we're still on the enrol surface.
+      // No navigation happened, we're still on the enrol surface.
       expect(screen.queryByTestId("landed-today")).toBeNull();
       expect(screen.queryByTestId("landed-dashboard")).toBeNull();
     } finally {

@@ -115,7 +115,7 @@ describe("<WorkspaceGate>", () => {
 
     expect(screen.getByText("protected tree")).toBeInTheDocument();
     // The chooser must NOT render even momentarily for single-workspace
-    // users — the auto-adopt fires synchronously in the same effect.
+    // users, the auto-adopt fires synchronously in the same effect.
     expect(screen.queryByText(/Pick a workspace/i)).toBeNull();
     expect(persistWorkspace).toHaveBeenCalledWith("solo");
   });
@@ -150,7 +150,7 @@ describe("<WorkspaceGate>", () => {
       </App>,
     );
 
-    // Server already picked the Beta Co ULID — adopt its slug silently.
+    // Server already picked the Beta Co ULID, adopt its slug silently.
     expect(screen.getByText("protected tree")).toBeInTheDocument();
     expect(screen.queryByText(/Pick a workspace/i)).toBeNull();
     expect(persistWorkspace).toHaveBeenCalledWith("beta-co");
@@ -170,7 +170,7 @@ describe("<WorkspaceGate>", () => {
   });
 
   it("does not surface the admin deep-link when the empty-state user is not a deployment admin", () => {
-    // cd-kiyd — non-admin branch. Only Sign Out should be reachable;
+    // cd-kiyd, non-admin branch. Only Sign Out should be reachable;
     // the /admin/dashboard link is gated on `is_deployment_admin`.
     setAuthenticated(makeUser([], null, { isDeploymentAdmin: false }));
     render(
@@ -186,7 +186,7 @@ describe("<WorkspaceGate>", () => {
   });
 
   it("surfaces the admin deep-link in the empty state when the user is a deployment admin", () => {
-    // cd-kiyd — admin branch. A deployment admin with zero workspace
+    // cd-kiyd, admin branch. A deployment admin with zero workspace
     // grants should get a primary "Open admin console" link to
     // /admin/dashboard alongside Sign Out, so the route is reachable
     // without typing the URL by hand.

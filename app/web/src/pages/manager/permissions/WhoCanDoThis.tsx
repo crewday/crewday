@@ -10,7 +10,7 @@ import type {
 } from "@/types/api";
 import type { UserIndexRow } from "./lib/usePermissionIndexes";
 
-// Live "who can do this?" preview — calls the resolver.
+// Live "who can do this?" preview, calls the resolver.
 export default function WhoCanDoThis({
   users,
   actions,

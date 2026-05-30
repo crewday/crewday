@@ -8,7 +8,7 @@ import { useWorkspace } from "@/context/WorkspaceContext";
 import { workspaceRelativePathname, workspaceRoute, workspaceSlugFromRoutePath } from "@/lib/workspaceRoutes";
 import type { AvailableWorkspace, Me } from "@/types/api";
 
-// §02 — workspace switcher rendered under the brand row in SideNav.
+// §02, workspace switcher rendered under the brand row in SideNav.
 // Lists every workspace the current user has a grant on (from /me's
 // `available_workspaces`); selecting one keeps `/w/<slug>/...` routes
 // canonical while still updating the cookie fallback.

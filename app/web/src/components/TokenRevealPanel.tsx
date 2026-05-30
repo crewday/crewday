@@ -4,7 +4,7 @@ import { getActiveWorkspaceSlug } from "@/lib/api";
 import type { ApiTokenCreated } from "@/types/api";
 
 // §03 "Save this token now" ceremony. The only moment the plaintext
-// secret is visible — rendered as a sealed-envelope reveal, not as
+// secret is visible, rendered as a sealed-envelope reveal, not as
 // an error panel. Copy-to-clipboard hints that the user should take
 // the plaintext *now*; a curl example is built client-side from the
 // shared bearer pattern (the API doesn't ship one to keep the
@@ -26,7 +26,7 @@ export default function TokenRevealPanel({
       setCopied(slot);
       window.setTimeout(() => setCopied((s) => (s === slot ? null : s)), 1800);
     } catch {
-      // Presentational-only fallback — the user can still select + copy.
+      // Presentational-only fallback, the user can still select + copy.
     }
   }
 
@@ -52,7 +52,7 @@ export default function TokenRevealPanel({
         <div>
           <div className="tokens-reveal__ribbon-title">Save this token now</div>
           <div className="tokens-reveal__ribbon-sub">
-            Only shown once — we store a hash, not the secret. Copy it before you dismiss this
+            Only shown once, we store a hash, not the secret. Copy it before you dismiss this
             panel.
           </div>
         </div>
