@@ -84,6 +84,9 @@ export interface InlineTableCellContext<TDraft> {
   row: InlineTableRow<TDraft>;
   saveMode: InlineTableSaveMode;
   disabled: boolean;
+  messageId: string;
+  validationMessageId: string;
+  errorMessageId: string;
   update: (patch: Partial<TDraft>) => void;
   save: () => void;
   cancel: () => void;
@@ -750,10 +753,15 @@ export function InlineTableForm<TDraft>({
             const controlsDisabled = row.disabled || row.saving || status === "disabled";
             const selectionDisabled = row.disabled || status === "disabled";
             const messageId = rowMessageId(tableId, row.id);
+            const validationMessageId = rowValidationMessageId(tableId, row.id);
+            const errorMessageId = rowErrorMessageId(tableId, row.id);
             const context: InlineTableCellContext<TDraft> = {
               row,
               saveMode,
               disabled: controlsDisabled,
+              messageId,
+              validationMessageId,
+              errorMessageId,
               update: (patch) => updateRowDraft(row, patch),
               save: () => saveRow(row, isTrailingCreate),
               cancel: () => cancelRow(row),
@@ -981,12 +989,18 @@ export function InlineTableForm<TDraft>({
                         </div>
                       ) : null}
                       {row.validation ? (
-                        <p className="inline-table-form__message inline-table-form__message--validation">
+                        <p
+                          id={validationMessageId}
+                          className="inline-table-form__message inline-table-form__message--validation"
+                        >
                           {row.validation}
                         </p>
                       ) : null}
                       {row.error ? (
-                        <p className="inline-table-form__message inline-table-form__message--error">
+                        <p
+                          id={errorMessageId}
+                          className="inline-table-form__message inline-table-form__message--error"
+                        >
                           {row.error}
                         </p>
                       ) : null}
@@ -1458,6 +1472,8 @@ export function InlineNumberField({
   placeholder,
   disabled,
   ariaLabel,
+  ariaInvalid,
+  ariaDescribedBy,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -1467,6 +1483,8 @@ export function InlineNumberField({
   placeholder?: string;
   disabled?: boolean;
   ariaLabel?: string;
+  ariaInvalid?: boolean;
+  ariaDescribedBy?: string;
 }) {
   return (
     <input
@@ -1480,6 +1498,8 @@ export function InlineNumberField({
       placeholder={placeholder}
       disabled={disabled}
       aria-label={ariaLabel}
+      aria-invalid={ariaInvalid ? "true" : undefined}
+      aria-describedby={ariaDescribedBy}
       onChange={(event) => onChange(event.currentTarget.value)}
     />
   );
@@ -2135,6 +2155,14 @@ function plainLabel(value: ReactNode) {
 
 function rowMessageId(tableId: string, rowId: string) {
   return `${tableId}-${rowId}-message`;
+}
+
+function rowValidationMessageId(tableId: string, rowId: string) {
+  return `${tableId}-${rowId}-validation`;
+}
+
+function rowErrorMessageId(tableId: string, rowId: string) {
+  return `${tableId}-${rowId}-error`;
 }
 
 function focusStayedInside(event: FocusEvent<HTMLElement>) {

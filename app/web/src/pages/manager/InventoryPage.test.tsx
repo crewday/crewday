@@ -400,7 +400,7 @@ describe("<InventoryPage>", () => {
     }
   });
 
-  it("opens the new item form with property choices for multi-property workspaces", async () => {
+  it("opens an inline new item row with property choices for multi-property workspaces", async () => {
     const fake = installFetch([...ITEMS], [PROPERTIES[0]!, SECOND_PROPERTY]);
     try {
       render(<Harness />);
@@ -408,32 +408,25 @@ describe("<InventoryPage>", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
 
-      const dialog = await screen.findByRole("dialog", { name: "Create item" });
-      expect(dialog).toHaveClass(
-        "modal",
-        "modal--sheet",
-        "form-modal-dialog",
-        "form-modal-dialog--narrow",
-        "inv-create-dialog",
-      );
-      expect(dialog.querySelector("form")).toHaveClass("form-modal", "inv-create");
-      expect(within(dialog).getByRole("heading", { name: "Create item" })).toBeInTheDocument();
-      const property = within(dialog).getByRole("combobox", { name: /^Property\b/ });
+      expect(screen.queryByRole("dialog", { name: "Create item" })).not.toBeInTheDocument();
+      const inlineForm = await screen.findByRole("table", { name: "Create inventory item" });
+      expect(inlineForm.closest(".inline-table-form")).toHaveClass("inv-create-inline");
+      const property = within(inlineForm).getByRole("combobox", { name: /^Property\b/ });
       expect(property).toHaveValue("Villa Rosa");
       fireEvent.focus(property);
-      expect(await within(dialog).findByText("Casa Azul")).toBeInTheDocument();
-      expect(within(dialog).getByLabelText(/^Name\b/)).toBeInTheDocument();
-      expect(within(dialog).getByLabelText(/^Unit\b/)).toHaveValue("each");
-      expect(within(dialog).getByLabelText(/^SKU\b/)).toBeInTheDocument();
-      expect(within(dialog).getByLabelText(/^Barcode\b/)).toBeInTheDocument();
-      expect(within(dialog).getByLabelText(/^Reorder point\b/)).toHaveValue(0);
-      expect(within(dialog).getByLabelText(/^Reorder target\b/)).toBeInTheDocument();
+      expect(await within(inlineForm).findByText("Casa Azul")).toBeInTheDocument();
+      expect(within(inlineForm).getByLabelText(/^Name\b/)).toBeInTheDocument();
+      expect(within(inlineForm).getByLabelText(/^Unit\b/)).toHaveValue("each");
+      expect(within(inlineForm).getByLabelText(/^SKU\b/)).toBeInTheDocument();
+      expect(within(inlineForm).getByLabelText(/^Barcode\b/)).toBeInTheDocument();
+      expect(within(inlineForm).getByLabelText(/^Reorder point\b/)).toHaveValue("0");
+      expect(within(inlineForm).getByLabelText(/^Reorder target\b/)).toBeInTheDocument();
     } finally {
       fake.restore();
     }
   });
 
-  it("marks required and optional new item fields and describes reorder controls", async () => {
+  it("describes required and optional new item fields inline", async () => {
     const fake = installFetch([...ITEMS], [PROPERTIES[0]!, SECOND_PROPERTY]);
     try {
       render(<Harness />);
@@ -441,51 +434,16 @@ describe("<InventoryPage>", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
 
-      const dialog = await screen.findByRole("dialog", { name: "Create item" });
-      const requiredFields = [
-        within(dialog).getByLabelText(/^Property\b/),
-        within(dialog).getByLabelText(/^Name\b/),
-        within(dialog).getByLabelText(/^Unit\b/),
-        within(dialog).getByLabelText(/^Reorder point\b/),
-      ];
-      const optionalFields = [
-        within(dialog).getByLabelText(/^SKU\b/),
-        within(dialog).getByLabelText(/^Barcode\b/),
-        within(dialog).getByLabelText(/^Reorder target\b/),
-      ];
-      const reorderPoint = within(dialog).getByLabelText(/^Reorder point\b/);
-      const reorderTarget = within(dialog).getByLabelText(/^Reorder target\b/);
-      const reorderPointHelp = within(dialog).getByText(
-        "Items at or below this threshold are low stock and can trigger procurement work.",
-      );
-      const reorderTargetHelp = within(dialog).getByText(
-        "Optional desired refill level; when provided, it must be at least the reorder point.",
-      );
-
-      for (const field of requiredFields) {
-        expect(field).toBeRequired();
-      }
-      for (const field of optionalFields) {
-        expect(field).not.toBeRequired();
-      }
-      expect(within(dialog).getAllByText("Required")).toHaveLength(4);
-      expect(within(dialog).getAllByText("Optional")).toHaveLength(3);
-      expect(reorderPointHelp).toBeVisible();
-      expect(reorderTargetHelp).toBeVisible();
-      expect(reorderPoint).toHaveAttribute(
-        "aria-describedby",
-        reorderPointHelp.id,
-      );
-      expect(reorderTarget).toHaveAttribute(
-        "aria-describedby",
-        reorderTargetHelp.id,
-      );
-      expect(reorderPoint).toHaveAccessibleDescription(
-        "Items at or below this threshold are low stock and can trigger procurement work.",
-      );
-      expect(reorderTarget).toHaveAccessibleDescription(
-        "Optional desired refill level; when provided, it must be at least the reorder point.",
-      );
+      const inlineForm = await screen.findByRole("table", { name: "Create inventory item" });
+      expect(within(inlineForm).getByText("Required: property, name, unit, reorder point.")).toBeVisible();
+      expect(within(inlineForm).getByText("Reorder target is optional, but must be at least the reorder point.")).toBeVisible();
+      expect(within(inlineForm).getByLabelText(/^Property\b/)).toBeInTheDocument();
+      expect(within(inlineForm).getByLabelText(/^Name\b/)).toBeInTheDocument();
+      expect(within(inlineForm).getByLabelText(/^Unit\b/)).toBeInTheDocument();
+      expect(within(inlineForm).getByLabelText(/^Reorder point\b/)).toBeInTheDocument();
+      expect(within(inlineForm).getByLabelText(/^SKU\b/)).toBeInTheDocument();
+      expect(within(inlineForm).getByLabelText(/^Barcode\b/)).toBeInTheDocument();
+      expect(within(inlineForm).getByLabelText(/^Reorder target\b/)).toBeInTheDocument();
     } finally {
       fake.restore();
     }
@@ -507,14 +465,15 @@ describe("<InventoryPage>", () => {
       await screen.findByText("Paper towels");
 
       fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
-      const dialog = await screen.findByRole("dialog", { name: "Create item" });
-      fireEvent.click(within(dialog).getByRole("button", { name: "Create item" }));
+      const inlineForm = await screen.findByRole("table", { name: "Create inventory item" });
+      fireEvent.click(within(inlineForm).getByRole("button", { name: "Save" }));
 
-      const name = within(dialog).getByLabelText(/^Name\b/);
-      const alert = await within(dialog).findByRole("alert");
+      const error = await within(inlineForm).findByText("Name is required.");
+      const name = within(inlineForm).getByLabelText(/^Name\b/);
 
-      expect(alert).toHaveTextContent("Name is required.");
-      expect(name).toHaveAccessibleDescription("Name is required.");
+      expect(error).toBeVisible();
+      expect(name).toHaveAttribute("aria-invalid", "true");
+      expect(name).toHaveAccessibleDescription(/Name is required\./);
       expect(
         fake.requests.some((r) => r.method === "POST" && r.path.includes("/inventory/properties/")),
       ).toBe(false);
@@ -530,28 +489,74 @@ describe("<InventoryPage>", () => {
       await screen.findByText("Paper towels");
 
       fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
-      const dialog = await screen.findByRole("dialog", { name: "Create item" });
-      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
+      const inlineForm = await screen.findByRole("table", { name: "Create inventory item" });
+      fireEvent.change(within(inlineForm).getByLabelText(/^Name\b/), {
         target: { value: "Draft towels" },
       });
-      fireEvent.change(within(dialog).getByLabelText(/^Unit\b/), {
+      fireEvent.change(within(inlineForm).getByLabelText(/^Unit\b/), {
         target: { value: "" },
       });
-      fireEvent.click(within(dialog).getByRole("button", { name: "Create item" }));
-      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
-        "Unit is required.",
-      );
-      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      fireEvent.click(within(inlineForm).getByRole("button", { name: "Save" }));
+      expect(await within(inlineForm).findByText("Unit is required.")).toBeVisible();
+      fireEvent.click(within(inlineForm).getByRole("button", { name: "Cancel" }));
 
       await waitFor(() => {
-        expect(screen.queryByRole("dialog", { name: "Create item" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("table", { name: "Create inventory item" })).not.toBeInTheDocument();
       });
       fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
 
-      const reopened = await screen.findByRole("dialog", { name: "Create item" });
-      expect(within(reopened).queryByRole("alert")).not.toBeInTheDocument();
+      const reopened = await screen.findByRole("table", { name: "Create inventory item" });
+      expect(within(reopened).queryByText(
+        "Unit is required.",
+      )).not.toBeInTheDocument();
       expect(within(reopened).getByLabelText(/^Name\b/)).toHaveValue("");
       expect(within(reopened).getByLabelText(/^Unit\b/)).toHaveValue("each");
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("keeps reorder validation inline and blocks invalid new item submissions", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+      await screen.findByText("Paper towels");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
+      const inlineForm = await screen.findByRole("table", { name: "Create inventory item" });
+      fireEvent.change(within(inlineForm).getByLabelText(/^Name\b/), {
+        target: { value: "Dish soap" },
+      });
+      fireEvent.change(within(inlineForm).getByLabelText(/^Unit\b/), {
+        target: { value: "bottle" },
+      });
+      fireEvent.change(within(inlineForm).getByLabelText(/^Reorder point\b/), {
+        target: { value: "-1" },
+      });
+      fireEvent.click(within(inlineForm).getByRole("button", { name: "Save" }));
+
+      expect(await within(inlineForm).findByText("Reorder point must be zero or more.")).toBeVisible();
+      const reorderPoint = within(inlineForm).getByLabelText(/^Reorder point\b/);
+      expect(reorderPoint).toHaveAttribute("aria-invalid", "true");
+      expect(reorderPoint).toHaveAccessibleDescription(/Reorder point must be zero or more\./);
+
+      fireEvent.change(reorderPoint, {
+        target: { value: "4" },
+      });
+      fireEvent.change(within(inlineForm).getByLabelText(/^Reorder target\b/), {
+        target: { value: "2" },
+      });
+      fireEvent.click(within(inlineForm).getByRole("button", { name: "Save" }));
+
+      const reorderTarget = within(inlineForm).getByLabelText(/^Reorder target\b/);
+      expect(await within(inlineForm).findByText("Reorder target must be at least the reorder point.")).toBeVisible();
+      expect(reorderTarget).toHaveAttribute("aria-invalid", "true");
+      expect(reorderTarget).toHaveAccessibleDescription(
+        /Reorder target must be at least the reorder point\./,
+      );
+      expect(
+        fake.requests.some((r) => r.method === "POST" && r.path.includes("/inventory/properties/")),
+      ).toBe(false);
     } finally {
       fake.restore();
     }
@@ -565,30 +570,31 @@ describe("<InventoryPage>", () => {
       await screen.findByText("Paper towels");
 
       fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
-      const dialog = await screen.findByRole("dialog", { name: "Create item" });
-      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
+      const inlineForm = await screen.findByRole("table", { name: "Create inventory item" });
+      fireEvent.change(within(inlineForm).getByLabelText(/^Name\b/), {
         target: { value: "Dish soap" },
       });
-      fireEvent.change(within(dialog).getByLabelText(/^Unit\b/), {
+      fireEvent.change(within(inlineForm).getByLabelText(/^Unit\b/), {
         target: { value: "bottle" },
       });
-      fireEvent.change(within(dialog).getByLabelText(/^SKU\b/), {
+      fireEvent.change(within(inlineForm).getByLabelText(/^SKU\b/), {
         target: { value: "DS-1" },
       });
-      fireEvent.change(within(dialog).getByLabelText(/^Barcode\b/), {
+      fireEvent.change(within(inlineForm).getByLabelText(/^Barcode\b/), {
         target: { value: "0123456789012" },
       });
-      fireEvent.change(within(dialog).getByLabelText(/^Reorder point\b/), {
+      fireEvent.change(within(inlineForm).getByLabelText(/^Reorder point\b/), {
         target: { value: "4" },
       });
-      fireEvent.change(within(dialog).getByLabelText(/^Reorder target\b/), {
+      fireEvent.change(within(inlineForm).getByLabelText(/^Reorder target\b/), {
         target: { value: "8" },
       });
-      fireEvent.click(within(dialog).getByRole("button", { name: "Create item" }));
+      fireEvent.click(within(inlineForm).getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
-        expect(screen.queryByRole("dialog", { name: "Create item" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("table", { name: "Create inventory item" })).not.toBeInTheDocument();
       });
+      expect(screen.queryByRole("dialog", { name: "Create item" })).not.toBeInTheDocument();
       expect(await screen.findByText("Dish soap")).toBeInTheDocument();
       expect(
         fake.requests.find(
@@ -624,21 +630,21 @@ describe("<InventoryPage>", () => {
       await screen.findByText("Paper towels");
 
       fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
-      const dialog = await screen.findByRole("dialog", { name: "Create item" });
-      expect(within(dialog).queryByRole("combobox", { name: /^Property\b/ })).toBeNull();
-      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
+      const inlineForm = await screen.findByRole("table", { name: "Create inventory item" });
+      expect(within(inlineForm).queryByRole("combobox", { name: /^Property\b/ })).toBeNull();
+      fireEvent.change(within(inlineForm).getByLabelText(/^Name\b/), {
         target: { value: "Dish soap" },
       });
-      fireEvent.change(within(dialog).getByLabelText(/^Unit\b/), {
+      fireEvent.change(within(inlineForm).getByLabelText(/^Unit\b/), {
         target: { value: "bottle" },
       });
-      fireEvent.change(within(dialog).getByLabelText(/^Reorder point\b/), {
+      fireEvent.change(within(inlineForm).getByLabelText(/^Reorder point\b/), {
         target: { value: "4" },
       });
-      fireEvent.click(within(dialog).getByRole("button", { name: "Create item" }));
+      fireEvent.click(within(inlineForm).getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
-        expect(screen.queryByRole("dialog", { name: "Create item" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("table", { name: "Create inventory item" })).not.toBeInTheDocument();
       });
       expect(await screen.findByText("Dish soap")).toBeInTheDocument();
       expect(
@@ -667,15 +673,18 @@ describe("<InventoryPage>", () => {
       await screen.findByText("Paper towels");
 
       fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
-      const dialog = await screen.findByRole("dialog", { name: "Create item" });
-      await chooseSearchableOption(dialog, /^Property\b/, "Casa Azul");
-      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
+      let inlineForm = await screen.findByRole("table", { name: "Create inventory item" });
+      await chooseSearchableOption(inlineForm, /^Property\b/, "Casa Azul");
+      inlineForm = await screen.findByRole("table", { name: "Create inventory item" });
+      expect(within(inlineForm).getByRole("combobox", { name: /^Property\b/ })).toHaveValue("Casa Azul");
+      expect(inlineForm.closest(".panel")).toHaveTextContent("Casa Azul");
+      fireEvent.change(within(inlineForm).getByLabelText(/^Name\b/), {
         target: { value: "Olive oil" },
       });
-      fireEvent.click(within(dialog).getByRole("button", { name: "Create item" }));
+      fireEvent.click(within(inlineForm).getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
-        expect(screen.queryByRole("dialog", { name: "Create item" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("table", { name: "Create inventory item" })).not.toBeInTheDocument();
       });
       expect(await screen.findByText("Olive oil")).toBeInTheDocument();
       expect(
@@ -706,18 +715,58 @@ describe("<InventoryPage>", () => {
       await screen.findByText("Paper towels");
 
       fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
-      const dialog = await screen.findByRole("dialog", { name: "Create item" });
-      fireEvent.change(within(dialog).getByLabelText(/^Name\b/), {
+      const inlineForm = await screen.findByRole("table", { name: "Create inventory item" });
+      fireEvent.change(within(inlineForm).getByLabelText(/^Name\b/), {
         target: { value: "Duplicate towels" },
       });
-      fireEvent.click(within(dialog).getByRole("button", { name: "Create item" }));
+      fireEvent.click(within(inlineForm).getByRole("button", { name: "Save" }));
 
-      const sku = within(dialog).getByLabelText(/^SKU\b/);
-      const alert = await within(dialog).findByRole("alert");
+      const error = await within(inlineForm).findByText("SKU already exists for this property.");
+      const sku = within(inlineForm).getByLabelText(/^SKU\b/);
 
-      expect(alert).toHaveTextContent("SKU already exists for this property.");
-      expect(sku).toHaveAccessibleDescription("SKU already exists for this property.");
-      expect(screen.getByRole("dialog", { name: "Create item" })).toBeInTheDocument();
+      expect(error).toBeVisible();
+      expect(sku).toHaveAttribute("aria-invalid", "true");
+      expect(sku).toHaveAccessibleDescription(/SKU already exists for this property\./);
+      expect(within(inlineForm).getByLabelText(/^Name\b/)).toHaveValue("Duplicate towels");
+      expect(within(inlineForm).getByLabelText(/^Unit\b/)).toHaveValue("each");
+      expect(screen.getByRole("table", { name: "Create inventory item" })).toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("shows barcode conflict errors inline without losing the new item draft", async () => {
+    const fake = installFetch([...ITEMS], PROPERTIES, {
+      createStatus: 409,
+      createBody: {
+        type: "https://crewday.dev/errors/conflict",
+        title: "Conflict",
+        status: 409,
+        error: "inventory_item_conflict",
+        field: "barcode_ean13",
+      },
+    });
+    try {
+      render(<Harness />);
+      await screen.findByText("Paper towels");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New item" }));
+      const inlineForm = await screen.findByRole("table", { name: "Create inventory item" });
+      fireEvent.change(within(inlineForm).getByLabelText(/^Name\b/), {
+        target: { value: "Duplicate barcode" },
+      });
+      fireEvent.change(within(inlineForm).getByLabelText(/^Barcode\b/), {
+        target: { value: "0123456789012" },
+      });
+      fireEvent.click(within(inlineForm).getByRole("button", { name: "Save" }));
+
+      expect(await within(inlineForm).findByText("Barcode already exists for this property.")).toBeVisible();
+      const barcode = within(inlineForm).getByLabelText(/^Barcode\b/);
+      expect(barcode).toHaveAttribute("aria-invalid", "true");
+      expect(barcode).toHaveAccessibleDescription(/Barcode already exists for this property\./);
+      expect(within(inlineForm).getByLabelText(/^Name\b/)).toHaveValue("Duplicate barcode");
+      expect(barcode).toHaveValue("0123456789012");
+      expect(screen.getByRole("table", { name: "Create inventory item" })).toBeInTheDocument();
     } finally {
       fake.restore();
     }

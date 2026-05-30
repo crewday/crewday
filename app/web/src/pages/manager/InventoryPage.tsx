@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import type { ChangeEvent, Dispatch } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import {
   useInfiniteQuery,
@@ -14,19 +14,17 @@ import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import DeskPage from "@/components/DeskPage";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import DateTime from "@/components/DateTime";
-import FormModal, {
-  FormModalField,
-  FormModalGrid,
-} from "@/components/FormModal";
 import {
   InlineNoteField,
   InlineNumberField,
+  InlineSearchableSelectField,
   InlineSelectField,
   InlineTableForm,
   type InlineTableColumn,
   type InlineTableRow,
+  InlineTextField,
 } from "@/components/InlineTableForm";
-import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
+import type { SearchableSelectOption } from "@/components/SearchableSelect";
 import { Chip, Loading } from "@/components/common";
 import type { Property } from "@/types/api";
 import PropertyTabs from "./property/PropertyTabs";
@@ -111,7 +109,7 @@ type NewInventoryItemAction =
   | { type: "patch"; patch: Partial<NewInventoryItemDraft> }
   | { type: "clientError"; error: string | null }
   | { type: "serverError"; error: string | null }
-  | { type: "reset"; properties: Property[] };
+  | { type: "reset"; properties: Property[]; propertyId?: string };
 
 interface InventoryDrawerState {
   itemId: string;
@@ -170,10 +168,13 @@ function propertySelectOption(property: Property): SearchableSelectOption {
   };
 }
 
-function initialNewInventoryItemState(properties: Property[]): NewInventoryItemState {
+function initialNewInventoryItemState(
+  properties: Property[],
+  propertyId = properties[0]?.id ?? "",
+): NewInventoryItemState {
   return {
     draft: {
-      propertyId: properties[0]?.id ?? "",
+      propertyId,
       name: "",
       unit: "each",
       sku: "",
@@ -201,7 +202,7 @@ function newInventoryItemReducer(
     case "serverError":
       return { ...state, serverErr: action.error };
     case "reset":
-      return initialNewInventoryItemState(action.properties);
+      return initialNewInventoryItemState(action.properties, action.propertyId);
   }
 }
 
@@ -404,7 +405,12 @@ export default function InventoryPage() {
 
   const [openItemId, setOpenItemId] = useState<string | null>(null);
   const [stocktakePid, setStocktakePid] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [creatingPropertyId, setCreatingPropertyId] = useState<string | null>(null);
+  const [createState, dispatchCreate] = useReducer(
+    newInventoryItemReducer,
+    [],
+    initialNewInventoryItemState,
+  );
   const stocktakeRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -420,11 +426,21 @@ export default function InventoryPage() {
 
   const sub =
     "Per-property stock. Items at or below par trigger a procurement task. Click a row to see full history and adjust.";
+  function startCreateItem() {
+    const propertyId = routePropertyId ?? pageProperties?.[0]?.id ?? propsQ.data?.[0]?.id ?? "";
+    dispatchCreate({
+      type: "reset",
+      properties: pageProperties ?? propsQ.data ?? [],
+      propertyId,
+    });
+    setCreatingPropertyId(propertyId || null);
+  }
+
   const actions = (
     <button
       type="button"
       className="btn btn--moss"
-      onClick={() => setCreating(true)}
+      onClick={startCreateItem}
     >
       + New item
     </button>
@@ -453,12 +469,11 @@ export default function InventoryPage() {
   }
 
   const propsById = new Map(propsQ.data.map((p) => [p.id, p]));
-  const order: string[] = routePropertyId ? pageProperties.map((property) => property.id) : [];
+  const order: string[] = pageProperties.map((property) => property.id);
   const byProp = new Map<string, InventoryItem[]>();
   for (const item of invQ.data) {
     if (!byProp.has(item.property_id)) {
       byProp.set(item.property_id, []);
-      if (!routePropertyId) order.push(item.property_id);
     }
     byProp.get(item.property_id)!.push(item);
   }
@@ -553,6 +568,15 @@ export default function InventoryPage() {
                 })}
               </tbody>
             </table>
+            {creatingPropertyId === pid ? (
+              <NewInventoryItemInlineForm
+                properties={pageProperties}
+                state={createState}
+                dispatch={dispatchCreate}
+                onPropertyChange={setCreatingPropertyId}
+                onClose={() => setCreatingPropertyId(null)}
+              />
+            ) : null}
           </div>
         );
       })}
@@ -580,29 +604,24 @@ export default function InventoryPage() {
         )}
       </dialog>
 
-      {creating ? (
-        <NewInventoryItemForm
-          properties={pageProperties}
-          onClose={() => setCreating(false)}
-        />
-      ) : null}
     </DeskPage>
   );
 }
 
-function NewInventoryItemForm({
+function NewInventoryItemInlineForm({
   properties,
+  state,
+  dispatch,
+  onPropertyChange,
   onClose,
 }: {
   properties: Property[];
+  state: NewInventoryItemState;
+  dispatch: Dispatch<NewInventoryItemAction>;
+  onPropertyChange: (propertyId: string) => void;
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const [state, dispatch] = useReducer(
-    newInventoryItemReducer,
-    properties,
-    initialNewInventoryItemState,
-  );
   const { draft, clientErr, serverErr } = state;
   const { propertyId, name, unit, sku, barcode, reorderPoint, reorderTarget } = draft;
 
@@ -627,7 +646,7 @@ function NewInventoryItemForm({
   });
 
   function resetDraft() {
-    dispatch({ type: "reset", properties });
+    dispatch({ type: "reset", properties, propertyId });
     create.reset();
   }
 
@@ -642,17 +661,15 @@ function NewInventoryItemForm({
   }
 
   const err = clientErr ?? serverErr;
-  const errId = err ? "inventory-create-error" : undefined;
-  const reorderPointHelpId = "inventory-create-reorder-point-help";
-  const reorderTargetHelpId = "inventory-create-reorder-target-help";
 
-  function describedBy(...ids: (string | undefined)[]): string | undefined {
-    const present = ids.filter((id): id is string => id !== undefined);
-    return present.length > 0 ? present.join(" ") : undefined;
+  function patchDraft(patch: Partial<NewInventoryItemDraft>) {
+    dispatch({ type: "patch", patch });
+    dispatch({ type: "clientError", error: null });
+    dispatch({ type: "serverError", error: null });
+    if (patch.propertyId) onPropertyChange(patch.propertyId);
   }
 
-  function submit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  function saveDraft() {
     const trimmedName = name.trim();
     const trimmedUnit = unit.trim();
     const point = Number.parseFloat(reorderPoint);
@@ -696,60 +713,103 @@ function NewInventoryItemForm({
     });
   }
 
+  const createRow: InlineTableRow<NewInventoryItemDraft> = {
+    id: "inventory-create-row",
+    label: "New item",
+    draft,
+    editing: true,
+    dirty: true,
+    isNew: true,
+    saving: create.isPending,
+    validation: clientErr,
+    error: serverErr,
+  };
+
+  const columns = newInventoryItemColumns(properties, err);
+
   return (
-    <FormModal
-      open
-      title="Create item"
-      titleId="inventory-create-title"
-      eyebrow="New inventory item"
-      width="narrow"
-      className="inv-create-dialog"
-      formClassName="inv-create"
-      onClose={closeForm}
-      onSubmit={submit}
-      noValidate
-      actions={
-        <>
-          <button type="button" className="btn btn--ghost" onClick={closeForm}>
-            Cancel
-          </button>
-          <button type="submit" className="btn btn--moss" disabled={create.isPending}>
-            Create item
-          </button>
-        </>
-      }
-    >
-      {properties.length > 1 && (
-        <SearchableSelect
-          label="Property"
-          className="form-modal__field"
-          value={propertyId}
-          options={properties.map(propertySelectOption)}
-          onChange={(propertyId) => dispatch({ type: "patch", patch: { propertyId } })}
-          required
-          aria-invalid={clientErr === "Choose a property."}
-          aria-describedby={errId}
-        />
+    <InlineTableForm
+      ariaLabel="Create inventory item"
+      className="inv-create-inline"
+      columns={columns}
+      rows={[]}
+      trailingCreateRow={createRow}
+      saveMode="explicit"
+      actionDisplay="text"
+      onDraftChange={(_rowId, patch) => patchDraft(patch)}
+      onSave={saveDraft}
+      onCancel={closeForm}
+      getRowLabel={() => name.trim() || "New item"}
+      renderDetail={() => (
+        <div className="inline-table-form__list">
+          <span>Required: property, name, unit, reorder point.</span>
+          <span>Reorder target is optional, but must be at least the reorder point.</span>
+        </div>
       )}
-      <FormModalField label="Name" requirement="required">
-        <input
-          value={name}
-          onChange={(e) => dispatch({ type: "patch", patch: { name: e.target.value } })}
-          required
-          aria-invalid={clientErr === "Name is required."}
-          aria-describedby={errId}
-         aria-label="Name"/>
-      </FormModalField>
-      <FormModalGrid>
-        <FormModalField label="Unit" requirement="required">
+    />
+  );
+}
+
+function newInventoryItemColumns(
+  properties: Property[],
+  err: string | null,
+): InlineTableColumn<NewInventoryItemDraft>[] {
+  const columns: InlineTableColumn<NewInventoryItemDraft>[] = [];
+  if (properties.length > 1) {
+    columns.push({
+      key: "property",
+      header: "Property",
+      width: { flex: 1.1, min: 180 },
+      renderRead: ({ row }) => {
+        const property = properties.find((candidate) => candidate.id === row.draft.propertyId);
+        return property?.name ?? "Choose property";
+      },
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineSearchableSelectField
+          value={row.draft.propertyId}
+          options={properties.map(propertySelectOption)}
+          onChange={(propertyId) => update({ propertyId })}
+          disabled={disabled}
+          label="Property"
+        />
+      ),
+    });
+  }
+  columns.push(
+    {
+      key: "name",
+      header: "Item",
+      width: { flex: 1.35, min: 170 },
+      renderRead: ({ row }) => <strong>{row.draft.name || "New item"}</strong>,
+      renderEdit: ({ row, update, disabled, validationMessageId }) => (
+        <InlineTextField
+          value={row.draft.name}
+          onChange={(name) => update({ name })}
+          disabled={disabled}
+          ariaLabel="Name"
+          ariaInvalid={err === "Name is required."}
+          ariaDescribedBy={err === "Name is required." ? validationMessageId : undefined}
+        />
+      ),
+    },
+    {
+      key: "unit",
+      header: "Unit",
+      width: { flex: 0.8, min: 120 },
+      renderRead: ({ row }) => row.draft.unit,
+      renderEdit: ({ row, update, disabled, validationMessageId }) => (
+        <>
           <input
-            value={unit}
-            onChange={(e) => dispatch({ type: "patch", patch: { unit: e.target.value } })}
-            required
+            className="inline-table-form__control"
+            type="text"
+            value={row.draft.unit}
             list="inventory-unit-options"
-            aria-invalid={clientErr === "Unit is required."}
-            aria-describedby={errId}
-           aria-label="Unit"/>
+            disabled={disabled}
+            aria-label="Unit"
+            aria-invalid={err === "Unit is required." ? "true" : undefined}
+            aria-describedby={err === "Unit is required." ? validationMessageId : undefined}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => update({ unit: event.currentTarget.value })}
+          />
           <datalist id="inventory-unit-options">
             <option value="each">each</option>
             <option value="roll">roll</option>
@@ -758,71 +818,95 @@ function NewInventoryItemForm({
             <option value="kg">kg</option>
             <option value="L">L</option>
           </datalist>
-        </FormModalField>
-        <FormModalField label="SKU" requirement="optional">
-          <input
-            value={sku}
-            onChange={(e) => dispatch({ type: "patch", patch: { sku: e.target.value } })}
-            aria-invalid={serverErr === "SKU already exists for this property."}
-            aria-describedby={errId}
-           aria-label="SKU"/>
-        </FormModalField>
-      </FormModalGrid>
-      <FormModalField label="Barcode" requirement="optional">
-        <input
-          value={barcode}
-          onChange={(e) => dispatch({ type: "patch", patch: { barcode: e.target.value } })}
-          aria-invalid={serverErr === "Barcode already exists for this property."}
-          aria-describedby={errId}
-         aria-label="Barcode"/>
-      </FormModalField>
-      <FormModalGrid>
-        <FormModalField
-          label="Reorder point"
-          requirement="required"
-          helpId={reorderPointHelpId}
-          helpText="Items at or below this threshold are low stock and can trigger procurement work."
-        >
-          <input
-            className="mono"
-            type="number"
-            step="0.01"
-            min="0"
-            value={reorderPoint}
-            onChange={(e) => dispatch({ type: "patch", patch: { reorderPoint: e.target.value } })}
-            required
-            aria-invalid={clientErr === "Reorder point must be zero or more."}
-            aria-describedby={describedBy(reorderPointHelpId, errId)}
-           aria-label="Reorder point"/>
-        </FormModalField>
-        <FormModalField
-          label="Reorder target"
-          requirement="optional"
-          helpId={reorderTargetHelpId}
-          helpText="Optional desired refill level; when provided, it must be at least the reorder point."
-        >
-          <input
-            className="mono"
-            type="number"
-            step="0.01"
-            min="0"
-            value={reorderTarget}
-            onChange={(e) => dispatch({ type: "patch", patch: { reorderTarget: e.target.value } })}
-            aria-invalid={
-              clientErr === "Reorder target must be zero or more." ||
-              clientErr === "Reorder target must be at least the reorder point."
-            }
-            aria-describedby={describedBy(reorderTargetHelpId, errId)}
-           aria-label="Reorder target"/>
-        </FormModalField>
-      </FormModalGrid>
-      {err && (
-        <p id="inventory-create-error" className="form-error" role="alert">
-          {err}
-        </p>
-      )}
-    </FormModal>
+        </>
+      ),
+    },
+    {
+      key: "sku",
+      header: "SKU",
+      width: { flex: 0.9, min: 120 },
+      renderRead: ({ row }) => <span className="mono muted">{row.draft.sku || "-"}</span>,
+      renderEdit: ({ row, update, disabled, errorMessageId }) => (
+        <InlineTextField
+          value={row.draft.sku}
+          onChange={(sku) => update({ sku })}
+          disabled={disabled}
+          ariaLabel="SKU"
+          ariaInvalid={err === "SKU already exists for this property."}
+          ariaDescribedBy={
+            err === "SKU already exists for this property." ? errorMessageId : undefined
+          }
+        />
+      ),
+    },
+    {
+      key: "barcode",
+      header: "Barcode",
+      width: { flex: 1, min: 140 },
+      renderRead: ({ row }) => <span className="mono muted">{row.draft.barcode || "-"}</span>,
+      renderEdit: ({ row, update, disabled, errorMessageId }) => (
+        <InlineTextField
+          value={row.draft.barcode}
+          onChange={(barcode) => update({ barcode })}
+          disabled={disabled}
+          ariaLabel="Barcode"
+          ariaInvalid={err === "Barcode already exists for this property."}
+          ariaDescribedBy={
+            err === "Barcode already exists for this property." ? errorMessageId : undefined
+          }
+        />
+      ),
+    },
+    {
+      key: "reorderPoint",
+      header: "Reorder point",
+      width: { flex: 0.8, min: 128 },
+      align: "end",
+      renderRead: ({ row }) => <span className="mono">{row.draft.reorderPoint}</span>,
+      renderEdit: ({ row, update, disabled, validationMessageId }) => (
+        <InlineNumberField
+          value={row.draft.reorderPoint}
+          onChange={(reorderPoint) => update({ reorderPoint })}
+          min="0"
+          step="0.01"
+          disabled={disabled}
+          ariaLabel="Reorder point"
+          ariaInvalid={err === "Reorder point must be zero or more."}
+          ariaDescribedBy={
+            err === "Reorder point must be zero or more." ? validationMessageId : undefined
+          }
+        />
+      ),
+    },
+    {
+      key: "reorderTarget",
+      header: "Reorder target",
+      width: { flex: 0.8, min: 128 },
+      align: "end",
+      renderRead: ({ row }) => <span className="mono muted">{row.draft.reorderTarget || "-"}</span>,
+      renderEdit: ({ row, update, disabled, validationMessageId }) => (
+        <InlineNumberField
+          value={row.draft.reorderTarget}
+          onChange={(reorderTarget) => update({ reorderTarget })}
+          min="0"
+          step="0.01"
+          disabled={disabled}
+          ariaLabel="Reorder target"
+          ariaInvalid={
+            err === "Reorder target must be zero or more." ||
+            err === "Reorder target must be at least the reorder point."
+          }
+          ariaDescribedBy={
+            err === "Reorder target must be zero or more." ||
+            err === "Reorder target must be at least the reorder point."
+              ? validationMessageId
+              : undefined
+          }
+        />
+      ),
+    },
   );
+  return columns;
 }
 
 // react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
